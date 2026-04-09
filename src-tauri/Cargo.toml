@@ -1,0 +1,20 @@
+[package]
+name = "ssh-tool"
+version = "0.1.0"
+description = "TermBridge desktop SSH client"
+authors = ["Codex"]
+edition = "2021"
+
+[lib]
+name = "ssh_tool_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
+tauri = { version = "2", features = [] }
+uuid = { version = "1", features = ["v4", "serde"] }
