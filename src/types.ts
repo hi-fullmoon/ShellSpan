@@ -45,6 +45,22 @@ export interface SshClosedEvent {
   reason?: string;
 }
 
+export interface UploadProgressEvent {
+  operationId: string;
+  currentPath?: string;
+  totalBytes: number;
+  uploadedBytes: number;
+  totalSteps: number;
+  completedSteps: number;
+}
+
+export interface DeleteProgressEvent {
+  operationId: string;
+  currentPath?: string;
+  totalSteps: number;
+  completedSteps: number;
+}
+
 export type RemoteFileKind = "directory" | "file" | "symlink" | "other";
 
 export interface RemoteFileEntry {

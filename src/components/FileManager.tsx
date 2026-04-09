@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createPortal } from "react-dom";
 import {
@@ -22,10 +23,12 @@ import {
 } from "./Icons";
 import { Toast, type ToastAction } from "./Toast";
 import type {
+  DeleteProgressEvent,
   RemoteDirectoryListing,
   RemoteFileEntry,
   RemoteFileKind,
   SessionState,
+  UploadProgressEvent,
 } from "../types";
 
 interface FileManagerProps {
@@ -61,6 +64,23 @@ interface ToastState {
   action?: ToastAction;
   message: string;
   tone: "success" | "error" | "info";
+}
+
+interface UploadProgressState {
+  operationId: string;
+  currentPath?: string;
+  totalBytes: number;
+  uploadedBytes: number;
+  totalSteps: number;
+  completedSteps: number;
+  cancelling?: boolean;
+}
+
+interface DeleteProgressState {
+  operationId: string;
+  currentPath?: string;
+  totalSteps: number;
+  completedSteps: number;
 }
 
 interface ContextMenuState {
@@ -124,6 +144,41 @@ function formatFullModified(modifiedAt?: number) {
 function localPathName(path: string) {
   const normalized = path.replace(/\\/g, "/");
   return normalized.split("/").filter(Boolean).pop() ?? path;
+}
+
+function createOperationId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function uploadProgressPercent(progress?: UploadProgressState) {
+  if (!progress) {
+    return 0;
+  }
+
+  if (progress.totalBytes > 0) {
+    return Math.min(100, Math.round((progress.uploadedBytes / progress.totalBytes) * 100));
+  }
+
+  if (progress.totalSteps > 0) {
+    return Math.min(100, Math.round((progress.completedSteps / progress.totalSteps) * 100));
+  }
+
+  return 0;
+}
+
+function stepProgressPercent(progress?: {
+  totalSteps: number;
+  completedSteps: number;
+}) {
+  if (!progress || progress.totalSteps <= 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.round((progress.completedSteps / progress.totalSteps) * 100));
 }
 
 function parentDirectoryPath(path: string) {
@@ -345,6 +400,8 @@ export function FileManager({ session }: FileManagerProps) {
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState>();
+  const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
   const [error, setError] = useState<string>();
   const [toast, setToast] = useState<ToastState>();
 
@@ -442,19 +499,76 @@ export function FileManager({ session }: FileManagerProps) {
       return;
     }
 
-    await runFileAction(
-      () =>
-        invoke("upload_local_paths", {
-          request: {
-            ...connection,
-            destinationDirectory: currentPath,
-            localPaths: nextPaths,
-          },
-        }),
-      nextPaths.length === 1
-        ? `已上传 ${localPathName(nextPaths[0])}`
-        : `已上传 ${nextPaths.length} 项`,
+    const operationId = createOperationId();
+    setWorking(true);
+    setError(undefined);
+    setToast(undefined);
+    setContextMenu(undefined);
+    setUploadProgress({
+      operationId,
+      currentPath: nextPaths[0],
+      totalBytes: 0,
+      uploadedBytes: 0,
+      totalSteps: nextPaths.length,
+      completedSteps: 0,
+      cancelling: false,
+    });
+
+    try {
+      await invoke("upload_local_paths", {
+        request: {
+          ...connection,
+          destinationDirectory: currentPath,
+          localPaths: nextPaths,
+          operationId,
+        },
+      });
+      await loadDirectory(currentPath);
+      setToast({
+        message:
+          nextPaths.length === 1
+            ? `已上传 ${localPathName(nextPaths[0])}`
+            : `已上传 ${nextPaths.length} 项`,
+        tone: "success",
+      });
+    } catch (nextError) {
+      const message = String(nextError);
+      const cancelled = message.includes("upload cancelled");
+      if (cancelled) {
+        await loadDirectory(currentPath);
+      }
+      setToast({
+        message: cancelled ? "已取消上传" : message,
+        tone: cancelled ? "info" : "error",
+      });
+    } finally {
+      setUploadProgress(undefined);
+      setWorking(false);
+    }
+  };
+
+  const handleCancelUpload = async () => {
+    if (!uploadProgress || uploadProgress.cancelling) {
+      return;
+    }
+
+    setUploadProgress((current) =>
+      current ? { ...current, cancelling: true } : current,
     );
+
+    try {
+      await invoke("cancel_upload", {
+        operationId: uploadProgress.operationId,
+      });
+    } catch (nextError) {
+      setUploadProgress((current) =>
+        current ? { ...current, cancelling: false } : current,
+      );
+      setToast({
+        message: String(nextError),
+        tone: "error",
+      });
+    }
   };
 
   useEffect(() => {
@@ -469,6 +583,8 @@ export function FileManager({ session }: FileManagerProps) {
     setError(undefined);
     setToast(undefined);
     setDragActive(false);
+    setUploadProgress(undefined);
+    setDeleteProgress(undefined);
 
     if (!ready) {
       return;
@@ -513,6 +629,85 @@ export function FileManager({ session }: FileManagerProps) {
         : current,
     );
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let dispose: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      const unlisten = await listen<UploadProgressEvent>("upload-progress", (event) => {
+        setUploadProgress((current) =>
+          current && current.operationId === event.payload.operationId
+            ? {
+                operationId: event.payload.operationId,
+                currentPath: event.payload.currentPath,
+                totalBytes: event.payload.totalBytes,
+                uploadedBytes: event.payload.uploadedBytes,
+                totalSteps: event.payload.totalSteps,
+                completedSteps: event.payload.completedSteps,
+                cancelling: current.cancelling,
+              }
+            : current,
+        );
+      });
+
+      if (cancelled) {
+        unlisten();
+        return;
+      }
+
+      dispose = unlisten;
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let dispose: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      const unlisten = await listen<DeleteProgressEvent>("delete-progress", (event) => {
+        setDeleteProgress((current) =>
+          current && current.operationId === event.payload.operationId
+            ? {
+                operationId: event.payload.operationId,
+                currentPath: event.payload.currentPath,
+                totalSteps: event.payload.totalSteps,
+                completedSteps: event.payload.completedSteps,
+              }
+            : current,
+        );
+      });
+
+      if (cancelled) {
+        unlisten();
+        return;
+      }
+
+      dispose = unlisten;
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -700,19 +895,46 @@ export function FileManager({ session }: FileManagerProps) {
       return;
     }
 
-    const targetPath = pendingDelete.path;
-    await runFileAction(
-      () =>
-        invoke("delete_remote_path", {
-          request: {
-            ...connection,
-            path: targetPath,
-          },
-        }),
-      "删除成功",
-    );
+    const target = pendingDelete;
+    const operationId = createOperationId();
+
+    setWorking(true);
+    setError(undefined);
+    setToast(undefined);
+    setContextMenu(undefined);
     setPendingDelete(undefined);
-    setSelectedPath(undefined);
+    setDeleteProgress({
+      operationId,
+      currentPath: target.path,
+      totalSteps: 1,
+      completedSteps: 0,
+    });
+
+    try {
+      await invoke("delete_remote_path", {
+        request: {
+          ...connection,
+          path: target.path,
+          operationId,
+        },
+      });
+      setDialog(undefined);
+      setProperties(undefined);
+      setSelectedPath(undefined);
+      await loadDirectory(currentPath);
+      setToast({
+        message: "删除成功",
+        tone: "success",
+      });
+    } catch (nextError) {
+      setToast({
+        message: String(nextError),
+        tone: "error",
+      });
+    } finally {
+      setDeleteProgress(undefined);
+      setWorking(false);
+    }
   };
 
   const handlePaste = async () => {
@@ -1126,7 +1348,86 @@ export function FileManager({ session }: FileManagerProps) {
         </div>
       ) : null}
 
-      {dragActive && ready ? (
+      {uploadProgress ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
+          <div className="surface flex w-full max-w-sm flex-col gap-2 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
+                {uploadProgress.cancelling ? "正在取消" : "上传中"}
+              </span>
+              <span className="text-xs font-medium text-slate-300">
+                {uploadProgressPercent(uploadProgress)}%
+              </span>
+            </div>
+
+            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-cyan-400 transition-[width] duration-150"
+                style={{ width: `${uploadProgressPercent(uploadProgress)}%` }}
+              />
+            </div>
+
+            <div className="flex flex-col gap-0.5">
+              <strong className="truncate text-sm text-slate-100">
+                {uploadProgress.currentPath
+                  ? localPathName(uploadProgress.currentPath)
+                  : "正在准备上传"}
+              </strong>
+              <span className="text-xs text-slate-400">
+                {uploadProgress.totalBytes > 0
+                  ? `${formatSize(uploadProgress.uploadedBytes)} / ${formatSize(uploadProgress.totalBytes)}`
+                  : `${uploadProgress.completedSteps} / ${uploadProgress.totalSteps} 项`}
+              </span>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                className="icon-btn"
+                disabled={uploadProgress.cancelling}
+                onClick={() => void handleCancelUpload()}
+                type="button"
+              >
+                {uploadProgress.cancelling ? "取消中..." : "取消上传"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteProgress ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
+          <div className="surface flex w-full max-w-sm flex-col gap-2 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
+                删除中
+              </span>
+              <span className="text-xs font-medium text-slate-300">
+                {stepProgressPercent(deleteProgress)}%
+              </span>
+            </div>
+
+            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-rose-400 transition-[width] duration-150"
+                style={{ width: `${stepProgressPercent(deleteProgress)}%` }}
+              />
+            </div>
+
+            <div className="flex flex-col gap-0.5">
+              <strong className="truncate text-sm text-slate-100">
+                {deleteProgress.currentPath
+                  ? localPathName(deleteProgress.currentPath)
+                  : "正在准备删除"}
+              </strong>
+              <span className="text-xs text-slate-400">
+                {deleteProgress.completedSteps} / {deleteProgress.totalSteps} 项
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {dragActive && ready && !uploadProgress && !deleteProgress ? (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
           <div className="surface flex max-w-xs flex-col gap-1 p-3 text-center">
             <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">上传</span>

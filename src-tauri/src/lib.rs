@@ -9,7 +9,9 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
+        atomic::{AtomicBool, Ordering as AtomicOrdering},
         mpsc::{self, Receiver, Sender, TryRecvError},
+        Arc,
         Mutex,
     },
     thread,
@@ -21,6 +23,8 @@ use uuid::Uuid;
 const SSH_DATA_EVENT: &str = "ssh-data";
 const SSH_STATUS_EVENT: &str = "ssh-status";
 const SSH_CLOSED_EVENT: &str = "ssh-closed";
+const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
+const DELETE_PROGRESS_EVENT: &str = "delete-progress";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,6 +103,7 @@ struct DeleteRemotePathRequest {
     #[serde(flatten)]
     connection: RemoteConnectionRequest,
     path: String,
+    operation_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,6 +130,7 @@ struct UploadLocalPathsRequest {
     connection: RemoteConnectionRequest,
     destination_directory: String,
     local_paths: Vec<String>,
+    operation_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -154,6 +160,26 @@ struct DataEvent {
 struct ClosedEvent {
     session_id: String,
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadProgressEvent {
+    operation_id: String,
+    current_path: Option<String>,
+    total_bytes: u64,
+    uploaded_bytes: u64,
+    total_steps: u64,
+    completed_steps: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteProgressEvent {
+    operation_id: String,
+    current_path: Option<String>,
+    total_steps: u64,
+    completed_steps: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -215,6 +241,137 @@ struct ConnectedSftp {
     sftp: Sftp,
 }
 
+#[derive(Default)]
+struct UploadCancellationRegistry {
+    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+#[derive(Default, Clone, Copy)]
+struct UploadScanStats {
+    total_bytes: u64,
+    total_steps: u64,
+}
+
+impl UploadScanStats {
+    fn combine(&mut self, other: UploadScanStats) {
+        self.total_bytes += other.total_bytes;
+        self.total_steps += other.total_steps;
+    }
+}
+
+struct UploadProgressTracker {
+    app: AppHandle,
+    operation_id: String,
+    cancel_flag: Arc<AtomicBool>,
+    current_path: Option<String>,
+    total_bytes: u64,
+    uploaded_bytes: u64,
+    total_steps: u64,
+    completed_steps: u64,
+}
+
+struct DeleteProgressTracker {
+    app: AppHandle,
+    operation_id: String,
+    current_path: Option<String>,
+    total_steps: u64,
+    completed_steps: u64,
+}
+
+impl UploadProgressTracker {
+    fn new(
+        app: AppHandle,
+        operation_id: String,
+        cancel_flag: Arc<AtomicBool>,
+        stats: UploadScanStats,
+    ) -> Self {
+        Self {
+            app,
+            operation_id,
+            cancel_flag,
+            current_path: None,
+            total_bytes: stats.total_bytes,
+            uploaded_bytes: 0,
+            total_steps: stats.total_steps,
+            completed_steps: 0,
+        }
+    }
+
+    fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        self.current_path = path;
+        self.emit()
+    }
+
+    fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
+        self.uploaded_bytes += count;
+        self.emit()
+    }
+
+    fn finish_step(&mut self) -> Result<(), String> {
+        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
+        self.emit()
+    }
+
+    fn ensure_not_cancelled(&self) -> Result<(), String> {
+        if self.cancel_flag.load(AtomicOrdering::SeqCst) {
+            return Err("upload cancelled".to_string());
+        }
+        Ok(())
+    }
+
+    fn emit(&self) -> Result<(), String> {
+        self.app
+            .emit(
+                UPLOAD_PROGRESS_EVENT,
+                UploadProgressEvent {
+                    operation_id: self.operation_id.clone(),
+                    current_path: self.current_path.clone(),
+                    total_bytes: self.total_bytes,
+                    uploaded_bytes: self.uploaded_bytes,
+                    total_steps: self.total_steps,
+                    completed_steps: self.completed_steps,
+                },
+            )
+            .map_err(|error| format!("failed to emit upload progress event: {error}"))
+    }
+}
+
+impl DeleteProgressTracker {
+    fn new(app: AppHandle, operation_id: String, total_steps: u64) -> Self {
+        Self {
+            app,
+            operation_id,
+            current_path: None,
+            total_steps,
+            completed_steps: 0,
+        }
+    }
+
+    fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        self.current_path = path;
+        self.emit()
+    }
+
+    fn finish_step(&mut self) -> Result<(), String> {
+        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
+        self.emit()
+    }
+
+    fn emit(&self) -> Result<(), String> {
+        self.app
+            .emit(
+                DELETE_PROGRESS_EVENT,
+                DeleteProgressEvent {
+                    operation_id: self.operation_id.clone(),
+                    current_path: self.current_path.clone(),
+                    total_steps: self.total_steps,
+                    completed_steps: self.completed_steps,
+                },
+            )
+            .map_err(|error| format!("failed to emit delete progress event: {error}"))
+    }
+}
+
 impl SessionManager {
     fn insert(&self, session_id: String, managed: ManagedSession) -> Result<(), String> {
         let mut guard = self
@@ -245,6 +402,39 @@ impl SessionManager {
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.remove(session_id);
+        Ok(())
+    }
+}
+
+impl UploadCancellationRegistry {
+    fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut guard = self
+            .operations
+            .lock()
+            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
+        guard.insert(operation_id, flag.clone());
+        Ok(flag)
+    }
+
+    fn cancel(&self, operation_id: &str) -> Result<(), String> {
+        let guard = self
+            .operations
+            .lock()
+            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
+        let flag = guard
+            .get(operation_id)
+            .ok_or_else(|| format!("upload operation {operation_id} not found"))?;
+        flag.store(true, AtomicOrdering::SeqCst);
+        Ok(())
+    }
+
+    fn remove(&self, operation_id: &str) -> Result<(), String> {
+        let mut guard = self
+            .operations
+            .lock()
+            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
+        guard.remove(operation_id);
         Ok(())
     }
 }
@@ -321,8 +511,8 @@ async fn rename_remote_path(request: RenameRemotePathRequest) -> Result<(), Stri
 }
 
 #[tauri::command]
-async fn delete_remote_path(request: DeleteRemotePathRequest) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || delete_remote_path_blocking(request))
+async fn delete_remote_path(app: AppHandle, request: DeleteRemotePathRequest) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || delete_remote_path_blocking(app, request))
         .await
         .map_err(|error| format!("failed to join delete task: {error}"))?
 }
@@ -335,10 +525,28 @@ async fn copy_remote_path(request: CopyRemotePathRequest) -> Result<(), String> 
 }
 
 #[tauri::command]
-async fn upload_local_paths(request: UploadLocalPathsRequest) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || upload_local_paths_blocking(request))
+async fn upload_local_paths(
+    app: AppHandle,
+    uploads: State<'_, UploadCancellationRegistry>,
+    request: UploadLocalPathsRequest,
+) -> Result<(), String> {
+    let cancel_flag = uploads.register(request.operation_id.clone())?;
+    let operation_id = request.operation_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        upload_local_paths_blocking(app, request, cancel_flag)
+    })
         .await
-        .map_err(|error| format!("failed to join upload task: {error}"))?
+        .map_err(|error| format!("failed to join upload task: {error}"))?;
+    let _ = uploads.remove(&operation_id);
+    result
+}
+
+#[tauri::command]
+fn cancel_upload(
+    uploads: State<'_, UploadCancellationRegistry>,
+    operation_id: String,
+) -> Result<(), String> {
+    uploads.cancel(&operation_id)
 }
 
 #[tauri::command]
@@ -507,9 +715,15 @@ fn rename_remote_path_blocking(request: RenameRemotePathRequest) -> Result<(), S
         .map_err(|error| format!("failed to rename remote path: {error}"))
 }
 
-fn delete_remote_path_blocking(request: DeleteRemotePathRequest) -> Result<(), String> {
+fn delete_remote_path_blocking(app: AppHandle, request: DeleteRemotePathRequest) -> Result<(), String> {
     let connected = connect_sftp(&request.connection)?;
-    delete_remote_path_recursive(&connected.sftp, Path::new(&request.path))
+    let target_path = Path::new(&request.path);
+    let total_steps = count_remote_delete_steps(&connected.sftp, target_path)?;
+    let mut progress = DeleteProgressTracker::new(app, request.operation_id.clone(), total_steps);
+    progress.emit()?;
+    delete_remote_path_recursive(&connected.sftp, target_path, &mut progress)?;
+    progress.set_current_path(None)?;
+    Ok(())
 }
 
 fn copy_remote_path_blocking(request: CopyRemotePathRequest) -> Result<(), String> {
@@ -537,7 +751,11 @@ fn copy_remote_path_blocking(request: CopyRemotePathRequest) -> Result<(), Strin
     copy_remote_entry_to_path(&connected.sftp, source_path, &destination_path, source_stat)
 }
 
-fn upload_local_paths_blocking(request: UploadLocalPathsRequest) -> Result<(), String> {
+fn upload_local_paths_blocking(
+    app: AppHandle,
+    request: UploadLocalPathsRequest,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
     if request.local_paths.is_empty() {
         return Err("no local files were provided for upload".to_string());
     }
@@ -546,7 +764,17 @@ fn upload_local_paths_blocking(request: UploadLocalPathsRequest) -> Result<(), S
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
 
+    let mut scan_stats = UploadScanStats::default();
     for local_path in &request.local_paths {
+        scan_stats.combine(scan_local_upload_path(Path::new(local_path))?);
+    }
+
+    let mut progress =
+        UploadProgressTracker::new(app, request.operation_id.clone(), cancel_flag, scan_stats);
+    progress.emit()?;
+
+    for local_path in &request.local_paths {
+        progress.ensure_not_cancelled()?;
         let local_path = Path::new(local_path);
         let file_name = local_path
             .file_name()
@@ -555,8 +783,10 @@ fn upload_local_paths_blocking(request: UploadLocalPathsRequest) -> Result<(), S
             .to_string();
         let destination_path =
             unique_remote_destination(&connected.sftp, destination_directory, &file_name)?;
-        upload_local_entry_to_path(&connected.sftp, local_path, &destination_path)?;
+        upload_local_entry_to_path(&connected.sftp, local_path, &destination_path, &mut progress)?;
     }
+
+    progress.set_current_path(None)?;
 
     Ok(())
 }
@@ -794,7 +1024,34 @@ fn ensure_remote_directory(sftp: &Sftp, path: &Path) -> Result<(), String> {
     }
 }
 
-fn delete_remote_path_recursive(sftp: &Sftp, path: &Path) -> Result<(), String> {
+fn count_remote_delete_steps(sftp: &Sftp, path: &Path) -> Result<u64, String> {
+    let stat = sftp
+        .lstat(path)
+        .map_err(|error| format!("failed to inspect remote path: {error}"))?;
+
+    match kind_from_permissions(stat.perm) {
+        RemoteFileKind::Directory => {
+            let entries = sftp
+                .readdir(path)
+                .map_err(|error| format!("failed to list remote directory for delete: {error}"))?;
+            let mut total_steps = 1;
+            for (child_path, _) in entries {
+                if should_skip_remote_child(&child_path) {
+                    continue;
+                }
+                total_steps += count_remote_delete_steps(sftp, &child_path)?;
+            }
+            Ok(total_steps)
+        }
+        _ => Ok(1),
+    }
+}
+
+fn delete_remote_path_recursive(
+    sftp: &Sftp,
+    path: &Path,
+    progress: &mut DeleteProgressTracker,
+) -> Result<(), String> {
     let stat = sftp
         .lstat(path)
         .map_err(|error| format!("failed to inspect remote path: {error}"))?;
@@ -805,15 +1062,30 @@ fn delete_remote_path_recursive(sftp: &Sftp, path: &Path) -> Result<(), String> 
                 .readdir(path)
                 .map_err(|error| format!("failed to list remote directory for delete: {error}"))?;
             for (child_path, _) in entries {
-                delete_remote_path_recursive(sftp, &child_path)?;
+                if should_skip_remote_child(&child_path) {
+                    continue;
+                }
+                delete_remote_path_recursive(sftp, &child_path, progress)?;
             }
+            progress.set_current_path(Some(path_to_string(path)))?;
             sftp.rmdir(path)
-                .map_err(|error| format!("failed to remove remote directory: {error}"))
+                .map_err(|error| format!("failed to remove remote directory: {error}"))?;
+            progress.finish_step()
         }
-        _ => sftp
-            .unlink(path)
-            .map_err(|error| format!("failed to remove remote file: {error}")),
+        _ => {
+            progress.set_current_path(Some(path_to_string(path)))?;
+            sftp.unlink(path)
+                .map_err(|error| format!("failed to remove remote file: {error}"))?;
+            progress.finish_step()
+        }
     }
+}
+
+fn should_skip_remote_child(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|value| value.to_str()),
+        Some(".") | Some("..")
+    )
 }
 
 fn copy_remote_entry_to_path(
@@ -922,11 +1194,7 @@ fn split_name(name: &str) -> (String, Option<String>) {
     }
 }
 
-fn upload_local_entry_to_path(
-    sftp: &Sftp,
-    local_path: &Path,
-    remote_path: &Path,
-) -> Result<(), String> {
+fn scan_local_upload_path(local_path: &Path) -> Result<UploadScanStats, String> {
     let metadata = fs::symlink_metadata(local_path)
         .map_err(|error| format!("failed to read local path metadata: {error}"))?;
 
@@ -938,7 +1206,54 @@ fn upload_local_entry_to_path(
     }
 
     if metadata.is_dir() {
+        let mut stats = UploadScanStats {
+            total_bytes: 0,
+            total_steps: 1,
+        };
+        let entries = fs::read_dir(local_path)
+            .map_err(|error| format!("failed to read local directory: {error}"))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("failed to read local directory entry: {error}"))?;
+            stats.combine(scan_local_upload_path(&entry.path())?);
+        }
+        return Ok(stats);
+    }
+
+    if metadata.is_file() {
+        return Ok(UploadScanStats {
+            total_bytes: metadata.len(),
+            total_steps: 1,
+        });
+    }
+
+    Err(format!(
+        "unsupported local path type for upload: {}",
+        local_path.display()
+    ))
+}
+
+fn upload_local_entry_to_path(
+    sftp: &Sftp,
+    local_path: &Path,
+    remote_path: &Path,
+    progress: &mut UploadProgressTracker,
+) -> Result<(), String> {
+    progress.ensure_not_cancelled()?;
+    let metadata = fs::symlink_metadata(local_path)
+        .map_err(|error| format!("failed to read local path metadata: {error}"))?;
+
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "symlink upload is not supported: {}",
+            local_path.display()
+        ));
+    }
+
+    if metadata.is_dir() {
+        progress.set_current_path(Some(path_to_string(local_path)))?;
         ensure_remote_directory(sftp, remote_path)?;
+        progress.finish_step()?;
         let entries = fs::read_dir(local_path)
             .map_err(|error| format!("failed to read local directory: {error}"))?;
         for entry in entries {
@@ -948,12 +1263,14 @@ fn upload_local_entry_to_path(
                 sftp,
                 &entry.path(),
                 &remote_path.join(entry.file_name()),
+                progress,
             )?;
         }
         return Ok(());
     }
 
     if metadata.is_file() {
+        progress.set_current_path(Some(path_to_string(local_path)))?;
         if let Some(parent) = remote_path.parent() {
             ensure_remote_directory(sftp, parent)?;
         }
@@ -968,11 +1285,26 @@ fn upload_local_entry_to_path(
                 OpenType::File,
             )
             .map_err(|error| format!("failed to create remote upload target: {error}"))?;
-        copy(&mut local_file, &mut remote_file)
-            .map_err(|error| format!("failed to upload local file: {error}"))?;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            progress.ensure_not_cancelled().inspect_err(|_| {
+                let _ = sftp.unlink(remote_path);
+            })?;
+            let read = local_file
+                .read(&mut buffer)
+                .map_err(|error| format!("failed to read local file for upload: {error}"))?;
+            if read == 0 {
+                break;
+            }
+            remote_file
+                .write_all(&buffer[..read])
+                .map_err(|error| format!("failed to upload local file: {error}"))?;
+            progress.advance_bytes(read as u64)?;
+        }
         remote_file
             .flush()
             .map_err(|error| format!("failed to flush remote upload: {error}"))?;
+        progress.finish_step()?;
         return Ok(());
     }
 
@@ -1191,6 +1523,7 @@ fn emit_closed(
 pub fn run() {
     tauri::Builder::default()
         .manage(SessionManager::default())
+        .manage(UploadCancellationRegistry::default())
         .invoke_handler(tauri::generate_handler![
             create_session,
             write_session,
@@ -1202,6 +1535,7 @@ pub fn run() {
             delete_remote_path,
             copy_remote_path,
             upload_local_paths,
+            cancel_upload,
             open_remote_file
         ])
         .run(tauri::generate_context!())
