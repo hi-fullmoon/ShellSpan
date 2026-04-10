@@ -120,9 +120,9 @@ export function SessionTabs({
   }
 
   return (
-    <div className="surface flex flex-col gap-1 p-1">
+    <div className="surface min-w-0 flex flex-col gap-1 p-1">
       <span className="label px-1.5 pt-0.5">会话</span>
-      <div className="flex items-center gap-1 pb-0.5">
+      <div className="flex min-w-0 items-center gap-1 pb-0.5">
         {canScrollLeft ? (
           <button
             className="icon-btn h-[38px] w-7 shrink-0 px-0"
@@ -135,11 +135,11 @@ export function SessionTabs({
         ) : null}
 
         <div
-          className="session-tabs-scroll min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
+          className="session-tabs-scroll min-w-0 max-w-full flex-1 overflow-x-auto overflow-y-hidden"
           onWheel={handleWheel}
           ref={scrollRef}
         >
-          <div className="flex gap-1 pr-0.5">
+          <div className="flex w-max min-w-full gap-1 pr-0.5">
             {sessions.map((session) => {
               const active = session.sessionId === activeSessionId;
               return (

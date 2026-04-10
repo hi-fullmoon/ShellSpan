@@ -40,6 +40,10 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
   const activeRef = useRef(active);
   const statusRef = useRef(session.status);
   const inputBlockedNoticeRef = useRef(false);
+  const frameRef = useRef<number | null>(null);
+  const pendingResizeSyncRef = useRef<number | null>(null);
+  const lastShellSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const scheduleResizeRef = useRef<((force?: boolean) => void) | null>(null);
 
   useEffect(() => {
     activeRef.current = active;
@@ -114,32 +118,109 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
 
     terminalRef.current = terminal;
     fitRef.current = fitAddon;
+    lastShellSizeRef.current = null;
 
-    const resize = () => {
-      const nextTerminal = terminalRef.current;
-      const nextFitAddon = fitRef.current;
-      if (!activeRef.current || !nextTerminal || !nextFitAddon) {
-        return;
+    const clearPendingResizeSync = () => {
+      if (pendingResizeSyncRef.current !== null) {
+        window.clearTimeout(pendingResizeSyncRef.current);
+        pendingResizeSyncRef.current = null;
       }
-      nextFitAddon.fit();
+    };
+
+    const syncSessionSize = (nextTerminal: Terminal, immediate = false) => {
       if (!isTauriRuntime()) {
         return;
       }
-      void invoke("resize_session", {
-        sessionId: session.sessionId,
-        cols: nextTerminal.cols,
-        rows: nextTerminal.rows,
-      });
+
+      const sendResize = () => {
+        void invoke("resize_session", {
+          sessionId: session.sessionId,
+          cols: nextTerminal.cols,
+          rows: nextTerminal.rows,
+        });
+      };
+
+      if (immediate) {
+        clearPendingResizeSync();
+        sendResize();
+        return;
+      }
+
+      clearPendingResizeSync();
+      pendingResizeSyncRef.current = window.setTimeout(() => {
+        pendingResizeSyncRef.current = null;
+        sendResize();
+      }, 80);
     };
 
-    resize();
-    const observer = new ResizeObserver(resize);
+    const performResize = (force = false) => {
+      frameRef.current = null;
+      const shell = shellRef.current;
+      const nextTerminal = terminalRef.current;
+      const nextFitAddon = fitRef.current;
+      if (!activeRef.current || !shell || !nextTerminal || !nextFitAddon) {
+        return;
+      }
+
+      const width = shell.clientWidth;
+      const height = shell.clientHeight;
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+
+      const previousSize = lastShellSizeRef.current;
+      if (
+        !force &&
+        previousSize &&
+        previousSize.width === width &&
+        previousSize.height === height
+      ) {
+        return;
+      }
+
+      lastShellSizeRef.current = { width, height };
+
+      try {
+        nextFitAddon.fit();
+      } catch {
+        return;
+      }
+
+      syncSessionSize(nextTerminal, force);
+    };
+
+    const scheduleResize = (force = false) => {
+      if (!activeRef.current) {
+        return;
+      }
+
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+      }
+
+      frameRef.current = requestAnimationFrame(() => performResize(force));
+    };
+    scheduleResizeRef.current = scheduleResize;
+
+    const handleViewportResize = () => {
+      scheduleResize(false);
+    };
+
+    scheduleResize(true);
+    const observer = new ResizeObserver(handleViewportResize);
     observer.observe(shellRef.current);
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", handleViewportResize);
 
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", handleViewportResize);
+      scheduleResizeRef.current = null;
+      clearPendingResizeSync();
+      lastShellSizeRef.current = null;
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
@@ -147,19 +228,25 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
   }, [session.sessionId]);
 
   useEffect(() => {
-    if (active) {
-      fitRef.current?.fit();
-      if (!isTauriRuntime()) {
-        terminalRef.current?.focus();
-        return;
-      }
-      void invoke("resize_session", {
-        sessionId: session.sessionId,
-        cols: terminalRef.current?.cols ?? 120,
-        rows: terminalRef.current?.rows ?? 32,
-      });
-      terminalRef.current?.focus();
+    if (!active) {
+      return;
     }
+
+    scheduleResizeRef.current?.(true);
+    const nextTerminal = terminalRef.current;
+    if (!nextTerminal) {
+      return;
+    }
+
+    const focusFrame = requestAnimationFrame(() => {
+      if (activeRef.current) {
+        nextTerminal.focus();
+      }
+    });
+
+    return () => {
+      cancelAnimationFrame(focusFrame);
+    };
   }, [active, session.sessionId]);
 
   useEffect(() => {

@@ -15,7 +15,7 @@ use std::{
         Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
@@ -25,6 +25,8 @@ const SSH_STATUS_EVENT: &str = "ssh-status";
 const SSH_CLOSED_EVENT: &str = "ssh-closed";
 const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 const DELETE_PROGRESS_EVENT: &str = "delete-progress";
+const SSH_KEEPALIVE_INTERVAL_SECS: u32 = 15;
+const SSH_KEEPALIVE_RETRY_SECS: u64 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -629,6 +631,7 @@ fn run_ssh_session(
     channel
         .shell()
         .map_err(|error| format!("failed to start remote shell: {error}"))?;
+    session.set_keepalive(true, SSH_KEEPALIVE_INTERVAL_SECS);
     session.set_blocking(false);
 
     emit_status(
@@ -638,7 +641,7 @@ fn run_ssh_session(
         Some("shell ready".to_string()),
     )?;
 
-    session_loop(app, session_id, &mut channel, rx)
+    session_loop(app, session_id, &session, &mut channel, rx)
 }
 
 fn list_remote_directory_blocking(
@@ -1514,10 +1517,12 @@ fn open_path_with_default_app(path: &Path) -> Result<(), String> {
 fn session_loop(
     app: &AppHandle,
     session_id: &str,
+    session: &Session,
     channel: &mut Channel,
     rx: Receiver<SessionCommand>,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
+    let mut next_keepalive_at = Instant::now() + Duration::from_secs(SSH_KEEPALIVE_RETRY_SECS);
 
     loop {
         match rx.try_recv() {
@@ -1551,7 +1556,12 @@ fn session_loop(
                 emit_data(app, session_id, chunk)?;
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-            Err(error) => return Err(format!("failed to read remote output: {error}")),
+            Err(error) => {
+                return Err(format_transport_error(
+                    "failed to read remote output",
+                    &error.to_string(),
+                ))
+            }
         }
 
         let mut stderr = channel.stderr();
@@ -1562,10 +1572,49 @@ fn session_loop(
                 emit_data(app, session_id, chunk)?;
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-            Err(error) => return Err(format!("failed to read remote stderr: {error}")),
+            Err(error) => {
+                return Err(format_transport_error(
+                    "failed to read remote stderr",
+                    &error.to_string(),
+                ))
+            }
+        }
+
+        if Instant::now() >= next_keepalive_at {
+            match session.keepalive_send() {
+                Ok(seconds_to_next) => {
+                    let sleep_secs = seconds_to_next.max(SSH_KEEPALIVE_RETRY_SECS as u32) as u64;
+                    next_keepalive_at = Instant::now() + Duration::from_secs(sleep_secs);
+                }
+                Err(error) => {
+                    let error_text = error.to_string();
+                    let io_error: std::io::Error = error.into();
+                    if io_error.kind() == ErrorKind::WouldBlock {
+                        next_keepalive_at =
+                            Instant::now() + Duration::from_secs(SSH_KEEPALIVE_RETRY_SECS);
+                    } else {
+                        return Err(format_transport_error("failed to send keepalive", &error_text));
+                    }
+                }
+            }
         }
 
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn format_transport_error(context: &str, raw_error: &str) -> String {
+    let error_lower = raw_error.to_ascii_lowercase();
+    if error_lower.contains("transport read")
+        || error_lower.contains("connection reset")
+        || error_lower.contains("connection aborted")
+        || error_lower.contains("broken pipe")
+    {
+        format!(
+            "{context}: ssh transport disconnected (possible network jitter, idle timeout, or remote-side close): {raw_error}"
+        )
+    } else {
+        format!("{context}: {raw_error}")
     }
 }
 

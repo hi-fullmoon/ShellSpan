@@ -84,8 +84,67 @@
   display: none;
 }
 
+.split-sash {
+  position: relative;
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  transition: background-color 150ms ease;
+}
+
+.split-sash:hover,
+.split-sash:focus-visible {
+  background: rgba(15, 23, 42, 0.55);
+  outline: none;
+}
+
+.split-sash-horizontal {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.split-sash-vertical {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.split-sash-line {
+  position: absolute;
+  border-radius: 9999px;
+  background: transparent;
+  opacity: 0;
+  transition:
+    background-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.split-sash:hover .split-sash-line,
+.split-sash:focus-visible .split-sash-line,
+.split-sash-active .split-sash-line {
+  background: rgba(34, 211, 238, 0.75);
+  opacity: 1;
+}
+
+.split-sash-horizontal .split-sash-line {
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+}
+
+.split-sash-vertical .split-sash-line {
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
 .termbridge-file-grid.ag-theme-quartz {
   --ag-background-color: transparent;
+  --ag-scrollbar-size: 10px;
   --ag-header-text-color: rgb(148 163 184);
   --ag-foreground-color: rgb(226 232 240);
   --ag-data-color: rgb(203 213 225);
@@ -199,8 +258,59 @@
 .termbridge-file-grid .ag-center-cols-clipper,
 .termbridge-file-grid .ag-center-cols-viewport,
 .termbridge-file-grid .ag-body-viewport,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport {
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport {
   scrollbar-color: rgba(51, 65, 85, 0.9) transparent;
+}
+
+.termbridge-file-grid .ag-body-horizontal-scroll,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport,
+.termbridge-file-grid .ag-body-vertical-scroll,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport,
+.termbridge-file-grid .ag-center-cols-viewport,
+.termbridge-file-grid .ag-body-viewport {
+  scrollbar-width: auto;
+}
+
+.termbridge-file-grid .ag-body-horizontal-scroll {
+  height: 10px !important;
+  min-height: 10px !important;
+}
+
+.termbridge-file-grid .ag-body-vertical-scroll {
+  width: 10px !important;
+  min-width: 10px !important;
+}
+
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport {
+  height: 10px !important;
+}
+
+.termbridge-file-grid .ag-body-vertical-scroll-viewport {
+  width: 10px !important;
+}
+
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar,
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-track,
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-track,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-thumb,
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-thumb,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgb(30 41 59);
 }
 
 .termbridge-grid-overlay {

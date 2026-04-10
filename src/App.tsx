@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
 import { Sidebar } from './components/Sidebar';
+import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane } from './components/TerminalPane';
 import { useLocalStorage } from './hooks/useLocalStorage';
@@ -15,11 +16,7 @@ import type { ConnectionProfile, SessionState, SessionSummary, SshClosedEvent, S
 
 function App() {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
-  const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>(
-    'termbridge.savedProfiles',
-    [],
-    ['windbridge.savedProfiles'],
-  );
+  const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>('termbridge.savedProfiles', [], ['windbridge.savedProfiles']);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -27,9 +24,7 @@ function App() {
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
-  const replaceFileManagerSessionStateKey = useFileManagerStore(
-    (state) => state.replaceSessionStateKey,
-  );
+  const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -97,10 +92,7 @@ function App() {
     () => savedProfiles.find((item) => item.id === pendingDeleteProfileId),
     [pendingDeleteProfileId, savedProfiles],
   );
-  const pendingCloseSession = useMemo(
-    () => sessions.find((item) => item.sessionId === pendingCloseSessionId),
-    [pendingCloseSessionId, sessions],
-  );
+  const pendingCloseSession = useMemo(() => sessions.find((item) => item.sessionId === pendingCloseSessionId), [pendingCloseSessionId, sessions]);
   const runtimeText = isTauriRuntime() ? '桌面端' : '浏览器预览';
 
   const createSessionFromProfile = async (profile: ConnectionProfile) =>
@@ -119,11 +111,7 @@ function App() {
       },
     });
 
-  const handleConnect = async (
-    profile: ConnectionProfile,
-    remember: boolean,
-    rememberPassword: boolean,
-  ) => {
+  const handleConnect = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
     if (!profile.host.trim() || !profile.username.trim()) {
       setErrorMessage('Host 和 Username 不能为空。');
       return;
@@ -175,7 +163,7 @@ function App() {
   const loadProfile = (profile: ConnectionProfile) => {
     setDraftProfile({
       ...profile,
-      password: profile.rememberPassword ? profile.password ?? '' : '',
+      password: profile.rememberPassword ? (profile.password ?? '') : '',
       passphrase: '',
     });
     setErrorMessage(undefined);
@@ -232,9 +220,7 @@ function App() {
         createdAt: Date.now(),
       };
 
-      setSessions((current) =>
-        current.map((item) => (item.sessionId === sessionId ? nextSession : item)),
-      );
+      setSessions((current) => current.map((item) => (item.sessionId === sessionId ? nextSession : item)));
       setActiveSessionId((current) => (current === sessionId ? summary.sessionId : current));
       replaceFileManagerSessionStateKey(sessionId, summary.sessionId);
       setErrorMessage(undefined);
@@ -259,9 +245,7 @@ function App() {
       return;
     }
 
-    setSavedProfiles((current) =>
-      current.filter((item) => item.id !== pendingDeleteProfileId),
-    );
+    setSavedProfiles((current) => current.filter((item) => item.id !== pendingDeleteProfileId));
     setPendingDeleteProfileId(undefined);
   };
 
@@ -276,78 +260,90 @@ function App() {
 
   return (
     <main className="h-screen overflow-hidden p-1">
-      <div className="grid h-full gap-1 xl:grid-cols-[300px_minmax(0,1fr)_240px]">
-        <FileManager session={activeSession} />
-
-        <section className="flex min-h-0 flex-col gap-1">
-          {errorMessage ? (
-            <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
-              <span className="truncate">{errorMessage}</span>
-              {activeSession ? (
-                <span className={cn('rounded-md px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
-                  {activeSession.status === 'connected'
-                    ? '已连接'
-                    : activeSession.status === 'connecting'
-                      ? '连接中'
-                      : activeSession.status === 'error'
-                        ? '错误'
-                        : '已断开'}
-                </span>
+      <div className="flex h-full gap-1">
+        <SplitLayout
+          className="min-w-0 flex-1"
+          defaultPrimarySize={320}
+          primary={<FileManager session={activeSession} />}
+          primaryClassName="min-h-0"
+          primaryMinSize={280}
+          secondary={
+            <section className="flex h-full w-full min-h-0 min-w-0 flex-col gap-1">
+              {errorMessage ? (
+                <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
+                  <span className="truncate">{errorMessage}</span>
+                  {activeSession ? (
+                    <span className={cn('rounded-md px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
+                      {activeSession.status === 'connected'
+                        ? '已连接'
+                        : activeSession.status === 'connecting'
+                          ? '连接中'
+                          : activeSession.status === 'error'
+                            ? '错误'
+                            : '已断开'}
+                    </span>
+                  ) : null}
+                </div>
               ) : null}
-            </div>
-          ) : null}
 
-          <SessionTabs
-            sessions={sessions}
+              <SessionTabs
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onSelect={setActiveSessionId}
+                onClose={(sessionId) => {
+                  setPendingCloseSessionId(sessionId);
+                }}
+              />
+
+              <section className="surface relative min-h-0 flex-1 overflow-hidden">
+                {sessions.length === 0 ? (
+                  <div className="flex h-full min-h-[280px] flex-col justify-between gap-1.5 p-2">
+                    <div className="flex flex-col gap-1">
+                      <span className="label">就绪</span>
+                      <h3 className="text-base font-semibold text-slate-100">开始一个新的远程工作区</h3>
+                      <p className="text-xs leading-5 text-slate-400">
+                        左侧浏览远程文件，右侧查看历史连接，中间专注终端操作。支持路径跳转、右键菜单和拖拽上传。
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative h-full min-h-0">
+                    {sessions.map((session) => (
+                      <TerminalPane
+                        active={session.sessionId === activeSessionId}
+                        key={session.sessionId}
+                        onReconnect={() => {
+                          void handleReconnectSession(session.sessionId);
+                        }}
+                        session={session}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            </section>
+          }
+          secondaryClassName="min-h-0"
+          secondaryMinSize={520}
+          storageKey="termbridge.layout.main"
+        />
+
+        <div className="h-full w-[240px] shrink-0">
+          <Sidebar
             activeSessionId={activeSessionId}
-            onSelect={setActiveSessionId}
-            onClose={(sessionId) => {
-              setPendingCloseSessionId(sessionId);
+            connectedCount={connectedSessions}
+            runtimeLabel={runtimeText}
+            sessions={sessions}
+            savedProfiles={savedProfiles}
+            onDeleteProfile={handleDeleteSavedProfile}
+            onSelectSession={setActiveSessionId}
+            onReuseProfile={loadProfile}
+            onOpenConnect={() => {
+              setErrorMessage(undefined);
+              setConnectDialogOpen(true);
             }}
           />
-
-          <section className="surface relative min-h-0 flex-1 overflow-hidden">
-            {sessions.length === 0 ? (
-              <div className="flex h-full min-h-[280px] flex-col justify-between gap-1.5 p-2">
-                <div className="flex flex-col gap-1">
-                  <span className="label">就绪</span>
-                  <h3 className="text-base font-semibold text-slate-100">开始一个新的远程工作区</h3>
-                  <p className="text-xs leading-5 text-slate-400">
-                    左侧浏览远程文件，右侧查看历史连接，中间专注终端操作。支持路径跳转、右键菜单和拖拽上传。
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="relative h-full min-h-0">
-                {sessions.map((session) => (
-                  <TerminalPane
-                    active={session.sessionId === activeSessionId}
-                    key={session.sessionId}
-                    onReconnect={() => {
-                      void handleReconnectSession(session.sessionId);
-                    }}
-                    session={session}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </section>
-
-        <Sidebar
-          activeSessionId={activeSessionId}
-          connectedCount={connectedSessions}
-          runtimeLabel={runtimeText}
-          sessions={sessions}
-          savedProfiles={savedProfiles}
-          onDeleteProfile={handleDeleteSavedProfile}
-          onSelectSession={setActiveSessionId}
-          onReuseProfile={loadProfile}
-          onOpenConnect={() => {
-            setErrorMessage(undefined);
-            setConnectDialogOpen(true);
-          }}
-        />
+        </div>
       </div>
 
       {connectDialogOpen ? (
@@ -403,17 +399,11 @@ function App() {
             <div className="flex flex-col gap-1">
               <p className="label">删除确认</p>
               <h3 className="text-sm font-semibold text-slate-100">删除历史连接</h3>
-              <p className="text-xs text-slate-400">
-                确认删除“{pendingDeleteProfile.name}”吗？此操作只会移除历史记录，不影响已经打开的会话。
-              </p>
+              <p className="text-xs text-slate-400">确认删除“{pendingDeleteProfile.name}”吗？此操作只会移除历史记录，不影响已经打开的会话。</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
-              <button
-                className="icon-btn"
-                onClick={() => setPendingDeleteProfileId(undefined)}
-                type="button"
-              >
+              <button className="icon-btn" onClick={() => setPendingDeleteProfileId(undefined)} type="button">
                 取消
               </button>
               <button
@@ -444,17 +434,11 @@ function App() {
             <div className="flex flex-col gap-1">
               <p className="label">关闭确认</p>
               <h3 className="text-sm font-semibold text-slate-100">关闭当前会话</h3>
-              <p className="text-xs text-slate-400">
-                确认关闭“{pendingCloseSession.title}”吗？关闭后当前终端标签会被移除。
-              </p>
+              <p className="text-xs text-slate-400">确认关闭“{pendingCloseSession.title}”吗？关闭后当前终端标签会被移除。</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
-              <button
-                className="icon-btn"
-                onClick={() => setPendingCloseSessionId(undefined)}
-                type="button"
-              >
+              <button className="icon-btn" onClick={() => setPendingCloseSessionId(undefined)} type="button">
                 取消
               </button>
               <button

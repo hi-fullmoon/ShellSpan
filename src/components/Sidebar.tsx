@@ -79,8 +79,8 @@ export function Sidebar({
   };
 
   return (
-    <aside className="grid min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)_minmax(0,0.9fr)]">
-      <div className="surface flex flex-col gap-1.5 p-1.5">
+    <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)_minmax(0,0.9fr)]">
+      <div className="surface h-full flex flex-col gap-1.5 p-1.5">
         <div className="flex items-center gap-1.5">
           <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-400 font-mono text-[11px] font-bold text-slate-950">TB</div>
           <div className="min-w-0">

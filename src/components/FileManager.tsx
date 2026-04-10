@@ -1173,6 +1173,7 @@ export function FileManager({ session }: FileManagerProps) {
                     suppressCellFocus
                     suppressContextMenu
                     suppressDragLeaveHidesColumns
+                    theme="legacy"
                   />
                 </div>
               )}
