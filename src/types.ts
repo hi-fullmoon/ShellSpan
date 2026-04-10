@@ -72,6 +72,8 @@ export interface RemoteFileEntry {
   permissions?: number;
   ownerUid?: number;
   groupGid?: number;
+  ownerName?: string;
+  groupName?: string;
 }
 
 export interface RemoteDirectoryListing {

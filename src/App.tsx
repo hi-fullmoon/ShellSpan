@@ -9,6 +9,7 @@ import { TerminalPane } from './components/TerminalPane';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
 import { isTauriRuntime } from './lib/tauri';
+import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
 import type { ConnectionProfile, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
 
@@ -25,6 +26,10 @@ function App() {
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
+  const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
+  const replaceFileManagerSessionStateKey = useFileManagerStore(
+    (state) => state.replaceSessionStateKey,
+  );
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -180,6 +185,7 @@ function App() {
   const handleCloseSession = async (sessionId: string) => {
     if (!isTauriRuntime()) {
       setSessions((current) => current.filter((session) => session.sessionId !== sessionId));
+      removeFileManagerSessionState(sessionId);
       return;
     }
 
@@ -193,6 +199,7 @@ function App() {
         return remaining;
       });
       setActiveSessionId((current) => (current === sessionId ? nextActiveSessionId : current));
+      removeFileManagerSessionState(sessionId);
     }
   };
 
@@ -229,6 +236,7 @@ function App() {
         current.map((item) => (item.sessionId === sessionId ? nextSession : item)),
       );
       setActiveSessionId((current) => (current === sessionId ? summary.sessionId : current));
+      replaceFileManagerSessionStateKey(sessionId, summary.sessionId);
       setErrorMessage(undefined);
     } catch (error) {
       setSessions((current) =>

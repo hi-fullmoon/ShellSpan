@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ssh2::{Channel, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{copy, ErrorKind, Read, Write},
     net::{TcpStream, ToSocketAddrs},
@@ -201,6 +201,8 @@ struct RemoteFileEntry {
     permissions: Option<u32>,
     owner_uid: Option<u32>,
     group_gid: Option<u32>,
+    owner_name: Option<String>,
+    group_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -237,7 +239,7 @@ struct SessionManager {
 }
 
 struct ConnectedSftp {
-    _session: Session,
+    session: Session,
     sftp: Sftp,
 }
 
@@ -643,7 +645,7 @@ fn list_remote_directory_blocking(
     request: RemoteDirectoryRequest,
 ) -> Result<RemoteDirectoryListing, String> {
     let connected = connect_sftp(&request.connection)?;
-    list_remote_directory_from_sftp(&connected.sftp, request.path.as_deref())
+    list_remote_directory_from_sftp(&connected.session, &connected.sftp, request.path.as_deref())
 }
 
 fn create_remote_entry_blocking(request: CreateRemoteEntryRequest) -> Result<(), String> {
@@ -830,6 +832,7 @@ fn open_remote_file_blocking(request: OpenRemoteFileRequest) -> Result<(), Strin
 }
 
 fn list_remote_directory_from_sftp(
+    session: &Session,
     sftp: &Sftp,
     requested_path: Option<&str>,
 ) -> Result<RemoteDirectoryListing, String> {
@@ -845,6 +848,7 @@ fn list_remote_directory_from_sftp(
         .map(|(path, stat)| map_remote_file(path, stat))
         .collect::<Vec<_>>();
 
+    enrich_remote_entry_owners(session, &mut entries);
     entries.sort_by(sort_remote_entries);
 
     let current_path = path_to_string(&resolved_path);
@@ -864,6 +868,118 @@ fn list_remote_directory_from_sftp(
     })
 }
 
+fn enrich_remote_entry_owners(session: &Session, entries: &mut [RemoteFileEntry]) {
+    let owner_ids = entries
+        .iter()
+        .filter_map(|entry| entry.owner_uid)
+        .collect::<HashSet<_>>();
+    let group_ids = entries
+        .iter()
+        .filter_map(|entry| entry.group_gid)
+        .collect::<HashSet<_>>();
+
+    let owner_names = resolve_remote_identity_names(session, &owner_ids, RemoteIdentityKind::User)
+        .unwrap_or_default();
+    let group_names = resolve_remote_identity_names(session, &group_ids, RemoteIdentityKind::Group)
+        .unwrap_or_default();
+
+    for entry in entries {
+        entry.owner_name = entry.owner_uid.and_then(|uid| owner_names.get(&uid).cloned());
+        entry.group_name = entry.group_gid.and_then(|gid| group_names.get(&gid).cloned());
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RemoteIdentityKind {
+    User,
+    Group,
+}
+
+fn resolve_remote_identity_names(
+    session: &Session,
+    ids: &HashSet<u32>,
+    kind: RemoteIdentityKind,
+) -> Result<HashMap<u32, String>, String> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut sorted_ids = ids.iter().copied().collect::<Vec<_>>();
+    sorted_ids.sort_unstable();
+
+    let command = build_remote_identity_lookup_command(&sorted_ids, kind);
+    let output = run_remote_exec(session, &command)?;
+
+    let mut names = HashMap::new();
+    for line in output.lines() {
+        let Some((id, name)) = line.split_once('\t') else {
+            continue;
+        };
+        let Ok(parsed_id) = id.trim().parse::<u32>() else {
+            continue;
+        };
+        let trimmed_name = name.trim();
+        if trimmed_name.is_empty() {
+            continue;
+        }
+        names.insert(parsed_id, trimmed_name.to_string());
+    }
+
+    Ok(names)
+}
+
+fn build_remote_identity_lookup_command(ids: &[u32], kind: RemoteIdentityKind) -> String {
+    let ids_text = ids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let (python_module, python_lookup, python_field, getent_database) = match kind {
+        RemoteIdentityKind::User => ("pwd", "getpwuid", "pw_name", "passwd"),
+        RemoteIdentityKind::Group => ("grp", "getgrgid", "gr_name", "group"),
+    };
+
+    format!(
+        "sh -lc 'if command -v getent >/dev/null 2>&1; then \
+for id in {ids_text}; do \
+entry=$(getent {getent_database} \"$id\" 2>/dev/null | cut -d: -f1); \
+if [ -n \"$entry\" ]; then printf \"%s\\t%s\\n\" \"$id\" \"$entry\"; fi; \
+done; \
+else \
+for id in {ids_text}; do \
+entry=\"\"; \
+if command -v python3 >/dev/null 2>&1; then \
+entry=$(python3 -c \"import {python_module},sys; print(getattr({python_module}.{python_lookup}(int(sys.argv[1])), '{python_field}'))\" \"$id\" 2>/dev/null); \
+elif command -v python >/dev/null 2>&1; then \
+entry=$(python -c \"import {python_module},sys; print(getattr({python_module}.{python_lookup}(int(sys.argv[1])), '{python_field}'))\" \"$id\" 2>/dev/null); \
+fi; \
+if [ -n \"$entry\" ]; then printf \"%s\\t%s\\n\" \"$id\" \"$entry\"; fi; \
+done; \
+fi'"
+    )
+}
+
+fn run_remote_exec(session: &Session, command: &str) -> Result<String, String> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|error| format!("failed to open remote exec channel: {error}"))?;
+    channel
+        .exec(command)
+        .map_err(|error| format!("failed to execute remote lookup command: {error}"))?;
+
+    let mut output = String::new();
+    channel
+        .read_to_string(&mut output)
+        .map_err(|error| format!("failed to read remote lookup output: {error}"))?;
+
+    let mut stderr = String::new();
+    let _ = channel.stderr().read_to_string(&mut stderr);
+    let _ = channel.wait_close();
+
+    Ok(output)
+}
+
 fn connect_sftp(request: &RemoteConnectionRequest) -> Result<ConnectedSftp, String> {
     validate_connection_fields(&request.host, &request.username)?;
 
@@ -881,7 +997,7 @@ fn connect_sftp(request: &RemoteConnectionRequest) -> Result<ConnectedSftp, Stri
         .map_err(|error| format!("failed to open sftp subsystem: {error}"))?;
 
     Ok(ConnectedSftp {
-        _session: session,
+        session,
         sftp,
     })
 }
@@ -1330,6 +1446,8 @@ fn map_remote_file(path: PathBuf, stat: FileStat) -> RemoteFileEntry {
         permissions: stat.perm,
         owner_uid: stat.uid,
         group_gid: stat.gid,
+        owner_name: None,
+        group_name: None,
     }
 }
 

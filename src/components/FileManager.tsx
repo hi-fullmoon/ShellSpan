@@ -1,42 +1,31 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { createPortal } from "react-dom";
 import {
-  type FormEvent,
-  type MouseEvent as ReactMouseEvent,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { isTauriRuntime } from "../lib/tauri";
-import { cn, fileKindTone } from "../lib/ui";
-import {
-  ArrowUpIcon,
-  DotsIcon,
-  FileIcon,
-  FolderIcon,
-  LinkIcon,
-  RefreshIcon,
-} from "./Icons";
-import { Toast, type ToastAction } from "./Toast";
-import type {
-  DeleteProgressEvent,
-  RemoteDirectoryListing,
-  RemoteFileEntry,
-  RemoteFileKind,
-  SessionState,
-  UploadProgressEvent,
-} from "../types";
+  AllCommunityModule,
+  ModuleRegistry,
+  type CellContextMenuEvent,
+  type ColDef,
+  type ICellRendererParams,
+  type RowClickedEvent,
+  type RowDoubleClickedEvent,
+} from 'ag-grid-community';
+import { AgGridReact } from 'ag-grid-react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { createPortal } from 'react-dom';
+import { type FormEvent, type MouseEvent as ReactMouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isTauriRuntime } from '../lib/tauri';
+import { useFileManagerStore } from '../stores/fileManagerStore';
+import { cn, fileKindTone } from '../lib/ui';
+import { ArrowUpIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
+import { Toast, type ToastAction } from './Toast';
+import type { DeleteProgressEvent, RemoteDirectoryListing, RemoteFileEntry, RemoteFileKind, SessionState, UploadProgressEvent } from '../types';
 
 interface FileManagerProps {
   session?: SessionState;
 }
 
-type EntryDialogMode = "newFile" | "newDirectory" | "rename";
-type MenuTarget = "blank" | "entry";
+type EntryDialogMode = 'newFile' | 'newDirectory' | 'rename';
+type MenuTarget = 'blank' | 'entry';
 
 interface EntryDialogState {
   mode: EntryDialogMode;
@@ -63,7 +52,7 @@ interface PropertiesState {
 interface ToastState {
   action?: ToastAction;
   message: string;
-  tone: "success" | "error" | "info";
+  tone: 'success' | 'error' | 'info';
 }
 
 interface UploadProgressState {
@@ -90,6 +79,8 @@ interface ContextMenuState {
   entry?: RemoteFileEntry;
 }
 
+ModuleRegistry.registerModules([AllCommunityModule]);
+
 function clampMenuPosition(x: number, y: number, width: number, height: number) {
   const edge = 8;
   return {
@@ -100,10 +91,10 @@ function clampMenuPosition(x: number, y: number, width: number, height: number) 
 
 function formatSize(size?: number) {
   if (size === undefined) {
-    return "--";
+    return '--';
   }
 
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let value = size;
   let unitIndex = 0;
   while (value >= 1024 && unitIndex < units.length - 1) {
@@ -115,39 +106,40 @@ function formatSize(size?: number) {
 
 function formatModified(modifiedAt?: number) {
   if (!modifiedAt) {
-    return "--";
+    return '--';
   }
 
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(modifiedAt * 1000));
 }
 
 function formatFullModified(modifiedAt?: number) {
   if (!modifiedAt) {
-    return "--";
+    return '--';
   }
 
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
   }).format(new Date(modifiedAt * 1000));
 }
 
 function localPathName(path: string) {
-  const normalized = path.replace(/\\/g, "/");
-  return normalized.split("/").filter(Boolean).pop() ?? path;
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.split('/').filter(Boolean).pop() ?? path;
 }
 
 function createOperationId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
   }
 
@@ -170,10 +162,7 @@ function uploadProgressPercent(progress?: UploadProgressState) {
   return 0;
 }
 
-function stepProgressPercent(progress?: {
-  totalSteps: number;
-  completedSteps: number;
-}) {
+function stepProgressPercent(progress?: { totalSteps: number; completedSteps: number }) {
   if (!progress || progress.totalSteps <= 0) {
     return 0;
   }
@@ -182,79 +171,107 @@ function stepProgressPercent(progress?: {
 }
 
 function parentDirectoryPath(path: string) {
-  const normalized = path.replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
+  const normalized = path.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
 
   if (!parts.length) {
-    return normalized.startsWith("/") ? "/" : ".";
+    return normalized.startsWith('/') ? '/' : '.';
   }
 
   parts.pop();
   if (!parts.length) {
-    return normalized.startsWith("/") ? "/" : ".";
+    return normalized.startsWith('/') ? '/' : '.';
   }
 
-  return `${normalized.startsWith("/") ? "/" : ""}${parts.join("/")}`;
+  return `${normalized.startsWith('/') ? '/' : ''}${parts.join('/')}`;
 }
 
 function kindLabel(kind: RemoteFileKind) {
   switch (kind) {
-    case "directory":
-      return "目录";
-    case "file":
-      return "文件";
-    case "symlink":
-      return "链接";
-    case "other":
-      return "其他";
+    case 'directory':
+      return '目录';
+    case 'file':
+      return '文件';
+    case 'symlink':
+      return '链接';
+    case 'other':
+      return '其他';
   }
 }
 
 function permissionTypePrefix(kind: RemoteFileKind) {
   switch (kind) {
-    case "directory":
-      return "d";
-    case "symlink":
-      return "l";
-    case "file":
-      return "-";
-    case "other":
-      return "?";
+    case 'directory':
+      return 'd';
+    case 'symlink':
+      return 'l';
+    case 'file':
+      return '-';
+    case 'other':
+      return '?';
   }
 }
 
 function formatPermissionOctal(permissions?: number) {
   if (permissions === undefined) {
-    return "--";
+    return '--';
   }
 
-  return `0${(permissions & 0o7777).toString(8).padStart(4, "0")}`;
+  return `0${(permissions & 0o7777).toString(8).padStart(4, '0')}`;
 }
 
-function formatPermissionSymbolic(
-  permissions: number | undefined,
-  kind: RemoteFileKind,
-) {
+function formatPermissionSymbolic(permissions: number | undefined, kind: RemoteFileKind) {
   if (permissions === undefined) {
-    return "--";
+    return '--';
   }
 
   const ownerExec = (permissions & 0o100) === 0o100;
   const groupExec = (permissions & 0o010) === 0o010;
   const otherExec = (permissions & 0o001) === 0o001;
   const symbolic = [
-    (permissions & 0o400) === 0o400 ? "r" : "-",
-    (permissions & 0o200) === 0o200 ? "w" : "-",
-    (permissions & 0o4000) === 0o4000 ? (ownerExec ? "s" : "S") : ownerExec ? "x" : "-",
-    (permissions & 0o040) === 0o040 ? "r" : "-",
-    (permissions & 0o020) === 0o020 ? "w" : "-",
-    (permissions & 0o2000) === 0o2000 ? (groupExec ? "s" : "S") : groupExec ? "x" : "-",
-    (permissions & 0o004) === 0o004 ? "r" : "-",
-    (permissions & 0o002) === 0o002 ? "w" : "-",
-    (permissions & 0o1000) === 0o1000 ? (otherExec ? "t" : "T") : otherExec ? "x" : "-",
-  ].join("");
+    (permissions & 0o400) === 0o400 ? 'r' : '-',
+    (permissions & 0o200) === 0o200 ? 'w' : '-',
+    (permissions & 0o4000) === 0o4000 ? (ownerExec ? 's' : 'S') : ownerExec ? 'x' : '-',
+    (permissions & 0o040) === 0o040 ? 'r' : '-',
+    (permissions & 0o020) === 0o020 ? 'w' : '-',
+    (permissions & 0o2000) === 0o2000 ? (groupExec ? 's' : 'S') : groupExec ? 'x' : '-',
+    (permissions & 0o004) === 0o004 ? 'r' : '-',
+    (permissions & 0o002) === 0o002 ? 'w' : '-',
+    (permissions & 0o1000) === 0o1000 ? (otherExec ? 't' : 'T') : otherExec ? 'x' : '-',
+  ].join('');
 
   return `${permissionTypePrefix(kind)}${symbolic}`;
+}
+
+function formatOwnership(entry: RemoteFileEntry) {
+  const owner = entry.ownerName?.trim() ? entry.ownerName : entry.ownerUid !== undefined ? `U${entry.ownerUid}` : '--';
+  const group = entry.groupName?.trim() ? entry.groupName : entry.groupGid !== undefined ? `G${entry.groupGid}` : '--';
+  return `${owner}:${group}`;
+}
+
+function formatOwner(entry: RemoteFileEntry) {
+  return entry.ownerName?.trim() ? entry.ownerName : entry.ownerUid !== undefined ? `U${entry.ownerUid}` : '--';
+}
+
+function formatGroup(entry: RemoteFileEntry) {
+  return entry.groupName?.trim() ? entry.groupName : entry.groupGid !== undefined ? `G${entry.groupGid}` : '--';
+}
+
+function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
+  if (!data) {
+    return null;
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-[2px]">
+      <span
+        className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', fileKindTone(data.kind))}
+      >
+        {fileKindIcon(data.kind)}
+      </span>
+      <span className="truncate text-[13px] font-medium leading-5 tracking-[0.01em] text-slate-100">{data.name}</span>
+    </div>
+  );
 }
 
 async function writeClipboardText(value: string) {
@@ -263,99 +280,31 @@ async function writeClipboardText(value: string) {
     return;
   }
 
-  const textarea = document.createElement("textarea");
+  const textarea = document.createElement('textarea');
   textarea.value = value;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
   document.body.append(textarea);
   textarea.select();
-  document.execCommand("copy");
+  document.execCommand('copy');
   textarea.remove();
 }
 
 function fileKindIcon(kind: RemoteFileKind) {
   switch (kind) {
-    case "directory":
+    case 'directory':
       return <FolderIcon />;
-    case "file":
+    case 'file':
       return <FileIcon />;
-    case "symlink":
+    case 'symlink':
       return <LinkIcon />;
-    case "other":
+    case 'other':
       return <DotsIcon />;
   }
 }
 
-function FileRow({
-  entry,
-  selected,
-  onOpen,
-  onSelect,
-  onContextMenu,
-}: {
-  entry: RemoteFileEntry;
-  selected: boolean;
-  onOpen: (path: string) => void;
-  onSelect: (path: string) => void;
-  onContextMenu: (event: ReactMouseEvent<HTMLDivElement>, entry: RemoteFileEntry) => void;
-}) {
-  const directory = entry.kind === "directory";
-
-  return (
-    <div
-      className={cn(
-        "grid select-none grid-cols-[minmax(0,1fr)_52px_64px] items-center gap-1 rounded-lg border px-2 py-1 transition",
-        selected
-          ? "border-cyan-400/50 bg-slate-900"
-          : "border-transparent bg-slate-900/70 hover:border-slate-700 hover:bg-slate-900",
-      )}
-      onMouseDown={(event) => {
-        if (event.button === 2) {
-          event.preventDefault();
-        }
-      }}
-      onContextMenu={(event) => onContextMenu(event, entry)}
-    >
-      <button
-        className="flex min-w-0 items-center gap-2 text-left"
-        onClick={() => onSelect(entry.path)}
-        onDoubleClick={() => directory && onOpen(entry.path)}
-        type="button"
-      >
-        <span
-          className={cn(
-            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-            fileKindTone(entry.kind),
-          )}
-          title={kindLabel(entry.kind)}
-        >
-          {fileKindIcon(entry.kind)}
-        </span>
-        <span className="truncate text-[13px] font-medium leading-5 tracking-[0.01em] text-slate-100">
-          {entry.name}
-        </span>
-      </button>
-
-      <span className="truncate text-right text-[11px] leading-5 text-slate-400">
-        {entry.kind === "directory" ? "--" : formatSize(entry.size)}
-      </span>
-      <span className="truncate text-right text-[11px] leading-5 text-slate-500">
-        {formatModified(entry.modifiedAt)}
-      </span>
-    </div>
-  );
-}
-
-function MenuButton({
-  label,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
+function MenuButton({ label, disabled, onClick }: { label: string; disabled?: boolean; onClick: () => void }) {
   return (
     <button
       className="rounded-md px-2 py-1 text-left text-[12px] font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500"
@@ -372,13 +321,7 @@ function MenuDivider() {
   return <div className="my-1 h-px bg-slate-800/90" />;
 }
 
-function PropertyRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function PropertyRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2 rounded-lg border border-slate-800 bg-slate-950/70 px-2 py-2">
       <span className="text-[11px] font-medium tracking-[0.02em] text-slate-500">{label}</span>
@@ -388,10 +331,9 @@ function PropertyRow({
 }
 
 export function FileManager({ session }: FileManagerProps) {
+  const gridRef = useRef<AgGridReact<RemoteFileEntry> | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const [listing, setListing] = useState<RemoteDirectoryListing>();
-  const [pathInput, setPathInput] = useState("");
-  const [selectedPath, setSelectedPath] = useState<string>();
+  const hasLoadedAnyListingRef = useRef(false);
   const [clipboard, setClipboard] = useState<ClipboardState>();
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteState>();
   const [properties, setProperties] = useState<PropertiesState>();
@@ -402,8 +344,10 @@ export function FileManager({ session }: FileManagerProps) {
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState>();
   const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
-  const [error, setError] = useState<string>();
   const [toast, setToast] = useState<ToastState>();
+  const sessionId = session?.sessionId;
+  const fileManagerState = useFileManagerStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
+  const updateSessionState = useFileManagerStore((state) => state.updateSessionState);
 
   const connection = useMemo(() => {
     if (!session) {
@@ -421,50 +365,155 @@ export function FileManager({ session }: FileManagerProps) {
     };
   }, [session]);
 
-  const selectedEntry = useMemo(
-    () => listing?.entries.find((entry) => entry.path === selectedPath),
-    [listing, selectedPath],
+  const listing = fileManagerState?.listing;
+  const pathInput = fileManagerState?.pathInput ?? '';
+  const selectedPath = fileManagerState?.selectedPath;
+  const error = fileManagerState?.error;
+  const selectedEntry = useMemo(() => listing?.entries.find((entry) => entry.path === selectedPath), [listing, selectedPath]);
+  const ready = !!session && session.status === 'connected' && !!connection;
+  const currentPath = listing?.path;
+  const showInitialLoadingHint = !hasLoadedAnyListingRef.current;
+  const columnDefs = useMemo<ColDef<RemoteFileEntry>[]>(
+    () => [
+      {
+        cellRenderer: NameCellRenderer,
+        field: 'name',
+        headerName: '名称',
+        width: 240,
+        minWidth: 120,
+        resizable: true,
+        suppressMovable: true,
+        tooltipField: 'name',
+        flex: 1,
+      },
+      {
+        field: 'modifiedAt',
+        headerName: '时间',
+        width: 142,
+        minWidth: 142,
+        resizable: true,
+        suppressMovable: true,
+        valueFormatter: ({ data }) => (data ? formatModified(data.modifiedAt) : '--'),
+        cellClass: 'tabular-nums',
+      },
+      {
+        field: 'kind',
+        headerName: '类型',
+        width: 88,
+        minWidth: 88,
+        resizable: true,
+        suppressMovable: true,
+        valueGetter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
+        valueFormatter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
+      },
+      {
+        field: 'size',
+        headerName: '大小',
+        width: 84,
+        minWidth: 84,
+        resizable: true,
+        suppressMovable: true,
+        valueFormatter: ({ data }) => (data ? (data.kind === 'directory' ? '--' : formatSize(data.size)) : '--'),
+      },
+      {
+        headerName: '权限',
+        width: 148,
+        minWidth: 148,
+        resizable: true,
+        suppressMovable: true,
+        valueGetter: ({ data }) => (data ? formatPermissionSymbolic(data.permissions, data.kind) : '--'),
+        valueFormatter: ({ data }) => (data ? formatPermissionSymbolic(data.permissions, data.kind) : '--'),
+        cellClass: 'font-mono',
+      },
+      {
+        headerName: '所有者',
+        width: 88,
+        minWidth: 88,
+        resizable: true,
+        suppressMovable: true,
+        valueGetter: ({ data }) => (data ? formatOwner(data) : '--'),
+        valueFormatter: ({ data }) => (data ? formatOwner(data) : '--'),
+        cellClass: 'font-mono',
+      },
+      {
+        headerName: '分组',
+        width: 88,
+        minWidth: 88,
+        resizable: true,
+        suppressMovable: true,
+        valueGetter: ({ data }) => (data ? formatGroup(data) : '--'),
+        valueFormatter: ({ data }) => (data ? formatGroup(data) : '--'),
+        cellClass: 'font-mono',
+      },
+    ],
+    [],
+  );
+  const defaultColDef = useMemo<ColDef<RemoteFileEntry>>(
+    () => ({
+      sortable: true,
+      menuTabs: [],
+      unSortIcon: true,
+    }),
+    [],
   );
 
-  const ready = !!session && session.status === "connected" && !!connection;
-  const currentPath = listing?.path;
+  const setPathInput = (value: string) => {
+    if (!sessionId) {
+      return;
+    }
+
+    updateSessionState(sessionId, { pathInput: value });
+  };
+
+  const setSelectedPath = (value?: string) => {
+    if (!sessionId) {
+      return;
+    }
+
+    updateSessionState(sessionId, { selectedPath: value });
+  };
+
+  const setFileError = (value?: string) => {
+    if (!sessionId) {
+      return;
+    }
+
+    updateSessionState(sessionId, { error: value });
+  };
 
   const loadDirectory = async (targetPath?: string) => {
-    if (!connection) {
+    if (!connection || !sessionId) {
       return;
     }
 
     setLoading(true);
-    setError(undefined);
+    setFileError(undefined);
     setContextMenu(undefined);
 
     try {
-      const nextListing = await invoke<RemoteDirectoryListing>("list_remote_directory", {
+      const nextListing = await invoke<RemoteDirectoryListing>('list_remote_directory', {
         request: {
           ...connection,
           path: targetPath,
         },
       });
-      setListing(nextListing);
-      setPathInput(nextListing.path);
-      setSelectedPath((current) =>
-        current && nextListing.entries.some((entry) => entry.path === current)
-          ? current
-          : undefined,
-      );
+      updateSessionState(sessionId, (current) => ({
+        error: undefined,
+        listing: nextListing,
+        pathInput: nextListing.path,
+        selectedPath:
+          current.selectedPath && nextListing.entries.some((entry) => entry.path === current.selectedPath) ? current.selectedPath : undefined,
+      }));
     } catch (nextError) {
-      setError(String(nextError));
+      setFileError(String(nextError));
     } finally {
       setLoading(false);
     }
   };
 
-  const runFileAction = async (
-    task: () => Promise<unknown>,
-    successMessage?: string,
-  ) => {
+  const runFileAction = async (task: () => Promise<unknown>, successMessage?: string) => {
     setWorking(true);
-    setError(undefined);
+    setFileError(undefined);
     setToast(undefined);
     setContextMenu(undefined);
 
@@ -476,13 +525,13 @@ export function FileManager({ session }: FileManagerProps) {
       if (successMessage) {
         setToast({
           message: successMessage,
-          tone: "success",
+          tone: 'success',
         });
       }
     } catch (nextError) {
       setToast({
         message: String(nextError),
-        tone: "error",
+        tone: 'error',
       });
     } finally {
       setWorking(false);
@@ -501,7 +550,7 @@ export function FileManager({ session }: FileManagerProps) {
 
     const operationId = createOperationId();
     setWorking(true);
-    setError(undefined);
+    setFileError(undefined);
     setToast(undefined);
     setContextMenu(undefined);
     setUploadProgress({
@@ -515,7 +564,7 @@ export function FileManager({ session }: FileManagerProps) {
     });
 
     try {
-      await invoke("upload_local_paths", {
+      await invoke('upload_local_paths', {
         request: {
           ...connection,
           destinationDirectory: currentPath,
@@ -525,21 +574,18 @@ export function FileManager({ session }: FileManagerProps) {
       });
       await loadDirectory(currentPath);
       setToast({
-        message:
-          nextPaths.length === 1
-            ? `已上传 ${localPathName(nextPaths[0])}`
-            : `已上传 ${nextPaths.length} 项`,
-        tone: "success",
+        message: nextPaths.length === 1 ? `已上传 ${localPathName(nextPaths[0])}` : `已上传 ${nextPaths.length} 项`,
+        tone: 'success',
       });
     } catch (nextError) {
       const message = String(nextError);
-      const cancelled = message.includes("upload cancelled");
+      const cancelled = message.includes('upload cancelled');
       if (cancelled) {
         await loadDirectory(currentPath);
       }
       setToast({
-        message: cancelled ? "已取消上传" : message,
-        tone: cancelled ? "info" : "error",
+        message: cancelled ? '已取消上传' : message,
+        tone: cancelled ? 'info' : 'error',
       });
     } finally {
       setUploadProgress(undefined);
@@ -552,35 +598,37 @@ export function FileManager({ session }: FileManagerProps) {
       return;
     }
 
-    setUploadProgress((current) =>
-      current ? { ...current, cancelling: true } : current,
-    );
+    setUploadProgress((current) => (current ? { ...current, cancelling: true } : current));
 
     try {
-      await invoke("cancel_upload", {
+      await invoke('cancel_upload', {
         operationId: uploadProgress.operationId,
       });
     } catch (nextError) {
-      setUploadProgress((current) =>
-        current ? { ...current, cancelling: false } : current,
-      );
+      setUploadProgress((current) => (current ? { ...current, cancelling: false } : current));
       setToast({
         message: String(nextError),
-        tone: "error",
+        tone: 'error',
       });
     }
   };
 
   useEffect(() => {
-    setListing(undefined);
-    setPathInput("");
-    setSelectedPath(undefined);
+    if (listing) {
+      hasLoadedAnyListingRef.current = true;
+    }
+  }, [listing]);
+
+  useEffect(() => {
+    gridRef.current?.api?.redrawRows();
+  }, [selectedPath, listing]);
+
+  useEffect(() => {
     setClipboard(undefined);
     setPendingDelete(undefined);
     setProperties(undefined);
     setDialog(undefined);
     setContextMenu(undefined);
-    setError(undefined);
     setToast(undefined);
     setDragActive(false);
     setUploadProgress(undefined);
@@ -590,15 +638,19 @@ export function FileManager({ session }: FileManagerProps) {
       return;
     }
 
+    if (listing) {
+      return;
+    }
+
     void loadDirectory();
-  }, [ready, session?.sessionId]);
+  }, [ready, sessionId, listing]);
 
   useEffect(() => {
     const closeMenu = () => setContextMenu(undefined);
-    window.addEventListener("click", closeMenu);
+    window.addEventListener('click', closeMenu);
 
     return () => {
-      window.removeEventListener("click", closeMenu);
+      window.removeEventListener('click', closeMenu);
     };
   }, []);
 
@@ -608,12 +660,7 @@ export function FileManager({ session }: FileManagerProps) {
     }
 
     const rect = menuRef.current.getBoundingClientRect();
-    const nextPosition = clampMenuPosition(
-      contextMenu.x,
-      contextMenu.y,
-      rect.width,
-      rect.height,
-    );
+    const nextPosition = clampMenuPosition(contextMenu.x, contextMenu.y, rect.width, rect.height);
 
     if (nextPosition.x === contextMenu.x && nextPosition.y === contextMenu.y) {
       return;
@@ -639,7 +686,7 @@ export function FileManager({ session }: FileManagerProps) {
     let cancelled = false;
 
     const attach = async () => {
-      const unlisten = await listen<UploadProgressEvent>("upload-progress", (event) => {
+      const unlisten = await listen<UploadProgressEvent>('upload-progress', (event) => {
         setUploadProgress((current) =>
           current && current.operationId === event.payload.operationId
             ? {
@@ -680,7 +727,7 @@ export function FileManager({ session }: FileManagerProps) {
     let cancelled = false;
 
     const attach = async () => {
-      const unlisten = await listen<DeleteProgressEvent>("delete-progress", (event) => {
+      const unlisten = await listen<DeleteProgressEvent>('delete-progress', (event) => {
         setDeleteProgress((current) =>
           current && current.operationId === event.payload.operationId
             ? {
@@ -725,14 +772,14 @@ export function FileManager({ session }: FileManagerProps) {
         }
 
         switch (event.payload.type) {
-          case "enter":
-          case "over":
+          case 'enter':
+          case 'over':
             setDragActive(true);
             break;
-          case "leave":
+          case 'leave':
             setDragActive(false);
             break;
-          case "drop":
+          case 'drop':
             setDragActive(false);
             void handleUploadPaths(event.payload.paths);
             break;
@@ -762,36 +809,36 @@ export function FileManager({ session }: FileManagerProps) {
       return;
     }
 
-    if (dialog.mode === "rename") {
+    if (dialog.mode === 'rename') {
       if (!selectedEntry) {
         return;
       }
 
       await runFileAction(
         () =>
-          invoke("rename_remote_path", {
+          invoke('rename_remote_path', {
             request: {
               ...connection,
               path: selectedEntry.path,
               newName: dialog.value,
             },
           }),
-        "重命名成功",
+        '重命名成功',
       );
       return;
     }
 
     await runFileAction(
       () =>
-        invoke("create_remote_entry", {
+        invoke('create_remote_entry', {
           request: {
             ...connection,
             parentPath: currentPath,
             name: dialog.value,
-            kind: dialog.mode === "newFile" ? "file" : "directory",
+            kind: dialog.mode === 'newFile' ? 'file' : 'directory',
           },
         }),
-      dialog.mode === "newFile" ? "文件已创建" : "文件夹已创建",
+      dialog.mode === 'newFile' ? '文件已创建' : '文件夹已创建',
     );
   };
 
@@ -804,7 +851,7 @@ export function FileManager({ session }: FileManagerProps) {
     setSelectedPath(target.path);
     setContextMenu(undefined);
     setDialog({
-      mode: "rename",
+      mode: 'rename',
       value: target.name,
     });
   };
@@ -819,10 +866,7 @@ export function FileManager({ session }: FileManagerProps) {
     setContextMenu(undefined);
     setProperties({
       entry: target,
-      directoryPath:
-        target.kind === "directory"
-          ? target.path
-          : parentDirectoryPath(target.path),
+      directoryPath: target.kind === 'directory' ? target.path : parentDirectoryPath(target.path),
     });
   };
 
@@ -855,16 +899,16 @@ export function FileManager({ session }: FileManagerProps) {
     });
     setToast({
       message: `已复制 ${target.name}`,
-      tone: "success",
+      tone: 'success',
       action: {
-        label: "清除",
+        label: '清除',
         onClick: () => {
           setClipboard(undefined);
           setToast(undefined);
         },
       },
     });
-    setError(undefined);
+    setFileError(undefined);
     setContextMenu(undefined);
   };
 
@@ -875,12 +919,12 @@ export function FileManager({ session }: FileManagerProps) {
       await writeClipboardText(value);
       setToast({
         message: `${label}已复制`,
-        tone: "success",
+        tone: 'success',
       });
     } catch (nextError) {
       setToast({
         message: String(nextError),
-        tone: "error",
+        tone: 'error',
       });
     }
   };
@@ -899,7 +943,7 @@ export function FileManager({ session }: FileManagerProps) {
     const operationId = createOperationId();
 
     setWorking(true);
-    setError(undefined);
+    setFileError(undefined);
     setToast(undefined);
     setContextMenu(undefined);
     setPendingDelete(undefined);
@@ -911,7 +955,7 @@ export function FileManager({ session }: FileManagerProps) {
     });
 
     try {
-      await invoke("delete_remote_path", {
+      await invoke('delete_remote_path', {
         request: {
           ...connection,
           path: target.path,
@@ -923,13 +967,13 @@ export function FileManager({ session }: FileManagerProps) {
       setSelectedPath(undefined);
       await loadDirectory(currentPath);
       setToast({
-        message: "删除成功",
-        tone: "success",
+        message: '删除成功',
+        tone: 'success',
       });
     } catch (nextError) {
       setToast({
         message: String(nextError),
-        tone: "error",
+        tone: 'error',
       });
     } finally {
       setDeleteProgress(undefined);
@@ -944,7 +988,7 @@ export function FileManager({ session }: FileManagerProps) {
 
     await runFileAction(
       () =>
-        invoke("copy_remote_path", {
+        invoke('copy_remote_path', {
           request: {
             ...connection,
             sourcePath: clipboard.sourcePath,
@@ -957,7 +1001,7 @@ export function FileManager({ session }: FileManagerProps) {
 
   const handleOpenWithDefaultEditor = async (entry?: RemoteFileEntry) => {
     const target = entry ?? selectedEntry;
-    if (!target || !connection || target.kind === "directory") {
+    if (!target || !connection || target.kind === 'directory') {
       return;
     }
 
@@ -967,7 +1011,7 @@ export function FileManager({ session }: FileManagerProps) {
     setToast(undefined);
 
     try {
-      await invoke("open_remote_file", {
+      await invoke('open_remote_file', {
         request: {
           ...connection,
           path: target.path,
@@ -975,12 +1019,12 @@ export function FileManager({ session }: FileManagerProps) {
       });
       setToast({
         message: `已使用默认应用打开 ${target.name}`,
-        tone: "success",
+        tone: 'success',
       });
     } catch (nextError) {
       setToast({
         message: String(nextError),
-        tone: "error",
+        tone: 'error',
       });
     } finally {
       setWorking(false);
@@ -1002,47 +1046,62 @@ export function FileManager({ session }: FileManagerProps) {
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
-      target: "blank",
+      target: 'blank',
     });
   };
 
-  const openEntryMenu = (
-    event: ReactMouseEvent<HTMLDivElement>,
-    entry: RemoteFileEntry,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setSelectedPath(entry.path);
+  const handleGridRowClick = (event: RowClickedEvent<RemoteFileEntry>) => {
+    if (!event.data) {
+      return;
+    }
+
+    setSelectedPath(event.data.path);
+  };
+
+  const handleGridRowDoubleClick = (event: RowDoubleClickedEvent<RemoteFileEntry>) => {
+    if (!event.data || event.data.kind !== 'directory') {
+      return;
+    }
+
+    void loadDirectory(event.data.path);
+  };
+
+  const handleGridContextMenu = (event: CellContextMenuEvent<RemoteFileEntry>) => {
+    const target = event.data;
+    const mouseEvent = event.event as MouseEvent | undefined;
+    if (!target || !mouseEvent) {
+      return;
+    }
+
+    mouseEvent.preventDefault();
+    mouseEvent.stopPropagation();
+    setSelectedPath(target.path);
     setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      target: "entry",
-      entry,
+      x: mouseEvent.clientX,
+      y: mouseEvent.clientY,
+      target: 'entry',
+      entry: target,
     });
   };
 
   return (
     <aside className="surface relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
-          <div className="surface-header">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">文件</p>
-              <h3 className="truncate text-[15px] font-semibold tracking-[0.01em] text-slate-100">
-                {session ? "远程文件管理器" : "未激活会话"}
-              </h3>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="rounded-md bg-slate-950/70 px-2 py-1 text-[10px] text-slate-400">
-                {listing?.entries.length ?? 0}
-              </span>
-            </div>
-          </div>
+      <div className="surface-header">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">文件</p>
+          <h3 className="truncate text-[15px] font-semibold tracking-[0.01em] text-slate-100">{session ? '远程文件管理器' : '未激活会话'}</h3>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="rounded-md bg-slate-950/70 px-2 py-1 text-[10px] text-slate-400">{listing?.entries.length ?? 0}</span>
+        </div>
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 p-1">
         {!session ? (
           <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
             先打开一个 SSH 会话，左侧会显示远程目录。
           </div>
-        ) : session.status !== "connected" ? (
+        ) : session.status !== 'connected' && !listing && showInitialLoadingHint ? (
           <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
             会话连接成功后，文件管理器会自动加载远程目录。
           </div>
@@ -1075,17 +1134,7 @@ export function FileManager({ session }: FileManagerProps) {
               </button>
             </form>
 
-            {error ? (
-              <div className="rounded-lg border border-rose-900 bg-rose-950/40 px-2 py-2 text-xs text-rose-300">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="grid grid-cols-[minmax(0,1fr)_52px_64px] gap-1 px-2 py-1 text-[11px] font-medium tracking-[0.04em] text-slate-500">
-              <span>名称</span>
-              <span className="text-right">大小</span>
-              <span className="text-right">时间</span>
-            </div>
+            {error ? <div className="rounded-lg border border-rose-900 bg-rose-950/40 px-2 py-2 text-xs text-rose-300">{error}</div> : null}
 
             <div
               className="min-h-0 flex-1 overflow-auto rounded-lg"
@@ -1096,28 +1145,37 @@ export function FileManager({ session }: FileManagerProps) {
               }}
               onContextMenu={openBlankMenu}
             >
-              <div className="flex min-h-full flex-col gap-1">
-                {loading && !listing ? (
-                  <div className="surface-muted px-2 py-2 text-xs text-slate-400">
-                    正在加载远程目录...
-                  </div>
-                ) : listing?.entries.length ? (
-                  listing.entries.map((entry) => (
-                    <FileRow
-                      entry={entry}
-                      key={entry.path}
-                      onContextMenu={openEntryMenu}
-                      onOpen={(path) => void loadDirectory(path)}
-                      onSelect={setSelectedPath}
-                      selected={entry.path === selectedPath}
-                    />
-                  ))
-                ) : (
-                  <div className="surface-muted px-2 py-2 text-xs text-slate-400">
-                    当前目录没有可显示的文件。
-                  </div>
-                )}
-              </div>
+              {loading && !listing ? (
+                showInitialLoadingHint ? (
+                  <div className="surface-muted px-2 py-2 text-xs text-slate-400">正在加载远程目录...</div>
+                ) : null
+              ) : !listing ? null : (
+                <div className="ag-theme-quartz termbridge-file-grid h-full">
+                  <AgGridReact<RemoteFileEntry>
+                    animateRows
+                    defaultColDef={defaultColDef}
+                    columnDefs={columnDefs}
+                    getRowClass={(params) =>
+                      params.data?.path === selectedPath ? 'termbridge-file-row termbridge-file-row-selected' : 'termbridge-file-row'
+                    }
+                    getRowId={(params) => params.data.path}
+                    headerHeight={30}
+                    noRowsOverlayComponentParams={{
+                      message: '当前目录没有可显示的文件。',
+                    }}
+                    onCellContextMenu={handleGridContextMenu}
+                    onRowClicked={handleGridRowClick}
+                    onRowDoubleClicked={handleGridRowDoubleClick}
+                    overlayNoRowsTemplate={'<span class="termbridge-grid-overlay">当前目录没有可显示的文件。</span>'}
+                    ref={gridRef}
+                    rowData={listing.entries}
+                    rowHeight={32}
+                    suppressCellFocus
+                    suppressContextMenu
+                    suppressDragLeaveHidesColumns
+                  />
+                </div>
+              )}
             </div>
           </>
         )}
@@ -1137,13 +1195,13 @@ export function FileManager({ session }: FileManagerProps) {
               ref={menuRef}
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
-              {contextMenu.target === "blank" ? (
+              {contextMenu.target === 'blank' ? (
                 <div className="flex flex-col">
                   <MenuButton
                     disabled={loading || working}
                     label="新建文件"
                     onClick={() => {
-                      setDialog({ mode: "newFile", value: "" });
+                      setDialog({ mode: 'newFile', value: '' });
                       setContextMenu(undefined);
                     }}
                   />
@@ -1151,27 +1209,19 @@ export function FileManager({ session }: FileManagerProps) {
                     disabled={loading || working}
                     label="新建文件夹"
                     onClick={() => {
-                      setDialog({ mode: "newDirectory", value: "" });
+                      setDialog({ mode: 'newDirectory', value: '' });
                       setContextMenu(undefined);
                     }}
                   />
                   <MenuDivider />
-                  <MenuButton
-                    disabled={!clipboard || loading || working}
-                    label="粘贴"
-                    onClick={() => void handlePaste()}
-                  />
+                  <MenuButton disabled={!clipboard || loading || working} label="粘贴" onClick={() => void handlePaste()} />
                   <MenuButton
                     disabled={!currentPath || loading || working}
                     label="复制当前目录路径"
-                    onClick={() => void handleCopyText("当前目录路径", currentPath ?? "")}
+                    onClick={() => void handleCopyText('当前目录路径', currentPath ?? '')}
                   />
                   <MenuDivider />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="刷新"
-                    onClick={() => void loadDirectory(currentPath)}
-                  />
+                  <MenuButton disabled={loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
                 </div>
               ) : (
                 <div className="flex flex-col">
@@ -1179,7 +1229,7 @@ export function FileManager({ session }: FileManagerProps) {
                     disabled={loading || working}
                     label="新建文件"
                     onClick={() => {
-                      setDialog({ mode: "newFile", value: "" });
+                      setDialog({ mode: 'newFile', value: '' });
                       setContextMenu(undefined);
                     }}
                   />
@@ -1187,11 +1237,11 @@ export function FileManager({ session }: FileManagerProps) {
                     disabled={loading || working}
                     label="新建文件夹"
                     onClick={() => {
-                      setDialog({ mode: "newDirectory", value: "" });
+                      setDialog({ mode: 'newDirectory', value: '' });
                       setContextMenu(undefined);
                     }}
                   />
-                  {contextMenu.entry?.kind === "directory" ? (
+                  {contextMenu.entry?.kind === 'directory' ? (
                     <MenuButton
                       disabled={loading || working}
                       label="打开"
@@ -1202,7 +1252,7 @@ export function FileManager({ session }: FileManagerProps) {
                       }}
                     />
                   ) : null}
-                  {contextMenu.entry && contextMenu.entry.kind !== "directory" ? (
+                  {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
                     <MenuButton
                       disabled={loading || working}
                       label="默认编辑器打开"
@@ -1210,36 +1260,19 @@ export function FileManager({ session }: FileManagerProps) {
                     />
                   ) : null}
                   <MenuDivider />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="重命名"
-                    onClick={() => openRenameDialog(contextMenu.entry)}
-                  />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="复制"
-                    onClick={() => handleCopy(contextMenu.entry)}
-                  />
+                  <MenuButton disabled={loading || working} label="重命名" onClick={() => openRenameDialog(contextMenu.entry)} />
+                  <MenuButton disabled={loading || working} label="复制" onClick={() => handleCopy(contextMenu.entry)} />
                   <MenuDivider />
                   <MenuButton
                     disabled={loading || working}
                     label="复制名称"
-                    onClick={() =>
-                      void handleCopyText("名称", contextMenu.entry?.name ?? "")
-                    }
+                    onClick={() => void handleCopyText('名称', contextMenu.entry?.name ?? '')}
                   />
                   <MenuButton
                     disabled={loading || working}
-                    label={
-                      contextMenu.entry?.kind === "directory"
-                        ? "复制目录路径"
-                        : "复制文件路径"
-                    }
+                    label={contextMenu.entry?.kind === 'directory' ? '复制目录路径' : '复制文件路径'}
                     onClick={() =>
-                      void handleCopyText(
-                        contextMenu.entry?.kind === "directory" ? "目录路径" : "文件路径",
-                        contextMenu.entry?.path ?? "",
-                      )
+                      void handleCopyText(contextMenu.entry?.kind === 'directory' ? '目录路径' : '文件路径', contextMenu.entry?.path ?? '')
                     }
                   />
                   <MenuButton
@@ -1247,32 +1280,20 @@ export function FileManager({ session }: FileManagerProps) {
                     label="复制所在目录"
                     onClick={() =>
                       void handleCopyText(
-                        "目录路径",
+                        '目录路径',
                         contextMenu.entry
-                          ? contextMenu.entry.kind === "directory"
+                          ? contextMenu.entry.kind === 'directory'
                             ? contextMenu.entry.path
                             : parentDirectoryPath(contextMenu.entry.path)
-                          : currentPath ?? "",
+                          : (currentPath ?? ''),
                       )
                     }
                   />
                   <MenuDivider />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="属性"
-                    onClick={() => openProperties(contextMenu.entry)}
-                  />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="刷新"
-                    onClick={() => void loadDirectory(currentPath)}
-                  />
+                  <MenuButton disabled={loading || working} label="属性" onClick={() => openProperties(contextMenu.entry)} />
+                  <MenuButton disabled={loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
                   <MenuDivider />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="删除"
-                    onClick={() => handleDelete(contextMenu.entry)}
-                  />
+                  <MenuButton disabled={loading || working} label="删除" onClick={() => handleDelete(contextMenu.entry)} />
                 </div>
               )}
             </div>,
@@ -1286,15 +1307,9 @@ export function FileManager({ session }: FileManagerProps) {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">属性</p>
-                <h4 className="mt-1 text-[15px] font-semibold tracking-[0.01em] text-slate-100">
-                  {properties.entry.name}
-                </h4>
+                <h4 className="mt-1 text-[15px] font-semibold tracking-[0.01em] text-slate-100">{properties.entry.name}</h4>
               </div>
-              <button
-                className="icon-btn"
-                onClick={() => setProperties(undefined)}
-                type="button"
-              >
+              <button className="icon-btn" onClick={() => setProperties(undefined)} type="button">
                 关闭
               </button>
             </div>
@@ -1304,45 +1319,34 @@ export function FileManager({ session }: FileManagerProps) {
               <PropertyRow label="路径" value={properties.entry.path} />
               <PropertyRow label="所在目录" value={properties.directoryPath} />
               <PropertyRow label="类型" value={kindLabel(properties.entry.kind)} />
-              <PropertyRow
-                label="大小"
-                value={
-                  properties.entry.kind === "directory"
-                    ? "--"
-                    : formatSize(properties.entry.size)
-                }
-              />
-              <PropertyRow
-                label="修改时间"
-                value={formatFullModified(properties.entry.modifiedAt)}
-              />
+              <PropertyRow label="大小" value={properties.entry.kind === 'directory' ? '--' : formatSize(properties.entry.size)} />
+              <PropertyRow label="修改时间" value={formatFullModified(properties.entry.modifiedAt)} />
               <PropertyRow
                 label="所有者"
                 value={
-                  properties.entry.ownerUid !== undefined
-                    ? `UID ${properties.entry.ownerUid}`
-                    : "--"
+                  properties.entry.ownerName
+                    ? properties.entry.ownerUid !== undefined
+                      ? `${properties.entry.ownerName} (UID ${properties.entry.ownerUid})`
+                      : properties.entry.ownerName
+                    : properties.entry.ownerUid !== undefined
+                      ? `UID ${properties.entry.ownerUid}`
+                      : '--'
                 }
               />
               <PropertyRow
                 label="分组"
                 value={
-                  properties.entry.groupGid !== undefined
-                    ? `GID ${properties.entry.groupGid}`
-                    : "--"
+                  properties.entry.groupName
+                    ? properties.entry.groupGid !== undefined
+                      ? `${properties.entry.groupName} (GID ${properties.entry.groupGid})`
+                      : properties.entry.groupName
+                    : properties.entry.groupGid !== undefined
+                      ? `GID ${properties.entry.groupGid}`
+                      : '--'
                 }
               />
-              <PropertyRow
-                label="权限"
-                value={formatPermissionOctal(properties.entry.permissions)}
-              />
-              <PropertyRow
-                label="权限详情"
-                value={formatPermissionSymbolic(
-                  properties.entry.permissions,
-                  properties.entry.kind,
-                )}
-              />
+              <PropertyRow label="权限" value={formatPermissionOctal(properties.entry.permissions)} />
+              <PropertyRow label="权限详情" value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)} />
             </div>
           </div>
         </div>
@@ -1352,12 +1356,8 @@ export function FileManager({ session }: FileManagerProps) {
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
           <div className="surface flex w-full max-w-sm flex-col gap-2 p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
-                {uploadProgress.cancelling ? "正在取消" : "上传中"}
-              </span>
-              <span className="text-xs font-medium text-slate-300">
-                {uploadProgressPercent(uploadProgress)}%
-              </span>
+              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{uploadProgress.cancelling ? '正在取消' : '上传中'}</span>
+              <span className="text-xs font-medium text-slate-300">{uploadProgressPercent(uploadProgress)}%</span>
             </div>
 
             <div className="h-2 overflow-hidden rounded-full bg-slate-800">
@@ -1369,9 +1369,7 @@ export function FileManager({ session }: FileManagerProps) {
 
             <div className="flex flex-col gap-0.5">
               <strong className="truncate text-sm text-slate-100">
-                {uploadProgress.currentPath
-                  ? localPathName(uploadProgress.currentPath)
-                  : "正在准备上传"}
+                {uploadProgress.currentPath ? localPathName(uploadProgress.currentPath) : '正在准备上传'}
               </strong>
               <span className="text-xs text-slate-400">
                 {uploadProgress.totalBytes > 0
@@ -1381,13 +1379,8 @@ export function FileManager({ session }: FileManagerProps) {
             </div>
 
             <div className="flex justify-end">
-              <button
-                className="icon-btn"
-                disabled={uploadProgress.cancelling}
-                onClick={() => void handleCancelUpload()}
-                type="button"
-              >
-                {uploadProgress.cancelling ? "取消中..." : "取消上传"}
+              <button className="icon-btn" disabled={uploadProgress.cancelling} onClick={() => void handleCancelUpload()} type="button">
+                {uploadProgress.cancelling ? '取消中...' : '取消上传'}
               </button>
             </div>
           </div>
@@ -1398,12 +1391,8 @@ export function FileManager({ session }: FileManagerProps) {
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
           <div className="surface flex w-full max-w-sm flex-col gap-2 p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
-                删除中
-              </span>
-              <span className="text-xs font-medium text-slate-300">
-                {stepProgressPercent(deleteProgress)}%
-              </span>
+              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">删除中</span>
+              <span className="text-xs font-medium text-slate-300">{stepProgressPercent(deleteProgress)}%</span>
             </div>
 
             <div className="h-2 overflow-hidden rounded-full bg-slate-800">
@@ -1415,9 +1404,7 @@ export function FileManager({ session }: FileManagerProps) {
 
             <div className="flex flex-col gap-0.5">
               <strong className="truncate text-sm text-slate-100">
-                {deleteProgress.currentPath
-                  ? localPathName(deleteProgress.currentPath)
-                  : "正在准备删除"}
+                {deleteProgress.currentPath ? localPathName(deleteProgress.currentPath) : '正在准备删除'}
               </strong>
               <span className="text-xs text-slate-400">
                 {deleteProgress.completedSteps} / {deleteProgress.totalSteps} 项
@@ -1432,9 +1419,7 @@ export function FileManager({ session }: FileManagerProps) {
           <div className="surface flex max-w-xs flex-col gap-1 p-3 text-center">
             <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">上传</span>
             <strong className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">释放鼠标以上传到当前目录</strong>
-            <span className="text-xs text-slate-400">
-              支持拖入文件或整个文件夹。
-            </span>
+            <span className="text-xs text-slate-400">支持拖入文件或整个文件夹。</span>
           </div>
         </div>
       ) : null}
@@ -1443,49 +1428,25 @@ export function FileManager({ session }: FileManagerProps) {
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 p-2 backdrop-blur-sm">
           <form className="surface flex w-full max-w-xs flex-col gap-2 p-3" onSubmit={(event) => void submitDialog(event)}>
             <div>
-              <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
-                {dialog.mode === "rename" ? "重命名" : "新建"}
-              </p>
+              <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{dialog.mode === 'rename' ? '重命名' : '新建'}</p>
               <h4 className="mt-1 text-[15px] font-semibold tracking-[0.01em] text-slate-100">
-                {dialog.mode === "newFile"
-                  ? "新建空文件"
-                  : dialog.mode === "newDirectory"
-                    ? "新建文件夹"
-                    : "修改名称"}
+                {dialog.mode === 'newFile' ? '新建空文件' : dialog.mode === 'newDirectory' ? '新建文件夹' : '修改名称'}
               </h4>
             </div>
 
             <input
               autoFocus
               className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-[13px] leading-5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
-              onChange={(event) =>
-                setDialog((current) =>
-                  current ? { ...current, value: event.target.value } : current,
-                )
-              }
-              placeholder={
-                dialog.mode === "newFile"
-                  ? "example.txt"
-                  : dialog.mode === "newDirectory"
-                    ? "新建文件夹"
-                    : "输入新名称"
-              }
+              onChange={(event) => setDialog((current) => (current ? { ...current, value: event.target.value } : current))}
+              placeholder={dialog.mode === 'newFile' ? 'example.txt' : dialog.mode === 'newDirectory' ? '新建文件夹' : '输入新名称'}
               value={dialog.value}
             />
 
             <div className="flex gap-1">
-              <button
-                className="primary-btn flex-1"
-                disabled={!dialog.value.trim() || working}
-                type="submit"
-              >
-                {dialog.mode === "rename" ? "保存" : "确定"}
+              <button className="primary-btn flex-1" disabled={!dialog.value.trim() || working} type="submit">
+                {dialog.mode === 'rename' ? '保存' : '确定'}
               </button>
-              <button
-                className="icon-btn"
-                onClick={() => setDialog(undefined)}
-                type="button"
-              >
+              <button className="icon-btn" onClick={() => setDialog(undefined)} type="button">
                 取消
               </button>
             </div>
@@ -1499,21 +1460,15 @@ export function FileManager({ session }: FileManagerProps) {
             <div className="flex flex-col gap-1">
               <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">删除确认</p>
               <h4 className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">
-                {pendingDelete.kind === "directory" ? "删除目录" : "删除文件"}
+                {pendingDelete.kind === 'directory' ? '删除目录' : '删除文件'}
               </h4>
               <p className="text-xs text-slate-400">
-                {pendingDelete.kind === "directory"
-                  ? `确认删除“${pendingDelete.name}”及其内容吗？`
-                  : `确认删除“${pendingDelete.name}”吗？`}
+                {pendingDelete.kind === 'directory' ? `确认删除“${pendingDelete.name}”及其内容吗？` : `确认删除“${pendingDelete.name}”吗？`}
               </p>
             </div>
 
             <div className="flex justify-end gap-1">
-              <button
-                className="icon-btn"
-                onClick={() => setPendingDelete(undefined)}
-                type="button"
-              >
+              <button className="icon-btn" onClick={() => setPendingDelete(undefined)} type="button">
                 取消
               </button>
               <button
@@ -1530,7 +1485,7 @@ export function FileManager({ session }: FileManagerProps) {
 
       <Toast
         action={toast?.action}
-        message={toast?.message ?? ""}
+        message={toast?.message ?? ''}
         onClose={() => {
           if (clipboard && toast?.action) {
             clearClipboardNotice();
@@ -1539,7 +1494,7 @@ export function FileManager({ session }: FileManagerProps) {
           setToast(undefined);
         }}
         open={!!toast}
-        tone={toast?.tone ?? "info"}
+        tone={toast?.tone ?? 'info'}
       />
     </aside>
   );

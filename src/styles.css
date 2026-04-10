@@ -83,3 +83,127 @@
 .session-tabs-scroll::-webkit-scrollbar {
   display: none;
 }
+
+.termbridge-file-grid.ag-theme-quartz {
+  --ag-background-color: transparent;
+  --ag-header-text-color: rgb(148 163 184);
+  --ag-foreground-color: rgb(226 232 240);
+  --ag-data-color: rgb(203 213 225);
+  --ag-header-background-color: rgba(2, 6, 23, 0.92);
+  --ag-header-foreground-color: rgb(100 116 139);
+  --ag-data-background-color: transparent !important;
+  --ag-odd-row-background-color: rgba(15, 23, 42, 0.55);
+  --ag-even-row-background-color: rgba(15, 23, 42, 0.55);
+  --ag-row-hover-color: rgba(15, 23, 42, 0.9);
+  --ag-selected-row-background-color: rgba(15, 23, 42, 0.96);
+  --ag-row-border-color: rgba(30, 41, 59, 0.7);
+  --ag-border-color: rgba(30, 41, 59, 0.9);
+  --ag-header-column-separator-display: none;
+  --ag-cell-horizontal-border: none;
+  --ag-row-border-style: solid;
+  --ag-row-border-width: 1px;
+  --ag-wrapper-border-radius: 10px;
+  --ag-font-size: 12px;
+  --ag-font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+  --ag-tooltip-background-color: rgba(2, 6, 23, 0.98);
+  --ag-tooltip-text-color: rgb(241 245 249);
+  --ag-card-shadow: 0 12px 36px rgba(2, 6, 23, 0.5);
+  height: 100%;
+}
+
+.termbridge-file-grid .ag-root-wrapper {
+  border: 0;
+  background: rgba(2, 6, 23, 0.18);
+}
+.termbridge-file-grid .ag-body,
+.termbridge-file-grid .ag-floating-top,
+.termbridge-file-grid .ag-floating-bottom {
+  background: transparent;
+}
+
+.termbridge-file-grid .ag-header {
+  border-bottom: 1px solid rgba(30, 41, 59, 0.85);
+  background: rgba(2, 6, 23, 0.92);
+}
+
+.termbridge-file-grid .ag-header-viewport,
+.termbridge-file-grid .ag-center-cols-viewport,
+.termbridge-file-grid .ag-center-cols-container,
+.termbridge-file-grid .ag-body-viewport,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport {
+  background: transparent;
+}
+
+.termbridge-file-grid .ag-header-cell,
+.termbridge-file-grid .ag-cell {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.termbridge-file-grid .ag-header-cell {
+  color: rgb(148 163 184);
+  background: rgba(2, 6, 23, 0.92);
+}
+
+.termbridge-file-grid .ag-header-cell-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(148 163 184);
+}
+
+.termbridge-file-grid .ag-row {
+  background: rgba(15, 23, 42, 0.55);
+  border-radius: 8px;
+}
+
+.termbridge-file-grid .ag-row .ag-cell {
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: rgb(203 213 225);
+}
+
+.termbridge-file-grid .ag-pinned-left-cols-container,
+.termbridge-file-grid .ag-pinned-right-cols-container {
+  background: transparent;
+}
+
+.termbridge-file-grid .ag-tooltip {
+  border: 1px solid rgba(51, 65, 85, 0.95);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.98) !important;
+  color: rgb(241 245 249) !important;
+  box-shadow: 0 12px 36px rgba(2, 6, 23, 0.5);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+}
+
+.termbridge-file-grid .ag-row.termbridge-file-row-selected .ag-cell {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.termbridge-file-grid .ag-row.termbridge-file-row-selected {
+  outline: 1px solid rgba(34, 211, 238, 0.45);
+  outline-offset: -1px;
+}
+
+.termbridge-file-grid .ag-cell-focus,
+.termbridge-file-grid .ag-cell:focus,
+.termbridge-file-grid .ag-header-cell:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.termbridge-file-grid .ag-center-cols-clipper,
+.termbridge-file-grid .ag-center-cols-viewport,
+.termbridge-file-grid .ag-body-viewport,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport {
+  scrollbar-color: rgba(51, 65, 85, 0.9) transparent;
+}
+
+.termbridge-grid-overlay {
+  font-size: 12px;
+  color: rgb(148 163 184);
+}
