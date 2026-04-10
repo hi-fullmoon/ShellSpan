@@ -239,11 +239,11 @@
   padding: 6px 8px;
 }
 
-.termbridge-file-grid .ag-row.termbridge-file-row-selected .ag-cell {
+.termbridge-file-grid .ag-row.ag-row-selected .ag-cell {
   background: rgba(15, 23, 42, 0.95);
 }
 
-.termbridge-file-grid .ag-row.termbridge-file-row-selected {
+.termbridge-file-grid .ag-row.ag-row-selected {
   outline: 1px solid rgba(34, 211, 238, 0.45);
   outline-offset: -1px;
 }

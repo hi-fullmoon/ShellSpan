@@ -620,7 +620,25 @@ export function FileManager({ session }: FileManagerProps) {
   }, [listing]);
 
   useEffect(() => {
-    gridRef.current?.api?.redrawRows();
+    const api = gridRef.current?.api;
+    if (!api) {
+      return;
+    }
+
+    let hasSelectedRow = false;
+    api.forEachNode((node) => {
+      const shouldSelect = !!selectedPath && node.data?.path === selectedPath;
+      if (node.isSelected() !== shouldSelect) {
+        node.setSelected(shouldSelect);
+      }
+      if (shouldSelect) {
+        hasSelectedRow = true;
+      }
+    });
+
+    if (!hasSelectedRow && api.getSelectedRows().length) {
+      api.deselectAll();
+    }
   }, [selectedPath, listing]);
 
   useEffect(() => {
@@ -1110,12 +1128,12 @@ export function FileManager({ session }: FileManagerProps) {
             <form className="surface-muted flex items-center gap-1 px-2 py-2" onSubmit={(event) => void handlePathSubmit(event)}>
               <button
                 className="icon-btn h-7 w-7 px-0"
-                disabled={!ready || loading || working}
-                onClick={() => void loadDirectory(currentPath)}
-                title="刷新"
+                disabled={!listing?.parentPath || loading || working}
+                onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
+                title="返回上级目录"
                 type="button"
               >
-                <RefreshIcon />
+                <ArrowUpIcon />
               </button>
               <input
                 className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[12px] leading-5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
@@ -1125,12 +1143,12 @@ export function FileManager({ session }: FileManagerProps) {
               />
               <button
                 className="icon-btn h-7 w-7 px-0"
-                disabled={!listing?.parentPath || loading || working}
-                onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
-                title="返回上级目录"
+                disabled={!ready || loading || working}
+                onClick={() => void loadDirectory(currentPath)}
+                title="刷新"
                 type="button"
               >
-                <ArrowUpIcon />
+                <RefreshIcon />
               </button>
             </form>
 
@@ -1155,9 +1173,6 @@ export function FileManager({ session }: FileManagerProps) {
                     animateRows
                     defaultColDef={defaultColDef}
                     columnDefs={columnDefs}
-                    getRowClass={(params) =>
-                      params.data?.path === selectedPath ? 'termbridge-file-row termbridge-file-row-selected' : 'termbridge-file-row'
-                    }
                     getRowId={(params) => params.data.path}
                     headerHeight={30}
                     noRowsOverlayComponentParams={{
@@ -1170,6 +1185,7 @@ export function FileManager({ session }: FileManagerProps) {
                     ref={gridRef}
                     rowData={listing.entries}
                     rowHeight={32}
+                    rowSelection="single"
                     suppressCellFocus
                     suppressContextMenu
                     suppressDragLeaveHidesColumns
