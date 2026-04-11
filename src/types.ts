@@ -8,6 +8,8 @@ export interface ConnectionProfile {
   port: number;
   username: string;
   authMethod: AuthMethod;
+  pinned?: boolean;
+  favorite?: boolean;
   rememberPassword?: boolean;
   password?: string;
   privateKeyPath?: string;
@@ -27,6 +29,17 @@ export interface SessionState extends SessionSummary {
   status: SessionStatus;
   note?: string;
   createdAt: number;
+}
+
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export interface LogEntry {
+  id: string;
+  timestamp: number;
+  level: LogLevel;
+  scope: string;
+  message: string;
+  details?: string;
 }
 
 export interface SshStatusEvent {
@@ -52,6 +65,10 @@ export interface UploadProgressEvent {
   uploadedBytes: number;
   totalSteps: number;
   completedSteps: number;
+}
+
+export interface UploadProgressState extends UploadProgressEvent {
+  cancelling?: boolean;
 }
 
 export interface DeleteProgressEvent {

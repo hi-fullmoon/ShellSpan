@@ -1,5 +1,5 @@
 [package]
-name = "ssh-tool"
+name = "TermBridge"
 version = "0.1.0"
 description = "TermBridge desktop SSH client"
 authors = ["Codex"]
@@ -18,3 +18,4 @@ serde_json = "1"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 tauri = { version = "2", features = [] }
 uuid = { version = "1", features = ["v4", "serde"] }
+rfd = "0.14"

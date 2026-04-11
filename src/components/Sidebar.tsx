@@ -1,8 +1,7 @@
 import { createPortal } from 'react-dom';
-import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { KeyIcon, LockIcon } from './Icons';
-import { cn, sessionStatusTone } from '../lib/ui';
-import type { ConnectionProfile, SessionState } from '../types';
+import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { PinIcon, StarIcon } from './Icons';
+import type { ConnectionProfile } from '../types';
 
 interface HistoryMenuState {
   profile: ConnectionProfile;
@@ -19,30 +18,44 @@ function clampMenuPosition(x: number, y: number, width: number, height: number) 
 }
 
 interface SidebarProps {
-  activeSessionId?: string;
   connectedCount: number;
   runtimeLabel: string;
-  sessions: SessionState[];
   savedProfiles: ConnectionProfile[];
   onDeleteProfile: (profileId: string) => void;
-  onSelectSession: (sessionId: string) => void;
+  onRenameProfile: (profileId: string, name: string) => void;
+  onToggleFavoriteProfile: (profileId: string) => void;
+  onTogglePinnedProfile: (profileId: string) => void;
   onReuseProfile: (profile: ConnectionProfile) => void;
   onOpenConnect: () => void;
 }
 
+export function sortSavedProfiles(profiles: ConnectionProfile[]) {
+  return [...profiles].sort(
+    (left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)),
+  );
+}
+
+export function countFavoriteProfiles(profiles: ConnectionProfile[]) {
+  return profiles.filter((profile) => profile.favorite).length;
+}
+
 export function Sidebar({
-  activeSessionId,
   connectedCount,
   runtimeLabel,
-  sessions,
   savedProfiles,
   onDeleteProfile,
-  onSelectSession,
+  onRenameProfile,
+  onToggleFavoriteProfile,
+  onTogglePinnedProfile,
   onReuseProfile,
   onOpenConnect,
 }: SidebarProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuState>();
+  const [renamingProfileId, setRenamingProfileId] = useState<string>();
+  const [renameValue, setRenameValue] = useState('');
+  const sortedProfiles = useMemo(() => sortSavedProfiles(savedProfiles), [savedProfiles]);
+  const favoriteCount = useMemo(() => countFavoriteProfiles(savedProfiles), [savedProfiles]);
 
   useLayoutEffect(() => {
     if (!historyMenu || !menuRef.current) {
@@ -78,9 +91,32 @@ export function Sidebar({
     });
   };
 
+  const startRenamingProfile = (profile: ConnectionProfile) => {
+    setHistoryMenu(undefined);
+    setRenamingProfileId(profile.id);
+    setRenameValue(profile.name);
+  };
+
+  const closeRenameDialog = () => {
+    setRenamingProfileId(undefined);
+    setRenameValue('');
+  };
+
+  const commitRename = () => {
+    if (!renamingProfileId) {
+      return;
+    }
+
+    const nextName = renameValue.trim();
+    if (nextName) {
+      onRenameProfile(renamingProfileId, nextName);
+    }
+    closeRenameDialog();
+  };
+
   return (
-    <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)_minmax(0,0.9fr)]">
-      <div className="surface h-full flex flex-col gap-1.5 p-1.5">
+    <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)]">
+      <div className="surface rounded-lg h-full flex flex-col gap-1.5 p-1.5">
         <div className="flex items-center gap-1.5">
           <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-400 font-mono text-[11px] font-bold text-slate-950">TB</div>
           <div className="min-w-0">
@@ -100,12 +136,12 @@ export function Sidebar({
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
           </div>
           <div className="surface-muted p-1.5">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">标签</p>
-            <strong className="mt-0.5 block text-sm">{sessions.length}</strong>
+            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">收藏</p>
+            <strong className="mt-0.5 block text-sm">{favoriteCount}</strong>
           </div>
         </div>
 
-        <button className="primary-btn w-full flex justify-center items-center" onClick={onOpenConnect} type="button">
+        <button className="primary-btn w-full" onClick={onOpenConnect} type="button">
           新建连接
         </button>
       </div>
@@ -119,13 +155,13 @@ export function Sidebar({
           <span className="text-xs text-slate-500">{savedProfiles.length}</span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-1">
-          {savedProfiles.length === 0 ? (
+          {sortedProfiles.length === 0 ? (
             <div className="surface-muted p-1.5 text-xs text-slate-400">还没有保存的连接配置。</div>
           ) : (
             <div className="flex flex-col gap-1">
-              {savedProfiles.map((profile) => (
+              {sortedProfiles.map((profile) => (
                 <button
-                  className="surface-muted flex select-none items-center gap-1.5 px-2 py-1 text-left transition hover:border-slate-700 hover:bg-slate-900"
+                  className="surface-muted rounded-[6px] flex select-none items-center gap-1.5 px-2 py-1 text-left transition hover:border-slate-700 hover:bg-slate-900"
                   key={profile.id}
                   onClick={() => onReuseProfile(profile)}
                   onDragStart={(event) => event.preventDefault()}
@@ -138,54 +174,23 @@ export function Sidebar({
                   type="button"
                 >
                   <div className="min-w-0 flex-1">
-                    <strong className="block truncate text-xs text-slate-100">{profile.name}</strong>
-                    <span className="block truncate text-[11px] text-slate-400">
+                    <div className="flex items-center gap-1">
+                      <strong className="block truncate text-xs text-slate-100">{profile.name}</strong>
+                      {profile.pinned ? (
+                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-cyan-300" title="已置顶">
+                          <PinIcon />
+                        </span>
+                      ) : null}
+                      {profile.favorite ? (
+                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-amber-300" title="已收藏">
+                          <StarIcon />
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="block truncate mt-[4px] text-[11px] text-slate-400">
                       {profile.username}@{profile.host}:{profile.port}
                     </span>
                   </div>
-                  <span
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-800 text-slate-300"
-                    title={profile.authMethod === 'password' ? '密码认证' : '私钥认证'}
-                  >
-                    {profile.authMethod === 'password' ? <LockIcon /> : <KeyIcon />}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="surface flex min-h-0 flex-col overflow-hidden">
-        <div className="surface-header">
-          <div>
-            <p className="label">会话</p>
-            <h2 className="text-sm font-semibold">会话记录</h2>
-          </div>
-          <span className="text-xs text-slate-500">{sessions.length}</span>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto p-1">
-          {sessions.length === 0 ? (
-            <div className="surface-muted p-1.5 text-xs text-slate-400">当前没有打开的终端会话。</div>
-          ) : (
-            <div className="flex flex-col gap-1">
-              {sessions.map((session) => (
-                <button
-                  className={cn(
-                    'surface-muted flex flex-col gap-0.5 px-2 py-1.5 text-left transition hover:border-slate-700 hover:bg-slate-900',
-                    session.sessionId === activeSessionId && 'border-cyan-400/50 bg-slate-900',
-                  )}
-                  key={session.sessionId}
-                  onClick={() => onSelectSession(session.sessionId)}
-                  type="button"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <strong className="truncate text-xs text-slate-100">{session.title}</strong>
-                    <span className={cn('rounded-md px-2 py-1 text-[10px]', sessionStatusTone(session.status))}>{session.status}</span>
-                  </div>
-                  <span className="truncate text-[11px] text-slate-400">
-                    {session.username}@{session.host}:{session.port}
-                  </span>
                 </button>
               ))}
             </div>
@@ -214,6 +219,33 @@ export function Sidebar({
               >
                 <button
                   className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                  onClick={() => startRenamingProfile(historyMenu.profile)}
+                  type="button"
+                >
+                  重命名
+                </button>
+                <button
+                  className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                  onClick={() => {
+                    onTogglePinnedProfile(historyMenu.profile.id);
+                    setHistoryMenu(undefined);
+                  }}
+                  type="button"
+                >
+                  {historyMenu.profile.pinned ? '取消置顶' : '置顶'}
+                </button>
+                <button
+                  className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                  onClick={() => {
+                    onToggleFavoriteProfile(historyMenu.profile.id);
+                    setHistoryMenu(undefined);
+                  }}
+                  type="button"
+                >
+                  {historyMenu.profile.favorite ? '取消收藏' : '收藏'}
+                </button>
+                <button
+                  className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
                   onClick={() => {
                     onDeleteProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
@@ -224,6 +256,57 @@ export function Sidebar({
                 </button>
               </div>
             </>,
+            document.body,
+          )
+        : null}
+
+      {renamingProfileId
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-40 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
+              onClick={closeRenameDialog}
+              role="presentation"
+            >
+              <div
+                className="surface w-full max-w-sm p-3"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label="重命名历史连接"
+              >
+                <div className="flex flex-col gap-1">
+                  <p className="label">重命名</p>
+                  <h3 className="text-sm font-semibold text-slate-100">修改历史连接名称</h3>
+                </div>
+
+                <input
+                  autoFocus
+                  className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitRename();
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      closeRenameDialog();
+                    }
+                  }}
+                  placeholder="输入连接名称"
+                  value={renameValue}
+                />
+
+                <div className="mt-3 flex justify-end gap-1">
+                  <button className="icon-btn" onClick={closeRenameDialog} type="button">
+                    取消
+                  </button>
+                  <button className="primary-btn px-3 py-2 text-xs" disabled={!renameValue.trim()} onClick={commitRename} type="button">
+                    保存
+                  </button>
+                </div>
+              </div>
+            </div>,
             document.body,
           )
         : null}

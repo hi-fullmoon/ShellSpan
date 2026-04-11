@@ -58,11 +58,11 @@
   }
 
   .icon-btn {
-    @apply inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-200 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-1.5 py-1.5 text-[11px] text-slate-200 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .primary-btn {
-    @apply inline-flex items-center justify-center rounded-lg bg-cyan-400 px-3 py-1.5 text-[11px] font-semibold text-slate-950 transition hover:bg-cyan-300;
+    @apply inline-flex items-center justify-center rounded-lg bg-cyan-400 px-3 py-1.5 text-[12px] font-semibold text-slate-950 transition hover:bg-cyan-300;
   }
 }
 
@@ -78,10 +78,33 @@
 .session-tabs-scroll {
   -ms-overflow-style: none;
   scrollbar-width: none;
+  scrollbar-color: rgba(51, 65, 85, 0) transparent;
+  transition: scrollbar-color 150ms ease;
 }
 
 .session-tabs-scroll::-webkit-scrollbar {
-  display: none;
+  height: 8px;
+}
+
+.session-tabs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.session-tabs-scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: transparent;
+  transition: background-color 150ms ease;
+}
+
+.session-tabs-scroll:hover,
+.session-tabs-scroll:focus-within {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(51, 65, 85, 0.95) transparent;
+}
+
+.session-tabs-scroll:hover::-webkit-scrollbar-thumb,
+.session-tabs-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: rgb(51 65 85 / 0.95);
 }
 
 .split-sash {
@@ -155,12 +178,12 @@
   --ag-even-row-background-color: rgba(15, 23, 42, 0.55);
   --ag-row-hover-color: rgba(15, 23, 42, 0.9);
   --ag-selected-row-background-color: rgba(15, 23, 42, 0.96);
-  --ag-row-border-color: rgba(30, 41, 59, 0.7);
+  --ag-row-border-color: transparent;
   --ag-border-color: rgba(30, 41, 59, 0.9);
   --ag-header-column-separator-display: none;
   --ag-cell-horizontal-border: none;
-  --ag-row-border-style: solid;
-  --ag-row-border-width: 1px;
+  --ag-row-border-style: none;
+  --ag-row-border-width: 0;
   --ag-wrapper-border-radius: 10px;
   --ag-font-size: 12px;
   --ag-font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Noto Sans SC', 'Source Han Sans SC', sans-serif;
@@ -211,8 +234,7 @@
 }
 
 .termbridge-file-grid .ag-row {
-  background: rgba(15, 23, 42, 0.55);
-  border-radius: 8px;
+  background: transparent;
 }
 
 .termbridge-file-grid .ag-row .ag-cell {
@@ -240,12 +262,24 @@
 }
 
 .termbridge-file-grid .ag-row.ag-row-selected .ag-cell {
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(8, 15, 30, 0.98);
 }
 
-.termbridge-file-grid .ag-row.ag-row-selected {
-  outline: 1px solid rgba(34, 211, 238, 0.45);
-  outline-offset: -1px;
+.termbridge-file-grid .ag-row-hover:not(.ag-full-width-row)::before,
+.termbridge-file-grid .ag-row-hover.ag-full-width-row.ag-row-group::before {
+  background: transparent;
+}
+
+.termbridge-file-grid .ag-row.ag-row-selected::after {
+  z-index: 100;
+  position: absolute;
+  content: '';
+  width: 100%;
+  height: 100%;
+  left: 0;
+  top: 1px;
+  border: 1px solid rgba(34, 211, 238, 0.85);
+  pointer-events: none;
 }
 
 .termbridge-file-grid .ag-cell-focus,

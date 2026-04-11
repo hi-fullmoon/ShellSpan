@@ -3,16 +3,33 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useEffect, useMemo, useState } from 'react';
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
+import { CloseIcon } from './components/Icons';
 import { Sidebar } from './components/Sidebar';
 import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane } from './components/TerminalPane';
+import { createLogger } from './lib/logger';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
 import { isTauriRuntime } from './lib/tauri';
 import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
 import type { ConnectionProfile, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
+
+const appLogger = createLogger('app');
+
+function reorderSessions(sessions: SessionState[], draggedSessionId: string, targetSessionId: string) {
+  const draggedIndex = sessions.findIndex((session) => session.sessionId === draggedSessionId);
+  const targetIndex = sessions.findIndex((session) => session.sessionId === targetSessionId);
+  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
+    return sessions;
+  }
+
+  const nextSessions = [...sessions];
+  const [draggedSession] = nextSessions.splice(draggedIndex, 1);
+  nextSessions.splice(targetIndex, 0, draggedSession);
+  return nextSessions;
+}
 
 function App() {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
@@ -23,11 +40,13 @@ function App() {
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
+  const [reorderingSessions, setReorderingSessions] = useState(false);
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
+      appLogger.warn('当前运行在浏览器预览模式，SSH 功能不可用');
       return;
     }
 
@@ -37,6 +56,7 @@ function App() {
 
     const attach = async () => {
       const nextStopStatus = await listen<SshStatusEvent>('ssh-status', (event) => {
+        appLogger.debug('收到会话状态事件', event.payload);
         setSessions((current) =>
           current.map((session) =>
             session.sessionId === event.payload.sessionId
@@ -57,6 +77,7 @@ function App() {
       stopStatus = nextStopStatus;
 
       const nextStopClosed = await listen<SshClosedEvent>('ssh-closed', (event) => {
+        appLogger.warn('会话已关闭', event.payload);
         setSessions((current) =>
           current.map((session) =>
             session.sessionId === event.payload.sessionId
@@ -113,16 +134,23 @@ function App() {
 
   const handleConnect = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
     if (!profile.host.trim() || !profile.username.trim()) {
+      appLogger.warn('连接参数校验失败：Host 或 Username 为空');
       setErrorMessage('Host 和 Username 不能为空。');
       return;
     }
 
     if (!isTauriRuntime()) {
+      appLogger.warn('浏览器预览模式下尝试建立连接');
       setErrorMessage('当前只启动了前端调试环境，请使用 `npm run tauri:dev` 运行桌面端。');
       return;
     }
 
     try {
+      appLogger.info('开始创建 SSH 会话', {
+        host: profile.host.trim(),
+        port: profile.port,
+        username: profile.username.trim(),
+      });
       if (remember) {
         const nextProfile = sanitizeProfileForStorage({
           ...profile,
@@ -155,7 +183,12 @@ function App() {
       });
       setErrorMessage(undefined);
       setConnectDialogOpen(false);
+      appLogger.info('SSH 会话创建成功', {
+        sessionId: summary.sessionId,
+        title: summary.title,
+      });
     } catch (error) {
+      appLogger.error('SSH 会话创建失败', error);
       setErrorMessage(String(error));
     }
   };
@@ -172,12 +205,14 @@ function App() {
 
   const handleCloseSession = async (sessionId: string) => {
     if (!isTauriRuntime()) {
+      appLogger.warn('浏览器预览模式下关闭会话', { sessionId });
       setSessions((current) => current.filter((session) => session.sessionId !== sessionId));
       removeFileManagerSessionState(sessionId);
       return;
     }
 
     try {
+      appLogger.info('请求关闭会话', { sessionId });
       await invoke('close_session', { sessionId });
     } finally {
       let nextActiveSessionId: string | undefined;
@@ -188,6 +223,7 @@ function App() {
       });
       setActiveSessionId((current) => (current === sessionId ? nextActiveSessionId : current));
       removeFileManagerSessionState(sessionId);
+      appLogger.info('会话已从前端状态移除', { sessionId });
     }
   };
 
@@ -200,6 +236,45 @@ function App() {
     setPendingDeleteProfileId(profileId);
   };
 
+  const handleToggleSavedProfilePinned = (profileId: string) => {
+    setSavedProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId
+          ? {
+              ...profile,
+              pinned: !profile.pinned,
+            }
+          : profile,
+      ),
+    );
+  };
+
+  const handleToggleSavedProfileFavorite = (profileId: string) => {
+    setSavedProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId
+          ? {
+              ...profile,
+              favorite: !profile.favorite,
+            }
+          : profile,
+      ),
+    );
+  };
+
+  const handleRenameSavedProfile = (profileId: string, name: string) => {
+    setSavedProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId
+          ? {
+              ...profile,
+              name,
+            }
+          : profile,
+      ),
+    );
+  };
+
   const handleReconnectSession = async (sessionId: string) => {
     const target = sessions.find((item) => item.sessionId === sessionId);
     if (!target) {
@@ -207,14 +282,17 @@ function App() {
     }
 
     if (!isTauriRuntime()) {
+      appLogger.warn('浏览器预览模式下尝试重连会话', { sessionId });
       setErrorMessage('当前只启动了前端调试环境，请使用 `npm run tauri:dev` 运行桌面端。');
       return;
     }
 
     try {
+      appLogger.info('开始重连会话', { sessionId });
       const summary = await createSessionFromProfile(target.profile);
       const nextSession: SessionState = {
         ...summary,
+        title: target.title,
         profile: target.profile,
         status: 'connecting',
         createdAt: Date.now(),
@@ -224,7 +302,15 @@ function App() {
       setActiveSessionId((current) => (current === sessionId ? summary.sessionId : current));
       replaceFileManagerSessionStateKey(sessionId, summary.sessionId);
       setErrorMessage(undefined);
+      appLogger.info('会话重连成功', {
+        fromSessionId: sessionId,
+        toSessionId: summary.sessionId,
+      });
     } catch (error) {
+      appLogger.error('会话重连失败', {
+        sessionId,
+        error: String(error),
+      });
       setSessions((current) =>
         current.map((item) =>
           item.sessionId === sessionId
@@ -245,6 +331,7 @@ function App() {
       return;
     }
 
+    appLogger.info('删除历史连接', { profileId: pendingDeleteProfileId });
     setSavedProfiles((current) => current.filter((item) => item.id !== pendingDeleteProfileId));
     setPendingDeleteProfileId(undefined);
   };
@@ -264,7 +351,7 @@ function App() {
         <SplitLayout
           className="min-w-0 flex-1"
           defaultPrimarySize={320}
-          primary={<FileManager session={activeSession} />}
+          primary={<FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} />}
           primaryClassName="min-h-0"
           primaryMinSize={280}
           secondary={
@@ -289,13 +376,29 @@ function App() {
               <SessionTabs
                 sessions={sessions}
                 activeSessionId={activeSessionId}
+                onDragStateChange={setReorderingSessions}
+                onRename={(sessionId, title) => {
+                  setSessions((current) =>
+                    current.map((session) =>
+                      session.sessionId === sessionId
+                        ? {
+                            ...session,
+                            title,
+                          }
+                        : session,
+                    ),
+                  );
+                }}
+                onReorder={(draggedSessionId, targetSessionId) => {
+                  setSessions((current) => reorderSessions(current, draggedSessionId, targetSessionId));
+                }}
                 onSelect={setActiveSessionId}
                 onClose={(sessionId) => {
                   setPendingCloseSessionId(sessionId);
                 }}
               />
 
-              <section className="surface relative min-h-0 flex-1 overflow-hidden">
+              <section className="surface rounded-lg relative min-h-0 flex-1 overflow-hidden">
                 {sessions.length === 0 ? (
                   <div className="flex h-full min-h-[280px] flex-col justify-between gap-1.5 p-2">
                     <div className="flex flex-col gap-1">
@@ -330,13 +433,13 @@ function App() {
 
         <div className="h-full w-[240px] shrink-0">
           <Sidebar
-            activeSessionId={activeSessionId}
             connectedCount={connectedSessions}
             runtimeLabel={runtimeText}
-            sessions={sessions}
             savedProfiles={savedProfiles}
             onDeleteProfile={handleDeleteSavedProfile}
-            onSelectSession={setActiveSessionId}
+            onRenameProfile={handleRenameSavedProfile}
+            onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
+            onTogglePinnedProfile={handleToggleSavedProfilePinned}
             onReuseProfile={loadProfile}
             onOpenConnect={() => {
               setErrorMessage(undefined);
@@ -364,8 +467,8 @@ function App() {
                 <p className="label">连接</p>
                 <h3 className="mt-1 text-sm font-semibold text-slate-100">新建 SSH 连接</h3>
               </div>
-              <button className="icon-btn" onClick={() => setConnectDialogOpen(false)} type="button">
-                ×
+              <button aria-label="关闭连接弹框" className="icon-btn" onClick={() => setConnectDialogOpen(false)} type="button">
+                <CloseIcon />
               </button>
             </div>
             <ConnectionForm

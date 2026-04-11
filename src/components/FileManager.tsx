@@ -12,20 +12,32 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { createPortal } from 'react-dom';
-import { type FormEvent, type MouseEvent as ReactMouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createLogger } from '../lib/logger';
+import { addPathWrapOpportunities } from '../lib/pathDisplay';
 import { isTauriRuntime } from '../lib/tauri';
 import { useFileManagerStore } from '../stores/fileManagerStore';
 import { cn, fileKindTone } from '../lib/ui';
-import { ArrowUpIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
+import { ArrowUpIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
 import { Toast, type ToastAction } from './Toast';
-import type { DeleteProgressEvent, RemoteDirectoryListing, RemoteFileEntry, RemoteFileKind, SessionState, UploadProgressEvent } from '../types';
+import type {
+  DeleteProgressEvent,
+  RemoteDirectoryListing,
+  RemoteFileEntry,
+  RemoteFileKind,
+  SessionState,
+  UploadProgressEvent,
+  UploadProgressState,
+} from '../types';
 
 interface FileManagerProps {
   session?: SessionState;
+  ignoreWindowDragDrop?: boolean;
 }
 
 type EntryDialogMode = 'newFile' | 'newDirectory' | 'rename';
-type MenuTarget = 'blank' | 'entry';
+type CreateEntryDialogMode = Exclude<EntryDialogMode, 'rename'>;
+type MenuTarget = 'blank' | 'entry' | 'toolbar';
 
 interface EntryDialogState {
   mode: EntryDialogMode;
@@ -55,21 +67,35 @@ interface ToastState {
   tone: 'success' | 'error' | 'info';
 }
 
-interface UploadProgressState {
-  operationId: string;
-  currentPath?: string;
-  totalBytes: number;
-  uploadedBytes: number;
-  totalSteps: number;
-  completedSteps: number;
-  cancelling?: boolean;
-}
-
 interface DeleteProgressState {
   operationId: string;
   currentPath?: string;
   totalSteps: number;
   completedSteps: number;
+  cancelling?: boolean;
+}
+
+type UploadConflictPolicy = 'overwrite' | 'skip' | 'fail';
+type UploadConflictAction = 'overwrite' | 'skip' | 'cancel';
+
+interface UploadConflictItem {
+  localPath: string;
+  targetName: string;
+  existingKind: RemoteFileKind;
+}
+
+interface PendingUploadConflictState {
+  conflict: UploadConflictItem;
+  remainingConflicts: number;
+  applyToRemaining: boolean;
+}
+
+interface WindowDragDropState {
+  ready: boolean;
+  currentPath?: string;
+  ignoreWindowDragDrop?: boolean;
+  loading: boolean;
+  working: boolean;
 }
 
 interface ContextMenuState {
@@ -80,6 +106,7 @@ interface ContextMenuState {
 }
 
 ModuleRegistry.registerModules([AllCommunityModule]);
+const fileManagerLogger = createLogger('file-manager');
 
 function clampMenuPosition(x: number, y: number, width: number, height: number) {
   const edge = 8;
@@ -136,6 +163,20 @@ function formatFullModified(modifiedAt?: number) {
 function localPathName(path: string) {
   const normalized = path.replace(/\\/g, '/');
   return normalized.split('/').filter(Boolean).pop() ?? path;
+}
+
+export function formatDirectoryLoadError(error: unknown, requestedPath?: string) {
+  const message = String(error);
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('[sftp(2)]') && normalized.includes('no such file')) {
+    if (requestedPath?.trim()) {
+      return `路径不存在：${requestedPath.trim()}`;
+    }
+    return '路径不存在，请检查后重试。';
+  }
+
+  return `目录加载失败：${message}`;
 }
 
 function createOperationId() {
@@ -212,6 +253,10 @@ function permissionTypePrefix(kind: RemoteFileKind) {
   }
 }
 
+function canProcessWindowDragDrop(state: WindowDragDropState) {
+  return state.ready && Boolean(state.currentPath) && !state.ignoreWindowDragDrop && !state.loading && !state.working;
+}
+
 function formatPermissionOctal(permissions?: number) {
   if (permissions === undefined) {
     return '--';
@@ -264,9 +309,7 @@ function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
 
   return (
     <div className="flex min-w-0 items-center gap-[2px]">
-      <span
-        className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', fileKindTone(data.kind))}
-      >
+      <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', fileKindTone(data.kind))}>
         {fileKindIcon(data.kind)}
       </span>
       <span className="truncate text-[13px] font-medium leading-5 tracking-[0.01em] text-slate-100">{data.name}</span>
@@ -330,19 +373,47 @@ function PropertyRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function FileManager({ session }: FileManagerProps) {
+function OverlayLayer({ children, tone = 'modal' }: { children: ReactNode; tone?: 'modal' | 'progress' }) {
+  return (
+    <div
+      className={
+        tone === 'progress'
+          ? 'absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm'
+          : 'absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 p-2 backdrop-blur-sm'
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+function OverlayPanel({ children, className }: { children: ReactNode; className: string }) {
+  return <div className={cn('surface flex w-full flex-col gap-2 p-3', className)}>{children}</div>;
+}
+
+export function FileManager({ session, ignoreWindowDragDrop = false }: FileManagerProps) {
   const gridRef = useRef<AgGridReact<RemoteFileEntry> | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const uploadSessionByOperationRef = useRef<Record<string, string>>({});
+  const latestWindowDropStateRef = useRef<WindowDragDropState>({
+    ready: false,
+    currentPath: undefined,
+    ignoreWindowDragDrop: false,
+    loading: false,
+    working: false,
+  });
+  const uploadPathsRef = useRef<(paths: string[]) => Promise<void>>(async () => {});
+  const uploadConflictResolverRef = useRef<((action: UploadConflictAction, applyToRemaining: boolean) => void) | null>(null);
   const hasLoadedAnyListingRef = useRef(false);
   const [clipboard, setClipboard] = useState<ClipboardState>();
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteState>();
+  const [pendingUploadConflict, setPendingUploadConflict] = useState<PendingUploadConflictState>();
   const [properties, setProperties] = useState<PropertiesState>();
   const [dialog, setDialog] = useState<EntryDialogState>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState>();
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgressState>();
   const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
   const [toast, setToast] = useState<ToastState>();
   const sessionId = session?.sessionId;
@@ -369,6 +440,7 @@ export function FileManager({ session }: FileManagerProps) {
   const pathInput = fileManagerState?.pathInput ?? '';
   const selectedPath = fileManagerState?.selectedPath;
   const error = fileManagerState?.error;
+  const uploadProgress = fileManagerState?.uploadProgress;
   const selectedEntry = useMemo(() => listing?.entries.find((entry) => entry.path === selectedPath), [listing, selectedPath]);
   const ready = !!session && session.status === 'connected' && !!connection;
   const currentPath = listing?.path;
@@ -380,7 +452,7 @@ export function FileManager({ session }: FileManagerProps) {
         field: 'name',
         headerName: '名称',
         width: 240,
-        minWidth: 120,
+        minWidth: 160,
         resizable: true,
         suppressMovable: true,
         tooltipField: 'name',
@@ -485,10 +557,15 @@ export function FileManager({ session }: FileManagerProps) {
     if (!connection || !sessionId) {
       return;
     }
+    const requestedPath = targetPath ?? currentPath;
 
     setLoading(true);
     setFileError(undefined);
     setContextMenu(undefined);
+    fileManagerLogger.debug('开始加载目录', {
+      sessionId,
+      requestedPath,
+    });
 
     try {
       const nextListing = await invoke<RemoteDirectoryListing>('list_remote_directory', {
@@ -504,8 +581,18 @@ export function FileManager({ session }: FileManagerProps) {
         selectedPath:
           current.selectedPath && nextListing.entries.some((entry) => entry.path === current.selectedPath) ? current.selectedPath : undefined,
       }));
+      fileManagerLogger.debug('目录加载完成', {
+        sessionId,
+        path: nextListing.path,
+        entryCount: nextListing.entries.length,
+      });
     } catch (nextError) {
-      setFileError(String(nextError));
+      fileManagerLogger.error('目录加载失败', {
+        sessionId,
+        requestedPath,
+        error: String(nextError),
+      });
+      setFileError(formatDirectoryLoadError(nextError, requestedPath));
     } finally {
       setLoading(false);
     }
@@ -529,6 +616,7 @@ export function FileManager({ session }: FileManagerProps) {
         });
       }
     } catch (nextError) {
+      fileManagerLogger.error('文件操作失败', String(nextError));
       setToast({
         message: String(nextError),
         tone: 'error',
@@ -538,8 +626,76 @@ export function FileManager({ session }: FileManagerProps) {
     }
   };
 
+  const promptUploadConflict = (conflict: UploadConflictItem, remainingConflicts: number) =>
+    new Promise<{ action: UploadConflictAction; applyToRemaining: boolean }>((resolve) => {
+      uploadConflictResolverRef.current = (action, applyToRemaining) => {
+        uploadConflictResolverRef.current = null;
+        resolve({ action, applyToRemaining });
+      };
+      setPendingUploadConflict({
+        conflict,
+        remainingConflicts,
+        applyToRemaining: false,
+      });
+    });
+
+  const resolveUploadSelection = async (paths: string[]) => {
+    const existingEntriesByName = new Map((listing?.entries ?? []).map((entry) => [entry.name, entry]));
+    const acceptedPaths: string[] = [];
+    const conflictPolicies: UploadConflictPolicy[] = [];
+    let rememberedAction: Exclude<UploadConflictAction, 'cancel'> | undefined;
+    let skippedConflicts = 0;
+    let remainingConflicts = paths.reduce((count, path) => count + (existingEntriesByName.has(localPathName(path)) ? 1 : 0), 0);
+
+    for (const path of paths) {
+      const targetName = localPathName(path);
+      const existingEntry = existingEntriesByName.get(targetName);
+      if (!existingEntry) {
+        acceptedPaths.push(path);
+        conflictPolicies.push('fail');
+        continue;
+      }
+
+      remainingConflicts -= 1;
+      let action = rememberedAction;
+      if (!action) {
+        const decision = await promptUploadConflict(
+          {
+            localPath: path,
+            targetName,
+            existingKind: existingEntry.kind,
+          },
+          remainingConflicts,
+        );
+
+        if (decision.action === 'cancel') {
+          return undefined;
+        }
+
+        action = decision.action;
+        if (decision.applyToRemaining) {
+          rememberedAction = action;
+        }
+      }
+
+      if (action === 'skip') {
+        skippedConflicts += 1;
+        continue;
+      }
+
+      acceptedPaths.push(path);
+      conflictPolicies.push('overwrite');
+    }
+
+    return {
+      acceptedPaths,
+      conflictPolicies,
+      skippedConflicts,
+    };
+  };
+
   const handleUploadPaths = async (paths: string[]) => {
-    if (!connection || !currentPath) {
+    if (!connection || !currentPath || !sessionId) {
       return;
     }
 
@@ -548,19 +704,42 @@ export function FileManager({ session }: FileManagerProps) {
       return;
     }
 
+    const resolvedUpload = await resolveUploadSelection(nextPaths);
+    if (!resolvedUpload) {
+      setPendingUploadConflict(undefined);
+      return;
+    }
+
+    setPendingUploadConflict(undefined);
+    if (!resolvedUpload.acceptedPaths.length) {
+      setToast({
+        message: resolvedUpload.skippedConflicts > 0 ? `已跳过 ${resolvedUpload.skippedConflicts} 个同名项` : '没有可上传的项目',
+        tone: 'info',
+      });
+      return;
+    }
+
     const operationId = createOperationId();
+    fileManagerLogger.info('开始上传', {
+      sessionId,
+      destinationDirectory: currentPath,
+      itemCount: resolvedUpload.acceptedPaths.length,
+    });
     setWorking(true);
     setFileError(undefined);
     setToast(undefined);
     setContextMenu(undefined);
-    setUploadProgress({
-      operationId,
-      currentPath: nextPaths[0],
-      totalBytes: 0,
-      uploadedBytes: 0,
-      totalSteps: nextPaths.length,
-      completedSteps: 0,
-      cancelling: false,
+    uploadSessionByOperationRef.current[operationId] = sessionId;
+    updateSessionState(sessionId, {
+      uploadProgress: {
+        operationId,
+        currentPath: resolvedUpload.acceptedPaths[0],
+        totalBytes: 0,
+        uploadedBytes: 0,
+        totalSteps: resolvedUpload.acceptedPaths.length,
+        completedSteps: 0,
+        cancelling: false,
+      },
     });
 
     try {
@@ -568,14 +747,24 @@ export function FileManager({ session }: FileManagerProps) {
         request: {
           ...connection,
           destinationDirectory: currentPath,
-          localPaths: nextPaths,
+          localPaths: resolvedUpload.acceptedPaths,
+          conflictPolicies: resolvedUpload.conflictPolicies,
           operationId,
         },
       });
       await loadDirectory(currentPath);
       setToast({
-        message: nextPaths.length === 1 ? `已上传 ${localPathName(nextPaths[0])}` : `已上传 ${nextPaths.length} 项`,
+        message:
+          resolvedUpload.acceptedPaths.length === 1
+            ? `已上传 ${localPathName(resolvedUpload.acceptedPaths[0])}${resolvedUpload.skippedConflicts ? `，跳过 ${resolvedUpload.skippedConflicts} 项` : ''}`
+            : `已上传 ${resolvedUpload.acceptedPaths.length} 项${resolvedUpload.skippedConflicts ? `，跳过 ${resolvedUpload.skippedConflicts} 项` : ''}`,
         tone: 'success',
+      });
+      fileManagerLogger.info('上传完成', {
+        sessionId,
+        operationId,
+        destinationDirectory: currentPath,
+        itemCount: resolvedUpload.acceptedPaths.length,
       });
     } catch (nextError) {
       const message = String(nextError);
@@ -583,35 +772,119 @@ export function FileManager({ session }: FileManagerProps) {
       if (cancelled) {
         await loadDirectory(currentPath);
       }
+      if (cancelled) {
+        fileManagerLogger.info('上传已取消', { sessionId, operationId });
+      } else {
+        fileManagerLogger.error('上传失败', { sessionId, operationId, error: message });
+      }
       setToast({
         message: cancelled ? '已取消上传' : message,
         tone: cancelled ? 'info' : 'error',
       });
     } finally {
-      setUploadProgress(undefined);
+      delete uploadSessionByOperationRef.current[operationId];
+      updateSessionState(sessionId, (current) => (current.uploadProgress?.operationId === operationId ? { uploadProgress: undefined } : {}));
       setWorking(false);
     }
   };
 
-  const handleCancelUpload = async () => {
-    if (!uploadProgress || uploadProgress.cancelling) {
+  latestWindowDropStateRef.current = {
+    ready,
+    currentPath,
+    ignoreWindowDragDrop,
+    loading,
+    working,
+  };
+  uploadPathsRef.current = handleUploadPaths;
+
+  const openCreateDialog = (mode: CreateEntryDialogMode) => {
+    setDialog({ mode, value: '' });
+    setContextMenu(undefined);
+  };
+
+  const handleSelectUploadFiles = async () => {
+    if (!ready || !currentPath || loading || working) {
       return;
     }
 
-    setUploadProgress((current) => (current ? { ...current, cancelling: true } : current));
+    setContextMenu(undefined);
 
     try {
-      await invoke('cancel_upload', {
-        operationId: uploadProgress.operationId,
-      });
+      const selectedPaths = await invoke<string[]>('pick_local_files');
+      await handleUploadPaths(selectedPaths);
     } catch (nextError) {
-      setUploadProgress((current) => (current ? { ...current, cancelling: false } : current));
       setToast({
         message: String(nextError),
         tone: 'error',
       });
     }
   };
+
+  const handleSelectUploadFolder = async () => {
+    if (!ready || !currentPath || loading || working) {
+      return;
+    }
+
+    setContextMenu(undefined);
+
+    try {
+      const selectedPaths = await invoke<string[]>('pick_local_folder');
+      await handleUploadPaths(selectedPaths);
+    } catch (nextError) {
+      setToast({
+        message: String(nextError),
+        tone: 'error',
+      });
+    }
+  };
+
+  const handleCancelUpload = async () => {
+    if (!uploadProgress || uploadProgress.cancelling || !sessionId) {
+      return;
+    }
+
+    const operationId = uploadProgress.operationId;
+    fileManagerLogger.info('请求取消上传', { sessionId, operationId });
+    updateSessionState(sessionId, (current) =>
+      current.uploadProgress?.operationId === operationId
+        ? {
+            uploadProgress: {
+              ...current.uploadProgress,
+              cancelling: true,
+            },
+          }
+        : {},
+    );
+
+    try {
+      await invoke('cancel_upload', {
+        operationId,
+      });
+    } catch (nextError) {
+      fileManagerLogger.error('取消上传失败', { sessionId, operationId, error: String(nextError) });
+      updateSessionState(sessionId, (current) =>
+        current.uploadProgress?.operationId === operationId
+          ? {
+              uploadProgress: {
+                ...current.uploadProgress,
+                cancelling: false,
+              },
+            }
+          : {},
+      );
+      setToast({
+        message: String(nextError),
+        tone: 'error',
+      });
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      uploadConflictResolverRef.current?.('cancel', false);
+      uploadConflictResolverRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (listing) {
@@ -649,7 +922,6 @@ export function FileManager({ session }: FileManagerProps) {
     setContextMenu(undefined);
     setToast(undefined);
     setDragActive(false);
-    setUploadProgress(undefined);
     setDeleteProgress(undefined);
 
     if (!ready) {
@@ -705,18 +977,26 @@ export function FileManager({ session }: FileManagerProps) {
 
     const attach = async () => {
       const unlisten = await listen<UploadProgressEvent>('upload-progress', (event) => {
-        setUploadProgress((current) =>
-          current && current.operationId === event.payload.operationId
+        const operationId = event.payload.operationId;
+        const targetSessionId = uploadSessionByOperationRef.current[operationId];
+        if (!targetSessionId) {
+          return;
+        }
+
+        updateSessionState(targetSessionId, (current) =>
+          current.uploadProgress?.operationId === operationId
             ? {
-                operationId: event.payload.operationId,
-                currentPath: event.payload.currentPath,
-                totalBytes: event.payload.totalBytes,
-                uploadedBytes: event.payload.uploadedBytes,
-                totalSteps: event.payload.totalSteps,
-                completedSteps: event.payload.completedSteps,
-                cancelling: current.cancelling,
+                uploadProgress: {
+                  operationId: event.payload.operationId,
+                  currentPath: event.payload.currentPath,
+                  totalBytes: event.payload.totalBytes,
+                  uploadedBytes: event.payload.uploadedBytes,
+                  totalSteps: event.payload.totalSteps,
+                  completedSteps: event.payload.completedSteps,
+                  cancelling: current.uploadProgress.cancelling,
+                },
               }
-            : current,
+            : {},
         );
       });
 
@@ -734,7 +1014,7 @@ export function FileManager({ session }: FileManagerProps) {
       cancelled = true;
       dispose?.();
     };
-  }, []);
+  }, [updateSessionState]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -753,6 +1033,7 @@ export function FileManager({ session }: FileManagerProps) {
                 currentPath: event.payload.currentPath,
                 totalSteps: event.payload.totalSteps,
                 completedSteps: event.payload.completedSteps,
+                cancelling: current.cancelling,
               }
             : current,
         );
@@ -784,7 +1065,7 @@ export function FileManager({ session }: FileManagerProps) {
 
     const attach = async () => {
       const unlisten = await getCurrentWindow().onDragDropEvent((event) => {
-        if (!ready || !currentPath) {
+        if (!canProcessWindowDragDrop(latestWindowDropStateRef.current)) {
           setDragActive(false);
           return;
         }
@@ -799,7 +1080,7 @@ export function FileManager({ session }: FileManagerProps) {
             break;
           case 'drop':
             setDragActive(false);
-            void handleUploadPaths(event.payload.paths);
+            void uploadPathsRef.current(event.payload.paths);
             break;
         }
       });
@@ -818,7 +1099,7 @@ export function FileManager({ session }: FileManagerProps) {
       cancelled = true;
       dispose?.();
     };
-  }, [ready, currentPath]);
+  }, []);
 
   const submitDialog = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -959,6 +1240,12 @@ export function FileManager({ session }: FileManagerProps) {
 
     const target = pendingDelete;
     const operationId = createOperationId();
+    fileManagerLogger.info('开始删除远程路径', {
+      sessionId,
+      operationId,
+      path: target.path,
+      kind: target.kind,
+    });
 
     setWorking(true);
     setFileError(undefined);
@@ -970,6 +1257,7 @@ export function FileManager({ session }: FileManagerProps) {
       currentPath: target.path,
       totalSteps: 1,
       completedSteps: 0,
+      cancelling: false,
     });
 
     try {
@@ -988,14 +1276,67 @@ export function FileManager({ session }: FileManagerProps) {
         message: '删除成功',
         tone: 'success',
       });
+      fileManagerLogger.info('删除完成', { sessionId, operationId, path: target.path });
     } catch (nextError) {
+      const message = String(nextError);
+      const cancelled = message.includes('delete cancelled');
+      if (cancelled) {
+        await loadDirectory(currentPath);
+      }
+      if (cancelled) {
+        fileManagerLogger.info('删除已取消', { sessionId, operationId, path: target.path });
+      } else {
+        fileManagerLogger.error('删除失败', {
+          sessionId,
+          operationId,
+          path: target.path,
+          error: message,
+        });
+      }
       setToast({
-        message: String(nextError),
-        tone: 'error',
+        message: cancelled ? '已取消删除' : message,
+        tone: cancelled ? 'info' : 'error',
       });
     } finally {
       setDeleteProgress(undefined);
       setWorking(false);
+    }
+  };
+
+  const handleCancelDelete = async () => {
+    if (!deleteProgress || deleteProgress.cancelling) {
+      return;
+    }
+
+    const operationId = deleteProgress.operationId;
+    fileManagerLogger.info('请求取消删除', { sessionId, operationId });
+    setDeleteProgress((current) =>
+      current && current.operationId === operationId
+        ? {
+            ...current,
+            cancelling: true,
+          }
+        : current,
+    );
+
+    try {
+      await invoke('cancel_delete', {
+        operationId,
+      });
+    } catch (nextError) {
+      fileManagerLogger.error('取消删除失败', { sessionId, operationId, error: String(nextError) });
+      setDeleteProgress((current) =>
+        current && current.operationId === operationId
+          ? {
+              ...current,
+              cancelling: false,
+            }
+          : current,
+      );
+      setToast({
+        message: String(nextError),
+        tone: 'error',
+      });
     }
   };
 
@@ -1039,7 +1380,16 @@ export function FileManager({ session }: FileManagerProps) {
         message: `已使用默认应用打开 ${target.name}`,
         tone: 'success',
       });
+      fileManagerLogger.info('已请求默认应用打开文件', {
+        sessionId,
+        path: target.path,
+      });
     } catch (nextError) {
+      fileManagerLogger.error('默认应用打开文件失败', {
+        sessionId,
+        path: target.path,
+        error: String(nextError),
+      });
       setToast({
         message: String(nextError),
         tone: 'error',
@@ -1065,6 +1415,17 @@ export function FileManager({ session }: FileManagerProps) {
       x: event.clientX,
       y: event.clientY,
       target: 'blank',
+    });
+  };
+
+  const openToolbarMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setContextMenu({
+      x: rect.left,
+      y: rect.bottom + 6,
+      target: 'toolbar',
     });
   };
 
@@ -1103,7 +1464,7 @@ export function FileManager({ session }: FileManagerProps) {
   };
 
   return (
-    <aside className="surface relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
+    <aside className="surface rounded-lg relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
       <div className="surface-header">
         <div className="min-w-0">
           <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">文件</p>
@@ -1125,7 +1486,7 @@ export function FileManager({ session }: FileManagerProps) {
           </div>
         ) : (
           <>
-            <form className="surface-muted flex items-center gap-1 px-2 py-2" onSubmit={(event) => void handlePathSubmit(event)}>
+            <form className="flex items-center gap-1" onSubmit={(event) => void handlePathSubmit(event)}>
               <button
                 className="icon-btn h-7 w-7 px-0"
                 disabled={!listing?.parentPath || loading || working}
@@ -1136,7 +1497,7 @@ export function FileManager({ session }: FileManagerProps) {
                 <ArrowUpIcon />
               </button>
               <input
-                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[12px] leading-5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+                className="min-w-0 flex-1 bg-slate-950 px-2 py-1 font-mono text-[12px] leading-5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:ring-1 focus:ring-cyan-400/50"
                 onChange={(event) => setPathInput(event.target.value)}
                 placeholder="输入远程路径并回车"
                 value={pathInput}
@@ -1149,6 +1510,15 @@ export function FileManager({ session }: FileManagerProps) {
                 type="button"
               >
                 <RefreshIcon />
+              </button>
+              <button
+                className="icon-btn h-7 w-7 px-0"
+                disabled={!ready || !currentPath || loading || working}
+                onClick={openToolbarMenu}
+                title="更多操作"
+                type="button"
+              >
+                <DotsIcon />
               </button>
             </form>
 
@@ -1170,7 +1540,7 @@ export function FileManager({ session }: FileManagerProps) {
               ) : !listing ? null : (
                 <div className="ag-theme-quartz termbridge-file-grid h-full">
                   <AgGridReact<RemoteFileEntry>
-                    animateRows
+                    animateRows={false}
                     defaultColDef={defaultColDef}
                     columnDefs={columnDefs}
                     getRowId={(params) => params.data.path}
@@ -1183,9 +1553,9 @@ export function FileManager({ session }: FileManagerProps) {
                     onRowDoubleClicked={handleGridRowDoubleClick}
                     overlayNoRowsTemplate={'<span class="termbridge-grid-overlay">当前目录没有可显示的文件。</span>'}
                     ref={gridRef}
+                    rowSelection={{ mode: 'singleRow', checkboxes: false }}
                     rowData={listing.entries}
                     rowHeight={32}
-                    rowSelection="single"
                     suppressCellFocus
                     suppressContextMenu
                     suppressDragLeaveHidesColumns
@@ -1212,52 +1582,12 @@ export function FileManager({ session }: FileManagerProps) {
               ref={menuRef}
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
-              {contextMenu.target === 'blank' ? (
+              {contextMenu.target === 'entry' ? (
                 <div className="flex flex-col">
-                  <MenuButton
-                    disabled={loading || working}
-                    label="新建文件"
-                    onClick={() => {
-                      setDialog({ mode: 'newFile', value: '' });
-                      setContextMenu(undefined);
-                    }}
-                  />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="新建文件夹"
-                    onClick={() => {
-                      setDialog({ mode: 'newDirectory', value: '' });
-                      setContextMenu(undefined);
-                    }}
-                  />
-                  <MenuDivider />
-                  <MenuButton disabled={!clipboard || loading || working} label="粘贴" onClick={() => void handlePaste()} />
-                  <MenuButton
-                    disabled={!currentPath || loading || working}
-                    label="复制当前目录路径"
-                    onClick={() => void handleCopyText('当前目录路径', currentPath ?? '')}
-                  />
-                  <MenuDivider />
-                  <MenuButton disabled={loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
-                </div>
-              ) : (
-                <div className="flex flex-col">
-                  <MenuButton
-                    disabled={loading || working}
-                    label="新建文件"
-                    onClick={() => {
-                      setDialog({ mode: 'newFile', value: '' });
-                      setContextMenu(undefined);
-                    }}
-                  />
-                  <MenuButton
-                    disabled={loading || working}
-                    label="新建文件夹"
-                    onClick={() => {
-                      setDialog({ mode: 'newDirectory', value: '' });
-                      setContextMenu(undefined);
-                    }}
-                  />
+                  <MenuButton disabled={loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
+                  <MenuButton disabled={loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
+                  <MenuButton disabled={loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
+                  <MenuButton disabled={loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
                   {contextMenu.entry?.kind === 'directory' ? (
                     <MenuButton
                       disabled={loading || working}
@@ -1279,6 +1609,7 @@ export function FileManager({ session }: FileManagerProps) {
                   <MenuDivider />
                   <MenuButton disabled={loading || working} label="重命名" onClick={() => openRenameDialog(contextMenu.entry)} />
                   <MenuButton disabled={loading || working} label="复制" onClick={() => handleCopy(contextMenu.entry)} />
+                  <MenuButton disabled={loading || working} label="删除" onClick={() => handleDelete(contextMenu.entry)} />
                   <MenuDivider />
                   <MenuButton
                     disabled={loading || working}
@@ -1307,10 +1638,25 @@ export function FileManager({ session }: FileManagerProps) {
                     }
                   />
                   <MenuDivider />
-                  <MenuButton disabled={loading || working} label="属性" onClick={() => openProperties(contextMenu.entry)} />
                   <MenuButton disabled={loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
                   <MenuDivider />
-                  <MenuButton disabled={loading || working} label="删除" onClick={() => handleDelete(contextMenu.entry)} />
+                  <MenuButton disabled={loading || working} label="属性" onClick={() => openProperties(contextMenu.entry)} />
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  <MenuButton disabled={loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
+                  <MenuButton disabled={loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
+                  <MenuButton disabled={loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
+                  <MenuButton disabled={loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
+                  <MenuDivider />
+                  <MenuButton disabled={!clipboard || loading || working} label="粘贴" onClick={() => void handlePaste()} />
+                  <MenuButton
+                    disabled={!currentPath || loading || working}
+                    label="复制当前目录路径"
+                    onClick={() => void handleCopyText('当前目录路径', currentPath ?? '')}
+                  />
+                  <MenuDivider />
+                  <MenuButton disabled={loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
                 </div>
               )}
             </div>,
@@ -1319,15 +1665,21 @@ export function FileManager({ session }: FileManagerProps) {
         : null}
 
       {properties ? (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 p-2 backdrop-blur-sm">
-          <div className="surface flex w-full max-w-md flex-col gap-2 p-3">
+        <OverlayLayer>
+          <OverlayPanel className="max-w-md">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">属性</p>
                 <h4 className="mt-1 text-[15px] font-semibold tracking-[0.01em] text-slate-100">{properties.entry.name}</h4>
               </div>
-              <button className="icon-btn" onClick={() => setProperties(undefined)} type="button">
-                关闭
+              <button
+                aria-label="关闭属性弹框"
+                className="icon-btn h-7 w-7 px-0"
+                onClick={() => setProperties(undefined)}
+                title="关闭"
+                type="button"
+              >
+                <CloseIcon />
               </button>
             </div>
 
@@ -1365,13 +1717,13 @@ export function FileManager({ session }: FileManagerProps) {
               <PropertyRow label="权限" value={formatPermissionOctal(properties.entry.permissions)} />
               <PropertyRow label="权限详情" value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)} />
             </div>
-          </div>
-        </div>
+          </OverlayPanel>
+        </OverlayLayer>
       ) : null}
 
       {uploadProgress ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
-          <div className="surface flex w-full max-w-sm flex-col gap-2 p-3">
+        <OverlayLayer tone="progress">
+          <OverlayPanel className="max-w-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{uploadProgress.cancelling ? '正在取消' : '上传中'}</span>
               <span className="text-xs font-medium text-slate-300">{uploadProgressPercent(uploadProgress)}%</span>
@@ -1400,15 +1752,15 @@ export function FileManager({ session }: FileManagerProps) {
                 {uploadProgress.cancelling ? '取消中...' : '取消上传'}
               </button>
             </div>
-          </div>
-        </div>
+          </OverlayPanel>
+        </OverlayLayer>
       ) : null}
 
       {deleteProgress ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
-          <div className="surface flex w-full max-w-sm flex-col gap-2 p-3">
+        <OverlayLayer tone="progress">
+          <OverlayPanel className="max-w-sm">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">删除中</span>
+              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{deleteProgress.cancelling ? '正在取消' : '删除中'}</span>
               <span className="text-xs font-medium text-slate-300">{stepProgressPercent(deleteProgress)}%</span>
             </div>
 
@@ -1427,22 +1779,27 @@ export function FileManager({ session }: FileManagerProps) {
                 {deleteProgress.completedSteps} / {deleteProgress.totalSteps} 项
               </span>
             </div>
-          </div>
-        </div>
+            <div className="flex justify-end">
+              <button className="icon-btn" disabled={deleteProgress.cancelling} onClick={() => void handleCancelDelete()} type="button">
+                {deleteProgress.cancelling ? '取消中...' : '取消删除'}
+              </button>
+            </div>
+          </OverlayPanel>
+        </OverlayLayer>
       ) : null}
 
       {dragActive && ready && !uploadProgress && !deleteProgress ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm">
-          <div className="surface flex max-w-xs flex-col gap-1 p-3 text-center">
+        <OverlayLayer tone="progress">
+          <OverlayPanel className="max-w-xs gap-1 text-center">
             <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">上传</span>
             <strong className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">释放鼠标以上传到当前目录</strong>
             <span className="text-xs text-slate-400">支持拖入文件或整个文件夹。</span>
-          </div>
-        </div>
+          </OverlayPanel>
+        </OverlayLayer>
       ) : null}
 
       {dialog ? (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 p-2 backdrop-blur-sm">
+        <OverlayLayer>
           <form className="surface flex w-full max-w-xs flex-col gap-2 p-3" onSubmit={(event) => void submitDialog(event)}>
             <div>
               <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{dialog.mode === 'rename' ? '重命名' : '新建'}</p>
@@ -1459,21 +1816,96 @@ export function FileManager({ session }: FileManagerProps) {
               value={dialog.value}
             />
 
-            <div className="flex gap-1">
-              <button className="primary-btn flex-1" disabled={!dialog.value.trim() || working} type="submit">
-                {dialog.mode === 'rename' ? '保存' : '确定'}
-              </button>
-              <button className="icon-btn" onClick={() => setDialog(undefined)} type="button">
+            <div className="flex justify-end gap-1">
+              <button className="icon-btn h-8 px-3" onClick={() => setDialog(undefined)} type="button">
                 取消
+              </button>
+              <button className="primary-btn h-8 px-3 text-xs" disabled={!dialog.value.trim() || working} type="submit">
+                {dialog.mode === 'rename' ? '保存' : '确定'}
               </button>
             </div>
           </form>
-        </div>
+        </OverlayLayer>
+      ) : null}
+
+      {pendingUploadConflict ? (
+        <OverlayLayer>
+          <OverlayPanel className="max-w-sm">
+            <div className="flex flex-col gap-1">
+              <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">上传冲突</p>
+              <h4 className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">“{pendingUploadConflict.conflict.targetName}”已存在</h4>
+              <p className="text-xs leading-5 text-slate-400">
+                远程目录里已经有同名{kindLabel(pendingUploadConflict.conflict.existingKind)}，要用本地文件覆盖它吗？
+              </p>
+              <p
+                className="break-all rounded-lg border border-slate-800 bg-slate-950/70 px-2 py-2 text-[11px] leading-5 text-slate-400"
+                title={pendingUploadConflict.conflict.localPath}
+              >
+                本地来源：{addPathWrapOpportunities(pendingUploadConflict.conflict.localPath)}
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-2 text-[12px] text-slate-300">
+              <input
+                checked={pendingUploadConflict.applyToRemaining}
+                className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-950 text-cyan-300 focus:ring-cyan-400/40"
+                onChange={(event) =>
+                  setPendingUploadConflict((current) =>
+                    current
+                      ? {
+                          ...current,
+                          applyToRemaining: event.target.checked,
+                        }
+                      : current,
+                  )
+                }
+                type="checkbox"
+              />
+              <span>
+                应用到剩余冲突
+                {pendingUploadConflict.remainingConflicts > 0 ? `（还有 ${pendingUploadConflict.remainingConflicts} 项）` : '（当前是最后一项）'}
+              </span>
+            </label>
+
+            <div className="flex justify-end gap-1">
+              <button
+                className="icon-btn h-8 px-3"
+                onClick={() => {
+                  uploadConflictResolverRef.current?.('cancel', pendingUploadConflict.applyToRemaining);
+                  setPendingUploadConflict(undefined);
+                }}
+                type="button"
+              >
+                取消上传
+              </button>
+              <button
+                className="icon-btn h-8 px-3"
+                onClick={() => {
+                  uploadConflictResolverRef.current?.('skip', pendingUploadConflict.applyToRemaining);
+                  setPendingUploadConflict(undefined);
+                }}
+                type="button"
+              >
+                跳过
+              </button>
+              <button
+                className="primary-btn h-8 px-3 text-xs"
+                onClick={() => {
+                  uploadConflictResolverRef.current?.('overwrite', pendingUploadConflict.applyToRemaining);
+                  setPendingUploadConflict(undefined);
+                }}
+                type="button"
+              >
+                覆盖
+              </button>
+            </div>
+          </OverlayPanel>
+        </OverlayLayer>
       ) : null}
 
       {pendingDelete ? (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 p-2 backdrop-blur-sm">
-          <div className="surface flex w-full max-w-sm flex-col gap-2 p-3">
+        <OverlayLayer>
+          <OverlayPanel className="max-w-sm">
             <div className="flex flex-col gap-1">
               <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">删除确认</p>
               <h4 className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">
@@ -1485,19 +1917,19 @@ export function FileManager({ session }: FileManagerProps) {
             </div>
 
             <div className="flex justify-end gap-1">
-              <button className="icon-btn" onClick={() => setPendingDelete(undefined)} type="button">
+              <button className="icon-btn h-8 px-3" onClick={() => setPendingDelete(undefined)} type="button">
                 取消
               </button>
               <button
-                className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="inline-flex h-8 items-center justify-center rounded-lg bg-rose-400 px-3 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={() => void confirmDelete()}
                 type="button"
               >
                 删除
               </button>
             </div>
-          </div>
-        </div>
+          </OverlayPanel>
+        </OverlayLayer>
       ) : null}
 
       <Toast

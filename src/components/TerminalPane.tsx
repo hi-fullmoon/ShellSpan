@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { Terminal } from "xterm";
+import { createLogger } from "../lib/logger";
 import { isTauriRuntime } from "../lib/tauri";
-import { cn, sessionStatusTone } from "../lib/ui";
-import { RefreshIcon } from "./Icons";
+import { cn } from "../lib/ui";
 import type {
   SessionState,
   SessionStatus,
@@ -19,6 +19,8 @@ interface TerminalPaneProps {
   active: boolean;
   onReconnect: () => void;
 }
+
+const terminalLogger = createLogger("terminal");
 
 function statusLabel(status: SessionStatus) {
   switch (status) {
@@ -40,6 +42,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
   const activeRef = useRef(active);
   const statusRef = useRef(session.status);
   const inputBlockedNoticeRef = useRef(false);
+  const reconnectRequestedRef = useRef(false);
   const frameRef = useRef<number | null>(null);
   const pendingResizeSyncRef = useRef<number | null>(null);
   const lastShellSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -56,6 +59,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     }
     if (session.status === "connected") {
       inputBlockedNoticeRef.current = false;
+      reconnectRequestedRef.current = false;
     }
   }, [session.status]);
 
@@ -63,6 +67,8 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     if (!shellRef.current || terminalRef.current) {
       return;
     }
+
+    terminalLogger.info("初始化终端面板", { sessionId: session.sessionId });
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -94,12 +100,33 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(shellRef.current);
-    fitAddon.fit();
+    // @xterm/xterm may not have renderer dimensions ready immediately after open.
+    // Defer fit to the next frame to avoid runtime errors in syncScrollArea.
+    requestAnimationFrame(() => {
+      try {
+        fitAddon.fit();
+      } catch {
+        // A later resize pass will retry fitting.
+      }
+    });
     terminal.writeln("\u001b[36m[termbridge]\u001b[0m 终端准备中...");
     terminal.onData((data) => {
       if (statusRef.current !== "connected") {
+        const shouldReconnect =
+          (statusRef.current === "disconnected" || statusRef.current === "error") &&
+          (data === "\r" || data === "\n");
+
+        if (shouldReconnect && !reconnectRequestedRef.current) {
+          reconnectRequestedRef.current = true;
+          terminal.writeln("\r\n\u001b[36m[重连中]\u001b[0m 正在重新连接...");
+          onReconnect();
+          return;
+        }
+
         if (!inputBlockedNoticeRef.current) {
-          terminal.writeln("\r\n\u001b[33m[提示]\u001b[0m 当前连接已断开，请先重连。");
+          terminal.writeln(
+            "\r\n\u001b[33m[提示]\u001b[0m 当前连接已断开，按回车重连。",
+          );
           inputBlockedNoticeRef.current = true;
         }
         return;
@@ -109,6 +136,10 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         sessionId: session.sessionId,
         data,
       }).catch((error) => {
+        terminalLogger.error("写入会话失败", {
+          sessionId: session.sessionId,
+          error: String(error),
+        });
         inputBlockedNoticeRef.current = true;
         terminal.writeln(
           `\r\n\u001b[31m[写入失败]\u001b[0m 连接不可用，请重连后再试。`,
@@ -212,6 +243,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     window.addEventListener("resize", handleViewportResize);
 
     return () => {
+      terminalLogger.debug("销毁终端实例", { sessionId: session.sessionId });
       observer.disconnect();
       window.removeEventListener("resize", handleViewportResize);
       scheduleResizeRef.current = null;
@@ -251,6 +283,9 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
 
   useEffect(() => {
     if (!isTauriRuntime()) {
+      terminalLogger.warn("非 Tauri 运行时，跳过终端事件监听", {
+        sessionId: session.sessionId,
+      });
       return;
     }
 
@@ -277,6 +312,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         if (event.payload.sessionId !== session.sessionId) {
           return;
         }
+        terminalLogger.info("会话状态更新", event.payload);
         const message = event.payload.message
           ? `: ${event.payload.message}`
           : "";
@@ -297,10 +333,15 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         if (event.payload.sessionId !== session.sessionId) {
           return;
         }
+        terminalLogger.warn("会话关闭事件", event.payload);
         const reason = event.payload.reason ? `: ${event.payload.reason}` : "";
         terminalRef.current?.writeln(
           `\r\n\u001b[31m[已关闭]\u001b[0m${reason}`,
         );
+        terminalRef.current?.writeln(
+          "\u001b[33m[提示]\u001b[0m 按回车重连。",
+        );
+        inputBlockedNoticeRef.current = true;
       });
 
       if (cancelled) {
@@ -327,29 +368,6 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         active ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
-      <header className="flex items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/95 px-2 py-1">
-        <div className="min-w-0">
-          <strong className="block truncate text-sm text-slate-100">{session.title}</strong>
-          <span className="block truncate text-xs text-slate-400">
-            {session.username}@{session.host}:{session.port}
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          {session.status === "disconnected" || session.status === "error" ? (
-            <button
-              className="icon-btn h-7 gap-1 px-2"
-              onClick={onReconnect}
-              type="button"
-            >
-              <RefreshIcon />
-              重连
-            </button>
-          ) : null}
-          <span className={cn("rounded-md px-2 py-1 text-[11px]", sessionStatusTone(session.status))}>
-            {statusLabel(session.status)}
-          </span>
-        </div>
-      </header>
       <div
         className="terminal-shell min-h-0 flex-1 overflow-hidden bg-slate-950"
         ref={shellRef}

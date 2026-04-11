@@ -107,3 +107,30 @@ export function RefreshIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function PinIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5 3.5h6" />
+      <path d="M6 3.5v3l-1.5 1.5v1h7v-1L10 6.5v-3" />
+      <path d="M8 9v3.5" />
+    </svg>
+  );
+}
+
+export function StarIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="m8 2.5 1.6 3.2 3.6.5-2.6 2.5.6 3.6L8 10.7 4.8 12.3l.6-3.6L2.8 6.2l3.6-.5Z" />
+    </svg>
+  );
+}
+
+export function CloseIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="m5 5 6 6" />
+      <path d="m11 5-6 6" />
+    </svg>
+  );
+}

@@ -8,6 +8,8 @@ export function createEmptyProfile(): ConnectionProfile {
     port: 22,
     username: "",
     authMethod: "password",
+    pinned: false,
+    favorite: false,
     rememberPassword: false,
     password: "",
     privateKeyPath: "",
@@ -20,6 +22,8 @@ export function sanitizeProfileForStorage(
 ): ConnectionProfile {
   return {
     ...profile,
+    pinned: profile.pinned ?? false,
+    favorite: profile.favorite ?? false,
     password:
       profile.authMethod === "password" && profile.rememberPassword
         ? profile.password ?? ""

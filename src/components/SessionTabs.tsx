@@ -1,63 +1,218 @@
-import { useEffect, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
-import { ArrowLeftIcon, ArrowRightIcon } from "./Icons";
-import { cn, sessionStatusDot, sessionStatusTone } from "../lib/ui";
-import type { SessionState } from "../types";
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DraggableAttributes,
+  type DragEndEvent,
+  type DragStartEvent,
+  type UniqueIdentifier,
+} from '@dnd-kit/core';
+import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type WheelEvent as ReactWheelEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
+import { CloseIcon } from './Icons';
+import { cn, sessionStatusDot } from '../lib/ui';
+import type { SessionState } from '../types';
 
 interface SessionTabsProps {
   sessions: SessionState[];
   activeSessionId?: string;
   onSelect: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
+  onReorder: (draggedSessionId: string, targetSessionId: string) => void;
+  onRename: (sessionId: string, title: string) => void;
+  onDragStateChange?: (dragging: boolean) => void;
 }
 
-function statusLabel(status: SessionState["status"]) {
-  switch (status) {
-    case "connected":
-      return "已连接";
-    case "connecting":
-      return "连接中";
-    case "error":
-      return "错误";
-    case "disconnected":
-      return "已断开";
-  }
+interface SessionTabCardProps {
+  session: SessionState;
+  active: boolean;
+  dragging?: boolean;
+  tabProps?: HTMLAttributes<HTMLDivElement> & {
+    ref?: (node: HTMLDivElement | null) => void;
+  };
+  dragListeners?: Record<string, unknown>;
+  dragAttributes?: DraggableAttributes;
+  onClose: (sessionId: string) => void;
+  onRenameCancel?: () => void;
+  onRenameChange?: (title: string) => void;
+  onRenameCommit?: () => void;
+  onRenameStart?: (session: SessionState) => void;
+  onSelect: (sessionId: string) => void;
+  renameValue?: string;
+  renaming?: boolean;
 }
 
-export function SessionTabs({
-  sessions,
-  activeSessionId,
-  onSelect,
+function SessionTabCard({
+  session,
+  active,
+  dragging = false,
+  tabProps,
+  dragListeners,
+  dragAttributes,
   onClose,
-}: SessionTabsProps) {
+  onRenameCancel,
+  onRenameChange,
+  onRenameCommit,
+  onRenameStart,
+  onSelect,
+  renameValue,
+  renaming = false,
+}: SessionTabCardProps) {
+  return (
+    <div
+      {...tabProps}
+      {...dragAttributes}
+      {...dragListeners}
+      className={cn(
+        'relative flex min-w-[150px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
+        active
+          ? 'border-cyan-400/50 bg-slate-800 text-slate-50'
+          : 'border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900',
+        renaming
+          ? 'cursor-text border-cyan-400/60 bg-slate-900 text-slate-50'
+          : dragging
+            ? 'cursor-grabbing opacity-70 shadow-[0_12px_24px_rgba(2,6,23,0.35)]'
+            : 'cursor-grab',
+        tabProps?.className,
+      )}
+      data-session-tab={session.sessionId}
+      onDoubleClick={() => onRenameStart?.(session)}
+    >
+      {renaming ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2 w-[200px] h-[32px]">
+          <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
+          <span className="min-w-0 flex-1">
+            <input
+              autoFocus
+              className="block w-full outline-0 border-none rounded-sm bg-slate-950 px-1.5 py-1 text-[13px] font-semibold leading-4 text-slate-50 outline-none"
+              onBlur={onRenameCommit}
+              onChange={(event) => onRenameChange?.(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onRenameCommit?.();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  onRenameCancel?.();
+                }
+              }}
+              value={renameValue}
+            />
+          </span>
+        </div>
+      ) : (
+        <>
+          <button className="flex min-w-0 flex-1 items-center gap-2 w-[200px] h-[32px]" onClick={() => onSelect(session.sessionId)} type="button">
+            <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
+            <span className="min-w-0 flex-1">
+              <strong className="block truncate text-xs text-left" title={session.title}>
+                {session.title}
+              </strong>
+              <small className="block truncate text-[11px] text-left text-slate-400">
+                {session.username}@{session.host}
+              </small>
+            </span>
+          </button>
+
+          <button
+            aria-label="关闭会话标签"
+            className="icon-btn px-0.5 py-0.5 rounded-[6px]"
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose(session.sessionId);
+            }}
+            type="button"
+          >
+            <CloseIcon />
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SortableSessionTab({
+  active,
+  session,
+  onClose,
+  onRenameCancel,
+  onRenameChange,
+  onRenameCommit,
+  onRenameStart,
+  onSelect,
+  renameValue,
+  renaming,
+}: {
+  active: boolean;
+  session: SessionState;
+  onClose: (sessionId: string) => void;
+  onRenameCancel: () => void;
+  onRenameChange: (title: string) => void;
+  onRenameCommit: () => void;
+  onRenameStart: (session: SessionState) => void;
+  onSelect: (sessionId: string) => void;
+  renameValue: string;
+  renaming: boolean;
+}) {
+  const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
+    id: session.sessionId,
+    disabled: renaming,
+  });
+
+  return (
+    <SessionTabCard
+      active={active}
+      dragAttributes={renaming ? undefined : attributes}
+      dragListeners={renaming ? undefined : listeners}
+      dragging={isDragging}
+      onClose={onClose}
+      onRenameCancel={onRenameCancel}
+      onRenameChange={onRenameChange}
+      onRenameCommit={onRenameCommit}
+      onRenameStart={onRenameStart}
+      onSelect={onSelect}
+      renameValue={renameValue}
+      renaming={renaming}
+      session={session}
+      tabProps={{
+        ref: setNodeRef,
+        style: {
+          transform: CSS.Transform.toString(transform),
+          transition,
+          zIndex: isDragging ? 20 : undefined,
+        },
+      }}
+    />
+  );
+}
+
+export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onReorder, onRename, onDragStateChange }: SessionTabsProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) {
-      return;
-    }
-
-    const updateScrollButtons = () => {
-      const maxScrollLeft = container.scrollWidth - container.clientWidth;
-      setCanScrollLeft(container.scrollLeft > 4);
-      setCanScrollRight(maxScrollLeft - container.scrollLeft > 4);
-    };
-
-    updateScrollButtons();
-
-    const observer = new ResizeObserver(updateScrollButtons);
-    observer.observe(container);
-    container.addEventListener("scroll", updateScrollButtons);
-    window.addEventListener("resize", updateScrollButtons);
-
-    return () => {
-      observer.disconnect();
-      container.removeEventListener("scroll", updateScrollButtons);
-      window.removeEventListener("resize", updateScrollButtons);
-    };
-  }, [sessions.length]);
+  const [draggingSessionId, setDraggingSessionId] = useState<string>();
+  const [renamingSessionId, setRenamingSessionId] = useState<string>();
+  const [renameValue, setRenameValue] = useState('');
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6,
+      },
+    }),
+  );
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -65,28 +220,13 @@ export function SessionTabs({
       return;
     }
 
-    const target = container.querySelector<HTMLElement>(
-      `[data-session-tab="${activeSessionId}"]`,
-    );
+    const target = container.querySelector<HTMLElement>(`[data-session-tab="${activeSessionId}"]`);
     target?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-      inline: "nearest",
+      behavior: 'smooth',
+      block: 'nearest',
+      inline: 'nearest',
     });
   }, [activeSessionId, sessions.length]);
-
-  const scrollTabs = (direction: "left" | "right") => {
-    const container = scrollRef.current;
-    if (!container) {
-      return;
-    }
-
-    const amount = Math.max(180, Math.floor(container.clientWidth * 0.65));
-    container.scrollBy({
-      left: direction === "left" ? -amount : amount,
-      behavior: "smooth",
-    });
-  };
 
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     const container = scrollRef.current;
@@ -95,19 +235,62 @@ export function SessionTabs({
     }
 
     const hasHorizontalOverflow = container.scrollWidth > container.clientWidth + 4;
-    if (!hasHorizontalOverflow) {
-      return;
-    }
-
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+    if (!hasHorizontalOverflow || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
       return;
     }
 
     container.scrollBy({
       left: event.deltaY,
-      behavior: "auto",
+      behavior: 'auto',
     });
     event.preventDefault();
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    if (renamingSessionId) {
+      return;
+    }
+    const nextId = String(event.active.id);
+    setDraggingSessionId(nextId);
+    onDragStateChange?.(true);
+  };
+
+  const finishDrag = () => {
+    setDraggingSessionId(undefined);
+    onDragStateChange?.(false);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const activeId = String(event.active.id);
+    const overId = event.over ? String(event.over.id) : undefined;
+
+    if (overId && activeId !== overId) {
+      onReorder(activeId, overId);
+    }
+
+    finishDrag();
+  };
+
+  const handleRenameStart = (session: SessionState) => {
+    setRenamingSessionId(session.sessionId);
+    setRenameValue(session.title);
+  };
+
+  const handleRenameCancel = () => {
+    setRenamingSessionId(undefined);
+    setRenameValue('');
+  };
+
+  const handleRenameCommit = () => {
+    if (!renamingSessionId) {
+      return;
+    }
+
+    const nextTitle = renameValue.trim();
+    if (nextTitle) {
+      onRename(renamingSessionId, nextTitle);
+    }
+    handleRenameCancel();
   };
 
   if (sessions.length === 0) {
@@ -119,79 +302,54 @@ export function SessionTabs({
     );
   }
 
+  const items = sessions.map((session) => session.sessionId as UniqueIdentifier);
+  const draggingSession = draggingSessionId ? sessions.find((session) => session.sessionId === draggingSessionId) : undefined;
+  const dragOverlay = (
+    <DragOverlay>
+      {draggingSession ? (
+        <SessionTabCard
+          active={draggingSession.sessionId === activeSessionId}
+          dragging
+          onClose={onClose}
+          onSelect={onSelect}
+          session={draggingSession}
+        />
+      ) : null}
+    </DragOverlay>
+  );
+
   return (
-    <div className="surface min-w-0 flex flex-col gap-1 p-1">
+    <div className="surface rounded-lg min-w-0 flex flex-col gap-1 p-1">
       <span className="label px-1.5 pt-0.5">会话</span>
-      <div className="flex min-w-0 items-center gap-1 pb-0.5">
-        {canScrollLeft ? (
-          <button
-            className="icon-btn h-[38px] w-7 shrink-0 px-0"
-            onClick={() => scrollTabs("left")}
-            title="向左查看会话"
-            type="button"
-          >
-            <ArrowLeftIcon />
-          </button>
-        ) : null}
-
-        <div
-          className="session-tabs-scroll min-w-0 max-w-full flex-1 overflow-x-auto overflow-y-hidden"
-          onWheel={handleWheel}
-          ref={scrollRef}
+      <div className="session-tabs-scroll min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-1" onWheel={handleWheel} ref={scrollRef}>
+        <DndContext
+          collisionDetection={closestCenter}
+          onDragCancel={finishDrag}
+          onDragEnd={handleDragEnd}
+          onDragStart={handleDragStart}
+          sensors={sensors}
         >
-          <div className="flex w-max min-w-full gap-1 pr-0.5">
-            {sessions.map((session) => {
-              const active = session.sessionId === activeSessionId;
-              return (
-                <div
-                  className={cn(
-                    "flex min-w-[150px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition",
-                    active
-                      ? "border-cyan-400/50 bg-slate-800 text-slate-50"
-                      : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900",
-                  )}
-                  data-session-tab={session.sessionId}
+          <SortableContext items={items} strategy={horizontalListSortingStrategy}>
+            <div className="flex w-max min-w-full gap-1 pr-0.5">
+              {sessions.map((session) => (
+                <SortableSessionTab
+                  active={session.sessionId === activeSessionId}
                   key={session.sessionId}
-                >
-                  <button
-                    className="flex min-w-0 flex-1 items-center gap-2"
-                    onClick={() => onSelect(session.sessionId)}
-                    type="button"
-                  >
-                    <span className={cn("h-2 w-2 rounded-full", sessionStatusDot(session.status))} />
-                    <span className="min-w-0 flex-1">
-                      <strong className="block truncate text-xs">{session.title}</strong>
-                      <small className="block truncate text-[11px] text-slate-400">
-                        {session.username}@{session.host}
-                      </small>
-                    </span>
-                  </button>
-                  <span className={cn("shrink-0 rounded-md px-2 py-1 text-[10px]", sessionStatusTone(session.status))}>
-                    {statusLabel(session.status)}
-                  </span>
-                  <button
-                    className="icon-btn px-1.5 py-0.5"
-                    onClick={() => onClose(session.sessionId)}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {canScrollRight ? (
-          <button
-            className="icon-btn h-[38px] w-7 shrink-0 px-0"
-            onClick={() => scrollTabs("right")}
-            title="向右查看会话"
-            type="button"
-          >
-            <ArrowRightIcon />
-          </button>
-        ) : null}
+                  onClose={onClose}
+                  onRenameCancel={handleRenameCancel}
+                  onRenameChange={setRenameValue}
+                  onRenameCommit={handleRenameCommit}
+                  onRenameStart={handleRenameStart}
+                  onSelect={onSelect}
+                  renameValue={renameValue}
+                  renaming={session.sessionId === renamingSessionId}
+                  session={session}
+                />
+              ))}
+            </div>
+          </SortableContext>
+          {typeof document === 'undefined' ? dragOverlay : createPortal(dragOverlay, document.body)}
+        </DndContext>
       </div>
     </div>
   );
