@@ -16,12 +16,29 @@ describe("updater wrapper", () => {
     const mockUpdate = {
       version: "0.2.0",
       body: "Fixes",
-      downloadAndInstall: vi.fn(async (onEvent: (event: any) => void) => {
+      downloadAndInstall: vi.fn(async (onEvent: (event: unknown) => void) => {
+        onEvent({
+          event: "Started",
+          data: {
+            contentLength: 100,
+          },
+        });
         onEvent({
           event: "Progress",
           data: {
-            chunkLength: 40,
-            contentLength: 100,
+            chunkLength: 25,
+          },
+        });
+        onEvent({
+          event: "Progress",
+          data: {
+            chunkLength: 25,
+          },
+        });
+        onEvent({
+          event: "Progress",
+          data: {
+            chunkLength: 50,
           },
         });
       }),
@@ -31,6 +48,8 @@ describe("updater wrapper", () => {
       { version: "0.2.0", body: "Fixes", raw: mockUpdate as any },
       progress,
     );
-    expect(progress).toHaveBeenCalledWith(40);
+    expect(progress).toHaveBeenNthCalledWith(1, 25);
+    expect(progress).toHaveBeenNthCalledWith(2, 50);
+    expect(progress).toHaveBeenNthCalledWith(3, 100);
   });
 });
