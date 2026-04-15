@@ -1,6 +1,12 @@
 use log::{debug, error, info, warn, LevelFilter};
+#[cfg(unix)]
+use libc::{poll, pollfd, POLLIN, POLLOUT};
 use serde::{Deserialize, Serialize};
-use ssh2::{Channel, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
+use socket2::{SockRef, TcpKeepalive};
+use ssh2::{
+    BlockDirections, Channel, ExtendedData, FileStat, OpenFlags, OpenType, RenameFlags, Session,
+    Sftp,
+};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -16,18 +22,22 @@ use std::{
         Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
+
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 
 const SSH_DATA_EVENT: &str = "ssh-data";
 const SSH_STATUS_EVENT: &str = "ssh-status";
 const SSH_CLOSED_EVENT: &str = "ssh-closed";
 const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 const DELETE_PROGRESS_EVENT: &str = "delete-progress";
-const SSH_KEEPALIVE_INTERVAL_SECS: u32 = 15;
-const SSH_KEEPALIVE_RETRY_SECS: u64 = 1;
+const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
+const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
+const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -851,9 +861,11 @@ fn run_ssh_session(
         )
         .map_err(|error| format!("failed to allocate PTY: {error}"))?;
     channel
+        .handle_extended_data(ExtendedData::Merge)
+        .map_err(|error| format!("failed to configure extended-data mode: {error}"))?;
+    channel
         .shell()
         .map_err(|error| format!("failed to start remote shell: {error}"))?;
-    session.set_keepalive(true, SSH_KEEPALIVE_INTERVAL_SECS);
     session.set_blocking(false);
 
     info!("SSH session connected session_id={session_id}");
@@ -1323,8 +1335,24 @@ fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, String> {
         .next()
         .ok_or_else(|| format!("no socket address found for {address}"))?;
 
-    TcpStream::connect_timeout(&socket_addr, Duration::from_secs(12))
-        .map_err(|error| format!("failed to connect to {address}: {error}"))
+    let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(12))
+        .map_err(|error| format!("failed to connect to {address}: {error}"))?;
+
+    configure_tcp_stream(&tcp)
+        .map_err(|error| format!("failed to configure TCP socket for {address}: {error}"))?;
+
+    Ok(tcp)
+}
+
+fn configure_tcp_stream(tcp: &TcpStream) -> std::io::Result<()> {
+    tcp.set_nodelay(true)?;
+
+    let keepalive = TcpKeepalive::new()
+        .with_time(Duration::from_secs(SSH_TCP_KEEPALIVE_TIME_SECS))
+        .with_interval(Duration::from_secs(SSH_TCP_KEEPALIVE_INTERVAL_SECS));
+
+    SockRef::from(tcp).set_tcp_keepalive(&keepalive)?;
+    Ok(())
 }
 
 fn open_authenticated_session(
@@ -1671,6 +1699,8 @@ fn split_name(name: &str) -> (String, Option<String>) {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use std::net::TcpListener;
+    use std::thread;
 
     #[test]
     fn upload_target_name_overwrites_existing_entry_when_requested() {
@@ -1754,6 +1784,122 @@ mod tests {
         assert!(!summary.contains("super-secret"));
         assert!(!summary.contains("keep-me-out-of-logs"));
         assert!(!summary.contains("/Users/alice/.ssh/id_ed25519"));
+    }
+
+    #[test]
+    fn connect_tcp_stream_enables_nodelay() {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .expect("should bind a loopback listener for the test");
+        let address = listener
+            .local_addr()
+            .expect("listener should expose a loopback address");
+
+        let accept_thread = thread::spawn(move || {
+            let _ = listener.accept();
+        });
+
+        let stream = connect_tcp_stream("127.0.0.1", address.port())
+            .expect("connect_tcp_stream should connect to the local listener");
+
+        assert!(
+            stream.nodelay().expect("querying nodelay should succeed"),
+            "interactive SSH sockets should disable Nagle's algorithm",
+        );
+
+        accept_thread
+            .join()
+            .expect("accept thread should finish cleanly");
+    }
+
+    #[test]
+    fn session_idle_wait_timeout_uses_short_slice_when_socket_is_blocked() {
+        let wait = session_idle_wait_timeout(true)
+            .expect("blocked sockets should use a short wait slice instead of busy spinning");
+
+        assert_eq!(wait, Duration::from_millis(20));
+    }
+
+    #[test]
+    fn session_idle_wait_timeout_skips_wait_when_no_signal_is_pending() {
+        let wait = session_idle_wait_timeout(false);
+
+        assert_eq!(wait, None);
+    }
+
+    #[test]
+    fn transport_error_classifies_drain_incoming_flow_as_disconnect() {
+        let message = format_transport_error(
+            "failed to write remote input",
+            "Failure while draining incoming flow",
+        );
+
+        assert!(message.contains("ssh transport disconnected"));
+    }
+
+    #[test]
+    fn coalesce_write_commands_merges_adjacent_write_chunks() {
+        let commands = vec![
+            SessionCommand::Write("a".to_string()),
+            SessionCommand::Write("bc".to_string()),
+            SessionCommand::Write("123".to_string()),
+        ];
+
+        let merged = coalesce_write_commands(commands);
+
+        assert_eq!(merged.len(), 1);
+        match &merged[0] {
+            SessionCommand::Write(data) => assert_eq!(data, "abc123"),
+            _ => panic!("expected a single merged write command"),
+        }
+    }
+
+    #[test]
+    fn coalesce_write_commands_preserves_non_write_boundaries() {
+        let commands = vec![
+            SessionCommand::Write("ab".to_string()),
+            SessionCommand::Resize { cols: 120, rows: 40 },
+            SessionCommand::Write("cd".to_string()),
+            SessionCommand::Close,
+            SessionCommand::Write("ef".to_string()),
+        ];
+
+        let merged = coalesce_write_commands(commands);
+
+        assert_eq!(merged.len(), 5);
+        match &merged[0] {
+            SessionCommand::Write(data) => assert_eq!(data, "ab"),
+            _ => panic!("first command should stay write"),
+        }
+        match &merged[1] {
+            SessionCommand::Resize { cols, rows } => {
+                assert_eq!((cols, rows), (&120, &40));
+            }
+            _ => panic!("second command should stay resize"),
+        }
+        match &merged[2] {
+            SessionCommand::Write(data) => assert_eq!(data, "cd"),
+            _ => panic!("third command should stay write"),
+        }
+        match &merged[3] {
+            SessionCommand::Close => {}
+            _ => panic!("fourth command should stay close"),
+        }
+        match &merged[4] {
+            SessionCommand::Write(data) => assert_eq!(data, "ef"),
+            _ => panic!("fifth command should stay write"),
+        }
+    }
+
+    #[test]
+    fn retryable_channel_error_kind_includes_wouldblock_and_interrupted() {
+        assert!(is_retryable_channel_error_kind(ErrorKind::WouldBlock));
+        assert!(is_retryable_channel_error_kind(ErrorKind::Interrupted));
+    }
+
+    #[test]
+    fn retryable_channel_error_kind_rejects_fatal_kinds() {
+        assert!(!is_retryable_channel_error_kind(ErrorKind::ConnectionReset));
+        assert!(!is_retryable_channel_error_kind(ErrorKind::BrokenPipe));
     }
 }
 
@@ -1958,6 +2104,37 @@ fn open_path_with_default_app(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn coalesce_write_commands(commands: Vec<SessionCommand>) -> Vec<SessionCommand> {
+    let mut merged = Vec::with_capacity(commands.len());
+    let mut pending_write = String::new();
+
+    for command in commands {
+        match command {
+            SessionCommand::Write(data) => {
+                pending_write.push_str(&data);
+            }
+            SessionCommand::Resize { cols, rows } => {
+                if !pending_write.is_empty() {
+                    merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
+                }
+                merged.push(SessionCommand::Resize { cols, rows });
+            }
+            SessionCommand::Close => {
+                if !pending_write.is_empty() {
+                    merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
+                }
+                merged.push(SessionCommand::Close);
+            }
+        }
+    }
+
+    if !pending_write.is_empty() {
+        merged.push(SessionCommand::Write(pending_write));
+    }
+
+    merged
+}
+
 fn session_loop(
     app: &AppHandle,
     session_id: &str,
@@ -1966,26 +2143,37 @@ fn session_loop(
     rx: Receiver<SessionCommand>,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
-    let mut next_keepalive_at = Instant::now() + Duration::from_secs(SSH_KEEPALIVE_RETRY_SECS);
 
     loop {
-        match rx.try_recv() {
-            Ok(SessionCommand::Write(data)) => {
-                write_all_nonblocking(channel, data.as_bytes())?;
+        let mut made_progress = false;
+        let mut blocked_on_socket = false;
+        let mut pending_commands = Vec::new();
+
+        loop {
+            match rx.try_recv() {
+                Ok(command) => pending_commands.push(command),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    graceful_shutdown(channel);
+                    return Ok(Some("session controller dropped".to_string()));
+                }
             }
-            Ok(SessionCommand::Resize { cols, rows }) => {
-                channel
-                    .request_pty_size(cols, rows, None, None)
-                    .map_err(|error| format!("failed to resize PTY: {error}"))?;
-            }
-            Ok(SessionCommand::Close) => {
-                graceful_shutdown(channel);
-                return Ok(Some("session closed locally".to_string()));
-            }
-            Err(TryRecvError::Empty) => {}
-            Err(TryRecvError::Disconnected) => {
-                graceful_shutdown(channel);
-                return Ok(Some("session controller dropped".to_string()));
+        }
+
+        for command in coalesce_write_commands(pending_commands) {
+            match command {
+                SessionCommand::Write(data) => {
+                    write_all_nonblocking(session, channel, data.as_bytes())?;
+                    made_progress = true;
+                }
+                SessionCommand::Resize { cols, rows } => {
+                    resize_pty_nonblocking(session, channel, cols, rows)?;
+                    made_progress = true;
+                }
+                SessionCommand::Close => {
+                    graceful_shutdown(channel);
+                    return Ok(Some("session closed locally".to_string()));
+                }
             }
         }
 
@@ -1998,9 +2186,19 @@ fn session_loop(
             Ok(read) => {
                 let chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
                 emit_data(app, session_id, chunk)?;
+                made_progress = true;
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+            Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                blocked_on_socket = true;
+            }
             Err(error) => {
+                warn!(
+                    "SSH read failed session_id={} kind={:?} block_directions={:?} error={}",
+                    session_id,
+                    error.kind(),
+                    session.block_directions(),
+                    error
+                );
                 return Err(format_transport_error(
                     "failed to read remote output",
                     &error.to_string(),
@@ -2008,43 +2206,28 @@ fn session_loop(
             }
         }
 
-        let mut stderr = channel.stderr();
-        match stderr.read(&mut buffer) {
-            Ok(0) => {}
-            Ok(read) => {
-                let chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
-                emit_data(app, session_id, chunk)?;
-            }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-            Err(error) => {
-                return Err(format_transport_error(
-                    "failed to read remote stderr",
-                    &error.to_string(),
-                ))
-            }
+        if made_progress {
+            continue;
         }
 
-        if Instant::now() >= next_keepalive_at {
-            match session.keepalive_send() {
-                Ok(seconds_to_next) => {
-                    let sleep_secs = seconds_to_next.max(SSH_KEEPALIVE_RETRY_SECS as u32) as u64;
-                    next_keepalive_at = Instant::now() + Duration::from_secs(sleep_secs);
-                }
-                Err(error) => {
-                    let error_text = error.to_string();
-                    let io_error: std::io::Error = error.into();
-                    if io_error.kind() == ErrorKind::WouldBlock {
-                        next_keepalive_at =
-                            Instant::now() + Duration::from_secs(SSH_KEEPALIVE_RETRY_SECS);
-                    } else {
-                        return Err(format_transport_error("failed to send keepalive", &error_text));
-                    }
-                }
-            }
+        if let Some(wait_timeout) = session_idle_wait_timeout(blocked_on_socket) {
+            wait_for_session_socket(session, wait_timeout)?;
+        } else {
+            thread::yield_now();
         }
-
-        thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn session_idle_wait_timeout(blocked_on_socket: bool) -> Option<Duration> {
+    if !blocked_on_socket {
+        return None;
+    }
+
+    Some(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS))
+}
+
+fn is_retryable_channel_error_kind(kind: ErrorKind) -> bool {
+    kind == ErrorKind::WouldBlock || kind == ErrorKind::Interrupted
 }
 
 fn format_transport_error(context: &str, raw_error: &str) -> String {
@@ -2053,6 +2236,7 @@ fn format_transport_error(context: &str, raw_error: &str) -> String {
         || error_lower.contains("connection reset")
         || error_lower.contains("connection aborted")
         || error_lower.contains("broken pipe")
+        || error_lower.contains("draining incoming flow")
     {
         format!(
             "{context}: ssh transport disconnected (possible network jitter, idle timeout, or remote-side close): {raw_error}"
@@ -2062,23 +2246,122 @@ fn format_transport_error(context: &str, raw_error: &str) -> String {
     }
 }
 
-fn write_all_nonblocking(channel: &mut Channel, bytes: &[u8]) -> Result<(), String> {
+fn write_all_nonblocking(session: &Session, channel: &mut Channel, bytes: &[u8]) -> Result<(), String> {
     let mut offset = 0usize;
+    let wait_timeout = Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS);
 
     while offset < bytes.len() {
         match channel.write(&bytes[offset..]) {
             Ok(0) => return Err("remote channel accepted zero bytes".to_string()),
             Ok(written) => offset += written,
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(2));
+            Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                if error.kind() == ErrorKind::Interrupted {
+                    continue;
+                }
+                wait_for_session_socket(session, wait_timeout)?;
             }
-            Err(error) => return Err(format!("failed to write remote input: {error}")),
+            Err(error) => {
+                warn!(
+                    "SSH write failed kind={:?} block_directions={:?} offset={} total={} error={}",
+                    error.kind(),
+                    session.block_directions(),
+                    offset,
+                    bytes.len(),
+                    error
+                );
+                return Err(format_transport_error(
+                    "failed to write remote input",
+                    &error.to_string(),
+                ))
+            }
         }
     }
+    Ok(())
+}
 
-    channel
-        .flush()
-        .map_err(|error| format!("failed to flush remote input: {error}"))?;
+fn resize_pty_nonblocking(
+    session: &Session,
+    channel: &mut Channel,
+    cols: u32,
+    rows: u32,
+) -> Result<(), String> {
+    let wait_timeout = Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS);
+    loop {
+        match channel.request_pty_size(cols, rows, None, None) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                let io_error: std::io::Error = error.into();
+                if is_retryable_channel_error_kind(io_error.kind()) {
+                    if io_error.kind() == ErrorKind::Interrupted {
+                        continue;
+                    }
+                    wait_for_session_socket(session, wait_timeout)?;
+                    continue;
+                }
+                warn!(
+                    "SSH resize failed cols={} rows={} kind={:?} block_directions={:?} error={}",
+                    cols,
+                    rows,
+                    io_error.kind(),
+                    session.block_directions(),
+                    io_error
+                );
+                return Err(format_transport_error(
+                    "failed to resize PTY",
+                    &io_error.to_string(),
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn session_poll_events(directions: BlockDirections) -> i16 {
+    match directions {
+        BlockDirections::None => 0,
+        BlockDirections::Inbound => POLLIN,
+        BlockDirections::Outbound => POLLOUT,
+        BlockDirections::Both => POLLIN | POLLOUT,
+    }
+}
+
+#[cfg(unix)]
+fn wait_for_session_socket(session: &Session, timeout: Duration) -> Result<(), String> {
+    let events = session_poll_events(session.block_directions());
+    if events == 0 {
+        if !timeout.is_zero() {
+            thread::sleep(timeout);
+        }
+        return Ok(());
+    }
+
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    let mut poll_fd = pollfd {
+        fd: session.as_raw_fd(),
+        events,
+        revents: 0,
+    };
+
+    loop {
+        let result = unsafe { poll(&mut poll_fd, 1, timeout_ms) };
+        if result >= 0 {
+            return Ok(());
+        }
+
+        let error = std::io::Error::last_os_error();
+        if error.kind() == ErrorKind::Interrupted {
+            continue;
+        }
+
+        return Err(format!("failed to wait for ssh socket readiness: {error}"));
+    }
+}
+
+#[cfg(not(unix))]
+fn wait_for_session_socket(_session: &Session, timeout: Duration) -> Result<(), String> {
+    if !timeout.is_zero() {
+        thread::sleep(timeout);
+    }
     Ok(())
 }
 
