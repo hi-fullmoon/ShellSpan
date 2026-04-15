@@ -35,6 +35,13 @@ const SSH_STATUS_EVENT: &str = "ssh-status";
 const SSH_CLOSED_EVENT: &str = "ssh-closed";
 const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 const DELETE_PROGRESS_EVENT: &str = "delete-progress";
+const MENU_CHECK_UPDATE_ID: &str = "menu.check_update";
+const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
+const SYSTEM_CHECK_UPDATE_EVENT: &str = "system-check-update";
+#[cfg(target_os = "windows")]
+const TRAY_SHOW_MAIN_WINDOW_ID: &str = "tray.show_main_window";
+#[cfg(target_os = "windows")]
+const TRAY_QUIT_ID: &str = "tray.quit";
 const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
@@ -1907,6 +1914,13 @@ mod tests {
         assert!(!is_retryable_channel_error_kind(ErrorKind::ConnectionReset));
         assert!(!is_retryable_channel_error_kind(ErrorKind::BrokenPipe));
     }
+
+    #[test]
+    fn check_update_menu_ids_are_recognized() {
+        assert!(is_check_update_menu_id("menu.check_update"));
+        assert!(is_check_update_menu_id("tray.check_update"));
+        assert!(!is_check_update_menu_id("tray.quit"));
+    }
 }
 
 fn scan_local_upload_path(local_path: &Path) -> Result<UploadScanStats, String> {
@@ -2420,6 +2434,69 @@ fn emit_closed(
     .map_err(|error| format!("failed to emit closed event: {error}"))
 }
 
+fn is_check_update_menu_id(menu_id: &str) -> bool {
+    menu_id == MENU_CHECK_UPDATE_ID || menu_id == TRAY_CHECK_UPDATE_ID
+}
+
+fn emit_system_check_update(app: &AppHandle) -> Result<(), String> {
+    app.emit(SYSTEM_CHECK_UPDATE_EVENT, ())
+        .map_err(|error| format!("failed to emit {SYSTEM_CHECK_UPDATE_EVENT} event: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+
+    let menu = Menu::default(app)?;
+    let app_submenu = menu
+        .items()?
+        .into_iter()
+        .find_map(|item| match item {
+            MenuItemKind::Submenu(submenu) => Some(submenu),
+            _ => None,
+        });
+
+    if let Some(app_submenu) = app_submenu {
+        let check_update_item =
+            MenuItem::with_id(app, MENU_CHECK_UPDATE_ID, "Check for Updates...", true, None::<&str>)?;
+        let separator = PredefinedMenuItem::separator(app)?;
+        let insert_before = app_submenu.items()?.len().saturating_sub(1);
+        app_submenu.insert_items(&[&separator, &check_update_item], insert_before)?;
+    }
+
+    Ok(menu)
+}
+
+#[cfg(target_os = "windows")]
+fn build_windows_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem};
+
+    let show_main_window_item =
+        MenuItem::with_id(app, TRAY_SHOW_MAIN_WINDOW_ID, "Show Main Window", true, None::<&str>)?;
+    let check_update_item =
+        MenuItem::with_id(app, TRAY_CHECK_UPDATE_ID, "Check for Updates", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_QUIT_ID, "Quit", true, None::<&str>)?;
+
+    Menu::with_items(app, &[&show_main_window_item, &check_update_item, &quit_item])
+}
+
+#[cfg(target_os = "windows")]
+fn show_main_window(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize main window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show main window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus main window: {error}"))?;
+    Ok(())
+}
+
 pub fn run() {
     let log_level = if cfg!(debug_assertions) {
         LevelFilter::Debug
@@ -2427,7 +2504,7 @@ pub fn run() {
         LevelFilter::Info
     };
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level)
@@ -2462,7 +2539,66 @@ pub fn run() {
             pick_local_files,
             pick_local_folder,
             open_remote_file
-        ])
+        ]);
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.menu(build_macos_app_menu);
+    }
+
+    builder = builder.on_menu_event(|app, event| {
+        let menu_id = event.id().as_ref();
+        if is_check_update_menu_id(menu_id) {
+            if let Err(error) = emit_system_check_update(app) {
+                error!("failed to handle check-update menu event: {error}");
+            }
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if menu_id == TRAY_SHOW_MAIN_WINDOW_ID {
+                if let Err(error) = show_main_window(app) {
+                    error!("failed to show main window from tray: {error}");
+                }
+                return;
+            }
+
+            if menu_id == TRAY_QUIT_ID {
+                app.exit(0);
+            }
+        }
+    });
+
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder
+            .setup(|app| {
+                let tray_menu = build_windows_tray_menu(app)
+                    .map_err(|error| format!("failed to create tray menu: {error}"))?;
+                let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main").menu(&tray_menu);
+
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    tray_builder = tray_builder.icon(icon);
+                }
+
+                tray_builder
+                    .build(app)
+                    .map_err(|error| format!("failed to initialize tray icon: {error}"))?;
+
+                Ok(())
+            })
+            .on_window_event(|window, event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Err(error) = window.hide() {
+                        error!("failed to hide window while keeping tray active: {error}");
+                    }
+                }
+            });
+    }
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
