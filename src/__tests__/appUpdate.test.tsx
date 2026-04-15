@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   checkForUpdateMock,
+  defaultListenImplementation,
   downloadAndInstallUpdateMock,
   emitSystemCheckUpdate,
   listenMock,
@@ -40,6 +41,7 @@ const {
 
   return {
     checkForUpdateMock: vi.fn(),
+    defaultListenImplementation,
     downloadAndInstallUpdateMock: vi.fn(),
     emitSystemCheckUpdate,
     listenMock,
@@ -140,6 +142,8 @@ import App from '../App';
 describe('App update listener', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    listenMock.mockReset();
+    listenMock.mockImplementation(defaultListenImplementation);
     resetMockListeners();
     unlistenByEvent.clear();
     checkForUpdateMock.mockResolvedValue(null);
