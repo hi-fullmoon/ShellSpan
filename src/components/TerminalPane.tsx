@@ -5,6 +5,10 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { createLogger } from "../lib/logger";
 import { isTauriRuntime } from "../lib/tauri";
+import {
+  shouldDisableTerminalInput,
+  shouldReconnectFromInput,
+} from "../lib/terminalStatus";
 import { cn } from "../lib/ui";
 import type {
   SessionState,
@@ -55,7 +59,9 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
   useEffect(() => {
     statusRef.current = session.status;
     if (terminalRef.current) {
-      terminalRef.current.options.disableStdin = session.status !== "connected";
+      terminalRef.current.options.disableStdin = shouldDisableTerminalInput(
+        session.status,
+      );
     }
     if (session.status === "connected") {
       inputBlockedNoticeRef.current = false;
@@ -95,7 +101,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         brightWhite: "#f8fafc",
       },
       scrollback: 5000,
-      disableStdin: session.status !== "connected",
+      disableStdin: shouldDisableTerminalInput(session.status),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -112,9 +118,10 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     terminal.writeln("\u001b[36m[termbridge]\u001b[0m 终端准备中...");
     terminal.onData((data) => {
       if (statusRef.current !== "connected") {
-        const shouldReconnect =
-          (statusRef.current === "disconnected" || statusRef.current === "error") &&
-          (data === "\r" || data === "\n");
+        const shouldReconnect = shouldReconnectFromInput(
+          statusRef.current,
+          data,
+        );
 
         if (shouldReconnect && !reconnectRequestedRef.current) {
           reconnectRequestedRef.current = true;
