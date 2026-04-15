@@ -4,16 +4,28 @@ import '@testing-library/jest-dom/vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { checkForUpdateMock, downloadAndInstallUpdateMock, emitSystemCheckUpdate, listenMock, unlistenByEvent } = vi.hoisted(() => {
+const {
+  checkForUpdateMock,
+  downloadAndInstallUpdateMock,
+  emitSystemCheckUpdate,
+  listenMock,
+  loggerErrorMock,
+  resetMockListeners,
+  unlistenByEvent,
+} = vi.hoisted(() => {
   const listeners = new Map<string, (event: { payload?: unknown }) => void>();
   const unlistenByEvent = new Map<string, ReturnType<typeof vi.fn>>();
+  const loggerErrorMock = vi.fn();
 
-  const listenMock = vi.fn(async (event: string, handler: (event: { payload?: unknown }) => void) => {
+  const defaultListenImplementation = async (event: string, handler: (event: { payload?: unknown }) => void) => {
     listeners.set(event, handler);
     const unlisten = vi.fn();
     unlistenByEvent.set(event, unlisten);
     return unlisten;
-  });
+  };
+
+  const listenMock = vi.fn(defaultListenImplementation);
+  const resetMockListeners = () => listeners.clear();
 
   const emitSystemCheckUpdate = async () => {
     const handler = listeners.get('system-check-update');
@@ -31,6 +43,8 @@ const { checkForUpdateMock, downloadAndInstallUpdateMock, emitSystemCheckUpdate,
     downloadAndInstallUpdateMock: vi.fn(),
     emitSystemCheckUpdate,
     listenMock,
+    loggerErrorMock,
+    resetMockListeners,
     unlistenByEvent,
   };
 });
@@ -103,7 +117,7 @@ vi.mock('../lib/logger', () => ({
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
-    error: vi.fn(),
+    error: loggerErrorMock,
   }),
 }));
 
@@ -126,6 +140,7 @@ import App from '../App';
 describe('App update listener', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetMockListeners();
     unlistenByEvent.clear();
     checkForUpdateMock.mockResolvedValue(null);
     downloadAndInstallUpdateMock.mockResolvedValue(undefined);
@@ -148,5 +163,27 @@ describe('App update listener', () => {
 
     unmount();
     expect(unlistenByEvent.get('system-check-update')).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles system-check-update listener registration failure without unhandled rejection', async () => {
+    listenMock.mockImplementation(async (event: string, handler: (event: { payload?: unknown }) => void) => {
+      if (event === 'system-check-update') {
+        throw new Error('register failed');
+      }
+
+      const unlisten = vi.fn();
+      unlistenByEvent.set(event, unlisten);
+      return unlisten;
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(listenMock).toHaveBeenCalledWith('system-check-update', expect.any(Function));
+    });
+
+    await waitFor(() => {
+      expect(loggerErrorMock).toHaveBeenCalledWith('监听系统更新检查事件失败', { error: 'Error: register failed' });
+    });
   });
 });

@@ -229,16 +229,20 @@ function App() {
     let cancelled = false;
 
     const attach = async () => {
-      const nextStopSystemCheckUpdate = await listen('system-check-update', () => {
-        void runUpdateCheck('manual');
-      });
+      try {
+        const nextStopSystemCheckUpdate = await listen('system-check-update', () => {
+          void runUpdateCheck('manual');
+        });
 
-      if (cancelled) {
-        nextStopSystemCheckUpdate();
-        return;
+        if (cancelled) {
+          nextStopSystemCheckUpdate();
+          return;
+        }
+
+        stopSystemCheckUpdate = nextStopSystemCheckUpdate;
+      } catch (error) {
+        appLogger.error('监听系统更新检查事件失败', { error: String(error) });
       }
-
-      stopSystemCheckUpdate = nextStopSystemCheckUpdate;
     };
 
     void attach();
