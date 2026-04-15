@@ -151,6 +151,9 @@ function App() {
 
       try {
         const available = await checkForUpdate();
+        if (mode === 'startup') {
+          markStartupUpdateCheck(Date.now());
+        }
         if (!available) {
           dispatchUpdateState({ type: 'noUpdateFound' });
           if (mode === 'manual') {
@@ -211,7 +214,6 @@ function App() {
     const timer = window.setTimeout(() => {
       void (async () => {
         await runUpdateCheck('startup');
-        markStartupUpdateCheck(Date.now());
       })();
     }, 8000);
 
@@ -458,10 +460,10 @@ function App() {
     appLogger.info('用户确认立即重启安装更新');
     void (async () => {
       try {
-        await invoke('plugin:process|relaunch');
+        await invoke('request_app_restart');
         return;
       } catch (error) {
-        appLogger.error('调用 Tauri relaunch 失败，回退到窗口刷新', { error: String(error) });
+        appLogger.error('调用原生重启失败，回退到窗口刷新', { error: String(error) });
       }
 
       setUpdateToast({

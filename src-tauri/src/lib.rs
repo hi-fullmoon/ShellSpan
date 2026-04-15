@@ -596,6 +596,12 @@ fn close_session(state: State<'_, SessionManager>, session_id: String) -> Result
 }
 
 #[tauri::command]
+fn request_app_restart(app: AppHandle) {
+    info!("Requesting application restart");
+    app.request_restart();
+}
+
+#[tauri::command]
 async fn list_remote_directory(request: RemoteDirectoryRequest) -> Result<RemoteDirectoryListing, String> {
     let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
     debug!(
@@ -2444,6 +2450,7 @@ pub fn run() {
             write_session,
             resize_session,
             close_session,
+            request_app_restart,
             list_remote_directory,
             create_remote_entry,
             rename_remote_path,
