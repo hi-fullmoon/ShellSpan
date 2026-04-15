@@ -192,10 +192,12 @@ function App() {
             message,
           },
         });
-        setUpdateToast({
-          message,
-          tone: 'error',
-        });
+        if (mode === 'manual') {
+          setUpdateToast({
+            message,
+            tone: 'error',
+          });
+        }
       }
     },
     [],
@@ -207,8 +209,10 @@ function App() {
     }
 
     const timer = window.setTimeout(() => {
-      markStartupUpdateCheck(Date.now());
-      void runUpdateCheck('startup');
+      void (async () => {
+        await runUpdateCheck('startup');
+        markStartupUpdateCheck(Date.now());
+      })();
     }, 8000);
 
     return () => window.clearTimeout(timer);
@@ -452,7 +456,32 @@ function App() {
 
   const handleInstallUpdateNow = () => {
     appLogger.info('用户确认立即重启安装更新');
-    window.location.reload();
+    void (async () => {
+      try {
+        await invoke('plugin:process|relaunch');
+        return;
+      } catch (error) {
+        appLogger.error('调用 Tauri relaunch 失败，回退到窗口刷新', { error: String(error) });
+      }
+
+      setUpdateToast({
+        message: '无法调用系统重启，1 秒后将尝试刷新窗口。若更新未生效，请手动重启应用。',
+        tone: 'info',
+      });
+
+      window.setTimeout(() => {
+        try {
+          window.location.reload();
+        } catch (error) {
+          const message = `自动重启失败：${String(error)}。请手动关闭并重新打开应用以完成安装。`;
+          appLogger.error('回退刷新失败', { error: String(error) });
+          setUpdateToast({
+            message,
+            tone: 'error',
+          });
+        }
+      }, 1000);
+    })();
   };
 
   const handleInstallUpdateLater = () => {
