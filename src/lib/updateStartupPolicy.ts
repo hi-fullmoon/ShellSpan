@@ -12,6 +12,9 @@ export function shouldRunStartupUpdateCheck(now: number): boolean {
   if (!Number.isFinite(lastCheckAt)) {
     return true;
   }
+  if (lastCheckAt > now) {
+    return true;
+  }
 
   return now - lastCheckAt >= TWELVE_HOURS_MS;
 }
