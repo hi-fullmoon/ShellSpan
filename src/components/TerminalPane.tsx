@@ -8,6 +8,7 @@ import { isTauriRuntime } from "../lib/tauri";
 import {
   shouldDisableTerminalInput,
   shouldReconnectFromInput,
+  shouldWarnOnClosedSession,
 } from "../lib/terminalStatus";
 import { cn } from "../lib/ui";
 import type {
@@ -340,7 +341,11 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         if (event.payload.sessionId !== session.sessionId) {
           return;
         }
-        terminalLogger.warn("会话关闭事件", event.payload);
+        if (shouldWarnOnClosedSession(statusRef.current)) {
+          terminalLogger.warn("会话关闭事件", event.payload);
+        } else {
+          terminalLogger.debug("会话关闭事件（错误态已记录）", event.payload);
+        }
         const reason = event.payload.reason ? `: ${event.payload.reason}` : "";
         terminalRef.current?.writeln(
           `\r\n\u001b[31m[已关闭]\u001b[0m${reason}`,

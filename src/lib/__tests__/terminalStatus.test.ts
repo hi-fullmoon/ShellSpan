@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { shouldDisableTerminalInput, shouldReconnectFromInput } from '../terminalStatus';
+import {
+  shouldDisableTerminalInput,
+  shouldReconnectFromInput,
+  shouldWarnOnClosedSession,
+} from '../terminalStatus';
 
 describe('shouldDisableTerminalInput', () => {
   it('keeps terminal input enabled after disconnection so enter can trigger reconnect', () => {
@@ -23,5 +27,17 @@ describe('shouldReconnectFromInput', () => {
     expect(shouldReconnectFromInput('disconnected', 'a')).toBe(false);
     expect(shouldReconnectFromInput('connected', '\r')).toBe(false);
     expect(shouldReconnectFromInput('connecting', '\n')).toBe(false);
+  });
+});
+
+describe('shouldWarnOnClosedSession', () => {
+  it('suppresses duplicate close warnings after an error status was already emitted', () => {
+    expect(shouldWarnOnClosedSession('error')).toBe(false);
+  });
+
+  it('keeps close warnings for non-error shutdown paths', () => {
+    expect(shouldWarnOnClosedSession('connected')).toBe(true);
+    expect(shouldWarnOnClosedSession('disconnected')).toBe(true);
+    expect(shouldWarnOnClosedSession('connecting')).toBe(true);
   });
 });

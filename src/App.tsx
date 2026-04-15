@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
 import { CloseIcon } from './components/Icons';
@@ -11,7 +11,9 @@ import { TerminalPane } from './components/TerminalPane';
 import { createLogger } from './lib/logger';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
+import { applyStatusToSessions, consumeBufferedSessionStatus, type PendingSessionStatusEvents } from './lib/sessionStatusBuffer';
 import { isTauriRuntime } from './lib/tauri';
+import { shouldWarnOnClosedSession } from './lib/terminalStatus';
 import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
 import type { ConnectionProfile, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
@@ -43,6 +45,12 @@ function App() {
   const [reorderingSessions, setReorderingSessions] = useState(false);
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
+  const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
+  const sessionsRef = useRef<SessionState[]>([]);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -57,17 +65,7 @@ function App() {
     const attach = async () => {
       const nextStopStatus = await listen<SshStatusEvent>('ssh-status', (event) => {
         appLogger.debug('收到会话状态事件', event.payload);
-        setSessions((current) =>
-          current.map((session) =>
-            session.sessionId === event.payload.sessionId
-              ? {
-                  ...session,
-                  status: event.payload.status,
-                  note: event.payload.message,
-                }
-              : session,
-          ),
-        );
+        setSessions((current) => applyStatusToSessions(current, event.payload, pendingStatusEventsRef.current));
       });
 
       if (cancelled) {
@@ -77,17 +75,27 @@ function App() {
       stopStatus = nextStopStatus;
 
       const nextStopClosed = await listen<SshClosedEvent>('ssh-closed', (event) => {
-        appLogger.warn('会话已关闭', event.payload);
+        const currentSession = sessionsRef.current.find((session) => session.sessionId === event.payload.sessionId);
+        if (currentSession) {
+          if (shouldWarnOnClosedSession(currentSession.status)) {
+            appLogger.warn('会话已关闭', event.payload);
+          } else {
+            appLogger.debug('会话关闭事件（错误态已记录）', event.payload);
+          }
+        }
+
         setSessions((current) =>
-          current.map((session) =>
-            session.sessionId === event.payload.sessionId
-              ? {
-                  ...session,
-                  status: session.status === 'error' ? 'error' : 'disconnected',
-                  note: event.payload.reason,
-                }
-              : session,
-          ),
+          current.map((session) => {
+            if (session.sessionId !== event.payload.sessionId) {
+              return session;
+            }
+
+            return {
+              ...session,
+              status: session.status === 'error' ? 'error' : 'disconnected',
+              note: event.payload.reason,
+            };
+          }),
         );
       });
 
@@ -163,15 +171,17 @@ function App() {
       }
 
       const summary = await createSessionFromProfile(profile);
-
-      const nextSession: SessionState = {
-        ...summary,
-        profile,
-        status: 'connecting',
-        createdAt: Date.now(),
-      };
-
-      setSessions((current) => [nextSession, ...current]);
+      setSessions((current) => {
+        const bufferedStatus = consumeBufferedSessionStatus(summary.sessionId, pendingStatusEventsRef.current);
+        const nextSession: SessionState = {
+          ...summary,
+          profile,
+          status: bufferedStatus?.status ?? 'connecting',
+          note: bufferedStatus?.note,
+          createdAt: Date.now(),
+        };
+        return [nextSession, ...current];
+      });
       setActiveSessionId(summary.sessionId);
       setDraftProfile({
         ...createEmptyProfile(),
@@ -204,6 +214,8 @@ function App() {
   };
 
   const handleCloseSession = async (sessionId: string) => {
+    delete pendingStatusEventsRef.current[sessionId];
+
     if (!isTauriRuntime()) {
       appLogger.warn('浏览器预览模式下关闭会话', { sessionId });
       setSessions((current) => current.filter((session) => session.sessionId !== sessionId));
@@ -290,15 +302,18 @@ function App() {
     try {
       appLogger.info('开始重连会话', { sessionId });
       const summary = await createSessionFromProfile(target.profile);
-      const nextSession: SessionState = {
-        ...summary,
-        title: target.title,
-        profile: target.profile,
-        status: 'connecting',
-        createdAt: Date.now(),
-      };
-
-      setSessions((current) => current.map((item) => (item.sessionId === sessionId ? nextSession : item)));
+      setSessions((current) => {
+        const bufferedStatus = consumeBufferedSessionStatus(summary.sessionId, pendingStatusEventsRef.current);
+        const nextSession: SessionState = {
+          ...summary,
+          title: target.title,
+          profile: target.profile,
+          status: bufferedStatus?.status ?? 'connecting',
+          note: bufferedStatus?.note,
+          createdAt: Date.now(),
+        };
+        return current.map((item) => (item.sessionId === sessionId ? nextSession : item));
+      });
       setActiveSessionId((current) => (current === sessionId ? summary.sessionId : current));
       replaceFileManagerSessionStateKey(sessionId, summary.sessionId);
       setErrorMessage(undefined);

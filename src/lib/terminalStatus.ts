@@ -10,3 +10,7 @@ export function shouldReconnectFromInput(status: SessionStatus, data: string) {
     (data === "\r" || data === "\n")
   );
 }
+
+export function shouldWarnOnClosedSession(status: SessionStatus) {
+  return status !== "error";
+}
