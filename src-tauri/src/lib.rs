@@ -1,3 +1,4 @@
+use log::{debug, error, info, warn, LevelFilter};
 use serde::{Deserialize, Serialize};
 use ssh2::{Channel, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::{
@@ -142,6 +143,15 @@ struct UploadLocalPathsRequest {
 enum AuthMethod {
     Password,
     Key,
+}
+
+impl AuthMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            AuthMethod::Password => "password",
+            AuthMethod::Key => "key",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -512,6 +522,7 @@ fn create_session(
     request: SessionCreateRequest,
 ) -> Result<SessionSummary, String> {
     validate_connection_fields(&request.host, &request.username)?;
+    info!("Creating SSH session {}", summarize_session_request(&request));
 
     let session_id = Uuid::new_v4().to_string();
     let summary = SessionSummary {
@@ -525,6 +536,10 @@ fn create_session(
     let (tx, rx) = mpsc::channel::<SessionCommand>();
     state.insert(session_id.clone(), ManagedSession { sender: tx })?;
 
+    info!(
+        "Created SSH session session_id={} title={} host={} port={} username={}",
+        session_id, summary.title, summary.host, summary.port, summary.username
+    );
     spawn_ssh_thread(app, session_id, request, rx);
     Ok(summary)
 }
@@ -535,7 +550,11 @@ fn write_session(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    state.send(&session_id, SessionCommand::Write(data))
+    let result = state.send(&session_id, SessionCommand::Write(data));
+    if let Err(error) = &result {
+        warn!("Failed to write SSH session input session_id={session_id}: {error}");
+    }
+    result
 }
 
 #[tauri::command]
@@ -545,35 +564,81 @@ fn resize_session(
     cols: u32,
     rows: u32,
 ) -> Result<(), String> {
-    state.send(&session_id, SessionCommand::Resize { cols, rows })
+    let result = state.send(&session_id, SessionCommand::Resize { cols, rows });
+    if let Err(error) = &result {
+        warn!(
+            "Failed to resize SSH session session_id={} cols={} rows={}: {}",
+            session_id, cols, rows, error
+        );
+    }
+    result
 }
 
 #[tauri::command]
 fn close_session(state: State<'_, SessionManager>, session_id: String) -> Result<(), String> {
+    info!("Closing SSH session session_id={session_id}");
     let result = state.send(&session_id, SessionCommand::Close);
     let _ = state.remove(&session_id);
+    if let Err(error) = &result {
+        warn!("Failed to close SSH session session_id={session_id}: {error}");
+    }
     result
 }
 
 #[tauri::command]
 async fn list_remote_directory(request: RemoteDirectoryRequest) -> Result<RemoteDirectoryListing, String> {
-    tauri::async_runtime::spawn_blocking(move || list_remote_directory_blocking(request))
+    let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
+    debug!(
+        "Listing remote directory path={} {}",
+        requested_path,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || list_remote_directory_blocking(request))
         .await
-        .map_err(|error| format!("failed to join directory listing task: {error}"))?
+        .map_err(|error| format!("failed to join directory listing task: {error}"))?;
+    if let Ok(listing) = &result {
+        debug!(
+            "Listed remote directory path={} entries={}",
+            listing.path,
+            listing.entries.len()
+        );
+    }
+    result
 }
 
 #[tauri::command]
 async fn create_remote_entry(request: CreateRemoteEntryRequest) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || create_remote_entry_blocking(request))
+    info!(
+        "Creating remote entry parent_path={} name={} kind={:?} {}",
+        request.parent_path,
+        request.name,
+        request.kind,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || create_remote_entry_blocking(request))
         .await
-        .map_err(|error| format!("failed to join create entry task: {error}"))?
+        .map_err(|error| format!("failed to join create entry task: {error}"))?;
+    if result.is_ok() {
+        info!("Created remote entry successfully");
+    }
+    result
 }
 
 #[tauri::command]
 async fn rename_remote_path(request: RenameRemotePathRequest) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || rename_remote_path_blocking(request))
+    info!(
+        "Renaming remote path path={} new_name={} {}",
+        request.path,
+        request.new_name,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || rename_remote_path_blocking(request))
         .await
-        .map_err(|error| format!("failed to join rename task: {error}"))?
+        .map_err(|error| format!("failed to join rename task: {error}"))?;
+    if result.is_ok() {
+        info!("Renamed remote path successfully");
+    }
+    result
 }
 
 #[tauri::command]
@@ -582,6 +647,12 @@ async fn delete_remote_path(
     deletes: State<'_, DeleteCancellationRegistry>,
     request: DeleteRemotePathRequest,
 ) -> Result<(), String> {
+    info!(
+        "Deleting remote path operation_id={} path={} {}",
+        request.operation_id,
+        request.path,
+        summarize_remote_connection_request(&request.connection)
+    );
     let cancel_flag = deletes.register(request.operation_id.clone())?;
     let operation_id = request.operation_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -590,14 +661,29 @@ async fn delete_remote_path(
         .await
         .map_err(|error| format!("failed to join delete task: {error}"))?;
     let _ = deletes.remove(&operation_id);
+    if let Err(error) = &result {
+        warn!("Delete remote path failed operation_id={operation_id}: {error}");
+    } else {
+        info!("Deleted remote path operation_id={operation_id}");
+    }
     result
 }
 
 #[tauri::command]
 async fn copy_remote_path(request: CopyRemotePathRequest) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || copy_remote_path_blocking(request))
+    info!(
+        "Copying remote path source_path={} destination_directory={} {}",
+        request.source_path,
+        request.destination_directory,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || copy_remote_path_blocking(request))
         .await
-        .map_err(|error| format!("failed to join copy task: {error}"))?
+        .map_err(|error| format!("failed to join copy task: {error}"))?;
+    if result.is_ok() {
+        info!("Copied remote path successfully");
+    }
+    result
 }
 
 #[tauri::command]
@@ -606,6 +692,13 @@ async fn upload_local_paths(
     uploads: State<'_, UploadCancellationRegistry>,
     request: UploadLocalPathsRequest,
 ) -> Result<(), String> {
+    info!(
+        "Uploading local paths operation_id={} count={} destination_directory={} {}",
+        request.operation_id,
+        request.local_paths.len(),
+        request.destination_directory,
+        summarize_remote_connection_request(&request.connection)
+    );
     let cancel_flag = uploads.register(request.operation_id.clone())?;
     let operation_id = request.operation_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -614,6 +707,11 @@ async fn upload_local_paths(
         .await
         .map_err(|error| format!("failed to join upload task: {error}"))?;
     let _ = uploads.remove(&operation_id);
+    if let Err(error) = &result {
+        warn!("Upload failed operation_id={operation_id}: {error}");
+    } else {
+        info!("Upload completed operation_id={operation_id}");
+    }
     result
 }
 
@@ -622,6 +720,7 @@ fn cancel_upload(
     uploads: State<'_, UploadCancellationRegistry>,
     operation_id: String,
 ) -> Result<(), String> {
+    info!("Cancelling upload operation_id={operation_id}");
     uploads.cancel(&operation_id)
 }
 
@@ -630,6 +729,7 @@ fn cancel_delete(
     deletes: State<'_, DeleteCancellationRegistry>,
     operation_id: String,
 ) -> Result<(), String> {
+    info!("Cancelling delete operation_id={operation_id}");
     deletes.cancel(&operation_id)
 }
 
@@ -656,9 +756,18 @@ fn pick_local_folder() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 async fn open_remote_file(request: OpenRemoteFileRequest) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || open_remote_file_blocking(request))
+    info!(
+        "Opening remote file path={} {}",
+        request.path,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || open_remote_file_blocking(request))
         .await
-        .map_err(|error| format!("failed to join open file task: {error}"))?
+        .map_err(|error| format!("failed to join open file task: {error}"))?;
+    if result.is_ok() {
+        info!("Opened remote file successfully");
+    }
+    result
 }
 
 fn spawn_ssh_thread(
@@ -668,10 +777,16 @@ fn spawn_ssh_thread(
     rx: Receiver<SessionCommand>,
 ) {
     thread::spawn(move || {
+        debug!("Spawned SSH worker session_id={session_id}");
         let run_result = run_ssh_session(&app, &session_id, &request, rx);
 
         match run_result {
             Ok(message) => {
+                info!(
+                    "SSH session ended session_id={} reason={}",
+                    session_id,
+                    message.as_deref().unwrap_or("remote shell closed")
+                );
                 let _ = emit_status(
                     &app,
                     &session_id,
@@ -681,6 +796,7 @@ fn spawn_ssh_thread(
                 let _ = emit_closed(&app, &session_id, message);
             }
             Err(error) => {
+                error!("SSH session failed session_id={session_id}: {error}");
                 let _ = emit_status(
                     &app,
                     &session_id,
@@ -702,6 +818,11 @@ fn run_ssh_session(
     request: &SessionCreateRequest,
     rx: Receiver<SessionCommand>,
 ) -> Result<Option<String>, String> {
+    info!(
+        "SSH session connecting session_id={} {}",
+        session_id,
+        summarize_session_request(request)
+    );
     emit_status(
         app,
         session_id,
@@ -735,6 +856,7 @@ fn run_ssh_session(
     session.set_keepalive(true, SSH_KEEPALIVE_INTERVAL_SECS);
     session.set_blocking(false);
 
+    info!("SSH session connected session_id={session_id}");
     emit_status(
         app,
         session_id,
@@ -1108,6 +1230,7 @@ fn run_remote_exec(session: &Session, command: &str) -> Result<String, String> {
 
 fn connect_sftp(request: &RemoteConnectionRequest) -> Result<ConnectedSftp, String> {
     validate_connection_fields(&request.host, &request.username)?;
+    debug!("Connecting SFTP {}", summarize_remote_connection_request(request));
 
     let tcp = connect_tcp_stream(&request.host, request.port)?;
     let session = open_authenticated_session(
@@ -1122,6 +1245,10 @@ fn connect_sftp(request: &RemoteConnectionRequest) -> Result<ConnectedSftp, Stri
         .sftp()
         .map_err(|error| format!("failed to open sftp subsystem: {error}"))?;
 
+    debug!(
+        "Connected SFTP host={} port={} username={}",
+        request.host, request.port, request.username
+    );
     Ok(ConnectedSftp {
         session,
         sftp,
@@ -1138,8 +1265,58 @@ fn validate_connection_fields(host: &str, username: &str) -> Result<(), String> 
     Ok(())
 }
 
+fn has_secret_value(value: Option<&str>) -> bool {
+    value.is_some_and(|item| !item.trim().is_empty())
+}
+
+fn summarize_connection_fields(
+    host: &str,
+    port: u16,
+    username: &str,
+    auth_method: AuthMethod,
+    password: Option<&str>,
+    private_key_path: Option<&str>,
+    passphrase: Option<&str>,
+) -> String {
+    format!(
+        "host={} port={} username={} auth_method={} has_password={} has_private_key_path={} has_passphrase={}",
+        host.trim(),
+        port,
+        username.trim(),
+        auth_method.as_str(),
+        has_secret_value(password),
+        has_secret_value(private_key_path),
+        has_secret_value(passphrase),
+    )
+}
+
+fn summarize_session_request(request: &SessionCreateRequest) -> String {
+    summarize_connection_fields(
+        &request.host,
+        request.port,
+        &request.username,
+        request.auth_method,
+        request.password.as_deref(),
+        request.private_key_path.as_deref(),
+        request.passphrase.as_deref(),
+    )
+}
+
+fn summarize_remote_connection_request(request: &RemoteConnectionRequest) -> String {
+    summarize_connection_fields(
+        &request.host,
+        request.port,
+        &request.username,
+        request.auth_method,
+        request.password.as_deref(),
+        request.private_key_path.as_deref(),
+        request.passphrase.as_deref(),
+    )
+}
+
 fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, String> {
     let address = format!("{host}:{port}");
+    debug!("Opening TCP connection address={address}");
     let socket_addr = address
         .to_socket_addrs()
         .map_err(|error| format!("failed to resolve {address}: {error}"))?
@@ -1158,6 +1335,11 @@ fn open_authenticated_session(
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
 ) -> Result<Session, String> {
+    debug!(
+        "Opening authenticated SSH session username={} auth_method={}",
+        username,
+        auth_method.as_str()
+    );
     let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
     session.set_tcp_stream(tcp);
     session
@@ -1173,6 +1355,11 @@ fn open_authenticated_session(
         passphrase,
     )?;
 
+    debug!(
+        "SSH authentication succeeded username={} auth_method={}",
+        username,
+        auth_method.as_str()
+    );
     Ok(session)
 }
 
@@ -1539,6 +1726,34 @@ mod tests {
         .expect("new names should upload without additional confirmation");
 
         assert_eq!(resolved, Some(String::from("report.txt")));
+    }
+
+    #[test]
+    fn session_request_summary_redacts_secret_values() {
+        let request = SessionCreateRequest {
+            name: "demo".to_string(),
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("super-secret".to_string()),
+            private_key_path: Some("/Users/alice/.ssh/id_ed25519".to_string()),
+            passphrase: Some("keep-me-out-of-logs".to_string()),
+            terminal_cols: 120,
+            terminal_rows: 32,
+        };
+
+        let summary = summarize_session_request(&request);
+
+        assert!(summary.contains("host=example.com"));
+        assert!(summary.contains("username=alice"));
+        assert!(summary.contains("auth_method=password"));
+        assert!(summary.contains("has_password=true"));
+        assert!(summary.contains("has_private_key_path=true"));
+        assert!(summary.contains("has_passphrase=true"));
+        assert!(!summary.contains("super-secret"));
+        assert!(!summary.contains("keep-me-out-of-logs"));
+        assert!(!summary.contains("/Users/alice/.ssh/id_ed25519"));
     }
 }
 
@@ -1917,7 +2132,27 @@ fn emit_closed(
 }
 
 pub fn run() {
+    let log_level = if cfg!(debug_assertions) {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
+
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log_level)
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(10))
+                .max_file_size(1_048_576)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("termbridge".to_string()),
+                    }),
+                ])
+                .build(),
+        )
         .manage(SessionManager::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())

@@ -1,4 +1,3 @@
 fn main() {
-    ssh_tool_lib::run();
+    term_bridge_lib::run();
 }
-

@@ -1,5 +1,11 @@
-import { useLogStore } from "../stores/logStore";
-import type { LogEntry, LogLevel } from "../types";
+import {
+  debug as tauriDebug,
+  error as tauriError,
+  info as tauriInfo,
+  warn as tauriWarn,
+} from "@tauri-apps/plugin-log";
+import type { LogLevel } from "../types";
+import { isTauriRuntime } from "./tauri";
 
 const LOG_LEVEL_WEIGHT: Record<LogLevel, number> = {
   debug: 10,
@@ -76,32 +82,24 @@ function toDetailsString(details: unknown): string | undefined {
   }
 }
 
-function createEntry(level: LogLevel, scope: string, message: string, details?: unknown): LogEntry {
-  const timestamp = Date.now();
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${timestamp}-${Math.random().toString(36).slice(2, 10)}`;
+function formatMessage(scope: string, message: string, details?: unknown) {
+  const detailsText = toDetailsString(details);
+  if (!detailsText) {
+    return `[${scope}] ${message}`;
+  }
 
-  return {
-    id,
-    timestamp,
-    level,
-    scope,
-    message,
-    details: toDetailsString(details),
-  };
+  return `[${scope}] ${message} ${detailsText}`;
 }
 
-function printToConsole(entry: LogEntry, details?: unknown) {
-  const tag = `[termbridge][${entry.level.toUpperCase()}][${entry.scope}]`;
-  const text = `${tag} ${entry.message}`;
+function printToConsole(level: LogLevel, scope: string, message: string, details?: unknown) {
+  const tag = `[termbridge][${level.toUpperCase()}][${scope}]`;
+  const text = `${tag} ${message}`;
   const method =
-    entry.level === "debug"
+    level === "debug"
       ? console.debug
-      : entry.level === "info"
+      : level === "info"
         ? console.info
-        : entry.level === "warn"
+        : level === "warn"
           ? console.warn
           : console.error;
 
@@ -113,12 +111,36 @@ function printToConsole(entry: LogEntry, details?: unknown) {
   method(text, details);
 }
 
+async function writeToTauri(level: LogLevel, message: string) {
+  switch (level) {
+    case "debug":
+      await tauriDebug(message);
+      return;
+    case "info":
+      await tauriInfo(message);
+      return;
+    case "warn":
+      await tauriWarn(message);
+      return;
+    case "error":
+      await tauriError(message);
+      return;
+  }
+}
+
 function log(level: LogLevel, scope: string, message: string, details?: unknown) {
   if (!shouldLog(level)) {
     return;
   }
 
-  const entry = createEntry(level, scope, message, details);
-  useLogStore.getState().append(entry);
-  printToConsole(entry, details);
+  const formattedMessage = formatMessage(scope, message, details);
+  if (!isTauriRuntime()) {
+    printToConsole(level, scope, message, details);
+    return;
+  }
+
+  void writeToTauri(level, formattedMessage).catch((error) => {
+    printToConsole(level, scope, message, details);
+    console.error("[termbridge][ERROR][logger] Failed to write desktop log", error);
+  });
 }

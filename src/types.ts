@@ -33,15 +33,6 @@ export interface SessionState extends SessionSummary {
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-export interface LogEntry {
-  id: string;
-  timestamp: number;
-  level: LogLevel;
-  scope: string;
-  message: string;
-  details?: string;
-}
-
 export interface SshStatusEvent {
   sessionId: string;
   status: SessionStatus;

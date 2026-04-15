@@ -34,6 +34,7 @@ TermBridge 是一个基于 Tauri 2、React 和 Rust 构建的跨平台 SSH 桌�
 - 上传取消
 - 删除进度展示
 - 右上角 Toast 操作提示
+- 前后端统一日志写入本地日志目录
 - 应用图标打包配置
 
 ## 项目结构
@@ -117,6 +118,31 @@ npm run tauri:build
 - 历史连接信息保存在前端本地存储中
 - 勾选“保存密码”后，密码会随连接信息一起保存在本地存储
 - `passphrase` 当前不会持久化保存
+
+## 日志说明
+
+- UI 和 Tauri / Rust 后端都接入统一日志系统
+- 日志会写入系统推荐的应用日志目录，文件名为 `termbridge.log`
+- 开发环境默认记录 `debug` 及以上日志，生产环境默认记录 `info` 及以上日志
+- 前端浏览器预览模式下不会写本地日志文件，只会输出到浏览器控制台
+- 日志会记录会话生命周期、文件管理操作、上传/删除等关键链路
+- 日志不会记录明文密码、私钥内容、passphrase 和终端实时输入输出内容
+
+### 本地开发时如何查看日志
+
+- macOS: `~/Library/Logs/com.termbridge/termbridge.log`
+- Windows: `%LOCALAPPDATA%\\com.termbridge\\logs\\termbridge.log`
+- Linux: `$XDG_DATA_HOME/com.termbridge/logs/termbridge.log`，如果未设置 `XDG_DATA_HOME`，通常是 `~/.local/share/com.termbridge/logs/termbridge.log`
+- 日志轮转后会生成类似 `termbridge_2026-04-15_10-30-00.log` 的归档文件
+- 只有通过 `npm run tauri:dev` 或桌面端构建产物运行时才会写本地日志文件
+- 仅运行 `npm run dev` 时属于浏览器预览模式，日志只会输出到浏览器控制台
+
+macOS 下可以直接执行：
+
+```bash
+open ~/Library/Logs/com.termbridge
+tail -f ~/Library/Logs/com.termbridge/termbridge.log
+```
 
 ## 当前限制
 
