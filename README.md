@@ -144,6 +144,13 @@ open ~/Library/Logs/com.termbridge
 tail -f ~/Library/Logs/com.termbridge/termbridge.log
 ```
 
+## 更新机制
+
+- 应用启动后约 8 秒会执行一次静默更新检查，并使用 12 小时节流策略避免频繁检查。
+- 检测到新版本后会自动在后台下载更新，不打断当前终端与文件操作。
+- 下载完成后会弹出提示，引导用户重启应用并完成安装。
+- 用户也可以随时手动触发检查更新：macOS 顶部菜单和 Windows 托盘右键菜单都提供入口。
+
 ## 当前限制
 
 - 暂未实现 known_hosts / 主机指纹校验管理

@@ -220,6 +220,35 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [runUpdateCheck]);
 
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let stopSystemCheckUpdate: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      const nextStopSystemCheckUpdate = await listen('system-check-update', () => {
+        void runUpdateCheck('manual');
+      });
+
+      if (cancelled) {
+        nextStopSystemCheckUpdate();
+        return;
+      }
+
+      stopSystemCheckUpdate = nextStopSystemCheckUpdate;
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      stopSystemCheckUpdate?.();
+    };
+  }, [runUpdateCheck]);
+
   const createSessionFromProfile = async (profile: ConnectionProfile) =>
     invoke<SessionSummary>('create_session', {
       request: {
