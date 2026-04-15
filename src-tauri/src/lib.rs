@@ -2519,6 +2519,7 @@ pub fn run() {
                 ])
                 .build(),
         )
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
