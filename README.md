@@ -190,9 +190,33 @@ https://github.com/hi-fullmoon/TermBridge/releases/latest/download/latest.json
 仓库内置了一键发布脚本：
 
 ```bash
+# 首次使用时创建本地发布配置
+cp .env.example .env.local
+
+# 在 .env.local 中填写：
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD=...
+
 gh auth login
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<你的私钥密码>" pnpm release:github -- --version 0.1.1 --notes "Release v0.1.1"
+pnpm release:github -- --version 0.1.1 --notes "Release v0.1.1"
 ```
+
+如果你直接执行脚本，也可以这样调用：
+
+```bash
+bash scripts/release-github.sh --version 0.1.1 --notes "Release v0.1.1"
+```
+
+发布脚本会按以下优先级读取根目录环境文件：
+
+- 先读取 `.env`
+- 再读取 `.env.local`
+- `.env.local` 中的值会覆盖 `.env`
+
+推荐做法：
+
+- 把示例变量保留在 `.env.example`
+- 把真实密钥口令写在本地 `.env.local`
+- `.env` 和 `.env.local` 都已加入 Git 忽略，不会被提交
 
 这个脚本会处理版本同步、构建、生成 updater 元数据并上传 Release 资产。
 

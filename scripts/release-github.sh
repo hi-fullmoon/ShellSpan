@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
 
 usage() {
   cat <<'USAGE'
@@ -21,43 +20,12 @@ Environment:
   TAURI_SIGNING_PRIVATE_KEY_PATH      Fallback key path (default: ~/.tauri/termbridge-updater.key)
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  Private key password (if key is encrypted)
   GITHUB_REPOSITORY                   Override owner/repo (default: infer from git remote)
+
+Root env files:
+  .env                                Optional local/shared env file
+  .env.local                          Optional local-only env file, overrides .env
 USAGE
 }
-
-VERSION=""
-NOTES=""
-DRAFT=0
-SKIP_BUILD=0
-
-while (($#)); do
-  case "$1" in
-    --version)
-      VERSION="${2:-}"
-      shift 2
-      ;;
-    --notes)
-      NOTES="${2:-}"
-      shift 2
-      ;;
-    --draft)
-      DRAFT=1
-      shift
-      ;;
-    --skip-build)
-      SKIP_BUILD=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown option: $1" >&2
-      usage
-      exit 1
-      ;;
-  esac
-done
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -66,18 +34,27 @@ need_cmd() {
   fi
 }
 
-need_cmd node
-need_cmd npm
-need_cmd gh
-need_cmd curl
+load_env_file() {
+  local env_file="$1"
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
 
-if ! gh auth status >/dev/null 2>&1; then
-  echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
-  exit 1
-fi
+  # .env files are treated as local shell env input for release automation.
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+}
 
-if [[ -n "$VERSION" ]]; then
-  node - "$VERSION" <<'NODE'
+load_release_env() {
+  load_env_file "$ROOT_DIR/.env"
+  load_env_file "$ROOT_DIR/.env.local"
+}
+
+synchronize_version() {
+  local version="$1"
+  node - "$version" <<'NODE'
 const fs = require('fs');
 const version = process.argv[2];
 if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
@@ -94,24 +71,17 @@ fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
 fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + '\n');
 console.log(`Version synchronized to ${version}`);
 NODE
-fi
+}
 
-read -r APP_VERSION TAURI_VERSION UPDATER_ENDPOINT < <(node - <<'NODE'
+read_release_metadata() {
+  node - <<'NODE'
 const fs = require('fs');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
 const endpoint = (tauri.plugins && tauri.plugins.updater && tauri.plugins.updater.endpoints || [])[0] || '';
 console.log(`${pkg.version} ${tauri.version} ${endpoint}`);
 NODE
-)
-
-if [[ "$APP_VERSION" != "$TAURI_VERSION" ]]; then
-  echo "Version mismatch: package.json=$APP_VERSION, tauri.conf.json=$TAURI_VERSION" >&2
-  echo "Run with --version <x.y.z> to synchronize." >&2
-  exit 1
-fi
-
-TAG="v${APP_VERSION}"
+}
 
 infer_repo() {
   local remote
@@ -137,37 +107,6 @@ for (const p of patterns) {
 process.exit(1);
 NODE
 }
-
-REPO_SLUG="${GITHUB_REPOSITORY:-}"
-if [[ -z "$REPO_SLUG" ]]; then
-  if ! REPO_SLUG="$(infer_repo)"; then
-    echo "Failed to infer GitHub repository from remote.origin.url. Set GITHUB_REPOSITORY=owner/repo" >&2
-    exit 1
-  fi
-fi
-
-if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-  KEY_PATH="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/termbridge-updater.key}"
-  if [[ ! -f "$KEY_PATH" ]]; then
-    echo "TAURI_SIGNING_PRIVATE_KEY is not set and key file not found: $KEY_PATH" >&2
-    exit 1
-  fi
-  export TAURI_SIGNING_PRIVATE_KEY
-  TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY_PATH")"
-fi
-
-if [[ "$SKIP_BUILD" -eq 0 ]]; then
-  echo "[release] Building Tauri bundles..."
-  npm run tauri:build
-else
-  echo "[release] Skipping build (--skip-build)"
-fi
-
-BUNDLE_DIR="$ROOT_DIR/src-tauri/target/release/bundle"
-if [[ ! -d "$BUNDLE_DIR" ]]; then
-  echo "Bundle directory not found: $BUNDLE_DIR" >&2
-  exit 1
-fi
 
 detect_platform() {
   local file="$1"
@@ -220,42 +159,145 @@ detect_platform() {
   return 1
 }
 
-declare -a UPDATER_ARCHIVES=()
-while IFS= read -r f; do
-  UPDATER_ARCHIVES+=("$f")
-done < <(find "$BUNDLE_DIR" -type f \( -name '*.app.tar.gz' -o -name '*.AppImage.tar.gz' -o -name '*.msi.zip' -o -name '*.nsis.zip' -o -name '*.exe.zip' \) | sort)
+main() {
+  cd "$ROOT_DIR"
 
-if [[ ${#UPDATER_ARCHIVES[@]} -eq 0 ]]; then
-  echo "No updater archive found under: $BUNDLE_DIR" >&2
-  exit 1
-fi
+  local version=""
+  local notes=""
+  local draft=0
+  local skip_build=0
 
-declare -a ROWS=()
-for archive in "${UPDATER_ARCHIVES[@]}"; do
-  sig_file="${archive}.sig"
-  if [[ ! -f "$sig_file" ]]; then
-    echo "Missing signature for updater archive: $sig_file" >&2
-    echo "Check TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD." >&2
+  while (($#)); do
+    case "$1" in
+      --)
+        shift
+        ;;
+      --version)
+        version="${2:-}"
+        shift 2
+        ;;
+      --notes)
+        notes="${2:-}"
+        shift 2
+        ;;
+      --draft)
+        draft=1
+        shift
+        ;;
+      --skip-build)
+        skip_build=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage
+        exit 1
+        ;;
+    esac
+  done
+
+  load_release_env
+
+  need_cmd node
+  need_cmd npm
+  need_cmd gh
+  need_cmd curl
+
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
     exit 1
   fi
 
-  if ! platform="$(detect_platform "$archive")"; then
-    echo "Skipping unknown updater archive type: $archive"
-    continue
+  if [[ -n "$version" ]]; then
+    synchronize_version "$version"
   fi
 
-  sig="$(tr -d '\r\n' < "$sig_file")"
-  url="https://github.com/${REPO_SLUG}/releases/download/${TAG}/$(basename "$archive")"
-  ROWS+=("${platform}|${url}|${sig}")
-done
+  local app_version
+  local tauri_version
+  local updater_endpoint
+  read -r app_version tauri_version updater_endpoint < <(read_release_metadata)
 
-if [[ ${#ROWS[@]} -eq 0 ]]; then
-  echo "No valid platform entries were generated for latest.json" >&2
-  exit 1
-fi
+  if [[ "$app_version" != "$tauri_version" ]]; then
+    echo "Version mismatch: package.json=$app_version, tauri.conf.json=$tauri_version" >&2
+    echo "Run with --version <x.y.z> to synchronize." >&2
+    exit 1
+  fi
 
-LATEST_JSON="$BUNDLE_DIR/latest.json"
-node - "$LATEST_JSON" "$TAG" "$NOTES" "${ROWS[@]}" <<'NODE'
+  local tag="v${app_version}"
+  local repo_slug="${GITHUB_REPOSITORY:-}"
+  if [[ -z "$repo_slug" ]]; then
+    if ! repo_slug="$(infer_repo)"; then
+      echo "Failed to infer GitHub repository from remote.origin.url. Set GITHUB_REPOSITORY=owner/repo" >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+    local key_path="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/termbridge-updater.key}"
+    if [[ ! -f "$key_path" ]]; then
+      echo "TAURI_SIGNING_PRIVATE_KEY is not set and key file not found: $key_path" >&2
+      exit 1
+    fi
+    export TAURI_SIGNING_PRIVATE_KEY
+    TAURI_SIGNING_PRIVATE_KEY="$(cat "$key_path")"
+  fi
+
+  if [[ "$skip_build" -eq 0 ]]; then
+    echo "[release] Building Tauri bundles..."
+    npm run tauri:build
+  else
+    echo "[release] Skipping build (--skip-build)"
+  fi
+
+  local bundle_dir="$ROOT_DIR/src-tauri/target/release/bundle"
+  if [[ ! -d "$bundle_dir" ]]; then
+    echo "Bundle directory not found: $bundle_dir" >&2
+    exit 1
+  fi
+
+  local -a updater_archives=()
+  while IFS= read -r f; do
+    updater_archives+=("$f")
+  done < <(find "$bundle_dir" -type f \( -name '*.app.tar.gz' -o -name '*.AppImage.tar.gz' -o -name '*.msi.zip' -o -name '*.nsis.zip' -o -name '*.exe.zip' \) | sort)
+
+  if [[ ${#updater_archives[@]} -eq 0 ]]; then
+    echo "No updater archive found under: $bundle_dir" >&2
+    exit 1
+  fi
+
+  local -a rows=()
+  local archive
+  for archive in "${updater_archives[@]}"; do
+    local sig_file="${archive}.sig"
+    if [[ ! -f "$sig_file" ]]; then
+      echo "Missing signature for updater archive: $sig_file" >&2
+      echo "Check TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD." >&2
+      exit 1
+    fi
+
+    local platform
+    if ! platform="$(detect_platform "$archive")"; then
+      echo "Skipping unknown updater archive type: $archive"
+      continue
+    fi
+
+    local sig
+    sig="$(tr -d '\r\n' < "$sig_file")"
+    local url="https://github.com/${repo_slug}/releases/download/${tag}/$(basename "$archive")"
+    rows+=("${platform}|${url}|${sig}")
+  done
+
+  if [[ ${#rows[@]} -eq 0 ]]; then
+    echo "No valid platform entries were generated for latest.json" >&2
+    exit 1
+  fi
+
+  local latest_json="$bundle_dir/latest.json"
+  node - "$latest_json" "$tag" "$notes" "${rows[@]}" <<'NODE'
 const fs = require('fs');
 
 const out = process.argv[2];
@@ -279,76 +321,83 @@ fs.writeFileSync(out, JSON.stringify(payload, null, 2) + '\n');
 console.log(`Generated ${out}`);
 NODE
 
-declare -a ASSETS=()
-ASSETS+=("$LATEST_JSON")
-for archive in "${UPDATER_ARCHIVES[@]}"; do
-  ASSETS+=("$archive" "${archive}.sig")
-done
-while IFS= read -r f; do
-  ASSETS+=("$f")
-done < <(find "$BUNDLE_DIR" -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' \) | sort)
+  local -a assets=()
+  assets+=("$latest_json")
+  for archive in "${updater_archives[@]}"; do
+    assets+=("$archive" "${archive}.sig")
+  done
+  while IFS= read -r f; do
+    assets+=("$f")
+  done < <(find "$bundle_dir" -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' \) | sort)
 
-# de-duplicate asset list
-if ((${#ASSETS[@]} == 0)); then
-  echo "No assets to upload." >&2
-  exit 1
-fi
-
-ASSETS_FILE="$(mktemp)"
-for a in "${ASSETS[@]}"; do
-  if [[ -f "$a" ]]; then
-    printf '%s\n' "$a" >> "$ASSETS_FILE"
+  if ((${#assets[@]} == 0)); then
+    echo "No assets to upload." >&2
+    exit 1
   fi
-done
 
-UNIQUE_ASSETS=()
-while IFS= read -r line; do
-  [[ -n "$line" ]] && UNIQUE_ASSETS+=("$line")
-done < <(sort -u "$ASSETS_FILE")
-rm -f "$ASSETS_FILE"
-
-if gh release view "$TAG" >/dev/null 2>&1; then
-  echo "[release] Release $TAG exists. Uploading assets with --clobber..."
-  gh release upload "$TAG" "${UNIQUE_ASSETS[@]}" --clobber
-else
-  echo "[release] Creating release $TAG ..."
-  args=(release create "$TAG" "${UNIQUE_ASSETS[@]}" --title "TermBridge ${TAG}")
-  if [[ "$DRAFT" -eq 1 ]]; then
-    args+=(--draft)
-  fi
-  if [[ -n "$NOTES" ]]; then
-    args+=(--notes "$NOTES")
-  else
-    args+=(--generate-notes)
-  fi
-  gh "${args[@]}"
-fi
-
-if [[ "$DRAFT" -eq 1 ]]; then
-  echo "[release] Draft release created. /releases/latest endpoint won't include drafts."
-  exit 0
-fi
-
-if [[ -z "$UPDATER_ENDPOINT" ]]; then
-  UPDATER_ENDPOINT="https://github.com/${REPO_SLUG}/releases/latest/download/latest.json"
-fi
-
-echo "[release] Verifying updater endpoint: $UPDATER_ENDPOINT"
-OK=0
-for _ in {1..12}; do
-  if body="$(curl -fsSL "$UPDATER_ENDPOINT" 2>/dev/null)"; then
-    if node -e 'JSON.parse(process.argv[1]);' "$body" >/dev/null 2>&1; then
-      OK=1
-      break
+  local assets_file
+  assets_file="$(mktemp)"
+  local a
+  for a in "${assets[@]}"; do
+    if [[ -f "$a" ]]; then
+      printf '%s\n' "$a" >> "$assets_file"
     fi
-  fi
-  sleep 3
-done
+  done
 
-if [[ "$OK" -eq 1 ]]; then
-  echo "[release] Success. Updater latest.json is reachable and valid JSON."
-else
-  echo "[release] Uploaded, but endpoint validation failed." >&2
-  echo "Run manually: curl -fsSL $UPDATER_ENDPOINT | jq ." >&2
-  exit 1
+  local -a unique_assets=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && unique_assets+=("$line")
+  done < <(sort -u "$assets_file")
+  rm -f "$assets_file"
+
+  if gh release view "$tag" >/dev/null 2>&1; then
+    echo "[release] Release $tag exists. Uploading assets with --clobber..."
+    gh release upload "$tag" "${unique_assets[@]}" --clobber
+  else
+    echo "[release] Creating release $tag ..."
+    local -a args=(release create "$tag" "${unique_assets[@]}" --title "TermBridge ${tag}")
+    if [[ "$draft" -eq 1 ]]; then
+      args+=(--draft)
+    fi
+    if [[ -n "$notes" ]]; then
+      args+=(--notes "$notes")
+    else
+      args+=(--generate-notes)
+    fi
+    gh "${args[@]}"
+  fi
+
+  if [[ "$draft" -eq 1 ]]; then
+    echo "[release] Draft release created. /releases/latest endpoint won't include drafts."
+    exit 0
+  fi
+
+  if [[ -z "$updater_endpoint" ]]; then
+    updater_endpoint="https://github.com/${repo_slug}/releases/latest/download/latest.json"
+  fi
+
+  echo "[release] Verifying updater endpoint: $updater_endpoint"
+  local ok=0
+  local body
+  for _ in {1..12}; do
+    if body="$(curl -fsSL "$updater_endpoint" 2>/dev/null)"; then
+      if node -e 'JSON.parse(process.argv[1]);' "$body" >/dev/null 2>&1; then
+        ok=1
+        break
+      fi
+    fi
+    sleep 3
+  done
+
+  if [[ "$ok" -eq 1 ]]; then
+    echo "[release] Success. Updater latest.json is reachable and valid JSON."
+  else
+    echo "[release] Uploaded, but endpoint validation failed." >&2
+    echo "Run manually: curl -fsSL $updater_endpoint | jq ." >&2
+    exit 1
+  fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
