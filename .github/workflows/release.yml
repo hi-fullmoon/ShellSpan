@@ -23,10 +23,10 @@ jobs:
       matrix:
         include:
           - platform: darwin-aarch64
-            runner: macos-14
+            runner: macos-15
             rust_target: aarch64-apple-darwin
           - platform: darwin-x86_64
-            runner: macos-13
+            runner: macos-15-intel
             rust_target: x86_64-apple-darwin
           - platform: windows-x86_64
             runner: windows-latest
@@ -38,8 +38,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
