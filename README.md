@@ -1,141 +1,168 @@
 # TermBridge
 
-TermBridge 是一个基于 Tauri 2、React 和 Rust 构建的跨平台 SSH 桌面工具，当前面向 macOS 和 Windows。
+TermBridge 是一个基于 Tauri 2、React 和 Rust 构建的跨平台 SSH 桌面工具，当前主要面向 macOS 和 Windows。
 
-它提供多会话终端、历史连接管理和内置远程文件管理，适合用作轻量 SSH / SFTP 工作台。
+它把常用的 SSH 终端能力和远程文件管理放进同一个桌面应用里，适合作为轻量的 SSH / SFTP 工作台。
+
+## 项目定位
+
+TermBridge 关注的是一条尽量顺手的远程运维主链路：
+
+- 快速创建 SSH 连接
+- 在同一窗口管理多个终端会话
+- 复用历史连接配置
+- 直接浏览和操作远程文件
+- 在桌面端统一处理日志与更新
+
+如果你想要一个比纯命令行更直观、又比重量级 IDE 更轻的桌面 SSH 客户端，这个项目就是围绕这个方向设计的。
+
+## 当前能力
+
+### 连接与会话
+
+- 支持密码认证和私钥认证
+- 支持保存连接信息
+- 密码认证下可选保存密码
+- 支持多标签终端会话
+- 支持会话状态展示与异常关闭提示
+- 支持会话标签切换与排序
+- 支持历史连接复用、重命名、收藏、置顶、删除
+
+### 文件管理
+
+- 内置远程文件管理器
+- 支持目录浏览和手动输入路径跳转
+- 支持新建文件、新建文件夹、重命名、复制、删除
+- 支持查看文件属性
+- 支持复制名称、文件路径、目录路径
+- 支持使用系统默认应用打开远程文件
+- 支持拖拽上传文件或文件夹
+- 支持上传进度展示与上传取消
+- 支持删除进度展示
+
+### 桌面能力
+
+- 前后端统一日志
+- 应用启动后自动检查更新
+- 支持手动触发更新检查
+- 已配置应用图标与打包产物
 
 ## 技术栈
 
 - 桌面框架：Tauri 2
-- 前端：React + TypeScript + Tailwind CSS
+- 前端：React 18 + TypeScript + Vite
+- UI 样式：Tailwind CSS
 - 终端渲染：xterm.js
-- 后端：Rust + `ssh2`
-- 支持平台：macOS、Windows
+- 文件表格：AG Grid
+- 状态管理：Zustand
+- 后端：Rust
+- SSH / SFTP：`ssh2`
 
-## 当前功能
+## 快速开始
 
-- SSH 连接表单，支持密码认证和私钥认证
-- 历史连接保存、删除
-- 可选保存连接信息
-- 可选保存密码
-- 多标签终端会话
-- 终端尺寸自动同步远端 PTY
-- 会话状态提示与异常关闭提示
-- 远程文件管理器
-- 远程目录手动输入和跳转
-- 文件 / 文件夹右键菜单
-- 新建文件、新建文件夹
-- 远程重命名、复制、粘贴、删除
-- 文件属性查看
-- 复制名称、文件路径、目录路径
-- 使用系统默认应用打开远程文件
-- 拖拽上传文件或文件夹
-- 上传进度展示
-- 上传取消
-- 删除进度展示
-- 右上角 Toast 操作提示
-- 前后端统一日志写入本地日志目录
-- 应用图标打包配置
+### 环境要求
 
-## 项目结构
+- Node.js 18 及以上
+- Rust 工具链，并确保 `cargo` 可用
+- 满足 Tauri 2 对当前系统的构建依赖
 
-```text
-.
-├── src/                     # React UI
-├── src/components/          # 终端、侧栏、文件管理器等组件
-├── src/lib/                 # 前端工具函数与 profile 持久化
-├── src-tauri/               # Tauri / Rust 后端
-├── src-tauri/icons/         # 应用图标资源
-├── package.json
-└── README.md
-```
+仓库当前使用 `pnpm-lock.yaml`，推荐使用 pnpm 9；如果你习惯 npm，也可以直接运行脚本。
 
-## 环境要求
-
-### Node.js
-
-建议使用 Node.js 18 及以上。
-
-### Rust
-
-需要安装 Rust 工具链，并确保 `cargo` 在终端可用。
-
-macOS:
-
-```bash
-curl https://sh.rustup.rs -sSf | sh
-```
-
-Windows:
-
-- 安装 Rustup
-- 安装 Visual Studio C++ Build Tools
-
-### Tauri 前置
-
-首次构建 Tauri 应用前，请确认本机已经满足 Tauri 2 的系统依赖。
-
-如果终端提示 `cargo: command not found`，说明 Rust 环境变量还没有生效。可以先执行：
+如果终端里找不到 `cargo`，先执行：
 
 ```bash
 source "$HOME/.cargo/env"
 ```
 
-或者重新打开终端后再运行。
-
-## 安装依赖
+### 安装依赖
 
 ```bash
-npm install
+pnpm install
 ```
 
-## 开发
-
-启动前端开发服务器：
+### 启动前端预览
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
-启动 Tauri 桌面开发模式：
+这会只启动浏览器预览环境，用于调试前端界面。此模式下无法使用真实 SSH 连接、文件管理和桌面端更新能力。
+
+### 启动桌面开发模式
 
 ```bash
-npm run tauri:dev
+pnpm tauri:dev
 ```
 
-当前脚本会优先从 `~/.cargo/bin` 查找 `cargo` 和 Tauri CLI。
+这个命令会启动完整的 Tauri 桌面应用，适合联调 SSH、SFTP、日志和更新逻辑。
 
-## 构建
+### 运行测试
 
 ```bash
-npm run tauri:build
+pnpm test
 ```
 
-构建完成后，可在 `src-tauri/target/` 下查看对应平台产物。
+### 构建桌面应用
 
-## 数据存储说明
+```bash
+pnpm tauri:build
+```
+
+构建完成后，可在 `src-tauri/target/` 下查看对应平台的构建产物。
+
+## 开发说明
+
+### 浏览器预览与桌面运行的区别
+
+`pnpm dev` 只运行 Vite 前端，因此：
+
+- UI 可以正常调试
+- SSH 连接不可用
+- 远程文件管理不可用
+- 本地日志文件不会生成
+- 更新检查不会生效
+
+`pnpm tauri:dev` 才会加载 Tauri 和 Rust 后端，完整功能都依赖这个模式验证。
+
+### 项目结构
+
+```text
+.
+├── src/                     # React 前端入口与界面逻辑
+├── src/components/          # 终端、侧栏、文件管理器等 UI 组件
+├── src/hooks/               # 前端自定义 hooks
+├── src/lib/                 # 状态、日志、更新、配置等通用逻辑
+├── src/stores/              # Zustand 状态存储
+├── src-tauri/               # Tauri 配置与 Rust 后端
+├── scripts/                 # 发布辅助脚本
+├── docs/                    # 设计说明与实施计划
+├── CONTRIBUTING.md          # 提交与注释规范
+└── README.md
+```
+
+## 数据与安全说明
 
 - 历史连接信息保存在前端本地存储中
-- 勾选“保存密码”后，密码会随连接信息一起保存在本地存储
-- `passphrase` 当前不会持久化保存
+- 只有勾选“保存密码”时，密码才会随连接信息一起保存在本地
+- 私钥口令仅参与当前连接，不会持久化保存
+- 日志不会记录明文密码、私钥内容、私钥口令或终端实时输入输出内容
+
+当前实现更偏向“可用的桌面客户端基础版”，安全能力仍有继续增强空间，见下方“当前限制”。
 
 ## 日志说明
 
-- UI 和 Tauri / Rust 后端都接入统一日志系统
-- 日志会写入系统推荐的应用日志目录，文件名为 `termbridge.log`
-- 开发环境默认记录 `debug` 及以上日志，生产环境默认记录 `info` 及以上日志
-- 前端浏览器预览模式下不会写本地日志文件，只会输出到浏览器控制台
-- 日志会记录会话生命周期、文件管理操作、上传/删除等关键链路
-- 日志不会记录明文密码、私钥内容、passphrase 和终端实时输入输出内容
+前端与 Tauri / Rust 后端共用统一日志体系：
 
-### 本地开发时如何查看日志
+- 开发环境默认记录 `debug` 及以上级别
+- 生产环境默认记录 `info` 及以上级别
+- 日志文件名为 `termbridge.log`
+- 日志会自动轮转，最多保留一组近期归档
+- 浏览器预览模式只输出到控制台，不写本地日志文件
 
-- macOS: `~/Library/Logs/com.termbridge/termbridge.log`
-- Windows: `%LOCALAPPDATA%\\com.termbridge\\logs\\termbridge.log`
-- Linux: `$XDG_DATA_HOME/com.termbridge/logs/termbridge.log`，如果未设置 `XDG_DATA_HOME`，通常是 `~/.local/share/com.termbridge/logs/termbridge.log`
-- 日志轮转后会生成类似 `termbridge_2026-04-15_10-30-00.log` 的归档文件
-- 只有通过 `npm run tauri:dev` 或桌面端构建产物运行时才会写本地日志文件
-- 仅运行 `npm run dev` 时属于浏览器预览模式，日志只会输出到浏览器控制台
+本地日志常见位置：
+
+- macOS：`~/Library/Logs/com.termbridge/termbridge.log`
+- Windows：`%LOCALAPPDATA%\\com.termbridge\\logs\\termbridge.log`
 
 macOS 下可以直接执行：
 
@@ -146,59 +173,74 @@ tail -f ~/Library/Logs/com.termbridge/termbridge.log
 
 ## 更新机制
 
-- 应用启动后约 8 秒会执行一次静默更新检查，并使用 12 小时节流策略避免频繁检查。
-- 检测到新版本后会自动在后台下载更新，不打断当前终端与文件操作。
-- 下载完成后会弹出提示，引导用户重启应用并完成安装。
-- 用户也可以随时手动触发检查更新：macOS 顶部菜单和 Windows 托盘右键菜单都提供入口。
+- 应用启动后约 8 秒会自动执行一次静默更新检查
+- 内置节流策略，避免频繁重复检查
+- 检测到新版本后会在后台下载
+- 下载完成后会提示用户重启应用完成安装
+- macOS 菜单和 Windows 托盘菜单都提供手动检查更新入口
 
-### 发布更新前自检（GitHub Releases）
+当前 updater 元数据地址配置为：
 
-1. 每次发布前先提升应用版本号，确保高于已安装版本。
-2. 构建时会生成 updater 产物（已启用 `bundle.createUpdaterArtifacts: "v1Compatible"`）。
-3. 在 GitHub Release 里上传构建产物及 updater 元数据（尤其是 `latest.json` 和对应签名文件）。
-4. 发布后先在终端验证：
-
-```bash
-curl -fsSL https://github.com/hi-fullmoon/TermBridge/releases/latest/download/latest.json | jq .
+```text
+https://github.com/hi-fullmoon/TermBridge/releases/latest/download/latest.json
 ```
 
-若该命令返回 404 或非 JSON，客户端会报错：`Could not fetch a valid release JSON from the remote`。
+### 发布 GitHub Release
 
-### 一键发布脚本
+仓库内置了一键发布脚本：
 
 ```bash
-# 先登录 GitHub CLI
 gh auth login
-
-# 发布新版本（会同步 package.json + tauri.conf.json 版本、构建、生成 latest.json、上传 Release 资产）
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<你的私钥密码>" npm run release:github -- --version 0.1.1 --notes "Release v0.1.1"
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<你的私钥密码>" pnpm release:github -- --version 0.1.1 --notes "Release v0.1.1"
 ```
+
+这个脚本会处理版本同步、构建、生成 updater 元数据并上传 Release 资产。
 
 ## 当前限制
 
-- 暂未实现 known_hosts / 主机指纹校验管理
-- 暂未实现系统钥匙串级别的密码安全存储
-- 暂未实现端口转发、代理跳板、分屏窗格
+- 暂未实现 `known_hosts` / 主机指纹校验管理
+- 暂未接入系统钥匙串级别的密码安全存储
+- 暂未实现端口转发、代理跳板、分屏窗格等高级连接能力
 - 上传暂不支持符号链接
-- “使用默认应用打开远程文件”会先把文件下载到本地临时目录再打开
-- 删除进度当前支持展示，不支持取消
+- 使用系统默认应用打开远程文件时，会先下载到本地临时目录
+- 删除进度当前支持展示，但不支持取消
+- 当前主要以 macOS 和 Windows 作为目标平台
 
-## 常用排查
+## 常见排查
 
 ### `cargo metadata` 执行失败
 
-一般是 Rust 未安装，或 `cargo` 不在 PATH 中。
-
-### 安装后没有显示应用图标
-
-请重新执行：
+通常是 Rust 未安装，或者 `cargo` 还没有加入 PATH。先确认：
 
 ```bash
-npm run tauri:build
+cargo --version
 ```
 
-项目已经配置好打包图标资源。若系统仍显示旧图标，通常是系统缓存导致，删除旧安装包后重新安装即可。
+如果依然失败，重新加载 Rust 环境：
 
-## 说明
+```bash
+source "$HOME/.cargo/env"
+```
 
-这个项目目前更接近可持续迭代的桌面客户端基础版本，已经具备 SSH 会话和常用文件管理主链路，后续可以继续在安全性、连接能力和终端高级特性上扩展。
+### 只看到前端页面，但 SSH 不能用
+
+大概率是你运行了 `pnpm dev`。真实 SSH / SFTP 功能需要通过 `pnpm tauri:dev` 启动桌面端。
+
+### 构建后应用图标没有更新
+
+先重新执行：
+
+```bash
+pnpm tauri:build
+```
+
+如果安装后的图标仍然是旧的，通常是系统图标缓存未刷新，删除旧安装包后重新安装即可。
+
+## 后续方向
+
+这个项目已经覆盖了 SSH 会话和常用文件管理的主链路，后续可以继续沿这些方向演进：
+
+- 更完善的安全能力
+- 更强的连接编排能力
+- 更丰富的终端高级特性
+- 更完整的发布与升级体验
