@@ -4,8 +4,7 @@ use libc::{poll, pollfd, POLLIN, POLLOUT};
 use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::{
-    BlockDirections, Channel, ExtendedData, FileStat, OpenFlags, OpenType, RenameFlags, Session,
-    Sftp,
+    Channel, ExtendedData, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp,
 };
 use std::{
     cmp::Ordering,
@@ -27,6 +26,8 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
+#[cfg(unix)]
+use ssh2::BlockDirections;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 
@@ -2581,7 +2582,7 @@ pub fn run() {
     {
         builder = builder
             .setup(|app| {
-                let tray_menu = build_windows_tray_menu(app)
+                let tray_menu = build_windows_tray_menu(app.handle())
                     .map_err(|error| format!("failed to create tray menu: {error}"))?;
                 let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main").menu(&tray_menu);
 

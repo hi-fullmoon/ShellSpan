@@ -16,7 +16,7 @@ tauri-build = { version = "2.5.6", features = [] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 ssh2 = { version = "0.9.5", features = ["vendored-openssl"] }
-tauri = { version = "2.10.3", features = [] }
+tauri = { version = "2.10.3", features = ["tray-icon"] }
 uuid = { version = "1.23.0", features = ["v4", "serde"] }
 rfd = "0.17.2"
 log = "0.4.29"
