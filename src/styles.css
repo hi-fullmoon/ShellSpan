@@ -184,7 +184,7 @@
   --ag-cell-horizontal-border: none;
   --ag-row-border-style: none;
   --ag-row-border-width: 0;
-  --ag-wrapper-border-radius: 10px;
+  --ag-wrapper-border-radius: 6px;
   --ag-font-size: 12px;
   --ag-font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Noto Sans SC', 'Source Han Sans SC', sans-serif;
   --ag-tooltip-background-color: rgba(2, 6, 23, 0.98);
@@ -252,7 +252,7 @@
 
 .termbridge-file-grid .ag-tooltip {
   border: 1px solid rgba(51, 65, 85, 0.95);
-  border-radius: 10px;
+  border-radius: 6px;
   background: rgba(2, 6, 23, 0.98) !important;
   color: rgb(241 245 249) !important;
   box-shadow: 0 12px 36px rgba(2, 6, 23, 0.5);
