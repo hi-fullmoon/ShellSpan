@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
 import { CloseIcon } from './components/Icons';
@@ -8,10 +8,15 @@ import { Sidebar } from './components/Sidebar';
 import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane } from './components/TerminalPane';
+import { Toast } from './components/Toast';
+import { UpdateRestartDialog } from './components/UpdateRestartDialog';
 import { createLogger } from './lib/logger';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
 import { applyStatusToSessions, consumeBufferedSessionStatus, type PendingSessionStatusEvents } from './lib/sessionStatusBuffer';
+import { markStartupUpdateCheck, shouldRunStartupUpdateCheck } from './lib/updateStartupPolicy';
+import { updateFlowReducer } from './lib/updateFlow';
+import { checkForUpdate, downloadAndInstallUpdate } from './lib/updater';
 import { isTauriRuntime } from './lib/tauri';
 import { shouldWarnOnClosedSession } from './lib/terminalStatus';
 import { useFileManagerStore } from './stores/fileManagerStore';
@@ -43,6 +48,10 @@ function App() {
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
   const [reorderingSessions, setReorderingSessions] = useState(false);
+  const [updateState, dispatchUpdateState] = useReducer(updateFlowReducer, { phase: 'idle' });
+  const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number>();
+  const [updateToast, setUpdateToast] = useState<{ message: string; tone: 'info' | 'success' | 'error' }>();
+  const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
   const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
@@ -123,6 +132,126 @@ function App() {
   );
   const pendingCloseSession = useMemo(() => sessions.find((item) => item.sessionId === pendingCloseSessionId), [pendingCloseSessionId, sessions]);
   const runtimeText = isTauriRuntime() ? '桌面端' : '浏览器预览';
+  const restartDialogOpen = updateState.phase === 'downloaded' && !restartDialogDismissed;
+
+  const runUpdateCheck = useCallback(
+    async (mode: 'startup' | 'manual') => {
+      if (!isTauriRuntime()) {
+        if (mode === 'manual') {
+          setUpdateToast({
+            message: '当前只启动了前端调试环境，无法检查更新。',
+            tone: 'error',
+          });
+        }
+        return;
+      }
+
+      dispatchUpdateState({ type: 'checkStarted' });
+      setUpdateDownloadProgress(undefined);
+
+      try {
+        const available = await checkForUpdate();
+        if (mode === 'startup') {
+          markStartupUpdateCheck(Date.now());
+        }
+        if (!available) {
+          dispatchUpdateState({ type: 'noUpdateFound' });
+          if (mode === 'manual') {
+            setUpdateToast({
+              message: '当前已是最新版本。',
+              tone: 'info',
+            });
+          }
+          return;
+        }
+
+        dispatchUpdateState({
+          type: 'updateFound',
+          payload: {
+            latestVersion: available.version,
+          },
+        });
+        dispatchUpdateState({ type: 'downloadStarted' });
+        setUpdateDownloadProgress(0);
+
+        await downloadAndInstallUpdate(available, (percent) => {
+          setUpdateDownloadProgress(percent);
+        });
+
+        setUpdateDownloadProgress(100);
+        dispatchUpdateState({
+          type: 'downloadCompleted',
+          payload: {
+            downloadedVersion: available.version,
+          },
+        });
+        setRestartDialogDismissed(false);
+      } catch (error) {
+        const message = `更新失败：${String(error)}`;
+        appLogger.error('检查或下载更新失败', { mode, error: String(error) });
+        dispatchUpdateState({
+          type: 'downloadFailed',
+          payload: {
+            message,
+          },
+        });
+        if (mode === 'manual') {
+          setUpdateToast({
+            message,
+            tone: 'error',
+          });
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !shouldRunStartupUpdateCheck(Date.now())) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        await runUpdateCheck('startup');
+      })();
+    }, 8000);
+
+    return () => window.clearTimeout(timer);
+  }, [runUpdateCheck]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let stopSystemCheckUpdate: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      try {
+        const nextStopSystemCheckUpdate = await listen('system-check-update', () => {
+          void runUpdateCheck('manual');
+        });
+
+        if (cancelled) {
+          nextStopSystemCheckUpdate();
+          return;
+        }
+
+        stopSystemCheckUpdate = nextStopSystemCheckUpdate;
+      } catch (error) {
+        appLogger.error('监听系统更新检查事件失败', { error: String(error) });
+      }
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      stopSystemCheckUpdate?.();
+    };
+  }, [runUpdateCheck]);
 
   const createSessionFromProfile = async (profile: ConnectionProfile) =>
     invoke<SessionSummary>('create_session', {
@@ -360,6 +489,41 @@ function App() {
     setPendingCloseSessionId(undefined);
   };
 
+  const handleInstallUpdateNow = () => {
+    appLogger.info('用户确认立即重启安装更新');
+    void (async () => {
+      try {
+        await invoke('request_app_restart');
+        return;
+      } catch (error) {
+        appLogger.error('调用原生重启失败，回退到窗口刷新', { error: String(error) });
+      }
+
+      setUpdateToast({
+        message: '无法调用系统重启，1 秒后将尝试刷新窗口。若更新未生效，请手动重启应用。',
+        tone: 'info',
+      });
+
+      window.setTimeout(() => {
+        try {
+          window.location.reload();
+        } catch (error) {
+          const message = `自动重启失败：${String(error)}。请手动关闭并重新打开应用以完成安装。`;
+          appLogger.error('回退刷新失败', { error: String(error) });
+          setUpdateToast({
+            message,
+            tone: 'error',
+          });
+        }
+      }, 1000);
+    })();
+  };
+
+  const handleInstallUpdateLater = () => {
+    appLogger.info('用户选择稍后安装更新');
+    setRestartDialogDismissed(true);
+  };
+
   return (
     <main className="h-screen overflow-hidden p-1">
       <div className="flex h-full gap-1">
@@ -570,6 +734,22 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      <UpdateRestartDialog
+        downloadProgress={updateDownloadProgress}
+        hasActiveSessions={connectedSessions > 0}
+        onInstallNow={handleInstallUpdateNow}
+        onLater={handleInstallUpdateLater}
+        open={restartDialogOpen}
+        version={updateState.version?.downloadedVersion ?? updateState.version?.latestVersion ?? '最新版本'}
+      />
+
+      <Toast
+        message={updateToast?.message ?? ''}
+        onClose={() => setUpdateToast(undefined)}
+        open={Boolean(updateToast)}
+        tone={updateToast?.tone ?? 'info'}
+      />
     </main>
   );
 }

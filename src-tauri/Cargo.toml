@@ -21,5 +21,6 @@ uuid = { version = "1.23.0", features = ["v4", "serde"] }
 rfd = "0.17.2"
 log = "0.4.29"
 tauri-plugin-log = "2.8.0"
+tauri-plugin-updater = "2.10.1"
 socket2 = "0.6.3"
 libc = "0.2.184"

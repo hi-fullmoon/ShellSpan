@@ -89,3 +89,33 @@ export interface RemoteDirectoryListing {
   parentPath?: string;
   entries: RemoteFileEntry[];
 }
+
+export type UpdatePhase =
+  | "idle"
+  | "checking"
+  | "update_available"
+  | "downloading"
+  | "downloaded"
+  | "no_update"
+  | "error";
+
+export interface UpdateVersionMetadata {
+  currentVersion?: string;
+  latestVersion?: string;
+  downloadedVersion?: string;
+}
+
+export interface UpdateState {
+  phase: UpdatePhase;
+  version?: UpdateVersionMetadata;
+  error?: string;
+}
+
+export type UpdateAction =
+  | { type: "checkStarted" }
+  | { type: "noUpdateFound" }
+  | { type: "updateFound"; payload: { latestVersion: string } }
+  | { type: "downloadStarted" }
+  | { type: "downloadCompleted"; payload: { downloadedVersion: string } }
+  | { type: "downloadFailed"; payload: { message: string } }
+  | { type: "reset" };
