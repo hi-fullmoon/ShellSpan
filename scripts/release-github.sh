@@ -8,6 +8,9 @@ usage() {
 Usage:
   bash scripts/release-github.sh [options]
 
+This script publishes from the current machine only. For multi-platform GitHub
+Releases, prefer the GitHub Actions workflow in `.github/workflows/release.yml`.
+
 Options:
   --version <semver>    Set release version (sync package.json + tauri.conf.json)
   --notes <text>        Release notes text

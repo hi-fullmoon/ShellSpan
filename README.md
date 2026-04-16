@@ -187,7 +187,40 @@ https://github.com/hi-fullmoon/TermBridge/releases/latest/download/latest.json
 
 ### 发布 GitHub Release
 
-仓库内置了一键发布脚本：
+推荐使用 GitHub Actions 多平台发布。当前仓库已经提供矩阵构建 workflow，会并行产出：
+
+- `windows-x86_64`
+- `darwin-x86_64`
+- `darwin-aarch64`
+
+统一汇总后会上传到同一个 GitHub Release，并生成包含多平台条目的 `latest.json`。
+
+### GitHub Actions 发布前准备
+
+需要在 GitHub 仓库 Secrets 中配置：
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+
+推荐发布流程：
+
+```bash
+# 1. 更新版本号
+
+# 2. 提交版本变更
+git add package.json src-tauri/tauri.conf.json
+git commit -m "chore(release): bump version to 1.0.2"
+
+# 3. 打标签并推送
+git tag v1.0.2
+git push origin main --tags
+```
+
+推送 `v*` tag 后，GitHub Actions 会自动执行 `.github/workflows/release.yml`，构建 Windows 与 macOS 多平台产物并发布。
+
+也可以在 GitHub Actions 页面手动运行 `Release` workflow，并可选填写 `release_notes`。
+
+### 本地单机发布
 
 ```bash
 # 首次使用时创建本地发布配置
@@ -205,6 +238,12 @@ pnpm release:github -- --version 0.1.1 --notes "Release v0.1.1"
 ```bash
 bash scripts/release-github.sh --version 0.1.1 --notes "Release v0.1.1"
 ```
+
+这条本地脚本只会发布“当前机器可构建的平台”。例如：
+
+- 在 Apple Silicon mac 上执行，通常只能得到 `darwin-aarch64`
+- 在 Intel mac 上执行，通常只能得到 `darwin-x86_64`
+- 在 Windows 上执行，通常只能得到 Windows 产物
 
 发布脚本会按以下优先级读取根目录环境文件：
 

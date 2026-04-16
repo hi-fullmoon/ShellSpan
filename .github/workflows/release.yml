@@ -1,0 +1,206 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: Optional release notes override
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-aarch64
+            runner: macos-14
+            rust_target: aarch64-apple-darwin
+          - platform: darwin-x86_64
+            runner: macos-13
+            rust_target: x86_64-apple-darwin
+          - platform: windows-x86_64
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag/version alignment
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          node - "${GITHUB_REF_NAME}" <<'NODE'
+          const fs = require('fs');
+          const tag = process.argv[2];
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+          const expected = `v${pkg.version}`;
+          if (tag !== expected || tauri.version !== pkg.version) {
+            console.error(`Release tag/version mismatch: tag=${tag} package=${pkg.version} tauri=${tauri.version}`);
+            process.exit(1);
+          }
+          NODE
+
+      - name: Build Tauri bundle
+        run: pnpm exec tauri build --target ${{ matrix.rust_target }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Prepare release artifact
+        shell: bash
+        run: |
+          mkdir -p release-artifact
+          cp -R src-tauri/target/release/bundle release-artifact/bundle
+
+          if [[ "${{ matrix.platform }}" == darwin-* ]]; then
+            archive="$(find release-artifact/bundle -type f -name '*.app.tar.gz' | head -n 1)"
+            if [[ -n "$archive" ]]; then
+              archive_dir="$(dirname "$archive")"
+              renamed_archive="${archive_dir}/TermBridge-${{ matrix.platform }}.app.tar.gz"
+              mv "$archive" "$renamed_archive"
+              if [[ -f "${archive}.sig" ]]; then
+                mv "${archive}.sig" "${renamed_archive}.sig"
+              fi
+            fi
+          fi
+
+          cat > release-artifact/release-metadata.json <<EOF
+          {
+            "platform": "${{ matrix.platform }}"
+          }
+          EOF
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.platform }}
+          path: release-artifact
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-inputs
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          APP_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${APP_VERSION}"
+          fi
+
+          NOTES="${{ github.event.inputs.release_notes || '' }}"
+          if [[ -z "$NOTES" ]]; then
+            NOTES="Release ${TAG}"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
+
+      - name: Generate combined updater manifest
+        shell: bash
+        run: |
+          mkdir -p release-output
+          node scripts/build-updater-json.mjs \
+            --artifacts-root release-inputs \
+            --repo "${GITHUB_REPOSITORY}" \
+            --tag "${{ steps.meta.outputs.tag }}" \
+            --notes "${{ steps.meta.outputs.notes }}" \
+            --output release-output/latest.json
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mapfile -t assets < <(find release-inputs -type f \( \
+            -name '*.dmg' -o \
+            -name '*.msi' -o \
+            -name '*.exe' -o \
+            -name '*.deb' -o \
+            -name '*.AppImage' -o \
+            -name '*.app.tar.gz' -o \
+            -name '*.AppImage.tar.gz' -o \
+            -name '*.msi.zip' -o \
+            -name '*.nsis.zip' -o \
+            -name '*.exe.zip' -o \
+            -name '*.sig' \
+          \) | sort)
+          assets+=(release-output/latest.json)
+
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.meta.outputs.tag }}" "${assets[@]}" --clobber
+          else
+            gh release create "${{ steps.meta.outputs.tag }}" "${assets[@]}" \
+              --title "TermBridge ${{ steps.meta.outputs.tag }}" \
+              --notes "${{ steps.meta.outputs.notes }}"
+          fi
+
+      - name: Verify updater endpoint
+        shell: bash
+        run: |
+          endpoint="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json"
+          for _ in {1..12}; do
+            if body="$(curl -fsSL "$endpoint" 2>/dev/null)"; then
+              if node -e 'JSON.parse(process.argv[1]);' "$body" >/dev/null 2>&1; then
+                echo "Updater endpoint is reachable: $endpoint"
+                exit 0
+              fi
+            fi
+            sleep 3
+          done
+
+          echo "Failed to verify updater endpoint: $endpoint" >&2
+          exit 1
