@@ -42,7 +42,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Setup Rust toolchain
@@ -52,6 +52,9 @@ jobs:
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -132,7 +135,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Download bundle artifacts
         uses: actions/download-artifact@v4

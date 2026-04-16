@@ -62,7 +62,7 @@ TermBridge 关注的是一条尽量顺手的远程运维主链路：
 
 ### 环境要求
 
-- Node.js 18 及以上
+- Node.js 24
 - Rust 工具链，并确保 `cargo` 可用
 - 满足 Tauri 2 对当前系统的构建依赖
 
