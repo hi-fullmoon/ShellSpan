@@ -9,7 +9,8 @@
     "test": "vitest run",
     "preview": "vite preview",
     "tauri:dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
-    "tauri:build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build"
+    "tauri:build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
+    "release:github": "bash scripts/release-github.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

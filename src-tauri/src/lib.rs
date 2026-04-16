@@ -2445,7 +2445,7 @@ fn emit_system_check_update(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+    use tauri::menu::{IconMenuItem, Menu, MenuItemKind, NativeIcon, PredefinedMenuItem};
 
     let menu = Menu::default(app)?;
     let app_submenu = menu
@@ -2457,8 +2457,14 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         });
 
     if let Some(app_submenu) = app_submenu {
-        let check_update_item =
-            MenuItem::with_id(app, MENU_CHECK_UPDATE_ID, "Check for Updates...", true, None::<&str>)?;
+        let check_update_item = IconMenuItem::with_id_and_native_icon(
+            app,
+            MENU_CHECK_UPDATE_ID,
+            "Check for Updates...",
+            true,
+            Some(NativeIcon::Refresh),
+            None::<&str>,
+        )?;
         let separator = PredefinedMenuItem::separator(app)?;
         let insert_before = app_submenu.items()?.len().saturating_sub(1);
         app_submenu.insert_items(&[&separator, &check_update_item], insert_before)?;

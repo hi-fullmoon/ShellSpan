@@ -151,6 +151,29 @@ tail -f ~/Library/Logs/com.termbridge/termbridge.log
 - 下载完成后会弹出提示，引导用户重启应用并完成安装。
 - 用户也可以随时手动触发检查更新：macOS 顶部菜单和 Windows 托盘右键菜单都提供入口。
 
+### 发布更新前自检（GitHub Releases）
+
+1. 每次发布前先提升应用版本号，确保高于已安装版本。
+2. 构建时会生成 updater 产物（已启用 `bundle.createUpdaterArtifacts: "v1Compatible"`）。
+3. 在 GitHub Release 里上传构建产物及 updater 元数据（尤其是 `latest.json` 和对应签名文件）。
+4. 发布后先在终端验证：
+
+```bash
+curl -fsSL https://github.com/hi-fullmoon/TermBridge/releases/latest/download/latest.json | jq .
+```
+
+若该命令返回 404 或非 JSON，客户端会报错：`Could not fetch a valid release JSON from the remote`。
+
+### 一键发布脚本
+
+```bash
+# 先登录 GitHub CLI
+gh auth login
+
+# 发布新版本（会同步 package.json + tauri.conf.json 版本、构建、生成 latest.json、上传 Release 资产）
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<你的私钥密码>" npm run release:github -- --version 0.1.1 --notes "Release v0.1.1"
+```
+
 ## 当前限制
 
 - 暂未实现 known_hosts / 主机指纹校验管理
