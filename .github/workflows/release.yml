@@ -82,7 +82,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-artifact
-          cp -R src-tauri/target/release/bundle release-artifact/bundle
+          bundle_dir="src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+          if [[ ! -d "$bundle_dir" ]]; then
+            bundle_dir="src-tauri/target/release/bundle"
+          fi
+
+          if [[ ! -d "$bundle_dir" ]]; then
+            echo "Bundle directory not found for target ${{ matrix.rust_target }}" >&2
+            find src-tauri/target -maxdepth 4 -type d | sort >&2 || true
+            exit 1
+          fi
+
+          cp -R "$bundle_dir" release-artifact/bundle
 
           if [[ "${{ matrix.platform }}" == darwin-* ]]; then
             archive="$(find release-artifact/bundle -type f -name '*.app.tar.gz' | head -n 1)"
