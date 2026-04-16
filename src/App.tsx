@@ -47,6 +47,7 @@ function App() {
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [reorderingSessions, setReorderingSessions] = useState(false);
   const [updateState, dispatchUpdateState] = useReducer(updateFlowReducer, { phase: 'idle' });
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number>();
@@ -252,6 +253,39 @@ function App() {
       stopSystemCheckUpdate?.();
     };
   }, [runUpdateCheck]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let stopAppExitRequest: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      try {
+        const nextStopAppExitRequest = await listen('system-request-app-exit', () => {
+          setExitDialogOpen(true);
+        });
+
+        if (cancelled) {
+          nextStopAppExitRequest();
+          return;
+        }
+
+        stopAppExitRequest = nextStopAppExitRequest;
+      } catch (error) {
+        appLogger.error('监听系统退出请求事件失败', { error: String(error) });
+      }
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      stopAppExitRequest?.();
+    };
+  }, []);
 
   const createSessionFromProfile = async (profile: ConnectionProfile) =>
     invoke<SessionSummary>('create_session', {
@@ -487,6 +521,12 @@ function App() {
 
     void handleCloseSession(pendingCloseSessionId);
     setPendingCloseSessionId(undefined);
+  };
+
+  const confirmAppExit = () => {
+    appLogger.info('用户确认退出应用');
+    setExitDialogOpen(false);
+    void invoke('request_app_exit');
   };
 
   const handleInstallUpdateNow = () => {
@@ -729,6 +769,41 @@ function App() {
                 type="button"
               >
                 关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {exitDialogOpen ? (
+        <div
+          className="fixed inset-0 z-30 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
+          onClick={() => setExitDialogOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="surface w-full max-w-sm p-3"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="退出应用"
+          >
+            <div className="flex flex-col gap-1">
+              <p className="label">退出确认</p>
+              <h3 className="text-sm font-semibold text-slate-100">退出应用</h3>
+              <p className="text-xs text-slate-400">确认退出 TermBridge 吗？退出后当前窗口和托盘都会关闭。</p>
+            </div>
+
+            <div className="mt-3 flex justify-end gap-1">
+              <button className="icon-btn" onClick={() => setExitDialogOpen(false)} type="button">
+                取消
+              </button>
+              <button
+                className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                onClick={confirmAppExit}
+                type="button"
+              >
+                退出应用
               </button>
             </div>
           </div>

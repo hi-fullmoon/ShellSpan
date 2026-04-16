@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { invoke } from '@tauri-apps/api/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -9,6 +10,7 @@ const {
   defaultListenImplementation,
   downloadAndInstallUpdateMock,
   emitSystemCheckUpdate,
+  emitSystemRequestAppExit,
   listenMock,
   loggerErrorMock,
   resetMockListeners,
@@ -39,11 +41,23 @@ const {
     });
   };
 
+  const emitSystemRequestAppExit = async () => {
+    const handler = listeners.get('system-request-app-exit');
+    if (!handler) {
+      throw new Error('system-request-app-exit listener was not registered');
+    }
+
+    await act(async () => {
+      handler({ payload: undefined });
+    });
+  };
+
   return {
     checkForUpdateMock: vi.fn(),
     defaultListenImplementation,
     downloadAndInstallUpdateMock: vi.fn(),
     emitSystemCheckUpdate,
+    emitSystemRequestAppExit,
     listenMock,
     loggerErrorMock,
     resetMockListeners,
@@ -189,5 +203,41 @@ describe('App update listener', () => {
     await waitFor(() => {
       expect(loggerErrorMock).toHaveBeenCalledWith('监听系统更新检查事件失败', { error: 'Error: register failed' });
     });
+  });
+
+  it('shows an exit confirmation dialog when the system exit event is emitted', async () => {
+    const invokeMock = vi.mocked(invoke);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(listenMock).toHaveBeenCalledWith('system-request-app-exit', expect.any(Function));
+    });
+
+    await emitSystemRequestAppExit();
+
+    expect(screen.getByRole('dialog', { name: '退出应用' })).toBeInTheDocument();
+    expect(screen.getByText('确认退出 TermBridge 吗？退出后当前窗口和托盘都会关闭。')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '退出应用' }));
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('request_app_exit');
+  });
+
+  it('closes the exit confirmation dialog without exiting when cancelled', async () => {
+    const invokeMock = vi.mocked(invoke);
+    render(<App />);
+
+    await emitSystemRequestAppExit();
+
+    expect(screen.getByRole('dialog', { name: '退出应用' })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    });
+
+    expect(screen.queryByRole('dialog', { name: '退出应用' })).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalledWith('request_app_exit');
   });
 });

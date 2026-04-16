@@ -37,8 +37,10 @@ const SSH_CLOSED_EVENT: &str = "ssh-closed";
 const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 const DELETE_PROGRESS_EVENT: &str = "delete-progress";
 const MENU_CHECK_UPDATE_ID: &str = "menu.check_update";
+const APP_QUIT_MENU_ID: &str = "menu.app_quit";
 const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
 const SYSTEM_CHECK_UPDATE_EVENT: &str = "system-check-update";
+const SYSTEM_REQUEST_APP_EXIT_EVENT: &str = "system-request-app-exit";
 #[cfg(target_os = "windows")]
 const TRAY_SHOW_MAIN_WINDOW_ID: &str = "tray.show_main_window";
 #[cfg(target_os = "windows")]
@@ -607,6 +609,12 @@ fn close_session(state: State<'_, SessionManager>, session_id: String) -> Result
 fn request_app_restart(app: AppHandle) {
     info!("Requesting application restart");
     app.request_restart();
+}
+
+#[tauri::command]
+fn request_app_exit(app: AppHandle) {
+    info!("Requesting application exit");
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -2444,9 +2452,15 @@ fn emit_system_check_update(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| format!("failed to emit {SYSTEM_CHECK_UPDATE_EVENT} event: {error}"))
 }
 
+fn emit_system_request_app_exit(app: &AppHandle) -> Result<(), String> {
+    app.emit(SYSTEM_REQUEST_APP_EXIT_EVENT, ()).map_err(|error| {
+        format!("failed to emit {SYSTEM_REQUEST_APP_EXIT_EVENT} event: {error}")
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{IconMenuItem, Menu, MenuItemKind, NativeIcon, PredefinedMenuItem};
+    use tauri::menu::{IconMenuItem, Menu, MenuItem, MenuItemKind, NativeIcon, PredefinedMenuItem};
 
     let menu = Menu::default(app)?;
     let app_submenu = menu
@@ -2467,8 +2481,13 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
             None::<&str>,
         )?;
         let separator = PredefinedMenuItem::separator(app)?;
+        let quit_item = MenuItem::with_id(app, APP_QUIT_MENU_ID, "Quit TermBridge", true, None::<&str>)?;
+        let app_submenu_items = app_submenu.items()?;
+        let quit_position = app_submenu_items.len().saturating_sub(1);
+        let _ = app_submenu.remove_at(quit_position)?;
         let insert_before = app_submenu.items()?.len().saturating_sub(1);
         app_submenu.insert_items(&[&separator, &check_update_item], insert_before)?;
+        app_submenu.insert_items(&[&quit_item], app_submenu.items()?.len())?;
     }
 
     Ok(menu)
@@ -2536,6 +2555,7 @@ pub fn run() {
             resize_session,
             close_session,
             request_app_restart,
+            request_app_exit,
             list_remote_directory,
             create_remote_entry,
             rename_remote_path,
@@ -2563,6 +2583,16 @@ pub fn run() {
             return;
         }
 
+        #[cfg(target_os = "macos")]
+        {
+            if menu_id == APP_QUIT_MENU_ID {
+                if let Err(error) = emit_system_request_app_exit(app) {
+                    error!("failed to handle app-exit menu event: {error}");
+                }
+                return;
+            }
+        }
+
         #[cfg(target_os = "windows")]
         {
             if menu_id == TRAY_SHOW_MAIN_WINDOW_ID {
@@ -2573,7 +2603,9 @@ pub fn run() {
             }
 
             if menu_id == TRAY_QUIT_ID {
-                app.exit(0);
+                if let Err(error) = emit_system_request_app_exit(app) {
+                    error!("failed to handle app-exit menu event: {error}");
+                }
             }
         }
     });
@@ -2604,6 +2636,18 @@ pub fn run() {
                     }
                 }
             });
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.on_window_event(|_window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                if let Err(error) = emit_system_request_app_exit(&_window.app_handle()) {
+                    error!("failed to handle macOS close request: {error}");
+                }
+            }
+        });
     }
 
     builder
