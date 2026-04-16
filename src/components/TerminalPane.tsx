@@ -6,6 +6,11 @@ import { useEffect, useRef } from "react";
 import { createLogger } from "../lib/logger";
 import { isTauriRuntime } from "../lib/tauri";
 import {
+  formatTerminalNoticeLine,
+  formatTerminalPrefixedText,
+  formatTerminalStatusLine,
+} from "../lib/terminalOutput";
+import {
   shouldDisableTerminalInput,
   shouldReconnectFromInput,
   shouldWarnOnClosedSession,
@@ -13,7 +18,6 @@ import {
 import { cn } from "../lib/ui";
 import type {
   SessionState,
-  SessionStatus,
   SshClosedEvent,
   SshDataEvent,
   SshStatusEvent,
@@ -27,19 +31,6 @@ interface TerminalPaneProps {
 
 const terminalLogger = createLogger("terminal");
 
-function statusLabel(status: SessionStatus) {
-  switch (status) {
-    case "connected":
-      return "已连接";
-    case "connecting":
-      return "连接中";
-    case "error":
-      return "错误";
-    case "disconnected":
-      return "已断开";
-  }
-}
-
 export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -52,6 +43,27 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
   const pendingResizeSyncRef = useRef<number | null>(null);
   const lastShellSizeRef = useRef<{ width: number; height: number } | null>(null);
   const scheduleResizeRef = useRef<((force?: boolean) => void) | null>(null);
+  const needsSystemLineBreakRef = useRef(false);
+  const needsConnectedShellSpacingRef = useRef(false);
+
+  const writeSystemLine = (line: string) => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    const prefix = needsSystemLineBreakRef.current ? "\r\n" : "";
+    terminal.writeln(`${prefix}${line}`);
+    needsSystemLineBreakRef.current = false;
+  };
+
+  const syncSystemLineBreakStateFromChunk = (chunk: string) => {
+    if (!chunk) {
+      return;
+    }
+
+    needsSystemLineBreakRef.current = !/[\r\n]$/.test(chunk);
+  };
 
   useEffect(() => {
     activeRef.current = active;
@@ -116,7 +128,10 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         // A later resize pass will retry fitting.
       }
     });
-    terminal.writeln("\u001b[36m[termbridge]\u001b[0m 终端准备中...");
+    terminalRef.current = terminal;
+    fitRef.current = fitAddon;
+    lastShellSizeRef.current = null;
+    writeSystemLine(formatTerminalPrefixedText("终端准备中..."));
     terminal.onData((data) => {
       if (statusRef.current !== "connected") {
         const shouldReconnect = shouldReconnectFromInput(
@@ -126,15 +141,13 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
 
         if (shouldReconnect && !reconnectRequestedRef.current) {
           reconnectRequestedRef.current = true;
-          terminal.writeln("\r\n\u001b[36m[重连中]\u001b[0m 正在重新连接...");
+          writeSystemLine(formatTerminalNoticeLine("重连中", "正在重新连接...", "36"));
           onReconnect();
           return;
         }
 
         if (!inputBlockedNoticeRef.current) {
-          terminal.writeln(
-            "\r\n\u001b[33m[提示]\u001b[0m 当前连接已断开，按回车重连。",
-          );
+          writeSystemLine(formatTerminalNoticeLine("提示", "当前连接已断开，按回车重连。"));
           inputBlockedNoticeRef.current = true;
         }
         return;
@@ -149,15 +162,9 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
           error: String(error),
         });
         inputBlockedNoticeRef.current = true;
-        terminal.writeln(
-          `\r\n\u001b[31m[写入失败]\u001b[0m 连接不可用，请重连后再试。`,
-        );
+        writeSystemLine(formatTerminalNoticeLine("写入失败", "连接不可用，请重连后再试。", "31"));
       });
     });
-
-    terminalRef.current = terminal;
-    fitRef.current = fitAddon;
-    lastShellSizeRef.current = null;
 
     const clearPendingResizeSync = () => {
       if (pendingResizeSyncRef.current !== null) {
@@ -307,7 +314,12 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         if (event.payload.sessionId !== session.sessionId) {
           return;
         }
+        if (needsConnectedShellSpacingRef.current) {
+          terminalRef.current?.write("\r\n");
+          needsConnectedShellSpacingRef.current = false;
+        }
         terminalRef.current?.write(event.payload.chunk);
+        syncSystemLineBreakStateFromChunk(event.payload.chunk);
       });
 
       if (cancelled) {
@@ -321,14 +333,8 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
           return;
         }
         terminalLogger.info("会话状态更新", event.payload);
-        const message = event.payload.message
-          ? `: ${event.payload.message}`
-          : "";
-        terminalRef.current?.writeln(
-          `\r\n\u001b[33m[${
-            statusLabel(event.payload.status)
-          }]\u001b[0m${message}`,
-        );
+        writeSystemLine(formatTerminalStatusLine(event.payload.status, event.payload.message));
+        needsConnectedShellSpacingRef.current = event.payload.status === "connected";
       });
 
       if (cancelled) {
@@ -346,13 +352,14 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         } else {
           terminalLogger.debug("会话关闭事件（错误态已记录）", event.payload);
         }
-        const reason = event.payload.reason ? `: ${event.payload.reason}` : "";
-        terminalRef.current?.writeln(
-          `\r\n\u001b[31m[已关闭]\u001b[0m${reason}`,
+        writeSystemLine(
+          formatTerminalNoticeLine(
+            "已关闭",
+            event.payload.reason ? `: ${event.payload.reason}` : undefined,
+            "31",
+          ),
         );
-        terminalRef.current?.writeln(
-          "\u001b[33m[提示]\u001b[0m 按回车重连。",
-        );
+        writeSystemLine(formatTerminalNoticeLine("提示", "按回车重连。"));
         inputBlockedNoticeRef.current = true;
       });
 
