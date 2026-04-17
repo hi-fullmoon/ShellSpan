@@ -8,8 +8,8 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "preview": "vite preview",
-    "tauri:dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
-    "tauri:build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "release:github": "bash scripts/release-github.sh",
     "release:local": "bash scripts/release-github.sh"
   },
