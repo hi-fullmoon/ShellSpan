@@ -1930,6 +1930,13 @@ mod tests {
         assert!(is_check_update_menu_id("tray.check_update"));
         assert!(!is_check_update_menu_id("tray.quit"));
     }
+
+    #[test]
+    fn macos_check_update_item_is_inserted_directly_after_about() {
+        assert_eq!(macos_check_update_insert_position(0), 0);
+        assert_eq!(macos_check_update_insert_position(1), 1);
+        assert_eq!(macos_check_update_insert_position(4), 1);
+    }
 }
 
 fn scan_local_upload_path(local_path: &Path) -> Result<UploadScanStats, String> {
@@ -2459,8 +2466,13 @@ fn emit_system_request_app_exit(app: &AppHandle) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
+fn macos_check_update_insert_position(item_count: usize) -> usize {
+    item_count.min(1)
+}
+
+#[cfg(target_os = "macos")]
 fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{IconMenuItem, Menu, MenuItem, MenuItemKind, NativeIcon, PredefinedMenuItem};
+    use tauri::menu::{Menu, MenuItem, MenuItemKind};
 
     let menu = Menu::default(app)?;
     let app_submenu = menu
@@ -2472,21 +2484,14 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         });
 
     if let Some(app_submenu) = app_submenu {
-        let check_update_item = IconMenuItem::with_id_and_native_icon(
-            app,
-            MENU_CHECK_UPDATE_ID,
-            "Check for Updates...",
-            true,
-            Some(NativeIcon::Refresh),
-            None::<&str>,
-        )?;
-        let separator = PredefinedMenuItem::separator(app)?;
+        let check_update_item =
+            MenuItem::with_id(app, MENU_CHECK_UPDATE_ID, "Check for Updates...", true, None::<&str>)?;
         let quit_item = MenuItem::with_id(app, APP_QUIT_MENU_ID, "Quit TermBridge", true, None::<&str>)?;
         let app_submenu_items = app_submenu.items()?;
         let quit_position = app_submenu_items.len().saturating_sub(1);
         let _ = app_submenu.remove_at(quit_position)?;
-        let insert_before = app_submenu.items()?.len().saturating_sub(1);
-        app_submenu.insert_items(&[&separator, &check_update_item], insert_before)?;
+        let insert_position = macos_check_update_insert_position(app_submenu.items()?.len());
+        app_submenu.insert_items(&[&check_update_item], insert_position)?;
         app_submenu.insert_items(&[&quit_item], app_submenu.items()?.len())?;
     }
 
