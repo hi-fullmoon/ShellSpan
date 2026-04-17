@@ -443,6 +443,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const uploadProgress = fileManagerState?.uploadProgress;
   const selectedEntry = useMemo(() => listing?.entries.find((entry) => entry.path === selectedPath), [listing, selectedPath]);
   const ready = !!session && session.status === 'connected' && !!connection;
+  const readOnly = !!session && session.status !== 'connected';
   const currentPath = listing?.path;
   const showInitialLoadingHint = !hasLoadedAnyListingRef.current;
   const columnDefs = useMemo<ColDef<RemoteFileEntry>[]>(
@@ -554,7 +555,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const loadDirectory = async (targetPath?: string) => {
-    if (!connection || !sessionId) {
+    if (!ready || !connection || !sessionId) {
       return;
     }
     const requestedPath = targetPath ?? currentPath;
@@ -798,6 +799,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   uploadPathsRef.current = handleUploadPaths;
 
   const openCreateDialog = (mode: CreateEntryDialogMode) => {
+    if (!ready) {
+      return;
+    }
     setDialog({ mode, value: '' });
     setContextMenu(undefined);
   };
@@ -1104,7 +1108,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const submitDialog = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!dialog || !connection || !currentPath) {
+    if (!ready || !dialog || !connection || !currentPath) {
       return;
     }
 
@@ -1142,6 +1146,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const openRenameDialog = (entry?: RemoteFileEntry) => {
+    if (!ready) {
+      return;
+    }
     const target = entry ?? selectedEntry;
     if (!target) {
       return;
@@ -1156,6 +1163,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const openProperties = (entry?: RemoteFileEntry) => {
+    if (!ready) {
+      return;
+    }
     const target = entry ?? selectedEntry;
     if (!target) {
       return;
@@ -1170,6 +1180,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const handleDelete = (entry?: RemoteFileEntry) => {
+    if (!ready) {
+      return;
+    }
     const target = entry ?? selectedEntry;
     if (!target || !connection) {
       return;
@@ -1234,7 +1247,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const confirmDelete = async () => {
-    if (!pendingDelete || !connection) {
+    if (!ready || !pendingDelete || !connection) {
       return;
     }
 
@@ -1341,7 +1354,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const handlePaste = async () => {
-    if (!clipboard || !connection || !currentPath) {
+    if (!ready || !clipboard || !connection || !currentPath) {
       return;
     }
 
@@ -1359,6 +1372,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const handleOpenWithDefaultEditor = async (entry?: RemoteFileEntry) => {
+    if (!ready) {
+      return;
+    }
     const target = entry ?? selectedEntry;
     if (!target || !connection || target.kind === 'directory') {
       return;
@@ -1401,6 +1417,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
   const handlePathSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!ready) {
+      return;
+    }
     const nextPath = pathInput.trim();
     if (!nextPath) {
       return;
@@ -1409,6 +1428,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const openBlankMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!ready) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     setContextMenu({
@@ -1419,6 +1441,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const openToolbarMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (!ready) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1438,7 +1463,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const handleGridRowDoubleClick = (event: RowDoubleClickedEvent<RemoteFileEntry>) => {
-    if (!event.data || event.data.kind !== 'directory') {
+    if (!ready || !event.data || event.data.kind !== 'directory') {
       return;
     }
 
@@ -1446,6 +1471,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   const handleGridContextMenu = (event: CellContextMenuEvent<RemoteFileEntry>) => {
+    if (!ready) {
+      return;
+    }
     const target = event.data;
     const mouseEvent = event.event as MouseEvent | undefined;
     if (!target || !mouseEvent) {
@@ -1489,7 +1517,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             <form className="flex items-center gap-1" onSubmit={(event) => void handlePathSubmit(event)}>
               <button
                 className="icon-btn h-7 w-7 px-0"
-                disabled={!listing?.parentPath || loading || working}
+                disabled={!ready || !listing?.parentPath || loading || working}
                 onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
                 title="返回上级目录"
                 type="button"
@@ -1498,6 +1526,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               </button>
               <input
                 className="min-w-0 flex-1 bg-slate-950 px-2 py-1 font-mono text-[12px] leading-5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:ring-1 focus:ring-cyan-400/50"
+                disabled={readOnly || loading || working}
                 onChange={(event) => setPathInput(event.target.value)}
                 placeholder="输入远程路径并回车"
                 value={pathInput}
@@ -1523,6 +1552,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             </form>
 
             {error ? <div className="rounded-lg border border-rose-900 bg-rose-950/40 px-2 py-2 text-xs text-rose-300">{error}</div> : null}
+            {readOnly && listing ? (
+              <div className="rounded-lg border border-amber-900/80 bg-amber-950/30 px-2 py-2 text-xs text-amber-200">
+                终端已断开，文件管理器当前仅支持查看。
+              </div>
+            ) : null}
 
             <div
               className="min-h-0 flex-1 overflow-auto rounded-lg"
@@ -1584,13 +1618,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             >
               {contextMenu.target === 'entry' ? (
                 <div className="flex flex-col">
-                  <MenuButton disabled={loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
-                  <MenuButton disabled={loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
-                  <MenuButton disabled={loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
-                  <MenuButton disabled={loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
+                  <MenuButton disabled={!ready || loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
+                  <MenuButton disabled={!ready || loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
+                  <MenuButton disabled={!ready || loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
+                  <MenuButton disabled={!ready || loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
                   {contextMenu.entry?.kind === 'directory' ? (
                     <MenuButton
-                      disabled={loading || working}
+                      disabled={!ready || loading || working}
                       label="打开"
                       onClick={() => {
                         if (contextMenu.entry) {
@@ -1601,30 +1635,30 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                   ) : null}
                   {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
                     <MenuButton
-                      disabled={loading || working}
+                      disabled={!ready || loading || working}
                       label="默认编辑器打开"
                       onClick={() => void handleOpenWithDefaultEditor(contextMenu.entry)}
                     />
                   ) : null}
                   <MenuDivider />
-                  <MenuButton disabled={loading || working} label="重命名" onClick={() => openRenameDialog(contextMenu.entry)} />
-                  <MenuButton disabled={loading || working} label="复制" onClick={() => handleCopy(contextMenu.entry)} />
-                  <MenuButton disabled={loading || working} label="删除" onClick={() => handleDelete(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label="重命名" onClick={() => openRenameDialog(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label="复制" onClick={() => handleCopy(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label="删除" onClick={() => handleDelete(contextMenu.entry)} />
                   <MenuDivider />
                   <MenuButton
-                    disabled={loading || working}
+                    disabled={!ready || loading || working}
                     label="复制名称"
                     onClick={() => void handleCopyText('名称', contextMenu.entry?.name ?? '')}
                   />
                   <MenuButton
-                    disabled={loading || working}
+                    disabled={!ready || loading || working}
                     label={contextMenu.entry?.kind === 'directory' ? '复制目录路径' : '复制文件路径'}
                     onClick={() =>
                       void handleCopyText(contextMenu.entry?.kind === 'directory' ? '目录路径' : '文件路径', contextMenu.entry?.path ?? '')
                     }
                   />
                   <MenuButton
-                    disabled={loading || working}
+                    disabled={!ready || loading || working}
                     label="复制所在目录"
                     onClick={() =>
                       void handleCopyText(
@@ -1638,25 +1672,25 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     }
                   />
                   <MenuDivider />
-                  <MenuButton disabled={loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
+                  <MenuButton disabled={!ready || loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
                   <MenuDivider />
-                  <MenuButton disabled={loading || working} label="属性" onClick={() => openProperties(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label="属性" onClick={() => openProperties(contextMenu.entry)} />
                 </div>
               ) : (
                 <div className="flex flex-col">
-                  <MenuButton disabled={loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
-                  <MenuButton disabled={loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
-                  <MenuButton disabled={loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
-                  <MenuButton disabled={loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
+                  <MenuButton disabled={!ready || loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
+                  <MenuButton disabled={!ready || loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
+                  <MenuButton disabled={!ready || loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
+                  <MenuButton disabled={!ready || loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
                   <MenuDivider />
-                  <MenuButton disabled={!clipboard || loading || working} label="粘贴" onClick={() => void handlePaste()} />
+                  <MenuButton disabled={!ready || !clipboard || loading || working} label="粘贴" onClick={() => void handlePaste()} />
                   <MenuButton
-                    disabled={!currentPath || loading || working}
+                    disabled={!ready || !currentPath || loading || working}
                     label="复制当前目录路径"
                     onClick={() => void handleCopyText('当前目录路径', currentPath ?? '')}
                   />
                   <MenuDivider />
-                  <MenuButton disabled={loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
+                  <MenuButton disabled={!ready || loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
                 </div>
               )}
             </div>,
