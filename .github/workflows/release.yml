@@ -28,12 +28,15 @@ jobs:
           - platform: darwin-aarch64
             runner: macos-15
             rust_target: aarch64-apple-darwin
+            bundle_args: --bundles app,dmg
           - platform: darwin-x86_64
             runner: macos-15-intel
             rust_target: x86_64-apple-darwin
+            bundle_args: --bundles app
           - platform: windows-x86_64
             runner: windows-latest
             rust_target: x86_64-pc-windows-msvc
+            bundle_args: ""
 
     steps:
       - name: Checkout
@@ -79,7 +82,7 @@ jobs:
           NODE
 
       - name: Build Tauri bundle
-        run: pnpm exec tauri build --target ${{ matrix.rust_target }}
+        run: pnpm exec tauri build --target ${{ matrix.rust_target }} ${{ matrix.bundle_args }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -182,16 +185,11 @@ jobs:
         run: |
           mapfile -t assets < <(find release-inputs -type f \( \
             -name '*.dmg' -o \
-            -name '*.msi' -o \
             -name '*.exe' -o \
-            -name '*.deb' -o \
-            -name '*.AppImage' -o \
             -name '*.app.tar.gz' -o \
-            -name '*.AppImage.tar.gz' -o \
             -name '*.msi.zip' -o \
-            -name '*.nsis.zip' -o \
-            -name '*.exe.zip' -o \
-            -name '*.sig' \
+            -name '*.app.tar.gz.sig' -o \
+            -name '*.msi.zip.sig' \
           \) | sort)
           assets+=(release-output/latest.json)
 
