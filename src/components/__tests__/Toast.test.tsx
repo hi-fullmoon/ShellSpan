@@ -14,7 +14,7 @@ describe("Toast", () => {
     const onClose = vi.fn();
     const onAction = vi.fn();
 
-    render(
+    const { container } = render(
       <Toast
         action={{ label: "重试", onClick: onAction }}
         message="连接已断开"
@@ -25,6 +25,9 @@ describe("Toast", () => {
     );
 
     expect(screen.getByText("连接已断开")).toBeTruthy();
+    expect(container.ownerDocument.body.lastElementChild?.className).toContain("left-1/2");
+    expect(container.ownerDocument.body.lastElementChild?.className).toContain("-translate-x-1/2");
+    expect(container.ownerDocument.body.lastElementChild?.className).toContain("top-2");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     fireEvent.click(screen.getByRole("button", { name: "关闭提示" }));
 

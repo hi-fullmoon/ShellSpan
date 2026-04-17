@@ -43,7 +43,7 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
   }
 
   return createPortal(
-    <div className="pointer-events-none fixed right-2 top-2 z-[70] flex max-w-sm">
+    <div className="pointer-events-none fixed left-1/2 top-2 z-[70] flex max-w-sm -translate-x-1/2">
       <div
         className={cn(
           'pointer-events-auto flex min-w-[220px] items-center gap-2 rounded-xl border px-3 py-2 shadow-[0_12px_36px_rgba(2,6,23,0.45)] backdrop-blur',
