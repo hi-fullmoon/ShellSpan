@@ -661,6 +661,7 @@ function App() {
             onTogglePinnedProfile={handleToggleSavedProfilePinned}
             onReuseProfile={loadProfile}
             onOpenConnect={() => {
+              setDraftProfile(createEmptyProfile());
               setErrorMessage(undefined);
               setConnectDialogOpen(true);
             }}
