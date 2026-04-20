@@ -196,7 +196,7 @@ describe('App reconnect flow', () => {
       fireEvent.click(screen.getByRole('button', { name: '新建连接' }));
     });
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Connect to server' })).getByRole('button', { name: '创建连接' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '连接到服务器' })).getByRole('button', { name: '创建连接' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenNthCalledWith(1, 'create_session', expect.anything());
@@ -239,7 +239,7 @@ describe('App reconnect flow', () => {
       fireEvent.click(screen.getByRole('button', { name: '新建连接' }));
     });
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Connect to server' })).getByRole('button', { name: '创建连接' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '连接到服务器' })).getByRole('button', { name: '创建连接' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledTimes(1);
