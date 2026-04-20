@@ -60,7 +60,7 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
     <div className="pointer-events-none fixed left-1/2 top-2 z-[70] flex max-w-sm -translate-x-1/2">
       <div
         className={cn(
-          'themed-toast pointer-events-auto flex min-w-[220px] items-center gap-2 rounded-xl border px-3 py-2 backdrop-blur',
+          'themed-toast pointer-events-auto flex min-w-[220px] items-center gap-2 rounded-lg border px-3 py-2 backdrop-blur',
           toastTone(tone),
         )}
         onMouseEnter={() => {
@@ -82,12 +82,7 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
             {action.label}
           </button>
         ) : null}
-        <button
-          aria-label="关闭提示"
-          className="themed-toast__button rounded-md px-1 py-1 text-[11px] transition"
-          onClick={onClose}
-          type="button"
-        >
+        <button aria-label="关闭提示" className="themed-toast__button rounded-md px-1 py-1 text-[11px] transition" onClick={onClose} type="button">
           <CloseIcon />
         </button>
       </div>
