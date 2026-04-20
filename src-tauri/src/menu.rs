@@ -3,7 +3,10 @@ use tauri::{AppHandle, Builder, Emitter, Manager};
 
 const MENU_OPEN_SETTINGS_ID: &str = "menu.open_settings";
 const MENU_CHECK_UPDATE_ID: &str = "menu.check_update";
+#[cfg(target_os = "macos")]
 const APP_QUIT_MENU_ID: &str = "menu.app_quit";
+#[cfg(target_os = "windows")]
+const TRAY_OPEN_SETTINGS_ID: &str = "tray.open_settings";
 const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
 const SYSTEM_OPEN_SETTINGS_EVENT: &str = "system-open-settings";
 const SYSTEM_CHECK_UPDATE_EVENT: &str = "system-check-update";
@@ -116,6 +119,16 @@ fn is_check_update_menu_id(menu_id: &str) -> bool {
 
 fn is_open_settings_menu_id(menu_id: &str) -> bool {
     menu_id == MENU_OPEN_SETTINGS_ID
+        || {
+            #[cfg(target_os = "windows")]
+            {
+                menu_id == TRAY_OPEN_SETTINGS_ID
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                false
+            }
+        }
 }
 
 fn emit_system_open_settings(app: &AppHandle) -> Result<(), String> {
@@ -188,6 +201,13 @@ fn build_windows_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<t
         true,
         None::<&str>,
     )?;
+    let open_settings_item = MenuItem::with_id(
+        app,
+        TRAY_OPEN_SETTINGS_ID,
+        "Settings",
+        true,
+        None::<&str>,
+    )?;
     let check_update_item = MenuItem::with_id(
         app,
         TRAY_CHECK_UPDATE_ID,
@@ -199,7 +219,12 @@ fn build_windows_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<t
 
     Menu::with_items(
         app,
-        &[&show_main_window_item, &check_update_item, &quit_item],
+        &[
+            &show_main_window_item,
+            &open_settings_item,
+            &check_update_item,
+            &quit_item,
+        ],
     )
 }
 
@@ -234,6 +259,8 @@ mod tests {
     #[test]
     fn open_settings_menu_id_is_recognized() {
         assert!(is_open_settings_menu_id("menu.open_settings"));
+        #[cfg(target_os = "windows")]
+        assert!(is_open_settings_menu_id("tray.open_settings"));
         assert!(!is_open_settings_menu_id("menu.check_update"));
     }
 
