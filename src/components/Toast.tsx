@@ -20,11 +20,11 @@ interface ToastProps {
 function toastTone(tone: NonNullable<ToastProps['tone']>) {
   switch (tone) {
     case 'success':
-      return 'border-emerald-900 bg-emerald-950/90 text-emerald-200';
+      return 'themed-toast--success';
     case 'error':
-      return 'border-rose-900 bg-rose-950/90 text-rose-200';
+      return 'themed-toast--error';
     case 'info':
-      return 'border-cyan-900 bg-slate-950/95 text-slate-100';
+      return 'themed-toast--info';
   }
 }
 
@@ -60,7 +60,7 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
     <div className="pointer-events-none fixed left-1/2 top-2 z-[70] flex max-w-sm -translate-x-1/2">
       <div
         className={cn(
-          'pointer-events-auto flex min-w-[220px] items-center gap-2 rounded-xl border px-3 py-2 shadow-[0_12px_36px_rgba(2,6,23,0.45)] backdrop-blur',
+          'themed-toast pointer-events-auto flex min-w-[220px] items-center gap-2 rounded-xl border px-3 py-2 backdrop-blur',
           toastTone(tone),
         )}
         onMouseEnter={() => {
@@ -78,11 +78,16 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
       >
         <span className="min-w-0 flex-1 text-xs">{message}</span>
         {action ? (
-          <button className="rounded-md px-2 py-1 text-[11px] transition hover:bg-white/10" onClick={action.onClick} type="button">
+          <button className="themed-toast__button rounded-md px-2 py-1 text-[11px] transition" onClick={action.onClick} type="button">
             {action.label}
           </button>
         ) : null}
-        <button aria-label="关闭提示" className="rounded-md px-1 py-1 text-[11px] transition hover:bg-white/10" onClick={onClose} type="button">
+        <button
+          aria-label="关闭提示"
+          className="themed-toast__button rounded-md px-1 py-1 text-[11px] transition"
+          onClick={onClose}
+          type="button"
+        >
           <CloseIcon />
         </button>
       </div>

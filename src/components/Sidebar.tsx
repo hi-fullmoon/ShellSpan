@@ -131,12 +131,12 @@ export function Sidebar({
 
         <div className="grid grid-cols-3 gap-1">
           <div className="surface-muted p-1.5">
-            <p className="stats-label">{t('sidebar.history')}</p>
-            <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
-          </div>
-          <div className="surface-muted p-1.5">
             <p className="stats-label">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
+          </div>
+          <div className="surface-muted p-1.5">
+            <p className="stats-label">{t('sidebar.history')}</p>
+            <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
           </div>
           <div className="surface-muted p-1.5">
             <p className="stats-label">{t('sidebar.favorite')}</p>

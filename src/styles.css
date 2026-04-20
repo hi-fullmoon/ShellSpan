@@ -27,6 +27,17 @@
     --app-settings-preview-bg: rgba(8, 15, 30, 0.92);
     --app-settings-preview-panel: rgba(30, 41, 59, 0.82);
     --app-settings-preview-active: rgba(34, 211, 238, 0.34);
+    --app-toast-bg: rgba(2, 6, 23, 0.94);
+    --app-toast-border: rgba(8, 145, 178, 0.45);
+    --app-toast-text: #f8fafc;
+    --app-toast-action-hover: rgba(255, 255, 255, 0.08);
+    --app-toast-shadow: 0 18px 44px rgba(2, 6, 23, 0.42);
+    --app-toast-success-bg: rgba(2, 44, 34, 0.92);
+    --app-toast-success-border: rgba(16, 185, 129, 0.4);
+    --app-toast-success-text: #d1fae5;
+    --app-toast-error-bg: rgba(76, 5, 25, 0.92);
+    --app-toast-error-border: rgba(244, 63, 94, 0.38);
+    --app-toast-error-text: #ffe4e6;
   }
 
   :root[data-theme='light'] {
@@ -47,12 +58,23 @@
     --app-icon-hover: rgba(226, 232, 240, 0.9);
     --app-primary-bg: #0891b2;
     --app-primary-text: #f8fafc;
-    --app-primary-hover: #0ea5e9;
+    --app-primary-hover: color-mix(in srgb, var(--app-primary-bg) 88%, #0f172a 12%);
     --app-brand-bg: linear-gradient(135deg, #cffafe 0%, #bfdbfe 100%);
     --app-brand-text: #0f172a;
     --app-settings-preview-bg: rgba(248, 250, 252, 0.98);
     --app-settings-preview-panel: rgba(226, 232, 240, 0.9);
     --app-settings-preview-active: rgba(14, 165, 233, 0.2);
+    --app-toast-bg: rgba(226, 236, 248, 0.98);
+    --app-toast-border: rgba(14, 165, 233, 0.3);
+    --app-toast-text: #0f172a;
+    --app-toast-action-hover: rgba(148, 163, 184, 0.18);
+    --app-toast-shadow: 0 20px 52px rgba(71, 85, 105, 0.2);
+    --app-toast-success-bg: rgba(216, 246, 232, 0.98);
+    --app-toast-success-border: rgba(16, 185, 129, 0.3);
+    --app-toast-success-text: #065f46;
+    --app-toast-error-bg: rgba(254, 226, 232, 0.98);
+    --app-toast-error-border: rgba(244, 63, 94, 0.28);
+    --app-toast-error-text: #9f1239;
   }
 
   html,
@@ -218,6 +240,35 @@
 
 .themed-menu-divider {
   background: var(--app-border);
+}
+
+.themed-toast {
+  background: var(--app-toast-bg);
+  border-color: var(--app-toast-border);
+  box-shadow: var(--app-toast-shadow);
+  color: var(--app-toast-text);
+}
+
+.themed-toast--info {
+  background: var(--app-toast-bg);
+  border-color: var(--app-toast-border);
+  color: var(--app-toast-text);
+}
+
+.themed-toast--success {
+  background: var(--app-toast-success-bg);
+  border-color: var(--app-toast-success-border);
+  color: var(--app-toast-success-text);
+}
+
+.themed-toast--error {
+  background: var(--app-toast-error-bg);
+  border-color: var(--app-toast-error-border);
+  color: var(--app-toast-error-text);
+}
+
+.themed-toast__button:hover {
+  background: var(--app-toast-action-hover);
 }
 
 .dialog-kicker {
