@@ -136,7 +136,7 @@ function App() {
             return {
               ...session,
               status: shouldAutoReconnect ? 'connecting' : session.status === 'error' ? 'error' : 'disconnected',
-              note: shouldAutoReconnect ? '连接中断，正在自动重连...' : event.payload.reason,
+              note: shouldAutoReconnect ? t('app.note.autoReconnecting') : event.payload.reason,
             };
           }),
         );
@@ -195,7 +195,7 @@ function App() {
     if (!isTauriRuntime()) {
       if (mode === 'manual') {
         setUpdateToast({
-          message: '当前只启动了前端调试环境，无法检查更新。',
+          message: t('app.update.manualUnavailable'),
           tone: 'error',
         });
       }
@@ -214,7 +214,7 @@ function App() {
         dispatchUpdateState({ type: 'noUpdateFound' });
         if (mode === 'manual') {
           setUpdateToast({
-            message: '当前已是最新版本。',
+            message: t('app.update.latest'),
             tone: 'info',
           });
         }
@@ -243,7 +243,7 @@ function App() {
       });
       setRestartDialogDismissed(false);
     } catch (error) {
-      const message = `更新失败：${String(error)}`;
+      const message = t('app.update.failed', { error: String(error) });
       appLogger.error('检查或下载更新失败', { mode, error: String(error) });
       dispatchUpdateState({
         type: 'downloadFailed',
@@ -392,13 +392,13 @@ function App() {
   const handleConnect = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
     if (!profile.host.trim() || !profile.username.trim()) {
       appLogger.warn('连接参数校验失败：Host 或 Username 为空');
-      setErrorMessage('Host 和 Username 不能为空。');
+      setErrorMessage(t('app.error.hostUsernameRequired'));
       return;
     }
 
     if (!isTauriRuntime()) {
       appLogger.warn('浏览器预览模式下尝试建立连接');
-      setErrorMessage('当前只启动了前端调试环境，请使用 `npm run tauri:dev` 运行桌面端。');
+      setErrorMessage(t('app.error.desktopOnly'));
       return;
     }
 
@@ -545,7 +545,7 @@ function App() {
 
     if (!isTauriRuntime()) {
       appLogger.warn('浏览器预览模式下尝试重连会话', { sessionId });
-      setErrorMessage('当前只启动了前端调试环境，请使用 `npm run tauri:dev` 运行桌面端。');
+      setErrorMessage(t('app.error.desktopOnly'));
       return;
     }
 
@@ -586,12 +586,18 @@ function App() {
             ? {
                 ...item,
                 status: 'error',
-                note: automatic ? `自动重连失败: ${String(error)}` : `重连失败: ${String(error)}`,
+                note: automatic
+                  ? t('app.error.autoReconnectFailed', { error: String(error) })
+                  : t('app.error.reconnectFailed', { error: String(error) }),
               }
             : item,
         ),
       );
-      setErrorMessage(automatic ? `自动重连失败: ${String(error)}` : `重连失败: ${String(error)}`);
+      setErrorMessage(
+        automatic
+          ? t('app.error.autoReconnectFailed', { error: String(error) })
+          : t('app.error.reconnectFailed', { error: String(error) }),
+      );
     }
   };
 
@@ -631,7 +637,7 @@ function App() {
       }
 
       setUpdateToast({
-        message: '无法调用系统重启，1 秒后将尝试刷新窗口。若更新未生效，请手动重启应用。',
+        message: t('app.update.restartFallback'),
         tone: 'info',
       });
 
@@ -639,7 +645,7 @@ function App() {
         try {
           window.location.reload();
         } catch (error) {
-          const message = `自动重启失败：${String(error)}。请手动关闭并重新打开应用以完成安装。`;
+          const message = t('app.update.reloadFailed', { error: String(error) });
           appLogger.error('回退刷新失败', { error: String(error) });
           setUpdateToast({
             message,
@@ -672,12 +678,12 @@ function App() {
                   {activeSession ? (
                     <span className={cn('rounded-md px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
                       {activeSession.status === 'connected'
-                        ? '已连接'
+                        ? t('app.status.connected')
                         : activeSession.status === 'connecting'
-                          ? '连接中'
+                          ? t('app.status.connecting')
                           : activeSession.status === 'error'
-                            ? '错误'
-                            : '已断开'}
+                            ? t('app.status.error')
+                            : t('app.status.disconnected')}
                     </span>
                   ) : null}
                 </div>
@@ -772,14 +778,19 @@ function App() {
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="Connect to server"
+            aria-label={t('app.connectDialog.ariaLabel')}
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <div>
-                <p className="label">连接</p>
-                <h3 className="dialog-title mt-1 text-sm font-semibold">新建 SSH 连接</h3>
+                <p className="label">{t('app.connectDialog.kicker')}</p>
+                <h3 className="dialog-title mt-1 text-sm font-semibold">{t('app.connectDialog.title')}</h3>
               </div>
-              <button aria-label="关闭连接弹框" className="icon-btn" onClick={() => setConnectDialogOpen(false)} type="button">
+              <button
+                aria-label={t('app.connectDialog.close')}
+                className="icon-btn"
+                onClick={() => setConnectDialogOpen(false)}
+                type="button"
+              >
                 <CloseIcon />
               </button>
             </div>
@@ -805,24 +816,24 @@ function App() {
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="删除历史连接"
+            aria-label={t('app.deleteProfileDialog.ariaLabel')}
           >
             <div className="flex flex-col gap-1">
-              <p className="label">删除确认</p>
-              <h3 className="dialog-title text-sm font-semibold">删除历史连接</h3>
-              <p className="dialog-description text-xs">确认删除“{pendingDeleteProfile.name}”吗？此操作只会移除历史记录，不影响已经打开的会话。</p>
+              <p className="label">{t('app.deleteProfileDialog.kicker')}</p>
+              <h3 className="dialog-title text-sm font-semibold">{t('app.deleteProfileDialog.title')}</h3>
+              <p className="dialog-description text-xs">{t('app.deleteProfileDialog.description', { name: pendingDeleteProfile.name })}</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
               <button className="icon-btn" onClick={() => setPendingDeleteProfileId(undefined)} type="button">
-                取消
+                {t('app.common.cancel')}
               </button>
               <button
                 className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={confirmDeleteSavedProfile}
                 type="button"
               >
-                删除
+                {t('app.common.delete')}
               </button>
             </div>
           </div>
@@ -836,24 +847,24 @@ function App() {
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="关闭会话"
+            aria-label={t('app.closeSessionDialog.ariaLabel')}
           >
             <div className="flex flex-col gap-1">
-              <p className="label">关闭确认</p>
-              <h3 className="dialog-title text-sm font-semibold">关闭当前会话</h3>
-              <p className="dialog-description text-xs">确认关闭“{pendingCloseSession.title}”吗？关闭后当前终端标签会被移除。</p>
+              <p className="label">{t('app.closeSessionDialog.kicker')}</p>
+              <h3 className="dialog-title text-sm font-semibold">{t('app.closeSessionDialog.title')}</h3>
+              <p className="dialog-description text-xs">{t('app.closeSessionDialog.description', { name: pendingCloseSession.title })}</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
               <button className="icon-btn" onClick={() => setPendingCloseSessionId(undefined)} type="button">
-                取消
+                {t('app.common.cancel')}
               </button>
               <button
                 className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={confirmCloseSession}
                 type="button"
               >
-                关闭
+                {t('app.common.close')}
               </button>
             </div>
           </div>
@@ -867,24 +878,24 @@ function App() {
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="退出应用"
+            aria-label={t('app.exitDialog.ariaLabel')}
           >
             <div className="flex flex-col gap-1">
-              <p className="label">退出确认</p>
-              <h3 className="dialog-title text-sm font-semibold">退出应用</h3>
-              <p className="dialog-description text-xs">确认退出 TermBridge 吗？退出后当前窗口和托盘都会关闭。</p>
+              <p className="label">{t('app.exitDialog.kicker')}</p>
+              <h3 className="dialog-title text-sm font-semibold">{t('app.exitDialog.title')}</h3>
+              <p className="dialog-description text-xs">{t('app.exitDialog.description')}</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
               <button className="icon-btn" onClick={() => setExitDialogOpen(false)} type="button">
-                取消
+                {t('app.common.cancel')}
               </button>
               <button
                 className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={confirmAppExit}
                 type="button"
               >
-                退出应用
+                {t('app.common.exit')}
               </button>
             </div>
           </div>
@@ -897,7 +908,7 @@ function App() {
         onInstallNow={handleInstallUpdateNow}
         onLater={handleInstallUpdateLater}
         open={restartDialogOpen}
-        version={updateState.version?.downloadedVersion ?? updateState.version?.latestVersion ?? '最新版本'}
+        version={updateState.version?.downloadedVersion ?? updateState.version?.latestVersion ?? t('app.update.latestVersion')}
       />
 
       <Toast

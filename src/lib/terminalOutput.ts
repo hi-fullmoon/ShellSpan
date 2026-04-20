@@ -1,17 +1,18 @@
 import type { SessionStatus } from '../types';
+import { t } from './i18n';
 
 const TERMINAL_PREFIX = '\u001b[36m[termbridge]\u001b[0m';
 
 function statusLabel(status: SessionStatus) {
   switch (status) {
     case 'connected':
-      return '已连接';
+      return t('terminal.status.connected');
     case 'connecting':
-      return '连接中';
+      return t('terminal.status.connecting');
     case 'error':
-      return '错误';
+      return t('terminal.status.error');
     case 'disconnected':
-      return '已断开';
+      return t('terminal.status.disconnected');
   }
 }
 
@@ -22,7 +23,7 @@ export function normalizeTerminalStatusMessage(message?: string) {
 
   switch (message.trim()) {
     case 'shell ready':
-      return '终端已就绪';
+      return t('terminal.message.shellReady');
     default:
       return message;
   }

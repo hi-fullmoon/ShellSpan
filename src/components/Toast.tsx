@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '../lib/ui';
 import { CloseIcon } from './Icons';
 
@@ -29,14 +29,28 @@ function toastTone(tone: NonNullable<ToastProps['tone']>) {
 }
 
 export function Toast({ action, durationMs = 2600, message, onClose, open, tone = 'info' }: ToastProps) {
+  const [paused, setPaused] = useState(false);
+  const [remainingMs, setRemainingMs] = useState(durationMs);
+  const startedAtRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!open) {
+      setPaused(false);
+      setRemainingMs(durationMs);
+      startedAtRef.current = null;
+      return;
+    }
+  }, [durationMs, open]);
+
+  useEffect(() => {
+    if (!open || paused) {
       return;
     }
 
-    const timer = window.setTimeout(onClose, durationMs);
+    startedAtRef.current = Date.now();
+    const timer = window.setTimeout(onClose, remainingMs);
     return () => window.clearTimeout(timer);
-  }, [durationMs, onClose, open]);
+  }, [onClose, open, paused, remainingMs]);
 
   if (!open) {
     return null;
@@ -49,6 +63,17 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
           'pointer-events-auto flex min-w-[220px] items-center gap-2 rounded-xl border px-3 py-2 shadow-[0_12px_36px_rgba(2,6,23,0.45)] backdrop-blur',
           toastTone(tone),
         )}
+        onMouseEnter={() => {
+          if (startedAtRef.current !== null) {
+            const elapsed = Date.now() - startedAtRef.current;
+            setRemainingMs((current) => Math.max(0, current - elapsed));
+          }
+          startedAtRef.current = null;
+          setPaused(true);
+        }}
+        onMouseLeave={() => {
+          setPaused(false);
+        }}
         role="status"
       >
         <span className="min-w-0 flex-1 text-xs">{message}</span>

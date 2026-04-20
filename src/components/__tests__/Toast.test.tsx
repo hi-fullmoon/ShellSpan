@@ -50,6 +50,29 @@ describe("Toast", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("does not auto close while hovered", () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+
+    render(
+      <Toast durationMs={1200} message="已保存" onClose={onClose} open tone="success" />,
+    );
+
+    const toast = screen.getByRole("status");
+    vi.advanceTimersByTime(700);
+    fireEvent.mouseEnter(toast);
+
+    vi.advanceTimersByTime(2000);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.mouseLeave(toast);
+    vi.advanceTimersByTime(499);
+    expect(onClose).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("renders nothing while closed", () => {
     render(<Toast message="不会显示" onClose={() => {}} open={false} />);
 

@@ -149,7 +149,7 @@ export function Sidebar({
         </button>
       </div>
 
-      <section className="surface flex min-h-0 flex-col overflow-hidden">
+      <section className="surface rounded-lg flex min-h-0 flex-col overflow-hidden">
         <div className="surface-header">
           <div>
             <p className="label">{t('sidebar.history')}</p>
@@ -180,12 +180,15 @@ export function Sidebar({
                     <div className="flex items-center gap-1">
                       <strong className="block truncate text-xs">{profile.name}</strong>
                       {profile.pinned ? (
-                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-cyan-300" title="已置顶">
+                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-cyan-300" title={t('sidebar.badge.pinned')}>
                           <PinIcon />
                         </span>
                       ) : null}
                       {profile.favorite ? (
-                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-amber-300" title="已收藏">
+                        <span
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-amber-300"
+                          title={t('sidebar.badge.favorite')}
+                        >
                           <StarIcon />
                         </span>
                       ) : null}
@@ -214,48 +217,48 @@ export function Sidebar({
                 role="presentation"
               />
               <div
-                className="themed-menu fixed z-50 min-w-[132px] rounded-lg p-1 backdrop-blur"
+                className="themed-menu fixed z-50 max-w-[96px] rounded-lg p-1 backdrop-blur"
                 onClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.preventDefault()}
                 ref={menuRef}
                 style={{ left: historyMenu.x, top: historyMenu.y }}
               >
                 <button
-                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => startRenamingProfile(historyMenu.profile)}
                   type="button"
                 >
-                  重命名
+                  {t('sidebar.menu.rename')}
                 </button>
                 <button
-                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onTogglePinnedProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
                   }}
                   type="button"
                 >
-                  {historyMenu.profile.pinned ? '取消置顶' : '置顶'}
+                  {historyMenu.profile.pinned ? t('sidebar.menu.unpin') : t('sidebar.menu.pin')}
                 </button>
                 <button
-                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onToggleFavoriteProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
                   }}
                   type="button"
                 >
-                  {historyMenu.profile.favorite ? '取消收藏' : '收藏'}
+                  {historyMenu.profile.favorite ? t('sidebar.menu.unfavorite') : t('sidebar.menu.favorite')}
                 </button>
                 <button
-                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onDeleteProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
                   }}
                   type="button"
                 >
-                  删除
+                  {t('sidebar.menu.delete')}
                 </button>
               </div>
             </>,
@@ -265,21 +268,17 @@ export function Sidebar({
 
       {renamingProfileId
         ? createPortal(
-            <div
-              className="app-overlay"
-              onClick={closeRenameDialog}
-              role="presentation"
-            >
+            <div className="app-overlay" onClick={closeRenameDialog} role="presentation">
               <div
                 className="surface w-full max-w-sm p-3"
                 onClick={(event) => event.stopPropagation()}
                 role="dialog"
                 aria-modal="true"
-                aria-label="重命名历史连接"
+                aria-label={t('sidebar.renameDialog.ariaLabel')}
               >
                 <div className="flex flex-col gap-1">
-                  <p className="label">重命名</p>
-                  <h3 className="themed-heading text-sm font-semibold">修改历史连接名称</h3>
+                  <p className="label">{t('sidebar.renameDialog.kicker')}</p>
+                  <h3 className="themed-heading text-sm font-semibold">{t('sidebar.renameDialog.title')}</h3>
                 </div>
 
                 <input
@@ -296,16 +295,16 @@ export function Sidebar({
                       closeRenameDialog();
                     }
                   }}
-                  placeholder="输入连接名称"
+                  placeholder={t('sidebar.renameDialog.placeholder')}
                   value={renameValue}
                 />
 
                 <div className="mt-3 flex justify-end gap-1">
                   <button className="icon-btn" onClick={closeRenameDialog} type="button">
-                    取消
+                    {t('sidebar.renameDialog.cancel')}
                   </button>
                   <button className="primary-btn px-3 py-2 text-xs" disabled={!renameValue.trim()} onClick={commitRename} type="button">
-                    保存
+                    {t('sidebar.renameDialog.save')}
                   </button>
                 </div>
               </div>

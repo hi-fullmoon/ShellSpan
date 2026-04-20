@@ -1,4 +1,5 @@
 import type { ChangeEvent, FormEvent } from 'react';
+import { t } from '../lib/i18n';
 import type { ConnectionProfile } from '../types';
 
 interface ConnectionFormProps {
@@ -45,37 +46,37 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
     <form className="flex flex-col gap-1.5" onSubmit={handleSubmit}>
       {!compact ? (
         <div className="flex flex-col gap-0.5">
-          <span className="label">快速连接</span>
-          <h2 className="themed-heading text-sm font-semibold">打开远程终端</h2>
-          <p className="text-xs text-slate-400">密码和密钥口令只参与本次连接，不会持久化。</p>
+          <span className="label">{t('connectionForm.quickConnect')}</span>
+          <h2 className="themed-heading text-sm font-semibold">{t('connectionForm.title')}</h2>
+          <p className="text-xs text-slate-400">{t('connectionForm.description')}</p>
         </div>
       ) : (
-        <p className="text-xs text-slate-400">填好主机和认证信息后直接启动新的 SSH 会话。</p>
+        <p className="text-xs text-slate-400">{t('connectionForm.compactDescription')}</p>
       )}
 
       <label className="flex flex-col gap-1">
-        <span className="text-[11px] font-medium text-slate-300">名称</span>
+        <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.name')}</span>
         <input
           className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
           value={profile.name}
           onChange={handleTextChange('name')}
-          placeholder="生产 / 堡垒机 / 演示"
+          placeholder={t('connectionForm.namePlaceholder')}
         />
       </label>
 
       <div className="grid gap-1.5 md:grid-cols-[minmax(0,1fr)_84px]">
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-slate-300">主机</span>
+          <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.host')}</span>
           <input
             className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             value={profile.host}
             onChange={handleTextChange('host')}
-            placeholder="192.168.1.10 / server.example.com"
+            placeholder={t('connectionForm.hostPlaceholder')}
             required
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-slate-300">端口</span>
+          <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.port')}</span>
           <input
             className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             type="number"
@@ -90,59 +91,59 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
 
       <div className="grid gap-1.5 md:grid-cols-[minmax(0,1fr)_132px]">
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-slate-300">用户名</span>
+          <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.username')}</span>
           <input
             className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             value={profile.username}
             onChange={handleTextChange('username')}
-            placeholder="root / ubuntu / deploy"
+            placeholder={t('connectionForm.usernamePlaceholder')}
             required
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-slate-300">认证</span>
+          <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.auth')}</span>
           <select
             className="themed-input h-[34px] rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             value={profile.authMethod}
             onChange={handleAuthChange}
           >
-            <option value="password">密码</option>
-            <option value="key">私钥</option>
+            <option value="password">{t('connectionForm.auth.password')}</option>
+            <option value="key">{t('connectionForm.auth.key')}</option>
           </select>
         </label>
       </div>
 
       {profile.authMethod === 'password' ? (
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-slate-300">密码</span>
+          <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.password')}</span>
           <input
             className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             type="password"
             value={profile.password ?? ''}
             onChange={handleTextChange('password')}
-            placeholder="不会写入本地存储"
+            placeholder={t('connectionForm.passwordPlaceholder')}
           />
         </label>
       ) : (
         <>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium text-slate-300">私钥路径</span>
+            <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.privateKeyPath')}</span>
             <input
               className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
               value={profile.privateKeyPath ?? ''}
               onChange={handleTextChange('privateKeyPath')}
-              placeholder="~/.ssh/id_ed25519 或 C:\\Users\\you\\.ssh\\id_rsa"
+              placeholder={t('connectionForm.privateKeyPathPlaceholder')}
               required
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium text-slate-300">私钥口令</span>
+            <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.passphrase')}</span>
             <input
               className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
               type="password"
               value={profile.passphrase ?? ''}
               onChange={handleTextChange('passphrase')}
-              placeholder="如密钥有口令可填写"
+              placeholder={t('connectionForm.passphrasePlaceholder')}
             />
           </label>
         </>
@@ -151,7 +152,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       <div className="flex flex-wrap gap-1">
         <label className="themed-checkbox-row flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs">
           <input className="themed-checkbox" name="remember" type="checkbox" defaultChecked />
-          <span>保存连接信息</span>
+          <span>{t('connectionForm.remember')}</span>
         </label>
 
         {profile.authMethod === 'password' ? (
@@ -168,16 +169,16 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               }
               type="checkbox"
             />
-            <span>保存密码</span>
+            <span>{t('connectionForm.rememberPassword')}</span>
           </label>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-0.5">
         <button className="primary-btn w-full" type="submit">
-          启动连接
+          {t('connectionForm.submit')}
         </button>
-        <small className="text-xs text-slate-500">建议优先为常用主机配置私钥认证。</small>
+        <small className="text-xs text-slate-500">{t('connectionForm.hint')}</small>
       </div>
     </form>
   );

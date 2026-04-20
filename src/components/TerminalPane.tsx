@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
+import { t } from "../lib/i18n";
 import { createLogger } from "../lib/logger";
 import { isTauriRuntime } from "../lib/tauri";
 import {
@@ -116,7 +117,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     terminalRef.current = terminal;
     fitRef.current = fitAddon;
     lastShellSizeRef.current = null;
-    writeSystemLine(formatTerminalPrefixedText("终端准备中..."));
+    writeSystemLine(formatTerminalPrefixedText(t('terminal.notice.preparing')));
 
     const themeObserver = new MutationObserver(() => {
       const nextTerminal = terminalRef.current;
@@ -141,13 +142,24 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
 
         if (shouldReconnect && !reconnectRequestedRef.current) {
           reconnectRequestedRef.current = true;
-          writeSystemLine(formatTerminalNoticeLine("重连中", "正在重新连接...", "36"));
+          writeSystemLine(
+            formatTerminalNoticeLine(
+              t('terminal.notice.reconnectingLabel'),
+              t('terminal.notice.reconnectingMessage'),
+              "36",
+            ),
+          );
           onReconnect();
           return;
         }
 
         if (!inputBlockedNoticeRef.current) {
-          writeSystemLine(formatTerminalNoticeLine("提示", "当前连接已断开，按回车重连。"));
+          writeSystemLine(
+            formatTerminalNoticeLine(
+              t('terminal.notice.hintLabel'),
+              t('terminal.notice.disconnectedHint'),
+            ),
+          );
           inputBlockedNoticeRef.current = true;
         }
         return;
@@ -162,7 +174,13 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
           error: String(error),
         });
         inputBlockedNoticeRef.current = true;
-        writeSystemLine(formatTerminalNoticeLine("写入失败", "连接不可用，请重连后再试。", "31"));
+        writeSystemLine(
+          formatTerminalNoticeLine(
+            t('terminal.notice.writeFailedLabel'),
+            t('terminal.notice.writeFailedMessage'),
+            "31",
+          ),
+        );
       });
     });
 
@@ -355,12 +373,17 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         }
         writeSystemLine(
           formatTerminalNoticeLine(
-            "已关闭",
+            t('terminal.notice.closedLabel'),
             event.payload.reason ? `: ${event.payload.reason}` : undefined,
             "31",
           ),
         );
-        writeSystemLine(formatTerminalNoticeLine("提示", "按回车重连。"));
+        writeSystemLine(
+          formatTerminalNoticeLine(
+            t('terminal.notice.hintLabel'),
+            t('terminal.notice.pressEnterReconnect'),
+          ),
+        );
         inputBlockedNoticeRef.current = true;
       });
 

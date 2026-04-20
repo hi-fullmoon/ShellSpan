@@ -22,6 +22,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { CloseIcon } from './Icons';
+import { t } from '../lib/i18n';
 import { cn, sessionStatusDot } from '../lib/ui';
 import type { SessionState } from '../types';
 
@@ -128,7 +129,7 @@ function SessionTabCard({
           </button>
 
           <button
-            aria-label="关闭会话标签"
+            aria-label={t('sessionTabs.close')}
             className="icon-btn px-0.5 py-0.5 rounded-[6px]"
             onClick={(event) => {
               event.stopPropagation();
@@ -294,8 +295,8 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
   if (sessions.length === 0) {
     return (
       <div className="surface rounded-lg session-tabs-empty flex items-center gap-2 px-2 py-1.5 text-xs">
-        <span className="label">会话</span>
-        <span>打开一个主机连接后，这里会出现标签页。</span>
+        <span className="label">{t('sessionTabs.label')}</span>
+        <span>{t('sessionTabs.empty')}</span>
       </div>
     );
   }
@@ -318,7 +319,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
 
   return (
     <div className="surface rounded-lg min-w-0 flex flex-col gap-1 p-1">
-      <span className="label px-1.5 pt-0.5">会话</span>
+      <span className="label px-1.5 pt-0.5">{t('sessionTabs.label')}</span>
       <div className="session-tabs-scroll min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-1" onWheel={handleWheel} ref={scrollRef}>
         <DndContext
           collisionDetection={closestCenter}

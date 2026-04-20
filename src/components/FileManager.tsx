@@ -13,6 +13,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { createPortal } from 'react-dom';
 import { type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { getActiveLocale, t } from '../lib/i18n';
 import { createLogger } from '../lib/logger';
 import { addPathWrapOpportunities } from '../lib/pathDisplay';
 import { isTauriRuntime } from '../lib/tauri';
@@ -136,7 +137,7 @@ function formatModified(modifiedAt?: number) {
     return '--';
   }
 
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(getActiveLocale(), {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -150,7 +151,7 @@ function formatFullModified(modifiedAt?: number) {
     return '--';
   }
 
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(getActiveLocale(), {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -171,12 +172,15 @@ export function formatDirectoryLoadError(error: unknown, requestedPath?: string)
 
   if (normalized.includes('[sftp(2)]') && normalized.includes('no such file')) {
     if (requestedPath?.trim()) {
-      return `路径不存在：${requestedPath.trim()}`;
+      return t('fileManager.error.pathMissingWithPath', {
+        label: t('fileManager.property.path'),
+        path: requestedPath.trim(),
+      });
     }
-    return '路径不存在，请检查后重试。';
+    return t('fileManager.error.pathMissing', { label: t('fileManager.property.path') });
   }
 
-  return `目录加载失败：${message}`;
+  return t('fileManager.error.loadDirectory', { message });
 }
 
 function createOperationId() {
@@ -230,13 +234,13 @@ function parentDirectoryPath(path: string) {
 function kindLabel(kind: RemoteFileKind) {
   switch (kind) {
     case 'directory':
-      return '目录';
+      return t('fileManager.kind.directory');
     case 'file':
-      return '文件';
+      return t('fileManager.kind.file');
     case 'symlink':
-      return '链接';
+      return t('fileManager.kind.symlink');
     case 'other':
-      return '其他';
+      return t('fileManager.kind.other');
   }
 }
 
@@ -446,12 +450,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const readOnly = !!session && session.status !== 'connected';
   const currentPath = listing?.path;
   const showInitialLoadingHint = !hasLoadedAnyListingRef.current;
+  const locale = getActiveLocale();
   const columnDefs = useMemo<ColDef<RemoteFileEntry>[]>(
     () => [
       {
         cellRenderer: NameCellRenderer,
         field: 'name',
-        headerName: '名称',
+        headerName: t('fileManager.columns.name'),
         width: 240,
         minWidth: 160,
         resizable: true,
@@ -461,7 +466,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       },
       {
         field: 'modifiedAt',
-        headerName: '时间',
+        headerName: t('fileManager.columns.time'),
         width: 142,
         minWidth: 142,
         resizable: true,
@@ -471,7 +476,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       },
       {
         field: 'kind',
-        headerName: '类型',
+        headerName: t('fileManager.columns.type'),
         width: 88,
         minWidth: 88,
         resizable: true,
@@ -481,7 +486,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       },
       {
         field: 'size',
-        headerName: '大小',
+        headerName: t('fileManager.columns.size'),
         width: 84,
         minWidth: 84,
         resizable: true,
@@ -489,7 +494,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         valueFormatter: ({ data }) => (data ? (data.kind === 'directory' ? '--' : formatSize(data.size)) : '--'),
       },
       {
-        headerName: '权限',
+        headerName: t('fileManager.columns.permissions'),
         width: 148,
         minWidth: 148,
         resizable: true,
@@ -499,7 +504,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         cellClass: 'font-mono',
       },
       {
-        headerName: '所有者',
+        headerName: t('fileManager.columns.owner'),
         width: 88,
         minWidth: 88,
         resizable: true,
@@ -509,7 +514,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         cellClass: 'font-mono',
       },
       {
-        headerName: '分组',
+        headerName: t('fileManager.columns.group'),
         width: 88,
         minWidth: 88,
         resizable: true,
@@ -519,7 +524,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         cellClass: 'font-mono',
       },
     ],
-    [],
+    [locale],
   );
   const defaultColDef = useMemo<ColDef<RemoteFileEntry>>(
     () => ({
@@ -714,7 +719,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     setPendingUploadConflict(undefined);
     if (!resolvedUpload.acceptedPaths.length) {
       setToast({
-        message: resolvedUpload.skippedConflicts > 0 ? `已跳过 ${resolvedUpload.skippedConflicts} 个同名项` : '没有可上传的项目',
+        message:
+          resolvedUpload.skippedConflicts > 0
+            ? t('fileManager.feedback.uploadSkipped', { count: resolvedUpload.skippedConflicts })
+            : t('fileManager.feedback.uploadNothing'),
         tone: 'info',
       });
       return;
@@ -754,11 +762,20 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         },
       });
       await loadDirectory(currentPath);
+      const skippedSuffix = resolvedUpload.skippedConflicts
+        ? t('fileManager.feedback.uploadSkippedSuffix', { count: resolvedUpload.skippedConflicts })
+        : '';
       setToast({
         message:
           resolvedUpload.acceptedPaths.length === 1
-            ? `已上传 ${localPathName(resolvedUpload.acceptedPaths[0])}${resolvedUpload.skippedConflicts ? `，跳过 ${resolvedUpload.skippedConflicts} 项` : ''}`
-            : `已上传 ${resolvedUpload.acceptedPaths.length} 项${resolvedUpload.skippedConflicts ? `，跳过 ${resolvedUpload.skippedConflicts} 项` : ''}`,
+            ? t('fileManager.feedback.uploadSingle', {
+                name: localPathName(resolvedUpload.acceptedPaths[0]),
+                suffix: skippedSuffix,
+              })
+            : t('fileManager.feedback.uploadMulti', {
+                count: resolvedUpload.acceptedPaths.length,
+                suffix: skippedSuffix,
+              }),
         tone: 'success',
       });
       fileManagerLogger.info('上传完成', {
@@ -779,7 +796,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         fileManagerLogger.error('上传失败', { sessionId, operationId, error: message });
       }
       setToast({
-        message: cancelled ? '已取消上传' : message,
+        message: cancelled ? t('fileManager.feedback.uploadCancelled') : message,
         tone: cancelled ? 'info' : 'error',
       });
     } finally {
@@ -1126,7 +1143,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               newName: dialog.value,
             },
           }),
-        '重命名成功',
+        t('fileManager.feedback.renameSuccess'),
       );
       return;
     }
@@ -1141,7 +1158,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             kind: dialog.mode === 'newFile' ? 'file' : 'directory',
           },
         }),
-      dialog.mode === 'newFile' ? '文件已创建' : '文件夹已创建',
+      dialog.mode === 'newFile' ? t('fileManager.feedback.fileCreated') : t('fileManager.feedback.directoryCreated'),
     );
   };
 
@@ -1210,10 +1227,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       kind: target.kind,
     });
     setToast({
-      message: `已复制 ${target.name}`,
+      message: t('fileManager.feedback.copiedEntry', { name: target.name }),
       tone: 'success',
       action: {
-        label: '清除',
+        label: t('fileManager.feedback.clear'),
         onClick: () => {
           setClipboard(undefined);
           setToast(undefined);
@@ -1230,7 +1247,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     try {
       await writeClipboardText(value);
       setToast({
-        message: `${label}已复制`,
+        message: t('fileManager.feedback.copiedLabel', { label }),
         tone: 'success',
       });
     } catch (nextError) {
@@ -1286,7 +1303,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       setSelectedPath(undefined);
       await loadDirectory(currentPath);
       setToast({
-        message: '删除成功',
+        message: t('fileManager.feedback.deleteSuccess'),
         tone: 'success',
       });
       fileManagerLogger.info('删除完成', { sessionId, operationId, path: target.path });
@@ -1307,7 +1324,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         });
       }
       setToast({
-        message: cancelled ? '已取消删除' : message,
+        message: cancelled ? t('fileManager.feedback.deleteCancelled') : message,
         tone: cancelled ? 'info' : 'error',
       });
     } finally {
@@ -1367,7 +1384,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             destinationDirectory: currentPath,
           },
         }),
-      `已粘贴 ${clipboard.sourceName}`,
+      t('fileManager.feedback.paste', { name: clipboard.sourceName }),
     );
   };
 
@@ -1393,7 +1410,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         },
       });
       setToast({
-        message: `已使用默认应用打开 ${target.name}`,
+        message: t('fileManager.feedback.openDefault', { name: target.name }),
         tone: 'success',
       });
       fileManagerLogger.info('已请求默认应用打开文件', {
@@ -1495,8 +1512,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     <aside className="surface rounded-lg relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
       <div className="surface-header">
         <div className="min-w-0">
-          <p className="file-manager-subtitle text-[11px] font-medium tracking-[0.08em]">文件</p>
-          <h3 className="themed-heading truncate text-[15px] font-semibold tracking-[0.01em]">{session ? '远程文件管理器' : '未激活会话'}</h3>
+          <p className="file-manager-subtitle text-[11px] font-medium tracking-[0.08em]">{t('fileManager.subtitle')}</p>
+          <h3 className="themed-heading truncate text-[15px] font-semibold tracking-[0.01em]">
+            {session ? t('fileManager.title.active') : t('fileManager.title.inactive')}
+          </h3>
         </div>
         <div className="flex items-center gap-1">
           <span className="file-manager-count rounded-md px-2 py-1 text-[10px]">{listing?.entries.length ?? 0}</span>
@@ -1506,11 +1525,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       <div className="flex min-h-0 flex-1 flex-col gap-1 p-1">
         {!session ? (
           <div className="surface-muted rounded-lg flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
-            先打开一个 SSH 会话，左侧会显示远程目录。
+            {t('fileManager.empty.noSession')}
           </div>
         ) : session.status !== 'connected' && !listing && showInitialLoadingHint ? (
           <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
-            会话连接成功后，文件管理器会自动加载远程目录。
+            {t('fileManager.empty.waitForSession')}
           </div>
         ) : (
           <>
@@ -1519,7 +1538,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 className="icon-btn h-7 w-7 px-0"
                 disabled={!ready || !listing?.parentPath || loading || working}
                 onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
-                title="返回上级目录"
+                title={t('fileManager.actions.parent')}
                 type="button"
               >
                 <ArrowUpIcon />
@@ -1528,14 +1547,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 className="themed-input min-w-0 flex-1 px-2 py-1 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
                 disabled={readOnly || loading || working}
                 onChange={(event) => setPathInput(event.target.value)}
-                placeholder="输入远程路径并回车"
+                placeholder={t('fileManager.pathPlaceholder')}
                 value={pathInput}
               />
               <button
                 className="icon-btn h-7 w-7 px-0"
                 disabled={!ready || loading || working}
                 onClick={() => void loadDirectory(currentPath)}
-                title="刷新"
+                title={t('fileManager.actions.refresh')}
                 type="button"
               >
                 <RefreshIcon />
@@ -1544,7 +1563,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 className="icon-btn h-7 w-7 px-0"
                 disabled={!ready || !currentPath || loading || working}
                 onClick={openToolbarMenu}
-                title="更多操作"
+                title={t('fileManager.actions.more')}
                 type="button"
               >
                 <DotsIcon />
@@ -1554,7 +1573,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             {error ? <div className="rounded-lg border border-rose-900 bg-rose-950/40 px-2 py-2 text-xs text-rose-300">{error}</div> : null}
             {readOnly && listing ? (
               <div className="rounded-lg border border-amber-900/80 bg-amber-950/30 px-2 py-2 text-xs text-amber-200">
-                终端已断开，文件管理器当前仅支持查看。
+                {t('fileManager.readOnly')}
               </div>
             ) : null}
 
@@ -1569,7 +1588,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             >
               {loading && !listing ? (
                 showInitialLoadingHint ? (
-                  <div className="surface-muted rounded-lg px-2 py-2 text-xs text-slate-400">正在加载远程目录...</div>
+                  <div className="surface-muted rounded-lg px-2 py-2 text-xs text-slate-400">{t('fileManager.loading')}</div>
                 ) : null
               ) : !listing ? null : (
                 <div className="ag-theme-quartz termbridge-file-grid h-full">
@@ -1580,12 +1599,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     getRowId={(params) => params.data.path}
                     headerHeight={30}
                     noRowsOverlayComponentParams={{
-                      message: '当前目录没有可显示的文件。',
+                      message: t('fileManager.emptyDirectory'),
                     }}
                     onCellContextMenu={handleGridContextMenu}
                     onRowClicked={handleGridRowClick}
                     onRowDoubleClicked={handleGridRowDoubleClick}
-                    overlayNoRowsTemplate={'<span class="termbridge-grid-overlay">当前目录没有可显示的文件。</span>'}
+                    overlayNoRowsTemplate={`<span class="termbridge-grid-overlay">${t('fileManager.emptyDirectory')}</span>`}
                     ref={gridRef}
                     rowSelection={{ mode: 'singleRow', checkboxes: false }}
                     rowData={listing.entries}
@@ -1618,14 +1637,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             >
               {contextMenu.target === 'entry' ? (
                 <div className="flex flex-col">
-                  <MenuButton disabled={!ready || loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
-                  <MenuButton disabled={!ready || loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
-                  <MenuButton disabled={!ready || loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
-                  <MenuButton disabled={!ready || loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newFile')} onClick={() => openCreateDialog('newFile')} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newDirectory')} onClick={() => openCreateDialog('newDirectory')} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFile')} onClick={() => void handleSelectUploadFiles()} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFolder')} onClick={() => void handleSelectUploadFolder()} />
                   {contextMenu.entry?.kind === 'directory' ? (
                     <MenuButton
                       disabled={!ready || loading || working}
-                      label="打开"
+                      label={t('fileManager.menu.open')}
                       onClick={() => {
                         if (contextMenu.entry) {
                           void loadDirectory(contextMenu.entry.path);
@@ -1636,33 +1655,36 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                   {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
                     <MenuButton
                       disabled={!ready || loading || working}
-                      label="默认编辑器打开"
+                      label={t('fileManager.menu.openWithDefaultEditor')}
                       onClick={() => void handleOpenWithDefaultEditor(contextMenu.entry)}
                     />
                   ) : null}
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label="重命名" onClick={() => openRenameDialog(contextMenu.entry)} />
-                  <MenuButton disabled={!ready || loading || working} label="复制" onClick={() => handleCopy(contextMenu.entry)} />
-                  <MenuButton disabled={!ready || loading || working} label="删除" onClick={() => handleDelete(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.rename')} onClick={() => openRenameDialog(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.copy')} onClick={() => handleCopy(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.delete')} onClick={() => handleDelete(contextMenu.entry)} />
                   <MenuDivider />
                   <MenuButton
                     disabled={!ready || loading || working}
-                    label="复制名称"
-                    onClick={() => void handleCopyText('名称', contextMenu.entry?.name ?? '')}
+                    label={t('fileManager.menu.copyName')}
+                    onClick={() => void handleCopyText(t('fileManager.copyLabel.name'), contextMenu.entry?.name ?? '')}
                   />
                   <MenuButton
                     disabled={!ready || loading || working}
-                    label={contextMenu.entry?.kind === 'directory' ? '复制目录路径' : '复制文件路径'}
+                    label={contextMenu.entry?.kind === 'directory' ? t('fileManager.menu.copyDirectoryPath') : t('fileManager.menu.copyFilePath')}
                     onClick={() =>
-                      void handleCopyText(contextMenu.entry?.kind === 'directory' ? '目录路径' : '文件路径', contextMenu.entry?.path ?? '')
+                      void handleCopyText(
+                        contextMenu.entry?.kind === 'directory' ? t('fileManager.copyLabel.directoryPath') : t('fileManager.copyLabel.filePath'),
+                        contextMenu.entry?.path ?? '',
+                      )
                     }
                   />
                   <MenuButton
                     disabled={!ready || loading || working}
-                    label="复制所在目录"
+                    label={t('fileManager.menu.copyContainingDirectory')}
                     onClick={() =>
                       void handleCopyText(
-                        '目录路径',
+                        t('fileManager.copyLabel.directoryPath'),
                         contextMenu.entry
                           ? contextMenu.entry.kind === 'directory'
                             ? contextMenu.entry.path
@@ -1672,25 +1694,25 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     }
                   />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.actions.refresh')} onClick={() => void loadDirectory(currentPath)} />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label="属性" onClick={() => openProperties(contextMenu.entry)} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.properties')} onClick={() => openProperties(contextMenu.entry)} />
                 </div>
               ) : (
                 <div className="flex flex-col">
-                  <MenuButton disabled={!ready || loading || working} label="新建文件" onClick={() => openCreateDialog('newFile')} />
-                  <MenuButton disabled={!ready || loading || working} label="新建文件夹" onClick={() => openCreateDialog('newDirectory')} />
-                  <MenuButton disabled={!ready || loading || working} label="上传文件" onClick={() => void handleSelectUploadFiles()} />
-                  <MenuButton disabled={!ready || loading || working} label="上传文件夹" onClick={() => void handleSelectUploadFolder()} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newFile')} onClick={() => openCreateDialog('newFile')} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newDirectory')} onClick={() => openCreateDialog('newDirectory')} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFile')} onClick={() => void handleSelectUploadFiles()} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFolder')} onClick={() => void handleSelectUploadFolder()} />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || !clipboard || loading || working} label="粘贴" onClick={() => void handlePaste()} />
+                  <MenuButton disabled={!ready || !clipboard || loading || working} label={t('fileManager.menu.paste')} onClick={() => void handlePaste()} />
                   <MenuButton
                     disabled={!ready || !currentPath || loading || working}
-                    label="复制当前目录路径"
-                    onClick={() => void handleCopyText('当前目录路径', currentPath ?? '')}
+                    label={t('fileManager.menu.copyCurrentDirectoryPath')}
+                    onClick={() => void handleCopyText(t('fileManager.copyLabel.currentDirectoryPath'), currentPath ?? '')}
                   />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label="刷新" onClick={() => void loadDirectory(currentPath)} />
+                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.actions.refresh')} onClick={() => void loadDirectory(currentPath)} />
                 </div>
               )}
             </div>,
@@ -1703,23 +1725,29 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
           <OverlayPanel className="max-w-md">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">属性</p>
+                <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.property.title')}</p>
                 <h4 className="themed-heading mt-1 text-[15px] font-semibold tracking-[0.01em]">{properties.entry.name}</h4>
               </div>
-              <button aria-label="关闭属性弹框" className="icon-btn h-7 w-7 px-0" onClick={() => setProperties(undefined)} title="关闭" type="button">
+              <button
+                aria-label={t('fileManager.property.close')}
+                className="icon-btn h-7 w-7 px-0"
+                onClick={() => setProperties(undefined)}
+                title={t('settings.close')}
+                type="button"
+              >
                 <CloseIcon />
               </button>
             </div>
 
             <div className="grid gap-1">
-              <PropertyRow label="名称" value={properties.entry.name} />
-              <PropertyRow label="路径" value={properties.entry.path} />
-              <PropertyRow label="所在目录" value={properties.directoryPath} />
-              <PropertyRow label="类型" value={kindLabel(properties.entry.kind)} />
-              <PropertyRow label="大小" value={properties.entry.kind === 'directory' ? '--' : formatSize(properties.entry.size)} />
-              <PropertyRow label="修改时间" value={formatFullModified(properties.entry.modifiedAt)} />
+              <PropertyRow label={t('fileManager.property.name')} value={properties.entry.name} />
+              <PropertyRow label={t('fileManager.property.path')} value={properties.entry.path} />
+              <PropertyRow label={t('fileManager.property.directory')} value={properties.directoryPath} />
+              <PropertyRow label={t('fileManager.property.type')} value={kindLabel(properties.entry.kind)} />
+              <PropertyRow label={t('fileManager.property.size')} value={properties.entry.kind === 'directory' ? '--' : formatSize(properties.entry.size)} />
+              <PropertyRow label={t('fileManager.property.modified')} value={formatFullModified(properties.entry.modifiedAt)} />
               <PropertyRow
-                label="所有者"
+                label={t('fileManager.property.owner')}
                 value={
                   properties.entry.ownerName
                     ? properties.entry.ownerUid !== undefined
@@ -1731,7 +1759,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 }
               />
               <PropertyRow
-                label="分组"
+                label={t('fileManager.property.group')}
                 value={
                   properties.entry.groupName
                     ? properties.entry.groupGid !== undefined
@@ -1742,8 +1770,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                       : '--'
                 }
               />
-              <PropertyRow label="权限" value={formatPermissionOctal(properties.entry.permissions)} />
-              <PropertyRow label="权限详情" value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)} />
+              <PropertyRow label={t('fileManager.property.permissions')} value={formatPermissionOctal(properties.entry.permissions)} />
+              <PropertyRow label={t('fileManager.property.permissionDetails')} value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)} />
             </div>
           </OverlayPanel>
         </OverlayLayer>
@@ -1753,7 +1781,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-sm">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{uploadProgress.cancelling ? '正在取消' : '上传中'}</span>
+              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
+                {uploadProgress.cancelling ? t('fileManager.uploadProgress.cancelling') : t('fileManager.uploadProgress.title')}
+              </span>
               <span className="text-xs font-medium text-slate-300">{uploadProgressPercent(uploadProgress)}%</span>
             </div>
 
@@ -1766,18 +1796,18 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
             <div className="flex flex-col gap-0.5">
               <strong className="truncate text-sm text-slate-100">
-                {uploadProgress.currentPath ? localPathName(uploadProgress.currentPath) : '正在准备上传'}
+                {uploadProgress.currentPath ? localPathName(uploadProgress.currentPath) : t('fileManager.uploadProgress.preparing')}
               </strong>
               <span className="text-xs text-slate-400">
                 {uploadProgress.totalBytes > 0
                   ? `${formatSize(uploadProgress.uploadedBytes)} / ${formatSize(uploadProgress.totalBytes)}`
-                  : `${uploadProgress.completedSteps} / ${uploadProgress.totalSteps} 项`}
+                  : t('fileManager.progress.items', { completed: uploadProgress.completedSteps, total: uploadProgress.totalSteps })}
               </span>
             </div>
 
             <div className="flex justify-end">
               <button className="icon-btn" disabled={uploadProgress.cancelling} onClick={() => void handleCancelUpload()} type="button">
-                {uploadProgress.cancelling ? '取消中...' : '取消上传'}
+                {uploadProgress.cancelling ? t('fileManager.uploadProgress.cancellingButton') : t('fileManager.uploadProgress.cancel')}
               </button>
             </div>
           </OverlayPanel>
@@ -1788,7 +1818,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-sm">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{deleteProgress.cancelling ? '正在取消' : '删除中'}</span>
+              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
+                {deleteProgress.cancelling ? t('fileManager.deleteProgress.cancelling') : t('fileManager.deleteProgress.title')}
+              </span>
               <span className="text-xs font-medium text-slate-300">{stepProgressPercent(deleteProgress)}%</span>
             </div>
 
@@ -1801,15 +1833,15 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
             <div className="flex flex-col gap-0.5">
               <strong className="truncate text-sm text-slate-100">
-                {deleteProgress.currentPath ? localPathName(deleteProgress.currentPath) : '正在准备删除'}
+                {deleteProgress.currentPath ? localPathName(deleteProgress.currentPath) : t('fileManager.deleteProgress.preparing')}
               </strong>
               <span className="text-xs text-slate-400">
-                {deleteProgress.completedSteps} / {deleteProgress.totalSteps} 项
+                {t('fileManager.progress.items', { completed: deleteProgress.completedSteps, total: deleteProgress.totalSteps })}
               </span>
             </div>
             <div className="flex justify-end">
               <button className="icon-btn" disabled={deleteProgress.cancelling} onClick={() => void handleCancelDelete()} type="button">
-                {deleteProgress.cancelling ? '取消中...' : '取消删除'}
+                {deleteProgress.cancelling ? t('fileManager.deleteProgress.cancellingButton') : t('fileManager.deleteProgress.cancel')}
               </button>
             </div>
           </OverlayPanel>
@@ -1819,9 +1851,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       {dragActive && ready && !uploadProgress && !deleteProgress ? (
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-xs gap-1 text-center">
-            <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">上传</span>
-            <strong className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">释放鼠标以上传到当前目录</strong>
-            <span className="text-xs text-slate-400">支持拖入文件或整个文件夹。</span>
+            <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{t('fileManager.dragDrop.title')}</span>
+            <strong className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">{t('fileManager.dragDrop.description')}</strong>
+            <span className="text-xs text-slate-400">{t('fileManager.dragDrop.hint')}</span>
           </OverlayPanel>
         </OverlayLayer>
       ) : null}
@@ -1830,9 +1862,15 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer>
           <form className="surface flex w-full max-w-xs flex-col gap-2 p-3" onSubmit={(event) => void submitDialog(event)}>
             <div>
-              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{dialog.mode === 'rename' ? '重命名' : '新建'}</p>
+              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">
+                {dialog.mode === 'rename' ? t('fileManager.dialog.rename') : t('fileManager.dialog.new')}
+              </p>
               <h4 className="themed-heading mt-1 text-[15px] font-semibold tracking-[0.01em]">
-                {dialog.mode === 'newFile' ? '新建空文件' : dialog.mode === 'newDirectory' ? '新建文件夹' : '修改名称'}
+                {dialog.mode === 'newFile'
+                  ? t('fileManager.dialog.newFileTitle')
+                  : dialog.mode === 'newDirectory'
+                    ? t('fileManager.dialog.newDirectoryTitle')
+                    : t('fileManager.dialog.renameTitle')}
               </h4>
             </div>
 
@@ -1840,16 +1878,22 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               autoFocus
               className="themed-input rounded-lg px-3 py-2 text-[13px] leading-5 outline-none transition focus:border-cyan-400/60"
               onChange={(event) => setDialog((current) => (current ? { ...current, value: event.target.value } : current))}
-              placeholder={dialog.mode === 'newFile' ? 'example.txt' : dialog.mode === 'newDirectory' ? '新建文件夹' : '输入新名称'}
+              placeholder={
+                dialog.mode === 'newFile'
+                  ? t('fileManager.dialog.newFilePlaceholder')
+                  : dialog.mode === 'newDirectory'
+                    ? t('fileManager.dialog.newDirectoryPlaceholder')
+                    : t('fileManager.dialog.renamePlaceholder')
+              }
               value={dialog.value}
             />
 
             <div className="flex justify-end gap-1">
               <button className="icon-btn h-8 px-3" onClick={() => setDialog(undefined)} type="button">
-                取消
+                {t('fileManager.dialog.cancel')}
               </button>
               <button className="primary-btn h-8 px-3 text-xs" disabled={!dialog.value.trim() || working} type="submit">
-                {dialog.mode === 'rename' ? '保存' : '确定'}
+                {dialog.mode === 'rename' ? t('fileManager.dialog.save') : t('fileManager.dialog.confirm')}
               </button>
             </div>
           </form>
@@ -1860,16 +1904,18 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer>
           <OverlayPanel className="max-w-sm">
             <div className="flex flex-col gap-1">
-              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">上传冲突</p>
-              <h4 className="themed-heading text-[15px] font-semibold tracking-[0.01em]">“{pendingUploadConflict.conflict.targetName}”已存在</h4>
+              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.uploadConflict.kicker')}</p>
+              <h4 className="themed-heading text-[15px] font-semibold tracking-[0.01em]">
+                {t('fileManager.uploadConflict.title', { name: pendingUploadConflict.conflict.targetName })}
+              </h4>
               <p className="text-subtle text-xs leading-5">
-                远程目录里已经有同名{kindLabel(pendingUploadConflict.conflict.existingKind)}，要用本地文件覆盖它吗？
+                {t('fileManager.uploadConflict.description', { kind: kindLabel(pendingUploadConflict.conflict.existingKind) })}
               </p>
               <p
                 className="themed-property-row break-all rounded-lg px-2 py-2 text-[11px] leading-5"
                 title={pendingUploadConflict.conflict.localPath}
               >
-                本地来源：{addPathWrapOpportunities(pendingUploadConflict.conflict.localPath)}
+                {t('fileManager.uploadConflict.source', { path: addPathWrapOpportunities(pendingUploadConflict.conflict.localPath) })}
               </p>
             </div>
 
@@ -1890,8 +1936,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 type="checkbox"
               />
               <span>
-                应用到剩余冲突
-                {pendingUploadConflict.remainingConflicts > 0 ? `（还有 ${pendingUploadConflict.remainingConflicts} 项）` : '（当前是最后一项）'}
+                {t('fileManager.uploadConflict.applyRemaining')}
+                {pendingUploadConflict.remainingConflicts > 0
+                  ? t('fileManager.uploadConflict.remaining', { count: pendingUploadConflict.remainingConflicts })
+                  : t('fileManager.uploadConflict.last')}
               </span>
             </label>
 
@@ -1904,7 +1952,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 }}
                 type="button"
               >
-                取消上传
+                {t('fileManager.uploadConflict.cancel')}
               </button>
               <button
                 className="icon-btn h-8 px-3"
@@ -1914,7 +1962,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 }}
                 type="button"
               >
-                跳过
+                {t('fileManager.uploadConflict.skip')}
               </button>
               <button
                 className="primary-btn h-8 px-3 text-xs"
@@ -1924,7 +1972,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 }}
                 type="button"
               >
-                覆盖
+                {t('fileManager.uploadConflict.overwrite')}
               </button>
             </div>
           </OverlayPanel>
@@ -1935,25 +1983,27 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer>
           <OverlayPanel className="max-w-sm">
             <div className="flex flex-col gap-1">
-              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">删除确认</p>
+              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.deleteConfirm.kicker')}</p>
               <h4 className="themed-heading text-[15px] font-semibold tracking-[0.01em]">
-                {pendingDelete.kind === 'directory' ? '删除目录' : '删除文件'}
+                {pendingDelete.kind === 'directory' ? t('fileManager.deleteConfirm.directoryTitle') : t('fileManager.deleteConfirm.fileTitle')}
               </h4>
               <p className="text-subtle text-xs">
-                {pendingDelete.kind === 'directory' ? `确认删除“${pendingDelete.name}”及其内容吗？` : `确认删除“${pendingDelete.name}”吗？`}
+                {pendingDelete.kind === 'directory'
+                  ? t('fileManager.deleteConfirm.directoryDescription', { name: pendingDelete.name })
+                  : t('fileManager.deleteConfirm.fileDescription', { name: pendingDelete.name })}
               </p>
             </div>
 
             <div className="flex justify-end gap-1">
               <button className="icon-btn h-8 px-3" onClick={() => setPendingDelete(undefined)} type="button">
-                取消
+                {t('fileManager.dialog.cancel')}
               </button>
               <button
                 className="inline-flex h-8 items-center justify-center rounded-lg bg-rose-400 px-3 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={() => void confirmDelete()}
                 type="button"
               >
-                删除
+                {t('fileManager.deleteConfirm.confirm')}
               </button>
             </div>
           </OverlayPanel>

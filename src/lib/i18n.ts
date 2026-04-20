@@ -29,6 +29,10 @@ export function syncI18nLocale(locale: LocalePreference) {
   activeLocale = locale;
 }
 
+export function getActiveLocale() {
+  return activeLocale;
+}
+
 export async function initI18n(locale: LocalePreference) {
   activeLocale = locale;
   initialized = false;

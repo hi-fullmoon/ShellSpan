@@ -1,11 +1,12 @@
-use log::{debug, error, info, warn, LevelFilter};
+mod commands;
+mod menu;
+mod models;
+
 #[cfg(unix)]
 use libc::{poll, pollfd, POLLIN, POLLOUT};
-use serde::{Deserialize, Serialize};
+use log::{debug, error, info, warn, LevelFilter};
 use socket2::{SockRef, TcpKeepalive};
-use ssh2::{
-    Channel, ExtendedData, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp,
-};
+use ssh2::{Channel, ExtendedData, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -15,15 +16,14 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        atomic::{AtomicBool, Ordering as AtomicOrdering},
-        mpsc::{self, Receiver, Sender, TryRecvError},
+        atomic::AtomicBool,
+        mpsc::{Receiver, TryRecvError},
         Arc,
-        Mutex,
     },
     thread,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 #[cfg(unix)]
@@ -31,838 +31,17 @@ use ssh2::BlockDirections;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 
+use models::*;
+
 const SSH_DATA_EVENT: &str = "ssh-data";
 const SSH_STATUS_EVENT: &str = "ssh-status";
 const SSH_CLOSED_EVENT: &str = "ssh-closed";
 const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 const DELETE_PROGRESS_EVENT: &str = "delete-progress";
-const MENU_OPEN_SETTINGS_ID: &str = "menu.open_settings";
-const MENU_CHECK_UPDATE_ID: &str = "menu.check_update";
-const APP_QUIT_MENU_ID: &str = "menu.app_quit";
-const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
-const SYSTEM_OPEN_SETTINGS_EVENT: &str = "system-open-settings";
-const SYSTEM_CHECK_UPDATE_EVENT: &str = "system-check-update";
-const SYSTEM_REQUEST_APP_EXIT_EVENT: &str = "system-request-app-exit";
-#[cfg(target_os = "windows")]
-const TRAY_SHOW_MAIN_WINDOW_ID: &str = "tray.show_main_window";
-#[cfg(target_os = "windows")]
-const TRAY_QUIT_ID: &str = "tray.quit";
 const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
 const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionSummary {
-    session_id: String,
-    title: String,
-    host: String,
-    port: u16,
-    username: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionCreateRequest {
-    name: String,
-    host: String,
-    port: u16,
-    username: String,
-    auth_method: AuthMethod,
-    password: Option<String>,
-    private_key_path: Option<String>,
-    passphrase: Option<String>,
-    terminal_cols: u32,
-    terminal_rows: u32,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteConnectionRequest {
-    host: String,
-    port: u16,
-    username: String,
-    auth_method: AuthMethod,
-    password: Option<String>,
-    private_key_path: Option<String>,
-    passphrase: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteDirectoryRequest {
-    #[serde(flatten)]
-    connection: RemoteConnectionRequest,
-    path: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateRemoteEntryRequest {
-    #[serde(flatten)]
-    connection: RemoteConnectionRequest,
-    parent_path: String,
-    name: String,
-    kind: CreateRemoteEntryKind,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum CreateRemoteEntryKind {
-    File,
-    Directory,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RenameRemotePathRequest {
-    #[serde(flatten)]
-    connection: RemoteConnectionRequest,
-    path: String,
-    new_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DeleteRemotePathRequest {
-    #[serde(flatten)]
-    connection: RemoteConnectionRequest,
-    path: String,
-    operation_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CopyRemotePathRequest {
-    #[serde(flatten)]
-    connection: RemoteConnectionRequest,
-    source_path: String,
-    destination_directory: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OpenRemoteFileRequest {
-    #[serde(flatten)]
-    connection: RemoteConnectionRequest,
-    path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UploadLocalPathsRequest {
-    #[serde(flatten)]
-    connection: RemoteConnectionRequest,
-    destination_directory: String,
-    local_paths: Vec<String>,
-    #[serde(default)]
-    conflict_policies: Vec<UploadConflictPolicy>,
-    operation_id: String,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum AuthMethod {
-    Password,
-    Key,
-}
-
-impl AuthMethod {
-    fn as_str(self) -> &'static str {
-        match self {
-            AuthMethod::Password => "password",
-            AuthMethod::Key => "key",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-enum UploadConflictPolicy {
-    Overwrite,
-    Skip,
-    Fail,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StatusEvent {
-    session_id: String,
-    status: SessionStatus,
-    message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DataEvent {
-    session_id: String,
-    chunk: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ClosedEvent {
-    session_id: String,
-    reason: Option<String>,
-    reason_kind: ClosedReasonKind,
-    retryable: bool,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum ClosedReasonKind {
-    LocalClose,
-    ControllerDropped,
-    RemoteExit,
-    TransportDisconnect,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UploadProgressEvent {
-    operation_id: String,
-    current_path: Option<String>,
-    total_bytes: u64,
-    uploaded_bytes: u64,
-    total_steps: u64,
-    completed_steps: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DeleteProgressEvent {
-    operation_id: String,
-    current_path: Option<String>,
-    total_steps: u64,
-    completed_steps: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteDirectoryListing {
-    path: String,
-    parent_path: Option<String>,
-    entries: Vec<RemoteFileEntry>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteFileEntry {
-    path: String,
-    name: String,
-    kind: RemoteFileKind,
-    size: Option<u64>,
-    modified_at: Option<u64>,
-    permissions: Option<u32>,
-    owner_uid: Option<u32>,
-    group_gid: Option<u32>,
-    owner_name: Option<String>,
-    group_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum SessionStatus {
-    Connecting,
-    Connected,
-    Disconnected,
-    Error,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-enum RemoteFileKind {
-    Directory,
-    File,
-    Symlink,
-    Other,
-}
-
-enum SessionCommand {
-    Write(String),
-    Resize { cols: u32, rows: u32 },
-    Close,
-}
-
-struct ManagedSession {
-    sender: Sender<SessionCommand>,
-}
-
-#[derive(Default)]
-struct SessionManager {
-    sessions: Mutex<HashMap<String, ManagedSession>>,
-}
-
-struct ConnectedSftp {
-    session: Session,
-    sftp: Sftp,
-}
-
-#[derive(Default)]
-struct UploadCancellationRegistry {
-    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
-}
-
-#[derive(Default)]
-struct DeleteCancellationRegistry {
-    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
-}
-
-#[derive(Default, Clone, Copy)]
-struct UploadScanStats {
-    total_bytes: u64,
-    total_steps: u64,
-}
-
-impl UploadScanStats {
-    fn combine(&mut self, other: UploadScanStats) {
-        self.total_bytes += other.total_bytes;
-        self.total_steps += other.total_steps;
-    }
-}
-
-struct UploadProgressTracker {
-    app: AppHandle,
-    operation_id: String,
-    cancel_flag: Arc<AtomicBool>,
-    current_path: Option<String>,
-    total_bytes: u64,
-    uploaded_bytes: u64,
-    total_steps: u64,
-    completed_steps: u64,
-}
-
-struct DeleteProgressTracker {
-    app: AppHandle,
-    operation_id: String,
-    cancel_flag: Arc<AtomicBool>,
-    current_path: Option<String>,
-    total_steps: u64,
-    completed_steps: u64,
-}
-
-impl UploadProgressTracker {
-    fn new(
-        app: AppHandle,
-        operation_id: String,
-        cancel_flag: Arc<AtomicBool>,
-        stats: UploadScanStats,
-    ) -> Self {
-        Self {
-            app,
-            operation_id,
-            cancel_flag,
-            current_path: None,
-            total_bytes: stats.total_bytes,
-            uploaded_bytes: 0,
-            total_steps: stats.total_steps,
-            completed_steps: 0,
-        }
-    }
-
-    fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
-        self.current_path = path;
-        self.emit()
-    }
-
-    fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
-        self.uploaded_bytes += count;
-        self.emit()
-    }
-
-    fn finish_step(&mut self) -> Result<(), String> {
-        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
-        self.emit()
-    }
-
-    fn ensure_not_cancelled(&self) -> Result<(), String> {
-        if self.cancel_flag.load(AtomicOrdering::SeqCst) {
-            return Err("upload cancelled".to_string());
-        }
-        Ok(())
-    }
-
-    fn emit(&self) -> Result<(), String> {
-        self.app
-            .emit(
-                UPLOAD_PROGRESS_EVENT,
-                UploadProgressEvent {
-                    operation_id: self.operation_id.clone(),
-                    current_path: self.current_path.clone(),
-                    total_bytes: self.total_bytes,
-                    uploaded_bytes: self.uploaded_bytes,
-                    total_steps: self.total_steps,
-                    completed_steps: self.completed_steps,
-                },
-            )
-            .map_err(|error| format!("failed to emit upload progress event: {error}"))
-    }
-}
-
-impl DeleteProgressTracker {
-    fn new(
-        app: AppHandle,
-        operation_id: String,
-        cancel_flag: Arc<AtomicBool>,
-        total_steps: u64,
-    ) -> Self {
-        Self {
-            app,
-            operation_id,
-            cancel_flag,
-            current_path: None,
-            total_steps,
-            completed_steps: 0,
-        }
-    }
-
-    fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
-        self.current_path = path;
-        self.emit()
-    }
-
-    fn finish_step(&mut self) -> Result<(), String> {
-        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
-        self.emit()
-    }
-
-    fn ensure_not_cancelled(&self) -> Result<(), String> {
-        if self.cancel_flag.load(AtomicOrdering::SeqCst) {
-            return Err("delete cancelled".to_string());
-        }
-        Ok(())
-    }
-
-    fn emit(&self) -> Result<(), String> {
-        self.app
-            .emit(
-                DELETE_PROGRESS_EVENT,
-                DeleteProgressEvent {
-                    operation_id: self.operation_id.clone(),
-                    current_path: self.current_path.clone(),
-                    total_steps: self.total_steps,
-                    completed_steps: self.completed_steps,
-                },
-            )
-            .map_err(|error| format!("failed to emit delete progress event: {error}"))
-    }
-}
-
-impl SessionManager {
-    fn insert(&self, session_id: String, managed: ManagedSession) -> Result<(), String> {
-        let mut guard = self
-            .sessions
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        guard.insert(session_id, managed);
-        Ok(())
-    }
-
-    fn send(&self, session_id: &str, command: SessionCommand) -> Result<(), String> {
-        let guard = self
-            .sessions
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        let managed = guard
-            .get(session_id)
-            .ok_or_else(|| format!("session {session_id} not found"))?;
-        managed
-            .sender
-            .send(command)
-            .map_err(|_| format!("session {session_id} is not available"))
-    }
-
-    fn remove(&self, session_id: &str) -> Result<(), String> {
-        let mut guard = self
-            .sessions
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        guard.remove(session_id);
-        Ok(())
-    }
-}
-
-impl UploadCancellationRegistry {
-    fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
-        let flag = Arc::new(AtomicBool::new(false));
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
-        guard.insert(operation_id, flag.clone());
-        Ok(flag)
-    }
-
-    fn cancel(&self, operation_id: &str) -> Result<(), String> {
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
-        let flag = guard
-            .get(operation_id)
-            .ok_or_else(|| format!("upload operation {operation_id} not found"))?;
-        flag.store(true, AtomicOrdering::SeqCst);
-        Ok(())
-    }
-
-    fn remove(&self, operation_id: &str) -> Result<(), String> {
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
-        guard.remove(operation_id);
-        Ok(())
-    }
-}
-
-impl DeleteCancellationRegistry {
-    fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
-        let flag = Arc::new(AtomicBool::new(false));
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "delete cancellation registry poisoned".to_string())?;
-        guard.insert(operation_id, flag.clone());
-        Ok(flag)
-    }
-
-    fn cancel(&self, operation_id: &str) -> Result<(), String> {
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "delete cancellation registry poisoned".to_string())?;
-        let flag = guard
-            .get(operation_id)
-            .ok_or_else(|| format!("delete operation {operation_id} not found"))?;
-        flag.store(true, AtomicOrdering::SeqCst);
-        Ok(())
-    }
-
-    fn remove(&self, operation_id: &str) -> Result<(), String> {
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "delete cancellation registry poisoned".to_string())?;
-        guard.remove(operation_id);
-        Ok(())
-    }
-}
-
-#[tauri::command]
-fn create_session(
-    app: AppHandle,
-    state: State<'_, SessionManager>,
-    request: SessionCreateRequest,
-) -> Result<SessionSummary, String> {
-    validate_connection_fields(&request.host, &request.username)?;
-    info!("Creating SSH session {}", summarize_session_request(&request));
-
-    let session_id = Uuid::new_v4().to_string();
-    let summary = SessionSummary {
-        session_id: session_id.clone(),
-        title: request.name.clone(),
-        host: request.host.clone(),
-        port: request.port,
-        username: request.username.clone(),
-    };
-
-    let (tx, rx) = mpsc::channel::<SessionCommand>();
-    state.insert(session_id.clone(), ManagedSession { sender: tx })?;
-
-    info!(
-        "Created SSH session session_id={} title={} host={} port={} username={}",
-        session_id, summary.title, summary.host, summary.port, summary.username
-    );
-    spawn_ssh_thread(app, session_id, request, rx);
-    Ok(summary)
-}
-
-#[tauri::command]
-fn write_session(
-    state: State<'_, SessionManager>,
-    session_id: String,
-    data: String,
-) -> Result<(), String> {
-    let result = state.send(&session_id, SessionCommand::Write(data));
-    if let Err(error) = &result {
-        warn!("Failed to write SSH session input session_id={session_id}: {error}");
-    }
-    result
-}
-
-#[tauri::command]
-fn resize_session(
-    state: State<'_, SessionManager>,
-    session_id: String,
-    cols: u32,
-    rows: u32,
-) -> Result<(), String> {
-    let result = state.send(&session_id, SessionCommand::Resize { cols, rows });
-    if let Err(error) = &result {
-        warn!(
-            "Failed to resize SSH session session_id={} cols={} rows={}: {}",
-            session_id, cols, rows, error
-        );
-    }
-    result
-}
-
-#[tauri::command]
-fn close_session(state: State<'_, SessionManager>, session_id: String) -> Result<(), String> {
-    info!("Closing SSH session session_id={session_id}");
-    let result = state.send(&session_id, SessionCommand::Close);
-    let _ = state.remove(&session_id);
-    if let Err(error) = &result {
-        warn!("Failed to close SSH session session_id={session_id}: {error}");
-    }
-    result
-}
-
-#[tauri::command]
-fn request_app_restart(app: AppHandle) {
-    info!("Requesting application restart");
-    app.request_restart();
-}
-
-#[tauri::command]
-fn request_app_exit(app: AppHandle) {
-    info!("Requesting application exit");
-    app.exit(0);
-}
-
-#[tauri::command]
-async fn list_remote_directory(request: RemoteDirectoryRequest) -> Result<RemoteDirectoryListing, String> {
-    let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
-    debug!(
-        "Listing remote directory path={} {}",
-        requested_path,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let result = tauri::async_runtime::spawn_blocking(move || list_remote_directory_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join directory listing task: {error}"))?;
-    if let Ok(listing) = &result {
-        debug!(
-            "Listed remote directory path={} entries={}",
-            listing.path,
-            listing.entries.len()
-        );
-    }
-    result
-}
-
-#[tauri::command]
-async fn create_remote_entry(request: CreateRemoteEntryRequest) -> Result<(), String> {
-    info!(
-        "Creating remote entry parent_path={} name={} kind={:?} {}",
-        request.parent_path,
-        request.name,
-        request.kind,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let result = tauri::async_runtime::spawn_blocking(move || create_remote_entry_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join create entry task: {error}"))?;
-    if result.is_ok() {
-        info!("Created remote entry successfully");
-    }
-    result
-}
-
-#[tauri::command]
-async fn rename_remote_path(request: RenameRemotePathRequest) -> Result<(), String> {
-    info!(
-        "Renaming remote path path={} new_name={} {}",
-        request.path,
-        request.new_name,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let result = tauri::async_runtime::spawn_blocking(move || rename_remote_path_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join rename task: {error}"))?;
-    if result.is_ok() {
-        info!("Renamed remote path successfully");
-    }
-    result
-}
-
-#[tauri::command]
-async fn delete_remote_path(
-    app: AppHandle,
-    deletes: State<'_, DeleteCancellationRegistry>,
-    request: DeleteRemotePathRequest,
-) -> Result<(), String> {
-    info!(
-        "Deleting remote path operation_id={} path={} {}",
-        request.operation_id,
-        request.path,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let cancel_flag = deletes.register(request.operation_id.clone())?;
-    let operation_id = request.operation_id.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        delete_remote_path_blocking(app, request, cancel_flag)
-    })
-        .await
-        .map_err(|error| format!("failed to join delete task: {error}"))?;
-    let _ = deletes.remove(&operation_id);
-    if let Err(error) = &result {
-        warn!("Delete remote path failed operation_id={operation_id}: {error}");
-    } else {
-        info!("Deleted remote path operation_id={operation_id}");
-    }
-    result
-}
-
-#[tauri::command]
-async fn copy_remote_path(request: CopyRemotePathRequest) -> Result<(), String> {
-    info!(
-        "Copying remote path source_path={} destination_directory={} {}",
-        request.source_path,
-        request.destination_directory,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let result = tauri::async_runtime::spawn_blocking(move || copy_remote_path_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join copy task: {error}"))?;
-    if result.is_ok() {
-        info!("Copied remote path successfully");
-    }
-    result
-}
-
-#[tauri::command]
-async fn upload_local_paths(
-    app: AppHandle,
-    uploads: State<'_, UploadCancellationRegistry>,
-    request: UploadLocalPathsRequest,
-) -> Result<(), String> {
-    info!(
-        "Uploading local paths operation_id={} count={} destination_directory={} {}",
-        request.operation_id,
-        request.local_paths.len(),
-        request.destination_directory,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let cancel_flag = uploads.register(request.operation_id.clone())?;
-    let operation_id = request.operation_id.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        upload_local_paths_blocking(app, request, cancel_flag)
-    })
-        .await
-        .map_err(|error| format!("failed to join upload task: {error}"))?;
-    let _ = uploads.remove(&operation_id);
-    if let Err(error) = &result {
-        warn!("Upload failed operation_id={operation_id}: {error}");
-    } else {
-        info!("Upload completed operation_id={operation_id}");
-    }
-    result
-}
-
-#[tauri::command]
-fn cancel_upload(
-    uploads: State<'_, UploadCancellationRegistry>,
-    operation_id: String,
-) -> Result<(), String> {
-    info!("Cancelling upload operation_id={operation_id}");
-    uploads.cancel(&operation_id)
-}
-
-#[tauri::command]
-fn cancel_delete(
-    deletes: State<'_, DeleteCancellationRegistry>,
-    operation_id: String,
-) -> Result<(), String> {
-    info!("Cancelling delete operation_id={operation_id}");
-    deletes.cancel(&operation_id)
-}
-
-#[tauri::command]
-fn pick_local_files() -> Result<Vec<String>, String> {
-    let paths = rfd::FileDialog::new()
-        .set_title("选择要上传的文件")
-        .pick_files()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    Ok(paths)
-}
-
-#[tauri::command]
-fn pick_local_folder() -> Result<Vec<String>, String> {
-    let path = rfd::FileDialog::new()
-        .set_title("选择要上传的文件夹")
-        .pick_folder()
-        .map(|path| path.to_string_lossy().to_string());
-    Ok(path.into_iter().collect())
-}
-
-#[tauri::command]
-async fn open_remote_file(request: OpenRemoteFileRequest) -> Result<(), String> {
-    info!(
-        "Opening remote file path={} {}",
-        request.path,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let result = tauri::async_runtime::spawn_blocking(move || open_remote_file_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join open file task: {error}"))?;
-    if result.is_ok() {
-        info!("Opened remote file successfully");
-    }
-    result
-}
-
-fn spawn_ssh_thread(
-    app: AppHandle,
-    session_id: String,
-    request: SessionCreateRequest,
-    rx: Receiver<SessionCommand>,
-) {
-    thread::spawn(move || {
-        debug!("Spawned SSH worker session_id={session_id}");
-        let run_result = run_ssh_session(&app, &session_id, &request, rx);
-
-        match run_result {
-            Ok(message) => {
-                let (reason_kind, retryable) =
-                    classify_closed_reason(message.as_deref(), SessionStatus::Disconnected);
-                info!(
-                    "SSH session ended session_id={} reason={}",
-                    session_id,
-                    message.as_deref().unwrap_or("remote shell closed")
-                );
-                let _ = emit_status(
-                    &app,
-                    &session_id,
-                    SessionStatus::Disconnected,
-                    message.clone(),
-                );
-                let _ = emit_closed(&app, &session_id, message, reason_kind, retryable);
-            }
-            Err(error) => {
-                let (reason_kind, retryable) =
-                    classify_closed_reason(Some(error.as_str()), SessionStatus::Error);
-                error!("SSH session failed session_id={session_id}: {error}");
-                let _ = emit_status(
-                    &app,
-                    &session_id,
-                    SessionStatus::Error,
-                    Some(error.clone()),
-                );
-                let _ = emit_closed(&app, &session_id, Some(error), reason_kind, retryable);
-            }
-        }
-
-        let manager = app.state::<SessionManager>();
-        let _ = manager.remove(&session_id);
-    });
-}
-
 fn run_ssh_session(
     app: &AppHandle,
     session_id: &str,
@@ -1085,7 +264,12 @@ fn upload_local_paths_blocking(
                 None => continue,
             };
         let destination_path = destination_directory.join(&destination_name);
-        upload_local_entry_to_path(&connected.sftp, local_path, &destination_path, &mut progress)?;
+        upload_local_entry_to_path(
+            &connected.sftp,
+            local_path,
+            &destination_path,
+            &mut progress,
+        )?;
         existing_names.insert(destination_name);
     }
 
@@ -1185,8 +369,12 @@ fn enrich_remote_entry_owners(session: &Session, entries: &mut [RemoteFileEntry]
         .unwrap_or_default();
 
     for entry in entries {
-        entry.owner_name = entry.owner_uid.and_then(|uid| owner_names.get(&uid).cloned());
-        entry.group_name = entry.group_gid.and_then(|gid| group_names.get(&gid).cloned());
+        entry.owner_name = entry
+            .owner_uid
+            .and_then(|uid| owner_names.get(&uid).cloned());
+        entry.group_name = entry
+            .group_gid
+            .and_then(|gid| group_names.get(&gid).cloned());
     }
 }
 
@@ -1230,11 +418,7 @@ fn resolve_remote_identity_names(
 }
 
 fn build_remote_identity_lookup_command(ids: &[u32], kind: RemoteIdentityKind) -> String {
-    let ids_text = ids
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
+    let ids_text = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
 
     let (python_module, python_lookup, python_field, getent_database) = match kind {
         RemoteIdentityKind::User => ("pwd", "getpwuid", "pw_name", "passwd"),
@@ -1283,7 +467,10 @@ fn run_remote_exec(session: &Session, command: &str) -> Result<String, String> {
 
 fn connect_sftp(request: &RemoteConnectionRequest) -> Result<ConnectedSftp, String> {
     validate_connection_fields(&request.host, &request.username)?;
-    debug!("Connecting SFTP {}", summarize_remote_connection_request(request));
+    debug!(
+        "Connecting SFTP {}",
+        summarize_remote_connection_request(request)
+    );
 
     let tcp = connect_tcp_stream(&request.host, request.port)?;
     let session = open_authenticated_session(
@@ -1302,10 +489,7 @@ fn connect_sftp(request: &RemoteConnectionRequest) -> Result<ConnectedSftp, Stri
         "Connected SFTP host={} port={} username={}",
         request.host, request.port, request.username
     );
-    Ok(ConnectedSftp {
-        session,
-        sftp,
-    })
+    Ok(ConnectedSftp { session, sftp })
 }
 
 fn validate_connection_fields(host: &str, username: &str) -> Result<(), String> {
@@ -1443,8 +627,8 @@ fn authenticate(
 ) -> Result<(), String> {
     match auth_method {
         AuthMethod::Password => {
-            let password =
-                password.ok_or_else(|| "password auth selected, but no password provided".to_string())?;
+            let password = password
+                .ok_or_else(|| "password auth selected, but no password provided".to_string())?;
             session
                 .userauth_password(username, password)
                 .map_err(|error| format!("password auth failed: {error}"))?;
@@ -1762,12 +946,9 @@ mod tests {
     fn upload_target_name_skips_existing_entry_when_requested() {
         let existing_names = HashSet::from([String::from("report.txt")]);
 
-        let resolved = resolve_upload_target_name(
-            &existing_names,
-            "report.txt",
-            UploadConflictPolicy::Skip,
-        )
-        .expect("skip policy should be treated as a valid decision");
+        let resolved =
+            resolve_upload_target_name(&existing_names, "report.txt", UploadConflictPolicy::Skip)
+                .expect("skip policy should be treated as a valid decision");
 
         assert_eq!(resolved, None);
     }
@@ -1776,12 +957,9 @@ mod tests {
     fn upload_target_name_rejects_existing_entry_without_explicit_resolution() {
         let existing_names = HashSet::from([String::from("report.txt")]);
 
-        let error = resolve_upload_target_name(
-            &existing_names,
-            "report.txt",
-            UploadConflictPolicy::Fail,
-        )
-        .expect_err("missing overwrite confirmation should fail the upload");
+        let error =
+            resolve_upload_target_name(&existing_names, "report.txt", UploadConflictPolicy::Fail)
+                .expect_err("missing overwrite confirmation should fail the upload");
 
         assert!(error.contains("report.txt"));
     }
@@ -1790,12 +968,9 @@ mod tests {
     fn upload_target_name_allows_new_entry_without_conflict() {
         let existing_names = HashSet::<String>::new();
 
-        let resolved = resolve_upload_target_name(
-            &existing_names,
-            "report.txt",
-            UploadConflictPolicy::Fail,
-        )
-        .expect("new names should upload without additional confirmation");
+        let resolved =
+            resolve_upload_target_name(&existing_names, "report.txt", UploadConflictPolicy::Fail)
+                .expect("new names should upload without additional confirmation");
 
         assert_eq!(resolved, Some(String::from("report.txt")));
     }
@@ -1941,7 +1116,10 @@ mod tests {
     fn coalesce_write_commands_preserves_non_write_boundaries() {
         let commands = vec![
             SessionCommand::Write("ab".to_string()),
-            SessionCommand::Resize { cols: 120, rows: 40 },
+            SessionCommand::Resize {
+                cols: 120,
+                rows: 40,
+            },
             SessionCommand::Write("cd".to_string()),
             SessionCommand::Close,
             SessionCommand::Write("ef".to_string()),
@@ -2088,8 +1266,8 @@ fn upload_local_entry_to_path(
             ensure_remote_directory(sftp, parent)?;
         }
 
-        let mut local_file =
-            fs::File::open(local_path).map_err(|error| format!("failed to open local file: {error}"))?;
+        let mut local_file = fs::File::open(local_path)
+            .map_err(|error| format!("failed to open local file: {error}"))?;
         let mut remote_file = sftp
             .open_mode(
                 remote_path,
@@ -2308,7 +1486,7 @@ fn session_loop(
                 return Err(format_transport_error(
                     "failed to read remote output",
                     &error.to_string(),
-                ))
+                ));
             }
         }
 
@@ -2388,10 +1566,7 @@ fn is_retryable_channel_error_kind(kind: ErrorKind) -> bool {
     kind == ErrorKind::WouldBlock || kind == ErrorKind::Interrupted
 }
 
-fn classify_closed_reason(
-    reason: Option<&str>,
-    status: SessionStatus,
-) -> (ClosedReasonKind, bool) {
+fn classify_closed_reason(reason: Option<&str>, status: SessionStatus) -> (ClosedReasonKind, bool) {
     match status {
         SessionStatus::Disconnected => match reason.unwrap_or_default() {
             "session closed locally" => (ClosedReasonKind::LocalClose, false),
@@ -2399,9 +1574,7 @@ fn classify_closed_reason(
             _ => (ClosedReasonKind::RemoteExit, false),
         },
         SessionStatus::Error => {
-            let retryable = reason
-                .map(is_transport_disconnect_message)
-                .unwrap_or(false);
+            let retryable = reason.map(is_transport_disconnect_message).unwrap_or(false);
 
             if retryable {
                 (ClosedReasonKind::TransportDisconnect, true)
@@ -2439,7 +1612,11 @@ fn format_transport_error(context: &str, raw_error: &str) -> String {
     }
 }
 
-fn write_all_nonblocking(session: &Session, channel: &mut Channel, bytes: &[u8]) -> Result<(), String> {
+fn write_all_nonblocking(
+    session: &Session,
+    channel: &mut Channel,
+    bytes: &[u8],
+) -> Result<(), String> {
     let mut offset = 0usize;
     let wait_timeout = Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS);
 
@@ -2465,7 +1642,7 @@ fn write_all_nonblocking(session: &Session, channel: &mut Channel, bytes: &[u8])
                 return Err(format_transport_error(
                     "failed to write remote input",
                     &error.to_string(),
-                ))
+                ));
             }
         }
     }
@@ -2611,96 +1788,6 @@ fn emit_closed(
     .map_err(|error| format!("failed to emit closed event: {error}"))
 }
 
-fn is_check_update_menu_id(menu_id: &str) -> bool {
-    menu_id == MENU_CHECK_UPDATE_ID || menu_id == TRAY_CHECK_UPDATE_ID
-}
-
-fn is_open_settings_menu_id(menu_id: &str) -> bool {
-    menu_id == MENU_OPEN_SETTINGS_ID
-}
-
-fn emit_system_open_settings(app: &AppHandle) -> Result<(), String> {
-    app.emit(SYSTEM_OPEN_SETTINGS_EVENT, ())
-        .map_err(|error| format!("failed to emit {SYSTEM_OPEN_SETTINGS_EVENT} event: {error}"))
-}
-
-fn emit_system_check_update(app: &AppHandle) -> Result<(), String> {
-    app.emit(SYSTEM_CHECK_UPDATE_EVENT, ())
-        .map_err(|error| format!("failed to emit {SYSTEM_CHECK_UPDATE_EVENT} event: {error}"))
-}
-
-fn emit_system_request_app_exit(app: &AppHandle) -> Result<(), String> {
-    app.emit(SYSTEM_REQUEST_APP_EXIT_EVENT, ()).map_err(|error| {
-        format!("failed to emit {SYSTEM_REQUEST_APP_EXIT_EVENT} event: {error}")
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn macos_check_update_insert_position(item_count: usize) -> usize {
-    item_count.min(1)
-}
-
-#[cfg(target_os = "macos")]
-fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{Menu, MenuItem, MenuItemKind};
-
-    let menu = Menu::default(app)?;
-    let app_submenu = menu
-        .items()?
-        .into_iter()
-        .find_map(|item| match item {
-            MenuItemKind::Submenu(submenu) => Some(submenu),
-            _ => None,
-        });
-
-    if let Some(app_submenu) = app_submenu {
-        let settings_item =
-            MenuItem::with_id(app, MENU_OPEN_SETTINGS_ID, "Settings...", true, None::<&str>)?;
-        let check_update_item =
-            MenuItem::with_id(app, MENU_CHECK_UPDATE_ID, "Check for Updates...", true, None::<&str>)?;
-        let quit_item = MenuItem::with_id(app, APP_QUIT_MENU_ID, "Quit TermBridge", true, None::<&str>)?;
-        let app_submenu_items = app_submenu.items()?;
-        let quit_position = app_submenu_items.len().saturating_sub(1);
-        let _ = app_submenu.remove_at(quit_position)?;
-        let insert_position = macos_check_update_insert_position(app_submenu.items()?.len());
-        app_submenu.insert_items(&[&settings_item], insert_position)?;
-        app_submenu.insert_items(&[&check_update_item], insert_position + 1)?;
-        app_submenu.insert_items(&[&quit_item], app_submenu.items()?.len())?;
-    }
-
-    Ok(menu)
-}
-
-#[cfg(target_os = "windows")]
-fn build_windows_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{Menu, MenuItem};
-
-    let show_main_window_item =
-        MenuItem::with_id(app, TRAY_SHOW_MAIN_WINDOW_ID, "Show Main Window", true, None::<&str>)?;
-    let check_update_item =
-        MenuItem::with_id(app, TRAY_CHECK_UPDATE_ID, "Check for Updates", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, TRAY_QUIT_ID, "Quit", true, None::<&str>)?;
-
-    Menu::with_items(app, &[&show_main_window_item, &check_update_item, &quit_item])
-}
-
-#[cfg(target_os = "windows")]
-fn show_main_window(app: &AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main window not found".to_string())?;
-    window
-        .unminimize()
-        .map_err(|error| format!("failed to unminimize main window: {error}"))?;
-    window
-        .show()
-        .map_err(|error| format!("failed to show main window: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("failed to focus main window: {error}"))?;
-    Ok(())
-}
-
 pub fn run() {
     let log_level = if cfg!(debug_assertions) {
         LevelFilter::Debug
@@ -2708,7 +1795,7 @@ pub fn run() {
         LevelFilter::Info
     };
 
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level)
@@ -2728,114 +1815,26 @@ pub fn run() {
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .invoke_handler(tauri::generate_handler![
-            create_session,
-            write_session,
-            resize_session,
-            close_session,
-            request_app_restart,
-            request_app_exit,
-            list_remote_directory,
-            create_remote_entry,
-            rename_remote_path,
-            delete_remote_path,
-            copy_remote_path,
-            upload_local_paths,
-            cancel_upload,
-            cancel_delete,
-            pick_local_files,
-            pick_local_folder,
-            open_remote_file
+            commands::create_session,
+            commands::write_session,
+            commands::resize_session,
+            commands::close_session,
+            commands::request_app_restart,
+            commands::request_app_exit,
+            commands::list_remote_directory,
+            commands::create_remote_entry,
+            commands::rename_remote_path,
+            commands::delete_remote_path,
+            commands::copy_remote_path,
+            commands::upload_local_paths,
+            commands::cancel_upload,
+            commands::cancel_delete,
+            commands::pick_local_files,
+            commands::pick_local_folder,
+            commands::open_remote_file
         ]);
 
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder.menu(build_macos_app_menu);
-    }
-
-    builder = builder.on_menu_event(|app, event| {
-        let menu_id = event.id().as_ref();
-        if is_open_settings_menu_id(menu_id) {
-            if let Err(error) = emit_system_open_settings(app) {
-                error!("failed to handle open-settings menu event: {error}");
-            }
-            return;
-        }
-
-        if is_check_update_menu_id(menu_id) {
-            if let Err(error) = emit_system_check_update(app) {
-                error!("failed to handle check-update menu event: {error}");
-            }
-            return;
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if menu_id == APP_QUIT_MENU_ID {
-                if let Err(error) = emit_system_request_app_exit(app) {
-                    error!("failed to handle app-exit menu event: {error}");
-                }
-                return;
-            }
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            if menu_id == TRAY_SHOW_MAIN_WINDOW_ID {
-                if let Err(error) = show_main_window(app) {
-                    error!("failed to show main window from tray: {error}");
-                }
-                return;
-            }
-
-            if menu_id == TRAY_QUIT_ID {
-                if let Err(error) = emit_system_request_app_exit(app) {
-                    error!("failed to handle app-exit menu event: {error}");
-                }
-            }
-        }
-    });
-
-    #[cfg(target_os = "windows")]
-    {
-        builder = builder
-            .setup(|app| {
-                let tray_menu = build_windows_tray_menu(app.handle())
-                    .map_err(|error| format!("failed to create tray menu: {error}"))?;
-                let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main").menu(&tray_menu);
-
-                if let Some(icon) = app.default_window_icon().cloned() {
-                    tray_builder = tray_builder.icon(icon);
-                }
-
-                tray_builder
-                    .build(app)
-                    .map_err(|error| format!("failed to initialize tray icon: {error}"))?;
-
-                Ok(())
-            })
-            .on_window_event(|window, event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    if let Err(error) = window.hide() {
-                        error!("failed to hide window while keeping tray active: {error}");
-                    }
-                }
-            });
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder.on_window_event(|_window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if let Err(error) = emit_system_request_app_exit(&_window.app_handle()) {
-                    error!("failed to handle macOS close request: {error}");
-                }
-            }
-        });
-    }
-
-    builder
+    menu::configure_builder(builder)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
