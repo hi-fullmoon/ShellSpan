@@ -59,7 +59,7 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
         builder = builder.on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                if let Err(error) = emit_system_request_app_exit(&window.app_handle()) {
+                if let Err(error) = emit_system_request_app_exit(window.app_handle()) {
                     error!("failed to handle macOS close request: {error}");
                 }
             }
@@ -90,7 +90,6 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
             if let Err(error) = emit_system_request_app_exit(app) {
                 error!("failed to handle app-exit menu event: {error}");
             }
-            return;
         }
     }
 
@@ -219,4 +218,30 @@ fn show_main_window(app: &AppHandle) -> Result<(), String> {
         .set_focus()
         .map_err(|error| format!("failed to focus main window: {error}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_update_menu_ids_are_recognized() {
+        assert!(is_check_update_menu_id("menu.check_update"));
+        assert!(is_check_update_menu_id("tray.check_update"));
+        assert!(!is_check_update_menu_id("tray.quit"));
+    }
+
+    #[test]
+    fn open_settings_menu_id_is_recognized() {
+        assert!(is_open_settings_menu_id("menu.open_settings"));
+        assert!(!is_open_settings_menu_id("menu.check_update"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_check_update_item_is_inserted_directly_after_about() {
+        assert_eq!(macos_check_update_insert_position(0), 0);
+        assert_eq!(macos_check_update_insert_position(1), 1);
+        assert_eq!(macos_check_update_insert_position(4), 1);
+    }
 }
