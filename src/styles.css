@@ -450,9 +450,7 @@
 }
 
 .settings-preview__panel--active {
-  background:
-    linear-gradient(135deg, var(--app-settings-preview-active) 0%, transparent 100%),
-    var(--app-settings-preview-panel);
+  background: linear-gradient(135deg, var(--app-settings-preview-active) 0%, transparent 100%), var(--app-settings-preview-panel);
 }
 
 .terminal-shell .xterm {
@@ -507,7 +505,6 @@
 
 .split-sash:hover,
 .split-sash:focus-visible {
-  background: rgba(15, 23, 42, 0.55);
   outline: none;
 }
 
