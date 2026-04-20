@@ -383,16 +383,21 @@ function OverlayLayer({ children, tone = 'modal' }: { children: ReactNode; tone?
       className={
         tone === 'progress'
           ? 'absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm'
-          : 'absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 p-2 backdrop-blur-sm'
+          : 'absolute inset-0 z-20 grid place-items-center p-2 backdrop-blur-[14px]'
       }
+      style={tone === 'modal' ? { background: 'var(--app-overlay)' } : undefined}
     >
       {children}
     </div>
   );
 }
 
-function OverlayPanel({ children, className }: { children: ReactNode; className: string }) {
-  return <div className={cn('surface flex w-full flex-col gap-2 p-3', className)}>{children}</div>;
+function OverlayPanel({ children, className, ...props }: { children: ReactNode; className: string } & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn('surface flex w-full flex-col gap-2 p-3', className)} {...props}>
+      {children}
+    </div>
+  );
 }
 
 export function FileManager({ session, ignoreWindowDragDrop = false }: FileManagerProps) {
@@ -1637,10 +1642,26 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             >
               {contextMenu.target === 'entry' ? (
                 <div className="flex flex-col">
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newFile')} onClick={() => openCreateDialog('newFile')} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newDirectory')} onClick={() => openCreateDialog('newDirectory')} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFile')} onClick={() => void handleSelectUploadFiles()} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFolder')} onClick={() => void handleSelectUploadFolder()} />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.newFile')}
+                    onClick={() => openCreateDialog('newFile')}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.newDirectory')}
+                    onClick={() => openCreateDialog('newDirectory')}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.uploadFile')}
+                    onClick={() => void handleSelectUploadFiles()}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.uploadFolder')}
+                    onClick={() => void handleSelectUploadFolder()}
+                  />
                   {contextMenu.entry?.kind === 'directory' ? (
                     <MenuButton
                       disabled={!ready || loading || working}
@@ -1660,9 +1681,21 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     />
                   ) : null}
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.rename')} onClick={() => openRenameDialog(contextMenu.entry)} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.copy')} onClick={() => handleCopy(contextMenu.entry)} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.delete')} onClick={() => handleDelete(contextMenu.entry)} />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.rename')}
+                    onClick={() => openRenameDialog(contextMenu.entry)}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.copy')}
+                    onClick={() => handleCopy(contextMenu.entry)}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.delete')}
+                    onClick={() => handleDelete(contextMenu.entry)}
+                  />
                   <MenuDivider />
                   <MenuButton
                     disabled={!ready || loading || working}
@@ -1694,25 +1727,57 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     }
                   />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.actions.refresh')} onClick={() => void loadDirectory(currentPath)} />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.actions.refresh')}
+                    onClick={() => void loadDirectory(currentPath)}
+                  />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.properties')} onClick={() => openProperties(contextMenu.entry)} />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.properties')}
+                    onClick={() => openProperties(contextMenu.entry)}
+                  />
                 </div>
               ) : (
                 <div className="flex flex-col">
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newFile')} onClick={() => openCreateDialog('newFile')} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.newDirectory')} onClick={() => openCreateDialog('newDirectory')} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFile')} onClick={() => void handleSelectUploadFiles()} />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.menu.uploadFolder')} onClick={() => void handleSelectUploadFolder()} />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.newFile')}
+                    onClick={() => openCreateDialog('newFile')}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.newDirectory')}
+                    onClick={() => openCreateDialog('newDirectory')}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.uploadFile')}
+                    onClick={() => void handleSelectUploadFiles()}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.menu.uploadFolder')}
+                    onClick={() => void handleSelectUploadFolder()}
+                  />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || !clipboard || loading || working} label={t('fileManager.menu.paste')} onClick={() => void handlePaste()} />
+                  <MenuButton
+                    disabled={!ready || !clipboard || loading || working}
+                    label={t('fileManager.menu.paste')}
+                    onClick={() => void handlePaste()}
+                  />
                   <MenuButton
                     disabled={!ready || !currentPath || loading || working}
                     label={t('fileManager.menu.copyCurrentDirectoryPath')}
                     onClick={() => void handleCopyText(t('fileManager.copyLabel.currentDirectoryPath'), currentPath ?? '')}
                   />
                   <MenuDivider />
-                  <MenuButton disabled={!ready || loading || working} label={t('fileManager.actions.refresh')} onClick={() => void loadDirectory(currentPath)} />
+                  <MenuButton
+                    disabled={!ready || loading || working}
+                    label={t('fileManager.actions.refresh')}
+                    onClick={() => void loadDirectory(currentPath)}
+                  />
                 </div>
               )}
             </div>,
@@ -1744,7 +1809,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               <PropertyRow label={t('fileManager.property.path')} value={properties.entry.path} />
               <PropertyRow label={t('fileManager.property.directory')} value={properties.directoryPath} />
               <PropertyRow label={t('fileManager.property.type')} value={kindLabel(properties.entry.kind)} />
-              <PropertyRow label={t('fileManager.property.size')} value={properties.entry.kind === 'directory' ? '--' : formatSize(properties.entry.size)} />
+              <PropertyRow
+                label={t('fileManager.property.size')}
+                value={properties.entry.kind === 'directory' ? '--' : formatSize(properties.entry.size)}
+              />
               <PropertyRow label={t('fileManager.property.modified')} value={formatFullModified(properties.entry.modifiedAt)} />
               <PropertyRow
                 label={t('fileManager.property.owner')}
@@ -1771,7 +1839,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 }
               />
               <PropertyRow label={t('fileManager.property.permissions')} value={formatPermissionOctal(properties.entry.permissions)} />
-              <PropertyRow label={t('fileManager.property.permissionDetails')} value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)} />
+              <PropertyRow
+                label={t('fileManager.property.permissionDetails')}
+                value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)}
+              />
             </div>
           </OverlayPanel>
         </OverlayLayer>
@@ -1781,24 +1852,24 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-sm">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
+              <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">
                 {uploadProgress.cancelling ? t('fileManager.uploadProgress.cancelling') : t('fileManager.uploadProgress.title')}
               </span>
-              <span className="text-xs font-medium text-slate-300">{uploadProgressPercent(uploadProgress)}%</span>
+              <span className="file-manager-progress-meta text-xs font-medium">{uploadProgressPercent(uploadProgress)}%</span>
             </div>
 
-            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+            <div className="file-manager-progress-track h-2 overflow-hidden rounded-full">
               <div
-                className="h-full rounded-full bg-cyan-400 transition-[width] duration-150"
+                className="file-manager-progress-bar file-manager-progress-bar--upload h-full rounded-full transition-[width] duration-150"
                 style={{ width: `${uploadProgressPercent(uploadProgress)}%` }}
               />
             </div>
 
             <div className="flex flex-col gap-0.5">
-              <strong className="truncate text-sm text-slate-100">
+              <strong className="file-manager-progress-title truncate text-sm">
                 {uploadProgress.currentPath ? localPathName(uploadProgress.currentPath) : t('fileManager.uploadProgress.preparing')}
               </strong>
-              <span className="text-xs text-slate-400">
+              <span className="file-manager-progress-meta text-xs">
                 {uploadProgress.totalBytes > 0
                   ? `${formatSize(uploadProgress.uploadedBytes)} / ${formatSize(uploadProgress.totalBytes)}`
                   : t('fileManager.progress.items', { completed: uploadProgress.completedSteps, total: uploadProgress.totalSteps })}
@@ -1818,24 +1889,24 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-sm">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">
+              <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">
                 {deleteProgress.cancelling ? t('fileManager.deleteProgress.cancelling') : t('fileManager.deleteProgress.title')}
               </span>
-              <span className="text-xs font-medium text-slate-300">{stepProgressPercent(deleteProgress)}%</span>
+              <span className="file-manager-progress-meta text-xs font-medium">{stepProgressPercent(deleteProgress)}%</span>
             </div>
 
-            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+            <div className="file-manager-progress-track h-2 overflow-hidden rounded-full">
               <div
-                className="h-full rounded-full bg-rose-400 transition-[width] duration-150"
+                className="file-manager-progress-bar file-manager-progress-bar--delete h-full rounded-full transition-[width] duration-150"
                 style={{ width: `${stepProgressPercent(deleteProgress)}%` }}
               />
             </div>
 
             <div className="flex flex-col gap-0.5">
-              <strong className="truncate text-sm text-slate-100">
+              <strong className="file-manager-progress-title truncate text-sm">
                 {deleteProgress.currentPath ? localPathName(deleteProgress.currentPath) : t('fileManager.deleteProgress.preparing')}
               </strong>
-              <span className="text-xs text-slate-400">
+              <span className="file-manager-progress-meta text-xs">
                 {t('fileManager.progress.items', { completed: deleteProgress.completedSteps, total: deleteProgress.totalSteps })}
               </span>
             </div>
@@ -1851,9 +1922,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       {dragActive && ready && !uploadProgress && !deleteProgress ? (
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-xs gap-1 text-center">
-            <span className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{t('fileManager.dragDrop.title')}</span>
-            <strong className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">{t('fileManager.dragDrop.description')}</strong>
-            <span className="text-xs text-slate-400">{t('fileManager.dragDrop.hint')}</span>
+            <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.dragDrop.title')}</span>
+            <strong className="file-manager-progress-title text-[15px] font-semibold tracking-[0.01em]">{t('fileManager.dragDrop.description')}</strong>
+            <span className="file-manager-progress-meta text-xs">{t('fileManager.dragDrop.hint')}</span>
           </OverlayPanel>
         </OverlayLayer>
       ) : null}
@@ -1902,13 +1973,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
       {pendingUploadConflict ? (
         <OverlayLayer>
-          <OverlayPanel className="max-w-sm">
+          <OverlayPanel className="app-dialog max-w-sm" role="dialog" aria-modal="true" aria-label={t('fileManager.uploadConflict.kicker')}>
             <div className="flex flex-col gap-1">
               <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.uploadConflict.kicker')}</p>
-              <h4 className="themed-heading text-[15px] font-semibold tracking-[0.01em]">
+              <h4 className="dialog-title text-[15px] font-semibold tracking-[0.01em]">
                 {t('fileManager.uploadConflict.title', { name: pendingUploadConflict.conflict.targetName })}
               </h4>
-              <p className="text-subtle text-xs leading-5">
+              <p className="dialog-description text-xs leading-5">
                 {t('fileManager.uploadConflict.description', { kind: kindLabel(pendingUploadConflict.conflict.existingKind) })}
               </p>
               <p
@@ -1981,13 +2052,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
       {pendingDelete ? (
         <OverlayLayer>
-          <OverlayPanel className="max-w-sm">
+          <OverlayPanel className="app-dialog max-w-sm" role="dialog" aria-modal="true" aria-label={t('fileManager.deleteConfirm.kicker')}>
             <div className="flex flex-col gap-1">
               <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.deleteConfirm.kicker')}</p>
-              <h4 className="themed-heading text-[15px] font-semibold tracking-[0.01em]">
+              <h4 className="dialog-title text-[15px] font-semibold tracking-[0.01em]">
                 {pendingDelete.kind === 'directory' ? t('fileManager.deleteConfirm.directoryTitle') : t('fileManager.deleteConfirm.fileTitle')}
               </h4>
-              <p className="text-subtle text-xs">
+              <p className="dialog-description text-xs leading-5">
                 {pendingDelete.kind === 'directory'
                   ? t('fileManager.deleteConfirm.directoryDescription', { name: pendingDelete.name })
                   : t('fileManager.deleteConfirm.fileDescription', { name: pendingDelete.name })}
@@ -1999,7 +2070,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 {t('fileManager.dialog.cancel')}
               </button>
               <button
-                className="inline-flex h-8 items-center justify-center rounded-lg bg-rose-400 px-3 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="inline-flex h-8 items-center justify-center rounded-lg bg-rose-500 px-3 text-xs font-semibold text-white transition hover:bg-rose-400"
                 onClick={() => void confirmDelete()}
                 type="button"
               >
