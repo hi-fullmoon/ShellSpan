@@ -82,6 +82,20 @@ pub fn run() {
     } else {
         LevelFilter::Info
     };
+    let log_targets = if cfg!(debug_assertions) {
+        vec![
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                file_name: Some("termbridge".to_string()),
+            }),
+        ]
+    } else {
+        vec![tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::LogDir {
+                file_name: Some("termbridge".to_string()),
+            },
+        )]
+    };
 
     let builder = tauri::Builder::default()
         .plugin(
@@ -90,12 +104,7 @@ pub fn run() {
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(10))
                 .max_file_size(1_048_576)
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("termbridge".to_string()),
-                    }),
-                ])
+                .targets(log_targets)
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
