@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { PinIcon, StarIcon } from './Icons';
+import { t } from '../lib/i18n';
 import type { ConnectionProfile } from '../types';
 
 interface HistoryMenuState {
@@ -117,51 +118,53 @@ export function Sidebar({
   return (
     <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)]">
       <div className="surface rounded-lg h-full flex flex-col gap-1.5 p-1.5">
-        <div className="flex items-center gap-1.5">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-400 font-mono text-[11px] font-bold text-slate-950">TB</div>
-          <div className="min-w-0">
-            <p className="label">控制台</p>
-            <h1 className="truncate text-sm font-semibold">TermBridge</h1>
-            <p className="truncate text-xs text-slate-400">{runtimeLabel}</p>
+        <div className="flex items-start justify-between gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div className="brand-badge">TB</div>
+            <div className="min-w-0">
+              <p className="label">{t('sidebar.console')}</p>
+              <h1 className="truncate text-sm font-semibold">TermBridge</h1>
+              <p className="text-subtle truncate text-xs">{runtimeLabel}</p>
+            </div>
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-1">
           <div className="surface-muted p-1.5">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">历史</p>
+            <p className="stats-label">{t('sidebar.history')}</p>
             <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
           </div>
           <div className="surface-muted p-1.5">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">在线</p>
+            <p className="stats-label">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
           </div>
           <div className="surface-muted p-1.5">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">收藏</p>
+            <p className="stats-label">{t('sidebar.favorite')}</p>
             <strong className="mt-0.5 block text-sm">{favoriteCount}</strong>
           </div>
         </div>
 
         <button className="primary-btn w-full" onClick={onOpenConnect} type="button">
-          新建连接
+          {t('sidebar.newConnection')}
         </button>
       </div>
 
       <section className="surface flex min-h-0 flex-col overflow-hidden">
         <div className="surface-header">
           <div>
-            <p className="label">历史</p>
-            <h2 className="text-sm font-semibold">历史连接</h2>
+            <p className="label">{t('sidebar.history')}</p>
+            <h2 className="text-sm font-semibold">{t('sidebar.historyTitle')}</h2>
           </div>
-          <span className="text-xs text-slate-500">{savedProfiles.length}</span>
+          <span className="text-subtle text-xs">{savedProfiles.length}</span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-1">
           {sortedProfiles.length === 0 ? (
-            <div className="surface-muted p-1.5 text-xs text-slate-400">还没有保存的连接配置。</div>
+            <div className="surface-muted text-subtle p-1.5 text-xs">{t('sidebar.emptyHistory')}</div>
           ) : (
             <div className="flex flex-col gap-1">
               {sortedProfiles.map((profile) => (
                 <button
-                  className="surface-muted rounded-[6px] flex select-none items-center gap-1.5 px-2 py-1 text-left transition hover:border-slate-700 hover:bg-slate-900"
+                  className="history-item surface-muted rounded-[6px] flex select-none items-center gap-1.5 px-2 py-1 text-left transition"
                   key={profile.id}
                   onClick={() => onReuseProfile(profile)}
                   onDragStart={(event) => event.preventDefault()}
@@ -175,7 +178,7 @@ export function Sidebar({
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
-                      <strong className="block truncate text-xs text-slate-100">{profile.name}</strong>
+                      <strong className="block truncate text-xs">{profile.name}</strong>
                       {profile.pinned ? (
                         <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-cyan-300" title="已置顶">
                           <PinIcon />
@@ -187,7 +190,7 @@ export function Sidebar({
                         </span>
                       ) : null}
                     </div>
-                    <span className="block truncate mt-[4px] text-[11px] text-slate-400">
+                    <span className="text-subtle block truncate mt-[4px] text-[11px]">
                       {profile.username}@{profile.host}:{profile.port}
                     </span>
                   </div>

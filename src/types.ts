@@ -1,5 +1,12 @@
 export type AuthMethod = "password" | "key";
 export type SessionStatus = "connecting" | "connected" | "disconnected" | "error";
+export type ThemePreference = "dark" | "light";
+export type LocalePreference = "zh-CN" | "en-US";
+
+export interface AppPreferences {
+  theme: ThemePreference;
+  locale: LocalePreference;
+}
 
 export interface ConnectionProfile {
   id: string;

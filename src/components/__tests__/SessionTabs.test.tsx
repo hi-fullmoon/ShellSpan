@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionState } from "../../types";
@@ -142,5 +143,21 @@ describe("SessionTabs", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onRename).toHaveBeenCalledWith("session-1", "Production API");
+  });
+
+  it("uses theme-aware classes for tab surfaces and subtitles", () => {
+    render(
+      <SessionTabs
+        activeSessionId="session-1"
+        onClose={vi.fn()}
+        onRename={vi.fn()}
+        onReorder={vi.fn()}
+        onSelect={vi.fn()}
+        sessions={sessions}
+      />,
+    );
+
+    expect(screen.getByText("Production").closest("[data-session-tab]")).toHaveClass("session-tab");
+    expect(screen.getByText("root@prod.example.com")).toHaveClass("session-tab-subtitle");
   });
 });

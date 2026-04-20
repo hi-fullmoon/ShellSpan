@@ -76,12 +76,10 @@ function SessionTabCard({
       {...dragAttributes}
       {...dragListeners}
       className={cn(
-        'relative flex min-w-[150px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
-        active
-          ? 'border-cyan-400/50 bg-slate-800 text-slate-50'
-          : 'border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900',
+        'session-tab relative flex min-w-[150px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
+        active ? 'session-tab-active' : 'session-tab-inactive',
         renaming
-          ? 'cursor-text border-cyan-400/60 bg-slate-900 text-slate-50'
+          ? 'session-tab-renaming cursor-text'
           : dragging
             ? 'cursor-grabbing opacity-70 shadow-[0_12px_24px_rgba(2,6,23,0.35)]'
             : 'cursor-grab',
@@ -96,7 +94,7 @@ function SessionTabCard({
           <span className="min-w-0 flex-1">
             <input
               autoFocus
-              className="block w-full outline-0 border-none rounded-sm bg-slate-950 px-1.5 py-1 text-[13px] font-semibold leading-4 text-slate-50 outline-none"
+              className="session-tab-input block w-full outline-0 border-none rounded-sm px-1.5 py-1 text-[13px] font-semibold leading-4 outline-none"
               onBlur={onRenameCommit}
               onChange={(event) => onRenameChange?.(event.target.value)}
               onClick={(event) => event.stopPropagation()}
@@ -123,7 +121,7 @@ function SessionTabCard({
               <strong className="block truncate text-xs text-left" title={session.title}>
                 {session.title}
               </strong>
-              <small className="block truncate text-[11px] text-left text-slate-400">
+              <small className="session-tab-subtitle block truncate text-[11px] text-left">
                 {session.username}@{session.host}
               </small>
             </span>
@@ -295,7 +293,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
 
   if (sessions.length === 0) {
     return (
-      <div className="surface flex items-center gap-2 px-2 py-1.5 text-xs text-slate-400">
+      <div className="surface rounded-lg session-tabs-empty flex items-center gap-2 px-2 py-1.5 text-xs">
         <span className="label">会话</span>
         <span>打开一个主机连接后，这里会出现标签页。</span>
       </div>

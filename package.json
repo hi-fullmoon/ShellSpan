@@ -26,6 +26,7 @@
     "ag-grid-react": "^35.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-intl-universal": "^2.13.4",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

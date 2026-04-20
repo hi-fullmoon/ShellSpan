@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionProfile } from "../../types";
@@ -94,5 +95,23 @@ describe("ConnectionForm", () => {
       true,
       true,
     );
+  });
+
+  it("uses theme-aware input classes", () => {
+    render(
+      <ConnectionForm
+        onConnect={vi.fn()}
+        onProfileChange={vi.fn()}
+        profile={baseProfile}
+      />,
+    );
+
+    expect(screen.getByDisplayValue("Demo")).toHaveClass("themed-input");
+    expect(screen.getByDisplayValue("example.com")).toHaveClass("themed-input");
+    expect(screen.getByRole("combobox")).toHaveClass("themed-input");
+    expect(screen.getByText("保存连接信息").closest("label")).toHaveClass("themed-checkbox-row");
+    expect(screen.getByText("保存密码").closest("label")).toHaveClass("themed-checkbox-row");
+    expect(screen.getAllByRole("checkbox")[0]).toHaveClass("themed-checkbox");
+    expect(screen.getAllByRole("checkbox")[1]).toHaveClass("themed-checkbox");
   });
 });

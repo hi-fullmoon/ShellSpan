@@ -312,7 +312,7 @@ function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
       <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', fileKindTone(data.kind))}>
         {fileKindIcon(data.kind)}
       </span>
-      <span className="truncate text-[13px] font-medium leading-5 tracking-[0.01em] text-slate-100">{data.name}</span>
+      <span className="file-entry-name truncate text-[13px] font-medium leading-5 tracking-[0.01em]">{data.name}</span>
     </div>
   );
 }
@@ -1495,17 +1495,17 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     <aside className="surface rounded-lg relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
       <div className="surface-header">
         <div className="min-w-0">
-          <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">文件</p>
-          <h3 className="truncate text-[15px] font-semibold tracking-[0.01em] text-slate-100">{session ? '远程文件管理器' : '未激活会话'}</h3>
+          <p className="file-manager-subtitle text-[11px] font-medium tracking-[0.08em]">文件</p>
+          <h3 className="themed-heading truncate text-[15px] font-semibold tracking-[0.01em]">{session ? '远程文件管理器' : '未激活会话'}</h3>
         </div>
         <div className="flex items-center gap-1">
-          <span className="rounded-md bg-slate-950/70 px-2 py-1 text-[10px] text-slate-400">{listing?.entries.length ?? 0}</span>
+          <span className="file-manager-count rounded-md px-2 py-1 text-[10px]">{listing?.entries.length ?? 0}</span>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 p-1">
         {!session ? (
-          <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
+          <div className="surface-muted rounded-lg flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
             先打开一个 SSH 会话，左侧会显示远程目录。
           </div>
         ) : session.status !== 'connected' && !listing && showInitialLoadingHint ? (
@@ -1525,7 +1525,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 <ArrowUpIcon />
               </button>
               <input
-                className="min-w-0 flex-1 bg-slate-950 px-2 py-1 font-mono text-[12px] leading-5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:ring-1 focus:ring-cyan-400/50"
+                className="themed-input min-w-0 flex-1 px-2 py-1 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
                 disabled={readOnly || loading || working}
                 onChange={(event) => setPathInput(event.target.value)}
                 placeholder="输入远程路径并回车"
@@ -1706,13 +1706,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">属性</p>
                 <h4 className="mt-1 text-[15px] font-semibold tracking-[0.01em] text-slate-100">{properties.entry.name}</h4>
               </div>
-              <button
-                aria-label="关闭属性弹框"
-                className="icon-btn h-7 w-7 px-0"
-                onClick={() => setProperties(undefined)}
-                title="关闭"
-                type="button"
-              >
+              <button aria-label="关闭属性弹框" className="icon-btn h-7 w-7 px-0" onClick={() => setProperties(undefined)} title="关闭" type="button">
                 <CloseIcon />
               </button>
             </div>

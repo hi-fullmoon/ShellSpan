@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
 import { CloseIcon } from './components/Icons';
+import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane } from './components/TerminalPane';
 import { Toast } from './components/Toast';
 import { UpdateRestartDialog } from './components/UpdateRestartDialog';
+import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { createLogger } from './lib/logger';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
@@ -21,9 +23,21 @@ import { isTauriRuntime } from './lib/tauri';
 import { shouldWarnOnClosedSession } from './lib/terminalStatus';
 import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
-import type { ConnectionProfile, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
+import type { AppPreferences, ConnectionProfile, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
 
 const appLogger = createLogger('app');
+const SYSTEM_OPEN_SETTINGS_EVENT = 'system-open-settings';
+const defaultPreferences: AppPreferences = {
+  theme: 'dark',
+  locale: 'zh-CN',
+};
+
+function normalizePreferences(value: Partial<AppPreferences> | null | undefined): AppPreferences {
+  return {
+    theme: value?.theme === 'light' ? 'light' : 'dark',
+    locale: value?.locale === 'en-US' ? 'en-US' : 'zh-CN',
+  };
+}
 
 function reorderSessions(sessions: SessionState[], draggedSessionId: string, targetSessionId: string) {
   const draggedIndex = sessions.findIndex((session) => session.sessionId === draggedSessionId);
@@ -41,10 +55,12 @@ function reorderSessions(sessions: SessionState[], draggedSessionId: string, tar
 function App() {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
   const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>('termbridge.savedProfiles', [], ['windbridge.savedProfiles']);
+  const [storedPreferences, setStoredPreferences] = useLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const [errorMessage, setErrorMessage] = useState<string>();
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
@@ -53,6 +69,8 @@ function App() {
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number>();
   const [updateToast, setUpdateToast] = useState<{ message: string; tone: 'info' | 'success' | 'error' }>();
   const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
+  const [, setIntlVersion] = useState(0);
+  const preferences = useMemo(() => normalizePreferences(storedPreferences), [storedPreferences]);
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
   const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
@@ -62,6 +80,10 @@ function App() {
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = preferences.theme;
+  }, [preferences.theme]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -142,85 +164,101 @@ function App() {
 
   const activeSession = useMemo(() => sessions.find((item) => item.sessionId === activeSessionId), [activeSessionId, sessions]);
   const connectedSessions = useMemo(() => sessions.filter((item) => item.status === 'connected').length, [sessions]);
+  syncI18nLocale(preferences.locale);
   const pendingDeleteProfile = useMemo(
     () => savedProfiles.find((item) => item.id === pendingDeleteProfileId),
     [pendingDeleteProfileId, savedProfiles],
   );
   const pendingCloseSession = useMemo(() => sessions.find((item) => item.sessionId === pendingCloseSessionId), [pendingCloseSessionId, sessions]);
-  const runtimeText = isTauriRuntime() ? '桌面端' : '浏览器预览';
+  const runtimeText = isTauriRuntime() ? t('runtime.desktop') : t('runtime.browser');
   const restartDialogOpen = updateState.phase === 'downloaded' && !restartDialogDismissed;
 
-  const runUpdateCheck = useCallback(
-    async (mode: 'startup' | 'manual') => {
-      if (!isTauriRuntime()) {
+  useEffect(() => {
+    let cancelled = false;
+
+    void initI18n(preferences.locale)
+      .then(() => {
+        if (!cancelled) {
+          setIntlVersion((current) => current + 1);
+        }
+      })
+      .catch((error) => {
+        appLogger.error('初始化国际化失败', { error: String(error), locale: preferences.locale });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preferences.locale]);
+
+  const runUpdateCheck = useCallback(async (mode: 'startup' | 'manual') => {
+    if (!isTauriRuntime()) {
+      if (mode === 'manual') {
+        setUpdateToast({
+          message: '当前只启动了前端调试环境，无法检查更新。',
+          tone: 'error',
+        });
+      }
+      return;
+    }
+
+    dispatchUpdateState({ type: 'checkStarted' });
+    setUpdateDownloadProgress(undefined);
+
+    try {
+      const available = await checkForUpdate();
+      if (mode === 'startup') {
+        markStartupUpdateCheck(Date.now());
+      }
+      if (!available) {
+        dispatchUpdateState({ type: 'noUpdateFound' });
         if (mode === 'manual') {
           setUpdateToast({
-            message: '当前只启动了前端调试环境，无法检查更新。',
-            tone: 'error',
+            message: '当前已是最新版本。',
+            tone: 'info',
           });
         }
         return;
       }
 
-      dispatchUpdateState({ type: 'checkStarted' });
-      setUpdateDownloadProgress(undefined);
+      dispatchUpdateState({
+        type: 'updateFound',
+        payload: {
+          latestVersion: available.version,
+        },
+      });
+      dispatchUpdateState({ type: 'downloadStarted' });
+      setUpdateDownloadProgress(0);
 
-      try {
-        const available = await checkForUpdate();
-        if (mode === 'startup') {
-          markStartupUpdateCheck(Date.now());
-        }
-        if (!available) {
-          dispatchUpdateState({ type: 'noUpdateFound' });
-          if (mode === 'manual') {
-            setUpdateToast({
-              message: '当前已是最新版本。',
-              tone: 'info',
-            });
-          }
-          return;
-        }
+      await downloadAndInstallUpdate(available, (percent) => {
+        setUpdateDownloadProgress(percent);
+      });
 
-        dispatchUpdateState({
-          type: 'updateFound',
-          payload: {
-            latestVersion: available.version,
-          },
+      setUpdateDownloadProgress(100);
+      dispatchUpdateState({
+        type: 'downloadCompleted',
+        payload: {
+          downloadedVersion: available.version,
+        },
+      });
+      setRestartDialogDismissed(false);
+    } catch (error) {
+      const message = `更新失败：${String(error)}`;
+      appLogger.error('检查或下载更新失败', { mode, error: String(error) });
+      dispatchUpdateState({
+        type: 'downloadFailed',
+        payload: {
+          message,
+        },
+      });
+      if (mode === 'manual') {
+        setUpdateToast({
+          message,
+          tone: 'error',
         });
-        dispatchUpdateState({ type: 'downloadStarted' });
-        setUpdateDownloadProgress(0);
-
-        await downloadAndInstallUpdate(available, (percent) => {
-          setUpdateDownloadProgress(percent);
-        });
-
-        setUpdateDownloadProgress(100);
-        dispatchUpdateState({
-          type: 'downloadCompleted',
-          payload: {
-            downloadedVersion: available.version,
-          },
-        });
-        setRestartDialogDismissed(false);
-      } catch (error) {
-        const message = `更新失败：${String(error)}`;
-        appLogger.error('检查或下载更新失败', { mode, error: String(error) });
-        dispatchUpdateState({
-          type: 'downloadFailed',
-          payload: {
-            message,
-          },
-        });
-        if (mode === 'manual') {
-          setUpdateToast({
-            message,
-            tone: 'error',
-          });
-        }
       }
-    },
-    [],
-  );
+    }
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime() || !shouldRunStartupUpdateCheck(Date.now())) {
@@ -268,6 +306,39 @@ function App() {
       stopSystemCheckUpdate?.();
     };
   }, [runUpdateCheck]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let stopSystemOpenSettings: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      try {
+        const nextStopSystemOpenSettings = await listen(SYSTEM_OPEN_SETTINGS_EVENT, () => {
+          setSettingsDialogOpen(true);
+        });
+
+        if (cancelled) {
+          nextStopSystemOpenSettings();
+          return;
+        }
+
+        stopSystemOpenSettings = nextStopSystemOpenSettings;
+      } catch (error) {
+        appLogger.error('监听系统设置事件失败', { error: String(error) });
+      }
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      stopSystemOpenSettings?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -586,7 +657,7 @@ function App() {
 
   return (
     <main className="h-screen overflow-hidden p-1">
-      <div className="flex h-full gap-1">
+      <div className="flex h-full gap-[4px]">
         <SplitLayout
           className="min-w-0 flex-1"
           defaultPrimarySize={320}
@@ -641,11 +712,9 @@ function App() {
                 {sessions.length === 0 ? (
                   <div className="flex h-full min-h-[280px] flex-col justify-between gap-1.5 p-2">
                     <div className="flex flex-col gap-1">
-                      <span className="label">就绪</span>
-                      <h3 className="text-base font-semibold text-slate-100">开始一个新的远程工作区</h3>
-                      <p className="text-xs leading-5 text-slate-400">
-                        左侧浏览远程文件，右侧查看历史连接，中间专注终端操作。支持路径跳转、右键菜单和拖拽上传。
-                      </p>
+                      <span className="label">{t('app.ready')}</span>
+                      <h3 className="themed-heading text-base font-semibold">{t('app.emptyState.title')}</h3>
+                      <p className="text-xs leading-5 text-slate-400">{t('app.emptyState.description')}</p>
                     </div>
                   </div>
                 ) : (
@@ -689,14 +758,17 @@ function App() {
         </div>
       </div>
 
+      <SettingsDialog
+        onChange={setStoredPreferences}
+        onClose={() => setSettingsDialogOpen(false)}
+        open={settingsDialogOpen}
+        preferences={preferences}
+      />
+
       {connectDialogOpen ? (
-        <div
-          className="fixed inset-0 z-20 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
-          onClick={() => setConnectDialogOpen(false)}
-          role="presentation"
-        >
+        <div className="app-overlay" onClick={() => setConnectDialogOpen(false)} role="presentation">
           <div
-            className="surface max-h-[calc(100vh-16px)] w-full max-w-xl overflow-auto p-3"
+            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl overflow-auto p-3"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -705,7 +777,7 @@ function App() {
             <div className="mb-2 flex items-start justify-between gap-2">
               <div>
                 <p className="label">连接</p>
-                <h3 className="mt-1 text-sm font-semibold text-slate-100">新建 SSH 连接</h3>
+                <h3 className="dialog-title mt-1 text-sm font-semibold">新建 SSH 连接</h3>
               </div>
               <button aria-label="关闭连接弹框" className="icon-btn" onClick={() => setConnectDialogOpen(false)} type="button">
                 <CloseIcon />
@@ -727,13 +799,9 @@ function App() {
       ) : null}
 
       {pendingDeleteProfile ? (
-        <div
-          className="fixed inset-0 z-30 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
-          onClick={() => setPendingDeleteProfileId(undefined)}
-          role="presentation"
-        >
+        <div className="app-overlay" onClick={() => setPendingDeleteProfileId(undefined)} role="presentation">
           <div
-            className="surface w-full max-w-sm p-3"
+            className="app-dialog surface w-full max-w-sm p-3"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -741,8 +809,8 @@ function App() {
           >
             <div className="flex flex-col gap-1">
               <p className="label">删除确认</p>
-              <h3 className="text-sm font-semibold text-slate-100">删除历史连接</h3>
-              <p className="text-xs text-slate-400">确认删除“{pendingDeleteProfile.name}”吗？此操作只会移除历史记录，不影响已经打开的会话。</p>
+              <h3 className="dialog-title text-sm font-semibold">删除历史连接</h3>
+              <p className="dialog-description text-xs">确认删除“{pendingDeleteProfile.name}”吗？此操作只会移除历史记录，不影响已经打开的会话。</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
@@ -762,13 +830,9 @@ function App() {
       ) : null}
 
       {pendingCloseSession ? (
-        <div
-          className="fixed inset-0 z-30 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
-          onClick={() => setPendingCloseSessionId(undefined)}
-          role="presentation"
-        >
+        <div className="app-overlay" onClick={() => setPendingCloseSessionId(undefined)} role="presentation">
           <div
-            className="surface w-full max-w-sm p-3"
+            className="app-dialog surface w-full max-w-sm p-3"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -776,8 +840,8 @@ function App() {
           >
             <div className="flex flex-col gap-1">
               <p className="label">关闭确认</p>
-              <h3 className="text-sm font-semibold text-slate-100">关闭当前会话</h3>
-              <p className="text-xs text-slate-400">确认关闭“{pendingCloseSession.title}”吗？关闭后当前终端标签会被移除。</p>
+              <h3 className="dialog-title text-sm font-semibold">关闭当前会话</h3>
+              <p className="dialog-description text-xs">确认关闭“{pendingCloseSession.title}”吗？关闭后当前终端标签会被移除。</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
@@ -797,13 +861,9 @@ function App() {
       ) : null}
 
       {exitDialogOpen ? (
-        <div
-          className="fixed inset-0 z-30 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
-          onClick={() => setExitDialogOpen(false)}
-          role="presentation"
-        >
+        <div className="app-overlay" onClick={() => setExitDialogOpen(false)} role="presentation">
           <div
-            className="surface w-full max-w-sm p-3"
+            className="app-dialog surface w-full max-w-sm p-3"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -811,8 +871,8 @@ function App() {
           >
             <div className="flex flex-col gap-1">
               <p className="label">退出确认</p>
-              <h3 className="text-sm font-semibold text-slate-100">退出应用</h3>
-              <p className="text-xs text-slate-400">确认退出 TermBridge 吗？退出后当前窗口和托盘都会关闭。</p>
+              <h3 className="dialog-title text-sm font-semibold">退出应用</h3>
+              <p className="dialog-description text-xs">确认退出 TermBridge 吗？退出后当前窗口和托盘都会关闭。</p>
             </div>
 
             <div className="mt-3 flex justify-end gap-1">

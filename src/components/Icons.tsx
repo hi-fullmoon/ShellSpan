@@ -134,3 +134,54 @@ export function CloseIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function SettingsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 2.5v1.3" />
+      <path d="M8 12.2v1.3" />
+      <path d="m11.9 4.1-.9.9" />
+      <path d="m5 11-.9.9" />
+      <path d="M13.5 8h-1.3" />
+      <path d="M3.8 8H2.5" />
+      <path d="m11.9 11.9-.9-.9" />
+      <path d="m5 5-.9-.9" />
+    </svg>
+  );
+}
+
+export function SunIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="8" cy="8" r="2.6" />
+      <path d="M8 1.8v1.6" />
+      <path d="M8 12.6v1.6" />
+      <path d="m12.4 3.6-1.1 1.1" />
+      <path d="m4.7 11.3-1.1 1.1" />
+      <path d="M14.2 8h-1.6" />
+      <path d="M3.4 8H1.8" />
+      <path d="m12.4 12.4-1.1-1.1" />
+      <path d="m4.7 4.7-1.1-1.1" />
+    </svg>
+  );
+}
+
+export function MoonIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M10.9 2.4a5.3 5.3 0 1 0 2.7 9.8A5.8 5.8 0 0 1 10.9 2.4Z" />
+    </svg>
+  );
+}
+
+export function GlobeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M2.8 8h10.4" />
+      <path d="M8 2.5c1.8 1.6 2.8 3.5 2.8 5.5S9.8 11.9 8 13.5" />
+      <path d="M8 2.5C6.2 4.1 5.2 6 5.2 8s1 3.9 2.8 5.5" />
+    </svg>
+  );
+}

@@ -15,7 +15,7 @@ import {
   shouldReconnectFromInput,
   shouldWarnOnClosedSession,
 } from "../lib/terminalStatus";
-import { cn } from "../lib/ui";
+import { cn, getCurrentThemeMode, getTerminalTheme } from "../lib/ui";
 import type {
   SessionState,
   SshClosedEvent,
@@ -97,22 +97,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace',
       fontSize: 14,
       lineHeight: 1.25,
-      theme: {
-        background: "#020617",
-        foreground: "#dbe7f5",
-        cursor: "#67e8f9",
-        selectionBackground: "#1e293b",
-        black: "#0f172a",
-        brightBlack: "#475569",
-        red: "#fb7185",
-        green: "#34d399",
-        yellow: "#fbbf24",
-        blue: "#60a5fa",
-        magenta: "#c084fc",
-        cyan: "#67e8f9",
-        white: "#e2e8f0",
-        brightWhite: "#f8fafc",
-      },
+      theme: getTerminalTheme(),
       scrollback: 5000,
       disableStdin: shouldDisableTerminalInput(session.status),
     });
@@ -132,6 +117,21 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     fitRef.current = fitAddon;
     lastShellSizeRef.current = null;
     writeSystemLine(formatTerminalPrefixedText("终端准备中..."));
+
+    const themeObserver = new MutationObserver(() => {
+      const nextTerminal = terminalRef.current;
+      if (!nextTerminal) {
+        return;
+      }
+
+      nextTerminal.options.theme = getTerminalTheme(getCurrentThemeMode());
+      nextTerminal.refresh?.(0, nextTerminal.rows - 1);
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
     terminal.onData((data) => {
       if (statusRef.current !== "connected") {
         const shouldReconnect = shouldReconnectFromInput(
@@ -253,13 +253,13 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
     };
 
     scheduleResize(true);
-    const observer = new ResizeObserver(handleViewportResize);
-    observer.observe(shellRef.current);
+    const resizeObserver = new ResizeObserver(handleViewportResize);
+    resizeObserver.observe(shellRef.current);
     window.addEventListener("resize", handleViewportResize);
 
     return () => {
       terminalLogger.debug("销毁终端实例", { sessionId: session.sessionId });
-      observer.disconnect();
+      resizeObserver.disconnect();
       window.removeEventListener("resize", handleViewportResize);
       scheduleResizeRef.current = null;
       clearPendingResizeSync();
@@ -269,6 +269,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
         frameRef.current = null;
       }
       terminal.dispose();
+      themeObserver.disconnect();
       terminalRef.current = null;
       fitRef.current = null;
     };
@@ -388,7 +389,7 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
       )}
     >
       <div
-        className="terminal-shell min-h-0 flex-1 overflow-hidden bg-slate-950"
+        className="terminal-shell themed-terminal-shell min-h-0 flex-1 overflow-hidden"
         ref={shellRef}
       />
     </section>

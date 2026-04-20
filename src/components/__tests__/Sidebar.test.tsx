@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { initI18n } from "../../lib/i18n";
 import type { ConnectionProfile } from "../../types";
 import {
   Sidebar,
@@ -59,6 +60,10 @@ describe("countFavoriteProfiles", () => {
 });
 
 describe("Sidebar", () => {
+  beforeAll(async () => {
+    await initI18n("zh-CN");
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -85,6 +90,7 @@ describe("Sidebar", () => {
     expect(screen.getAllByText("3")).toHaveLength(2);
     expect(screen.getByText("2")).toBeTruthy();
     expect(screen.getByText("1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开设置" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
     fireEvent.click(screen.getByRole("button", { name: /Beta deploy@beta\.example\.com:22/i }));

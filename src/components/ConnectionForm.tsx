@@ -46,7 +46,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       {!compact ? (
         <div className="flex flex-col gap-0.5">
           <span className="label">快速连接</span>
-          <h2 className="text-sm font-semibold text-slate-100">打开远程终端</h2>
+          <h2 className="themed-heading text-sm font-semibold">打开远程终端</h2>
           <p className="text-xs text-slate-400">密码和密钥口令只参与本次连接，不会持久化。</p>
         </div>
       ) : (
@@ -56,7 +56,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       <label className="flex flex-col gap-1">
         <span className="text-[11px] font-medium text-slate-300">名称</span>
         <input
-          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+          className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
           value={profile.name}
           onChange={handleTextChange('name')}
           placeholder="生产 / 堡垒机 / 演示"
@@ -67,7 +67,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-slate-300">主机</span>
           <input
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+            className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             value={profile.host}
             onChange={handleTextChange('host')}
             placeholder="192.168.1.10 / server.example.com"
@@ -77,7 +77,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-slate-300">端口</span>
           <input
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+            className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             type="number"
             value={profile.port}
             onChange={handleTextChange('port')}
@@ -92,7 +92,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-slate-300">用户名</span>
           <input
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+            className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             value={profile.username}
             onChange={handleTextChange('username')}
             placeholder="root / ubuntu / deploy"
@@ -102,7 +102,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-slate-300">认证</span>
           <select
-            className="h-[34px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
+            className="themed-input h-[34px] rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             value={profile.authMethod}
             onChange={handleAuthChange}
           >
@@ -116,7 +116,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-slate-300">密码</span>
           <input
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+            className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             type="password"
             value={profile.password ?? ''}
             onChange={handleTextChange('password')}
@@ -128,7 +128,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-slate-300">私钥路径</span>
             <input
-              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+              className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
               value={profile.privateKeyPath ?? ''}
               onChange={handleTextChange('privateKeyPath')}
               placeholder="~/.ssh/id_ed25519 或 C:\\Users\\you\\.ssh\\id_rsa"
@@ -138,7 +138,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-slate-300">私钥口令</span>
             <input
-              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+              className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
               type="password"
               value={profile.passphrase ?? ''}
               onChange={handleTextChange('passphrase')}
@@ -149,14 +149,15 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       )}
 
       <div className="flex flex-wrap gap-1">
-        <label className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-400">
-          <input name="remember" type="checkbox" defaultChecked />
+        <label className="themed-checkbox-row flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs">
+          <input className="themed-checkbox" name="remember" type="checkbox" defaultChecked />
           <span>保存连接信息</span>
         </label>
 
         {profile.authMethod === 'password' ? (
-          <label className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-400">
+          <label className="themed-checkbox-row flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs">
             <input
+              className="themed-checkbox"
               checked={profile.rememberPassword ?? false}
               name="rememberPassword"
               onChange={(event) =>

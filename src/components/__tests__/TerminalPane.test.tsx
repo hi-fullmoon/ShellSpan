@@ -143,6 +143,19 @@ describe('TerminalPane', () => {
     );
   });
 
+  it('uses the light terminal palette when the document theme is light', () => {
+    document.documentElement.dataset.theme = 'light';
+
+    render(<TerminalPane active onReconnect={() => {}} session={session} />);
+
+    expect(terminalInstances[0]?.options).toMatchObject({
+      theme: expect.objectContaining({
+        background: '#f8fafc',
+        foreground: '#0f172a',
+      }),
+    });
+  });
+
   it('shows the reconnect line with the termbridge prefix', () => {
     const onReconnect = vi.fn();
     render(<TerminalPane active onReconnect={onReconnect} session={session} />);

@@ -36,9 +36,11 @@ const SSH_STATUS_EVENT: &str = "ssh-status";
 const SSH_CLOSED_EVENT: &str = "ssh-closed";
 const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 const DELETE_PROGRESS_EVENT: &str = "delete-progress";
+const MENU_OPEN_SETTINGS_ID: &str = "menu.open_settings";
 const MENU_CHECK_UPDATE_ID: &str = "menu.check_update";
 const APP_QUIT_MENU_ID: &str = "menu.app_quit";
 const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
+const SYSTEM_OPEN_SETTINGS_EVENT: &str = "system-open-settings";
 const SYSTEM_CHECK_UPDATE_EVENT: &str = "system-check-update";
 const SYSTEM_REQUEST_APP_EXIT_EVENT: &str = "system-request-app-exit";
 #[cfg(target_os = "windows")]
@@ -1992,6 +1994,12 @@ mod tests {
     }
 
     #[test]
+    fn open_settings_menu_id_is_recognized() {
+        assert!(is_open_settings_menu_id("menu.open_settings"));
+        assert!(!is_open_settings_menu_id("menu.check_update"));
+    }
+
+    #[test]
     fn macos_check_update_item_is_inserted_directly_after_about() {
         assert_eq!(macos_check_update_insert_position(0), 0);
         assert_eq!(macos_check_update_insert_position(1), 1);
@@ -2607,6 +2615,15 @@ fn is_check_update_menu_id(menu_id: &str) -> bool {
     menu_id == MENU_CHECK_UPDATE_ID || menu_id == TRAY_CHECK_UPDATE_ID
 }
 
+fn is_open_settings_menu_id(menu_id: &str) -> bool {
+    menu_id == MENU_OPEN_SETTINGS_ID
+}
+
+fn emit_system_open_settings(app: &AppHandle) -> Result<(), String> {
+    app.emit(SYSTEM_OPEN_SETTINGS_EVENT, ())
+        .map_err(|error| format!("failed to emit {SYSTEM_OPEN_SETTINGS_EVENT} event: {error}"))
+}
+
 fn emit_system_check_update(app: &AppHandle) -> Result<(), String> {
     app.emit(SYSTEM_CHECK_UPDATE_EVENT, ())
         .map_err(|error| format!("failed to emit {SYSTEM_CHECK_UPDATE_EVENT} event: {error}"))
@@ -2637,6 +2654,8 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         });
 
     if let Some(app_submenu) = app_submenu {
+        let settings_item =
+            MenuItem::with_id(app, MENU_OPEN_SETTINGS_ID, "Settings...", true, None::<&str>)?;
         let check_update_item =
             MenuItem::with_id(app, MENU_CHECK_UPDATE_ID, "Check for Updates...", true, None::<&str>)?;
         let quit_item = MenuItem::with_id(app, APP_QUIT_MENU_ID, "Quit TermBridge", true, None::<&str>)?;
@@ -2644,7 +2663,8 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         let quit_position = app_submenu_items.len().saturating_sub(1);
         let _ = app_submenu.remove_at(quit_position)?;
         let insert_position = macos_check_update_insert_position(app_submenu.items()?.len());
-        app_submenu.insert_items(&[&check_update_item], insert_position)?;
+        app_submenu.insert_items(&[&settings_item], insert_position)?;
+        app_submenu.insert_items(&[&check_update_item], insert_position + 1)?;
         app_submenu.insert_items(&[&quit_item], app_submenu.items()?.len())?;
     }
 
@@ -2734,6 +2754,13 @@ pub fn run() {
 
     builder = builder.on_menu_event(|app, event| {
         let menu_id = event.id().as_ref();
+        if is_open_settings_menu_id(menu_id) {
+            if let Err(error) = emit_system_open_settings(app) {
+                error!("failed to handle open-settings menu event: {error}");
+            }
+            return;
+        }
+
         if is_check_update_menu_id(menu_id) {
             if let Err(error) = emit_system_check_update(app) {
                 error!("failed to handle check-update menu event: {error}");
