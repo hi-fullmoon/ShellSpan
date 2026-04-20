@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { forwardRef } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionState } from "../../types";
 
@@ -15,15 +15,35 @@ vi.mock("ag-grid-community", () => ({
 
 vi.mock("ag-grid-react", () => ({
   AgGridReact: forwardRef(function AgGridReact(
-    { rowData }: { rowData?: Array<{ path: string; name: string }> },
+    {
+      rowData,
+      onCellContextMenu,
+      onRowClicked,
+    }: {
+      rowData?: Array<{ path: string; name: string; kind: string }>;
+      onCellContextMenu?: (event: { data: { path: string; name: string; kind: string }; event: MouseEvent }) => void;
+      onRowClicked?: (event: { data: { path: string; name: string; kind: string } }) => void;
+    },
     _ref,
   ) {
     return (
       <div data-testid="file-grid">
         {rowData?.map((entry) => (
-          <div key={entry.path}>
+          <button
+            key={entry.path}
+            onClick={() => onRowClicked?.({ data: entry })}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onCellContextMenu?.({
+                data: entry,
+                event: event.nativeEvent,
+              });
+            }}
+            type="button"
+          >
             <span className="file-entry-name">{entry.name}</span>
-          </div>
+          </button>
         ))}
       </div>
     );
@@ -78,6 +98,11 @@ const disconnectedSession: SessionState = {
   },
 };
 
+const connectedSession: SessionState = {
+  ...disconnectedSession,
+  status: "connected",
+};
+
 describe("FileManager", () => {
   beforeEach(() => {
     useFileManagerStore.setState({
@@ -124,5 +149,26 @@ describe("FileManager", () => {
     expect(screen.getByText("1")).toHaveClass("file-manager-count");
     expect(screen.getByPlaceholderText("输入远程路径并回车")).toHaveClass("themed-input");
     expect(screen.getByText("keep.txt")).toHaveClass("file-entry-name");
+  });
+
+  it("uses theme-aware classes for the file context menu and entry dialogs", () => {
+    render(<FileManager session={connectedSession} />);
+
+    fireEvent.contextMenu(screen.getByText("keep.txt"));
+
+    const createFileMenuItem = screen.getByRole("button", { name: "新建文件" });
+    expect(createFileMenuItem.closest(".themed-menu")).toHaveClass("themed-menu");
+    expect(createFileMenuItem).toHaveClass("themed-menu-item");
+
+    fireEvent.click(screen.getByRole("button", { name: "属性" }));
+    expect(screen.getByText("属性")).toHaveClass("dialog-kicker");
+    expect(screen.getByText("名称").closest("div")).toHaveClass("themed-property-row");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭属性弹框" }));
+    fireEvent.contextMenu(screen.getByTestId("file-grid"));
+    fireEvent.click(screen.getByRole("button", { name: "新建文件" }));
+
+    expect(screen.getByText("新建")).toHaveClass("dialog-kicker");
+    expect(screen.getByPlaceholderText("example.txt")).toHaveClass("themed-input");
   });
 });

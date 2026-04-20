@@ -214,21 +214,21 @@ export function Sidebar({
                 role="presentation"
               />
               <div
-                className="fixed z-50 min-w-[132px] rounded-lg border border-slate-800 bg-slate-950/95 p-1 shadow-[0_12px_36px_rgba(2,6,23,0.45)] backdrop-blur"
+                className="themed-menu fixed z-50 min-w-[132px] rounded-lg p-1 backdrop-blur"
                 onClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.preventDefault()}
                 ref={menuRef}
                 style={{ left: historyMenu.x, top: historyMenu.y }}
               >
                 <button
-                  className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => startRenamingProfile(historyMenu.profile)}
                   type="button"
                 >
                   重命名
                 </button>
                 <button
-                  className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onTogglePinnedProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
@@ -238,7 +238,7 @@ export function Sidebar({
                   {historyMenu.profile.pinned ? '取消置顶' : '置顶'}
                 </button>
                 <button
-                  className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onToggleFavoriteProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
@@ -248,7 +248,7 @@ export function Sidebar({
                   {historyMenu.profile.favorite ? '取消收藏' : '收藏'}
                 </button>
                 <button
-                  className="w-full rounded-md px-2 py-1 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onDeleteProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
@@ -266,7 +266,7 @@ export function Sidebar({
       {renamingProfileId
         ? createPortal(
             <div
-              className="fixed inset-0 z-40 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
+              className="app-overlay"
               onClick={closeRenameDialog}
               role="presentation"
             >
@@ -279,12 +279,12 @@ export function Sidebar({
               >
                 <div className="flex flex-col gap-1">
                   <p className="label">重命名</p>
-                  <h3 className="text-sm font-semibold text-slate-100">修改历史连接名称</h3>
+                  <h3 className="themed-heading text-sm font-semibold">修改历史连接名称</h3>
                 </div>
 
                 <input
                   autoFocus
-                  className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+                  className="themed-input mt-3 w-full rounded-lg px-3 py-2 text-sm outline-none transition focus:border-cyan-400/60"
                   onChange={(event) => setRenameValue(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {

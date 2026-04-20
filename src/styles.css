@@ -198,6 +198,45 @@
   accent-color: var(--app-primary-bg);
 }
 
+.themed-menu {
+  border: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-surface) 94%, transparent);
+  box-shadow: var(--app-shadow);
+}
+
+.themed-menu-item {
+  color: var(--app-text);
+}
+
+.themed-menu-item:hover {
+  background: color-mix(in srgb, var(--app-surface-muted) 86%, var(--app-primary-bg) 8%);
+}
+
+.themed-menu-item:disabled {
+  color: var(--app-text-muted);
+}
+
+.themed-menu-divider {
+  background: var(--app-border);
+}
+
+.dialog-kicker {
+  color: var(--app-label);
+}
+
+.themed-property-row {
+  border: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-surface-muted) 92%, transparent);
+}
+
+.themed-property-row__label {
+  color: var(--app-text-muted);
+}
+
+.themed-property-row__value {
+  color: var(--app-text);
+}
+
 .file-manager-subtitle {
   color: var(--app-label);
 }

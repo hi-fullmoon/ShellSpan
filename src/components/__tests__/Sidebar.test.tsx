@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../../lib/i18n";
@@ -115,5 +116,31 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByText("还没有保存的连接配置。")).toBeTruthy();
+  });
+
+  it("uses theme-aware classes for the history context menu and rename dialog", () => {
+    render(
+      <Sidebar
+        connectedCount={2}
+        onDeleteProfile={vi.fn()}
+        onOpenConnect={vi.fn()}
+        onRenameProfile={vi.fn()}
+        onReuseProfile={vi.fn()}
+        onToggleFavoriteProfile={vi.fn()}
+        onTogglePinnedProfile={vi.fn()}
+        runtimeLabel="Desktop"
+        savedProfiles={profiles}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Beta deploy@beta\.example\.com:22/i }));
+
+    expect(screen.getByRole("button", { name: "重命名" }).parentElement).toHaveClass("themed-menu");
+    expect(screen.getByRole("button", { name: "重命名" })).toHaveClass("themed-menu-item");
+
+    fireEvent.click(screen.getByRole("button", { name: "重命名" }));
+
+    expect(screen.getByText("修改历史连接名称")).toHaveClass("themed-heading");
+    expect(screen.getByPlaceholderText("输入连接名称")).toHaveClass("themed-input");
   });
 });

@@ -350,7 +350,7 @@ function fileKindIcon(kind: RemoteFileKind) {
 function MenuButton({ label, disabled, onClick }: { label: string; disabled?: boolean; onClick: () => void }) {
   return (
     <button
-      className="rounded-md px-2 py-1 text-left text-[12px] font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500"
+      className="themed-menu-item rounded-md px-2 py-1 text-left text-[12px] font-medium transition disabled:cursor-not-allowed"
       disabled={disabled}
       onClick={onClick}
       type="button"
@@ -361,14 +361,14 @@ function MenuButton({ label, disabled, onClick }: { label: string; disabled?: bo
 }
 
 function MenuDivider() {
-  return <div className="my-1 h-px bg-slate-800/90" />;
+  return <div className="themed-menu-divider my-1 h-px" />;
 }
 
 function PropertyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2 rounded-lg border border-slate-800 bg-slate-950/70 px-2 py-2">
-      <span className="text-[11px] font-medium tracking-[0.02em] text-slate-500">{label}</span>
-      <span className="break-all text-[12px] leading-5 text-slate-200">{value}</span>
+    <div className="themed-property-row grid grid-cols-[72px_minmax(0,1fr)] gap-2 rounded-lg px-2 py-2">
+      <span className="themed-property-row__label text-[11px] font-medium leading-5 tracking-[0.02em]">{label}</span>
+      <span className="themed-property-row__value break-all text-[12px] leading-5">{value}</span>
     </div>
   );
 }
@@ -1569,7 +1569,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             >
               {loading && !listing ? (
                 showInitialLoadingHint ? (
-                  <div className="surface-muted px-2 py-2 text-xs text-slate-400">正在加载远程目录...</div>
+                  <div className="surface-muted rounded-lg px-2 py-2 text-xs text-slate-400">正在加载远程目录...</div>
                 ) : null
               ) : !listing ? null : (
                 <div className="ag-theme-quartz termbridge-file-grid h-full">
@@ -1605,7 +1605,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       {contextMenu
         ? createPortal(
             <div
-              className="fixed z-50 min-w-[132px] rounded-lg border border-slate-800 bg-slate-950/95 p-1 shadow-[0_12px_36px_rgba(2,6,23,0.45)] backdrop-blur"
+              className="themed-menu fixed z-50 min-w-[132px] rounded-lg p-1 backdrop-blur"
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
               onMouseDown={(event) => {
@@ -1703,8 +1703,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
           <OverlayPanel className="max-w-md">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">属性</p>
-                <h4 className="mt-1 text-[15px] font-semibold tracking-[0.01em] text-slate-100">{properties.entry.name}</h4>
+                <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">属性</p>
+                <h4 className="themed-heading mt-1 text-[15px] font-semibold tracking-[0.01em]">{properties.entry.name}</h4>
               </div>
               <button aria-label="关闭属性弹框" className="icon-btn h-7 w-7 px-0" onClick={() => setProperties(undefined)} title="关闭" type="button">
                 <CloseIcon />
@@ -1830,15 +1830,15 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer>
           <form className="surface flex w-full max-w-xs flex-col gap-2 p-3" onSubmit={(event) => void submitDialog(event)}>
             <div>
-              <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">{dialog.mode === 'rename' ? '重命名' : '新建'}</p>
-              <h4 className="mt-1 text-[15px] font-semibold tracking-[0.01em] text-slate-100">
+              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{dialog.mode === 'rename' ? '重命名' : '新建'}</p>
+              <h4 className="themed-heading mt-1 text-[15px] font-semibold tracking-[0.01em]">
                 {dialog.mode === 'newFile' ? '新建空文件' : dialog.mode === 'newDirectory' ? '新建文件夹' : '修改名称'}
               </h4>
             </div>
 
             <input
               autoFocus
-              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-[13px] leading-5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60"
+              className="themed-input rounded-lg px-3 py-2 text-[13px] leading-5 outline-none transition focus:border-cyan-400/60"
               onChange={(event) => setDialog((current) => (current ? { ...current, value: event.target.value } : current))}
               placeholder={dialog.mode === 'newFile' ? 'example.txt' : dialog.mode === 'newDirectory' ? '新建文件夹' : '输入新名称'}
               value={dialog.value}
@@ -1860,23 +1860,23 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer>
           <OverlayPanel className="max-w-sm">
             <div className="flex flex-col gap-1">
-              <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">上传冲突</p>
-              <h4 className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">“{pendingUploadConflict.conflict.targetName}”已存在</h4>
-              <p className="text-xs leading-5 text-slate-400">
+              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">上传冲突</p>
+              <h4 className="themed-heading text-[15px] font-semibold tracking-[0.01em]">“{pendingUploadConflict.conflict.targetName}”已存在</h4>
+              <p className="text-subtle text-xs leading-5">
                 远程目录里已经有同名{kindLabel(pendingUploadConflict.conflict.existingKind)}，要用本地文件覆盖它吗？
               </p>
               <p
-                className="break-all rounded-lg border border-slate-800 bg-slate-950/70 px-2 py-2 text-[11px] leading-5 text-slate-400"
+                className="themed-property-row break-all rounded-lg px-2 py-2 text-[11px] leading-5"
                 title={pendingUploadConflict.conflict.localPath}
               >
                 本地来源：{addPathWrapOpportunities(pendingUploadConflict.conflict.localPath)}
               </p>
             </div>
 
-            <label className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-2 text-[12px] text-slate-300">
+            <label className="themed-checkbox-row flex items-center gap-2 rounded-lg px-2 py-2 text-[12px]">
               <input
                 checked={pendingUploadConflict.applyToRemaining}
-                className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-950 text-cyan-300 focus:ring-cyan-400/40"
+                className="themed-checkbox h-3.5 w-3.5"
                 onChange={(event) =>
                   setPendingUploadConflict((current) =>
                     current
@@ -1935,11 +1935,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer>
           <OverlayPanel className="max-w-sm">
             <div className="flex flex-col gap-1">
-              <p className="text-[11px] font-medium tracking-[0.08em] text-cyan-300/80">删除确认</p>
-              <h4 className="text-[15px] font-semibold tracking-[0.01em] text-slate-100">
+              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">删除确认</p>
+              <h4 className="themed-heading text-[15px] font-semibold tracking-[0.01em]">
                 {pendingDelete.kind === 'directory' ? '删除目录' : '删除文件'}
               </h4>
-              <p className="text-xs text-slate-400">
+              <p className="text-subtle text-xs">
                 {pendingDelete.kind === 'directory' ? `确认删除“${pendingDelete.name}”及其内容吗？` : `确认删除“${pendingDelete.name}”吗？`}
               </p>
             </div>
