@@ -57,6 +57,7 @@ function App() {
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
   const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
   const sessionsRef = useRef<SessionState[]>([]);
+  const autoReconnectAttemptedRef = useRef<Record<string, true>>({});
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -86,12 +87,22 @@ function App() {
 
       const nextStopClosed = await listen<SshClosedEvent>('ssh-closed', (event) => {
         const currentSession = sessionsRef.current.find((session) => session.sessionId === event.payload.sessionId);
+        const shouldAutoReconnect =
+          !!currentSession &&
+          event.payload.reasonKind === 'transport_disconnect' &&
+          event.payload.retryable &&
+          !autoReconnectAttemptedRef.current[event.payload.sessionId];
+
         if (currentSession) {
           if (shouldWarnOnClosedSession(currentSession.status)) {
             appLogger.warn('会话已关闭', event.payload);
           } else {
             appLogger.debug('会话关闭事件（错误态已记录）', event.payload);
           }
+        }
+
+        if (shouldAutoReconnect) {
+          autoReconnectAttemptedRef.current[event.payload.sessionId] = true;
         }
 
         setSessions((current) =>
@@ -102,11 +113,15 @@ function App() {
 
             return {
               ...session,
-              status: session.status === 'error' ? 'error' : 'disconnected',
-              note: event.payload.reason,
+              status: shouldAutoReconnect ? 'connecting' : session.status === 'error' ? 'error' : 'disconnected',
+              note: shouldAutoReconnect ? '连接中断，正在自动重连...' : event.payload.reason,
             };
           }),
         );
+
+        if (shouldAutoReconnect) {
+          void handleReconnectSession(event.payload.sessionId, { automatic: true });
+        }
       });
 
       if (cancelled) {
@@ -450,8 +465,9 @@ function App() {
     );
   };
 
-  const handleReconnectSession = async (sessionId: string) => {
-    const target = sessions.find((item) => item.sessionId === sessionId);
+  const handleReconnectSession = async (sessionId: string, options?: { automatic?: boolean }) => {
+    const automatic = options?.automatic ?? false;
+    const target = sessionsRef.current.find((item) => item.sessionId === sessionId);
     if (!target) {
       return;
     }
@@ -479,14 +495,18 @@ function App() {
       });
       setActiveSessionId((current) => (current === sessionId ? summary.sessionId : current));
       replaceFileManagerSessionStateKey(sessionId, summary.sessionId);
+      delete autoReconnectAttemptedRef.current[sessionId];
+      delete autoReconnectAttemptedRef.current[summary.sessionId];
       setErrorMessage(undefined);
       appLogger.info('会话重连成功', {
         fromSessionId: sessionId,
         toSessionId: summary.sessionId,
+        automatic,
       });
     } catch (error) {
       appLogger.error('会话重连失败', {
         sessionId,
+        automatic,
         error: String(error),
       });
       setSessions((current) =>
@@ -495,12 +515,12 @@ function App() {
             ? {
                 ...item,
                 status: 'error',
-                note: `重连失败: ${String(error)}`,
+                note: automatic ? `自动重连失败: ${String(error)}` : `重连失败: ${String(error)}`,
               }
             : item,
         ),
       );
-      setErrorMessage(`重连失败: ${String(error)}`);
+      setErrorMessage(automatic ? `自动重连失败: ${String(error)}` : `重连失败: ${String(error)}`);
     }
   };
 

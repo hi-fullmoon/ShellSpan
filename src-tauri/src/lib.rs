@@ -21,7 +21,7 @@ use std::{
         Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
@@ -47,6 +47,7 @@ const TRAY_SHOW_MAIN_WINDOW_ID: &str = "tray.show_main_window";
 const TRAY_QUIT_ID: &str = "tray.quit";
 const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
+const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 
 #[derive(Debug, Clone, Serialize)]
@@ -202,6 +203,18 @@ struct DataEvent {
 struct ClosedEvent {
     session_id: String,
     reason: Option<String>,
+    reason_kind: ClosedReasonKind,
+    retryable: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ClosedReasonKind {
+    LocalClose,
+    ControllerDropped,
+    RemoteExit,
+    TransportDisconnect,
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -814,6 +827,8 @@ fn spawn_ssh_thread(
 
         match run_result {
             Ok(message) => {
+                let (reason_kind, retryable) =
+                    classify_closed_reason(message.as_deref(), SessionStatus::Disconnected);
                 info!(
                     "SSH session ended session_id={} reason={}",
                     session_id,
@@ -825,9 +840,11 @@ fn spawn_ssh_thread(
                     SessionStatus::Disconnected,
                     message.clone(),
                 );
-                let _ = emit_closed(&app, &session_id, message);
+                let _ = emit_closed(&app, &session_id, message, reason_kind, retryable);
             }
             Err(error) => {
+                let (reason_kind, retryable) =
+                    classify_closed_reason(Some(error.as_str()), SessionStatus::Error);
                 error!("SSH session failed session_id={session_id}: {error}");
                 let _ = emit_status(
                     &app,
@@ -835,7 +852,7 @@ fn spawn_ssh_thread(
                     SessionStatus::Error,
                     Some(error.clone()),
                 );
-                let _ = emit_closed(&app, &session_id, Some(error));
+                let _ = emit_closed(&app, &session_id, Some(error), reason_kind, retryable);
             }
         }
 
@@ -1410,6 +1427,7 @@ fn open_authenticated_session(
         username,
         auth_method.as_str()
     );
+    session.set_keepalive(false, SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
     Ok(session)
 }
 
@@ -1835,7 +1853,7 @@ mod tests {
 
     #[test]
     fn session_idle_wait_timeout_uses_short_slice_when_socket_is_blocked() {
-        let wait = session_idle_wait_timeout(true)
+        let wait = session_idle_wait_timeout(true, None)
             .expect("blocked sockets should use a short wait slice instead of busy spinning");
 
         assert_eq!(wait, Duration::from_millis(20));
@@ -1843,9 +1861,31 @@ mod tests {
 
     #[test]
     fn session_idle_wait_timeout_skips_wait_when_no_signal_is_pending() {
-        let wait = session_idle_wait_timeout(false);
+        let wait = session_idle_wait_timeout(false, None);
 
         assert_eq!(wait, None);
+    }
+
+    #[test]
+    fn session_idle_wait_timeout_prefers_earlier_keepalive_deadline() {
+        let wait = session_idle_wait_timeout(true, Some(Duration::from_millis(8)))
+            .expect("keepalive deadline should cap the socket wait");
+
+        assert_eq!(wait, Duration::from_millis(8));
+    }
+
+    #[test]
+    fn session_idle_wait_timeout_uses_keepalive_deadline_without_socket_block() {
+        let wait = session_idle_wait_timeout(false, Some(Duration::from_secs(5)))
+            .expect("keepalive should wake the loop even when the socket is idle");
+
+        assert_eq!(wait, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn normalize_keepalive_delay_clamps_zero_to_one_second() {
+        assert_eq!(normalize_keepalive_delay(0), Duration::from_secs(1));
+        assert_eq!(normalize_keepalive_delay(7), Duration::from_secs(7));
     }
 
     #[test]
@@ -1856,6 +1896,26 @@ mod tests {
         );
 
         assert!(message.contains("ssh transport disconnected"));
+    }
+
+    #[test]
+    fn closed_reason_marks_transport_disconnect_as_retryable() {
+        let (reason_kind, retryable) = classify_closed_reason(
+            Some("failed to read remote output: ssh transport disconnected"),
+            SessionStatus::Error,
+        );
+
+        assert_eq!(reason_kind, ClosedReasonKind::TransportDisconnect);
+        assert!(retryable);
+    }
+
+    #[test]
+    fn closed_reason_keeps_remote_exit_non_retryable() {
+        let (reason_kind, retryable) =
+            classify_closed_reason(Some("remote shell exited"), SessionStatus::Disconnected);
+
+        assert_eq!(reason_kind, ClosedReasonKind::RemoteExit);
+        assert!(!retryable);
     }
 
     #[test]
@@ -2179,6 +2239,8 @@ fn session_loop(
     rx: Receiver<SessionCommand>,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
+    let mut next_keepalive_at =
+        Instant::now() + normalize_keepalive_delay(SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
 
     loop {
         let mut made_progress = false;
@@ -2243,10 +2305,20 @@ fn session_loop(
         }
 
         if made_progress {
+            next_keepalive_at =
+                Instant::now() + normalize_keepalive_delay(SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
             continue;
         }
 
-        if let Some(wait_timeout) = session_idle_wait_timeout(blocked_on_socket) {
+        let now = Instant::now();
+        if now >= next_keepalive_at {
+            let keepalive_delay = send_session_keepalive_nonblocking(session)?;
+            next_keepalive_at = Instant::now() + keepalive_delay;
+            continue;
+        }
+
+        let keepalive_due_in = Some(next_keepalive_at.saturating_duration_since(now));
+        if let Some(wait_timeout) = session_idle_wait_timeout(blocked_on_socket, keepalive_due_in) {
             wait_for_session_socket(session, wait_timeout)?;
         } else {
             thread::yield_now();
@@ -2254,16 +2326,93 @@ fn session_loop(
     }
 }
 
-fn session_idle_wait_timeout(blocked_on_socket: bool) -> Option<Duration> {
-    if !blocked_on_socket {
-        return None;
-    }
+fn session_idle_wait_timeout(
+    blocked_on_socket: bool,
+    keepalive_due_in: Option<Duration>,
+) -> Option<Duration> {
+    let socket_wait = blocked_on_socket.then_some(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS));
+    let keepalive_wait = keepalive_due_in.filter(|wait| !wait.is_zero());
 
-    Some(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS))
+    match (socket_wait, keepalive_wait) {
+        (Some(socket_wait), Some(keepalive_wait)) => Some(socket_wait.min(keepalive_wait)),
+        (Some(socket_wait), None) => Some(socket_wait),
+        (None, Some(keepalive_wait)) => Some(keepalive_wait),
+        (None, None) => None,
+    }
+}
+
+fn normalize_keepalive_delay(seconds: u32) -> Duration {
+    Duration::from_secs(u64::from(seconds.max(1)))
+}
+
+fn send_session_keepalive_nonblocking(session: &Session) -> Result<Duration, String> {
+    let wait_timeout = Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS);
+
+    loop {
+        match session.keepalive_send() {
+            Ok(next_seconds) => return Ok(normalize_keepalive_delay(next_seconds)),
+            Err(error) => {
+                let io_error: std::io::Error = error.into();
+                if is_retryable_channel_error_kind(io_error.kind()) {
+                    if io_error.kind() == ErrorKind::Interrupted {
+                        continue;
+                    }
+                    wait_for_session_socket(session, wait_timeout)?;
+                    continue;
+                }
+
+                warn!(
+                    "SSH keepalive failed kind={:?} block_directions={:?} error={}",
+                    io_error.kind(),
+                    session.block_directions(),
+                    io_error
+                );
+                return Err(format_transport_error(
+                    "failed to send ssh keepalive",
+                    &io_error.to_string(),
+                ));
+            }
+        }
+    }
 }
 
 fn is_retryable_channel_error_kind(kind: ErrorKind) -> bool {
     kind == ErrorKind::WouldBlock || kind == ErrorKind::Interrupted
+}
+
+fn classify_closed_reason(
+    reason: Option<&str>,
+    status: SessionStatus,
+) -> (ClosedReasonKind, bool) {
+    match status {
+        SessionStatus::Disconnected => match reason.unwrap_or_default() {
+            "session closed locally" => (ClosedReasonKind::LocalClose, false),
+            "session controller dropped" => (ClosedReasonKind::ControllerDropped, false),
+            _ => (ClosedReasonKind::RemoteExit, false),
+        },
+        SessionStatus::Error => {
+            let retryable = reason
+                .map(is_transport_disconnect_message)
+                .unwrap_or(false);
+
+            if retryable {
+                (ClosedReasonKind::TransportDisconnect, true)
+            } else {
+                (ClosedReasonKind::Error, false)
+            }
+        }
+        SessionStatus::Connecting | SessionStatus::Connected => (ClosedReasonKind::Error, false),
+    }
+}
+
+fn is_transport_disconnect_message(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("ssh transport disconnected")
+        || message.contains("transport read")
+        || message.contains("connection reset")
+        || message.contains("connection aborted")
+        || message.contains("broken pipe")
+        || message.contains("draining incoming flow")
 }
 
 fn format_transport_error(context: &str, raw_error: &str) -> String {
@@ -2439,12 +2588,16 @@ fn emit_closed(
     app: &AppHandle,
     session_id: &str,
     reason: Option<String>,
+    reason_kind: ClosedReasonKind,
+    retryable: bool,
 ) -> Result<(), String> {
     app.emit(
         SSH_CLOSED_EVENT,
         ClosedEvent {
             session_id: session_id.to_string(),
             reason,
+            reason_kind,
+            retryable,
         },
     )
     .map_err(|error| format!("failed to emit closed event: {error}"))

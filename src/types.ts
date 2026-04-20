@@ -47,6 +47,8 @@ export interface SshDataEvent {
 export interface SshClosedEvent {
   sessionId: string;
   reason?: string;
+  reasonKind: "local_close" | "controller_dropped" | "remote_exit" | "transport_disconnect" | "error";
+  retryable: boolean;
 }
 
 export interface UploadProgressEvent {
