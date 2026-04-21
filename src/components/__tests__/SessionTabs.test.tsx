@@ -8,7 +8,11 @@ import { SessionTabs } from "../SessionTabs";
 
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DragOverlay: ({ children, dropAnimation }: { children: React.ReactNode; dropAnimation?: unknown }) => (
+    <div data-drop-animation={dropAnimation === null ? "disabled" : "enabled"} data-testid="drag-overlay">
+      {children}
+    </div>
+  ),
   PointerSensor: class {},
   closestCenter: vi.fn(),
   useSensor: vi.fn(() => ({})),
@@ -159,5 +163,20 @@ describe("SessionTabs", () => {
 
     expect(screen.getByText("Production").closest("[data-session-tab]")).toHaveClass("session-tab");
     expect(screen.getByText("root@prod.example.com")).toHaveClass("session-tab-subtitle");
+  });
+
+  it("disables the drag overlay drop animation to avoid post-drop flicker", () => {
+    render(
+      <SessionTabs
+        activeSessionId="session-1"
+        onClose={vi.fn()}
+        onRename={vi.fn()}
+        onReorder={vi.fn()}
+        onSelect={vi.fn()}
+        sessions={sessions}
+      />,
+    );
+
+    expect(screen.getByTestId("drag-overlay")).toHaveAttribute("data-drop-animation", "disabled");
   });
 });

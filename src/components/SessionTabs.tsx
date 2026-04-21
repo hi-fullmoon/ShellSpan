@@ -304,7 +304,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
   const items = sessions.map((session) => session.sessionId as UniqueIdentifier);
   const draggingSession = draggingSessionId ? sessions.find((session) => session.sessionId === draggingSessionId) : undefined;
   const dragOverlay = (
-    <DragOverlay>
+    <DragOverlay dropAnimation={null}>
       {draggingSession ? (
         <SessionTabCard
           active={draggingSession.sessionId === activeSessionId}
