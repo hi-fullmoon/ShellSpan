@@ -4,8 +4,8 @@
   "version": "1.0.14",
   "identifier": "com.termbridge",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "pnpm run dev",
+    "beforeBuildCommand": "pnpm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

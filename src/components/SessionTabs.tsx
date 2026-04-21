@@ -77,7 +77,7 @@ function SessionTabCard({
       {...dragAttributes}
       {...dragListeners}
       className={cn(
-        'session-tab relative flex min-w-[150px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
+        'session-tab relative flex min-w-37.5 max-w-55 shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
         active ? 'session-tab-active' : 'session-tab-inactive',
         renaming
           ? 'session-tab-renaming cursor-text'
@@ -90,7 +90,7 @@ function SessionTabCard({
       onDoubleClick={() => onRenameStart?.(session)}
     >
       {renaming ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2 w-[200px] h-[32px]">
+        <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8">
           <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
           <span className="min-w-0 flex-1">
             <input
@@ -116,7 +116,7 @@ function SessionTabCard({
         </div>
       ) : (
         <>
-          <button className="flex min-w-0 flex-1 items-center gap-2 w-[200px] h-[32px]" onClick={() => onSelect(session.sessionId)} type="button">
+          <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8" onClick={() => onSelect(session.sessionId)} type="button">
             <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
             <span className="min-w-0 flex-1">
               <strong className="block truncate text-xs text-left" title={session.title}>
@@ -130,7 +130,7 @@ function SessionTabCard({
 
           <button
             aria-label={t('sessionTabs.close')}
-            className="icon-btn px-0.5 py-0.5 rounded-[6px]"
+            className="icon-btn px-0.5 py-0.5 rounded-md"
             onClick={(event) => {
               event.stopPropagation();
               onClose(session.sessionId);

@@ -20,32 +20,32 @@
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-log": "^2.8.0",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ag-grid-community": "^35.2.1",
     "ag-grid-react": "^35.2.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "react-intl-universal": "^2.13.4",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.3",
     "@tauri-apps/cli": "^2.10.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@types/react": "^18.3.28",
-    "@types/react-dom": "^18.3.7",
-    "@vitejs/plugin-react": "^4.7.0",
-    "autoprefixer": "^10.4.27",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.5.0",
     "jsdom": "^29.0.2",
-    "postcss": "^8.5.9",
-    "tailwindcss": "3.4.17",
-    "typescript": "^5.9.3",
-    "vite": "^5.4.21",
-    "vitest": "^1.6.1"
+    "postcss": "^8.5.10",
+    "tailwindcss": "^4.2.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.9",
+    "vitest": "^4.1.4"
   },
   "engines": {
     "node": ">=24 <25"
-  },
-  "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c"
+  }
 }

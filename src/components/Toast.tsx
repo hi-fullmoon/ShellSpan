@@ -57,12 +57,9 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
   }
 
   return createPortal(
-    <div className="pointer-events-none fixed left-1/2 top-2 z-[70] flex max-w-sm -translate-x-1/2">
+    <div className="pointer-events-none fixed left-1/2 top-2 z-70 flex max-w-sm -translate-x-1/2">
       <div
-        className={cn(
-          'themed-toast pointer-events-auto flex min-w-[220px] items-center gap-2 rounded-lg border px-3 py-2 backdrop-blur',
-          toastTone(tone),
-        )}
+        className={cn('themed-toast pointer-events-auto flex min-w-55 items-center gap-2 rounded-lg border px-3 py-2 backdrop-blur', toastTone(tone))}
         onMouseEnter={() => {
           if (startedAtRef.current !== null) {
             const elapsed = Date.now() - startedAtRef.current;

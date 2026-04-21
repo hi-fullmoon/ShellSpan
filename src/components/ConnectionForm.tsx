@@ -5,11 +5,7 @@ import type { ConnectionProfile } from '../types';
 interface ConnectionFormProps {
   profile: ConnectionProfile;
   onProfileChange: (profile: ConnectionProfile) => void;
-  onConnect: (
-    profile: ConnectionProfile,
-    remember: boolean,
-    rememberPassword: boolean,
-  ) => void;
+  onConnect: (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => void;
   compact?: boolean;
 }
 
@@ -27,7 +23,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
     onProfileChange({
       ...profile,
       authMethod,
-      rememberPassword: authMethod === 'password' ? profile.rememberPassword ?? false : false,
+      rememberPassword: authMethod === 'password' ? (profile.rememberPassword ?? false) : false,
       password: authMethod === 'password' ? (profile.password ?? '') : '',
       privateKeyPath: authMethod === 'key' ? (profile.privateKeyPath ?? '') : '',
       passphrase: authMethod === 'key' ? (profile.passphrase ?? '') : '',
@@ -78,7 +74,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.port')}</span>
           <input
-            className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+            className="themed-input no-number-spinner rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             type="number"
             value={profile.port}
             onChange={handleTextChange('port')}
@@ -103,7 +99,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.auth')}</span>
           <select
-            className="themed-input h-[34px] rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+            className="themed-input h-8.5 rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
             value={profile.authMethod}
             onChange={handleAuthChange}
           >

@@ -312,7 +312,7 @@ function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-[2px]">
+    <div className="flex min-w-0 items-center gap-0.5">
       <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', fileKindTone(data.kind))}>
         {fileKindIcon(data.kind)}
       </span>
@@ -1629,7 +1629,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       {contextMenu
         ? createPortal(
             <div
-              className="themed-menu fixed z-50 min-w-[132px] rounded-lg p-1 backdrop-blur"
+              className="themed-menu fixed z-50 min-w-33 rounded-lg p-1 backdrop-blur"
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
               onMouseDown={(event) => {
@@ -1923,7 +1923,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-xs gap-1 text-center">
             <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.dragDrop.title')}</span>
-            <strong className="file-manager-progress-title text-[15px] font-semibold tracking-[0.01em]">{t('fileManager.dragDrop.description')}</strong>
+            <strong className="file-manager-progress-title text-[15px] font-semibold tracking-[0.01em]">
+              {t('fileManager.dragDrop.description')}
+            </strong>
             <span className="file-manager-progress-meta text-xs">{t('fileManager.dragDrop.hint')}</span>
           </OverlayPanel>
         </OverlayLayer>

@@ -130,15 +130,15 @@ export function Sidebar({
         </div>
 
         <div className="grid grid-cols-3 gap-1">
-          <div className="surface-muted p-1.5">
+          <div className="surface-muted rounded-lg p-1.5">
             <p className="stats-label">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
           </div>
-          <div className="surface-muted p-1.5">
+          <div className="surface-muted rounded-lg p-1.5">
             <p className="stats-label">{t('sidebar.history')}</p>
             <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
           </div>
-          <div className="surface-muted p-1.5">
+          <div className="surface-muted rounded-lg p-1.5">
             <p className="stats-label">{t('sidebar.favorite')}</p>
             <strong className="mt-0.5 block text-sm">{favoriteCount}</strong>
           </div>
@@ -164,7 +164,7 @@ export function Sidebar({
             <div className="flex flex-col gap-1">
               {sortedProfiles.map((profile) => (
                 <button
-                  className="history-item surface-muted rounded-[6px] flex select-none items-center gap-1.5 px-2 py-1 text-left transition"
+                  className="history-item surface-muted rounded-md flex select-none items-center gap-1.5 px-2 py-1 text-left transition"
                   key={profile.id}
                   onClick={() => onReuseProfile(profile)}
                   onDragStart={(event) => event.preventDefault()}
@@ -193,7 +193,7 @@ export function Sidebar({
                         </span>
                       ) : null}
                     </div>
-                    <span className="text-subtle block truncate mt-[4px] text-[11px]">
+                    <span className="text-subtle block truncate mt-1 text-[11px]">
                       {profile.username}@{profile.host}:{profile.port}
                     </span>
                   </div>
@@ -217,7 +217,7 @@ export function Sidebar({
                 role="presentation"
               />
               <div
-                className="themed-menu fixed z-50 max-w-[96px] rounded-lg p-1 backdrop-blur"
+                className="themed-menu fixed z-50 max-w-24 rounded-lg p-1 backdrop-blur"
                 onClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.preventDefault()}
                 ref={menuRef}
