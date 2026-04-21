@@ -33,9 +33,17 @@ const defaultPreferences: AppPreferences = {
   locale: 'zh-CN',
 };
 
+function getSystemThemeMode() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'dark' as const;
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? ('dark' as const) : ('light' as const);
+}
+
 function normalizePreferences(value: Partial<AppPreferences> | null | undefined): AppPreferences {
   return {
-    theme: value?.theme === 'light' ? 'light' : 'dark',
+    theme: value?.theme === 'light' || value?.theme === 'system' ? value.theme : 'dark',
     locale: value?.locale === 'en-US' ? 'en-US' : 'zh-CN',
   };
 }
@@ -71,7 +79,9 @@ function App() {
   const [updateToast, setUpdateToast] = useState<{ message: string; tone: 'info' | 'success' | 'error' }>();
   const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
   const [, setIntlVersion] = useState(0);
+  const [systemThemeMode, setSystemThemeMode] = useState<'dark' | 'light'>(() => getSystemThemeMode());
   const preferences = useMemo(() => normalizePreferences(storedPreferences), [storedPreferences]);
+  const appliedTheme = preferences.theme === 'system' ? systemThemeMode : preferences.theme;
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
   const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
@@ -83,19 +93,47 @@ function App() {
   }, [sessions]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = preferences.theme;
-  }, [preferences.theme]);
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const applySystemTheme = () => {
+      setSystemThemeMode(darkMediaQuery.matches ? 'dark' : 'light');
+    };
+
+    applySystemTheme();
+    if (typeof darkMediaQuery.addEventListener === 'function') {
+      darkMediaQuery.addEventListener('change', applySystemTheme);
+      return () => {
+        darkMediaQuery.removeEventListener('change', applySystemTheme);
+      };
+    }
+
+    darkMediaQuery.addListener(applySystemTheme);
+    return () => {
+      darkMediaQuery.removeListener(applySystemTheme);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = appliedTheme;
+  }, [appliedTheme]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
       return;
     }
 
-    void getCurrentWindow()
-      .setTheme(preferences.theme)
-      .catch((error) => {
-        appLogger.warn('同步原生窗口主题失败', { error: String(error), theme: preferences.theme });
-      });
+    try {
+      void getCurrentWindow()
+        .setTheme(preferences.theme === 'system' ? null : preferences.theme)
+        .catch((error) => {
+          appLogger.warn('同步原生窗口主题失败', { error: String(error), theme: preferences.theme });
+        });
+    } catch (error) {
+      appLogger.warn('获取原生窗口实例失败，跳过窗口主题同步', { error: String(error), theme: preferences.theme });
+    }
   }, [preferences.theme]);
 
   useEffect(() => {

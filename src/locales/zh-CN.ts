@@ -228,9 +228,10 @@ const zhCN = {
   'settings.title': '应用设置',
   'settings.description': '在这里统一管理界面主题、语言偏好和后续会继续扩展的体验设置。',
   'settings.appearance': '外观',
-  'settings.appearanceHint': '当前支持暗色与浅色两套风格，可随时手动切换。',
+  'settings.appearanceHint': '支持跟随系统、暗色、浅色，可随时切换。',
   'settings.theme': '主题',
-  'settings.themeHint': '切换后立即应用到控制台界面。',
+  'settings.themeHint': '切换后立即应用；选择跟随系统时会自动响应系统主题变化。',
+  'settings.theme.system': '跟随系统',
   'settings.theme.dark': '暗色',
   'settings.theme.light': '浅色',
   'settings.language': '语言',
@@ -238,7 +239,7 @@ const zhCN = {
   'settings.language.zh-CN': '简体中文',
   'settings.language.en-US': 'English',
   'settings.preview': '当前预览',
-  'settings.previewHint': '你的设置会自动保存到本地，下次打开应用时直接恢复。',
+  'settings.previewHint': '用于预览主题在主界面结构中的效果（侧栏、标签栏、终端区）。',
   'settings.close': '关闭设置',
 } as const;
 

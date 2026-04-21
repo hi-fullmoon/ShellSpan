@@ -6,7 +6,7 @@ mod remote_fs;
 mod session;
 
 use log::LevelFilter;
-use tauri::{AppHandle, Emitter, Manager, Theme};
+use tauri::{AppHandle, Emitter};
 
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
 use models::{SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
@@ -108,13 +108,6 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_theme(Some(Theme::Dark));
-            }
-
-            Ok(())
-        })
         .manage(SessionManager::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())

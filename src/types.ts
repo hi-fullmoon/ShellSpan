@@ -1,6 +1,6 @@
 export type AuthMethod = "password" | "key";
 export type SessionStatus = "connecting" | "connected" | "disconnected" | "error";
-export type ThemePreference = "dark" | "light";
+export type ThemePreference = "dark" | "light" | "system";
 export type LocalePreference = "zh-CN" | "en-US";
 
 export interface AppPreferences {

@@ -228,9 +228,10 @@ const enUS = {
   'settings.title': 'Settings',
   'settings.description': 'Manage theme, language, and the preference options we will continue expanding here.',
   'settings.appearance': 'Appearance',
-  'settings.appearanceHint': 'Switch between dark and light styles at any time.',
+  'settings.appearanceHint': 'Choose System, Dark, or Light at any time.',
   'settings.theme': 'Theme',
-  'settings.themeHint': 'Changes apply to the console immediately.',
+  'settings.themeHint': 'Changes apply immediately. System mode follows OS appearance automatically.',
+  'settings.theme.system': 'System',
   'settings.theme.dark': 'Dark',
   'settings.theme.light': 'Light',
   'settings.language': 'Language',
@@ -238,7 +239,7 @@ const enUS = {
   'settings.language.zh-CN': 'Simplified Chinese',
   'settings.language.en-US': 'English',
   'settings.preview': 'Preview',
-  'settings.previewHint': 'Preferences are saved locally and restored automatically on launch.',
+  'settings.previewHint': 'Shows how the selected theme looks in the main app layout (sidebar, tabs, terminal).',
   'settings.close': 'Close settings',
 } as const;
 

@@ -36,6 +36,12 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: listenMock,
 }));
 
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    setTheme: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 vi.mock('../components/ConnectionForm', () => ({
   ConnectionForm: () => null,
 }));
@@ -157,5 +163,43 @@ describe('App settings', () => {
 
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('Appearance')).toBeInTheDocument();
+  });
+
+  it('applies system theme mode and persists the system preference', async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(prefers-color-scheme: dark)',
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(listenMock).toHaveBeenCalledWith('system-open-settings', expect.any(Function));
+    });
+    await emitSystemOpenSettings();
+
+    fireEvent.change(screen.getByLabelText('主题'), { target: { value: 'system' } });
+
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe('dark');
+      expect(window.localStorage.getItem('termbridge.preferences')).toContain('"theme":"system"');
+    });
+
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: originalMatchMedia,
+    });
   });
 });

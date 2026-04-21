@@ -42,14 +42,33 @@ function PreferenceSelect<T extends string>({
 function ThemePreview({ theme }: { theme: ThemePreference }) {
   return (
     <div className="settings-preview" data-theme-preview={theme}>
-      <div className="settings-preview__toolbar">
-        <span className="settings-preview__dot" />
-        <span className="settings-preview__dot" />
-        <span className="settings-preview__dot" />
+      <div className="settings-preview__windowbar">
+        <span className="settings-preview__dot settings-preview__dot--close" />
+        <span className="settings-preview__dot settings-preview__dot--min" />
+        <span className="settings-preview__dot settings-preview__dot--max" />
       </div>
-      <div className="settings-preview__content">
-        <div className="settings-preview__panel" />
-        <div className="settings-preview__panel settings-preview__panel--active" />
+      <div className="settings-preview__app">
+        <aside className="settings-preview__sidebar">
+          <div className="settings-preview__title" />
+          <div className="settings-preview__item settings-preview__item--active" />
+          <div className="settings-preview__item" />
+          <div className="settings-preview__item" />
+        </aside>
+        <section className="settings-preview__workspace">
+          <div className="settings-preview__tabs">
+            <div className="settings-preview__tab settings-preview__tab--active" />
+            <div className="settings-preview__tab" />
+            <div className="settings-preview__tab" />
+          </div>
+          <div className="settings-preview__terminals"></div>
+        </section>
+        <aside className="settings-preview__rightbar">
+          <div className="settings-preview__title" />
+          <div className="settings-preview__item settings-preview__item--active" />
+          <div className="settings-preview__item" />
+          <div className="settings-preview__item" />
+          <div className="settings-preview__item" />
+        </aside>
       </div>
     </div>
   );
@@ -62,7 +81,13 @@ export function SettingsDialog({ open, preferences, onChange, onClose }: Setting
 
   return (
     <div className="app-overlay" onClick={onClose} role="presentation">
-      <div className="app-dialog settings-dialog" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={t('settings.title')}>
+      <div
+        className="app-dialog settings-dialog"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('settings.title')}
+      >
         <div className="settings-dialog__header">
           <div>
             <p className="label">{t('settings.subtitle')}</p>
@@ -77,9 +102,7 @@ export function SettingsDialog({ open, preferences, onChange, onClose }: Setting
         <div className="settings-grid">
           <section className="settings-card">
             <div className="settings-card__title">
-              <span className="settings-card__icon">
-                {preferences.theme === 'light' ? <SunIcon /> : <MoonIcon />}
-              </span>
+              <span className="settings-card__icon">{preferences.theme === 'light' ? <SunIcon /> : <MoonIcon />}</span>
               <div>
                 <h4>{t('settings.appearance')}</h4>
                 <p>{t('settings.appearanceHint')}</p>
@@ -92,6 +115,7 @@ export function SettingsDialog({ open, preferences, onChange, onClose }: Setting
               label={t('settings.theme')}
               onChange={(theme) => onChange({ ...preferences, theme })}
               options={[
+                { value: 'system', label: t('settings.theme.system') },
                 { value: 'dark', label: t('settings.theme.dark') },
                 { value: 'light', label: t('settings.theme.light') },
               ]}
@@ -126,9 +150,7 @@ export function SettingsDialog({ open, preferences, onChange, onClose }: Setting
 
         <section className="settings-card settings-card--preview">
           <div className="settings-card__title">
-            <span className="settings-card__icon">
-              {preferences.theme === 'light' ? <SunIcon /> : <MoonIcon />}
-            </span>
+            <span className="settings-card__icon">{preferences.theme === 'light' ? <SunIcon /> : <MoonIcon />}</span>
             <div>
               <h4>{t('settings.preview')}</h4>
               <p>{t('settings.previewHint')}</p>
