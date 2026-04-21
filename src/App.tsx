@@ -17,6 +17,7 @@ import { createLogger } from './lib/logger';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
 import { applyStatusToSessions, consumeBufferedSessionStatus, type PendingSessionStatusEvents } from './lib/sessionStatusBuffer';
+import { insertSessionAfterActive } from './lib/sessionOrder';
 import { markStartupUpdateCheck, shouldRunStartupUpdateCheck } from './lib/updateStartupPolicy';
 import { updateFlowReducer } from './lib/updateFlow';
 import { checkForUpdate, downloadAndInstallUpdate } from './lib/updater';
@@ -471,17 +472,17 @@ function App() {
       }
 
       const summary = await createSessionFromProfile(profile);
-      setSessions((current) => {
-        const bufferedStatus = consumeBufferedSessionStatus(summary.sessionId, pendingStatusEventsRef.current);
-        const nextSession: SessionState = {
-          ...summary,
-          profile,
-          status: bufferedStatus?.status ?? 'connecting',
-          note: bufferedStatus?.note,
-          createdAt: Date.now(),
-        };
-        return [nextSession, ...current];
-      });
+      const bufferedStatus = consumeBufferedSessionStatus(summary.sessionId, pendingStatusEventsRef.current);
+      const nextSession: SessionState = {
+        ...summary,
+        profile,
+        status: bufferedStatus?.status ?? 'connecting',
+        note: bufferedStatus?.note,
+        createdAt: Date.now(),
+      };
+      const insertAfterSessionId = activeSessionId;
+      sessionsRef.current = insertSessionAfterActive(sessionsRef.current, nextSession, insertAfterSessionId);
+      setSessions((current) => insertSessionAfterActive(current, nextSession, insertAfterSessionId));
       setActiveSessionId(summary.sessionId);
       setDraftProfile({
         ...createEmptyProfile(),
