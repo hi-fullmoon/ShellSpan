@@ -646,9 +646,7 @@ function App() {
         ),
       );
       setErrorMessage(
-        automatic
-          ? t('app.error.autoReconnectFailed', { error: String(error) })
-          : t('app.error.reconnectFailed', { error: String(error) }),
+        automatic ? t('app.error.autoReconnectFailed', { error: String(error) }) : t('app.error.reconnectFailed', { error: String(error) }),
       );
     }
   };
@@ -715,7 +713,7 @@ function App() {
 
   return (
     <main className="h-screen overflow-hidden p-1">
-      <div className="flex h-full gap-[4px]">
+      <div className="flex h-full gap-1">
         <SplitLayout
           className="min-w-0 flex-1"
           defaultPrimarySize={320}
@@ -768,7 +766,7 @@ function App() {
 
               <section className="surface rounded-lg relative min-h-0 flex-1 overflow-hidden">
                 {sessions.length === 0 ? (
-                  <div className="flex h-full min-h-[280px] flex-col justify-between gap-1.5 p-2">
+                  <div className="flex h-full min-h-70 flex-col justify-between gap-1.5 p-2">
                     <div className="flex flex-col gap-1">
                       <span className="label">{t('app.ready')}</span>
                       <h3 className="themed-heading text-base font-semibold">{t('app.emptyState.title')}</h3>
@@ -797,7 +795,7 @@ function App() {
           storageKey="termbridge.layout.main"
         />
 
-        <div className="h-full w-[240px] shrink-0">
+        <div className="h-full w-60 shrink-0">
           <Sidebar
             connectedCount={connectedSessions}
             runtimeLabel={runtimeText}
@@ -837,12 +835,7 @@ function App() {
                 <p className="label">{t('app.connectDialog.kicker')}</p>
                 <h3 className="dialog-title mt-1 text-sm font-semibold">{t('app.connectDialog.title')}</h3>
               </div>
-              <button
-                aria-label={t('app.connectDialog.close')}
-                className="icon-btn"
-                onClick={() => setConnectDialogOpen(false)}
-                type="button"
-              >
+              <button aria-label={t('app.connectDialog.close')} className="icon-btn" onClick={() => setConnectDialogOpen(false)} type="button">
                 <CloseIcon />
               </button>
             </div>

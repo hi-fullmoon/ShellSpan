@@ -77,7 +77,7 @@ function SessionTabCard({
       {...dragAttributes}
       {...dragListeners}
       className={cn(
-        'session-tab relative flex min-w-37.5 max-w-55 shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
+        'session-tab relative flex w-55 shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
         active ? 'session-tab-active' : 'session-tab-inactive',
         renaming
           ? 'session-tab-renaming cursor-text'
@@ -294,9 +294,9 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
 
   if (sessions.length === 0) {
     return (
-      <div className="surface rounded-lg session-tabs-empty flex items-center gap-2 px-2 py-1.5 text-xs">
+      <div className="surface rounded-lg session-tabs-empty flex flex-col justify-center items-start gap-1 px-2 py-2 text-xs">
         <span className="label">{t('sessionTabs.label')}</span>
-        <span>{t('sessionTabs.empty')}</span>
+        <div>{t('sessionTabs.empty')}</div>
       </div>
     );
   }
