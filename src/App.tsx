@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
@@ -83,6 +84,18 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = preferences.theme;
+  }, [preferences.theme]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    void getCurrentWindow()
+      .setTheme(preferences.theme)
+      .catch((error) => {
+        appLogger.warn('同步原生窗口主题失败', { error: String(error), theme: preferences.theme });
+      });
   }, [preferences.theme]);
 
   useEffect(() => {
