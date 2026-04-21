@@ -33,13 +33,13 @@ export function sessionStatusDot(status: SessionStatus) {
 export function fileKindTone(kind: RemoteFileKind) {
   switch (kind) {
     case 'directory':
-      return 'text-cyan-300';
+      return 'bg-cyan-500/12 text-cyan-300';
     case 'symlink':
-      return 'text-violet-300';
+      return 'bg-violet-500/12 text-violet-300';
     case 'file':
-      return 'text-slate-300';
+      return 'bg-slate-500/12 text-slate-300';
     case 'other':
-      return 'text-amber-300';
+      return 'bg-amber-500/12 text-amber-300';
   }
 }
 

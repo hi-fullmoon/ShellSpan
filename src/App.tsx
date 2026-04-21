@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
 import { CloseIcon } from './components/Icons';
+import { ScrollArea } from './components/ScrollArea';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { SplitLayout } from './components/SplitLayout';
@@ -823,12 +824,13 @@ function App() {
 
       {connectDialogOpen ? (
         <div className="app-overlay" onClick={() => setConnectDialogOpen(false)} role="presentation">
-          <div
-            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl overflow-auto p-3"
+          <ScrollArea
+            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl p-3"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-label={t('app.connectDialog.ariaLabel')}
+            orientation="both"
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <div>
@@ -850,7 +852,7 @@ function App() {
               }}
               compact
             />
-          </div>
+          </ScrollArea>
         </div>
       ) : null}
 

@@ -664,36 +664,89 @@
   background: var(--app-terminal-bg) !important;
 }
 
-.session-tabs-scroll {
-  -ms-overflow-style: none;
+.scroll-area {
+  --scroll-area-thumb-color: rgb(51 65 85 / 0.95);
+  --scroll-area-thumb-hover-color: rgb(71 85 105 / 1);
+  --scroll-area-track-color: rgb(15 23 42 / 0.08);
+  --scroll-area-size: 8px;
+}
+
+.scroll-area-viewport {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   scrollbar-width: none;
-  scrollbar-color: rgba(51, 65, 85, 0) transparent;
-  transition: scrollbar-color 150ms ease;
+  -ms-overflow-style: none;
 }
 
-.session-tabs-scroll::-webkit-scrollbar {
-  height: 8px;
+.scroll-area-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
-.session-tabs-scroll::-webkit-scrollbar-track {
-  background: transparent;
+.scroll-area-track {
+  position: absolute;
+  z-index: 2;
+  opacity: 1;
+  transition:
+    opacity 320ms ease,
+    transform 320ms ease;
 }
 
-.session-tabs-scroll::-webkit-scrollbar-thumb {
+.scroll-area-scrollbar-hover .scroll-area-track {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.scroll-area-scrollbar-hover.scroll-area-scrollbar-visible .scroll-area-track {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.scroll-area-track-vertical {
+  top: 6px;
+  right: 2px;
+  bottom: 6px;
+  width: var(--scroll-area-size);
+}
+
+.scroll-area-track-horizontal {
+  right: 6px;
+  bottom: 2px;
+  left: 6px;
+  height: var(--scroll-area-size);
+}
+
+.scroll-area-thumb {
+  position: absolute;
   border-radius: 9999px;
-  background: transparent;
+  background: var(--scroll-area-thumb-color);
+  cursor: pointer;
   transition: background-color 150ms ease;
 }
 
-.session-tabs-scroll:hover,
-.session-tabs-scroll:focus-within {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(51, 65, 85, 0.95) transparent;
+.scroll-area-thumb:hover {
+  background: var(--scroll-area-thumb-hover-color);
 }
 
-.session-tabs-scroll:hover::-webkit-scrollbar-thumb,
-.session-tabs-scroll:focus-within::-webkit-scrollbar-thumb {
-  background: rgb(51 65 85 / 0.95);
+.scroll-area-thumb-vertical {
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.scroll-area-thumb-horizontal {
+  top: 0;
+  left: 0;
+  height: 100%;
+}
+
+.scroll-area-track::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--scroll-area-track-color);
+  opacity: 0.75;
 }
 
 .split-sash {

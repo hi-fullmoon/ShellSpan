@@ -20,6 +20,7 @@ import { isTauriRuntime } from '../lib/tauri';
 import { useFileManagerStore } from '../stores/fileManagerStore';
 import { cn, fileKindTone } from '../lib/ui';
 import { ArrowUpIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
+import { ScrollArea } from './ScrollArea';
 import { Toast, type ToastAction } from './Toast';
 import type {
   DeleteProgressEvent,
@@ -1582,8 +1583,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               </div>
             ) : null}
 
-            <div
-              className="min-h-0 flex-1 overflow-auto rounded-lg"
+            <ScrollArea
+              className="flex-1 rounded-lg"
               onMouseDown={(event) => {
                 if (event.button === 2) {
                   event.preventDefault();
@@ -1621,7 +1622,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                   />
                 </div>
               )}
-            </div>
+            </ScrollArea>
           </>
         )}
       </div>

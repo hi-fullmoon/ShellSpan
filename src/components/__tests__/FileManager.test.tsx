@@ -142,13 +142,14 @@ describe("FileManager", () => {
   });
 
   it("uses theme-aware classes for the subtitle, path input, and file name", () => {
-    render(<FileManager session={disconnectedSession} />);
+    const { container } = render(<FileManager session={disconnectedSession} />);
 
     expect(screen.getByText("文件")).toHaveClass("file-manager-subtitle");
     expect(screen.getByText("远程文件管理器")).toHaveClass("themed-heading");
     expect(screen.getByText("1")).toHaveClass("file-manager-count");
     expect(screen.getByPlaceholderText("输入远程路径并回车")).toHaveClass("themed-input");
     expect(screen.getByText("keep.txt")).toHaveClass("file-entry-name");
+    expect(container.querySelector(".scroll-area")).toBeTruthy();
   });
 
   it("uses theme-aware classes for the file context menu and entry dialogs", () => {

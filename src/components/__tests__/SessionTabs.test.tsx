@@ -163,6 +163,7 @@ describe("SessionTabs", () => {
 
     expect(screen.getByText("Production").closest("[data-session-tab]")).toHaveClass("session-tab");
     expect(screen.getByText("root@prod.example.com")).toHaveClass("session-tab-subtitle");
+    expect(screen.getByText("Production").closest(".scroll-area")).toHaveClass("scroll-area-scrollbar-hover");
   });
 
   it("disables the drag overlay drop animation to avoid post-drop flicker", () => {

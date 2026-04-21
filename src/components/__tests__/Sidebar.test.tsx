@@ -67,9 +67,11 @@ describe("Sidebar", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   it("renders saved profiles and forwards button actions", () => {
+    vi.useFakeTimers();
     const onOpenConnect = vi.fn();
     const onReuseProfile = vi.fn();
 
@@ -95,6 +97,7 @@ describe("Sidebar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
     fireEvent.click(screen.getByRole("button", { name: /Beta deploy@beta\.example\.com:22/i }));
+    vi.advanceTimersByTime(220);
 
     expect(onOpenConnect).toHaveBeenCalledTimes(1);
     expect(onReuseProfile).toHaveBeenCalledWith(profiles[1]);
@@ -116,6 +119,49 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByText("还没有保存的连接配置。")).toBeTruthy();
+  });
+
+  it("wraps the history list with the shared scroll area", () => {
+    const { container } = render(
+      <Sidebar
+        connectedCount={2}
+        onDeleteProfile={vi.fn()}
+        onOpenConnect={vi.fn()}
+        onRenameProfile={vi.fn()}
+        onReuseProfile={vi.fn()}
+        onToggleFavoriteProfile={vi.fn()}
+        onTogglePinnedProfile={vi.fn()}
+        runtimeLabel="Desktop"
+        savedProfiles={profiles}
+      />,
+    );
+
+    expect(container.querySelector(".scroll-area")).toBeTruthy();
+  });
+
+  it("opens the rename dialog on double click without reusing the profile", () => {
+    vi.useFakeTimers();
+    const onReuseProfile = vi.fn();
+
+    render(
+      <Sidebar
+        connectedCount={2}
+        onDeleteProfile={vi.fn()}
+        onOpenConnect={vi.fn()}
+        onRenameProfile={vi.fn()}
+        onReuseProfile={onReuseProfile}
+        onToggleFavoriteProfile={vi.fn()}
+        onTogglePinnedProfile={vi.fn()}
+        runtimeLabel="Desktop"
+        savedProfiles={profiles}
+      />,
+    );
+
+    fireEvent.doubleClick(screen.getByRole("button", { name: /Beta deploy@beta\.example\.com:22/i }));
+
+    expect(screen.getByRole("dialog", { name: "重命名历史连接" })).toBeTruthy();
+    expect(screen.getByDisplayValue("Beta")).toBeTruthy();
+    expect(onReuseProfile).not.toHaveBeenCalled();
   });
 
   it("uses theme-aware classes for the history context menu and rename dialog", () => {

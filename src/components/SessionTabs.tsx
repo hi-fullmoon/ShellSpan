@@ -22,6 +22,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { CloseIcon } from './Icons';
+import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
 import { cn, sessionStatusDot } from '../lib/ui';
 import type { SessionState } from '../types';
@@ -320,7 +321,14 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
   return (
     <div className="surface rounded-lg min-w-0 flex flex-col gap-1 p-1">
       <span className="label px-1.5 pt-0.5">{t('sessionTabs.label')}</span>
-      <div className="session-tabs-scroll min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-1" onWheel={handleWheel} ref={scrollRef}>
+      <ScrollArea
+        className="min-w-0 max-w-full pb-1"
+        onWheel={handleWheel}
+        orientation="horizontal"
+        ref={scrollRef}
+        scrollbar="hover"
+        scrollbarSize={4}
+      >
         <DndContext
           collisionDetection={closestCenter}
           onDragCancel={finishDrag}
@@ -349,7 +357,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
           </SortableContext>
           {typeof document === 'undefined' ? dragOverlay : createPortal(dragOverlay, document.body)}
         </DndContext>
-      </div>
+      </ScrollArea>
     </div>
   );
 }

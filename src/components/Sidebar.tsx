@@ -1,8 +1,11 @@
 import { createPortal } from 'react-dom';
-import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { PinIcon, StarIcon } from './Icons';
+import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
 import type { ConnectionProfile } from '../types';
+
+const HISTORY_ITEM_DOUBLE_CLICK_DELAY_MS = 220;
 
 interface HistoryMenuState {
   profile: ConnectionProfile;
@@ -52,6 +55,7 @@ export function Sidebar({
   onOpenConnect,
 }: SidebarProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const clickTimerRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined);
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuState>();
   const [renamingProfileId, setRenamingProfileId] = useState<string>();
   const [renameValue, setRenameValue] = useState('');
@@ -115,6 +119,28 @@ export function Sidebar({
     closeRenameDialog();
   };
 
+  const clearPendingReuse = () => {
+    if (clickTimerRef.current) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = undefined;
+    }
+  };
+
+  useEffect(() => clearPendingReuse, []);
+
+  const handleReuseClick = (profile: ConnectionProfile) => {
+    clearPendingReuse();
+    clickTimerRef.current = window.setTimeout(() => {
+      clickTimerRef.current = undefined;
+      onReuseProfile(profile);
+    }, HISTORY_ITEM_DOUBLE_CLICK_DELAY_MS);
+  };
+
+  const handleRenameDoubleClick = (profile: ConnectionProfile) => {
+    clearPendingReuse();
+    startRenamingProfile(profile);
+  };
+
   return (
     <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)]">
       <div className="surface rounded-lg h-full flex flex-col gap-1.5 p-1.5">
@@ -157,7 +183,7 @@ export function Sidebar({
           </div>
           <span className="text-subtle text-xs">{savedProfiles.length}</span>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-1">
+        <ScrollArea className="flex-1 p-1">
           {sortedProfiles.length === 0 ? (
             <div className="surface-muted text-subtle p-1.5 text-xs">{t('sidebar.emptyHistory')}</div>
           ) : (
@@ -166,7 +192,8 @@ export function Sidebar({
                 <button
                   className="history-item surface-muted rounded-md flex select-none items-center gap-1.5 px-2 py-1 text-left transition"
                   key={profile.id}
-                  onClick={() => onReuseProfile(profile)}
+                  onClick={() => handleReuseClick(profile)}
+                  onDoubleClick={() => handleRenameDoubleClick(profile)}
                   onDragStart={(event) => event.preventDefault()}
                   onMouseDown={(event) => {
                     if (event.button === 2) {
@@ -201,7 +228,7 @@ export function Sidebar({
               ))}
             </div>
           )}
-        </div>
+        </ScrollArea>
       </section>
 
       {historyMenu
