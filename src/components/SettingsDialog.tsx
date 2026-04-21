@@ -39,6 +39,94 @@ function PreferenceSelect<T extends string>({
   );
 }
 
+function PreferenceNumber({
+  id,
+  label,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (nextValue: number) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span className="settings-field__label">{label}</span>
+      <div className="flex items-center gap-2">
+        <input
+          className="settings-select w-20 text-center"
+          id={id}
+          max={max}
+          min={min}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (!Number.isNaN(next)) {
+              onChange(Math.max(min, Math.min(max, next)));
+            }
+          }}
+          step={step ?? 1}
+          type="number"
+          value={value}
+        />
+        <input
+          max={max}
+          min={min}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (!Number.isNaN(next)) {
+              onChange(Math.max(min, Math.min(max, next)));
+            }
+          }}
+          step={step ?? 1}
+          style={{ flex: 1 }}
+          type="range"
+          value={value}
+        />
+      </div>
+      <span className="settings-field__hint">{hint}</span>
+    </label>
+  );
+}
+
+function PreferenceCheckbox({
+  id,
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (nextValue: boolean) => void;
+}) {
+  return (
+    <label className="themed-checkbox-row flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-[12px]" htmlFor={id}>
+      <input
+        checked={checked}
+        className="themed-checkbox h-3.5 w-3.5 shrink-0"
+        id={id}
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span className="flex flex-col gap-0.5">
+        <span className="font-medium text-[var(--app-text)]">{label}</span>
+        <span className="text-[var(--app-text-soft)]">{hint}</span>
+      </span>
+    </label>
+  );
+}
+
 function ThemePreview({ theme }: { theme: ThemePreference }) {
   return (
     <div className="settings-preview" data-theme-preview={theme}>
@@ -80,7 +168,7 @@ export function SettingsDialog({ open, preferences, onChange, onClose }: Setting
   }
 
   return (
-    <div className="app-overlay" onClick={onClose} role="presentation">
+    <div className="app-overlay" role="presentation">
       <div
         className="app-dialog settings-dialog"
         onClick={(event) => event.stopPropagation()}
@@ -121,6 +209,14 @@ export function SettingsDialog({ open, preferences, onChange, onClose }: Setting
               ]}
               value={preferences.theme}
             />
+
+            <PreferenceCheckbox
+              checked={preferences.showFileManager}
+              hint={t('settings.showFileManagerHint')}
+              id="settings-show-file-manager"
+              label={t('settings.showFileManager')}
+              onChange={(showFileManager) => onChange({ ...preferences, showFileManager })}
+            />
           </section>
 
           <section className="settings-card">
@@ -144,6 +240,83 @@ export function SettingsDialog({ open, preferences, onChange, onClose }: Setting
                 { value: 'en-US', label: t('settings.language.en-US') },
               ]}
               value={preferences.locale}
+            />
+          </section>
+
+          <section className="settings-card">
+            <div className="settings-card__title">
+              <span className="settings-card__icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+              </span>
+              <div>
+                <h4>{t('settings.terminal')}</h4>
+                <p>{t('settings.terminalHint')}</p>
+              </div>
+            </div>
+
+            <PreferenceNumber
+              hint={t('settings.terminalFontSizeHint')}
+              id="settings-terminal-font-size"
+              label={t('settings.terminalFontSize')}
+              max={20}
+              min={10}
+              onChange={(terminalFontSize) => onChange({ ...preferences, terminalFontSize })}
+              value={preferences.terminalFontSize}
+            />
+
+            <PreferenceNumber
+              hint={t('settings.terminalLineHeightHint')}
+              id="settings-terminal-line-height"
+              label={t('settings.terminalLineHeight')}
+              max={20}
+              min={10}
+              step={1}
+              onChange={(v) => onChange({ ...preferences, terminalLineHeight: v / 10 })}
+              value={Math.round(preferences.terminalLineHeight * 10)}
+            />
+          </section>
+
+          <section className="settings-card">
+            <div className="settings-card__title">
+              <span className="settings-card__icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+              </span>
+              <div>
+                <h4>{t('settings.behavior')}</h4>
+                <p>{t('settings.behaviorHint')}</p>
+              </div>
+            </div>
+
+            <PreferenceCheckbox
+              checked={preferences.autoReconnect}
+              hint={t('settings.autoReconnectHint')}
+              id="settings-auto-reconnect"
+              label={t('settings.autoReconnect')}
+              onChange={(autoReconnect) => onChange({ ...preferences, autoReconnect })}
+            />
+
+            <PreferenceCheckbox
+              checked={preferences.startupUpdateCheck}
+              hint={t('settings.startupUpdateCheckHint')}
+              id="settings-startup-update-check"
+              label={t('settings.startupUpdateCheck')}
+              onChange={(startupUpdateCheck) => onChange({ ...preferences, startupUpdateCheck })}
+            />
+
+            <PreferenceNumber
+              hint={t('settings.historyLimitHint')}
+              id="settings-history-limit"
+              label={t('settings.historyLimit')}
+              max={20}
+              min={3}
+              onChange={(historyLimit) => onChange({ ...preferences, historyLimit })}
+              value={preferences.historyLimit}
             />
           </section>
         </div>

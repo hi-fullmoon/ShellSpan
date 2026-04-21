@@ -241,6 +241,22 @@ const enUS = {
   'settings.preview': 'Preview',
   'settings.previewHint': 'Shows how the selected theme looks in the main app layout (sidebar, tabs, terminal).',
   'settings.close': 'Close settings',
+  'settings.terminal': 'Terminal',
+  'settings.terminalHint': 'Adjust terminal font size and line height for comfortable reading.',
+  'settings.terminalFontSize': 'Font Size',
+  'settings.terminalFontSizeHint': 'Range 10–20, default 14.',
+  'settings.terminalLineHeight': 'Line Height',
+  'settings.terminalLineHeightHint': 'Range 1.0–2.0, default 1.2.',
+  'settings.behavior': 'Behavior',
+  'settings.behaviorHint': 'Control auto-reconnect, update checks, and history limit preferences.',
+  'settings.autoReconnect': 'Auto Reconnect',
+  'settings.autoReconnectHint': 'Automatically try to reconnect when the connection drops unexpectedly.',
+  'settings.startupUpdateCheck': 'Check for Updates on Startup',
+  'settings.startupUpdateCheckHint': 'Automatically check for new versions 8 seconds after the app starts.',
+  'settings.historyLimit': 'History Limit',
+  'settings.historyLimitHint': 'Maximum number of saved connections to keep.',
+  'settings.showFileManager': 'Show File Manager',
+  'settings.showFileManagerHint': 'Display the remote file manager panel on the left side of the main layout.',
 } as const;
 
 export default enUS;

@@ -30,17 +30,21 @@ export function sessionStatusDot(status: SessionStatus) {
   }
 }
 
-export function fileKindTone(kind: RemoteFileKind) {
+export function fileKindColor(kind: RemoteFileKind) {
   switch (kind) {
     case 'directory':
-      return 'bg-cyan-500/12 text-cyan-300';
+      return 'text-cyan-300';
     case 'symlink':
-      return 'bg-violet-500/12 text-violet-300';
+      return 'text-violet-300';
     case 'file':
-      return 'bg-slate-500/12 text-slate-300';
+      return 'text-slate-300';
     case 'other':
-      return 'bg-amber-500/12 text-amber-300';
+      return 'text-amber-300';
   }
+}
+
+export function fileKindTone(kind: RemoteFileKind) {
+  return `${fileKindColor(kind).replace('text-', 'bg-').replace('-300', '-500/12')} ${fileKindColor(kind)}`;
 }
 
 export function getCurrentThemeMode() {

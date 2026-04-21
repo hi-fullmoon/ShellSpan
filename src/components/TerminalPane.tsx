@@ -28,11 +28,13 @@ interface TerminalPaneProps {
   session: SessionState;
   active: boolean;
   onReconnect: () => void;
+  fontSize?: number;
+  lineHeight?: number;
 }
 
 const terminalLogger = createLogger("terminal");
 
-export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps) {
+export function TerminalPane({ session, active, onReconnect, fontSize = 14, lineHeight = 1.25 }: TerminalPaneProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -84,6 +86,14 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
   }, [session.status]);
 
   useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.fontSize = fontSize;
+      terminalRef.current.options.lineHeight = lineHeight;
+      scheduleResizeRef.current?.(true);
+    }
+  }, [fontSize, lineHeight]);
+
+  useEffect(() => {
     if (!shellRef.current || terminalRef.current) {
       return;
     }
@@ -96,8 +106,8 @@ export function TerminalPane({ session, active, onReconnect }: TerminalPaneProps
       convertEol: true,
       fontFamily:
         '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace',
-      fontSize: 14,
-      lineHeight: 1.25,
+      fontSize,
+      lineHeight,
       theme: getTerminalTheme(),
       scrollback: 5000,
       disableStdin: shouldDisableTerminalInput(session.status),

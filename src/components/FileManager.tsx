@@ -18,7 +18,7 @@ import { createLogger } from '../lib/logger';
 import { addPathWrapOpportunities } from '../lib/pathDisplay';
 import { isTauriRuntime } from '../lib/tauri';
 import { useFileManagerStore } from '../stores/fileManagerStore';
-import { cn, fileKindTone } from '../lib/ui';
+import { cn, fileKindColor } from '../lib/ui';
 import { ArrowUpIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
 import { ScrollArea } from './ScrollArea';
 import { Toast, type ToastAction } from './Toast';
@@ -314,7 +314,7 @@ function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
 
   return (
     <div className="flex min-w-0 items-center gap-0.5">
-      <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', fileKindTone(data.kind))}>
+      <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', fileKindColor(data.kind))}>
         {fileKindIcon(data.kind)}
       </span>
       <span className="file-entry-name truncate text-[13px] font-medium leading-5 tracking-[0.01em]">{data.name}</span>
@@ -1518,8 +1518,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     <aside className="surface rounded-lg relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
       <div className="surface-header">
         <div className="min-w-0">
-          <p className="file-manager-subtitle text-[11px] font-medium tracking-[0.08em]">{t('fileManager.subtitle')}</p>
-          <h3 className="themed-heading truncate text-[15px] font-semibold tracking-[0.01em]">
+          <p className="file-manager-subtitle text-[10px] font-medium tracking-[0.08em]">{t('fileManager.subtitle')}</p>
+          <h3 className="themed-heading truncate text-[13px] font-semibold tracking-[0.01em]">
             {session ? t('fileManager.title.active') : t('fileManager.title.inactive')}
           </h3>
         </div>
@@ -1541,7 +1541,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
           <>
             <form className="flex items-center gap-1" onSubmit={(event) => void handlePathSubmit(event)}>
               <button
-                className="icon-btn h-7 w-7 px-0"
+                className="icon-btn h-6 w-6 px-0"
                 disabled={!ready || !listing?.parentPath || loading || working}
                 onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
                 title={t('fileManager.actions.parent')}
@@ -1550,14 +1550,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 <ArrowUpIcon />
               </button>
               <input
-                className="themed-input min-w-0 flex-1 px-2 py-1 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
+                className="themed-input min-w-0 flex-1 px-2 py-0.5 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
                 disabled={readOnly || loading || working}
                 onChange={(event) => setPathInput(event.target.value)}
                 placeholder={t('fileManager.pathPlaceholder')}
                 value={pathInput}
               />
               <button
-                className="icon-btn h-7 w-7 px-0"
+                className="icon-btn h-6 w-6 px-0"
                 disabled={!ready || loading || working}
                 onClick={() => void loadDirectory(currentPath)}
                 title={t('fileManager.actions.refresh')}
@@ -1566,7 +1566,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 <RefreshIcon />
               </button>
               <button
-                className="icon-btn h-7 w-7 px-0"
+                className="icon-btn h-6 w-6 px-0"
                 disabled={!ready || !currentPath || loading || working}
                 onClick={openToolbarMenu}
                 title={t('fileManager.actions.more')}
@@ -1603,7 +1603,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     defaultColDef={defaultColDef}
                     columnDefs={columnDefs}
                     getRowId={(params) => params.data.path}
-                    headerHeight={30}
+                    headerHeight={26}
                     noRowsOverlayComponentParams={{
                       message: t('fileManager.emptyDirectory'),
                     }}
@@ -1614,7 +1614,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     ref={gridRef}
                     rowSelection={{ mode: 'singleRow', checkboxes: false }}
                     rowData={listing.entries}
-                    rowHeight={32}
+                    rowHeight={28}
                     suppressCellFocus
                     suppressContextMenu
                     suppressDragLeaveHidesColumns

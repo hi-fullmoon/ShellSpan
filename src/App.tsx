@@ -33,6 +33,12 @@ const SYSTEM_OPEN_SETTINGS_EVENT = 'system-open-settings';
 const defaultPreferences: AppPreferences = {
   theme: 'dark',
   locale: 'zh-CN',
+  terminalFontSize: 14,
+  terminalLineHeight: 1.2,
+  showFileManager: true,
+  autoReconnect: true,
+  startupUpdateCheck: true,
+  historyLimit: 8,
 };
 
 function getSystemThemeMode() {
@@ -47,6 +53,17 @@ function normalizePreferences(value: Partial<AppPreferences> | null | undefined)
   return {
     theme: value?.theme === 'light' || value?.theme === 'system' ? value.theme : 'dark',
     locale: value?.locale === 'en-US' ? 'en-US' : 'zh-CN',
+    terminalFontSize: typeof value?.terminalFontSize === 'number' && value.terminalFontSize >= 10 && value.terminalFontSize <= 20
+      ? value.terminalFontSize
+      : 14,
+    terminalLineHeight:
+      typeof value?.terminalLineHeight === 'number' && value.terminalLineHeight >= 1 && value.terminalLineHeight <= 2
+        ? value.terminalLineHeight
+        : 1.2,
+    showFileManager: value?.showFileManager !== false,
+    autoReconnect: value?.autoReconnect !== false,
+    startupUpdateCheck: value?.startupUpdateCheck !== false,
+    historyLimit: typeof value?.historyLimit === 'number' && value.historyLimit >= 3 && value.historyLimit <= 20 ? value.historyLimit : 8,
   };
 }
 
@@ -164,6 +181,7 @@ function App() {
         const currentSession = sessionsRef.current.find((session) => session.sessionId === event.payload.sessionId);
         const shouldAutoReconnect =
           !!currentSession &&
+          preferences.autoReconnect &&
           event.payload.reasonKind === 'transport_disconnect' &&
           event.payload.retryable &&
           !autoReconnectAttemptedRef.current[event.payload.sessionId];
@@ -213,7 +231,7 @@ function App() {
       stopStatus?.();
       stopClosed?.();
     };
-  }, []);
+  }, [preferences.autoReconnect]);
 
   const activeSession = useMemo(() => sessions.find((item) => item.sessionId === activeSessionId), [activeSessionId, sessions]);
   const connectedSessions = useMemo(() => sessions.filter((item) => item.status === 'connected').length, [sessions]);
@@ -314,7 +332,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isTauriRuntime() || !shouldRunStartupUpdateCheck(Date.now())) {
+    if (!isTauriRuntime() || !preferences.startupUpdateCheck || !shouldRunStartupUpdateCheck(Date.now())) {
       return;
     }
 
@@ -325,7 +343,7 @@ function App() {
     }, 8000);
 
     return () => window.clearTimeout(timer);
-  }, [runUpdateCheck]);
+  }, [runUpdateCheck, preferences.startupUpdateCheck]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -468,7 +486,7 @@ function App() {
         });
         setSavedProfiles((current) => {
           const others = current.filter((item) => item.id !== nextProfile.id);
-          return [nextProfile, ...others].slice(0, 8);
+          return [nextProfile, ...others].slice(0, preferences.historyLimit);
         });
       }
 
@@ -712,91 +730,99 @@ function App() {
     setRestartDialogDismissed(true);
   };
 
-  return (
-    <main className="h-screen overflow-hidden p-1">
-      <div className="flex h-full gap-1">
-        <SplitLayout
-          className="min-w-0 flex-1"
-          defaultPrimarySize={320}
-          primary={<FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} />}
-          primaryClassName="min-h-0"
-          primaryMinSize={280}
-          secondary={
-            <section className="flex h-full w-full min-h-0 min-w-0 flex-col gap-1">
-              {errorMessage ? (
-                <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
-                  <span className="truncate">{errorMessage}</span>
-                  {activeSession ? (
-                    <span className={cn('rounded-md px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
-                      {activeSession.status === 'connected'
-                        ? t('app.status.connected')
-                        : activeSession.status === 'connecting'
-                          ? t('app.status.connecting')
-                          : activeSession.status === 'error'
-                            ? t('app.status.error')
-                            : t('app.status.disconnected')}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
+  const workspaceContent = (
+    <section className="flex h-full w-full min-h-0 min-w-0 flex-col gap-0.5">
+      {errorMessage ? (
+        <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
+          <span className="truncate">{errorMessage}</span>
+          {activeSession ? (
+            <span className={cn('rounded-md px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
+              {activeSession.status === 'connected'
+                ? t('app.status.connected')
+                : activeSession.status === 'connecting'
+                  ? t('app.status.connecting')
+                  : activeSession.status === 'error'
+                    ? t('app.status.error')
+                    : t('app.status.disconnected')}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
-              <SessionTabs
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                onDragStateChange={setReorderingSessions}
-                onRename={(sessionId, title) => {
-                  setSessions((current) =>
-                    current.map((session) =>
-                      session.sessionId === sessionId
-                        ? {
-                            ...session,
-                            title,
-                          }
-                        : session,
-                    ),
-                  );
+      <SessionTabs
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onDragStateChange={setReorderingSessions}
+        onRename={(sessionId, title) => {
+          setSessions((current) =>
+            current.map((session) =>
+              session.sessionId === sessionId
+                ? {
+                    ...session,
+                    title,
+                  }
+                : session,
+            ),
+          );
+        }}
+        onReorder={(draggedSessionId, targetSessionId) => {
+          setSessions((current) => reorderSessions(current, draggedSessionId, targetSessionId));
+        }}
+        onSelect={setActiveSessionId}
+        onClose={(sessionId) => {
+          setPendingCloseSessionId(sessionId);
+        }}
+      />
+
+      <section className="surface rounded-lg relative min-h-0 flex-1 overflow-hidden">
+        {sessions.length === 0 ? (
+          <div className="flex h-full min-h-70 flex-col justify-between gap-1 p-1.5">
+            <div className="flex flex-col gap-1">
+              <span className="label">{t('app.ready')}</span>
+              <h3 className="themed-heading text-base font-semibold">{t('app.emptyState.title')}</h3>
+              <p className="text-xs leading-5 text-slate-400">{t('app.emptyState.description')}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="relative h-full min-h-0">
+            {sessions.map((session) => (
+              <TerminalPane
+                active={session.sessionId === activeSessionId}
+                fontSize={preferences.terminalFontSize}
+                key={session.sessionId}
+                lineHeight={preferences.terminalLineHeight}
+                onReconnect={() => {
+                  void handleReconnectSession(session.sessionId);
                 }}
-                onReorder={(draggedSessionId, targetSessionId) => {
-                  setSessions((current) => reorderSessions(current, draggedSessionId, targetSessionId));
-                }}
-                onSelect={setActiveSessionId}
-                onClose={(sessionId) => {
-                  setPendingCloseSessionId(sessionId);
-                }}
+                session={session}
               />
+            ))}
+          </div>
+        )}
+      </section>
+    </section>
+  );
 
-              <section className="surface rounded-lg relative min-h-0 flex-1 overflow-hidden">
-                {sessions.length === 0 ? (
-                  <div className="flex h-full min-h-70 flex-col justify-between gap-1.5 p-2">
-                    <div className="flex flex-col gap-1">
-                      <span className="label">{t('app.ready')}</span>
-                      <h3 className="themed-heading text-base font-semibold">{t('app.emptyState.title')}</h3>
-                      <p className="text-xs leading-5 text-slate-400">{t('app.emptyState.description')}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="relative h-full min-h-0">
-                    {sessions.map((session) => (
-                      <TerminalPane
-                        active={session.sessionId === activeSessionId}
-                        key={session.sessionId}
-                        onReconnect={() => {
-                          void handleReconnectSession(session.sessionId);
-                        }}
-                        session={session}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-            </section>
-          }
-          secondaryClassName="min-h-0"
-          secondaryMinSize={520}
-          storageKey="termbridge.layout.main"
-        />
+  return (
+    <main className="h-screen overflow-hidden p-0.5">
+      <div className="flex h-full gap-0.5">
+        {preferences.showFileManager ? (
+          <SplitLayout
+            className="min-w-0 flex-1"
+            defaultPrimarySize={320}
+            primary={<FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} />}
+            primaryClassName="min-h-0"
+            primaryMinSize={280}
+            secondary={workspaceContent}
+            secondaryClassName="min-h-0"
+            secondaryMinSize={520}
+            storageKey="termbridge.layout.main"
+          />
+        ) : (
+          <div className="min-w-0 flex-1">{workspaceContent}</div>
+        )}
 
-        <div className="h-full w-60 shrink-0">
+        <div className="h-full w-52 shrink-0">
           <Sidebar
             connectedCount={connectedSessions}
             runtimeLabel={runtimeText}
@@ -823,9 +849,9 @@ function App() {
       />
 
       {connectDialogOpen ? (
-        <div className="app-overlay" onClick={() => setConnectDialogOpen(false)} role="presentation">
+        <div className="app-overlay" role="presentation">
           <ScrollArea
-            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl p-3"
+            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl p-2.5"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -850,14 +876,13 @@ function App() {
               onConnect={(profile, remember, rememberPassword) => {
                 void handleConnect(profile, remember, rememberPassword);
               }}
-              compact
             />
           </ScrollArea>
         </div>
       ) : null}
 
       {pendingDeleteProfile ? (
-        <div className="app-overlay" onClick={() => setPendingDeleteProfileId(undefined)} role="presentation">
+        <div className="app-overlay" role="presentation">
           <div
             className="app-dialog surface w-full max-w-sm p-3"
             onClick={(event) => event.stopPropagation()}
@@ -888,7 +913,7 @@ function App() {
       ) : null}
 
       {pendingCloseSession ? (
-        <div className="app-overlay" onClick={() => setPendingCloseSessionId(undefined)} role="presentation">
+        <div className="app-overlay" role="presentation">
           <div
             className="app-dialog surface w-full max-w-sm p-3"
             onClick={(event) => event.stopPropagation()}
@@ -919,7 +944,7 @@ function App() {
       ) : null}
 
       {exitDialogOpen ? (
-        <div className="app-overlay" onClick={() => setExitDialogOpen(false)} role="presentation">
+        <div className="app-overlay" role="presentation">
           <div
             className="app-dialog surface w-full max-w-sm p-3"
             onClick={(event) => event.stopPropagation()}

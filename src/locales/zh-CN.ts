@@ -241,6 +241,22 @@ const zhCN = {
   'settings.preview': '当前预览',
   'settings.previewHint': '用于预览主题在主界面结构中的效果（侧栏、标签栏、终端区）。',
   'settings.close': '关闭设置',
+  'settings.terminal': '终端',
+  'settings.terminalHint': '调整终端字体大小和行高，让阅读更舒适。',
+  'settings.terminalFontSize': '字体大小',
+  'settings.terminalFontSizeHint': '取值范围 10–20，默认 14。',
+  'settings.terminalLineHeight': '行高',
+  'settings.terminalLineHeightHint': '取值范围 1.0–2.0，默认 1.2。',
+  'settings.behavior': '行为',
+  'settings.behaviorHint': '控制自动重连、更新检查和历史记录数量等行为偏好。',
+  'settings.autoReconnect': '自动重连',
+  'settings.autoReconnectHint': '连接意外断开时自动尝试重新连接。',
+  'settings.startupUpdateCheck': '启动时检查更新',
+  'settings.startupUpdateCheckHint': '应用启动 8 秒后自动检查是否有新版本。',
+  'settings.historyLimit': '历史连接上限',
+  'settings.historyLimitHint': '最多保留几条已保存的连接，超出的旧记录会被移除。',
+  'settings.showFileManager': '显示文件管理器',
+  'settings.showFileManagerHint': '在主界面左侧显示远程文件管理面板。',
 } as const;
 
 export default zhCN;

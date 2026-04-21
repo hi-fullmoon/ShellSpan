@@ -78,7 +78,7 @@ function SessionTabCard({
       {...dragAttributes}
       {...dragListeners}
       className={cn(
-        'session-tab relative flex w-55 shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition',
+        'session-tab relative flex w-55 shrink-0 items-center gap-1.5 rounded-lg border px-1.5 py-0.5 text-left transition',
         active ? 'session-tab-active' : 'session-tab-inactive',
         renaming
           ? 'session-tab-renaming cursor-text'
@@ -91,7 +91,7 @@ function SessionTabCard({
       onDoubleClick={() => onRenameStart?.(session)}
     >
       {renaming ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8">
+        <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-7">
           <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
           <span className="min-w-0 flex-1">
             <input
@@ -117,7 +117,7 @@ function SessionTabCard({
         </div>
       ) : (
         <>
-          <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8" onClick={() => onSelect(session.sessionId)} type="button">
+          <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-7" onClick={() => onSelect(session.sessionId)} type="button">
             <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
             <span className="min-w-0 flex-1">
               <strong className="block truncate text-xs text-left" title={session.title}>
@@ -295,7 +295,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
 
   if (sessions.length === 0) {
     return (
-      <div className="surface rounded-lg session-tabs-empty flex flex-col justify-center items-start gap-1 px-2 py-2 text-xs">
+      <div className="surface rounded-lg session-tabs-empty flex flex-col justify-center items-start gap-1 px-2 py-1.5 text-xs">
         <span className="label">{t('sessionTabs.label')}</span>
         <div>{t('sessionTabs.empty')}</div>
       </div>
@@ -321,14 +321,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
   return (
     <div className="surface rounded-lg min-w-0 flex flex-col gap-1 p-1">
       <span className="label px-1.5 pt-0.5">{t('sessionTabs.label')}</span>
-      <ScrollArea
-        className="min-w-0 max-w-full pb-1"
-        onWheel={handleWheel}
-        orientation="horizontal"
-        ref={scrollRef}
-        scrollbar="hover"
-        scrollbarSize={4}
-      >
+      <ScrollArea className="min-w-0 max-w-full" onWheel={handleWheel} orientation="horizontal" ref={scrollRef} scrollbar="hover" scrollbarSize={4}>
         <DndContext
           collisionDetection={closestCenter}
           onDragCancel={finishDrag}

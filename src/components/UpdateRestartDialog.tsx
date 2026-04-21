@@ -24,7 +24,6 @@ export function UpdateRestartDialog({
   return (
     <div
       className="fixed inset-0 z-40 grid place-items-center bg-slate-950/70 p-1 backdrop-blur md:p-2"
-      onClick={onLater}
       role="presentation"
     >
       <div

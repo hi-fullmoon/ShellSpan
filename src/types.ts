@@ -6,6 +6,12 @@ export type LocalePreference = "zh-CN" | "en-US";
 export interface AppPreferences {
   theme: ThemePreference;
   locale: LocalePreference;
+  terminalFontSize: number;
+  terminalLineHeight: number;
+  showFileManager: boolean;
+  autoReconnect: boolean;
+  startupUpdateCheck: boolean;
+  historyLimit: number;
 }
 
 export interface ConnectionProfile {

@@ -142,8 +142,8 @@ export function Sidebar({
   };
 
   return (
-    <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)]">
-      <div className="surface rounded-lg h-full flex flex-col gap-1.5 p-1.5">
+    <aside className="grid h-full min-h-0 gap-0.5 xl:grid-rows-[auto_minmax(0,1fr)]">
+      <div className="surface rounded-lg h-full flex flex-col gap-1 p-1">
         <div className="flex items-start justify-between gap-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <div className="brand-badge">TB</div>
@@ -155,16 +155,16 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-1">
-          <div className="surface-muted rounded-lg p-1.5">
+        <div className="grid grid-cols-3 gap-0.5">
+          <div className="surface-muted rounded-lg p-1">
             <p className="stats-label">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
           </div>
-          <div className="surface-muted rounded-lg p-1.5">
+          <div className="surface-muted rounded-lg p-1">
             <p className="stats-label">{t('sidebar.history')}</p>
             <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
           </div>
-          <div className="surface-muted rounded-lg p-1.5">
+          <div className="surface-muted rounded-lg p-1">
             <p className="stats-label">{t('sidebar.favorite')}</p>
             <strong className="mt-0.5 block text-sm">{favoriteCount}</strong>
           </div>
@@ -185,12 +185,12 @@ export function Sidebar({
         </div>
         <ScrollArea className="flex-1 p-1">
           {sortedProfiles.length === 0 ? (
-            <div className="surface-muted text-subtle p-1.5 text-xs">{t('sidebar.emptyHistory')}</div>
+            <div className="text-subtle px-1 py-2 text-xs leading-relaxed">{t('sidebar.emptyHistory')}</div>
           ) : (
             <div className="flex flex-col gap-1">
               {sortedProfiles.map((profile) => (
                 <button
-                  className="history-item surface-muted rounded-md flex select-none items-center gap-1.5 px-2 py-1 text-left transition"
+                  className="history-item surface-muted rounded-md flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
                   key={profile.id}
                   onClick={() => handleReuseClick(profile)}
                   onDoubleClick={() => handleRenameDoubleClick(profile)}
@@ -295,7 +295,7 @@ export function Sidebar({
 
       {renamingProfileId
         ? createPortal(
-            <div className="app-overlay" onClick={closeRenameDialog} role="presentation">
+            <div className="app-overlay" role="presentation">
               <div
                 className="surface w-full max-w-sm p-3"
                 onClick={(event) => event.stopPropagation()}
