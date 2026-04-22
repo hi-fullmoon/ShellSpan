@@ -15,7 +15,7 @@ use std::{
     io::{copy, Read, Write},
     path::{Path, PathBuf},
     process::Command,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::{AtomicBool, Ordering as AtomicOrdering}, Arc},
     time::{Duration, SystemTime},
 };
 use tauri::AppHandle;
@@ -218,9 +218,26 @@ pub(crate) fn download_remote_paths_blocking(
     fs::create_dir_all(destination_directory)
         .map_err(|error| format!("failed to create destination directory: {error}"))?;
 
+    // Emit an initial event so the UI shows activity during the scan phase.
+    let mut scanning_progress = DownloadProgressTracker::new(
+        app.clone(),
+        request.operation_id.clone(),
+        cancel_flag.clone(),
+        DownloadScanStats::default(),
+    );
+    scanning_progress.set_current_path(Some("scanning...".to_string()))?;
+    scanning_progress.emit()?;
+
     let mut scan_stats = DownloadScanStats::default();
     for remote_path in &request.remote_paths {
-        scan_stats.combine(scan_remote_download_path(&connected.sftp, Path::new(remote_path))?);
+        if cancel_flag.load(AtomicOrdering::SeqCst) {
+            return Err("download cancelled".to_string());
+        }
+        scan_stats.combine(scan_remote_download_path(
+            &connected.sftp,
+            Path::new(remote_path),
+            &cancel_flag,
+        )?);
     }
 
     let mut progress =
@@ -249,7 +266,15 @@ pub(crate) fn download_remote_paths_blocking(
     Ok(())
 }
 
-fn scan_remote_download_path(sftp: &Sftp, remote_path: &Path) -> Result<DownloadScanStats, String> {
+fn scan_remote_download_path(
+    sftp: &Sftp,
+    remote_path: &Path,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<DownloadScanStats, String> {
+    if cancel_flag.load(AtomicOrdering::SeqCst) {
+        return Err("download cancelled".to_string());
+    }
+
     let stat = sftp
         .lstat(remote_path)
         .map_err(|error| format!("failed to inspect remote path: {error}"))?;
@@ -267,19 +292,17 @@ fn scan_remote_download_path(sftp: &Sftp, remote_path: &Path) -> Result<Download
                 if should_skip_remote_child(&child_path) {
                     continue;
                 }
-                stats.combine(scan_remote_download_path(sftp, &child_path)?);
+                stats.combine(scan_remote_download_path(sftp, &child_path, cancel_flag)?);
             }
             Ok(stats)
         }
         RemoteFileKind::Symlink => {
-            let target = sftp
-                .readlink(remote_path)
-                .map_err(|error| format!("failed to read remote symlink: {error}"))?;
-            let resolved = remote_path
-                .parent()
-                .map(|p| p.join(&target))
-                .unwrap_or(target);
-            scan_remote_download_path(sftp, &resolved)
+            // Do not recursively follow symlinks to avoid infinite loops.
+            // Treat a symlink as a single file step; sftp.open follows it during download.
+            Ok(DownloadScanStats {
+                total_bytes: 0,
+                total_steps: 1,
+            })
         }
         _ => Ok(DownloadScanStats {
             total_bytes: stat.size.unwrap_or(0),
@@ -326,14 +349,24 @@ fn download_remote_entry_to_path(
             Ok(())
         }
         RemoteFileKind::Symlink => {
-            let target = sftp
-                .readlink(remote_path)
-                .map_err(|error| format!("failed to read remote symlink: {error}"))?;
-            let resolved = remote_path
-                .parent()
-                .map(|p| p.join(&target))
-                .unwrap_or(target);
-            download_remote_entry_to_path(sftp, &resolved, local_path, progress)
+            // Do not recursively follow symlinks to avoid infinite loops.
+            // sftp.open follows the symlink automatically for file targets.
+            match download_remote_file(sftp, remote_path, local_path, progress) {
+                Ok(()) => Ok(()),
+                Err(_error) => {
+                    // Symlink might point to a directory or be broken.
+                    // Create an empty local file as a placeholder and finish the step.
+                    progress.set_current_path(Some(path_to_string(remote_path)))?;
+                    if let Some(parent) = local_path.parent() {
+                        fs::create_dir_all(parent)
+                            .map_err(|e| format!("failed to create parent directory: {e}"))?;
+                    }
+                    fs::File::create(local_path)
+                        .map_err(|e| format!("failed to create local file for symlink: {e}"))?;
+                    progress.finish_step()?;
+                    Ok(())
+                }
+            }
         }
         _ => download_remote_file(sftp, remote_path, local_path, progress),
     }

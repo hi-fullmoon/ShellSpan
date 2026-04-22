@@ -220,7 +220,8 @@ function downloadProgressPercent(progress?: DownloadProgressState) {
   }
 
   if (progress.totalSteps > 0) {
-    return Math.min(100, Math.round((progress.completedSteps / progress.totalSteps) * 100));
+    const percent = (progress.completedSteps / progress.totalSteps) * 100;
+    return Math.min(100, percent > 0 && percent < 1 ? 1 : Math.round(percent));
   }
 
   return 0;
