@@ -142,7 +142,7 @@ export function Sidebar({
   };
 
   return (
-    <aside className="grid h-full min-h-0 gap-0.5 xl:grid-rows-[auto_minmax(0,1fr)]">
+    <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)]">
       <div className="surface rounded-lg h-full flex flex-col gap-1 p-1">
         <div className="flex items-start justify-between gap-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -155,7 +155,7 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-0.5">
+        <div className="grid grid-cols-3 gap-1">
           <div className="surface-muted rounded-lg p-1">
             <p className="stats-label">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>

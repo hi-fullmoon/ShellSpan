@@ -1518,7 +1518,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     <aside className="surface rounded-lg relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
       <div className="surface-header">
         <div className="min-w-0">
-          <p className="file-manager-subtitle text-[10px] font-medium tracking-[0.08em]">{t('fileManager.subtitle')}</p>
+          <p className="label">{t('fileManager.subtitle')}</p>
           <h3 className="themed-heading truncate text-[13px] font-semibold tracking-[0.01em]">
             {session ? t('fileManager.title.active') : t('fileManager.title.inactive')}
           </h3>

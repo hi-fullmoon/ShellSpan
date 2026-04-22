@@ -53,9 +53,8 @@ function normalizePreferences(value: Partial<AppPreferences> | null | undefined)
   return {
     theme: value?.theme === 'light' || value?.theme === 'system' ? value.theme : 'dark',
     locale: value?.locale === 'en-US' ? 'en-US' : 'zh-CN',
-    terminalFontSize: typeof value?.terminalFontSize === 'number' && value.terminalFontSize >= 10 && value.terminalFontSize <= 20
-      ? value.terminalFontSize
-      : 14,
+    terminalFontSize:
+      typeof value?.terminalFontSize === 'number' && value.terminalFontSize >= 10 && value.terminalFontSize <= 20 ? value.terminalFontSize : 14,
     terminalLineHeight:
       typeof value?.terminalLineHeight === 'number' && value.terminalLineHeight >= 1 && value.terminalLineHeight <= 2
         ? value.terminalLineHeight
@@ -731,7 +730,7 @@ function App() {
   };
 
   const workspaceContent = (
-    <section className="flex h-full w-full min-h-0 min-w-0 flex-col gap-0.5">
+    <section className="flex h-full w-full min-h-0 min-w-0 flex-col gap-1">
       {errorMessage ? (
         <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
           <span className="truncate">{errorMessage}</span>
@@ -805,7 +804,7 @@ function App() {
 
   return (
     <main className="h-screen overflow-hidden p-0.5">
-      <div className="flex h-full gap-0.5">
+      <div className="flex h-full gap-1">
         {preferences.showFileManager ? (
           <SplitLayout
             className="min-w-0 flex-1"
