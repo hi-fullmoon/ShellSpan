@@ -371,6 +371,10 @@
   background: color-mix(in srgb, #fb7185 76%, var(--app-primary-bg) 24%);
 }
 
+.file-manager-progress-bar--download {
+  background: color-mix(in srgb, #38bdf8 76%, var(--app-primary-bg) 24%);
+}
+
 .file-entry-name {
   color: var(--app-text);
 }

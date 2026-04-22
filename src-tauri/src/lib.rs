@@ -9,15 +9,15 @@ use log::LevelFilter;
 use tauri::{AppHandle, Emitter};
 
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
-use models::{SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
+use models::{DownloadCancellationRegistry, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
 
 pub(crate) use connection::{
     summarize_remote_connection_request, summarize_session_request, validate_connection_fields,
 };
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
-    list_remote_directory_blocking, open_remote_file_blocking, rename_remote_path_blocking,
-    upload_local_paths_blocking,
+    download_remote_paths_blocking, list_remote_directory_blocking, open_remote_file_blocking,
+    rename_remote_path_blocking, upload_local_paths_blocking,
 };
 pub(crate) use session::{
     classify_closed_reason, is_transport_disconnect_message, run_ssh_session,
@@ -28,6 +28,7 @@ pub(crate) const SSH_STATUS_EVENT: &str = "ssh-status";
 pub(crate) const SSH_CLOSED_EVENT: &str = "ssh-closed";
 pub(crate) const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 pub(crate) const DELETE_PROGRESS_EVENT: &str = "delete-progress";
+pub(crate) const DOWNLOAD_PROGRESS_EVENT: &str = "download-progress";
 
 pub(crate) fn emit_status(
     app: &AppHandle,
@@ -111,6 +112,7 @@ pub fn run() {
         .manage(SessionManager::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
+        .manage(DownloadCancellationRegistry::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::write_session,
@@ -126,6 +128,8 @@ pub fn run() {
             commands::upload_local_paths,
             commands::cancel_upload,
             commands::cancel_delete,
+            commands::download_remote_paths,
+            commands::cancel_download,
             commands::pick_local_files,
             commands::pick_local_folder,
             commands::open_remote_file

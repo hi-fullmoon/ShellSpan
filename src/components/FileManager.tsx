@@ -24,6 +24,8 @@ import { ScrollArea } from './ScrollArea';
 import { Toast, type ToastAction } from './Toast';
 import type {
   DeleteProgressEvent,
+  DownloadProgressEvent,
+  DownloadProgressState,
   RemoteDirectoryListing,
   RemoteFileEntry,
   RemoteFileKind,
@@ -208,6 +210,22 @@ function uploadProgressPercent(progress?: UploadProgressState) {
   return 0;
 }
 
+function downloadProgressPercent(progress?: DownloadProgressState) {
+  if (!progress) {
+    return 0;
+  }
+
+  if (progress.totalBytes > 0) {
+    return Math.min(100, Math.round((progress.downloadedBytes / progress.totalBytes) * 100));
+  }
+
+  if (progress.totalSteps > 0) {
+    return Math.min(100, Math.round((progress.completedSteps / progress.totalSteps) * 100));
+  }
+
+  return 0;
+}
+
 function stepProgressPercent(progress?: { totalSteps: number; completedSteps: number }) {
   if (!progress || progress.totalSteps <= 0) {
     return 0;
@@ -383,10 +401,10 @@ function OverlayLayer({ children, tone = 'modal' }: { children: ReactNode; tone?
     <div
       className={
         tone === 'progress'
-          ? 'absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm'
+          ? 'absolute inset-0 z-10 flex items-center justify-center p-2 backdrop-blur-sm'
           : 'absolute inset-0 z-20 grid place-items-center p-2 backdrop-blur-[14px]'
       }
-      style={tone === 'modal' ? { background: 'var(--app-overlay)' } : undefined}
+      style={{ background: 'var(--app-overlay)' }}
     >
       {children}
     </div>
@@ -425,6 +443,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const [working, setWorking] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgressState>();
   const [toast, setToast] = useState<ToastState>();
   const sessionId = session?.sessionId;
   const fileManagerState = useFileManagerStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
@@ -1087,6 +1106,47 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       return;
     }
 
+    let dispose: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      const unlisten = await listen<DownloadProgressEvent>('download-progress', (event) => {
+        setDownloadProgress((current) =>
+          current && current.operationId === event.payload.operationId
+            ? {
+                operationId: event.payload.operationId,
+                currentPath: event.payload.currentPath,
+                totalBytes: event.payload.totalBytes,
+                downloadedBytes: event.payload.downloadedBytes,
+                totalSteps: event.payload.totalSteps,
+                completedSteps: event.payload.completedSteps,
+                cancelling: current.cancelling,
+              }
+            : current,
+        );
+      });
+
+      if (cancelled) {
+        unlisten();
+        return;
+      }
+
+      dispose = unlisten;
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
     let dispose: (() => void) | undefined;
     let cancelled = false;
 
@@ -1218,6 +1278,132 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       name: target.name,
       kind: target.kind,
     });
+  };
+
+  const handleDownload = async (entry?: RemoteFileEntry) => {
+    if (!ready) {
+      return;
+    }
+    const target = entry ?? selectedEntry;
+    if (!target || !connection || !sessionId) {
+      return;
+    }
+
+    setSelectedPath(target.path);
+    setContextMenu(undefined);
+
+    let destinationDirectory: string;
+    try {
+      const selected = await invoke<string[]>('pick_local_folder');
+      if (!selected.length) {
+        return;
+      }
+      destinationDirectory = selected[0];
+    } catch (nextError) {
+      setToast({
+        message: String(nextError),
+        tone: 'error',
+      });
+      return;
+    }
+
+    const operationId = createOperationId();
+    fileManagerLogger.info('开始下载', {
+      sessionId,
+      operationId,
+      remotePath: target.path,
+      destinationDirectory,
+    });
+    setWorking(true);
+    setFileError(undefined);
+    setToast(undefined);
+    setDownloadProgress({
+      operationId,
+      currentPath: target.path,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      cancelling: false,
+    });
+
+    try {
+      await invoke('download_remote_paths', {
+        request: {
+          ...connection,
+          remotePaths: [target.path],
+          destinationDirectory,
+          operationId,
+        },
+      });
+      setToast({
+        message: t('fileManager.feedback.downloadSingle', { name: target.name }),
+        tone: 'success',
+      });
+      fileManagerLogger.info('下载完成', {
+        sessionId,
+        operationId,
+        remotePath: target.path,
+        destinationDirectory,
+      });
+    } catch (nextError) {
+      const message = String(nextError);
+      const cancelled = message.includes('download cancelled');
+      if (cancelled) {
+        fileManagerLogger.info('下载已取消', { sessionId, operationId, remotePath: target.path });
+      } else {
+        fileManagerLogger.error('下载失败', {
+          sessionId,
+          operationId,
+          remotePath: target.path,
+          error: message,
+        });
+      }
+      setToast({
+        message: cancelled ? t('fileManager.feedback.downloadCancelled') : message,
+        tone: cancelled ? 'info' : 'error',
+      });
+    } finally {
+      setDownloadProgress(undefined);
+      setWorking(false);
+    }
+  };
+
+  const handleCancelDownload = async () => {
+    if (!downloadProgress || downloadProgress.cancelling) {
+      return;
+    }
+
+    const operationId = downloadProgress.operationId;
+    fileManagerLogger.info('请求取消下载', { sessionId, operationId });
+    setDownloadProgress((current) =>
+      current && current.operationId === operationId
+        ? {
+            ...current,
+            cancelling: true,
+          }
+        : current,
+    );
+
+    try {
+      await invoke('cancel_download', {
+        operationId,
+      });
+    } catch (nextError) {
+      fileManagerLogger.error('取消下载失败', { sessionId, operationId, error: String(nextError) });
+      setDownloadProgress((current) =>
+        current && current.operationId === operationId
+          ? {
+              ...current,
+              cancelling: false,
+            }
+          : current,
+      );
+      setToast({
+        message: String(nextError),
+        tone: 'error',
+      });
+    }
   };
 
   const handleCopy = (entry?: RemoteFileEntry) => {
@@ -1684,6 +1870,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                   <MenuDivider />
                   <MenuButton
                     disabled={!ready || loading || working}
+                    label={t('fileManager.menu.download')}
+                    onClick={() => void handleDownload(contextMenu.entry)}
+                  />
+                  <MenuDivider />
+                  <MenuButton
+                    disabled={!ready || loading || working}
                     label={t('fileManager.menu.rename')}
                     onClick={() => openRenameDialog(contextMenu.entry)}
                   />
@@ -1920,7 +2112,44 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         </OverlayLayer>
       ) : null}
 
-      {dragActive && ready && !uploadProgress && !deleteProgress ? (
+      {downloadProgress ? (
+        <OverlayLayer tone="progress">
+          <OverlayPanel className="max-w-sm">
+            <div className="flex items-center justify-between gap-2">
+              <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">
+                {downloadProgress.cancelling ? t('fileManager.downloadProgress.cancelling') : t('fileManager.downloadProgress.title')}
+              </span>
+              <span className="file-manager-progress-meta text-xs font-medium">{downloadProgressPercent(downloadProgress)}%</span>
+            </div>
+
+            <div className="file-manager-progress-track h-2 overflow-hidden rounded-full">
+              <div
+                className="file-manager-progress-bar file-manager-progress-bar--download h-full rounded-full transition-[width] duration-150"
+                style={{ width: `${downloadProgressPercent(downloadProgress)}%` }}
+              />
+            </div>
+
+            <div className="flex flex-col gap-0.5">
+              <strong className="file-manager-progress-title truncate text-sm">
+                {downloadProgress.currentPath ? localPathName(downloadProgress.currentPath) : t('fileManager.downloadProgress.preparing')}
+              </strong>
+              <span className="file-manager-progress-meta text-xs">
+                {downloadProgress.totalBytes > 0
+                  ? `${formatSize(downloadProgress.downloadedBytes)} / ${formatSize(downloadProgress.totalBytes)}`
+                  : t('fileManager.progress.items', { completed: downloadProgress.completedSteps, total: downloadProgress.totalSteps })}
+              </span>
+            </div>
+
+            <div className="flex justify-end">
+              <button className="icon-btn" disabled={downloadProgress.cancelling} onClick={() => void handleCancelDownload()} type="button">
+                {downloadProgress.cancelling ? t('fileManager.downloadProgress.cancellingButton') : t('fileManager.downloadProgress.cancel')}
+              </button>
+            </div>
+          </OverlayPanel>
+        </OverlayLayer>
+      ) : null}
+
+      {dragActive && ready && !uploadProgress && !deleteProgress && !downloadProgress ? (
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-xs gap-1 text-center">
             <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.dragDrop.title')}</span>

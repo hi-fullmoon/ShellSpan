@@ -109,6 +109,16 @@ pub(crate) struct OpenRemoteFileRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct DownloadRemotePathsRequest {
+    #[serde(flatten)]
+    pub(crate) connection: RemoteConnectionRequest,
+    pub(crate) remote_paths: Vec<String>,
+    pub(crate) destination_directory: String,
+    pub(crate) operation_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct UploadLocalPathsRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,
@@ -199,6 +209,17 @@ pub(crate) struct DeleteProgressEvent {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct DownloadProgressEvent {
+    pub(crate) operation_id: String,
+    pub(crate) current_path: Option<String>,
+    pub(crate) total_bytes: u64,
+    pub(crate) downloaded_bytes: u64,
+    pub(crate) total_steps: u64,
+    pub(crate) completed_steps: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RemoteDirectoryListing {
     pub(crate) path: String,
     pub(crate) parent_path: Option<String>,
@@ -266,6 +287,126 @@ pub(crate) struct UploadCancellationRegistry {
 #[derive(Default)]
 pub(crate) struct DeleteCancellationRegistry {
     operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+#[derive(Default, Clone, Copy)]
+pub(crate) struct DownloadScanStats {
+    pub(crate) total_bytes: u64,
+    pub(crate) total_steps: u64,
+}
+
+impl DownloadScanStats {
+    pub(crate) fn combine(&mut self, other: DownloadScanStats) {
+        self.total_bytes += other.total_bytes;
+        self.total_steps += other.total_steps;
+    }
+}
+
+pub(crate) struct DownloadProgressTracker {
+    app: AppHandle,
+    operation_id: String,
+    cancel_flag: Arc<AtomicBool>,
+    current_path: Option<String>,
+    total_bytes: u64,
+    downloaded_bytes: u64,
+    total_steps: u64,
+    completed_steps: u64,
+}
+
+impl DownloadProgressTracker {
+    pub(crate) fn new(
+        app: AppHandle,
+        operation_id: String,
+        cancel_flag: Arc<AtomicBool>,
+        stats: DownloadScanStats,
+    ) -> Self {
+        Self {
+            app,
+            operation_id,
+            cancel_flag,
+            current_path: None,
+            total_bytes: stats.total_bytes,
+            downloaded_bytes: 0,
+            total_steps: stats.total_steps,
+            completed_steps: 0,
+        }
+    }
+
+    pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        self.current_path = path;
+        self.emit()
+    }
+
+    pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
+        self.downloaded_bytes += count;
+        self.emit()
+    }
+
+    pub(crate) fn finish_step(&mut self) -> Result<(), String> {
+        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
+        self.emit()
+    }
+
+    pub(crate) fn ensure_not_cancelled(&self) -> Result<(), String> {
+        if self.cancel_flag.load(AtomicOrdering::SeqCst) {
+            return Err("download cancelled".to_string());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn emit(&self) -> Result<(), String> {
+        self.app
+            .emit(
+                super::DOWNLOAD_PROGRESS_EVENT,
+                DownloadProgressEvent {
+                    operation_id: self.operation_id.clone(),
+                    current_path: self.current_path.clone(),
+                    total_bytes: self.total_bytes,
+                    downloaded_bytes: self.downloaded_bytes,
+                    total_steps: self.total_steps,
+                    completed_steps: self.completed_steps,
+                },
+            )
+            .map_err(|error| format!("failed to emit download progress event: {error}"))
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct DownloadCancellationRegistry {
+    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl DownloadCancellationRegistry {
+    pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut guard = self
+            .operations
+            .lock()
+            .map_err(|_| "download cancellation registry poisoned".to_string())?;
+        guard.insert(operation_id, flag.clone());
+        Ok(flag)
+    }
+
+    pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
+        let guard = self
+            .operations
+            .lock()
+            .map_err(|_| "download cancellation registry poisoned".to_string())?;
+        let flag = guard
+            .get(operation_id)
+            .ok_or_else(|| format!("download operation {operation_id} not found"))?;
+        flag.store(true, AtomicOrdering::SeqCst);
+        Ok(())
+    }
+
+    pub(crate) fn remove(&self, operation_id: &str) -> Result<(), String> {
+        let mut guard = self
+            .operations
+            .lock()
+            .map_err(|_| "download cancellation registry poisoned".to_string())?;
+        guard.remove(operation_id);
+        Ok(())
+    }
 }
 
 #[derive(Default, Clone, Copy)]

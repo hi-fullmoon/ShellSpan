@@ -1,9 +1,10 @@
 use crate::connection::connect_sftp;
 use crate::models::{
     CopyRemotePathRequest, CreateRemoteEntryKind, CreateRemoteEntryRequest, DeleteProgressTracker,
-    DeleteRemotePathRequest, OpenRemoteFileRequest, RemoteDirectoryListing, RemoteDirectoryRequest,
-    RemoteFileEntry, RemoteFileKind, RenameRemotePathRequest, UploadConflictPolicy,
-    UploadLocalPathsRequest, UploadProgressTracker, UploadScanStats,
+    DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
+    OpenRemoteFileRequest, RemoteDirectoryListing, RemoteDirectoryRequest, RemoteFileEntry,
+    RemoteFileKind, RenameRemotePathRequest, UploadConflictPolicy, UploadLocalPathsRequest,
+    UploadProgressTracker, UploadScanStats,
 };
 use log::warn;
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
@@ -200,6 +201,182 @@ pub(crate) fn upload_local_paths_blocking(
 
     progress.set_current_path(None)?;
 
+    Ok(())
+}
+
+pub(crate) fn download_remote_paths_blocking(
+    app: AppHandle,
+    request: DownloadRemotePathsRequest,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    if request.remote_paths.is_empty() {
+        return Err("no remote paths were provided for download".to_string());
+    }
+
+    let connected = connect_sftp(&request.connection)?;
+    let destination_directory = Path::new(&request.destination_directory);
+    fs::create_dir_all(destination_directory)
+        .map_err(|error| format!("failed to create destination directory: {error}"))?;
+
+    let mut scan_stats = DownloadScanStats::default();
+    for remote_path in &request.remote_paths {
+        scan_stats.combine(scan_remote_download_path(&connected.sftp, Path::new(remote_path))?);
+    }
+
+    let mut progress =
+        DownloadProgressTracker::new(app, request.operation_id.clone(), cancel_flag, scan_stats);
+    progress.emit()?;
+
+    for remote_path in &request.remote_paths {
+        progress.ensure_not_cancelled()?;
+        let remote_path = Path::new(remote_path);
+        let file_name = remote_path
+            .file_name()
+            .ok_or_else(|| format!("invalid remote path: {}", remote_path.display()))?
+            .to_string_lossy()
+            .to_string();
+        let destination_path = destination_directory.join(&file_name);
+        download_remote_entry_to_path(
+            &connected.sftp,
+            remote_path,
+            &destination_path,
+            &mut progress,
+        )?;
+    }
+
+    progress.set_current_path(None)?;
+
+    Ok(())
+}
+
+fn scan_remote_download_path(sftp: &Sftp, remote_path: &Path) -> Result<DownloadScanStats, String> {
+    let stat = sftp
+        .lstat(remote_path)
+        .map_err(|error| format!("failed to inspect remote path: {error}"))?;
+
+    match kind_from_permissions(stat.perm) {
+        RemoteFileKind::Directory => {
+            let mut stats = DownloadScanStats {
+                total_bytes: 0,
+                total_steps: 1,
+            };
+            let entries = sftp
+                .readdir(remote_path)
+                .map_err(|error| format!("failed to list remote directory for download: {error}"))?;
+            for (child_path, _) in entries {
+                if should_skip_remote_child(&child_path) {
+                    continue;
+                }
+                stats.combine(scan_remote_download_path(sftp, &child_path)?);
+            }
+            Ok(stats)
+        }
+        RemoteFileKind::Symlink => {
+            let target = sftp
+                .readlink(remote_path)
+                .map_err(|error| format!("failed to read remote symlink: {error}"))?;
+            let resolved = remote_path
+                .parent()
+                .map(|p| p.join(&target))
+                .unwrap_or(target);
+            scan_remote_download_path(sftp, &resolved)
+        }
+        _ => Ok(DownloadScanStats {
+            total_bytes: stat.size.unwrap_or(0),
+            total_steps: 1,
+        }),
+    }
+}
+
+fn download_remote_entry_to_path(
+    sftp: &Sftp,
+    remote_path: &Path,
+    local_path: &Path,
+    progress: &mut DownloadProgressTracker,
+) -> Result<(), String> {
+    progress.ensure_not_cancelled()?;
+    let stat = sftp
+        .lstat(remote_path)
+        .map_err(|error| format!("failed to inspect remote path: {error}"))?;
+
+    match kind_from_permissions(stat.perm) {
+        RemoteFileKind::Directory => {
+            progress.set_current_path(Some(path_to_string(remote_path)))?;
+            fs::create_dir_all(local_path)
+                .map_err(|error| format!("failed to create local directory: {error}"))?;
+            progress.finish_step()?;
+            let entries = sftp
+                .readdir(remote_path)
+                .map_err(|error| format!("failed to list remote directory for download: {error}"))?;
+            for (child_path, _) in entries {
+                progress.ensure_not_cancelled()?;
+                if should_skip_remote_child(&child_path) {
+                    continue;
+                }
+                let child_name = child_path
+                    .file_name()
+                    .ok_or_else(|| "invalid child path while downloading directory".to_string())?;
+                download_remote_entry_to_path(
+                    sftp,
+                    &child_path,
+                    &local_path.join(child_name),
+                    progress,
+                )?;
+            }
+            Ok(())
+        }
+        RemoteFileKind::Symlink => {
+            let target = sftp
+                .readlink(remote_path)
+                .map_err(|error| format!("failed to read remote symlink: {error}"))?;
+            let resolved = remote_path
+                .parent()
+                .map(|p| p.join(&target))
+                .unwrap_or(target);
+            download_remote_entry_to_path(sftp, &resolved, local_path, progress)
+        }
+        _ => download_remote_file(sftp, remote_path, local_path, progress),
+    }
+}
+
+fn download_remote_file(
+    sftp: &Sftp,
+    remote_path: &Path,
+    local_path: &Path,
+    progress: &mut DownloadProgressTracker,
+) -> Result<(), String> {
+    progress.set_current_path(Some(path_to_string(remote_path)))?;
+    if let Some(parent) = local_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create local parent directory: {error}"))?;
+    }
+
+    let mut remote_file = sftp
+        .open(remote_path)
+        .map_err(|error| format!("failed to open remote file: {error}"))?;
+    let mut local_file = fs::File::create(local_path)
+        .map_err(|error| format!("failed to create local file: {error}"))?;
+
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        progress.ensure_not_cancelled().inspect_err(|_| {
+            let _ = fs::remove_file(local_path);
+        })?;
+        let read = remote_file
+            .read(&mut buffer)
+            .map_err(|error| format!("failed to read remote file: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        local_file
+            .write_all(&buffer[..read])
+            .map_err(|error| format!("failed to write local file: {error}"))?;
+        progress.advance_bytes(read as u64)?;
+    }
+    local_file
+        .flush()
+        .map_err(|error| format!("failed to flush local file: {error}"))?;
+    progress.finish_step()?;
     Ok(())
 }
 

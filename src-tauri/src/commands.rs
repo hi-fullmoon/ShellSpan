@@ -1,9 +1,9 @@
 use super::*;
 use crate::models::{
     ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest, DeleteRemotePathRequest,
-    ManagedSession, OpenRemoteFileRequest, RemoteDirectoryListing, RemoteDirectoryRequest,
-    RenameRemotePathRequest, SessionCommand, SessionCreateRequest, SessionStatus, SessionSummary,
-    UploadLocalPathsRequest,
+    DownloadRemotePathsRequest, ManagedSession, OpenRemoteFileRequest, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
+    SessionStatus, SessionSummary, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
 use std::{sync::mpsc, thread};
@@ -248,6 +248,44 @@ pub(crate) fn cancel_delete(
 ) -> Result<(), String> {
     info!("Cancelling delete operation_id={operation_id}");
     deletes.cancel(&operation_id)
+}
+
+#[tauri::command]
+pub(crate) async fn download_remote_paths(
+    app: AppHandle,
+    downloads: State<'_, DownloadCancellationRegistry>,
+    request: DownloadRemotePathsRequest,
+) -> Result<(), String> {
+    info!(
+        "Downloading remote paths operation_id={} count={} destination_directory={} {}",
+        request.operation_id,
+        request.remote_paths.len(),
+        request.destination_directory,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let cancel_flag = downloads.register(request.operation_id.clone())?;
+    let operation_id = request.operation_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        download_remote_paths_blocking(app, request, cancel_flag)
+    })
+    .await
+    .map_err(|error| format!("failed to join download task: {error}"))?;
+    let _ = downloads.remove(&operation_id);
+    if let Err(error) = &result {
+        warn!("Download failed operation_id={operation_id}: {error}");
+    } else {
+        info!("Download completed operation_id={operation_id}");
+    }
+    result
+}
+
+#[tauri::command]
+pub(crate) fn cancel_download(
+    downloads: State<'_, DownloadCancellationRegistry>,
+    operation_id: String,
+) -> Result<(), String> {
+    info!("Cancelling download operation_id={operation_id}");
+    downloads.cancel(&operation_id)
 }
 
 #[tauri::command]

@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 import { createLogger } from "../lib/logger";
 import { isTauriRuntime } from "../lib/tauri";
@@ -38,6 +39,8 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const activeRef = useRef(active);
   const statusRef = useRef(session.status);
   const inputBlockedNoticeRef = useRef(false);
@@ -48,6 +51,9 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
   const scheduleResizeRef = useRef<((force?: boolean) => void) | null>(null);
   const needsSystemLineBreakRef = useRef(false);
   const needsConnectedShellSpacingRef = useRef(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
 
   const writeSystemLine = (line: string) => {
     const terminal = terminalRef.current;
@@ -113,7 +119,9 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
       disableStdin: shouldDisableTerminalInput(session.status),
     });
     const fitAddon = new FitAddon();
+    const searchAddon = new SearchAddon();
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(searchAddon);
     terminal.open(shellRef.current);
     // @xterm/xterm may not have renderer dimensions ready immediately after open.
     // Defer fit to the next frame to avoid runtime errors in syncScrollArea.
@@ -126,7 +134,32 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
     });
     terminalRef.current = terminal;
     fitRef.current = fitAddon;
+    searchAddonRef.current = searchAddon;
     lastShellSizeRef.current = null;
+
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (!activeRef.current) {
+        return true;
+      }
+      if (event.type === "keydown") {
+        const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+        if (isCtrlOrMeta && event.key === "f") {
+          event.preventDefault();
+          setShowSearch(true);
+          return false;
+        }
+        if (event.key === "Escape") {
+          setShowSearch((current) => {
+            if (current) {
+              searchAddonRef.current?.clearDecorations?.();
+              return false;
+            }
+            return current;
+          });
+        }
+      }
+      return true;
+    });
     writeSystemLine(formatTerminalPrefixedText(t('terminal.notice.preparing')));
 
     const themeObserver = new MutationObserver(() => {
@@ -300,6 +333,7 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
       themeObserver.disconnect();
       terminalRef.current = null;
       fitRef.current = null;
+      searchAddonRef.current = null;
     };
   }, [session.sessionId]);
 
@@ -414,6 +448,35 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
     };
   }, [session.sessionId]);
 
+  useEffect(() => {
+    if (showSearch) {
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+    }
+  }, [showSearch]);
+
+  const performSearch = (direction: "next" | "previous") => {
+    const addon = searchAddonRef.current;
+    if (!addon || !searchTerm) {
+      return;
+    }
+    const options = { caseSensitive };
+    if (direction === "next") {
+      addon.findNext(searchTerm, options);
+    } else {
+      addon.findPrevious(searchTerm, options);
+    }
+  };
+
+  const closeSearch = () => {
+    searchAddonRef.current?.clearDecorations?.();
+    setShowSearch(false);
+    setSearchTerm("");
+    terminalRef.current?.focus();
+  };
+
   return (
     <section
       className={cn(
@@ -421,6 +484,75 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
         active ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
+      {showSearch && (
+        <div className="absolute right-2 top-2 z-30 flex items-center gap-1.5 rounded-lg p-1.5 backdrop-blur-sm"
+          style={{ background: 'var(--app-surface)', border: '1px solid var(--app-border)', boxShadow: 'var(--app-shadow)' }}
+        >
+          <input
+            ref={searchInputRef}
+            className="themed-input h-7 w-44 rounded-md px-2 text-xs outline-none"
+            placeholder={t('terminal.search.placeholder')}
+            type="text"
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              if (e.target.value) {
+                searchAddonRef.current?.findNext?.(e.target.value, { caseSensitive });
+              } else {
+                searchAddonRef.current?.clearDecorations?.();
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                performSearch(e.shiftKey ? "previous" : "next");
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                closeSearch();
+              }
+            }}
+          />
+          <button
+            className="icon-btn h-6 w-6 px-0 text-xs"
+            onClick={() => performSearch("previous")}
+            title={t('terminal.search.previous')}
+            type="button"
+          >
+            ↑
+          </button>
+          <button
+            className="icon-btn h-6 w-6 px-0 text-xs"
+            onClick={() => performSearch("next")}
+            title={t('terminal.search.next')}
+            type="button"
+          >
+            ↓
+          </button>
+          <button
+            className={cn("icon-btn h-6 w-6 px-0 text-xs", caseSensitive && "bg-cyan-500/20 text-cyan-300")}
+            onClick={() => {
+              const next = !caseSensitive;
+              setCaseSensitive(next);
+              if (searchTerm) {
+                searchAddonRef.current?.findNext?.(searchTerm, { caseSensitive: next });
+              }
+            }}
+            title={t('terminal.search.caseSensitive')}
+            type="button"
+          >
+            Aa
+          </button>
+          <button
+            className="icon-btn h-6 w-6 px-0 text-xs"
+            onClick={closeSearch}
+            title={t('terminal.search.close')}
+            type="button"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div
         className="terminal-shell themed-terminal-shell min-h-0 flex-1 overflow-hidden"
         ref={shellRef}

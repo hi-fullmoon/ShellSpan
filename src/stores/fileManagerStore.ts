@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { RemoteDirectoryListing, UploadProgressState } from "../types";
+import type { RemoteDirectoryListing, UploadProgressState, DownloadProgressState } from "../types";
 
 export interface FileManagerSessionState {
   error?: string;
@@ -7,6 +7,7 @@ export interface FileManagerSessionState {
   pathInput: string;
   selectedPath?: string;
   uploadProgress?: UploadProgressState;
+  downloadProgress?: DownloadProgressState;
 }
 
 type SessionStatePatch =

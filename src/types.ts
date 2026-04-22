@@ -84,6 +84,19 @@ export interface DeleteProgressEvent {
   completedSteps: number;
 }
 
+export interface DownloadProgressEvent {
+  operationId: string;
+  currentPath?: string;
+  totalBytes: number;
+  downloadedBytes: number;
+  totalSteps: number;
+  completedSteps: number;
+}
+
+export interface DownloadProgressState extends DownloadProgressEvent {
+  cancelling?: boolean;
+}
+
 export type RemoteFileKind = "directory" | "file" | "symlink" | "other";
 
 export interface RemoteFileEntry {
