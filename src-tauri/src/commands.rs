@@ -1,9 +1,10 @@
 use super::*;
 use crate::models::{
     ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest, DeleteRemotePathRequest,
-    DownloadRemotePathsRequest, ManagedSession, OpenRemoteFileRequest, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
-    SessionStatus, SessionSummary, UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
+    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, ManagedSession,
+    OpenRemoteFileRequest, RemoteDirectoryListing, RemoteDirectoryRequest, RenameRemotePathRequest,
+    SessionCommand, SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
+    UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
 use std::{sync::mpsc, thread};
@@ -341,6 +342,41 @@ pub(crate) async fn update_remote_permissions(
             .map_err(|error| format!("failed to join permissions update task: {error}"))?;
     if result.is_ok() {
         info!("Updated remote permissions successfully");
+    }
+    result
+}
+
+#[tauri::command]
+pub(crate) async fn check_host_key(
+    app: AppHandle,
+    request: HostKeyCheckRequest,
+) -> Result<HostKeyCheckResult, String> {
+    info!("Checking host key for {}:{}", request.host, request.port);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::known_hosts::check_host_key_blocking(&app, &request)
+    })
+    .await
+    .map_err(|error| format!("failed to join host key check task: {error}"))?;
+    match &result {
+        Ok(r) => info!("Host key check result: {:?}", r.status),
+        Err(e) => warn!("Host key check failed: {e}"),
+    }
+    result
+}
+
+#[tauri::command]
+pub(crate) async fn trust_host(
+    app: AppHandle,
+    request: TrustHostRequest,
+) -> Result<(), String> {
+    info!("Trusting host {}:{}", request.host, request.port);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::known_hosts::trust_host_blocking(&app, &request)
+    })
+    .await
+    .map_err(|error| format!("failed to join trust host task: {error}"))?;
+    if result.is_ok() {
+        info!("Host trusted successfully");
     }
     result
 }

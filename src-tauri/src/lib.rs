@@ -1,5 +1,6 @@
 mod commands;
 mod connection;
+mod known_hosts;
 mod menu;
 mod models;
 mod remote_fs;
@@ -133,7 +134,9 @@ pub fn run() {
             commands::pick_local_files,
             commands::pick_local_folder,
             commands::open_remote_file,
-            commands::update_remote_permissions
+            commands::update_remote_permissions,
+            commands::check_host_key,
+            commands::trust_host,
         ]);
 
     menu::configure_builder(builder)
