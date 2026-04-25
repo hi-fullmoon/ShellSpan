@@ -194,4 +194,55 @@ describe("Sidebar", () => {
     expect(screen.getByText("修改历史连接名称")).toHaveClass("themed-heading");
     expect(screen.getByPlaceholderText("输入连接名称")).toHaveClass("themed-input");
   });
+
+  it("renders profiles grouped by group name", () => {
+    const groupedProfiles: ConnectionProfile[] = [
+      { ...profiles[0], group: "Production" },
+      { ...profiles[1], group: "Production" },
+      { ...profiles[2], group: "Staging" },
+    ];
+
+    render(
+      <Sidebar
+        connectedCount={0}
+        onDeleteProfile={vi.fn()}
+        onOpenConnect={vi.fn()}
+        onRenameProfile={vi.fn()}
+        onReuseProfile={vi.fn()}
+        onSetProfileGroup={vi.fn()}
+        onToggleFavoriteProfile={vi.fn()}
+        onTogglePinnedProfile={vi.fn()}
+        runtimeLabel="Desktop"
+        savedProfiles={groupedProfiles}
+      />,
+    );
+
+    expect(screen.getByText("Production")).toBeTruthy();
+    expect(screen.getByText("Staging")).toBeTruthy();
+  });
+
+  it("shows ungrouped label when some profiles have no group", () => {
+    const mixedProfiles: ConnectionProfile[] = [
+      { ...profiles[0], group: "Production" },
+      profiles[1],
+    ];
+
+    render(
+      <Sidebar
+        connectedCount={0}
+        onDeleteProfile={vi.fn()}
+        onOpenConnect={vi.fn()}
+        onRenameProfile={vi.fn()}
+        onReuseProfile={vi.fn()}
+        onSetProfileGroup={vi.fn()}
+        onToggleFavoriteProfile={vi.fn()}
+        onTogglePinnedProfile={vi.fn()}
+        runtimeLabel="Desktop"
+        savedProfiles={mixedProfiles}
+      />,
+    );
+
+    expect(screen.getByText("Production")).toBeTruthy();
+    expect(screen.getByText("未分组")).toBeTruthy();
+  });
 });

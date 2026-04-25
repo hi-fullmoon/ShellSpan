@@ -149,4 +149,20 @@ describe("parseQuickConnect", () => {
   it("returns undefined for out-of-range port", () => {
     expect(parseQuickConnect("host:99999")).toBeUndefined();
   });
+
+  it("returns undefined for port 0", () => {
+    expect(parseQuickConnect("host:0")).toBeUndefined();
+  });
+
+  it("returns undefined for port 65536", () => {
+    expect(parseQuickConnect("host:65536")).toBeUndefined();
+  });
+
+  it("trims leading and trailing whitespace", () => {
+    expect(parseQuickConnect("  user@host:2222  ")).toEqual({
+      username: "user",
+      host: "host",
+      port: 2222,
+    });
+  });
 });
