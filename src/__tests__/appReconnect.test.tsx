@@ -176,6 +176,10 @@ describe('App reconnect flow', () => {
     const invokeMock = vi.mocked(invoke);
     invokeMock
       .mockResolvedValueOnce({
+        status: 'match',
+        fingerprint: 'RSA SHA256:abc123',
+      })
+      .mockResolvedValueOnce({
         sessionId: 'session-1',
         title: 'Demo',
         host: 'example.com',
@@ -199,7 +203,7 @@ describe('App reconnect flow', () => {
     fireEvent.click(within(screen.getByRole('dialog', { name: '连接到服务器' })).getByRole('button', { name: '创建连接' }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenNthCalledWith(1, 'create_session', expect.anything());
+      expect(invokeMock).toHaveBeenNthCalledWith(1, 'check_host_key', expect.anything());
     });
 
     const closedHandler = listenMock.mock.calls.find(([eventName]) => eventName === 'ssh-closed')?.[1];
@@ -217,7 +221,7 @@ describe('App reconnect flow', () => {
     });
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenNthCalledWith(2, 'create_session', expect.anything());
+      expect(invokeMock).toHaveBeenNthCalledWith(3, 'create_session', expect.anything());
     });
 
     expect(replaceSessionStateKeyMock).toHaveBeenCalledWith('session-1', 'session-2');
@@ -225,13 +229,18 @@ describe('App reconnect flow', () => {
 
   it('does not auto reconnect for a non-retryable close reason', async () => {
     const invokeMock = vi.mocked(invoke);
-    invokeMock.mockResolvedValueOnce({
-      sessionId: 'session-1',
-      title: 'Demo',
-      host: 'example.com',
-      port: 22,
-      username: 'root',
-    });
+    invokeMock
+      .mockResolvedValueOnce({
+        status: 'match',
+        fingerprint: 'RSA SHA256:abc123',
+      })
+      .mockResolvedValueOnce({
+        sessionId: 'session-1',
+        title: 'Demo',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+      });
 
     render(<App />);
 
@@ -242,7 +251,7 @@ describe('App reconnect flow', () => {
     fireEvent.click(within(screen.getByRole('dialog', { name: '连接到服务器' })).getByRole('button', { name: '创建连接' }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledTimes(1);
+      expect(invokeMock).toHaveBeenCalledTimes(2);
     });
 
     const closedHandler = listenMock.mock.calls.find(([eventName]) => eventName === 'ssh-closed')?.[1];
@@ -259,6 +268,6 @@ describe('App reconnect flow', () => {
       });
     });
 
-    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 });
