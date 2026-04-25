@@ -48,6 +48,8 @@ const enUS = {
   'app.error.desktopOnly': 'Only the frontend dev server is running. Use `npm run tauri:dev` to launch the desktop app.',
   'app.error.autoReconnectFailed': 'Auto reconnect failed: {error}',
   'app.error.reconnectFailed': 'Reconnect failed: {error}',
+  'app.error.hostKeyMismatch': 'Host key mismatch! Possible man-in-the-middle attack. Connection aborted.',
+  'app.error.hostKeyCheckFailed': 'Host key check failed. Unable to connect.',
   'app.note.autoReconnecting': 'Connection lost, trying to reconnect automatically...',
   'app.update.manualUnavailable': 'Only the frontend dev server is running, so update checks are unavailable.',
   'app.update.latest': 'You already have the latest version.',
@@ -286,6 +288,12 @@ const enUS = {
   'settings.historyLimitHint': 'Maximum number of saved connections to keep.',
   'settings.showFileManager': 'Show File Manager',
   'settings.showFileManagerHint': 'Display the remote file manager panel on the left side of the main layout.',
+  'hostKey.dialog.ariaLabel': 'Trust New Host',
+  'hostKey.dialog.kicker': 'Host Verification',
+  'hostKey.dialog.title': 'First Connection to "{host}"',
+  'hostKey.dialog.description': 'This is your first time connecting to this host. Please verify the fingerprint below matches what the server administrator provided.',
+  'hostKey.dialog.warning': 'Accepting an unknown host key carries security risks. If the fingerprint is incorrect, your connection may be intercepted.',
+  'hostKey.dialog.trustAndConnect': 'Trust & Connect',
 } as const;
 
 export default enUS;

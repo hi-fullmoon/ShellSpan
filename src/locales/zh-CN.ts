@@ -48,6 +48,8 @@ const zhCN = {
   'app.error.desktopOnly': '当前只启动了前端调试环境，请使用 `npm run tauri:dev` 运行桌面端。',
   'app.error.autoReconnectFailed': '自动重连失败: {error}',
   'app.error.reconnectFailed': '重连失败: {error}',
+  'app.error.hostKeyMismatch': '主机密钥不匹配！可能存在中间人攻击，已中断连接。',
+  'app.error.hostKeyCheckFailed': '主机密钥检查失败，无法建立连接。',
   'app.note.autoReconnecting': '连接中断，正在自动重连...',
   'app.update.manualUnavailable': '当前只启动了前端调试环境，无法检查更新。',
   'app.update.latest': '当前已是最新版本。',
@@ -286,6 +288,12 @@ const zhCN = {
   'settings.historyLimitHint': '最多保留几条已保存的连接，超出的旧记录会被移除。',
   'settings.showFileManager': '显示文件管理器',
   'settings.showFileManagerHint': '在主界面左侧显示远程文件管理面板。',
+  'hostKey.dialog.ariaLabel': '信任新主机',
+  'hostKey.dialog.kicker': '主机验证',
+  'hostKey.dialog.title': '首次连接到 "{host}"',
+  'hostKey.dialog.description': '这是您第一次连接到此主机。请核对下方指纹是否与服务器管理员提供的一致。',
+  'hostKey.dialog.warning': '接受未知主机的密钥存在安全风险。如果指纹不正确，您的连接可能被窃听。',
+  'hostKey.dialog.trustAndConnect': '信任并连接',
 } as const;
 
 export default zhCN;
