@@ -606,6 +606,19 @@ function App() {
     );
   };
 
+  const handleSetProfileGroup = (profileId: string, group: string) => {
+    setSavedProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId
+          ? {
+              ...profile,
+              group: group.trim() || undefined,
+            }
+          : profile,
+      ),
+    );
+  };
+
   const handleReconnectSession = async (sessionId: string, options?: { automatic?: boolean }) => {
     const automatic = options?.automatic ?? false;
     const target = sessionsRef.current.find((item) => item.sessionId === sessionId);
@@ -828,6 +841,7 @@ function App() {
             savedProfiles={savedProfiles}
             onDeleteProfile={handleDeleteSavedProfile}
             onRenameProfile={handleRenameSavedProfile}
+            onSetProfileGroup={handleSetProfileGroup}
             onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
             onTogglePinnedProfile={handleToggleSavedProfilePinned}
             onReuseProfile={loadProfile}
