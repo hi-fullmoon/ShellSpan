@@ -3,8 +3,8 @@ use crate::models::{
     CopyRemotePathRequest, CreateRemoteEntryKind, CreateRemoteEntryRequest, DeleteProgressTracker,
     DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
     OpenRemoteFileRequest, RemoteDirectoryListing, RemoteDirectoryRequest, RemoteFileEntry,
-    RemoteFileKind, RenameRemotePathRequest, UploadConflictPolicy, UploadLocalPathsRequest,
-    UploadProgressTracker, UploadScanStats,
+    RemoteFileKind, RenameRemotePathRequest, UpdateRemotePermissionsRequest, UploadConflictPolicy,
+    UploadLocalPathsRequest, UploadProgressTracker, UploadScanStats,
 };
 use log::warn;
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
@@ -99,6 +99,22 @@ pub(crate) fn rename_remote_path_blocking(request: RenameRemotePathRequest) -> R
             Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
         )
         .map_err(|error| format!("failed to rename remote path: {error}"))
+}
+
+pub(crate) fn update_remote_permissions_blocking(
+    request: UpdateRemotePermissionsRequest,
+) -> Result<(), String> {
+    let connected = connect_sftp(&request.connection)?;
+    let path = std::path::Path::new(&request.path);
+    let mut stat = connected
+        .sftp
+        .stat(path)
+        .map_err(|error| format!("failed to stat remote path: {error}"))?;
+    stat.perm = Some(request.permissions);
+    connected
+        .sftp
+        .setstat(path, stat)
+        .map_err(|error| format!("failed to update remote permissions: {error}"))
 }
 
 pub(crate) fn delete_remote_path_blocking(

@@ -3,7 +3,7 @@ use crate::models::{
     ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest, DeleteRemotePathRequest,
     DownloadRemotePathsRequest, ManagedSession, OpenRemoteFileRequest, RemoteDirectoryListing,
     RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
-    SessionStatus, SessionSummary, UploadLocalPathsRequest,
+    SessionStatus, SessionSummary, UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
 use std::{sync::mpsc, thread};
@@ -321,6 +321,26 @@ pub(crate) async fn open_remote_file(request: OpenRemoteFileRequest) -> Result<(
         .map_err(|error| format!("failed to join open file task: {error}"))?;
     if result.is_ok() {
         info!("Opened remote file successfully");
+    }
+    result
+}
+
+#[tauri::command]
+pub(crate) async fn update_remote_permissions(
+    request: UpdateRemotePermissionsRequest,
+) -> Result<(), String> {
+    info!(
+        "Updating remote permissions path={} permissions={:04o} {}",
+        request.path,
+        request.permissions,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let result =
+        tauri::async_runtime::spawn_blocking(move || update_remote_permissions_blocking(request))
+            .await
+            .map_err(|error| format!("failed to join permissions update task: {error}"))?;
+    if result.is_ok() {
+        info!("Updated remote permissions successfully");
     }
     result
 }
