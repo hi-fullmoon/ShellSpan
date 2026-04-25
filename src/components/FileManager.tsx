@@ -65,6 +65,11 @@ interface PropertiesState {
   directoryPath: string;
 }
 
+interface PermissionEditState {
+  entry: RemoteFileEntry;
+  value: string;
+}
+
 interface ToastState {
   action?: ToastAction;
   message: string;
@@ -438,6 +443,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteState>();
   const [pendingUploadConflict, setPendingUploadConflict] = useState<PendingUploadConflictState>();
   const [properties, setProperties] = useState<PropertiesState>();
+  const [permissionEdit, setPermissionEdit] = useState<PermissionEditState>();
   const [dialog, setDialog] = useState<EntryDialogState>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState>();
   const [loading, setLoading] = useState(false);
@@ -1261,6 +1267,58 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       entry: target,
       directoryPath: target.kind === 'directory' ? target.path : parentDirectoryPath(target.path),
     });
+    setPermissionEdit(undefined);
+  };
+
+  const openPermissionEdit = (entry?: RemoteFileEntry) => {
+    if (!ready) {
+      return;
+    }
+    const target = entry ?? selectedEntry;
+    if (!target || target.permissions === undefined) {
+      return;
+    }
+
+    setSelectedPath(target.path);
+    setContextMenu(undefined);
+    setPermissionEdit({
+      entry: target,
+      value: formatPermissionOctal(target.permissions),
+    });
+    setProperties(undefined);
+  };
+
+  const submitPermissionEdit = async () => {
+    if (!ready || !permissionEdit || !connection) {
+      return;
+    }
+
+    const trimmed = permissionEdit.value.trim();
+    const parsed = parseInt(trimmed, 8);
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 0o7777) {
+      setToast({
+        message: t('fileManager.error.invalidPermissions'),
+        tone: 'error',
+      });
+      return;
+    }
+
+    await runFileAction(
+      () =>
+        invoke('update_remote_permissions', {
+          request: {
+            ...connection,
+            path: permissionEdit.entry.path,
+            permissions: parsed,
+          },
+        }),
+      t('fileManager.feedback.permissionsUpdated'),
+    );
+    setPermissionEdit(undefined);
+  };
+
+  const handlePermissionInputChange = (value: string) => {
+    setPermissionEdit((current) => (current ? { ...current, value } : current));
   };
 
   const handleDelete = (entry?: RemoteFileEntry) => {
@@ -1929,6 +1987,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                   <MenuDivider />
                   <MenuButton
                     disabled={!ready || loading || working}
+                    label={t('fileManager.menu.editPermissions')}
+                    onClick={() => openPermissionEdit(contextMenu.entry)}
+                  />
+                  <MenuButton
+                    disabled={!ready || loading || working}
                     label={t('fileManager.menu.properties')}
                     onClick={() => openProperties(contextMenu.entry)}
                   />
@@ -2037,6 +2100,54 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 label={t('fileManager.property.permissionDetails')}
                 value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)}
               />
+              {permissionEdit && permissionEdit.entry.path === properties.entry.path ? (
+                <div className="flex flex-col gap-2 rounded-lg border border-cyan-900/50 bg-cyan-950/20 p-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium tracking-[0.02em]">{t('fileManager.permissionEdit.label')}</span>
+                    <input
+                      aria-label={t('fileManager.permissionEdit.label')}
+                      autoFocus
+                      className="themed-input w-20 px-2 py-1 font-mono text-[12px] leading-5 outline-none"
+                      onChange={(event) => handlePermissionInputChange(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          setPermissionEdit(undefined);
+                        }
+                      }}
+                      placeholder="0755"
+                      value={permissionEdit.value}
+                    />
+                    <span className="text-[11px] text-slate-400">
+                      {formatPermissionSymbolic(
+                        parseInt(permissionEdit.value.trim(), 8) || 0,
+                        permissionEdit.entry.kind,
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-end gap-1">
+                    <button className="icon-btn h-7 px-2 text-xs" onClick={() => setPermissionEdit(undefined)} type="button">
+                      {t('fileManager.dialog.cancel')}
+                    </button>
+                    <button
+                      className="primary-btn h-7 px-2 text-xs"
+                      disabled={working}
+                      onClick={() => void submitPermissionEdit()}
+                      type="button"
+                    >
+                      {t('fileManager.permissionEdit.save')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  className="themed-menu-item w-full rounded-md px-2 py-1 text-left text-[12px] font-medium"
+                  disabled={properties.entry.permissions === undefined || !ready || working}
+                  onClick={() => openPermissionEdit(properties.entry)}
+                  type="button"
+                >
+                  {t('fileManager.menu.editPermissions')}
+                </button>
+              )}
             </div>
           </OverlayPanel>
         </OverlayLayer>
