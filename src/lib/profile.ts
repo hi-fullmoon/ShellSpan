@@ -1,5 +1,33 @@
 import type { ConnectionProfile } from "../types";
 
+export function parseQuickConnect(input: string): { username?: string; host: string; port?: number } | undefined {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const match = trimmed.match(/^(?:(?<user>[^@:\s]+)@)?(?<host>[^@:\s]+)(?::(?<port>\d+))?$/);
+  if (!match?.groups?.host) {
+    return undefined;
+  }
+
+  const host = match.groups.host.trim();
+  if (!host) {
+    return undefined;
+  }
+
+  const port = match.groups.port ? Number(match.groups.port) : undefined;
+  if (port !== undefined && (Number.isNaN(port) || port < 1 || port > 65535)) {
+    return undefined;
+  }
+
+  return {
+    username: match.groups.user?.trim() || undefined,
+    host,
+    port,
+  };
+}
+
 export function createEmptyProfile(): ConnectionProfile {
   return {
     id: crypto.randomUUID(),
@@ -29,6 +57,7 @@ export function sanitizeProfileForStorage(
         ? profile.password ?? ""
         : "",
     passphrase: "",
+    group: profile.group,
   };
 }
 

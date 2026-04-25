@@ -3,6 +3,7 @@ import type { ConnectionProfile } from "../../types";
 import {
   createEmptyProfile,
   describeSession,
+  parseQuickConnect,
   sanitizeProfileForStorage,
 } from "../profile";
 
@@ -105,5 +106,47 @@ describe("describeSession", () => {
         authMethod: "password",
       }),
     ).toBe("root@example.com");
+  });
+});
+
+describe("parseQuickConnect", () => {
+  it("parses user@host:port", () => {
+    expect(parseQuickConnect("root@192.168.1.1:2222")).toEqual({
+      username: "root",
+      host: "192.168.1.1",
+      port: 2222,
+    });
+  });
+
+  it("parses user@host", () => {
+    expect(parseQuickConnect("deploy@example.com")).toEqual({
+      username: "deploy",
+      host: "example.com",
+    });
+  });
+
+  it("parses host:port", () => {
+    expect(parseQuickConnect("server.local:2222")).toEqual({
+      host: "server.local",
+      port: 2222,
+    });
+  });
+
+  it("parses host only", () => {
+    expect(parseQuickConnect("192.168.1.1")).toEqual({
+      host: "192.168.1.1",
+    });
+  });
+
+  it("returns undefined for empty input", () => {
+    expect(parseQuickConnect("")).toBeUndefined();
+  });
+
+  it("returns undefined for invalid input", () => {
+    expect(parseQuickConnect("not valid")).toBeUndefined();
+  });
+
+  it("returns undefined for out-of-range port", () => {
+    expect(parseQuickConnect("host:99999")).toBeUndefined();
   });
 });

@@ -27,6 +27,7 @@ export interface ConnectionProfile {
   password?: string;
   privateKeyPath?: string;
   passphrase?: string;
+  group?: string;
 }
 
 export interface SessionSummary {
