@@ -472,7 +472,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgressState>();
   const [toast, setToast] = useState<ToastState>();
-  const [sensitivePathWarning, setSensitivePathWarning] = useState(false);
   const sessionId = session?.sessionId;
   const fileManagerState = useFileManagerStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
   const updateSessionState = useFileManagerStore((state) => state.updateSessionState);
@@ -502,6 +501,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const ready = !!session && session.status === 'connected' && !!connection;
   const readOnly = !!session && session.status !== 'connected';
   const currentPath = listing?.path;
+  const sensitivePathWarning = !!currentPath && !error && isSensitivePath(currentPath);
   const showInitialLoadingHint = !hasLoadedAnyListingRef.current;
   const locale = getActiveLocale();
   const columnDefs = useMemo<ColDef<RemoteFileEntry>[]>(
@@ -640,7 +640,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         selectedPath:
           current.selectedPath && nextListing.entries.some((entry) => entry.path === current.selectedPath) ? current.selectedPath : undefined,
       }));
-      setSensitivePathWarning(isSensitivePath(nextListing.path));
+      // sensitivePathWarning is now computed from currentPath
       fileManagerLogger.debug('目录加载完成', {
         sessionId,
         path: nextListing.path,
@@ -653,7 +653,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         error: String(nextError),
       });
       setFileError(formatDirectoryLoadError(nextError, requestedPath));
-      setSensitivePathWarning(false);
+      // sensitivePathWarning is now computed from currentPath
     } finally {
       setLoading(false);
     }
@@ -998,7 +998,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     setContextMenu(undefined);
     setToast(undefined);
     setDragActive(false);
-    setSensitivePathWarning(false);
     setDeleteProgress(undefined);
 
     if (!ready) {
@@ -1309,7 +1308,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       entry: target,
       value: formatPermissionOctal(target.permissions),
     });
-    setProperties(undefined);
   };
 
   const submitPermissionEdit = async () => {

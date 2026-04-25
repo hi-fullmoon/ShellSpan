@@ -117,6 +117,7 @@ describe("FileManager", () => {
                 path: "/var/www/keep.txt",
                 name: "keep.txt",
                 kind: "file",
+                permissions: 420,
               },
             ],
           },
@@ -144,7 +145,7 @@ describe("FileManager", () => {
   it("uses theme-aware classes for the subtitle, path input, and file name", () => {
     const { container } = render(<FileManager session={disconnectedSession} />);
 
-    expect(screen.getByText("文件")).toHaveClass("file-manager-subtitle");
+    expect(screen.getByText("文件")).toHaveClass("label");
     expect(screen.getByText("远程文件管理器")).toHaveClass("themed-heading");
     expect(screen.getByText("1")).toHaveClass("file-manager-count");
     expect(screen.getByPlaceholderText("输入远程路径并回车")).toHaveClass("themed-input");
@@ -171,5 +172,41 @@ describe("FileManager", () => {
 
     expect(screen.getByText("新建")).toHaveClass("dialog-kicker");
     expect(screen.getByPlaceholderText("example.txt")).toHaveClass("themed-input");
+  });
+
+  it("shows permission edit controls in the properties panel", () => {
+    render(<FileManager session={connectedSession} />);
+
+    fireEvent.contextMenu(screen.getByText("keep.txt"));
+    fireEvent.click(screen.getByRole("button", { name: "属性" }));
+
+    expect(screen.getByRole("button", { name: "修改权限" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "修改权限" }));
+    expect(screen.getByPlaceholderText("0755")).toBeInTheDocument();
+  });
+
+  it("shows a warning banner when navigating to a sensitive path", () => {
+    useFileManagerStore.setState({
+      sessions: {
+        "session-1": {
+          pathInput: "/etc",
+          listing: {
+            path: "/etc",
+            parentPath: "/",
+            entries: [
+              {
+                path: "/etc/nginx",
+                name: "nginx",
+                kind: "directory",
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    render(<FileManager session={connectedSession} />);
+    expect(screen.getByText(/系统敏感目录/)).toBeInTheDocument();
   });
 });
