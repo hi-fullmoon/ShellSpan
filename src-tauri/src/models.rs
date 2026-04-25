@@ -138,6 +138,37 @@ pub(crate) struct UploadLocalPathsRequest {
     pub(crate) operation_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HostKeyCheckRequest {
+    pub(crate) host: String,
+    pub(crate) port: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HostKeyCheckResult {
+    pub(crate) status: HostKeyCheckStatus,
+    pub(crate) fingerprint: Option<String>,
+    pub(crate) message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum HostKeyCheckStatus {
+    Match,
+    Mismatch,
+    NotFound,
+    Failure,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TrustHostRequest {
+    pub(crate) host: String,
+    pub(crate) port: u16,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AuthMethod {

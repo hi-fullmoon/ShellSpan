@@ -164,6 +164,17 @@ pub(crate) fn open_authenticated_session(
     Ok(session)
 }
 
+pub(crate) fn open_session_for_host_key(host: &str, port: u16) -> Result<Session, String> {
+    debug!("Opening SSH session for host key check host={host} port={port}");
+    let tcp = connect_tcp_stream(host, port)?;
+    let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
+    session.set_tcp_stream(tcp);
+    session
+        .handshake()
+        .map_err(|error| format!("ssh handshake failed: {error}"))?;
+    Ok(session)
+}
+
 fn authenticate(
     session: &mut Session,
     username: &str,
