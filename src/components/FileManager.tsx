@@ -1304,6 +1304,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
     setSelectedPath(target.path);
     setContextMenu(undefined);
+    setProperties({
+      entry: target,
+      directoryPath: target.kind === 'directory' ? target.path : parentDirectoryPath(target.path),
+    });
     setPermissionEdit({
       entry: target,
       value: formatPermissionOctal(target.permissions),
@@ -2013,7 +2017,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                   />
                   <MenuDivider />
                   <MenuButton
-                    disabled={!ready || loading || working}
+                    disabled={!ready || loading || working || contextMenu.entry?.permissions === undefined}
                     label={t('fileManager.menu.editPermissions')}
                     onClick={() => openPermissionEdit(contextMenu.entry)}
                   />
