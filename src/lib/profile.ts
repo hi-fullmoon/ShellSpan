@@ -57,7 +57,6 @@ export function sanitizeProfileForStorage(
         ? profile.password ?? ""
         : "",
     passphrase: "",
-    group: profile.group,
   };
 }
 

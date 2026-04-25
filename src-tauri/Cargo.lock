@@ -11,6 +11,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "socket2",
  "ssh2",
  "tauri",
