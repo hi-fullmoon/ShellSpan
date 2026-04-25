@@ -1,5 +1,6 @@
 import type { ChangeEvent, FormEvent } from 'react';
 import { t } from '../lib/i18n';
+import { parseQuickConnect } from '../lib/profile';
 import type { ConnectionProfile } from '../types';
 
 interface ConnectionFormProps {
@@ -49,6 +50,32 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       ) : (
         <p className="text-xs text-slate-400">{t('connectionForm.compactDescription')}</p>
       )}
+
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.quickConnect')}</span>
+        <input
+          className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+          placeholder={t('connectionForm.quickConnectPlaceholder')}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') {
+              return;
+            }
+            const parsed = parseQuickConnect(event.currentTarget.value);
+            if (!parsed) {
+              return;
+            }
+            onProfileChange({
+              ...profile,
+              name: parsed.host,
+              host: parsed.host,
+              username: parsed.username ?? profile.username,
+              port: parsed.port ?? profile.port,
+            });
+            event.currentTarget.value = '';
+          }}
+        />
+        <span className="text-[11px] text-slate-500">{t('connectionForm.quickConnectHint')}</span>
+      </label>
 
       <label className="flex flex-col gap-1">
         <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.name')}</span>
