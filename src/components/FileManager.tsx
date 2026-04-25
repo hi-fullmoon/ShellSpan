@@ -256,6 +256,26 @@ function parentDirectoryPath(path: string) {
   return `${normalized.startsWith('/') ? '/' : ''}${parts.join('/')}`;
 }
 
+const SENSITIVE_PATH_PATTERNS = [
+  '/etc',
+  '/root',
+  '/boot',
+  '/var/log',
+  '/proc',
+  '/sys',
+];
+
+function isSensitivePath(path: string): boolean {
+  const normalized = path.replace(/\\+/g, '/');
+  if (SENSITIVE_PATH_PATTERNS.some((sp) => normalized === sp || normalized.startsWith(`${sp}/`))) {
+    return true;
+  }
+  if (/(?:^|\/)\.ssh(?:\/|$)/.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
 function kindLabel(kind: RemoteFileKind) {
   switch (kind) {
     case 'directory':
@@ -452,6 +472,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgressState>();
   const [toast, setToast] = useState<ToastState>();
+  const [sensitivePathWarning, setSensitivePathWarning] = useState(false);
   const sessionId = session?.sessionId;
   const fileManagerState = useFileManagerStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
   const updateSessionState = useFileManagerStore((state) => state.updateSessionState);
@@ -619,6 +640,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         selectedPath:
           current.selectedPath && nextListing.entries.some((entry) => entry.path === current.selectedPath) ? current.selectedPath : undefined,
       }));
+      setSensitivePathWarning(isSensitivePath(nextListing.path));
       fileManagerLogger.debug('目录加载完成', {
         sessionId,
         path: nextListing.path,
@@ -631,6 +653,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         error: String(nextError),
       });
       setFileError(formatDirectoryLoadError(nextError, requestedPath));
+      setSensitivePathWarning(false);
     } finally {
       setLoading(false);
     }
@@ -975,6 +998,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     setContextMenu(undefined);
     setToast(undefined);
     setDragActive(false);
+    setSensitivePathWarning(false);
     setDeleteProgress(undefined);
 
     if (!ready) {
@@ -1825,6 +1849,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             {readOnly && listing ? (
               <div className="rounded-lg border border-amber-900/80 bg-amber-950/30 px-2 py-2 text-xs text-amber-200">
                 {t('fileManager.readOnly')}
+              </div>
+            ) : null}
+            {sensitivePathWarning && !error ? (
+              <div className="rounded-lg border border-amber-900/80 bg-amber-950/30 px-2 py-2 text-xs text-amber-200">
+                {t('fileManager.sensitivePathWarning')}
               </div>
             ) : null}
 
