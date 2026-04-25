@@ -26,7 +26,7 @@ import { isTauriRuntime } from './lib/tauri';
 import { shouldWarnOnClosedSession } from './lib/terminalStatus';
 import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
-import type { AppPreferences, ConnectionProfile, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
+import type { AppPreferences, ConnectionProfile, HostKeyCheckResponse, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
 
 const appLogger = createLogger('app');
 const SYSTEM_OPEN_SETTINGS_EVENT = 'system-open-settings';
@@ -98,6 +98,13 @@ function App() {
   const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
   const [, setIntlVersion] = useState(0);
   const [systemThemeMode, setSystemThemeMode] = useState<'dark' | 'light'>(() => getSystemThemeMode());
+  const [hostKeyDialog, setHostKeyDialog] = useState<{
+    open: boolean;
+    profile?: ConnectionProfile;
+    fingerprint?: string;
+    remember?: boolean;
+    rememberPassword?: boolean;
+  }>({ open: false });
   const preferences = useMemo(() => normalizePreferences(storedPreferences), [storedPreferences]);
   const appliedTheme = preferences.theme === 'system' ? systemThemeMode : preferences.theme;
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
@@ -459,25 +466,12 @@ function App() {
       },
     });
 
-  const handleConnect = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
-    if (!profile.host.trim() || !profile.username.trim()) {
-      appLogger.warn('连接参数校验失败：Host 或 Username 为空');
-      setErrorMessage(t('app.error.hostUsernameRequired'));
-      return;
-    }
-
-    if (!isTauriRuntime()) {
-      appLogger.warn('浏览器预览模式下尝试建立连接');
-      setErrorMessage(t('app.error.desktopOnly'));
-      return;
-    }
-
+  const proceedWithConnection = async (
+    profile: ConnectionProfile,
+    remember: boolean,
+    rememberPassword: boolean,
+  ) => {
     try {
-      appLogger.info('开始创建 SSH 会话', {
-        host: profile.host.trim(),
-        port: profile.port,
-        username: profile.username.trim(),
-      });
       if (remember) {
         const nextProfile = sanitizeProfileForStorage({
           ...profile,
@@ -518,6 +512,91 @@ function App() {
       });
     } catch (error) {
       appLogger.error('SSH 会话创建失败', error);
+      setErrorMessage(String(error));
+    }
+  };
+
+  const handleConnect = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
+    if (!profile.host.trim() || !profile.username.trim()) {
+      appLogger.warn('连接参数校验失败：Host 或 Username 为空');
+      setErrorMessage(t('app.error.hostUsernameRequired'));
+      return;
+    }
+
+    if (!isTauriRuntime()) {
+      appLogger.warn('浏览器预览模式下尝试建立连接');
+      setErrorMessage(t('app.error.desktopOnly'));
+      return;
+    }
+
+    try {
+      appLogger.info('开始检查主机密钥', {
+        host: profile.host.trim(),
+        port: profile.port,
+      });
+
+      const checkResult = await invoke<HostKeyCheckResponse>('check_host_key', {
+        request: {
+          host: profile.host.trim(),
+          port: profile.port,
+        },
+      });
+
+      if (checkResult.status === 'mismatch') {
+        appLogger.warn('主机密钥不匹配，可能存在中间人攻击', {
+          host: profile.host.trim(),
+          port: profile.port,
+        });
+        setErrorMessage(t('app.error.hostKeyMismatch'));
+        return;
+      }
+
+      if (checkResult.status === 'failure') {
+        appLogger.warn('主机密钥检查失败', {
+          host: profile.host.trim(),
+          port: profile.port,
+        });
+        setErrorMessage(checkResult.message || t('app.error.hostKeyCheckFailed'));
+        return;
+      }
+
+      if (checkResult.status === 'notFound') {
+        appLogger.info('首次连接到该主机，等待用户确认指纹', {
+          host: profile.host.trim(),
+          fingerprint: checkResult.fingerprint,
+        });
+        setHostKeyDialog({
+          open: true,
+          profile,
+          fingerprint: checkResult.fingerprint,
+          remember,
+          rememberPassword,
+        });
+        return;
+      }
+
+      await proceedWithConnection(profile, remember, rememberPassword);
+    } catch (error) {
+      appLogger.error('主机密钥检查或连接失败', error);
+      setErrorMessage(String(error));
+    }
+  };
+
+  const handleTrustAndConnect = async () => {
+    if (!hostKeyDialog.profile) return;
+
+    const { profile, remember, rememberPassword } = hostKeyDialog;
+    try {
+      await invoke('trust_host', {
+        request: {
+          host: profile.host.trim(),
+          port: profile.port,
+        },
+      });
+      setHostKeyDialog({ open: false });
+      await proceedWithConnection(profile, remember ?? false, rememberPassword ?? false);
+    } catch (error) {
+      appLogger.error('信任主机失败', error);
       setErrorMessage(String(error));
     }
   };
@@ -986,6 +1065,54 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      {hostKeyDialog.open && hostKeyDialog.profile && (
+        <div className="app-overlay" role="presentation">
+          <div
+            className="app-dialog surface w-full max-w-md p-4"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('hostKey.dialog.ariaLabel')}
+          >
+            <div className="flex flex-col gap-1">
+              <p className="label">{t('hostKey.dialog.kicker')}</p>
+              <h3 className="dialog-title text-sm font-semibold">
+                {t('hostKey.dialog.title', { host: hostKeyDialog.profile.host })}
+              </h3>
+            </div>
+
+            <p className="dialog-description mt-3 text-xs">
+              {t('hostKey.dialog.description')}
+            </p>
+
+            <div className="mt-3 rounded-lg bg-slate-900/80 p-3 font-mono text-xs text-slate-300 break-all">
+              {hostKeyDialog.fingerprint}
+            </div>
+
+            <p className="mt-3 text-[11px] text-amber-400/80">
+              {t('hostKey.dialog.warning')}
+            </p>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="icon-btn"
+                onClick={() => setHostKeyDialog({ open: false })}
+                type="button"
+              >
+                {t('app.common.cancel')}
+              </button>
+              <button
+                className="primary-btn"
+                onClick={() => void handleTrustAndConnect()}
+                type="button"
+              >
+                {t('hostKey.dialog.trustAndConnect')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <UpdateRestartDialog
         downloadProgress={updateDownloadProgress}

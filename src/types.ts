@@ -65,6 +65,12 @@ export interface SshClosedEvent {
   retryable: boolean;
 }
 
+export interface HostKeyCheckResponse {
+  status: "match" | "mismatch" | "notFound" | "failure";
+  fingerprint?: string;
+  message?: string;
+}
+
 export interface UploadProgressEvent {
   operationId: string;
   currentPath?: string;
