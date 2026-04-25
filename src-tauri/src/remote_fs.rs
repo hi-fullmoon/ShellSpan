@@ -989,6 +989,21 @@ fn scan_local_upload_path(local_path: &Path) -> Result<UploadScanStats, String> 
     ))
 }
 
+fn is_private_key_file(path: &std::path::Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let lower = name.to_lowercase();
+    lower.ends_with(".pem")
+        || lower.ends_with(".key")
+        || lower.ends_with(".ppk")
+        || name == "id_rsa"
+        || name == "id_ed25519"
+        || name == "id_ecdsa"
+        || name == "id_dsa"
+}
+
 fn upload_local_entry_to_path(
     sftp: &Sftp,
     local_path: &Path,
@@ -1033,11 +1048,16 @@ fn upload_local_entry_to_path(
 
         let mut local_file = fs::File::open(local_path)
             .map_err(|error| format!("failed to open local file: {error}"))?;
+        let upload_mode = if is_private_key_file(remote_path) {
+            0o600
+        } else {
+            0o644
+        };
         let mut remote_file = sftp
             .open_mode(
                 remote_path,
                 OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
-                0o644,
+                upload_mode,
                 OpenType::File,
             )
             .map_err(|error| format!("failed to create remote upload target: {error}"))?;
