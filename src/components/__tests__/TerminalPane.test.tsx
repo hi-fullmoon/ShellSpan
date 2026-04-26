@@ -31,6 +31,8 @@ const { MockTerminal, terminalInstances, eventHandlers } = vi.hoisted(() => {
 
     open() {}
 
+    attachCustomKeyEventHandler() {}
+
     write(message: string) {
       this.writeCalls.push(message);
     }

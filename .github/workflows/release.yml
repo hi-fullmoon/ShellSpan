@@ -100,8 +100,36 @@ jobs:
 
           if [[ ! -d "$bundle_dir" ]]; then
             echo "Bundle directory not found for target ${{ matrix.rust_target }}" >&2
-            find src-tauri/target -maxdepth 4 -type d | sort >&2 || true
+            find src-tauri/target -type d | sort >&2 || true
             exit 1
+          fi
+
+          if [[ "${{ matrix.platform }}" == darwin-* ]]; then
+            app_path="$(find "$bundle_dir" -name '*.app' -type d -prune | head -n 1)"
+            if [[ -z "$app_path" ]]; then
+              echo "macOS .app bundle not found in $bundle_dir" >&2
+              find "$bundle_dir" -print >&2
+              exit 1
+            fi
+
+            app_binary="$app_path/Contents/MacOS/TermBridge"
+            if [[ ! -x "$app_binary" ]]; then
+              echo "macOS app executable not found: $app_binary" >&2
+              exit 1
+            fi
+
+            archs="$(lipo -archs "$app_binary")"
+            expected_arch="arm64"
+            if [[ "${{ matrix.platform }}" == "darwin-x86_64" ]]; then
+              expected_arch="x86_64"
+            fi
+
+            if [[ " $archs " != *" $expected_arch "* ]]; then
+              echo "Unexpected macOS app architecture for ${{ matrix.platform }}: $archs" >&2
+              exit 1
+            fi
+
+            codesign --verify --deep --strict --verbose=2 "$app_path"
           fi
 
           cp -R "$bundle_dir" release-artifact/bundle
@@ -115,6 +143,11 @@ jobs:
               if [[ -f "${archive}.sig" ]]; then
                 mv "${archive}.sig" "${renamed_archive}.sig"
               fi
+            fi
+
+            dmg="$(find release-artifact/bundle -type f -name '*.dmg' | head -n 1)"
+            if [[ -n "$dmg" ]]; then
+              mv "$dmg" "$(dirname "$dmg")/TermBridge-${{ matrix.platform }}.dmg"
             fi
           fi
 
