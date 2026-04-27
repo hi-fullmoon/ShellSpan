@@ -26,6 +26,8 @@ import { isTauriRuntime } from './lib/tauri';
 import { shouldWarnOnClosedSession } from './lib/terminalStatus';
 import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
+import { DEFAULT_SHORTCUTS, matchesBinding } from './lib/keyboard';
+import type { ShortcutAction } from './lib/keyboard';
 import type { AppPreferences, ConnectionProfile, HostKeyCheckResponse, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
 
 const appLogger = createLogger('app');
@@ -39,6 +41,7 @@ const defaultPreferences: AppPreferences = {
   autoReconnect: true,
   startupUpdateCheck: true,
   historyLimit: 8,
+  keyboardShortcuts: {},
 };
 
 function getSystemThemeMode() {
@@ -63,6 +66,7 @@ function normalizePreferences(value: Partial<AppPreferences> | null | undefined)
     autoReconnect: value?.autoReconnect !== false,
     startupUpdateCheck: value?.startupUpdateCheck !== false,
     historyLimit: typeof value?.historyLimit === 'number' && value.historyLimit >= 3 && value.historyLimit <= 20 ? value.historyLimit : 8,
+    keyboardShortcuts: value?.keyboardShortcuts ?? {},
   };
 }
 
@@ -112,6 +116,101 @@ function App() {
   const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
   const sessionsRef = useRef<SessionState[]>([]);
   const autoReconnectAttemptedRef = useRef<Record<string, true>>({});
+  const dialogStateRef = useRef({
+    hostKeyOpen: false,
+    connectOpen: false,
+    settingsOpen: false,
+    pendingDelete: false,
+    pendingClose: false,
+    exitOpen: false,
+  });
+
+  useEffect(() => {
+    dialogStateRef.current = {
+      hostKeyOpen: hostKeyDialog.open,
+      connectOpen: connectDialogOpen,
+      settingsOpen: settingsDialogOpen,
+      pendingDelete: !!pendingDeleteProfileId,
+      pendingClose: !!pendingCloseSessionId,
+      exitOpen: exitDialogOpen,
+    };
+  }, [hostKeyDialog.open, connectDialogOpen, settingsDialogOpen, pendingDeleteProfileId, pendingCloseSessionId, exitDialogOpen]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const merged = { ...DEFAULT_SHORTCUTS, ...preferences.keyboardShortcuts };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Check if an input element is focused
+      const tag = document.activeElement?.tagName.toLowerCase();
+      const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+
+      const dlg = dialogStateRef.current;
+      const anyDialogOpen = dlg.hostKeyOpen || dlg.connectOpen || dlg.settingsOpen || dlg.pendingDelete || dlg.pendingClose || dlg.exitOpen;
+
+      // Escape always closes the active dialog, even if input is focused
+      if (matchesBinding(merged.closeDialog, event)) {
+        if (dlg.hostKeyOpen) { setHostKeyDialog({ open: false }); event.preventDefault(); return; }
+        if (dlg.connectOpen) { setConnectDialogOpen(false); event.preventDefault(); return; }
+        if (dlg.settingsOpen) { setSettingsDialogOpen(false); event.preventDefault(); return; }
+        if (dlg.pendingDelete) { setPendingDeleteProfileId(undefined); event.preventDefault(); return; }
+        if (dlg.pendingClose) { setPendingCloseSessionId(undefined); event.preventDefault(); return; }
+        if (dlg.exitOpen) { setExitDialogOpen(false); event.preventDefault(); return; }
+        return;
+      }
+
+      // Skip other shortcuts when a dialog or input is active
+      if (anyDialogOpen || isInput) return;
+
+      if (matchesBinding(merged.newConnection, event)) {
+        event.preventDefault();
+        setDraftProfile(createEmptyProfile());
+        setErrorMessage(undefined);
+        setConnectDialogOpen(true);
+        return;
+      }
+
+      if (matchesBinding(merged.openSettings, event)) {
+        event.preventDefault();
+        setSettingsDialogOpen(true);
+        return;
+      }
+
+      if (matchesBinding(merged.closeSession, event)) {
+        event.preventDefault();
+        const currentSessions = sessionsRef.current;
+        if (currentSessions.length > 0) {
+          setPendingCloseSessionId(activeSessionId ?? currentSessions[currentSessions.length - 1].sessionId);
+        }
+        return;
+      }
+
+      if (matchesBinding(merged.nextTab, event)) {
+        event.preventDefault();
+        const currentSessions = sessionsRef.current;
+        if (currentSessions.length > 1) {
+          const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
+          const next = idx === -1 ? currentSessions[0] : currentSessions[(idx + 1) % currentSessions.length];
+          setActiveSessionId(next.sessionId);
+        }
+        return;
+      }
+
+      if (matchesBinding(merged.prevTab, event)) {
+        event.preventDefault();
+        const currentSessions = sessionsRef.current;
+        if (currentSessions.length > 1) {
+          const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
+          const prev = idx === -1 ? currentSessions[currentSessions.length - 1] : currentSessions[(idx - 1 + currentSessions.length) % currentSessions.length];
+          setActiveSessionId(prev.sessionId);
+        }
+        return;
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [preferences.keyboardShortcuts, activeSessionId]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -184,6 +283,13 @@ function App() {
       stopStatus = nextStopStatus;
 
       const nextStopClosed = await listen<SshClosedEvent>('ssh-closed', (event) => {
+        // Stop port forwards when session closes
+        if (isTauriRuntime()) {
+          const forwardOpId = `pf-${event.payload.sessionId}`;
+          void invoke('stop_port_forwards', { operationId: forwardOpId })
+            .catch(() => { /* port forwards may not have been started */ });
+        }
+
         const currentSession = sessionsRef.current.find((session) => session.sessionId === event.payload.sessionId);
         const shouldAutoReconnect =
           !!currentSession &&
@@ -267,6 +373,55 @@ function App() {
       cancelled = true;
     };
   }, [preferences.locale]);
+
+  // Migrate passwords from localStorage to OS keychain (one-time)
+  useEffect(() => {
+    if (!isTauriRuntime() || !savedProfiles.length) {
+      return;
+    }
+
+    const migrated = localStorage.getItem('termbridge.passwordsMigrated');
+    if (migrated === '1') {
+      return;
+    }
+
+    const passwordsToMigrate: Array<[string, string]> = [];
+    for (const profile of savedProfiles) {
+      if (profile.rememberPassword && profile.password) {
+        passwordsToMigrate.push([profile.id, profile.password]);
+      }
+    }
+
+    if (passwordsToMigrate.length === 0) {
+      localStorage.setItem('termbridge.passwordsMigrated', '1');
+      return;
+    }
+
+    appLogger.info('Migrating passwords to keychain', { count: passwordsToMigrate.length });
+
+    invoke<Array<[string, boolean]>>('migrate_passwords', {
+      profiles: passwordsToMigrate,
+    })
+      .then((results) => {
+        const allSucceeded = results.every(([, ok]) => ok);
+        if (allSucceeded) {
+          localStorage.setItem('termbridge.passwordsMigrated', '1');
+          // Clear passwords from localStorage profiles
+          setSavedProfiles((current) =>
+            current.map((p) => ({
+              ...p,
+              password: '',
+            })),
+          );
+          appLogger.info('Passwords migrated to keychain successfully');
+        } else {
+          appLogger.warn('Some passwords failed to migrate', { results });
+        }
+      })
+      .catch((error) => {
+        appLogger.error('Password migration failed', { error: String(error) });
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runUpdateCheck = useCallback(async (mode: 'startup' | 'manual') => {
     if (!isTauriRuntime()) {
@@ -450,21 +605,32 @@ function App() {
     };
   }, []);
 
-  const createSessionFromProfile = async (profile: ConnectionProfile) =>
-    invoke<SessionSummary>('create_session', {
-      request: {
-        name: describeSession(profile),
-        host: profile.host.trim(),
-        port: profile.port,
-        username: profile.username.trim(),
-        authMethod: profile.authMethod,
-        password: profile.password || undefined,
-        privateKeyPath: profile.privateKeyPath?.trim() || undefined,
-        passphrase: profile.passphrase || undefined,
-        terminalCols: 120,
-        terminalRows: 32,
-      },
-    });
+  const createSessionFromProfile = async (profile: ConnectionProfile) => {
+    const request: Record<string, unknown> = {
+      name: describeSession(profile),
+      host: profile.host.trim(),
+      port: profile.port,
+      username: profile.username.trim(),
+      authMethod: profile.authMethod,
+      password: profile.password || undefined,
+      privateKeyPath: profile.privateKeyPath?.trim() || undefined,
+      passphrase: profile.passphrase || undefined,
+      terminalCols: 120,
+      terminalRows: 32,
+    };
+    if (profile.jumpHost) {
+      request.jumpHost = {
+        host: profile.jumpHost.host.trim(),
+        port: profile.jumpHost.port,
+        username: profile.jumpHost.username.trim(),
+        authMethod: profile.jumpHost.authMethod,
+        password: profile.jumpHost.password || undefined,
+        privateKeyPath: profile.jumpHost.privateKeyPath?.trim() || undefined,
+        passphrase: profile.jumpHost.passphrase || undefined,
+      };
+    }
+    return invoke<SessionSummary>('create_session', { request });
+  };
 
   const proceedWithConnection = async (
     profile: ConnectionProfile,
@@ -473,6 +639,17 @@ function App() {
   ) => {
     try {
       if (remember) {
+        // Store password in OS keychain before saving profile
+        if (rememberPassword && profile.password && isTauriRuntime()) {
+          try {
+            await invoke('store_password', {
+              profileId: profile.id,
+              password: profile.password,
+            });
+          } catch (error) {
+            appLogger.warn('Failed to store password in keychain', { error: String(error) });
+          }
+        }
         const nextProfile = sanitizeProfileForStorage({
           ...profile,
           rememberPassword,
@@ -496,6 +673,36 @@ function App() {
       sessionsRef.current = insertSessionAfterActive(sessionsRef.current, nextSession, insertAfterSessionId);
       setSessions((current) => insertSessionAfterActive(current, nextSession, insertAfterSessionId));
       setActiveSessionId(summary.sessionId);
+
+      // Start port forwards if configured
+      if ((profile.portForwards?.length ?? 0) > 0 && isTauriRuntime()) {
+        const forwardOpId = `pf-${summary.sessionId}`;
+        void invoke('start_port_forwards', {
+          operationId: forwardOpId,
+          host: profile.host.trim(),
+          port: profile.port,
+          username: profile.username.trim(),
+          authMethod: profile.authMethod,
+          password: profile.password || undefined,
+          privateKeyPath: profile.privateKeyPath?.trim() || undefined,
+          passphrase: profile.passphrase || undefined,
+          jumpHost: profile.jumpHost
+            ? {
+                host: profile.jumpHost.host.trim(),
+                port: profile.jumpHost.port,
+                username: profile.jumpHost.username.trim(),
+                authMethod: profile.jumpHost.authMethod,
+                password: profile.jumpHost.password || undefined,
+                privateKeyPath: profile.jumpHost.privateKeyPath?.trim() || undefined,
+                passphrase: profile.jumpHost.passphrase || undefined,
+              }
+            : undefined,
+          forwards: profile.portForwards,
+        }).catch((error) => {
+          appLogger.warn('Failed to start port forwards', { error: String(error) });
+        });
+      }
+
       setDraftProfile({
         ...createEmptyProfile(),
         username: profile.username,
@@ -601,10 +808,23 @@ function App() {
     }
   };
 
-  const loadProfile = (profile: ConnectionProfile) => {
+  const loadProfile = async (profile: ConnectionProfile) => {
+    let password = '';
+    if (profile.rememberPassword && isTauriRuntime()) {
+      try {
+        const stored = await invoke<string | null>('retrieve_password', {
+          profileId: profile.id,
+        });
+        if (stored) {
+          password = stored;
+        }
+      } catch (error) {
+        appLogger.warn('Failed to retrieve password from keychain', { error: String(error) });
+      }
+    }
     setDraftProfile({
       ...profile,
-      password: profile.rememberPassword ? (profile.password ?? '') : '',
+      password,
       passphrase: '',
     });
     setErrorMessage(undefined);
@@ -625,6 +845,14 @@ function App() {
       appLogger.info('请求关闭会话', { sessionId });
       await invoke('close_session', { sessionId });
     } finally {
+      // Stop port forwards if running
+      if (isTauriRuntime()) {
+        const forwardOpId = `pf-${sessionId}`;
+        void invoke('stop_port_forwards', { operationId: forwardOpId })
+          .catch((error) => {
+            appLogger.warn('Failed to stop port forwards', { error: String(error) });
+          });
+      }
       let nextActiveSessionId: string | undefined;
       setSessions((current) => {
         const remaining = current.filter((session) => session.sessionId !== sessionId);
@@ -754,6 +982,12 @@ function App() {
     }
 
     appLogger.info('删除历史连接', { profileId: pendingDeleteProfileId });
+    if (isTauriRuntime()) {
+      void invoke('remove_password', { profileId: pendingDeleteProfileId })
+        .catch((error) => {
+          appLogger.warn('Failed to remove password from keychain', { error: String(error) });
+        });
+    }
     setSavedProfiles((current) => current.filter((item) => item.id !== pendingDeleteProfileId));
     setPendingDeleteProfileId(undefined);
   };

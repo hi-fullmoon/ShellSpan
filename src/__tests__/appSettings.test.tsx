@@ -142,7 +142,6 @@ describe('App settings', () => {
 
     expect(screen.getByRole('dialog', { name: '应用设置' })).toBeInTheDocument();
     expect(screen.getByLabelText('主题')).toBeInTheDocument();
-    expect(screen.getByLabelText('语言')).toBeInTheDocument();
   });
 
   it('switches locale with translated copy and persists the theme selection', async () => {
@@ -153,6 +152,7 @@ describe('App settings', () => {
     });
     await emitSystemOpenSettings();
     fireEvent.change(screen.getByLabelText('主题'), { target: { value: 'light' } });
+    fireEvent.click(screen.getByText('语言'));
     fireEvent.change(screen.getByLabelText('语言'), { target: { value: 'en-US' } });
 
     await waitFor(() => {

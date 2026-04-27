@@ -20,6 +20,34 @@ pub(crate) struct SessionSummary {
     pub(crate) username: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PortForwardKind {
+    Local,
+    Remote,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PortForwardConfig {
+    pub(crate) kind: PortForwardKind,
+    pub(crate) local_port: u16,
+    pub(crate) remote_host: String,
+    pub(crate) remote_port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JumpHostConfig {
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) username: String,
+    pub(crate) auth_method: AuthMethod,
+    pub(crate) password: Option<String>,
+    pub(crate) private_key_path: Option<String>,
+    pub(crate) passphrase: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionCreateRequest {
@@ -33,9 +61,12 @@ pub(crate) struct SessionCreateRequest {
     pub(crate) passphrase: Option<String>,
     pub(crate) terminal_cols: u32,
     pub(crate) terminal_rows: u32,
+    #[serde(default)]
+    pub(crate) port_forwards: Vec<PortForwardConfig>,
+    pub(crate) jump_host: Option<JumpHostConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RemoteConnectionRequest {
     pub(crate) host: String,
@@ -45,6 +76,7 @@ pub(crate) struct RemoteConnectionRequest {
     pub(crate) password: Option<String>,
     pub(crate) private_key_path: Option<String>,
     pub(crate) passphrase: Option<String>,
+    pub(crate) jump_host: Option<JumpHostConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,7 +201,7 @@ pub(crate) struct TrustHostRequest {
     pub(crate) port: u16,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AuthMethod {
     Password,

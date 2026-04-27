@@ -1,10 +1,12 @@
-use crate::models::{AuthMethod, ConnectedSftp, RemoteConnectionRequest, SessionCreateRequest};
+use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest, SessionCreateRequest};
 use log::debug;
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
 use std::{
-    net::{TcpStream, ToSocketAddrs},
+    io::copy,
+    net::{TcpListener, TcpStream, ToSocketAddrs},
     path::Path,
+    thread,
     time::Duration,
 };
 
@@ -173,6 +175,99 @@ pub(crate) fn open_session_for_host_key(host: &str, port: u16) -> Result<Session
         .handshake()
         .map_err(|error| format!("ssh handshake failed: {error}"))?;
     Ok(session)
+}
+
+pub(crate) fn connect_through_jump_host(
+    jump: &JumpHostConfig,
+    target_host: &str,
+    target_port: u16,
+    target_username: &str,
+    target_auth_method: AuthMethod,
+    target_password: Option<&str>,
+    target_private_key_path: Option<&str>,
+    target_passphrase: Option<&str>,
+) -> Result<(Session, Session), String> {
+    debug!(
+        "Connecting through jump host {}:{} to target {}:{}",
+        jump.host, jump.port, target_host, target_port
+    );
+
+    // 1. Connect to jump host
+    let jump_tcp = connect_tcp_stream(&jump.host, jump.port)?;
+    let jump_session = open_authenticated_session(
+        jump_tcp,
+        &jump.username,
+        jump.auth_method,
+        jump.password.as_deref(),
+        jump.private_key_path.as_deref(),
+        jump.passphrase.as_deref(),
+    )?;
+
+    // 2. Create a local TCP socket pair for bridging
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("failed to bind local bridge socket: {e}"))?;
+    let local_port = listener
+        .local_addr()
+        .map_err(|e| format!("failed to get local bridge address: {e}"))?
+        .port();
+
+    // 3. Open direct-tcpip channel through jump host to target
+    let channel = jump_session
+        .channel_direct_tcpip(target_host, target_port, Some(("127.0.0.1", local_port)))
+        .map_err(|e| format!("failed to open direct-tcpip through jump host: {e}"))?;
+
+    // 4. Accept connection from the other side of the bridge
+    let server_stream = listener
+        .accept()
+        .map_err(|e| format!("failed to accept bridge connection: {e}"))?
+        .0;
+
+    // 5. Connect client side of the bridge (this will be the target session's TCP stream)
+    let client_stream = TcpStream::connect(("127.0.0.1", local_port))
+        .map_err(|e| format!("failed to connect to bridge socket: {e}"))?;
+    configure_tcp_stream(&client_stream)
+        .map_err(|e| format!("failed to configure bridge client socket: {e}"))?;
+
+    // 6. Spawn a thread to bridge data between the jump channel and the server side
+    thread::spawn(move || {
+        let _ = bridge_channel_tcp(channel, server_stream);
+    });
+
+    // 7. Open authenticated session on the client stream
+    let target_session = open_authenticated_session(
+        client_stream,
+        target_username,
+        target_auth_method,
+        target_password,
+        target_private_key_path,
+        target_passphrase,
+    )?;
+
+    debug!("Connected to target through jump host successfully");
+    Ok((jump_session, target_session))
+}
+
+fn bridge_channel_tcp(
+    mut channel: ssh2::Channel,
+    mut tcp: TcpStream,
+) -> Result<(), String> {
+    let mut tcp_clone = tcp
+        .try_clone()
+        .map_err(|e| format!("failed to clone bridge TCP stream: {e}"))?;
+
+    let mut channel_clone = channel.stream(0);
+
+    let t1 = thread::spawn(move || {
+        let _ = copy(&mut tcp_clone, &mut channel_clone);
+    });
+
+    let t2 = thread::spawn(move || {
+        let _ = copy(&mut channel, &mut tcp);
+    });
+
+    let _ = t1.join();
+    let _ = t2.join();
+    Ok(())
 }
 
 fn authenticate(

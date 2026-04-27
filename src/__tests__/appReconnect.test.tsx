@@ -48,7 +48,7 @@ const {
 });
 
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
+  invoke: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -186,6 +186,7 @@ describe('App reconnect flow', () => {
         port: 22,
         username: 'root',
       })
+      .mockResolvedValueOnce(undefined) // stop_port_forwards on ssh-closed
       .mockResolvedValueOnce({
         sessionId: 'session-2',
         title: 'Demo',
@@ -221,7 +222,7 @@ describe('App reconnect flow', () => {
     });
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenNthCalledWith(3, 'create_session', expect.anything());
+      expect(invokeMock).toHaveBeenNthCalledWith(4, 'create_session', expect.anything());
     });
 
     expect(replaceSessionStateKeyMock).toHaveBeenCalledWith('session-1', 'session-2');
@@ -268,6 +269,6 @@ describe('App reconnect flow', () => {
       });
     });
 
-    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(invokeMock).toHaveBeenCalledTimes(3);
   });
 });

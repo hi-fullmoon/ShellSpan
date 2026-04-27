@@ -52,11 +52,15 @@ export function sanitizeProfileForStorage(
     ...profile,
     pinned: profile.pinned ?? false,
     favorite: profile.favorite ?? false,
-    password:
-      profile.authMethod === "password" && profile.rememberPassword
-        ? profile.password ?? ""
-        : "",
+    password: "", // always clear — passwords are stored in OS keychain
     passphrase: "",
+    jumpHost: profile.jumpHost
+      ? {
+          ...profile.jumpHost,
+          password: "",
+          passphrase: "",
+        }
+      : undefined,
   };
 }
 

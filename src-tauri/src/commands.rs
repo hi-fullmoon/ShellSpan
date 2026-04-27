@@ -1,13 +1,18 @@
 use super::*;
 use crate::models::{
-    ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest, DeleteRemotePathRequest,
-    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, ManagedSession,
-    OpenRemoteFileRequest, RemoteDirectoryListing, RemoteDirectoryRequest, RenameRemotePathRequest,
-    SessionCommand, SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
+    AuthMethod, ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest,
+    DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
+    JumpHostConfig, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
+    RemoteDirectoryListing, RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand,
+    SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
-use std::{sync::mpsc, thread};
+use std::sync::{
+    atomic::AtomicBool,
+    Arc, mpsc,
+};
+use std::thread;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
@@ -344,6 +349,69 @@ pub(crate) async fn update_remote_permissions(
         info!("Updated remote permissions successfully");
     }
     result
+}
+
+#[tauri::command]
+pub(crate) fn store_password(profile_id: String, password: String) -> Result<(), String> {
+    crate::keychain::set_password(&profile_id, &password)
+}
+
+#[tauri::command]
+pub(crate) fn retrieve_password(profile_id: String) -> Result<Option<String>, String> {
+    crate::keychain::get_password(&profile_id)
+}
+
+#[tauri::command]
+pub(crate) fn remove_password(profile_id: String) -> Result<(), String> {
+    crate::keychain::delete_password(&profile_id)
+}
+
+#[tauri::command]
+pub(crate) fn migrate_passwords(
+    profiles: Vec<(String, String)>,
+) -> Result<Vec<(String, bool)>, String> {
+    Ok(crate::keychain::migrate_passwords(&profiles))
+}
+
+#[tauri::command]
+pub(crate) fn start_port_forwards(
+    forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    operation_id: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: AuthMethod,
+    password: Option<String>,
+    private_key_path: Option<String>,
+    passphrase: Option<String>,
+    jump_host: Option<JumpHostConfig>,
+    forwards: Vec<PortForwardConfig>,
+) -> Result<(), String> {
+    info!("Starting port forwards operation_id={operation_id} count={}", forwards.len());
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    forwards_state.register(operation_id.clone(), cancel_flag.clone())?;
+
+    let operation_id_clone = operation_id.clone();
+    thread::spawn(move || {
+        crate::port_forward::start_port_forwards(
+            host, port, username, auth_method,
+            password, private_key_path, passphrase,
+            jump_host, forwards, cancel_flag,
+        );
+        info!("Port forwards operation completed operation_id={operation_id_clone}");
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn stop_port_forwards(
+    forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    operation_id: String,
+) -> Result<(), String> {
+    info!("Stopping port forwards operation_id={operation_id}");
+    forwards_state.cancel(&operation_id)
 }
 
 #[tauri::command]

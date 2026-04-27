@@ -40,7 +40,7 @@ describe("sanitizeProfileForStorage", () => {
     authMethod: "password",
   };
 
-  it("keeps the password only when password auth is remembered", () => {
+  it("always clears the password (stored in OS keychain)", () => {
     expect(
       sanitizeProfileForStorage({
         ...baseProfile,
@@ -53,7 +53,7 @@ describe("sanitizeProfileForStorage", () => {
       pinned: false,
       favorite: false,
       rememberPassword: true,
-      password: "secret",
+      password: "",
       passphrase: "",
     });
   });

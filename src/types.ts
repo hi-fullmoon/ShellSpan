@@ -1,7 +1,15 @@
 export type AuthMethod = "password" | "key";
+export type PortForwardKind = "local" | "remote";
 export type SessionStatus = "connecting" | "connected" | "disconnected" | "error";
 export type ThemePreference = "dark" | "light" | "system";
 export type LocalePreference = "zh-CN" | "en-US";
+export type ShortcutAction =
+  | "closeDialog"
+  | "newConnection"
+  | "openSettings"
+  | "closeSession"
+  | "nextTab"
+  | "prevTab";
 
 export interface AppPreferences {
   theme: ThemePreference;
@@ -12,6 +20,7 @@ export interface AppPreferences {
   autoReconnect: boolean;
   startupUpdateCheck: boolean;
   historyLimit: number;
+  keyboardShortcuts?: Partial<Record<ShortcutAction, string>>;
 }
 
 export interface ConnectionProfile {
@@ -27,6 +36,8 @@ export interface ConnectionProfile {
   password?: string;
   privateKeyPath?: string;
   passphrase?: string;
+  jumpHost?: JumpHostConfig;
+  portForwards?: PortForwardConfig[];
 }
 
 export interface SessionSummary {
@@ -35,6 +46,23 @@ export interface SessionSummary {
   host: string;
   port: number;
   username: string;
+}
+
+export interface JumpHostConfig {
+  host: string;
+  port: number;
+  username: string;
+  authMethod: AuthMethod;
+  password?: string;
+  privateKeyPath?: string;
+  passphrase?: string;
+}
+
+export interface PortForwardConfig {
+  kind: PortForwardKind;
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
 }
 
 export interface SessionState extends SessionSummary {

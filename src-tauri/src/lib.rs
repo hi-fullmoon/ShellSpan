@@ -1,8 +1,10 @@
 mod commands;
 mod connection;
+mod keychain;
 mod known_hosts;
 mod menu;
 mod models;
+mod port_forward;
 mod remote_fs;
 mod session;
 
@@ -114,6 +116,7 @@ pub fn run() {
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
+        .manage(port_forward::PortForwardManager::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::write_session,
@@ -137,6 +140,12 @@ pub fn run() {
             commands::update_remote_permissions,
             commands::check_host_key,
             commands::trust_host,
+            commands::store_password,
+            commands::retrieve_password,
+            commands::remove_password,
+            commands::migrate_passwords,
+            commands::start_port_forwards,
+            commands::stop_port_forwards,
         ]);
 
     menu::configure_builder(builder)

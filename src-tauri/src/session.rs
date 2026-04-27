@@ -16,7 +16,7 @@ use ssh2::BlockDirections;
 use std::os::fd::AsRawFd;
 
 use crate::{
-    connection::{connect_tcp_stream, open_authenticated_session, summarize_session_request},
+    connection::{connect_tcp_stream, connect_through_jump_host, open_authenticated_session, summarize_session_request},
     emit_data, emit_status,
     models::{ClosedReasonKind, SessionCommand, SessionCreateRequest, SessionStatus},
 };
@@ -42,15 +42,31 @@ pub(crate) fn run_ssh_session(
         Some(format!("dialing {}:{}...", request.host, request.port)),
     )?;
 
-    let tcp = connect_tcp_stream(&request.host, request.port)?;
-    let session = open_authenticated_session(
-        tcp,
-        &request.username,
-        request.auth_method,
-        request.password.as_deref(),
-        request.private_key_path.as_deref(),
-        request.passphrase.as_deref(),
-    )?;
+    let mut _jump_session_holder: Option<Box<ssh2::Session>> = None;
+    let session = if let Some(ref jump) = request.jump_host {
+        let (jump_session, target_session) = connect_through_jump_host(
+            jump,
+            &request.host,
+            request.port,
+            &request.username,
+            request.auth_method,
+            request.password.as_deref(),
+            request.private_key_path.as_deref(),
+            request.passphrase.as_deref(),
+        )?;
+        _jump_session_holder = Some(Box::new(jump_session));
+        target_session
+    } else {
+        let tcp = connect_tcp_stream(&request.host, request.port)?;
+        open_authenticated_session(
+            tcp,
+            &request.username,
+            request.auth_method,
+            request.password.as_deref(),
+            request.private_key_path.as_deref(),
+            request.passphrase.as_deref(),
+        )?
+    };
 
     let mut channel = session
         .channel_session()

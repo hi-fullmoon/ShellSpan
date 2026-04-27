@@ -38,7 +38,7 @@ describe("ConnectionForm", () => {
     fireEvent.change(screen.getByDisplayValue("Demo"), {
       target: { value: "Production" },
     });
-    fireEvent.change(screen.getByDisplayValue("22"), {
+    fireEvent.change(screen.getAllByDisplayValue("22")[0], {
       target: { value: "2222" },
     });
 
@@ -63,7 +63,7 @@ describe("ConnectionForm", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("combobox"), {
+    fireEvent.change(screen.getAllByRole("combobox")[0], {
       target: { value: "key" },
     });
 
@@ -108,7 +108,7 @@ describe("ConnectionForm", () => {
 
     expect(screen.getByDisplayValue("Demo")).toHaveClass("themed-input");
     expect(screen.getByDisplayValue("example.com")).toHaveClass("themed-input");
-    expect(screen.getByRole("combobox")).toHaveClass("themed-input");
+    expect(screen.getAllByRole("combobox")[0]).toHaveClass("themed-input");
     expect(screen.getByText("保存连接信息").closest("label")).toHaveClass("themed-checkbox-row");
     expect(screen.getByText("保存密码").closest("label")).toHaveClass("themed-checkbox-row");
     expect(screen.getAllByRole("checkbox")[0]).toHaveClass("themed-checkbox");
