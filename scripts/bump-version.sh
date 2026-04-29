@@ -20,10 +20,12 @@ case "$CHOICE" in
 esac
 
 NEW=$(node -p "
-  const [m, n, p] = '$CURRENT'.split('.').map(Number);
-  if ('$BUMP' === 'patch') return \`\${m}.\${n}.\${p + 1}\`;
-  if ('$BUMP' === 'minor') return \`\${m}.\${n + 1}.0\`;
-  if ('$BUMP' === 'major') return \`\${m + 1}.0.0\`;
+  (() => {
+    const [m, n, p] = '$CURRENT'.split('.').map(Number);
+    if ('$BUMP' === 'patch') return \`\${m}.\${n}.\${p + 1}\`;
+    if ('$BUMP' === 'minor') return \`\${m}.\${n + 1}.0\`;
+    return \`\${m + 1}.0.0\`;
+  })()
 ")
 
 echo ""
