@@ -81,14 +81,6 @@ pub(crate) fn emit_closed(
 }
 
 pub fn run() {
-    #[cfg(target_os = "macos")]
-    unsafe {
-        use objc::{msg_send, sel, sel_impl};
-        if let Some(scroller) = objc::runtime::Class::get("NSScroller") {
-            let _: () = msg_send![scroller, setPreferredScrollerStyle: 1i64];
-        }
-    }
-
     let log_level = if cfg!(debug_assertions) {
         LevelFilter::Debug
     } else {
