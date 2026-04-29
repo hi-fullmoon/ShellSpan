@@ -5,7 +5,7 @@ import {
   describeSession,
   parseQuickConnect,
   sanitizeProfileForStorage,
-} from "../profile";
+} from '../profile';
 
 describe("createEmptyProfile", () => {
   it("creates a profile with the default connection settings", () => {

@@ -21,15 +21,31 @@ pub(crate) fn connect_sftp(request: &RemoteConnectionRequest) -> Result<Connecte
         summarize_remote_connection_request(request)
     );
 
-    let tcp = connect_tcp_stream(&request.host, request.port)?;
-    let session = open_authenticated_session(
-        tcp,
-        &request.username,
-        request.auth_method,
-        request.password.as_deref(),
-        request.private_key_path.as_deref(),
-        request.passphrase.as_deref(),
-    )?;
+    let (session, jump_session) = if let Some(ref jump) = request.jump_host {
+        let (jump_session, target_session) = connect_through_jump_host(
+            jump,
+            &request.host,
+            request.port,
+            &request.username,
+            request.auth_method,
+            request.password.as_deref(),
+            request.private_key_path.as_deref(),
+            request.passphrase.as_deref(),
+        )?;
+        (target_session, Some(jump_session))
+    } else {
+        let tcp = connect_tcp_stream(&request.host, request.port)?;
+        let session = open_authenticated_session(
+            tcp,
+            &request.username,
+            request.auth_method,
+            request.password.as_deref(),
+            request.private_key_path.as_deref(),
+            request.passphrase.as_deref(),
+        )?;
+        (session, None)
+    };
+
     let sftp = session
         .sftp()
         .map_err(|error| format!("failed to open sftp subsystem: {error}"))?;
@@ -38,7 +54,11 @@ pub(crate) fn connect_sftp(request: &RemoteConnectionRequest) -> Result<Connecte
         "Connected SFTP host={} port={} username={}",
         request.host, request.port, request.username
     );
-    Ok(ConnectedSftp { session, sftp })
+    Ok(ConnectedSftp {
+        session,
+        sftp,
+        _jump_session: jump_session,
+    })
 }
 
 pub(crate) fn validate_connection_fields(host: &str, username: &str) -> Result<(), String> {
@@ -322,6 +342,7 @@ mod tests {
             passphrase: Some("keep-me-out-of-logs".to_string()),
             terminal_cols: 120,
             terminal_rows: 32,
+            jump_host: None,
         };
 
         let summary = summarize_session_request(&request);

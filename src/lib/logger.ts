@@ -4,7 +4,7 @@ import {
   info as tauriInfo,
   warn as tauriWarn,
 } from "@tauri-apps/plugin-log";
-import type { LogLevel } from "../types";
+import type { LogLevel } from '../types';
 import { isTauriRuntime } from "./tauri";
 
 const LOG_LEVEL_WEIGHT: Record<LogLevel, number> = {

@@ -5,24 +5,27 @@ import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
-import { createLogger } from "../lib/logger";
-import { isTauriRuntime } from "../lib/tauri";
+import { createLogger } from '../lib/logger';
+import { isTauriRuntime } from '../lib/tauri';
 import {
   formatTerminalNoticeLine,
   formatTerminalPrefixedText,
   formatTerminalStatusLine,
-} from "../lib/terminalOutput";
+} from '../lib/terminal';
 import {
   shouldDisableTerminalInput,
   shouldReconnectFromInput,
   shouldWarnOnClosedSession,
-} from "../lib/terminalStatus";
-import { cn, getCurrentThemeMode, getTerminalTheme } from "../lib/ui";
+} from '../lib/terminal';
+import { cn, getCurrentThemeMode, getTerminalTheme, getCursorStyle } from "../lib/ui";
 import type {
   SessionState,
   SshClosedEvent,
   SshDataEvent,
   SshStatusEvent,
+  TerminalTheme,
+  CursorStyle,
+  Snippet,
 } from "../types";
 
 interface TerminalPaneProps {
@@ -31,11 +34,27 @@ interface TerminalPaneProps {
   onReconnect: () => void;
   fontSize?: number;
   lineHeight?: number;
+  terminalTheme?: TerminalTheme;
+  cursorStyle?: CursorStyle;
+  cursorBlink?: boolean;
+  copyOnSelect?: boolean;
+  snippets?: Snippet[];
 }
 
 const terminalLogger = createLogger("terminal");
 
-export function TerminalPane({ session, active, onReconnect, fontSize = 14, lineHeight = 1.25 }: TerminalPaneProps) {
+export function TerminalPane({
+  session,
+  active,
+  onReconnect,
+  fontSize = 14,
+  lineHeight = 1.25,
+  terminalTheme = 'default',
+  cursorStyle = 'block',
+  cursorBlink = true,
+  copyOnSelect = false,
+  snippets = [],
+}: TerminalPaneProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -95,9 +114,13 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
     if (terminalRef.current) {
       terminalRef.current.options.fontSize = fontSize;
       terminalRef.current.options.lineHeight = lineHeight;
+      terminalRef.current.options.theme = getTerminalTheme(terminalTheme, getCurrentThemeMode());
+      terminalRef.current.options.cursorStyle = getCursorStyle(cursorStyle);
+      terminalRef.current.options.cursorBlink = cursorBlink;
+      terminalRef.current.refresh?.(0, terminalRef.current.rows - 1);
       scheduleResizeRef.current?.(true);
     }
-  }, [fontSize, lineHeight]);
+  }, [fontSize, lineHeight, terminalTheme, cursorStyle, cursorBlink]);
 
   useEffect(() => {
     if (!shellRef.current || terminalRef.current) {
@@ -107,14 +130,15 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
     terminalLogger.info("初始化终端面板", { sessionId: session.sessionId });
 
     const terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink,
+      cursorStyle: getCursorStyle(cursorStyle),
       allowProposedApi: true,
       convertEol: true,
       fontFamily:
         '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace',
       fontSize,
       lineHeight,
-      theme: getTerminalTheme(),
+      theme: getTerminalTheme(terminalTheme, getCurrentThemeMode()),
       scrollback: 5000,
       disableStdin: shouldDisableTerminalInput(session.status),
     });
@@ -136,6 +160,15 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
     fitRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
     lastShellSizeRef.current = null;
+
+    if (copyOnSelect) {
+      terminal.onSelectionChange(() => {
+        const selection = terminal.getSelection();
+        if (selection) {
+          void navigator.clipboard.writeText(selection);
+        }
+      });
+    }
 
     terminal.attachCustomKeyEventHandler((event) => {
       if (!activeRef.current) {
@@ -168,7 +201,7 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
         return;
       }
 
-      nextTerminal.options.theme = getTerminalTheme(getCurrentThemeMode());
+      nextTerminal.options.theme = getTerminalTheme(terminalTheme, getCurrentThemeMode());
       nextTerminal.refresh?.(0, nextTerminal.rows - 1);
     });
     themeObserver.observe(document.documentElement, {
@@ -484,6 +517,33 @@ export function TerminalPane({ session, active, onReconnect, fontSize = 14, line
         active ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
+      {snippets.length > 0 && (
+        <div className="flex items-center gap-1 px-2 py-1"
+          style={{ background: 'var(--app-surface)', borderBottom: '1px solid var(--app-border)' }}
+        >
+          <span className="text-[10px] text-[var(--app-text-soft)] shrink-0 mr-1">{t('terminal.snippets.label')}</span>
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            {snippets.map((snippet) => (
+              <button
+                className="snippet-chip"
+                key={snippet.id}
+                onClick={() => {
+                  if (statusRef.current === 'connected') {
+                    invoke("write_session", {
+                      sessionId: session.sessionId,
+                      data: snippet.command + "\r",
+                    }).catch(() => {});
+                  }
+                }}
+                title={snippet.command}
+                type="button"
+              >
+                {snippet.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {showSearch && (
         <div className="absolute right-2 top-2 z-30 flex items-center gap-1.5 rounded-lg p-1.5 backdrop-blur-sm"
           style={{ background: 'var(--app-surface)', border: '1px solid var(--app-border)', boxShadow: 'var(--app-shadow)' }}

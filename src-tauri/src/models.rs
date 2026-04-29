@@ -61,8 +61,6 @@ pub(crate) struct SessionCreateRequest {
     pub(crate) passphrase: Option<String>,
     pub(crate) terminal_cols: u32,
     pub(crate) terminal_rows: u32,
-    #[serde(default)]
-    pub(crate) port_forwards: Vec<PortForwardConfig>,
     pub(crate) jump_host: Option<JumpHostConfig>,
 }
 
@@ -349,6 +347,7 @@ pub(crate) struct SessionManager {
 pub(crate) struct ConnectedSftp {
     pub(crate) session: Session,
     pub(crate) sftp: Sftp,
+    pub(crate) _jump_session: Option<Session>,
 }
 
 #[derive(Default)]

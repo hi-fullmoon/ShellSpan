@@ -392,14 +392,14 @@ pub(crate) fn start_port_forwards(
     let cancel_flag = Arc::new(AtomicBool::new(false));
     forwards_state.register(operation_id.clone(), cancel_flag.clone())?;
 
-    let operation_id_clone = operation_id.clone();
+    let manager = (&*forwards_state).clone();
     thread::spawn(move || {
         crate::port_forward::start_port_forwards(
+            manager, operation_id,
             host, port, username, auth_method,
             password, private_key_path, passphrase,
             jump_host, forwards, cancel_flag,
         );
-        info!("Port forwards operation completed operation_id={operation_id_clone}");
     });
 
     Ok(())

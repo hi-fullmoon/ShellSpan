@@ -1,3 +1,4 @@
+// terminal.ts — merged from terminalOutput.ts, terminalStatus.ts
 import type { SessionStatus } from '../types';
 import { t } from './i18n';
 
@@ -51,4 +52,19 @@ export function formatTerminalNoticeLine(
   const suffix = message ? ` ${message}` : '';
 
   return `${TERMINAL_PREFIX} \u001b[${tone}m[${label}]\u001b[0m${suffix}`;
+}
+
+export function shouldDisableTerminalInput(status: SessionStatus) {
+  return status === "connecting";
+}
+
+export function shouldReconnectFromInput(status: SessionStatus, data: string) {
+  return (
+    (status === "disconnected" || status === "error") &&
+    (data === "\r" || data === "\n")
+  );
+}
+
+export function shouldWarnOnClosedSession(status: SessionStatus) {
+  return status !== "error";
 }

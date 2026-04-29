@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom';
 import { type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getActiveLocale, t } from '../lib/i18n';
 import { createLogger } from '../lib/logger';
-import { addPathWrapOpportunities } from '../lib/pathDisplay';
+import { addPathWrapOpportunities } from '../lib/ui';
 import { isTauriRuntime } from '../lib/tauri';
 import { useFileManagerStore } from '../stores/fileManagerStore';
 import { cn, fileKindColor } from '../lib/ui';
@@ -416,8 +416,8 @@ function MenuDivider() {
 function PropertyRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="themed-property-row grid grid-cols-[72px_minmax(0,1fr)] gap-2 rounded-lg px-2 py-2">
-      <span className="themed-property-row__label text-[11px] font-medium leading-5 tracking-[0.02em]">{label}</span>
-      <span className="themed-property-row__value break-all text-[12px] leading-5">{value}</span>
+      <span className="themed-property-row-label text-[11px] font-medium leading-5 tracking-[0.02em]">{label}</span>
+      <span className="themed-property-row-value break-all text-[12px] leading-5">{value}</span>
     </div>
   );
 }
@@ -2196,7 +2196,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
             <div className="file-manager-progress-track h-2 overflow-hidden rounded-full">
               <div
-                className="file-manager-progress-bar file-manager-progress-bar--upload h-full rounded-full transition-[width] duration-150"
+                className="file-manager-progress-bar file-manager-progress-bar-upload h-full rounded-full transition-[width] duration-150"
                 style={{ width: `${uploadProgressPercent(uploadProgress)}%` }}
               />
             </div>
@@ -2233,7 +2233,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
             <div className="file-manager-progress-track h-2 overflow-hidden rounded-full">
               <div
-                className="file-manager-progress-bar file-manager-progress-bar--delete h-full rounded-full transition-[width] duration-150"
+                className="file-manager-progress-bar file-manager-progress-bar-delete h-full rounded-full transition-[width] duration-150"
                 style={{ width: `${stepProgressPercent(deleteProgress)}%` }}
               />
             </div>
@@ -2267,7 +2267,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
             <div className="file-manager-progress-track h-2 overflow-hidden rounded-full">
               <div
-                className="file-manager-progress-bar file-manager-progress-bar--download h-full rounded-full transition-[width] duration-150"
+                className="file-manager-progress-bar file-manager-progress-bar-download h-full rounded-full transition-[width] duration-150"
                 style={{ width: `${downloadProgressPercent(downloadProgress)}%` }}
               />
             </div>

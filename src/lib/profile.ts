@@ -1,4 +1,4 @@
-import type { ConnectionProfile } from "../types";
+import type { ConnectionProfile } from '../types';
 
 export function parseQuickConnect(input: string): { username?: string; host: string; port?: number } | undefined {
   const trimmed = input.trim();

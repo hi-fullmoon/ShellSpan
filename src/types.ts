@@ -3,6 +3,8 @@ export type PortForwardKind = "local" | "remote";
 export type SessionStatus = "connecting" | "connected" | "disconnected" | "error";
 export type ThemePreference = "dark" | "light" | "system";
 export type LocalePreference = "zh-CN" | "en-US";
+export type TerminalTheme = "default" | "dracula" | "solarized-dark" | "solarized-light" | "one-dark" | "monokai";
+export type CursorStyle = "block" | "line" | "bar";
 export type ShortcutAction =
   | "closeDialog"
   | "newConnection"
@@ -16,7 +18,12 @@ export interface AppPreferences {
   locale: LocalePreference;
   terminalFontSize: number;
   terminalLineHeight: number;
+  terminalTheme: TerminalTheme;
+  cursorStyle: CursorStyle;
+  cursorBlink: boolean;
+  copyOnSelect: boolean;
   showFileManager: boolean;
+  showSidebar: boolean;
   autoReconnect: boolean;
   startupUpdateCheck: boolean;
   historyLimit: number;
@@ -90,6 +97,12 @@ export interface SshClosedEvent {
   reason?: string;
   reasonKind: "local_close" | "controller_dropped" | "remote_exit" | "transport_disconnect" | "error";
   retryable: boolean;
+}
+
+export interface Snippet {
+  id: string;
+  name: string;
+  command: string;
 }
 
 export interface HostKeyCheckResponse {

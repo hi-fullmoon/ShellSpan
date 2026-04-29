@@ -11,9 +11,9 @@ use log::{info, warn};
 use crate::connection::{connect_tcp_stream, open_authenticated_session};
 use crate::models::{AuthMethod, JumpHostConfig, PortForwardConfig, PortForwardKind};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct PortForwardManager {
-    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    operations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 impl PortForwardManager {
@@ -49,6 +49,8 @@ impl PortForwardManager {
 }
 
 pub(crate) fn start_port_forwards(
+    manager: PortForwardManager,
+    operation_id: String,
     host: String,
     port: u16,
     username: String,
@@ -112,6 +114,9 @@ pub(crate) fn start_port_forwards(
     info!("Port forward cancelled, joining threads");
     for handle in handles {
         let _ = handle.join();
+    }
+    if let Err(e) = manager.remove(&operation_id) {
+        warn!("Failed to remove port forward operation {operation_id}: {e}");
     }
     info!("Port forward operation complete");
 }

@@ -32,6 +32,10 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
     {
         builder = builder
             .setup(|app| {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_decorations(false).ok();
+                }
+
                 let tray_menu = build_windows_tray_menu(app.handle())
                     .map_err(|error| format!("failed to create tray menu: {error}"))?;
                 let mut tray_builder =
@@ -49,9 +53,11 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
             })
             .on_window_event(|window, event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    if let Err(error) = window.hide() {
-                        error!("failed to hide window while keeping tray active: {error}");
+                    if window.label() == "main" {
+                        api.prevent_close();
+                        if let Err(error) = window.hide() {
+                            error!("failed to hide window while keeping tray active: {error}");
+                        }
                     }
                 }
             });
@@ -61,9 +67,11 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
     {
         builder = builder.on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if let Err(error) = emit_system_request_app_exit(window.app_handle()) {
-                    error!("failed to handle macOS close request: {error}");
+                if window.label() == "main" {
+                    api.prevent_close();
+                    if let Err(error) = emit_system_request_app_exit(window.app_handle()) {
+                        error!("failed to handle macOS close request: {error}");
+                    }
                 }
             }
         });

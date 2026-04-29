@@ -9,7 +9,7 @@ mod remote_fs;
 mod session;
 
 use log::LevelFilter;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
 use models::{DownloadCancellationRegistry, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
@@ -102,6 +102,15 @@ pub fn run() {
     };
 
     let builder = tauri::Builder::default()
+        .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_title("").ok();
+                }
+            }
+            Ok(())
+        })
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level)

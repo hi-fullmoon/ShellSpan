@@ -1,14 +1,14 @@
-import type { SVGProps } from "react";
+import type { SVGProps } from 'react';
 
 function baseProps(props: SVGProps<SVGSVGElement>) {
   return {
-    fill: "none",
+    fill: 'none',
     height: 14,
-    stroke: "currentColor",
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
+    stroke: 'currentColor',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
     strokeWidth: 1.8,
-    viewBox: "0 0 16 16",
+    viewBox: '0 0 16 16',
     width: 14,
     ...props,
   };
@@ -171,6 +171,42 @@ export function MoonIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...baseProps(props)}>
       <path d="M10.9 2.4a5.3 5.3 0 1 0 2.7 9.8A5.8 5.8 0 0 1 10.9 2.4Z" />
+    </svg>
+  );
+}
+
+export function PrimarySidebarIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps({ width: 18, height: 18, viewBox: '0 0 24 24', ...props })} strokeWidth={2}>
+      <rect x="1" y="2" width="22" height="20" rx="4" />
+      <rect x="4" y="5" width="1" height="14" rx="2" />
+    </svg>
+  );
+}
+
+export function PrimarySidebarActiveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps({ width: 18, height: 18, viewBox: '0 0 24 24', ...props })} strokeWidth={2}>
+      <rect x="1" y="2" width="22" height="20" rx="4" />
+      <rect x="4" y="5" width="4" height="14" rx="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function SecondarySidebarIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps({ width: 18, height: 18, viewBox: '0 0 24 24', ...props })} strokeWidth={2}>
+      <rect x="1" y="2" width="22" height="20" rx="4" />
+      <rect x="19" y="5" width="1" height="14" rx="2" />
+    </svg>
+  );
+}
+
+export function SecondarySidebarActiveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps({ width: 18, height: 18, viewBox: '0 0 24 24', ...props })} strokeWidth={2}>
+      <rect x="1" y="2" width="22" height="20" rx="4" />
+      <rect x="16" y="5" width="4" height="14" rx="2" fill="currentColor" />
     </svg>
   );
 }

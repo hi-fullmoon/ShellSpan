@@ -1,0 +1,17 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --font-sans: 'IBM Plex Sans', 'Avenir Next', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', monospace;
+}
+
+@import './base.css';
+@import './components.css';
+@import './settings.css';
+@import './title-bar.css';
+@import './terminal.css';
+@import './session.css';
+@import './file-manager.css';
+@import './grid.css';
+@import './scroll.css';
+@import './utilities.css';

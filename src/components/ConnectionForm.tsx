@@ -70,7 +70,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         {tabKeys.map((key) => (
           <button
             key={key}
-            className={`settings-tab ${activeTab === key ? 'settings-tab--active' : ''}`}
+            className={`settings-tab ${activeTab === key ? 'settings-tab-active' : ''}`}
             onClick={() => setActiveTab(key)}
             type="button"
           >
@@ -82,7 +82,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       {/* Tab panels — grid overlay so all share the same height */}
       <div className="connection-tab-panels">
         {/* ───────── Tab: Basic ───────── */}
-        <div className={activeTab === 'basic' ? '' : 'connection-tab-panel--hidden'}>
+        <div className={activeTab === 'basic' ? '' : 'connection-tab-panel-hidden'}>
           <div className="flex flex-col gap-1.5">
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.quickConnect')}</span>
@@ -233,7 +233,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         </div>
 
         {/* ───────── Tab: Jump Host ───────── */}
-        <div className={activeTab === 'jumpHost' ? '' : 'connection-tab-panel--hidden'}>
+        <div className={activeTab === 'jumpHost' ? '' : 'connection-tab-panel-hidden'}>
           <div className="flex flex-col gap-1.5">
             <div className="grid gap-1.5 md:grid-cols-[minmax(0,1fr)_84px]">
               <label className="flex flex-col gap-1">
@@ -336,7 +336,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
         </div>
 
         {/* ───────── Tab: Port Forwarding ───────── */}
-        <div className={activeTab === 'portForwarding' ? '' : 'connection-tab-panel--hidden'}>
+        <div className={activeTab === 'portForwarding' ? '' : 'connection-tab-panel-hidden'}>
           <div className="flex flex-col gap-2">
             <p className="text-[11px] text-slate-500">{t('connectionForm.portForwardingHint')}</p>
             <div className="port-forward-list">

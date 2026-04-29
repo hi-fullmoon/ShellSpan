@@ -61,6 +61,10 @@ vi.mock('../components/FileManager', () => ({
 
 vi.mock('../components/Icons', () => ({
   CloseIcon: () => null,
+  PrimarySidebarIcon: () => null,
+  PrimarySidebarActiveIcon: () => null,
+  SecondarySidebarIcon: () => null,
+  SecondarySidebarActiveIcon: () => null,
 }));
 
 vi.mock('../components/Sidebar', () => ({

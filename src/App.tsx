@@ -1,11 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ConnectionForm } from './components/ConnectionForm';
 import { FileManager } from './components/FileManager';
 import { CloseIcon } from './components/Icons';
 import { ScrollArea } from './components/ScrollArea';
+import { TitleBar } from './components/TitleBar';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { SplitLayout } from './components/SplitLayout';
@@ -17,14 +19,15 @@ import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { createLogger } from './lib/logger';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
-import { applyStatusToSessions, consumeBufferedSessionStatus, type PendingSessionStatusEvents } from './lib/sessionStatusBuffer';
-import { insertSessionAfterActive } from './lib/sessionOrder';
-import { markStartupUpdateCheck, shouldRunStartupUpdateCheck } from './lib/updateStartupPolicy';
-import { updateFlowReducer } from './lib/updateFlow';
-import { checkForUpdate, downloadAndInstallUpdate } from './lib/updater';
+import { applyStatusToSessions, consumeBufferedSessionStatus, type PendingSessionStatusEvents } from './lib/session';
+import { insertSessionAfterActive } from './lib/session';
+import { markStartupUpdateCheck, shouldRunStartupUpdateCheck } from './lib/update';
+import { updateFlowReducer } from './lib/update';
+import { checkForUpdate, downloadAndInstallUpdate } from './lib/update';
 import { isTauriRuntime } from './lib/tauri';
-import { shouldWarnOnClosedSession } from './lib/terminalStatus';
+import { shouldWarnOnClosedSession } from './lib/terminal';
 import { useFileManagerStore } from './stores/fileManagerStore';
+import { useSnippets } from './hooks/useSnippets';
 import { cn, sessionStatusTone } from './lib/ui';
 import { DEFAULT_SHORTCUTS, matchesBinding } from './lib/keyboard';
 import type { ShortcutAction } from './lib/keyboard';
@@ -32,12 +35,18 @@ import type { AppPreferences, ConnectionProfile, HostKeyCheckResponse, SessionSt
 
 const appLogger = createLogger('app');
 const SYSTEM_OPEN_SETTINGS_EVENT = 'system-open-settings';
+const SETTINGS_CHANGED_EVENT = 'settings-changed';
 const defaultPreferences: AppPreferences = {
   theme: 'dark',
   locale: 'zh-CN',
   terminalFontSize: 14,
   terminalLineHeight: 1.2,
+  terminalTheme: 'default',
+  cursorStyle: 'block',
+  cursorBlink: true,
+  copyOnSelect: false,
   showFileManager: true,
+  showSidebar: true,
   autoReconnect: true,
   startupUpdateCheck: true,
   historyLimit: 8,
@@ -52,6 +61,9 @@ function getSystemThemeMode() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? ('dark' as const) : ('light' as const);
 }
 
+const validTerminalThemes: Array<AppPreferences['terminalTheme']> = ['default', 'dracula', 'solarized-dark', 'solarized-light', 'one-dark', 'monokai'];
+const validCursorStyles: Array<AppPreferences['cursorStyle']> = ['block', 'line', 'bar'];
+
 function normalizePreferences(value: Partial<AppPreferences> | null | undefined): AppPreferences {
   return {
     theme: value?.theme === 'light' || value?.theme === 'system' ? value.theme : 'dark',
@@ -62,7 +74,12 @@ function normalizePreferences(value: Partial<AppPreferences> | null | undefined)
       typeof value?.terminalLineHeight === 'number' && value.terminalLineHeight >= 1 && value.terminalLineHeight <= 2
         ? value.terminalLineHeight
         : 1.2,
+    terminalTheme: validTerminalThemes.includes(value?.terminalTheme as AppPreferences['terminalTheme']) ? (value!.terminalTheme as AppPreferences['terminalTheme']) : 'default',
+    cursorStyle: validCursorStyles.includes(value?.cursorStyle as AppPreferences['cursorStyle']) ? (value!.cursorStyle as AppPreferences['cursorStyle']) : 'block',
+    cursorBlink: value?.cursorBlink !== false,
+    copyOnSelect: value?.copyOnSelect === true,
     showFileManager: value?.showFileManager !== false,
+    showSidebar: value?.showSidebar !== false,
     autoReconnect: value?.autoReconnect !== false,
     startupUpdateCheck: value?.startupUpdateCheck !== false,
     historyLimit: typeof value?.historyLimit === 'number' && value.historyLimit >= 3 && value.historyLimit <= 20 ? value.historyLimit : 8,
@@ -83,6 +100,49 @@ function reorderSessions(sessions: SessionState[], draggedSessionId: string, tar
   return nextSessions;
 }
 
+async function openSettingsWindow(): Promise<void> {
+  appLogger.info('openSettingsWindow called');
+  if (!isTauriRuntime()) {
+    appLogger.info('Not in tauri runtime, dispatching fallback');
+    window.dispatchEvent(new CustomEvent('open-settings-fallback'));
+    return;
+  }
+  try {
+    appLogger.info('Checking for existing settings window');
+    const existing = await WebviewWindow.getByLabel('settings');
+    if (existing) {
+      appLogger.info('Existing settings window found, focusing');
+      await existing.unminimize();
+      await existing.show();
+      await existing.setFocus();
+      return;
+    }
+    appLogger.info('Creating new settings window');
+    const IS_MAC_OS = /mac/i.test(navigator.platform);
+    const settingsWindow = new WebviewWindow('settings', {
+      url: '/index.html#settings',
+      title: IS_MAC_OS ? '' : 'Settings',
+      width: 640,
+      height: 560,
+      resizable: false,
+      center: true,
+      transparent: IS_MAC_OS,
+      titleBarStyle: IS_MAC_OS ? 'overlay' : undefined,
+      decorations: !IS_MAC_OS,
+      alwaysOnTop: false,
+    });
+    settingsWindow.once('tauri://created', () => {
+      appLogger.info('Settings window created successfully');
+    });
+    settingsWindow.once('tauri://error', (e) => {
+      appLogger.error('Failed to create settings window', { error: String(e.payload) });
+    });
+  } catch (error) {
+    appLogger.error('Exception in openSettingsWindow', { error: String(error) });
+    window.dispatchEvent(new CustomEvent('open-settings-fallback'));
+  }
+}
+
 function App() {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
   const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>('termbridge.savedProfiles', [], ['windbridge.savedProfiles']);
@@ -96,10 +156,18 @@ function App() {
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [reorderingSessions, setReorderingSessions] = useState(false);
+
+  // Listen for fallback event when settings window cannot be opened
+  useEffect(() => {
+    const handler = () => setSettingsDialogOpen(true);
+    window.addEventListener('open-settings-fallback', handler);
+    return () => window.removeEventListener('open-settings-fallback', handler);
+  }, []);
   const [updateState, dispatchUpdateState] = useReducer(updateFlowReducer, { phase: 'idle' });
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number>();
   const [updateToast, setUpdateToast] = useState<{ message: string; tone: 'info' | 'success' | 'error' }>();
   const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
+  const snippetManager = useSnippets();
   const [, setIntlVersion] = useState(0);
   const [systemThemeMode, setSystemThemeMode] = useState<'dark' | 'light'>(() => getSystemThemeMode());
   const [hostKeyDialog, setHostKeyDialog] = useState<{
@@ -172,7 +240,11 @@ function App() {
 
       if (matchesBinding(merged.openSettings, event)) {
         event.preventDefault();
-        setSettingsDialogOpen(true);
+        if (isTauriRuntime()) {
+          void openSettingsWindow();
+        } else {
+          setSettingsDialogOpen(true);
+        }
         return;
       }
 
@@ -545,12 +617,13 @@ function App() {
     }
 
     let stopSystemOpenSettings: UnlistenFn | undefined;
+    let stopSettingsChanged: UnlistenFn | undefined;
     let cancelled = false;
 
     const attach = async () => {
       try {
         const nextStopSystemOpenSettings = await listen(SYSTEM_OPEN_SETTINGS_EVENT, () => {
-          setSettingsDialogOpen(true);
+          void openSettingsWindow();
         });
 
         if (cancelled) {
@@ -559,6 +632,26 @@ function App() {
         }
 
         stopSystemOpenSettings = nextStopSystemOpenSettings;
+
+        const nextStopSettingsChanged = await listen(SETTINGS_CHANGED_EVENT, () => {
+          // Re-read localStorage to sync with settings window changes
+          try {
+            const rawPrefs = window.localStorage.getItem('termbridge.preferences');
+            if (rawPrefs) {
+              setStoredPreferences(JSON.parse(rawPrefs));
+            }
+          } catch {
+            // ignore parse errors
+          }
+          snippetManager.refreshSnippets();
+        });
+
+        if (cancelled) {
+          nextStopSettingsChanged();
+          return;
+        }
+
+        stopSettingsChanged = nextStopSettingsChanged;
       } catch (error) {
         appLogger.error('监听系统设置事件失败', { error: String(error) });
       }
@@ -569,6 +662,7 @@ function App() {
     return () => {
       cancelled = true;
       stopSystemOpenSettings?.();
+      stopSettingsChanged?.();
     };
   }, []);
 
@@ -1100,6 +1194,9 @@ function App() {
             {sessions.map((session) => (
               <TerminalPane
                 active={session.sessionId === activeSessionId}
+                copyOnSelect={preferences.copyOnSelect}
+                cursorBlink={preferences.cursorBlink}
+                cursorStyle={preferences.cursorStyle}
                 fontSize={preferences.terminalFontSize}
                 key={session.sessionId}
                 lineHeight={preferences.terminalLineHeight}
@@ -1107,6 +1204,8 @@ function App() {
                   void handleReconnectSession(session.sessionId);
                 }}
                 session={session}
+                snippets={snippetManager.snippets}
+                terminalTheme={preferences.terminalTheme}
               />
             ))}
           </div>
@@ -1115,9 +1214,23 @@ function App() {
     </section>
   );
 
+  const handleTogglePrimarySide = useCallback(() => {
+    setStoredPreferences((prev) => ({ ...prev, showFileManager: !preferences.showFileManager }));
+  }, [preferences.showFileManager, setStoredPreferences]);
+
+  const handleToggleSecondarySide = useCallback(() => {
+    setStoredPreferences((prev) => ({ ...prev, showSidebar: !preferences.showSidebar }));
+  }, [preferences.showSidebar, setStoredPreferences]);
+
   return (
-    <main className="h-screen overflow-hidden p-0.5">
-      <div className="flex h-full gap-1">
+    <main className="h-screen overflow-hidden flex flex-col">
+      <TitleBar
+        onTogglePrimarySide={handleTogglePrimarySide}
+        onToggleSecondarySide={handleToggleSecondarySide}
+        primarySideVisible={preferences.showFileManager}
+        secondarySideVisible={preferences.showSidebar}
+      />
+      <div className="flex flex-1 gap-1 p-0.5 min-h-0">
         {preferences.showFileManager ? (
           <SplitLayout
             className="min-w-0 flex-1"
@@ -1134,30 +1247,37 @@ function App() {
           <div className="min-w-0 flex-1">{workspaceContent}</div>
         )}
 
-        <div className="h-full w-52 shrink-0">
-          <Sidebar
-            connectedCount={connectedSessions}
-            runtimeLabel={runtimeText}
-            savedProfiles={savedProfiles}
-            onDeleteProfile={handleDeleteSavedProfile}
-            onRenameProfile={handleRenameSavedProfile}
-            onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
-            onTogglePinnedProfile={handleToggleSavedProfilePinned}
-            onReuseProfile={loadProfile}
-            onOpenConnect={() => {
-              setDraftProfile(createEmptyProfile());
-              setErrorMessage(undefined);
-              setConnectDialogOpen(true);
-            }}
-          />
-        </div>
+        {preferences.showSidebar ? (
+          <div className="h-full w-52 shrink-0">
+            <Sidebar
+              connectedCount={connectedSessions}
+              runtimeLabel={runtimeText}
+              savedProfiles={savedProfiles}
+              onDeleteProfile={handleDeleteSavedProfile}
+              onRenameProfile={handleRenameSavedProfile}
+              onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
+              onTogglePinnedProfile={handleToggleSavedProfilePinned}
+              onReuseProfile={loadProfile}
+              onOpenConnect={() => {
+                setDraftProfile(createEmptyProfile());
+                setErrorMessage(undefined);
+                setConnectDialogOpen(true);
+              }}
+            />
+          </div>
+        ) : null}
       </div>
 
       <SettingsDialog
+        onAddSnippet={snippetManager.addSnippet}
         onChange={setStoredPreferences}
         onClose={() => setSettingsDialogOpen(false)}
+        onDeleteSnippet={snippetManager.deleteSnippet}
+        onMoveSnippet={snippetManager.moveSnippet}
+        onUpdateSnippet={snippetManager.updateSnippet}
         open={settingsDialogOpen}
         preferences={preferences}
+        snippets={snippetManager.snippets}
       />
 
       {connectDialogOpen ? (

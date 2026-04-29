@@ -1,0 +1,36 @@
+.session-tab {
+  box-shadow: none;
+}
+
+.session-tab-active {
+  border-color: color-mix(in srgb, var(--app-primary-bg) 55%, transparent);
+  background: color-mix(in srgb, var(--app-surface) 82%, var(--app-primary-bg) 12%);
+  color: var(--app-text);
+}
+
+.session-tab-inactive {
+  border-color: var(--app-border);
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
+  color: var(--app-text-soft);
+}
+
+.session-tab-inactive:hover {
+  border-color: var(--app-icon-border);
+  background: color-mix(in srgb, var(--app-surface) 78%, var(--app-primary-bg) 6%);
+}
+
+.session-tab-renaming {
+  border-color: color-mix(in srgb, var(--app-primary-bg) 65%, transparent);
+  background: var(--app-surface);
+  color: var(--app-text);
+}
+
+.session-tab-input {
+  background: color-mix(in srgb, var(--app-bg) 45%, var(--app-icon-bg) 55%);
+  color: var(--app-text);
+}
+
+.session-tab-subtitle,
+.session-tabs-empty {
+  color: var(--app-text-soft);
+}

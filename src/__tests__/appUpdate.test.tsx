@@ -73,6 +73,18 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: listenMock,
 }));
 
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    setTheme: vi.fn().mockResolvedValue(undefined),
+    isMaximized: vi.fn().mockResolvedValue(false),
+    onResized: vi.fn().mockReturnValue(Promise.resolve(vi.fn())),
+    minimize: vi.fn(),
+    maximize: vi.fn(),
+    unmaximize: vi.fn(),
+    close: vi.fn(),
+  }),
+}));
+
 vi.mock('../hooks/useLocalStorage', () => ({
   useLocalStorage: () => [[], vi.fn()],
 }));
@@ -97,6 +109,10 @@ vi.mock('../components/FileManager', () => ({
 
 vi.mock('../components/Icons', () => ({
   CloseIcon: () => null,
+  PrimarySidebarIcon: () => null,
+  PrimarySidebarActiveIcon: () => null,
+  SecondarySidebarIcon: () => null,
+  SecondarySidebarActiveIcon: () => null,
 }));
 
 vi.mock('../components/Sidebar', () => ({

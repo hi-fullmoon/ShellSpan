@@ -1,0 +1,13 @@
+.themed-terminal-shell {
+  background: var(--app-terminal-bg);
+}
+
+.terminal-shell .xterm {
+  height: 100%;
+  padding: 4px;
+}
+
+.terminal-shell .xterm-viewport {
+  overflow-y: auto !important;
+  background: var(--app-terminal-bg) !important;
+}

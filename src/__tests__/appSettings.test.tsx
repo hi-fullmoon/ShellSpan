@@ -39,7 +39,22 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     setTheme: vi.fn().mockResolvedValue(undefined),
+    isMaximized: vi.fn().mockResolvedValue(false),
+    onResized: vi.fn().mockReturnValue(Promise.resolve(vi.fn())),
+    minimize: vi.fn(),
+    maximize: vi.fn(),
+    unmaximize: vi.fn(),
+    close: vi.fn(),
   }),
+}));
+
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  WebviewWindow: class MockWebviewWindow {
+    static async getByLabel() { throw new Error('mock: webview window unavailable'); }
+    static getAll() { return []; }
+    constructor() {}
+    once() {}
+  },
 }));
 
 vi.mock('../components/ConnectionForm', () => ({
@@ -54,6 +69,10 @@ vi.mock('../components/Icons', () => ({
   CloseIcon: () => null,
   GlobeIcon: () => null,
   MoonIcon: () => null,
+  PrimarySidebarIcon: () => null,
+  PrimarySidebarActiveIcon: () => null,
+  SecondarySidebarIcon: () => null,
+  SecondarySidebarActiveIcon: () => null,
   SunIcon: () => null,
 }));
 

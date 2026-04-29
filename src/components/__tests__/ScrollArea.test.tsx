@@ -4,7 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getThumbMetrics, ScrollArea } from "../ScrollArea";
-import styles from "../../styles.css?raw";
+import styles from "../../styles/index.css?raw";
 
 describe("ScrollArea", () => {
   beforeEach(() => {

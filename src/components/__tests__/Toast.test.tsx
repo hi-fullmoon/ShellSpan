@@ -29,9 +29,9 @@ describe("Toast", () => {
     expect(container.ownerDocument.body.lastElementChild?.className).toContain("-translate-x-1/2");
     expect(container.ownerDocument.body.lastElementChild?.className).toContain("top-2");
     expect(screen.getByRole("status").className).toContain("themed-toast");
-    expect(screen.getByRole("status").className).toContain("themed-toast--error");
-    expect(screen.getByRole("button", { name: "重试" }).className).toContain("themed-toast__button");
-    expect(screen.getByRole("button", { name: "关闭提示" }).className).toContain("themed-toast__button");
+    expect(screen.getByRole("status").className).toContain("themed-toast-error");
+    expect(screen.getByRole("button", { name: "重试" }).className).toContain("themed-toast-button");
+    expect(screen.getByRole("button", { name: "关闭提示" }).className).toContain("themed-toast-button");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     fireEvent.click(screen.getByRole("button", { name: "关闭提示" }));
 
@@ -45,8 +45,8 @@ describe("Toast", () => {
     render(<Toast message="已保存" onClose={() => {}} open tone="success" />);
 
     expect(screen.getByRole("status").className).toContain("themed-toast");
-    expect(screen.getByRole("status").className).toContain("themed-toast--success");
-    expect(screen.getByRole("button", { name: "关闭提示" }).className).toContain("themed-toast__button");
+    expect(screen.getByRole("status").className).toContain("themed-toast-success");
+    expect(screen.getByRole("button", { name: "关闭提示" }).className).toContain("themed-toast-button");
   });
 
   it("auto closes after the configured duration", () => {
