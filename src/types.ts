@@ -11,7 +11,9 @@ export type ShortcutAction =
   | "openSettings"
   | "closeSession"
   | "nextTab"
-  | "prevTab";
+  | "prevTab"
+  | "togglePrimarySidebar"
+  | "toggleSecondarySidebar";
 
 export interface AppPreferences {
   theme: ThemePreference;
@@ -97,12 +99,6 @@ export interface SshClosedEvent {
   reason?: string;
   reasonKind: "local_close" | "controller_dropped" | "remote_exit" | "transport_disconnect" | "error";
   retryable: boolean;
-}
-
-export interface Snippet {
-  id: string;
-  name: string;
-  command: string;
 }
 
 export interface HostKeyCheckResponse {

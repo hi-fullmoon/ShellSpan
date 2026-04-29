@@ -2,20 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { GlobeIcon, MoonIcon, SunIcon } from './Icons';
 import { t } from '../lib/i18n';
 import { DEFAULT_SHORTCUTS, formatKeyBinding, recordKeyBinding, SHORTCUT_ACTIONS, SHORTCUT_LABELS, type ShortcutAction } from '../lib/keyboard';
-import type { AppPreferences, LocalePreference, ThemePreference, TerminalTheme, CursorStyle, Snippet } from '../types';
+import type { AppPreferences, LocalePreference, ThemePreference, TerminalTheme, CursorStyle } from '../types';
 
 export interface SettingsPanelProps {
   preferences: AppPreferences;
   onChange: (nextPreferences: AppPreferences) => void;
-  snippets?: Snippet[];
-  onAddSnippet?: (name: string, command: string) => void;
-  onUpdateSnippet?: (id: string, name: string, command: string) => void;
-  onDeleteSnippet?: (id: string) => void;
-  onMoveSnippet?: (id: string, direction: 'up' | 'down') => void;
   showTabs?: boolean;
 }
 
-type SettingsTab = 'appearance' | 'language' | 'terminal' | 'behavior' | 'shortcuts' | 'snippets';
+type SettingsTab = 'appearance' | 'language' | 'terminal' | 'behavior' | 'shortcuts';
 
 const tabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'appearance', labelKey: 'settings.tabAppearance' },
@@ -23,7 +18,6 @@ const tabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'terminal', labelKey: 'settings.tabTerminal' },
   { key: 'behavior', labelKey: 'settings.tabBehavior' },
   { key: 'shortcuts', labelKey: 'settings.tabShortcuts' },
-  { key: 'snippets', labelKey: 'settings.tabSnippets' },
 ];
 
 function PreferenceSelect<T extends string>({
@@ -204,111 +198,12 @@ function ShortcutRow({
   );
 }
 
-function SnippetRow({
-  snippet,
-  isEditing,
-  onEdit,
-  onSave,
-  onCancel,
-  onDelete,
-  onMoveUp,
-  onMoveDown,
-  canMoveUp,
-  canMoveDown,
-}: {
-  snippet: Snippet;
-  isEditing: boolean;
-  onEdit: () => void;
-  onSave: (name: string, command: string) => void;
-  onCancel: () => void;
-  onDelete: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-}) {
-  const [editName, setEditName] = useState(snippet.name);
-  const [editCommand, setEditCommand] = useState(snippet.command);
-
-  if (isEditing) {
-    return (
-      <div className="settings-card gap-2">
-        <input
-          className="themed-input h-8 rounded-md px-2 text-xs"
-          placeholder={t('settings.snippets.namePlaceholder')}
-          type="text"
-          value={editName}
-          onChange={(e) => setEditName(e.target.value)}
-        />
-        <input
-          className="themed-input h-8 rounded-md px-2 text-xs"
-          placeholder={t('settings.snippets.commandPlaceholder')}
-          type="text"
-          value={editCommand}
-          onChange={(e) => setEditCommand(e.target.value)}
-        />
-        <div className="flex gap-1.5">
-          <button className="icon-btn h-7 px-2 text-xs" onClick={() => onSave(editName, editCommand)} type="button">
-            {t('settings.snippets.save')}
-          </button>
-          <button className="icon-btn h-7 px-2 text-xs" onClick={onCancel} type="button">
-            {t('settings.snippets.cancel')}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="shortcut-row">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="shortcut-row-label truncate">{snippet.name}</span>
-        <span className="truncate text-[11px] text-[var(--app-text-soft)] font-mono">{snippet.command}</span>
-      </div>
-      <div className="flex items-center gap-1">
-        <button
-          className="icon-btn h-6 w-6 px-0 text-xs disabled:opacity-30"
-          disabled={!canMoveUp}
-          onClick={onMoveUp}
-          title={t('settings.snippets.moveUp')}
-          type="button"
-        >
-          ↑
-        </button>
-        <button
-          className="icon-btn h-6 w-6 px-0 text-xs disabled:opacity-30"
-          disabled={!canMoveDown}
-          onClick={onMoveDown}
-          title={t('settings.snippets.moveDown')}
-          type="button"
-        >
-          ↓
-        </button>
-        <button className="icon-btn h-6 w-6 px-0 text-xs" onClick={onEdit} title={t('settings.snippets.edit')} type="button">
-          ✎
-        </button>
-        <button className="icon-btn h-6 w-6 px-0 text-xs text-rose-400" onClick={onDelete} title={t('settings.snippets.delete')} type="button">
-          ✕
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function SettingsPanel({
   preferences,
   onChange,
-  snippets = [],
-  onAddSnippet,
-  onUpdateSnippet,
-  onDeleteSnippet,
-  onMoveSnippet,
   showTabs = true,
 }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
-  const [newSnippetName, setNewSnippetName] = useState('');
-  const [newSnippetCommand, setNewSnippetCommand] = useState('');
-  const [editingSnippetId, setEditingSnippetId] = useState<string | null>(null);
 
   const shortcuts = { ...DEFAULT_SHORTCUTS, ...preferences.keyboardShortcuts };
 
@@ -329,7 +224,7 @@ export function SettingsPanel({
     <>
       {showTabs && (
         /* Tab bar */
-        <div className="settings-tab-bar px-2">
+        <div className="settings-tab-bar pt-2 mx-2">
           {tabs.map((tab) => (
             <button
               key={tab.key}
@@ -572,60 +467,6 @@ export function SettingsPanel({
                 onReset={() => resetShortcut(action)}
               />
             ))}
-          </div>
-        )}
-
-        {/* ───── Tab: Snippets ───── */}
-        {activeTab === 'snippets' && (
-          <div className="flex flex-col gap-3 mt-2.5">
-            <p className="text-[11px] text-slate-500">{t('settings.snippetsHint')}</p>
-
-            {snippets.map((snippet, index) => (
-              <SnippetRow
-                canMoveDown={index < snippets.length - 1}
-                canMoveUp={index > 0}
-                isEditing={editingSnippetId === snippet.id}
-                key={snippet.id}
-                onCancel={() => setEditingSnippetId(null)}
-                onDelete={() => onDeleteSnippet?.(snippet.id)}
-                onEdit={() => setEditingSnippetId(snippet.id)}
-                onMoveDown={() => onMoveSnippet?.(snippet.id, 'down')}
-                onMoveUp={() => onMoveSnippet?.(snippet.id, 'up')}
-                onSave={(name, command) => onUpdateSnippet?.(snippet.id, name, command)}
-                snippet={snippet}
-              />
-            ))}
-
-            <div className="settings-card gap-2">
-              <p className="settings-card-title text-xs font-medium">{t('settings.snippets.addNew')}</p>
-              <input
-                className="themed-input h-8 rounded-md px-2 text-xs"
-                placeholder={t('settings.snippets.namePlaceholder')}
-                type="text"
-                value={newSnippetName}
-                onChange={(e) => setNewSnippetName(e.target.value)}
-              />
-              <input
-                className="themed-input h-8 rounded-md px-2 text-xs"
-                placeholder={t('settings.snippets.commandPlaceholder')}
-                type="text"
-                value={newSnippetCommand}
-                onChange={(e) => setNewSnippetCommand(e.target.value)}
-              />
-              <button
-                className="icon-btn h-7 px-2 text-xs self-start"
-                onClick={() => {
-                  if (newSnippetName.trim() && newSnippetCommand.trim()) {
-                    onAddSnippet?.(newSnippetName.trim(), newSnippetCommand.trim());
-                    setNewSnippetName('');
-                    setNewSnippetCommand('');
-                  }
-                }}
-                type="button"
-              >
-                {t('settings.snippets.add')}
-              </button>
-            </div>
           </div>
         )}
       </div>

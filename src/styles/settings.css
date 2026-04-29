@@ -46,6 +46,39 @@
   padding-right: 80px;
 }
 
+.settings-title-bar-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  padding-right: 0;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.settings-window-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--app-text-soft);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.settings-window-btn:hover {
+  background: var(--app-icon-hover);
+  color: var(--app-text);
+}
+
+.settings-window-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
 .settings-header {
   display: flex;
   flex-direction: column;
@@ -234,7 +267,7 @@
 }
 
 .settings-select {
-  min-height: 32px;
+  height: 32px;
   border: 1px solid var(--app-icon-border);
   border-radius: 10px;
   background: var(--app-icon-bg);
@@ -242,6 +275,7 @@
   padding: 0 10px;
   outline: none;
   font-size: 12px;
+  appearance: none;
 }
 
 .settings-select:focus {

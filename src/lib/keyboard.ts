@@ -4,7 +4,9 @@ export type ShortcutAction =
   | 'openSettings'
   | 'closeSession'
   | 'nextTab'
-  | 'prevTab';
+  | 'prevTab'
+  | 'togglePrimarySidebar'
+  | 'toggleSecondarySidebar';
 
 export interface ParsedBinding {
   key: string;
@@ -21,6 +23,8 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   'closeSession',
   'nextTab',
   'prevTab',
+  'togglePrimarySidebar',
+  'toggleSecondarySidebar',
 ];
 
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
@@ -30,6 +34,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   closeSession: 'CmdOrCtrl+W',
   nextTab: 'CmdOrCtrl+Tab',
   prevTab: 'CmdOrCtrl+Shift+Tab',
+  togglePrimarySidebar: 'CmdOrCtrl+Shift+E',
+  toggleSecondarySidebar: 'CmdOrCtrl+Shift+S',
 };
 
 export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
@@ -39,6 +45,8 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   closeSession: 'shortcuts.action.closeSession',
   nextTab: 'shortcuts.action.nextTab',
   prevTab: 'shortcuts.action.prevTab',
+  togglePrimarySidebar: 'shortcuts.action.togglePrimarySidebar',
+  toggleSecondarySidebar: 'shortcuts.action.toggleSecondarySidebar',
 };
 
 function isMac(): boolean {

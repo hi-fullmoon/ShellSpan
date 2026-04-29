@@ -1,18 +1,13 @@
 import { CloseIcon } from './Icons';
 import { t } from '../lib/i18n';
 import { SettingsPanel } from './SettingsPanel';
-import type { AppPreferences, Snippet } from '../types';
+import type { AppPreferences } from '../types';
 
 interface SettingsDialogProps {
   open: boolean;
   preferences: AppPreferences;
   onChange: (nextPreferences: AppPreferences) => void;
   onClose: () => void;
-  snippets?: Snippet[];
-  onAddSnippet?: (name: string, command: string) => void;
-  onUpdateSnippet?: (id: string, name: string, command: string) => void;
-  onDeleteSnippet?: (id: string) => void;
-  onMoveSnippet?: (id: string, direction: 'up' | 'down') => void;
 }
 
 export function SettingsDialog({
@@ -20,11 +15,6 @@ export function SettingsDialog({
   preferences,
   onChange,
   onClose,
-  snippets = [],
-  onAddSnippet,
-  onUpdateSnippet,
-  onDeleteSnippet,
-  onMoveSnippet,
 }: SettingsDialogProps) {
   if (!open) {
     return null;
@@ -51,13 +41,8 @@ export function SettingsDialog({
         </div>
 
         <SettingsPanel
-          onAddSnippet={onAddSnippet}
           onChange={onChange}
-          onDeleteSnippet={onDeleteSnippet}
-          onMoveSnippet={onMoveSnippet}
-          onUpdateSnippet={onUpdateSnippet}
           preferences={preferences}
-          snippets={snippets}
         />
       </div>
     </div>

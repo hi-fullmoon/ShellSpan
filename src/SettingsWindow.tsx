@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { SettingsPanel } from './components/SettingsPanel';
 import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { isTauriRuntime } from './lib/tauri';
-import type { AppPreferences, Snippet } from './types';
+import type { AppPreferences } from './types';
 
 const IS_MAC = /mac/i.test(navigator.platform);
 
@@ -83,7 +84,6 @@ function readLocalStorage<T>(key: string, fallback: T): T {
 
 export default function SettingsWindow() {
   const [storedPreferences, setStoredPreferences] = useLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
-  const [storedSnippets, setStoredSnippets] = useLocalStorage<Snippet[]>('termbridge.snippets', []);
   const preferences = useMemo(() => normalizePreferences(storedPreferences), [storedPreferences]);
   const appliedTheme = preferences.theme === 'system' ? getSystemThemeMode() : preferences.theme;
   // Initialize i18n
@@ -106,16 +106,14 @@ export default function SettingsWindow() {
       unlisten = await listen(SETTINGS_CHANGED_EVENT, () => {
         // Re-read localStorage to sync with main window changes
         const prefs = readLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
-        const snippets = readLocalStorage<Snippet[]>('termbridge.snippets', []);
         setStoredPreferences(prefs);
-        setStoredSnippets(snippets);
       });
     };
     void attach();
     return () => {
       unlisten?.();
     };
-  }, [setStoredPreferences, setStoredSnippets]);
+  }, [setStoredPreferences]);
 
   const handleChange = useCallback(
     (nextPreferences: AppPreferences) => {
@@ -126,63 +124,15 @@ export default function SettingsWindow() {
     [setStoredPreferences],
   );
 
-  const handleAddSnippet = useCallback(
-    (name: string, command: string) => {
-      const trimmedName = name.trim();
-      const trimmedCommand = command.trim();
-      if (!trimmedName || !trimmedCommand) return;
-      const next = [
-        ...storedSnippets,
-        { id: `snippet_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name: trimmedName, command: trimmedCommand },
-      ];
-      window.localStorage.setItem('termbridge.snippets', JSON.stringify(next));
-      setStoredSnippets(next);
-      void emitTo('main', SETTINGS_CHANGED_EVENT, {});
-    },
-    [storedSnippets, setStoredSnippets],
-  );
-
-  const handleUpdateSnippet = useCallback(
-    (id: string, name: string, command: string) => {
-      const trimmedName = name.trim();
-      const trimmedCommand = command.trim();
-      if (!trimmedName || !trimmedCommand) return;
-      const next = storedSnippets.map((s) => (s.id === id ? { ...s, name: trimmedName, command: trimmedCommand } : s));
-      window.localStorage.setItem('termbridge.snippets', JSON.stringify(next));
-      setStoredSnippets(next);
-      void emitTo('main', SETTINGS_CHANGED_EVENT, {});
-    },
-    [storedSnippets, setStoredSnippets],
-  );
-
-  const handleDeleteSnippet = useCallback(
-    (id: string) => {
-      const next = storedSnippets.filter((s) => s.id !== id);
-      window.localStorage.setItem('termbridge.snippets', JSON.stringify(next));
-      setStoredSnippets(next);
-      void emitTo('main', SETTINGS_CHANGED_EVENT, {});
-    },
-    [storedSnippets, setStoredSnippets],
-  );
-
-  const handleMoveSnippet = useCallback(
-    (id: string, direction: 'up' | 'down') => {
-      const index = storedSnippets.findIndex((s) => s.id === id);
-      if (index === -1) return;
-      const next = [...storedSnippets];
-      if (direction === 'up' && index > 0) {
-        [next[index], next[index - 1]] = [next[index - 1], next[index]];
-      } else if (direction === 'down' && index < next.length - 1) {
-        [next[index], next[index + 1]] = [next[index + 1], next[index]];
-      }
-      window.localStorage.setItem('termbridge.snippets', JSON.stringify(next));
-      setStoredSnippets(next);
-      void emitTo('main', SETTINGS_CHANGED_EVENT, {});
-    },
-    [storedSnippets, setStoredSnippets],
-  );
-
   const isTauri = isTauriRuntime();
+
+  const handleMinimize = useCallback(() => {
+    if (isTauri) void getCurrentWindow().minimize();
+  }, [isTauri]);
+
+  const handleClose = useCallback(() => {
+    if (isTauri) void getCurrentWindow().close();
+  }, [isTauri]);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-(--app-bg) text-(--app-text)">
@@ -195,14 +145,39 @@ export default function SettingsWindow() {
           <div className="settings-title-bar-right" data-tauri-drag-region />
         </div>
       )}
+      {isTauri && !IS_MAC && (
+        <div className="settings-title-bar" data-tauri-drag-region>
+          <div className="settings-title-bar-left" data-tauri-drag-region>
+            <span className="settings-title-bar-text" data-tauri-drag-region>{t('settings.title')}</span>
+          </div>
+          <div className="settings-title-bar-right settings-title-bar-controls" data-tauri-drag-region>
+            <button
+              aria-label="Minimize"
+              className="settings-window-btn settings-window-btn-minimize"
+              onClick={handleMinimize}
+              type="button"
+            >
+              <svg fill="none" height="10" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" viewBox="0 0 10 10" width="10">
+                <path d="M1 5h8" />
+              </svg>
+            </button>
+            <button
+              aria-label="Close"
+              className="settings-window-btn settings-window-btn-close"
+              onClick={handleClose}
+              type="button"
+            >
+              <svg fill="none" height="10" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" viewBox="0 0 10 10" width="10">
+                <path d="m2 2 6 6" />
+                <path d="m8 2-6 6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
       <SettingsPanel
-        onAddSnippet={handleAddSnippet}
         onChange={handleChange}
-        onDeleteSnippet={handleDeleteSnippet}
-        onMoveSnippet={handleMoveSnippet}
-        onUpdateSnippet={handleUpdateSnippet}
         preferences={preferences}
-        snippets={storedSnippets}
       />
     </div>
   );

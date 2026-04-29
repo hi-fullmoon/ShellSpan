@@ -25,7 +25,6 @@ import type {
   SshStatusEvent,
   TerminalTheme,
   CursorStyle,
-  Snippet,
 } from "../types";
 
 interface TerminalPaneProps {
@@ -38,7 +37,6 @@ interface TerminalPaneProps {
   cursorStyle?: CursorStyle;
   cursorBlink?: boolean;
   copyOnSelect?: boolean;
-  snippets?: Snippet[];
 }
 
 const terminalLogger = createLogger("terminal");
@@ -53,7 +51,6 @@ export function TerminalPane({
   cursorStyle = 'block',
   cursorBlink = true,
   copyOnSelect = false,
-  snippets = [],
 }: TerminalPaneProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -517,33 +514,6 @@ export function TerminalPane({
         active ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
-      {snippets.length > 0 && (
-        <div className="flex items-center gap-1 px-2 py-1"
-          style={{ background: 'var(--app-surface)', borderBottom: '1px solid var(--app-border)' }}
-        >
-          <span className="text-[10px] text-[var(--app-text-soft)] shrink-0 mr-1">{t('terminal.snippets.label')}</span>
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-            {snippets.map((snippet) => (
-              <button
-                className="snippet-chip"
-                key={snippet.id}
-                onClick={() => {
-                  if (statusRef.current === 'connected') {
-                    invoke("write_session", {
-                      sessionId: session.sessionId,
-                      data: snippet.command + "\r",
-                    }).catch(() => {});
-                  }
-                }}
-                title={snippet.command}
-                type="button"
-              >
-                {snippet.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       {showSearch && (
         <div className="absolute right-2 top-2 z-30 flex items-center gap-1.5 rounded-lg p-1.5 backdrop-blur-sm"
           style={{ background: 'var(--app-surface)', border: '1px solid var(--app-border)', boxShadow: 'var(--app-shadow)' }}

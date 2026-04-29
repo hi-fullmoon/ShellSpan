@@ -27,7 +27,6 @@ import { checkForUpdate, downloadAndInstallUpdate } from './lib/update';
 import { isTauriRuntime } from './lib/tauri';
 import { shouldWarnOnClosedSession } from './lib/terminal';
 import { useFileManagerStore } from './stores/fileManagerStore';
-import { useSnippets } from './hooks/useSnippets';
 import { cn, sessionStatusTone } from './lib/ui';
 import { DEFAULT_SHORTCUTS, matchesBinding } from './lib/keyboard';
 import type { ShortcutAction } from './lib/keyboard';
@@ -128,7 +127,7 @@ async function openSettingsWindow(): Promise<void> {
       center: true,
       transparent: IS_MAC_OS,
       titleBarStyle: IS_MAC_OS ? 'overlay' : undefined,
-      decorations: !IS_MAC_OS,
+      decorations: IS_MAC_OS,
       alwaysOnTop: false,
     });
     settingsWindow.once('tauri://created', () => {
@@ -167,7 +166,6 @@ function App() {
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number>();
   const [updateToast, setUpdateToast] = useState<{ message: string; tone: 'info' | 'success' | 'error' }>();
   const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
-  const snippetManager = useSnippets();
   const [, setIntlVersion] = useState(0);
   const [systemThemeMode, setSystemThemeMode] = useState<'dark' | 'light'>(() => getSystemThemeMode());
   const [hostKeyDialog, setHostKeyDialog] = useState<{
@@ -278,11 +276,23 @@ function App() {
         }
         return;
       }
+
+      if (matchesBinding(merged.togglePrimarySidebar, event)) {
+        event.preventDefault();
+        setStoredPreferences((prev) => ({ ...prev, showFileManager: !preferences.showFileManager }));
+        return;
+      }
+
+      if (matchesBinding(merged.toggleSecondarySidebar, event)) {
+        event.preventDefault();
+        setStoredPreferences((prev) => ({ ...prev, showSidebar: !preferences.showSidebar }));
+        return;
+      }
     };
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [preferences.keyboardShortcuts, activeSessionId]);
+  }, [preferences.keyboardShortcuts, preferences.showFileManager, preferences.showSidebar, activeSessionId]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -643,7 +653,6 @@ function App() {
           } catch {
             // ignore parse errors
           }
-          snippetManager.refreshSnippets();
         });
 
         if (cancelled) {
@@ -1204,7 +1213,6 @@ function App() {
                   void handleReconnectSession(session.sessionId);
                 }}
                 session={session}
-                snippets={snippetManager.snippets}
                 terminalTheme={preferences.terminalTheme}
               />
             ))}
@@ -1269,15 +1277,10 @@ function App() {
       </div>
 
       <SettingsDialog
-        onAddSnippet={snippetManager.addSnippet}
         onChange={setStoredPreferences}
         onClose={() => setSettingsDialogOpen(false)}
-        onDeleteSnippet={snippetManager.deleteSnippet}
-        onMoveSnippet={snippetManager.moveSnippet}
-        onUpdateSnippet={snippetManager.updateSnippet}
         open={settingsDialogOpen}
         preferences={preferences}
-        snippets={snippetManager.snippets}
       />
 
       {connectDialogOpen ? (

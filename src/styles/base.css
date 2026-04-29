@@ -108,7 +108,7 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    border-radius: 9999px;
+    border-radius: 5px;
     background: var(--app-icon-border);
   }
 }

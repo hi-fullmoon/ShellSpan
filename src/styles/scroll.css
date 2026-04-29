@@ -21,9 +21,7 @@
   position: absolute;
   z-index: 2;
   opacity: 1;
-  transition:
-    opacity 320ms ease,
-    transform 320ms ease;
+  transition: opacity 320ms ease, transform 320ms ease;
 }
 
 .scroll-area-scrollbar-hover .scroll-area-track {
@@ -52,7 +50,7 @@
 
 .scroll-area-thumb {
   position: absolute;
-  border-radius: 9999px;
+  border-radius: 4px;
   background: var(--scroll-area-thumb-color);
   cursor: pointer;
   transition: background-color 150ms ease;
@@ -78,7 +76,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 9999px;
+  border-radius: 4px;
   background: var(--scroll-area-track-color);
   opacity: 0.75;
 }
@@ -112,9 +110,7 @@
   border-radius: 9999px;
   background: transparent;
   opacity: 0;
-  transition:
-    background-color 150ms ease,
-    opacity 150ms ease;
+  transition: background-color 150ms ease, opacity 150ms ease;
 }
 
 .split-sash:hover .split-sash-line,

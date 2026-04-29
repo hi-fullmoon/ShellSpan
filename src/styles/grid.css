@@ -124,64 +124,6 @@
   box-shadow: none !important;
 }
 
-.termbridge-file-grid .ag-center-cols-clipper,
-.termbridge-file-grid .ag-center-cols-viewport,
-.termbridge-file-grid .ag-body-viewport,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport {
-  scrollbar-color: var(--app-icon-border) transparent;
-}
-
-.termbridge-file-grid .ag-body-horizontal-scroll,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport,
-.termbridge-file-grid .ag-body-vertical-scroll,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport,
-.termbridge-file-grid .ag-center-cols-viewport,
-.termbridge-file-grid .ag-body-viewport {
-  scrollbar-width: auto;
-}
-
-.termbridge-file-grid .ag-body-horizontal-scroll {
-  height: 10px !important;
-  min-height: 10px !important;
-}
-
-.termbridge-file-grid .ag-body-vertical-scroll {
-  width: 10px !important;
-  min-width: 10px !important;
-}
-
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport {
-  height: 10px !important;
-}
-
-.termbridge-file-grid .ag-body-vertical-scroll-viewport {
-  width: 10px !important;
-}
-
-.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar,
-.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-track,
-.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-track,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-thumb,
-.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-thumb,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb {
-  border-radius: 9999px;
-  background: var(--app-icon-border);
-}
-
 .termbridge-grid-overlay {
   font-size: 12px;
   color: var(--app-text-soft);
