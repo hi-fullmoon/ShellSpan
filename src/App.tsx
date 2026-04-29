@@ -207,9 +207,11 @@ function App() {
     const merged = { ...DEFAULT_SHORTCUTS, ...preferences.keyboardShortcuts };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      // Check if an input element is focused
-      const tag = document.activeElement?.tagName.toLowerCase();
-      const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+      // Check if an input element is focused (allow xterm's hidden textarea)
+      const activeEl = document.activeElement;
+      const tag = activeEl?.tagName.toLowerCase();
+      const isXterm = activeEl && (activeEl as HTMLElement).classList.contains('xterm-helper-textarea');
+      const isInput = !isXterm && (tag === 'input' || tag === 'textarea' || tag === 'select');
 
       const dlg = dialogStateRef.current;
       const anyDialogOpen = dlg.hostKeyOpen || dlg.connectOpen || dlg.settingsOpen || dlg.pendingDelete || dlg.pendingClose || dlg.exitOpen;
