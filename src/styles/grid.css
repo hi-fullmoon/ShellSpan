@@ -145,7 +145,6 @@
 .termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar {
   width: 8px;
   height: 8px;
-  background: rgba(128, 128, 128, 0.02);
 }
 
 .termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-track,
