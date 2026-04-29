@@ -11,8 +11,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "version": "bash scripts/bump-version.sh",
-    "release:github": "bash scripts/release-github.sh",
-    "release:local": "bash scripts/release-github.sh"
+    "release": "bash scripts/release-github.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
