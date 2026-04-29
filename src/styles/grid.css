@@ -124,25 +124,48 @@
   box-shadow: none !important;
 }
 
-.termbridge-file-grid ::-webkit-scrollbar {
+.termbridge-file-grid .ag-body-viewport,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport,
+.termbridge-file-grid .ag-center-cols-viewport,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-icon-border) transparent;
+}
+
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar,
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-.termbridge-file-grid ::-webkit-scrollbar-track {
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-track,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track,
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-track,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.termbridge-file-grid ::-webkit-scrollbar-thumb {
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-thumb,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb,
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-thumb,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb {
   background: var(--app-icon-border);
   border-radius: 3px;
 }
 
-.termbridge-file-grid ::-webkit-scrollbar-thumb:hover {
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-thumb:hover,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb:hover,
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-thumb:hover,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb:hover {
   background: var(--app-text-muted);
 }
 
-.termbridge-file-grid ::-webkit-scrollbar-corner {
+.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-corner,
+.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-corner,
+.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-corner,
+.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-corner {
   background: transparent;
 }
 
