@@ -1,6 +1,8 @@
 import { useState, type ChangeEvent, FormEvent } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { t } from '../lib/i18n';
 import { parseQuickConnect } from '../lib/profile';
+import { FolderIcon } from './Icons';
 import type { ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
 
 type TabKey = 'basic' | 'jumpHost' | 'portForwarding';
@@ -35,6 +37,29 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       privateKeyPath: authMethod === 'key' ? (profile.privateKeyPath ?? '') : '',
       passphrase: authMethod === 'key' ? (profile.passphrase ?? '') : '',
     });
+  };
+
+  const handlePickPrivateKey = async (field: 'profile' | 'jumpHost') => {
+    try {
+      const path = await invoke<string | null>('pick_private_key_file');
+      if (!path) return;
+      if (field === 'profile') {
+        onProfileChange({ ...profile, privateKeyPath: path });
+      } else {
+        const next: JumpHostConfig = {
+          host: profile.jumpHost?.host ?? '',
+          port: profile.jumpHost?.port ?? 22,
+          username: profile.jumpHost?.username ?? '',
+          authMethod: profile.jumpHost?.authMethod ?? 'key',
+          privateKeyPath: path,
+          passphrase: profile.jumpHost?.passphrase,
+          ...(profile.jumpHost ? { password: profile.jumpHost.password } : {}),
+        };
+        onProfileChange({ ...profile, jumpHost: next });
+      }
+    } catch {
+      // silently ignore cancellation or errors
+    }
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -184,13 +209,23 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.privateKeyPath')}</span>
-                  <input
-                    className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
-                    value={profile.privateKeyPath ?? ''}
-                    onChange={handleTextChange('privateKeyPath')}
-                    placeholder={t('connectionForm.privateKeyPathPlaceholder')}
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      className="themed-input w-full rounded-lg px-3 py-1.5 pr-8 text-sm outline-none transition focus:border-cyan-400/60"
+                      value={profile.privateKeyPath ?? ''}
+                      onChange={handleTextChange('privateKeyPath')}
+                      placeholder={t('connectionForm.privateKeyPathPlaceholder')}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-700/30 hover:text-slate-200"
+                      onClick={() => handlePickPrivateKey('profile')}
+                      title={t('connectionForm.selectPrivateKey')}
+                    >
+                      <FolderIcon className="h-4 w-4" />
+                    </button>
+                  </div>
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.passphrase')}</span>
@@ -309,14 +344,24 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.privateKeyPath')}</span>
-                  <input
-                    className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
-                    value={profile.jumpHost?.privateKeyPath ?? ''}
-                    onChange={(event) => {
-                      const next: JumpHostConfig = { host: profile.jumpHost?.host ?? '', port: profile.jumpHost?.port ?? 22, username: profile.jumpHost?.username ?? '', authMethod: 'key', privateKeyPath: event.target.value, passphrase: profile.jumpHost?.passphrase };
-                      onProfileChange({ ...profile, jumpHost: next });
-                    }}
-                  />
+                  <div className="relative">
+                    <input
+                      className="themed-input w-full rounded-lg px-3 py-1.5 pr-8 text-sm outline-none transition focus:border-cyan-400/60"
+                      value={profile.jumpHost?.privateKeyPath ?? ''}
+                      onChange={(event) => {
+                        const next: JumpHostConfig = { host: profile.jumpHost?.host ?? '', port: profile.jumpHost?.port ?? 22, username: profile.jumpHost?.username ?? '', authMethod: 'key', privateKeyPath: event.target.value, passphrase: profile.jumpHost?.passphrase };
+                        onProfileChange({ ...profile, jumpHost: next });
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-700/30 hover:text-slate-200"
+                      onClick={() => handlePickPrivateKey('jumpHost')}
+                      title={t('connectionForm.selectPrivateKey')}
+                    >
+                      <FolderIcon className="h-4 w-4" />
+                    </button>
+                  </div>
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.passphrase')}</span>

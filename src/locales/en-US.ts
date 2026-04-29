@@ -112,6 +112,7 @@ const enUS = {
   'connectionForm.passwordPlaceholder': 'Will not be written to local storage',
   'connectionForm.privateKeyPath': 'Private Key Path',
   'connectionForm.privateKeyPathPlaceholder': '~/.ssh/id_ed25519 or C:\\Users\\you\\.ssh\\id_rsa',
+  'connectionForm.selectPrivateKey': 'Select private key file',
   'connectionForm.passphrase': 'Key Passphrase',
   'connectionForm.passphrasePlaceholder': 'Fill this in if your key is protected',
   'connectionForm.remember': 'Save connection',

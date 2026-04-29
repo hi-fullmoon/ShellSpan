@@ -112,6 +112,7 @@ const zhCN = {
   'connectionForm.passwordPlaceholder': '不会写入本地存储',
   'connectionForm.privateKeyPath': '私钥路径',
   'connectionForm.privateKeyPathPlaceholder': '~/.ssh/id_ed25519 或 C:\\Users\\you\\.ssh\\id_rsa',
+  'connectionForm.selectPrivateKey': '选择私钥文件',
   'connectionForm.passphrase': '私钥口令',
   'connectionForm.passphrasePlaceholder': '如密钥有口令可填写',
   'connectionForm.remember': '保存连接信息',

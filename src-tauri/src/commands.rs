@@ -316,6 +316,15 @@ pub(crate) fn pick_local_folder() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+pub(crate) fn pick_private_key_file() -> Result<Option<String>, String> {
+    let path = rfd::FileDialog::new()
+        .set_title("选择私钥文件")
+        .pick_file()
+        .map(|path| path.to_string_lossy().to_string());
+    Ok(path)
+}
+
+#[tauri::command]
 pub(crate) async fn open_remote_file(request: OpenRemoteFileRequest) -> Result<(), String> {
     info!(
         "Opening remote file path={} {}",

@@ -145,6 +145,7 @@ pub fn run() {
             commands::cancel_download,
             commands::pick_local_files,
             commands::pick_local_folder,
+            commands::pick_private_key_file,
             commands::open_remote_file,
             commands::update_remote_permissions,
             commands::check_host_key,
