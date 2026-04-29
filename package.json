@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "bump": "bash scripts/bump-version.sh",
+    "version": "bash scripts/bump-version.sh",
     "release:github": "bash scripts/release-github.sh",
     "release:local": "bash scripts/release-github.sh"
   },
