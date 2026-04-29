@@ -131,8 +131,8 @@ function PreferenceCheckbox({
         type="checkbox"
       />
       <span className="flex flex-col gap-0.5">
-        <span className="font-medium text-[var(--app-text)]">{label}</span>
-        <span className="text-[var(--app-text-soft)]">{hint}</span>
+        <span className="font-medium text-(--app-text)">{label}</span>
+        <span className="text-(--app-text-soft)">{hint}</span>
       </span>
     </label>
   );
@@ -198,11 +198,7 @@ function ShortcutRow({
   );
 }
 
-export function SettingsPanel({
-  preferences,
-  onChange,
-  showTabs = true,
-}: SettingsPanelProps) {
+export function SettingsPanel({ preferences, onChange, showTabs = true }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
 
   const shortcuts = { ...DEFAULT_SHORTCUTS, ...preferences.keyboardShortcuts };

@@ -129,14 +129,6 @@
 .termbridge-file-grid .ag-center-cols-viewport,
 .termbridge-file-grid .ag-body-vertical-scroll-viewport {
   scrollbar-width: auto;
-  scrollbar-color: transparent transparent;
-}
-
-.termbridge-file-grid .ag-body-viewport:hover,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport:hover,
-.termbridge-file-grid .ag-center-cols-viewport:hover,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport:hover {
-  scrollbar-color: var(--app-icon-border) transparent;
 }
 
 .termbridge-file-grid .ag-body-viewport::-webkit-scrollbar,
@@ -147,18 +139,10 @@
   height: 8px;
 }
 
-.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-track,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track,
-.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-track,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-track {
-  background: transparent;
-}
-
 .termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-thumb,
 .termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb,
 .termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-thumb,
 .termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb {
-  background: transparent;
   border-radius: 3px;
 }
 
@@ -174,13 +158,6 @@
 .termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-thumb:hover,
 .termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb:hover {
   background: var(--app-text-muted);
-}
-
-.termbridge-file-grid .ag-body-viewport::-webkit-scrollbar-corner,
-.termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-corner,
-.termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-corner,
-.termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-corner {
-  background: transparent;
 }
 
 .termbridge-grid-overlay {
