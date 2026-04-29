@@ -124,6 +124,28 @@
   box-shadow: none !important;
 }
 
+.termbridge-file-grid ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.termbridge-file-grid ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.termbridge-file-grid ::-webkit-scrollbar-thumb {
+  background: var(--app-icon-border);
+  border-radius: 3px;
+}
+
+.termbridge-file-grid ::-webkit-scrollbar-thumb:hover {
+  background: var(--app-text-muted);
+}
+
+.termbridge-file-grid ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .termbridge-grid-overlay {
   font-size: 12px;
   color: var(--app-text-soft);
