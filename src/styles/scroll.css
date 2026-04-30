@@ -3,6 +3,7 @@
   --scroll-area-thumb-hover-color: rgb(71 85 105 / 1);
   --scroll-area-track-color: rgb(15 23 42 / 0.08);
   --scroll-area-size: 8px;
+  border-radius: 0px;
 }
 
 .scroll-area-viewport {
@@ -21,7 +22,9 @@
   position: absolute;
   z-index: 2;
   opacity: 1;
-  transition: opacity 320ms ease, transform 320ms ease;
+  transition:
+    opacity 320ms ease,
+    transform 320ms ease;
 }
 
 .scroll-area-scrollbar-hover .scroll-area-track {
@@ -110,7 +113,9 @@
   border-radius: 9999px;
   background: transparent;
   opacity: 0;
-  transition: background-color 150ms ease, opacity 150ms ease;
+  transition:
+    background-color 150ms ease,
+    opacity 150ms ease;
 }
 
 .split-sash:hover .split-sash-line,

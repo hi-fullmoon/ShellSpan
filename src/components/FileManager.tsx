@@ -256,14 +256,7 @@ function parentDirectoryPath(path: string) {
   return `${normalized.startsWith('/') ? '/' : ''}${parts.join('/')}`;
 }
 
-const SENSITIVE_PATH_PATTERNS = [
-  '/etc',
-  '/root',
-  '/boot',
-  '/var/log',
-  '/proc',
-  '/sys',
-];
+const SENSITIVE_PATH_PATTERNS = ['/etc', '/root', '/boot', '/var/log', '/proc', '/sys'];
 
 function isSensitivePath(path: string): boolean {
   const normalized = path.replace(/\\+/g, '/');
@@ -1795,7 +1788,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
           </h3>
         </div>
         <div className="flex items-center gap-1">
-          <span className="file-manager-count rounded-md px-2 py-1 text-[10px]">{listing?.entries.length ?? 0}</span>
+          <span className="file-manager-count rounded-md px-2 py-1 text-[10px]">{listing ? listing?.entries.length : ''}</span>
         </div>
       </div>
 
@@ -2149,22 +2142,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                       value={permissionEdit.value}
                     />
                     <span className="text-[11px] text-slate-400">
-                      {formatPermissionSymbolic(
-                        parseInt(permissionEdit.value.trim(), 8) || 0,
-                        permissionEdit.entry.kind,
-                      )}
+                      {formatPermissionSymbolic(parseInt(permissionEdit.value.trim(), 8) || 0, permissionEdit.entry.kind)}
                     </span>
                   </div>
                   <div className="flex justify-end gap-1">
                     <button className="icon-btn h-7 px-2 text-xs" onClick={() => setPermissionEdit(undefined)} type="button">
                       {t('fileManager.dialog.cancel')}
                     </button>
-                    <button
-                      className="primary-btn h-7 px-2 text-xs"
-                      disabled={working}
-                      onClick={() => void submitPermissionEdit()}
-                      type="button"
-                    >
+                    <button className="primary-btn h-7 px-2 text-xs" disabled={working} onClick={() => void submitPermissionEdit()} type="button">
                       {t('fileManager.permissionEdit.save')}
                     </button>
                   </div>
