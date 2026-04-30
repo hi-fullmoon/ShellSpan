@@ -60,7 +60,14 @@ function getSystemThemeMode() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? ('dark' as const) : ('light' as const);
 }
 
-const validTerminalThemes: Array<AppPreferences['terminalTheme']> = ['default', 'dracula', 'solarized-dark', 'solarized-light', 'one-dark', 'monokai'];
+const validTerminalThemes: Array<AppPreferences['terminalTheme']> = [
+  'default',
+  'dracula',
+  'solarized-dark',
+  'solarized-light',
+  'one-dark',
+  'monokai',
+];
 const validCursorStyles: Array<AppPreferences['cursorStyle']> = ['block', 'line', 'bar'];
 
 function normalizePreferences(value: Partial<AppPreferences> | null | undefined): AppPreferences {
@@ -73,8 +80,12 @@ function normalizePreferences(value: Partial<AppPreferences> | null | undefined)
       typeof value?.terminalLineHeight === 'number' && value.terminalLineHeight >= 1 && value.terminalLineHeight <= 2
         ? value.terminalLineHeight
         : 1.2,
-    terminalTheme: validTerminalThemes.includes(value?.terminalTheme as AppPreferences['terminalTheme']) ? (value!.terminalTheme as AppPreferences['terminalTheme']) : 'default',
-    cursorStyle: validCursorStyles.includes(value?.cursorStyle as AppPreferences['cursorStyle']) ? (value!.cursorStyle as AppPreferences['cursorStyle']) : 'block',
+    terminalTheme: validTerminalThemes.includes(value?.terminalTheme as AppPreferences['terminalTheme'])
+      ? (value!.terminalTheme as AppPreferences['terminalTheme'])
+      : 'default',
+    cursorStyle: validCursorStyles.includes(value?.cursorStyle as AppPreferences['cursorStyle'])
+      ? (value!.cursorStyle as AppPreferences['cursorStyle'])
+      : 'block',
     cursorBlink: value?.cursorBlink !== false,
     copyOnSelect: value?.copyOnSelect === true,
     showFileManager: value?.showFileManager !== false,
@@ -218,12 +229,36 @@ function App() {
 
       // Escape always closes the active dialog, even if input is focused
       if (matchesBinding(merged.closeDialog, event)) {
-        if (dlg.hostKeyOpen) { setHostKeyDialog({ open: false }); event.preventDefault(); return; }
-        if (dlg.connectOpen) { setConnectDialogOpen(false); event.preventDefault(); return; }
-        if (dlg.settingsOpen) { setSettingsDialogOpen(false); event.preventDefault(); return; }
-        if (dlg.pendingDelete) { setPendingDeleteProfileId(undefined); event.preventDefault(); return; }
-        if (dlg.pendingClose) { setPendingCloseSessionId(undefined); event.preventDefault(); return; }
-        if (dlg.exitOpen) { setExitDialogOpen(false); event.preventDefault(); return; }
+        if (dlg.hostKeyOpen) {
+          setHostKeyDialog({ open: false });
+          event.preventDefault();
+          return;
+        }
+        if (dlg.connectOpen) {
+          setConnectDialogOpen(false);
+          event.preventDefault();
+          return;
+        }
+        if (dlg.settingsOpen) {
+          setSettingsDialogOpen(false);
+          event.preventDefault();
+          return;
+        }
+        if (dlg.pendingDelete) {
+          setPendingDeleteProfileId(undefined);
+          event.preventDefault();
+          return;
+        }
+        if (dlg.pendingClose) {
+          setPendingCloseSessionId(undefined);
+          event.preventDefault();
+          return;
+        }
+        if (dlg.exitOpen) {
+          setExitDialogOpen(false);
+          event.preventDefault();
+          return;
+        }
         return;
       }
 
@@ -273,7 +308,8 @@ function App() {
         const currentSessions = sessionsRef.current;
         if (currentSessions.length > 1) {
           const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
-          const prev = idx === -1 ? currentSessions[currentSessions.length - 1] : currentSessions[(idx - 1 + currentSessions.length) % currentSessions.length];
+          const prev =
+            idx === -1 ? currentSessions[currentSessions.length - 1] : currentSessions[(idx - 1 + currentSessions.length) % currentSessions.length];
           setActiveSessionId(prev.sessionId);
         }
         return;
@@ -370,8 +406,9 @@ function App() {
         // Stop port forwards when session closes
         if (isTauriRuntime()) {
           const forwardOpId = `pf-${event.payload.sessionId}`;
-          void invoke('stop_port_forwards', { operationId: forwardOpId })
-            .catch(() => { /* port forwards may not have been started */ });
+          void invoke('stop_port_forwards', { operationId: forwardOpId }).catch(() => {
+            /* port forwards may not have been started */
+          });
         }
 
         const currentSession = sessionsRef.current.find((session) => session.sessionId === event.payload.sessionId);
@@ -737,11 +774,7 @@ function App() {
     return invoke<SessionSummary>('create_session', { request });
   };
 
-  const proceedWithConnection = async (
-    profile: ConnectionProfile,
-    remember: boolean,
-    rememberPassword: boolean,
-  ) => {
+  const proceedWithConnection = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
     try {
       if (remember) {
         // Store password in OS keychain before saving profile
@@ -953,10 +986,9 @@ function App() {
       // Stop port forwards if running
       if (isTauriRuntime()) {
         const forwardOpId = `pf-${sessionId}`;
-        void invoke('stop_port_forwards', { operationId: forwardOpId })
-          .catch((error) => {
-            appLogger.warn('Failed to stop port forwards', { error: String(error) });
-          });
+        void invoke('stop_port_forwards', { operationId: forwardOpId }).catch((error) => {
+          appLogger.warn('Failed to stop port forwards', { error: String(error) });
+        });
       }
       let nextActiveSessionId: string | undefined;
       setSessions((current) => {
@@ -1088,10 +1120,9 @@ function App() {
 
     appLogger.info('删除历史连接', { profileId: pendingDeleteProfileId });
     if (isTauriRuntime()) {
-      void invoke('remove_password', { profileId: pendingDeleteProfileId })
-        .catch((error) => {
-          appLogger.warn('Failed to remove password from keychain', { error: String(error) });
-        });
+      void invoke('remove_password', { profileId: pendingDeleteProfileId }).catch((error) => {
+        appLogger.warn('Failed to remove password from keychain', { error: String(error) });
+      });
     }
     setSavedProfiles((current) => current.filter((item) => item.id !== pendingDeleteProfileId));
     setPendingDeleteProfileId(undefined);
@@ -1241,41 +1272,43 @@ function App() {
         secondarySideVisible={preferences.showSidebar}
       />
       <div className="flex flex-1 gap-0 p-0 min-h-0">
-        {preferences.showFileManager ? (
-          <SplitLayout
-            className="min-w-0 flex-1"
-            defaultPrimarySize={320}
-            primary={<FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} />}
-            primaryClassName="min-h-0"
-            primaryMinSize={280}
-            secondary={workspaceContent}
-            secondaryClassName="min-h-0"
-            secondaryMinSize={520}
-            storageKey="termbridge.layout.main"
-          />
-        ) : (
-          <div className="min-w-0 flex-1">{workspaceContent}</div>
-        )}
+        <SplitLayout className="min-w-0 flex-1" storageKey="termbridge.layout.main">
+          <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showFileManager} defaultSize={320} minSize={280} name="fileManager">
+            {({ collapsed }) => (!collapsed ? <FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} /> : null)}
+          </SplitLayout.Slot>
 
-        {preferences.showSidebar ? (
-          <div className="h-full w-52 shrink-0">
-            <Sidebar
-              connectedCount={connectedSessions}
-              runtimeLabel={runtimeText}
-              savedProfiles={savedProfiles}
-              onDeleteProfile={handleDeleteSavedProfile}
-              onRenameProfile={handleRenameSavedProfile}
-              onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
-              onTogglePinnedProfile={handleToggleSavedProfilePinned}
-              onReuseProfile={loadProfile}
-              onOpenConnect={() => {
-                setDraftProfile(createEmptyProfile());
-                setErrorMessage(undefined);
-                setConnectDialogOpen(true);
-              }}
-            />
-          </div>
-        ) : null}
+          <SplitLayout.Slot className="min-h-0" minSize={520} name="workspace">
+            {() => (
+              <SplitLayout className="w-full" storageKey="termbridge.layout.sidebar">
+                <SplitLayout.Slot className="min-h-0" defaultSize={520} minSize={320} name="tabs">
+                  {() => workspaceContent}
+                </SplitLayout.Slot>
+
+                <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showSidebar} defaultSize={212} fixed minSize={212} name="sidebar">
+                  {({ collapsed }) =>
+                    !collapsed ? (
+                      <Sidebar
+                        connectedCount={connectedSessions}
+                        runtimeLabel={runtimeText}
+                        savedProfiles={savedProfiles}
+                        onDeleteProfile={handleDeleteSavedProfile}
+                        onRenameProfile={handleRenameSavedProfile}
+                        onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
+                        onTogglePinnedProfile={handleToggleSavedProfilePinned}
+                        onReuseProfile={loadProfile}
+                        onOpenConnect={() => {
+                          setDraftProfile(createEmptyProfile());
+                          setErrorMessage(undefined);
+                          setConnectDialogOpen(true);
+                        }}
+                      />
+                    ) : null
+                  }
+                </SplitLayout.Slot>
+              </SplitLayout>
+            )}
+          </SplitLayout.Slot>
+        </SplitLayout>
       </div>
 
       <SettingsDialog
@@ -1422,36 +1455,20 @@ function App() {
           >
             <div className="flex flex-col gap-1">
               <p className="label">{t('hostKey.dialog.kicker')}</p>
-              <h3 className="dialog-title text-sm font-semibold">
-                {t('hostKey.dialog.title', { host: hostKeyDialog.profile.host })}
-              </h3>
+              <h3 className="dialog-title text-sm font-semibold">{t('hostKey.dialog.title', { host: hostKeyDialog.profile.host })}</h3>
             </div>
 
-            <p className="dialog-description mt-3 text-xs">
-              {t('hostKey.dialog.description')}
-            </p>
+            <p className="dialog-description mt-3 text-xs">{t('hostKey.dialog.description')}</p>
 
-            <div className="mt-3 rounded-lg bg-slate-900/80 p-3 font-mono text-xs text-slate-300 break-all">
-              {hostKeyDialog.fingerprint}
-            </div>
+            <div className="mt-3 rounded-lg bg-slate-900/80 p-3 font-mono text-xs text-slate-300 break-all">{hostKeyDialog.fingerprint}</div>
 
-            <p className="mt-3 text-[11px] text-amber-400/80">
-              {t('hostKey.dialog.warning')}
-            </p>
+            <p className="mt-3 text-[11px] text-amber-400/80">{t('hostKey.dialog.warning')}</p>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button
-                className="icon-btn"
-                onClick={() => setHostKeyDialog({ open: false })}
-                type="button"
-              >
+              <button className="icon-btn" onClick={() => setHostKeyDialog({ open: false })} type="button">
                 {t('app.common.cancel')}
               </button>
-              <button
-                className="primary-btn"
-                onClick={() => void handleTrustAndConnect()}
-                type="button"
-              >
+              <button className="primary-btn" onClick={() => void handleTrustAndConnect()} type="button">
                 {t('hostKey.dialog.trustAndConnect')}
               </button>
             </div>

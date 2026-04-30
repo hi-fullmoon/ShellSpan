@@ -118,14 +118,16 @@ vi.mock('../components/Sidebar', () => ({
   ),
 }));
 
-vi.mock('../components/SplitLayout', () => ({
-  SplitLayout: ({ primary, secondary }: { primary: React.ReactNode; secondary: React.ReactNode }) => (
-    <div>
-      <div>{primary}</div>
-      <div>{secondary}</div>
-    </div>
-  ),
-}));
+vi.mock('../components/SplitLayout', () => {
+  function Slot({ children }: { children: React.ReactNode | ((props: { collapsed: boolean; size: number }) => React.ReactNode) }) {
+    return <div>{typeof children === 'function' ? children({ collapsed: false, size: 320 }) : children}</div>;
+  }
+  function SplitLayout({ children }: { children: React.ReactNode }) {
+    return <div>{children}</div>;
+  }
+  SplitLayout.Slot = Slot;
+  return { SplitLayout };
+});
 
 vi.mock('../components/SessionTabs', () => ({
   SessionTabs: ({ sessions }: { sessions: Array<{ sessionId: string; title: string; status: string; note?: string }> }) => (

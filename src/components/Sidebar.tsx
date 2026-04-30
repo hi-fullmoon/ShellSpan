@@ -142,8 +142,8 @@ export function Sidebar({
   };
 
   return (
-    <aside className="grid h-full min-h-0 gap-1 xl:grid-rows-[auto_minmax(0,1fr)]">
-      <div className="surface h-full flex flex-col gap-1 p-1">
+    <aside className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1">
+      <div className="surface flex flex-col gap-1 p-1">
         <div className="flex items-start justify-between gap-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <div className="brand-badge">TB</div>
@@ -156,21 +156,21 @@ export function Sidebar({
         </div>
 
         <div className="grid grid-cols-3 gap-1">
-          <div className="surface-muted p-1">
-            <p className="stats-label">{t('sidebar.online')}</p>
+          <div className="surface-muted rounded-lg! min-w-0 p-1">
+            <p className="stats-label truncate">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
           </div>
-          <div className="surface-muted p-1">
-            <p className="stats-label">{t('sidebar.history')}</p>
+          <div className="surface-muted rounded-lg! min-w-0 p-1">
+            <p className="stats-label truncate">{t('sidebar.history')}</p>
             <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
           </div>
-          <div className="surface-muted p-1">
-            <p className="stats-label">{t('sidebar.favorite')}</p>
+          <div className="surface-muted rounded-lg! min-w-0 p-1">
+            <p className="stats-label truncate">{t('sidebar.favorite')}</p>
             <strong className="mt-0.5 block text-sm">{favoriteCount}</strong>
           </div>
         </div>
 
-        <button className="primary-btn w-full" onClick={onOpenConnect} type="button">
+        <button className="primary-btn w-full whitespace-nowrap" onClick={onOpenConnect} type="button">
           {t('sidebar.newConnection')}
         </button>
       </div>
@@ -190,7 +190,7 @@ export function Sidebar({
             <div className="flex flex-col gap-1">
               {sortedProfiles.map((profile) => (
                 <button
-                  className="history-item surface-muted flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
+                  className="history-item surface-muted rounded-md! flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
                   key={profile.id}
                   onClick={() => handleReuseClick(profile)}
                   onDoubleClick={() => handleRenameDoubleClick(profile)}
