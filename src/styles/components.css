@@ -131,6 +131,7 @@
 
 .themed-checkbox-row {
   border: 1px solid var(--app-border);
+  border-radius: 4px;
   background: color-mix(in srgb, var(--app-surface-muted) 92%, transparent);
   color: var(--app-text-soft);
 }
