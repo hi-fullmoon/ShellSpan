@@ -1468,7 +1468,7 @@ function App() {
               <button className="btn-cancel" onClick={() => setHostKeyDialog({ open: false })} type="button">
                 {t('app.common.cancel')}
               </button>
-              <button className="btn-confirm" onClick={() => void handleTrustAndConnect()} type="button">
+              <button className="primary-btn" onClick={() => void handleTrustAndConnect()} type="button">
                 {t('hostKey.dialog.trustAndConnect')}
               </button>
             </div>

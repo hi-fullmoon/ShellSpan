@@ -216,7 +216,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                     />
                     <button
                       type="button"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-[4px] text-(--app-text-muted) transition hover:bg-(--app-icon-hover) hover:text-(--app-text-soft)"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-sm text-(--app-text-muted) transition hover:bg-(--app-icon-hover) hover:text-(--app-text-soft)"
                       onClick={() => handlePickPrivateKey('profile')}
                       title={t('connectionForm.selectPrivateKey')}
                     >
@@ -400,7 +400,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                     />
                     <button
                       type="button"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-[4px] text-(--app-text-muted) transition hover:bg-(--app-icon-hover) hover:text-(--app-text-soft)"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-sm text-(--app-text-muted) transition hover:bg-(--app-icon-hover) hover:text-(--app-text-soft)"
                       onClick={() => handlePickPrivateKey('jumpHost')}
                       title={t('connectionForm.selectPrivateKey')}
                     >
@@ -500,7 +500,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                     />
                   </label>
                   <button
-                    className="mb-0.5 inline-flex h-7 w-7 items-center justify-center rounded-[4px] text-xs text-rose-400 transition hover:bg-rose-400/10"
+                    className="mb-0.5 inline-flex h-7 w-7 items-center justify-center rounded-sm text-xs text-rose-400 transition hover:bg-rose-400/10"
                     onClick={() => {
                       const next = (profile.portForwards ?? []).filter((_, idx) => idx !== i);
                       onProfileChange({ ...profile, portForwards: next.length > 0 ? next : undefined });
@@ -514,7 +514,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               ))}
             </div>
             <button
-              className="inline-flex items-center justify-center gap-1 rounded-[4px] border border-dashed border-(--app-icon-border) px-3 py-1.5 text-xs text-(--app-text-muted) transition hover:border-(--app-text-muted) hover:text-(--app-text-soft)"
+              className="inline-flex items-center justify-center gap-1 rounded-sm border border-dashed border-(--app-icon-border) px-3 py-1.5 text-xs text-(--app-text-muted) transition hover:border-(--app-text-muted) hover:text-(--app-text-soft)"
               onClick={() => {
                 const next: PortForwardConfig = { kind: 'local', localPort: 8080, remoteHost: '', remotePort: 80 };
                 onProfileChange({ ...profile, portForwards: [...(profile.portForwards ?? []), next] });

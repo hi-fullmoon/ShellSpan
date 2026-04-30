@@ -54,7 +54,7 @@ export function UpdateRestartDialog({
           <button className="btn-cancel" onClick={onLater} type="button">
             {t('updateRestartDialog.later')}
           </button>
-          <button className="btn-confirm" onClick={onInstallNow} type="button">
+          <button className="primary-btn" onClick={onInstallNow} type="button">
             {t('updateRestartDialog.installNow')}
           </button>
         </div>

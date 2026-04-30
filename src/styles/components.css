@@ -115,24 +115,6 @@
   background: var(--app-icon-hover);
 }
 
-.btn-confirm {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 32px;
-  border-radius: 4px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--app-primary-bg);
-  color: var(--app-primary-text);
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
-}
-
-.btn-confirm:hover {
-  background: var(--app-primary-hover);
-}
-
 .segment {
   display: grid;
   grid-auto-flow: column;

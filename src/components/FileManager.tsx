@@ -406,7 +406,7 @@ function MenuDivider() {
 
 function PropertyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="themed-property-row grid grid-cols-[72px_minmax(0,1fr)] gap-2 px-2 py-2">
+    <div className="themed-property-row grid grid-cols-[72px_minmax(0,1fr)] gap-2 px-2 py-2 rounded-sm">
       <span className="themed-property-row-label text-[11px] font-medium leading-5 tracking-[0.02em]">{label}</span>
       <span className="themed-property-row-value break-all text-[12px] leading-5">{value}</span>
     </div>
@@ -2123,7 +2123,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 value={formatPermissionSymbolic(properties.entry.permissions, properties.entry.kind)}
               />
               {permissionEdit && permissionEdit.entry.path === properties.entry.path ? (
-                <div className="flex flex-col gap-2 border border-cyan-900/50 bg-cyan-950/20 p-2">
+                <div className="flex flex-col gap-2 border border-cyan-900/50 bg-cyan-950/20 p-2 rounded-sm">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-medium tracking-[0.02em]">{t('fileManager.permissionEdit.label')}</span>
                     <input
@@ -2321,7 +2321,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               <button className="btn-cancel" onClick={() => setDialog(undefined)} type="button">
                 {t('fileManager.dialog.cancel')}
               </button>
-              <button className="btn-confirm" disabled={!dialog.value.trim() || working} type="submit">
+              <button className="primary-btn" disabled={!dialog.value.trim() || working} type="submit">
                 {dialog.mode === 'rename' ? t('fileManager.dialog.save') : t('fileManager.dialog.confirm')}
               </button>
             </div>
@@ -2391,7 +2391,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 {t('fileManager.uploadConflict.skip')}
               </button>
               <button
-                className="btn-confirm"
+                className="primary-btn"
                 onClick={() => {
                   uploadConflictResolverRef.current?.('overwrite', pendingUploadConflict.applyToRemaining);
                   setPendingUploadConflict(undefined);

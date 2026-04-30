@@ -327,7 +327,7 @@ export function Sidebar({
                   <button className="btn-cancel" onClick={closeRenameDialog} type="button">
                     {t('sidebar.renameDialog.cancel')}
                   </button>
-                  <button className="btn-confirm" disabled={!renameValue.trim()} onClick={commitRename} type="button">
+                  <button className="primary-btn" disabled={!renameValue.trim()} onClick={commitRename} type="button">
                     {t('sidebar.renameDialog.save')}
                   </button>
                 </div>
