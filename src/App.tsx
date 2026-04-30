@@ -1433,7 +1433,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="inline-flex h-8 items-center justify-center rounded-sm bg-rose-400 px-3 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="danger-btn"
                 onClick={confirmAppExit}
                 type="button"
               >
