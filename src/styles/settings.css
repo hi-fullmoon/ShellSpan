@@ -66,7 +66,9 @@
   background: transparent;
   color: var(--app-text-soft);
   cursor: pointer;
-  transition: background-color 150ms ease, color 150ms ease;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
 }
 
 .settings-window-btn:hover {
@@ -120,7 +122,9 @@
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .settings-tab:hover {
@@ -144,7 +148,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-radius: 0;
+  border-radius: 4px;
   border: 1px solid var(--app-border);
   padding: 8px 12px;
 }
@@ -162,7 +166,9 @@
   font-weight: 500;
   border: none;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   background: color-mix(in srgb, var(--app-surface) 88%, transparent);
   color: var(--app-text-soft);
 }
@@ -210,7 +216,7 @@
   flex-direction: column;
   gap: 10px;
   border: 1px solid var(--app-border);
-  border-radius: 0;
+  border-radius: 4px;
   background: var(--app-surface-muted);
   padding: 12px;
 }
@@ -242,7 +248,7 @@
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border-radius: 0;
+  border-radius: 6px;
   border: 1px solid var(--app-icon-border);
   background: var(--app-icon-bg);
   color: var(--app-primary-bg);

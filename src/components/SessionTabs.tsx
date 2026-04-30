@@ -78,7 +78,7 @@ function SessionTabCard({
       {...dragAttributes}
       {...dragListeners}
       className={cn(
-        'session-tab relative flex w-55 shrink-0 items-center gap-1.5 border px-1.5 py-0.5 text-left transition',
+        'session-tab group relative flex w-55 shrink-0 items-center gap-1.5 border px-1.5 py-0.5 text-left transition rounded-sm',
         active ? 'session-tab-active' : 'session-tab-inactive',
         renaming
           ? 'session-tab-renaming cursor-text'
@@ -91,7 +91,7 @@ function SessionTabCard({
       onDoubleClick={() => onRenameStart?.(session)}
     >
       {renaming ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-7">
+        <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8">
           <span className={cn('h-2 w-2', sessionStatusDot(session.status))} />
           <span className="min-w-0 flex-1">
             <input
@@ -117,13 +117,13 @@ function SessionTabCard({
         </div>
       ) : (
         <>
-          <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-7" onClick={() => onSelect(session.sessionId)} type="button">
-            <span className={cn('h-2 w-2', sessionStatusDot(session.status))} />
+          <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8" onClick={() => onSelect(session.sessionId)} type="button">
+            <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
             <span className="min-w-0 flex-1">
-              <strong className="block truncate text-xs text-left" title={session.title}>
+              <strong className="block truncate text-[12px] text-left" title={session.title}>
                 {session.title}
               </strong>
-              <small className="session-tab-subtitle block truncate text-[11px] text-left">
+              <small className="session-tab-subtitle block truncate text-[10px] text-left">
                 {session.username}@{session.host}
               </small>
             </span>
@@ -131,7 +131,7 @@ function SessionTabCard({
 
           <button
             aria-label={t('sessionTabs.close')}
-            className="icon-btn px-0.5 py-0.5"
+            className="icon-btn px-0.5 py-0.5 opacity-0 transition-opacity group-hover:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
               onClose(session.sessionId);
@@ -320,7 +320,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
 
   return (
     <div className="surface min-w-0 flex flex-col gap-0 p-0">
-      <span className="label px-1.5 pt-0.5">{t('sessionTabs.label')}</span>
+      <span className="label p-[0.25rem_0.5rem_0]">{t('sessionTabs.label')}</span>
       <ScrollArea className="min-w-0 max-w-full" onWheel={handleWheel} orientation="horizontal" ref={scrollRef} scrollbar="hover" scrollbarSize={4}>
         <DndContext
           collisionDetection={closestCenter}
@@ -330,7 +330,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
           sensors={sensors}
         >
           <SortableContext items={items} strategy={horizontalListSortingStrategy}>
-            <div className="flex w-max min-w-full gap-1 pr-0.5">
+            <div className="flex w-max min-w-full gap-1 px-1 pb-1">
               {sessions.map((session) => (
                 <SortableSessionTab
                   active={session.sessionId === activeSessionId}

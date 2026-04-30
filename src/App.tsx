@@ -1321,7 +1321,7 @@ function App() {
       {connectDialogOpen ? (
         <div className="app-overlay" role="presentation">
           <ScrollArea
-            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl p-2.5"
+            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl p-2.5 rounded-lg!"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -1370,11 +1370,7 @@ function App() {
               <button className="btn-cancel" onClick={() => setPendingDeleteProfileId(undefined)} type="button">
                 {t('app.common.cancel')}
               </button>
-              <button
-                className="btn-danger"
-                onClick={confirmDeleteSavedProfile}
-                type="button"
-              >
+              <button className="btn-danger" onClick={confirmDeleteSavedProfile} type="button">
                 {t('app.common.delete')}
               </button>
             </div>
@@ -1401,11 +1397,7 @@ function App() {
               <button className="btn-cancel" onClick={() => setPendingCloseSessionId(undefined)} type="button">
                 {t('app.common.cancel')}
               </button>
-              <button
-                className="btn-danger"
-                onClick={confirmCloseSession}
-                type="button"
-              >
+              <button className="btn-danger" onClick={confirmCloseSession} type="button">
                 {t('app.common.close')}
               </button>
             </div>
@@ -1432,11 +1424,7 @@ function App() {
               <button className="btn-cancel" onClick={() => setExitDialogOpen(false)} type="button">
                 {t('app.common.cancel')}
               </button>
-              <button
-                className="btn-danger"
-                onClick={confirmAppExit}
-                type="button"
-              >
+              <button className="btn-danger" onClick={confirmAppExit} type="button">
                 {t('app.common.exit')}
               </button>
             </div>

@@ -56,8 +56,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    height: 32px;
     border-radius: 4px;
-    padding: 0.25rem 0.625rem;
+    padding: 0 12px;
     font-size: 12px;
     font-weight: 600;
     transition:
@@ -108,7 +109,11 @@
   border: 1px solid var(--app-icon-border);
   background: var(--app-icon-bg);
   color: var(--app-text);
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
 }
 
 .btn-cancel:hover {
