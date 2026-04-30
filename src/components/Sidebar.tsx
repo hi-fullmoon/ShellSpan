@@ -156,15 +156,15 @@ export function Sidebar({
         </div>
 
         <div className="grid grid-cols-3 gap-1">
-          <div className="surface-muted min-w-0 p-1">
+          <div className="surface-muted min-w-0 p-1 rounded-sm">
             <p className="stats-label truncate">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
           </div>
-          <div className="surface-muted min-w-0 p-1">
+          <div className="surface-muted min-w-0 p-1 rounded-sm">
             <p className="stats-label truncate">{t('sidebar.history')}</p>
             <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
           </div>
-          <div className="surface-muted min-w-0 p-1">
+          <div className="surface-muted min-w-0 p-1 rounded-sm">
             <p className="stats-label truncate">{t('sidebar.favorite')}</p>
             <strong className="mt-0.5 block text-sm">{favoriteCount}</strong>
           </div>
@@ -190,7 +190,7 @@ export function Sidebar({
             <div className="flex flex-col gap-1">
               {sortedProfiles.map((profile) => (
                 <button
-                  className="history-item surface-muted flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
+                  className="history-item surface-muted rounded-sm flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
                   key={profile.id}
                   onClick={() => handleReuseClick(profile)}
                   onDoubleClick={() => handleRenameDoubleClick(profile)}
@@ -212,10 +212,7 @@ export function Sidebar({
                         </span>
                       ) : null}
                       {profile.favorite ? (
-                        <span
-                          className="inline-flex h-4 w-4 items-center justify-center text-amber-300"
-                          title={t('sidebar.badge.favorite')}
-                        >
+                        <span className="inline-flex h-4 w-4 items-center justify-center text-amber-300" title={t('sidebar.badge.favorite')}>
                           <StarIcon />
                         </span>
                       ) : null}
@@ -327,10 +324,10 @@ export function Sidebar({
                 />
 
                 <div className="mt-3 flex justify-end gap-1">
-                  <button className="icon-btn" onClick={closeRenameDialog} type="button">
+                  <button className="btn-cancel" onClick={closeRenameDialog} type="button">
                     {t('sidebar.renameDialog.cancel')}
                   </button>
-                  <button className="primary-btn px-3 py-2 text-xs" disabled={!renameValue.trim()} onClick={commitRename} type="button">
+                  <button className="btn-confirm" disabled={!renameValue.trim()} onClick={commitRename} type="button">
                     {t('sidebar.renameDialog.save')}
                   </button>
                 </div>

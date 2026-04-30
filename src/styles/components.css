@@ -96,6 +96,43 @@
   background: #fb7185;
 }
 
+.btn-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  border-radius: 4px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--app-icon-border);
+  background: var(--app-icon-bg);
+  color: var(--app-text);
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.btn-cancel:hover {
+  background: var(--app-icon-hover);
+}
+
+.btn-confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  border-radius: 4px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--app-primary-bg);
+  color: var(--app-primary-text);
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.btn-confirm:hover {
+  background: var(--app-primary-hover);
+}
+
 .segment {
   display: grid;
   grid-auto-flow: column;
@@ -207,6 +244,9 @@
 }
 
 .themed-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 80px;
   border: 1px solid var(--app-border);
   background: color-mix(in srgb, var(--app-surface) 94%, transparent);
   box-shadow: var(--app-shadow);
@@ -214,6 +254,7 @@
 
 .themed-menu-item {
   color: var(--app-text);
+  border-radius: 4px;
 }
 
 .themed-menu-item:hover {

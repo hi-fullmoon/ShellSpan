@@ -1792,11 +1792,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 p-1">
         {!session ? (
-          <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
+          <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400 rounded-sm">
             {t('fileManager.empty.noSession')}
           </div>
         ) : session.status !== 'connected' && !listing && showInitialLoadingHint ? (
-          <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
+          <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400 rounded-sm">
             {t('fileManager.empty.waitForSession')}
           </div>
         ) : (
@@ -1861,7 +1861,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             >
               {loading && !listing ? (
                 showInitialLoadingHint ? (
-                  <div className="surface-muted px-2 py-2 text-xs text-slate-400">{t('fileManager.loading')}</div>
+                  <div className="surface-muted px-2 py-2 text-xs text-slate-400 rounded-sm">{t('fileManager.loading')}</div>
                 ) : null
               ) : !listing ? null : (
                 <div className="ag-theme-quartz termbridge-file-grid h-full">
@@ -2318,10 +2318,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             />
 
             <div className="flex justify-end gap-1">
-              <button className="icon-btn h-8 px-3" onClick={() => setDialog(undefined)} type="button">
+              <button className="btn-cancel" onClick={() => setDialog(undefined)} type="button">
                 {t('fileManager.dialog.cancel')}
               </button>
-              <button className="primary-btn h-8 px-3 text-xs" disabled={!dialog.value.trim() || working} type="submit">
+              <button className="btn-confirm" disabled={!dialog.value.trim() || working} type="submit">
                 {dialog.mode === 'rename' ? t('fileManager.dialog.save') : t('fileManager.dialog.confirm')}
               </button>
             </div>
@@ -2371,7 +2371,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
             <div className="flex justify-end gap-1">
               <button
-                className="icon-btn h-8 px-3"
+                className="btn-cancel"
                 onClick={() => {
                   uploadConflictResolverRef.current?.('cancel', pendingUploadConflict.applyToRemaining);
                   setPendingUploadConflict(undefined);
@@ -2381,7 +2381,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 {t('fileManager.uploadConflict.cancel')}
               </button>
               <button
-                className="icon-btn h-8 px-3"
+                className="btn-cancel"
                 onClick={() => {
                   uploadConflictResolverRef.current?.('skip', pendingUploadConflict.applyToRemaining);
                   setPendingUploadConflict(undefined);
@@ -2391,7 +2391,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 {t('fileManager.uploadConflict.skip')}
               </button>
               <button
-                className="primary-btn h-8 px-3 text-xs"
+                className="btn-confirm"
                 onClick={() => {
                   uploadConflictResolverRef.current?.('overwrite', pendingUploadConflict.applyToRemaining);
                   setPendingUploadConflict(undefined);
@@ -2421,14 +2421,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             </div>
 
             <div className="flex justify-end gap-1">
-              <button className="icon-btn h-8 px-3" onClick={() => setPendingDelete(undefined)} type="button">
+              <button className="btn-cancel" onClick={() => setPendingDelete(undefined)} type="button">
                 {t('fileManager.dialog.cancel')}
               </button>
-              <button
-                className="danger-btn"
-                onClick={() => void confirmDelete()}
-                type="button"
-              >
+              <button className="danger-btn" onClick={() => void confirmDelete()} type="button">
                 {t('fileManager.deleteConfirm.confirm')}
               </button>
             </div>

@@ -51,10 +51,10 @@ export function UpdateRestartDialog({
         ) : null}
 
         <div className="mt-3 flex justify-end gap-1">
-          <button className="icon-btn" onClick={onLater} type="button">
+          <button className="btn-cancel" onClick={onLater} type="button">
             {t('updateRestartDialog.later')}
           </button>
-          <button className="primary-btn px-3 py-2 text-xs" onClick={onInstallNow} type="button">
+          <button className="btn-confirm" onClick={onInstallNow} type="button">
             {t('updateRestartDialog.installNow')}
           </button>
         </div>

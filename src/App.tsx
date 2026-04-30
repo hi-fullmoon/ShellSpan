@@ -1367,7 +1367,7 @@ function App() {
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
-              <button className="icon-btn" onClick={() => setPendingDeleteProfileId(undefined)} type="button">
+              <button className="btn-cancel" onClick={() => setPendingDeleteProfileId(undefined)} type="button">
                 {t('app.common.cancel')}
               </button>
               <button
@@ -1398,7 +1398,7 @@ function App() {
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
-              <button className="icon-btn h-8 px-3" onClick={() => setPendingCloseSessionId(undefined)} type="button">
+              <button className="btn-cancel" onClick={() => setPendingCloseSessionId(undefined)} type="button">
                 {t('app.common.cancel')}
               </button>
               <button
@@ -1429,7 +1429,7 @@ function App() {
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
-              <button className="icon-btn h-8 px-3" onClick={() => setExitDialogOpen(false)} type="button">
+              <button className="btn-cancel" onClick={() => setExitDialogOpen(false)} type="button">
                 {t('app.common.cancel')}
               </button>
               <button
@@ -1465,10 +1465,10 @@ function App() {
             <p className="mt-3 text-[11px] text-amber-400/80">{t('hostKey.dialog.warning')}</p>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button className="icon-btn" onClick={() => setHostKeyDialog({ open: false })} type="button">
+              <button className="btn-cancel" onClick={() => setHostKeyDialog({ open: false })} type="button">
                 {t('app.common.cancel')}
               </button>
-              <button className="primary-btn" onClick={() => void handleTrustAndConnect()} type="button">
+              <button className="btn-confirm" onClick={() => void handleTrustAndConnect()} type="button">
                 {t('hostKey.dialog.trustAndConnect')}
               </button>
             </div>
