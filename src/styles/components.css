@@ -1,6 +1,6 @@
 @layer components {
   .surface {
-    border-radius: 0.75rem;
+    border-radius: 0;
     backdrop-filter: blur(12px);
     background: var(--app-surface);
     box-shadow: var(--app-shadow);
@@ -8,7 +8,7 @@
   }
 
   .surface-muted {
-    border-radius: 0.75rem;
+    border-radius: 0;
     border: 1px solid var(--app-border);
     color: var(--app-text);
   }
