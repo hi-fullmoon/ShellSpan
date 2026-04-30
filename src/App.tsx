@@ -1184,7 +1184,7 @@ function App() {
         <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
           <span className="truncate">{errorMessage}</span>
           {activeSession ? (
-            <span className={cn('rounded-md px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
+            <span className={cn('px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
               {activeSession.status === 'connected'
                 ? t('app.status.connected')
                 : activeSession.status === 'connecting'
@@ -1371,7 +1371,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="inline-flex items-center justify-center bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={confirmDeleteSavedProfile}
                 type="button"
               >
@@ -1402,7 +1402,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="inline-flex items-center justify-center bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={confirmCloseSession}
                 type="button"
               >
@@ -1433,7 +1433,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="inline-flex items-center justify-center rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="inline-flex items-center justify-center bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={confirmAppExit}
                 type="button"
               >
@@ -1460,7 +1460,7 @@ function App() {
 
             <p className="dialog-description mt-3 text-xs">{t('hostKey.dialog.description')}</p>
 
-            <div className="mt-3 rounded-lg bg-slate-900/80 p-3 font-mono text-xs text-slate-300 break-all">{hostKeyDialog.fingerprint}</div>
+            <div className="mt-3 bg-slate-900/80 p-3 font-mono text-xs text-slate-300 break-all">{hostKeyDialog.fingerprint}</div>
 
             <p className="mt-3 text-[11px] text-amber-400/80">{t('hostKey.dialog.warning')}</p>
 

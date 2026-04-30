@@ -520,7 +520,7 @@ export function TerminalPane({
         >
           <input
             ref={searchInputRef}
-            className="themed-input h-7 w-44 rounded-md px-2 text-xs outline-none"
+            className="themed-input h-7 w-44 px-2 text-xs outline-none"
             placeholder={t('terminal.search.placeholder')}
             type="text"
             value={searchTerm}

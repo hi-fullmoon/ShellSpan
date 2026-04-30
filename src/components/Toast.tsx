@@ -75,11 +75,11 @@ export function Toast({ action, durationMs = 2600, message, onClose, open, tone 
       >
         <span className="min-w-0 flex-1 text-xs">{message}</span>
         {action ? (
-          <button className="themed-toast-button rounded-md px-2 py-1 text-[11px] transition" onClick={action.onClick} type="button">
+          <button className="themed-toast-button px-2 py-1 text-[11px] transition" onClick={action.onClick} type="button">
             {action.label}
           </button>
         ) : null}
-        <button aria-label="关闭提示" className="themed-toast-button rounded-md px-1 py-1 text-[11px] transition" onClick={onClose} type="button">
+        <button aria-label="关闭提示" className="themed-toast-button px-1 py-1 text-[11px] transition" onClick={onClose} type="button">
           <CloseIcon />
         </button>
       </div>

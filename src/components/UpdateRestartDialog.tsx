@@ -45,7 +45,7 @@ export function UpdateRestartDialog({
         </div>
 
         {hasActiveSessions ? (
-          <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">
+          <div className="mt-2 border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">
             {t('updateRestartDialog.warning')}
           </div>
         ) : null}

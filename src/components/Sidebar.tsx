@@ -156,15 +156,15 @@ export function Sidebar({
         </div>
 
         <div className="grid grid-cols-3 gap-1">
-          <div className="surface-muted rounded-lg! min-w-0 p-1">
+          <div className="surface-muted min-w-0 p-1">
             <p className="stats-label truncate">{t('sidebar.online')}</p>
             <strong className="mt-0.5 block text-sm">{connectedCount}</strong>
           </div>
-          <div className="surface-muted rounded-lg! min-w-0 p-1">
+          <div className="surface-muted min-w-0 p-1">
             <p className="stats-label truncate">{t('sidebar.history')}</p>
             <strong className="mt-0.5 block text-sm">{savedProfiles.length}</strong>
           </div>
-          <div className="surface-muted rounded-lg! min-w-0 p-1">
+          <div className="surface-muted min-w-0 p-1">
             <p className="stats-label truncate">{t('sidebar.favorite')}</p>
             <strong className="mt-0.5 block text-sm">{favoriteCount}</strong>
           </div>
@@ -190,7 +190,7 @@ export function Sidebar({
             <div className="flex flex-col gap-1">
               {sortedProfiles.map((profile) => (
                 <button
-                  className="history-item surface-muted rounded-md! flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
+                  className="history-item surface-muted flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
                   key={profile.id}
                   onClick={() => handleReuseClick(profile)}
                   onDoubleClick={() => handleRenameDoubleClick(profile)}
@@ -207,13 +207,13 @@ export function Sidebar({
                     <div className="flex items-center gap-1">
                       <strong className="block truncate text-xs">{profile.name}</strong>
                       {profile.pinned ? (
-                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-cyan-300" title={t('sidebar.badge.pinned')}>
+                        <span className="inline-flex h-4 w-4 items-center justify-center text-cyan-300" title={t('sidebar.badge.pinned')}>
                           <PinIcon />
                         </span>
                       ) : null}
                       {profile.favorite ? (
                         <span
-                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-amber-300"
+                          className="inline-flex h-4 w-4 items-center justify-center text-amber-300"
                           title={t('sidebar.badge.favorite')}
                         >
                           <StarIcon />
@@ -251,14 +251,14 @@ export function Sidebar({
                 style={{ left: historyMenu.x, top: historyMenu.y }}
               >
                 <button
-                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
                   onClick={() => startRenamingProfile(historyMenu.profile)}
                   type="button"
                 >
                   {t('sidebar.menu.rename')}
                 </button>
                 <button
-                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onTogglePinnedProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
@@ -268,7 +268,7 @@ export function Sidebar({
                   {historyMenu.profile.pinned ? t('sidebar.menu.unpin') : t('sidebar.menu.pin')}
                 </button>
                 <button
-                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onToggleFavoriteProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
@@ -278,7 +278,7 @@ export function Sidebar({
                   {historyMenu.profile.favorite ? t('sidebar.menu.unfavorite') : t('sidebar.menu.favorite')}
                 </button>
                 <button
-                  className="themed-menu-item w-full whitespace-nowrap rounded-md px-2 py-1 text-left text-xs transition"
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
                   onClick={() => {
                     onDeleteProfile(historyMenu.profile.id);
                     setHistoryMenu(undefined);
@@ -310,7 +310,7 @@ export function Sidebar({
 
                 <input
                   autoFocus
-                  className="themed-input mt-3 w-full rounded-lg px-3 py-2 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input mt-3 w-full px-3 py-2 text-sm outline-none transition focus:border-cyan-400/60"
                   onChange={(event) => setRenameValue(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {

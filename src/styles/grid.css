@@ -87,7 +87,7 @@
 
 .termbridge-file-grid .ag-tooltip {
   border: 1px solid var(--app-icon-border);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--app-surface) !important;
   color: var(--app-text) !important;
   box-shadow: var(--app-shadow);
@@ -143,7 +143,7 @@
 .termbridge-file-grid .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb,
 .termbridge-file-grid .ag-center-cols-viewport::-webkit-scrollbar-thumb,
 .termbridge-file-grid .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb {
-  border-radius: 3px;
+  border-radius: 0;
 }
 
 .termbridge-file-grid .ag-body-viewport:hover::-webkit-scrollbar-thumb,

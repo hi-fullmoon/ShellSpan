@@ -78,7 +78,7 @@ function SessionTabCard({
       {...dragAttributes}
       {...dragListeners}
       className={cn(
-        'session-tab relative flex w-55 shrink-0 items-center gap-1.5 rounded-lg border px-1.5 py-0.5 text-left transition',
+        'session-tab relative flex w-55 shrink-0 items-center gap-1.5 border px-1.5 py-0.5 text-left transition',
         active ? 'session-tab-active' : 'session-tab-inactive',
         renaming
           ? 'session-tab-renaming cursor-text'
@@ -92,11 +92,11 @@ function SessionTabCard({
     >
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-7">
-          <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
+          <span className={cn('h-2 w-2', sessionStatusDot(session.status))} />
           <span className="min-w-0 flex-1">
             <input
               autoFocus
-              className="session-tab-input block w-full outline-0 border-none rounded-sm px-1.5 py-1 text-[13px] font-semibold leading-4 outline-none"
+              className="session-tab-input block w-full outline-0 border-none px-1.5 py-1 text-[13px] font-semibold leading-4 outline-none"
               onBlur={onRenameCommit}
               onChange={(event) => onRenameChange?.(event.target.value)}
               onClick={(event) => event.stopPropagation()}
@@ -118,7 +118,7 @@ function SessionTabCard({
       ) : (
         <>
           <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-7" onClick={() => onSelect(session.sessionId)} type="button">
-            <span className={cn('h-2 w-2 rounded-full', sessionStatusDot(session.status))} />
+            <span className={cn('h-2 w-2', sessionStatusDot(session.status))} />
             <span className="min-w-0 flex-1">
               <strong className="block truncate text-xs text-left" title={session.title}>
                 {session.title}
@@ -131,7 +131,7 @@ function SessionTabCard({
 
           <button
             aria-label={t('sessionTabs.close')}
-            className="icon-btn px-0.5 py-0.5 rounded-md"
+            className="icon-btn px-0.5 py-0.5"
             onClick={(event) => {
               event.stopPropagation();
               onClose(session.sessionId);

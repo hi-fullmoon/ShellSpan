@@ -112,7 +112,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.quickConnect')}</span>
               <input
-                className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                 placeholder={t('connectionForm.quickConnectPlaceholder')}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter') {
@@ -138,7 +138,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.name')}</span>
               <input
-                className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                 value={profile.name}
                 onChange={handleTextChange('name')}
                 placeholder={t('connectionForm.namePlaceholder')}
@@ -149,7 +149,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.host')}</span>
                 <input
-                  className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   value={profile.host}
                   onChange={handleTextChange('host')}
                   placeholder={t('connectionForm.hostPlaceholder')}
@@ -159,7 +159,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.port')}</span>
                 <input
-                  className="themed-input no-number-spinner rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input no-number-spinner px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   type="number"
                   value={profile.port}
                   onChange={handleTextChange('port')}
@@ -174,7 +174,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.username')}</span>
                 <input
-                  className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   value={profile.username}
                   onChange={handleTextChange('username')}
                   placeholder={t('connectionForm.usernamePlaceholder')}
@@ -184,7 +184,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.auth')}</span>
                 <select
-                  className="themed-input h-8.5 rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input h-8.5 px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   value={profile.authMethod}
                   onChange={handleAuthChange}
                 >
@@ -198,7 +198,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.password')}</span>
                 <input
-                  className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   type="password"
                   value={profile.password ?? ''}
                   onChange={handleTextChange('password')}
@@ -211,7 +211,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.privateKeyPath')}</span>
                   <div className="relative">
                     <input
-                      className="themed-input w-full rounded-lg px-3 py-1.5 pr-8 text-sm outline-none transition focus:border-cyan-400/60"
+                      className="themed-input w-full px-3 py-1.5 pr-8 text-sm outline-none transition focus:border-cyan-400/60"
                       value={profile.privateKeyPath ?? ''}
                       onChange={handleTextChange('privateKeyPath')}
                       placeholder={t('connectionForm.privateKeyPathPlaceholder')}
@@ -219,7 +219,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                     />
                     <button
                       type="button"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-700/30 hover:text-slate-200"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center text-slate-400 transition hover:bg-slate-700/30 hover:text-slate-200"
                       onClick={() => handlePickPrivateKey('profile')}
                       title={t('connectionForm.selectPrivateKey')}
                     >
@@ -230,7 +230,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.passphrase')}</span>
                   <input
-                    className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                    className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                     type="password"
                     value={profile.passphrase ?? ''}
                     onChange={handleTextChange('passphrase')}
@@ -241,13 +241,13 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
             )}
 
             <div className="flex flex-wrap gap-1">
-              <label className="themed-checkbox-row flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs">
+              <label className="themed-checkbox-row flex items-center gap-2 px-3 py-1.5 text-xs">
                 <input className="themed-checkbox" name="remember" type="checkbox" defaultChecked />
                 <span>{t('connectionForm.remember')}</span>
               </label>
 
               {profile.authMethod === 'password' ? (
-                <label className="themed-checkbox-row flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs">
+                <label className="themed-checkbox-row flex items-center gap-2 px-3 py-1.5 text-xs">
                   <input
                     className="themed-checkbox"
                     checked={profile.rememberPassword ?? false}
@@ -274,7 +274,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.host')}</span>
                 <input
-                  className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   value={profile.jumpHost?.host ?? ''}
                   onChange={(event) => {
                     const next: JumpHostConfig = { ...profile.jumpHost, host: event.target.value, port: profile.jumpHost?.port ?? 22, username: profile.jumpHost?.username ?? '', authMethod: profile.jumpHost?.authMethod ?? 'password' };
@@ -286,7 +286,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.port')}</span>
                 <input
-                  className="themed-input no-number-spinner rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input no-number-spinner px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   type="number"
                   value={profile.jumpHost?.port ?? 22}
                   onChange={(event) => {
@@ -302,7 +302,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.username')}</span>
                 <input
-                  className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   value={profile.jumpHost?.username ?? ''}
                   onChange={(event) => {
                     const next: JumpHostConfig = { host: profile.jumpHost?.host ?? '', port: profile.jumpHost?.port ?? 22, username: event.target.value, authMethod: profile.jumpHost?.authMethod ?? 'password', ...(profile.jumpHost ? { password: profile.jumpHost.password, privateKeyPath: profile.jumpHost.privateKeyPath, passphrase: profile.jumpHost.passphrase } : {}) };
@@ -314,7 +314,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.auth')}</span>
                 <select
-                  className="themed-input h-8.5 rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input h-8.5 px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   value={profile.jumpHost?.authMethod ?? 'password'}
                   onChange={(event) => {
                     const authMethod = event.target.value as ConnectionProfile['authMethod'];
@@ -331,7 +331,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.password')}</span>
                 <input
-                  className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                   type="password"
                   value={profile.jumpHost?.password ?? ''}
                   onChange={(event) => {
@@ -346,7 +346,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.privateKeyPath')}</span>
                   <div className="relative">
                     <input
-                      className="themed-input w-full rounded-lg px-3 py-1.5 pr-8 text-sm outline-none transition focus:border-cyan-400/60"
+                      className="themed-input w-full px-3 py-1.5 pr-8 text-sm outline-none transition focus:border-cyan-400/60"
                       value={profile.jumpHost?.privateKeyPath ?? ''}
                       onChange={(event) => {
                         const next: JumpHostConfig = { host: profile.jumpHost?.host ?? '', port: profile.jumpHost?.port ?? 22, username: profile.jumpHost?.username ?? '', authMethod: 'key', privateKeyPath: event.target.value, passphrase: profile.jumpHost?.passphrase };
@@ -355,7 +355,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                     />
                     <button
                       type="button"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-700/30 hover:text-slate-200"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center text-slate-400 transition hover:bg-slate-700/30 hover:text-slate-200"
                       onClick={() => handlePickPrivateKey('jumpHost')}
                       title={t('connectionForm.selectPrivateKey')}
                     >
@@ -366,7 +366,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-slate-300">{t('connectionForm.passphrase')}</span>
                   <input
-                    className="themed-input rounded-lg px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+                    className="themed-input px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
                     type="password"
                     value={profile.jumpHost?.passphrase ?? ''}
                     onChange={(event) => {
@@ -386,11 +386,11 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
             <p className="text-[11px] text-slate-500">{t('connectionForm.portForwardingHint')}</p>
             <div className="port-forward-list">
             {(profile.portForwards ?? []).map((fw, i) => (
-              <div key={i} className="flex flex-wrap items-end gap-1.5 rounded-md border border-slate-700/30 p-1.5">
+              <div key={i} className="flex flex-wrap items-end gap-1.5 border border-slate-700/30 p-1.5">
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] font-medium text-slate-400">{t('connectionForm.portForwardKind')}</span>
                   <select
-                    className="themed-input h-7 rounded-lg px-2 text-xs outline-none transition focus:border-cyan-400/60"
+                    className="themed-input h-7 px-2 text-xs outline-none transition focus:border-cyan-400/60"
                     value={fw.kind}
                     onChange={(event) => {
                       const kind = event.target.value as 'local' | 'remote';
@@ -406,7 +406,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] font-medium text-slate-400">{t('connectionForm.port')}</span>
                   <input
-                    className="themed-input no-number-spinner h-7 w-16 rounded-lg px-2 text-xs outline-none transition focus:border-cyan-400/60"
+                    className="themed-input no-number-spinner h-7 w-16 px-2 text-xs outline-none transition focus:border-cyan-400/60"
                     type="number"
                     value={fw.localPort}
                     onChange={(event) => {
@@ -421,7 +421,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] font-medium text-slate-400">{t('connectionForm.remoteHost')}</span>
                   <input
-                    className="themed-input h-7 w-28 rounded-lg px-2 text-xs outline-none transition focus:border-cyan-400/60"
+                    className="themed-input h-7 w-28 px-2 text-xs outline-none transition focus:border-cyan-400/60"
                     value={fw.remoteHost}
                     onChange={(event) => {
                       const next = [...(profile.portForwards ?? [])];
@@ -434,7 +434,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] font-medium text-slate-400">{t('connectionForm.port')}</span>
                   <input
-                    className="themed-input no-number-spinner h-7 w-16 rounded-lg px-2 text-xs outline-none transition focus:border-cyan-400/60"
+                    className="themed-input no-number-spinner h-7 w-16 px-2 text-xs outline-none transition focus:border-cyan-400/60"
                     type="number"
                     value={fw.remotePort}
                     onChange={(event) => {
@@ -447,7 +447,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                   />
                 </label>
                 <button
-                  className="mb-0.5 inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs text-rose-400 transition hover:bg-rose-400/10"
+                  className="mb-0.5 inline-flex h-7 w-7 items-center justify-center text-xs text-rose-400 transition hover:bg-rose-400/10"
                   onClick={() => {
                     const next = (profile.portForwards ?? []).filter((_, idx) => idx !== i);
                     onProfileChange({ ...profile, portForwards: next.length > 0 ? next : undefined });
@@ -461,7 +461,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
             ))}
             </div>
             <button
-              className="inline-flex items-center justify-center gap-1 rounded-lg border border-dashed border-slate-600/50 px-3 py-1.5 text-xs text-slate-400 transition hover:border-slate-500 hover:text-slate-300"
+              className="inline-flex items-center justify-center gap-1 border border-dashed border-slate-600/50 px-3 py-1.5 text-xs text-slate-400 transition hover:border-slate-500 hover:text-slate-300"
               onClick={() => {
                 const next: PortForwardConfig = { kind: 'local', localPort: 8080, remoteHost: '', remotePort: 80 };
                 onProfileChange({ ...profile, portForwards: [...(profile.portForwards ?? []), next] });

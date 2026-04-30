@@ -122,7 +122,7 @@ function PreferenceCheckbox({
   onChange: (nextValue: boolean) => void;
 }) {
   return (
-    <label className="themed-checkbox-row flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[12px]" htmlFor={id}>
+    <label className="themed-checkbox-row flex cursor-pointer items-center gap-2 px-2 py-1.5 text-[12px]" htmlFor={id}>
       <input
         checked={checked}
         className="themed-checkbox h-3.5 w-3.5 shrink-0"
