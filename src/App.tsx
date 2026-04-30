@@ -1371,7 +1371,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="inline-flex items-center justify-center bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="danger-btn"
                 onClick={confirmDeleteSavedProfile}
                 type="button"
               >
@@ -1398,11 +1398,11 @@ function App() {
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
-              <button className="icon-btn" onClick={() => setPendingCloseSessionId(undefined)} type="button">
+              <button className="icon-btn h-8 px-3" onClick={() => setPendingCloseSessionId(undefined)} type="button">
                 {t('app.common.cancel')}
               </button>
               <button
-                className="inline-flex items-center justify-center bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="danger-btn"
                 onClick={confirmCloseSession}
                 type="button"
               >
@@ -1429,11 +1429,11 @@ function App() {
             </div>
 
             <div className="mt-3 flex justify-end gap-1">
-              <button className="icon-btn" onClick={() => setExitDialogOpen(false)} type="button">
+              <button className="icon-btn h-8 px-3" onClick={() => setExitDialogOpen(false)} type="button">
                 {t('app.common.cancel')}
               </button>
               <button
-                className="inline-flex items-center justify-center bg-rose-400 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-300"
+                className="inline-flex h-8 items-center justify-center rounded-sm bg-rose-400 px-3 text-xs font-semibold text-white transition hover:bg-rose-300"
                 onClick={confirmAppExit}
                 type="button"
               >
