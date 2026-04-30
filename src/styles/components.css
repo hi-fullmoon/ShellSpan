@@ -2,7 +2,7 @@
   .surface {
     border-radius: 0;
     backdrop-filter: blur(12px);
-    background: var(--app-surface);
+    background: var(--app-panel-primary);
     box-shadow: var(--app-shadow);
     color: var(--app-text);
   }
@@ -10,6 +10,7 @@
   .surface-muted {
     border-radius: 0;
     border: 1px solid var(--app-border);
+    background: var(--app-panel-secondary);
     color: var(--app-text);
   }
 

@@ -8,6 +8,8 @@
     --app-text-muted: #64748b;
     --app-surface: rgba(15, 23, 42, 0.9);
     --app-surface-muted: rgba(2, 6, 23, 0.6);
+    --app-panel-primary: rgba(15, 23, 42, 0.95);
+    --app-panel-secondary: rgba(30, 41, 59, 0.9);
     --app-border: rgba(30, 41, 59, 1);
     --app-shadow: 0 12px 36px rgba(2, 6, 23, 0.4);
     --app-overlay: rgba(2, 6, 23, 0.7);
@@ -43,6 +45,8 @@
     --app-text-muted: #64748b;
     --app-surface: rgba(255, 255, 255, 0.9);
     --app-surface-muted: rgba(241, 245, 249, 0.92);
+    --app-panel-primary: rgba(255, 255, 255, 0.95);
+    --app-panel-secondary: rgba(241, 245, 249, 0.95);
     --app-border: rgba(148, 163, 184, 0.35);
     --app-shadow: 0 16px 40px rgba(148, 163, 184, 0.18);
     --app-overlay: rgba(226, 232, 240, 0.72);
