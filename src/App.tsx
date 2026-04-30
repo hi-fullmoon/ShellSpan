@@ -1191,7 +1191,7 @@ function App() {
         }}
       />
 
-      <section className="surface rounded-lg relative min-h-0 flex-1 overflow-hidden">
+      <section className="surface relative min-h-0 flex-1 overflow-hidden">
         {sessions.length === 0 ? (
           <div className="flex h-full min-h-70 flex-col justify-between gap-1 p-1.5">
             <div className="flex flex-col gap-1">
