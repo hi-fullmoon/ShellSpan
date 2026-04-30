@@ -78,7 +78,7 @@
   background: var(--app-primary-hover);
 }
 
-.danger-btn {
+.btn-danger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -92,7 +92,7 @@
   transition: background-color 150ms ease;
 }
 
-.danger-btn:hover {
+.btn-danger:hover {
   background: #fb7185;
 }
 

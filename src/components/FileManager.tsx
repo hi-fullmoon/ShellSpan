@@ -2424,7 +2424,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               <button className="btn-cancel" onClick={() => setPendingDelete(undefined)} type="button">
                 {t('fileManager.dialog.cancel')}
               </button>
-              <button className="danger-btn" onClick={() => void confirmDelete()} type="button">
+              <button className="btn-danger" onClick={() => void confirmDelete()} type="button">
                 {t('fileManager.deleteConfirm.confirm')}
               </button>
             </div>

@@ -1371,7 +1371,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="danger-btn"
+                className="btn-danger"
                 onClick={confirmDeleteSavedProfile}
                 type="button"
               >
@@ -1402,7 +1402,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="danger-btn"
+                className="btn-danger"
                 onClick={confirmCloseSession}
                 type="button"
               >
@@ -1433,7 +1433,7 @@ function App() {
                 {t('app.common.cancel')}
               </button>
               <button
-                className="danger-btn"
+                className="btn-danger"
                 onClick={confirmAppExit}
                 type="button"
               >
