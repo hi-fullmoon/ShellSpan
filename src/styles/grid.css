@@ -18,7 +18,7 @@
   --ag-cell-horizontal-border: none;
   --ag-row-border-style: none;
   --ag-row-border-width: 0;
-  --ag-wrapper-border-radius: 6px;
+  --ag-wrapper-border-radius: 0px;
   --ag-font-size: 12px;
   --ag-font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Noto Sans SC', 'Source Han Sans SC', sans-serif;
   --ag-tooltip-background-color: var(--app-surface);

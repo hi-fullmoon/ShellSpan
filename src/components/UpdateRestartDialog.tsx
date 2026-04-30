@@ -27,7 +27,7 @@ export function UpdateRestartDialog({
       role="presentation"
     >
       <div
-        className="surface w-full max-w-md p-3"
+        className="surface rounded-xl w-full max-w-md p-3"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"

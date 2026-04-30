@@ -91,6 +91,7 @@
 
 .app-dialog {
   width: 100%;
+  border-radius: 12px;
 }
 
 .dialog-title {

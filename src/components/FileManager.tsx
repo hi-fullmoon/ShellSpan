@@ -439,7 +439,7 @@ function OverlayLayer({ children, tone = 'modal' }: { children: ReactNode; tone?
 
 function OverlayPanel({ children, className, ...props }: { children: ReactNode; className: string } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('surface flex w-full flex-col gap-2 p-3', className)} {...props}>
+    <div className={cn('surface flex w-full flex-col gap-2 rounded-xl p-3', className)} {...props}>
       {children}
     </div>
   );
@@ -2306,7 +2306,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
       {dialog ? (
         <OverlayLayer>
-          <form className="surface flex w-full max-w-xs flex-col gap-2 p-3" onSubmit={(event) => void submitDialog(event)}>
+          <form className="surface flex w-full max-w-xs flex-col gap-2 rounded-xl p-3" onSubmit={(event) => void submitDialog(event)}>
             <div>
               <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">
                 {dialog.mode === 'rename' ? t('fileManager.dialog.rename') : t('fileManager.dialog.new')}
