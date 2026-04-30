@@ -108,6 +108,13 @@ export function SplitLayout({ className, direction = 'horizontal', storageKey, c
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [controlledSize, setControlledSize] = useState(() => readStoredSize(storageKey, controlledDefaultSize));
   const [dragging, setDragging] = useState(false);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
 
   // 当 defaultSize 变化时更新（仅当无 storageKey）
   useEffect(() => {
@@ -154,11 +161,13 @@ export function SplitLayout({ className, direction = 'horizontal', storageKey, c
 
   const startDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     const element = containerRef.current;
+    const sash = event.currentTarget;
     if (!element) {
       return;
     }
 
     event.preventDefault();
+    sash.setPointerCapture(event.pointerId);
 
     const startPosition = direction === 'horizontal' ? event.clientX : event.clientY;
     const startSize = controlledSize;
@@ -178,18 +187,32 @@ export function SplitLayout({ className, direction = 'horizontal', storageKey, c
       setControlledSize(clampSize(startSize + delta, containerSize));
     };
 
+    let ended = false;
+
     const stopDrag = () => {
+      if (ended) return;
+      ended = true;
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousUserSelect;
       setDragging(false);
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', stopDrag);
       window.removeEventListener('pointercancel', stopDrag);
+      sash.removeEventListener('lostpointercapture', stopDrag);
+      try {
+        sash.releasePointerCapture(event.pointerId);
+      } catch {
+        // capture 可能已经被浏览器释放
+      }
+      dragCleanupRef.current = null;
     };
+
+    dragCleanupRef.current = stopDrag;
 
     window.addEventListener('pointermove', handleMove);
     window.addEventListener('pointerup', stopDrag);
     window.addEventListener('pointercancel', stopDrag);
+    sash.addEventListener('lostpointercapture', stopDrag);
   };
 
   const getContainerSize = () => {
