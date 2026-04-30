@@ -2430,7 +2430,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 {t('fileManager.dialog.cancel')}
               </button>
               <button
-                className="inline-flex h-8 items-center justify-center bg-rose-500 px-3 text-xs font-semibold text-white transition hover:bg-rose-400"
+                className="inline-flex h-8 items-center justify-center rounded-[4px] bg-rose-500 px-3 text-xs font-semibold text-white transition hover:bg-rose-400"
                 onClick={() => void confirmDelete()}
                 type="button"
               >

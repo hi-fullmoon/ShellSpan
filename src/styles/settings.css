@@ -115,7 +115,7 @@
   background: transparent;
   color: var(--app-text-soft);
   border: none;
-  border-radius: 0;
+  border-radius: 4px;
   padding: 4px 12px;
   font-size: 11px;
   font-weight: 500;
@@ -156,7 +156,7 @@
 
 .shortcut-key {
   min-width: 80px;
-  border-radius: 0;
+  border-radius: 4px;
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 500;
@@ -269,7 +269,7 @@
 .settings-select {
   height: 32px;
   border: 1px solid var(--app-icon-border);
-  border-radius: 0;
+  border-radius: 4px;
   background: var(--app-icon-bg);
   color: var(--app-text);
   padding: 0 10px;

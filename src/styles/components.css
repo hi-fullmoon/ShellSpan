@@ -34,7 +34,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 0;
+    border-radius: 4px;
     padding: 0.25rem;
     font-size: 11px;
     transition:
@@ -56,7 +56,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 0;
+    border-radius: 4px;
     padding: 0.25rem 0.625rem;
     font-size: 12px;
     font-weight: 600;
@@ -109,7 +109,7 @@
 
 .themed-input {
   border: 1px solid var(--app-border);
-  border-radius: 0;
+  border-radius: 4px;
   background: var(--app-icon-bg);
   color: var(--app-text);
 }
@@ -138,7 +138,7 @@
 .themed-checkbox {
   height: 14px;
   width: 14px;
-  border-radius: 0;
+  border-radius: 4px;
   border: 1px solid var(--app-icon-border);
   background: var(--app-icon-bg);
   color: var(--app-primary-bg);
@@ -190,6 +190,10 @@
   background: var(--app-toast-error-bg);
   border-color: var(--app-toast-error-border);
   color: var(--app-toast-error-text);
+}
+
+.themed-toast-button {
+  border-radius: 4px;
 }
 
 .themed-toast-button:hover {
