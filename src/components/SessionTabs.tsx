@@ -91,8 +91,8 @@ function SessionTabCard({
       onDoubleClick={() => onRenameStart?.(session)}
     >
       {renaming ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8">
-          <span className={cn('h-2 w-2', sessionStatusDot(session.status))} />
+        <div className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8 select-none">
+          <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
           <span className="min-w-0 flex-1">
             <input
               autoFocus
@@ -117,7 +117,7 @@ function SessionTabCard({
         </div>
       ) : (
         <>
-          <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8" onClick={() => onSelect(session.sessionId)} type="button">
+          <button className="flex min-w-0 flex-1 items-center gap-2 w-50 h-8 select-none" onClick={() => onSelect(session.sessionId)} type="button">
             <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
             <span className="min-w-0 flex-1">
               <strong className="block truncate text-[12px] text-left" title={session.title}>

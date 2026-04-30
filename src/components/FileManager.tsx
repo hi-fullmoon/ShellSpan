@@ -954,6 +954,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   }, []);
 
   useEffect(() => {
+    hasLoadedAnyListingRef.current = Boolean(listing);
+  }, [sessionId]);
+
+  useEffect(() => {
     if (listing) {
       hasLoadedAnyListingRef.current = true;
     }
