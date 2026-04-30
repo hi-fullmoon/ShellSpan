@@ -1786,7 +1786,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   };
 
   return (
-    <aside className="surface rounded-lg relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
+    <aside className="surface relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
       <div className="surface-header">
         <div className="min-w-0">
           <p className="label">{t('fileManager.subtitle')}</p>
@@ -1801,7 +1801,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 p-1">
         {!session ? (
-          <div className="surface-muted rounded-lg flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
+          <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400">
             {t('fileManager.empty.noSession')}
           </div>
         ) : session.status !== 'connected' && !listing && showInitialLoadingHint ? (
