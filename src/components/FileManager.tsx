@@ -2147,7 +2147,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     <button className="icon-btn h-7 px-2 text-xs" onClick={() => setPermissionEdit(undefined)} type="button">
                       {t('fileManager.dialog.cancel')}
                     </button>
-                    <button className="primary-btn h-7 px-2 text-xs" disabled={working} onClick={() => void submitPermissionEdit()} type="button">
+                    <button className="btn-primary h-7 px-2 text-xs" disabled={working} onClick={() => void submitPermissionEdit()} type="button">
                       {t('fileManager.permissionEdit.save')}
                     </button>
                   </div>
@@ -2321,7 +2321,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               <button className="btn-cancel" onClick={() => setDialog(undefined)} type="button">
                 {t('fileManager.dialog.cancel')}
               </button>
-              <button className="primary-btn" disabled={!dialog.value.trim() || working} type="submit">
+              <button className="btn-primary" disabled={!dialog.value.trim() || working} type="submit">
                 {dialog.mode === 'rename' ? t('fileManager.dialog.save') : t('fileManager.dialog.confirm')}
               </button>
             </div>
@@ -2391,7 +2391,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 {t('fileManager.uploadConflict.skip')}
               </button>
               <button
-                className="primary-btn"
+                className="btn-primary"
                 onClick={() => {
                   uploadConflictResolverRef.current?.('overwrite', pendingUploadConflict.applyToRemaining);
                   setPendingUploadConflict(undefined);

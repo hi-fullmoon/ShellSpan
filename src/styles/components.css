@@ -52,7 +52,7 @@
     opacity: 0.5;
   }
 
-  .primary-btn {
+  .btn-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -74,7 +74,7 @@
   background: var(--app-icon-hover);
 }
 
-.primary-btn:hover {
+.btn-primary:hover {
   background: var(--app-primary-hover);
 }
 

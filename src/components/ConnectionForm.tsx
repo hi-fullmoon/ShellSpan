@@ -528,7 +528,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       </div>
 
       <div className="flex flex-col gap-0.5">
-        <button className="primary-btn w-full" type="submit">
+        <button className="btn-primary w-full" type="submit">
           {t('connectionForm.submit')}
         </button>
         <small className="text-xs text-(--app-text-muted)">{t('connectionForm.hint')}</small>
