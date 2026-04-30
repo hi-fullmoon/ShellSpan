@@ -281,13 +281,13 @@ function App() {
 
       if (matchesBinding(merged.togglePrimarySidebar, event)) {
         event.preventDefault();
-        setStoredPreferences((prev) => ({ ...prev, showFileManager: !preferences.showFileManager }));
+        setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager }));
         return;
       }
 
       if (matchesBinding(merged.toggleSecondarySidebar, event)) {
         event.preventDefault();
-        setStoredPreferences((prev) => ({ ...prev, showSidebar: !preferences.showSidebar }));
+        setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar }));
         return;
       }
     };
@@ -1225,12 +1225,12 @@ function App() {
   );
 
   const handleTogglePrimarySide = useCallback(() => {
-    setStoredPreferences((prev) => ({ ...prev, showFileManager: !preferences.showFileManager }));
-  }, [preferences.showFileManager, setStoredPreferences]);
+    setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager }));
+  }, [setStoredPreferences]);
 
   const handleToggleSecondarySide = useCallback(() => {
-    setStoredPreferences((prev) => ({ ...prev, showSidebar: !preferences.showSidebar }));
-  }, [preferences.showSidebar, setStoredPreferences]);
+    setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar }));
+  }, [setStoredPreferences]);
 
   return (
     <main className="h-screen overflow-hidden flex flex-col">

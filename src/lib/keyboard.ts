@@ -72,7 +72,7 @@ export function parseKeyBinding(str: string): ParsedBinding {
 
 export function matchesBinding(str: string, event: KeyboardEvent): boolean {
   const binding = parseKeyBinding(str);
-  if (event.key !== binding.key && event.code !== binding.key) {
+  if (event.key.toLowerCase() !== binding.key.toLowerCase() && event.code !== binding.key) {
     return false;
   }
   if (event.ctrlKey !== binding.ctrl) return false;
