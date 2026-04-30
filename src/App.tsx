@@ -1240,7 +1240,7 @@ function App() {
         primarySideVisible={preferences.showFileManager}
         secondarySideVisible={preferences.showSidebar}
       />
-      <div className="flex flex-1 gap-1 p-0.5 min-h-0">
+      <div className="flex flex-1 gap-0 p-0 min-h-0">
         {preferences.showFileManager ? (
           <SplitLayout
             className="min-w-0 flex-1"
