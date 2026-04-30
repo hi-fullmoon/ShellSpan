@@ -1870,7 +1870,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
             >
               {loading && !listing ? (
                 showInitialLoadingHint ? (
-                  <div className="surface-muted rounded-lg px-2 py-2 text-xs text-slate-400">{t('fileManager.loading')}</div>
+                  <div className="surface-muted px-2 py-2 text-xs text-slate-400">{t('fileManager.loading')}</div>
                 ) : null
               ) : !listing ? null : (
                 <div className="ag-theme-quartz termbridge-file-grid h-full">
