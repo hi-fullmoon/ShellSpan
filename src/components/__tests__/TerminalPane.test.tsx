@@ -1,29 +1,34 @@
 // @vitest-environment jsdom
 
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionState } from '../../types';
 import { TerminalPane } from '../TerminalPane';
 
 const { MockTerminal, terminalInstances, eventHandlers } = vi.hoisted(() => {
   const terminalInstances: Array<{
-    options: { disableStdin?: boolean };
+    options: Record<string, unknown> & { disableStdin?: boolean };
     writes: string[];
     writeCalls: string[];
+    selection: string;
     onDataHandler?: (data: string) => void;
+    onSelectionChangeHandler?: () => void;
   }> = [];
   const eventHandlers: Record<string, (event: { payload: any }) => void> = {};
 
   class MockTerminal {
-    options: { disableStdin?: boolean };
+    options: Record<string, unknown> & { disableStdin?: boolean };
     writes: string[];
     writeCalls: string[];
+    selection: string;
     onDataHandler?: (data: string) => void;
+    onSelectionChangeHandler?: () => void;
 
-    constructor(options: { disableStdin?: boolean }) {
+    constructor(options: Record<string, unknown> & { disableStdin?: boolean }) {
       this.options = { ...options };
       this.writes = [];
       this.writeCalls = [];
+      this.selection = '';
       terminalInstances.push(this);
     }
 
@@ -46,6 +51,15 @@ const { MockTerminal, terminalInstances, eventHandlers } = vi.hoisted(() => {
     onData(handler: (data: string) => void) {
       this.onDataHandler = handler;
       return { dispose() {} };
+    }
+
+    onSelectionChange(handler: () => void) {
+      this.onSelectionChangeHandler = handler;
+      return { dispose() {} };
+    }
+
+    getSelection() {
+      return this.selection;
     }
 
     dispose() {}
@@ -128,6 +142,12 @@ describe('TerminalPane', () => {
       disconnect() {}
       unobserve() {}
     } as typeof ResizeObserver;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
   });
 
   it('keeps stdin enabled after disconnection so enter can trigger reconnect', () => {
@@ -182,6 +202,38 @@ describe('TerminalPane', () => {
     ).toBe(
       '\u001b[36m[termbridge]\u001b[0m \u001b[33m[提示]\u001b[0m 当前连接已断开，按回车重连。',
     );
+  });
+
+  it('shows a lightweight copied status after copy on select succeeds', async () => {
+    render(<TerminalPane active copyOnSelect onReconnect={() => {}} session={session} />);
+
+    const terminal = terminalInstances[0];
+    terminal!.selection = 'ls -la';
+    terminal?.onSelectionChangeHandler?.();
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('ls -la');
+    });
+    expect((await screen.findByRole('status')).textContent).toBe('已复制');
+  });
+
+  it('uses the latest copy on select preference without recreating the terminal', async () => {
+    const { rerender } = render(
+      <TerminalPane active copyOnSelect={false} onReconnect={() => {}} session={session} />,
+    );
+    const terminal = terminalInstances[0];
+
+    terminal!.selection = 'pwd';
+    terminal?.onSelectionChangeHandler?.();
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+
+    rerender(<TerminalPane active copyOnSelect onReconnect={() => {}} session={session} />);
+    terminal?.onSelectionChangeHandler?.();
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('pwd');
+    });
+    expect(terminalInstances).toHaveLength(1);
   });
 
   it('adds a blank line between connected status and the first shell output', async () => {

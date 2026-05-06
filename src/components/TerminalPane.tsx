@@ -40,6 +40,7 @@ interface TerminalPaneProps {
 }
 
 const terminalLogger = createLogger("terminal");
+type CopyFeedback = "copied" | "failed";
 
 export function TerminalPane({
   session,
@@ -58,6 +59,7 @@ export function TerminalPane({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const activeRef = useRef(active);
+  const copyOnSelectRef = useRef(copyOnSelect);
   const statusRef = useRef(session.status);
   const inputBlockedNoticeRef = useRef(false);
   const reconnectRequestedRef = useRef(false);
@@ -67,9 +69,26 @@ export function TerminalPane({
   const scheduleResizeRef = useRef<((force?: boolean) => void) | null>(null);
   const needsSystemLineBreakRef = useRef(false);
   const needsConnectedShellSpacingRef = useRef(false);
+  const copyFeedbackTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
+
+  const showCopyFeedback = (feedback: CopyFeedback) => {
+    if (!mountedRef.current) {
+      return;
+    }
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current);
+    }
+    setCopyFeedback(feedback);
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      copyFeedbackTimerRef.current = null;
+      setCopyFeedback(null);
+    }, 1000);
+  };
 
   const writeSystemLine = (line: string) => {
     const terminal = terminalRef.current;
@@ -93,6 +112,21 @@ export function TerminalPane({
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    copyOnSelectRef.current = copyOnSelect;
+  }, [copyOnSelect]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
+        copyFeedbackTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     statusRef.current = session.status;
@@ -158,14 +192,26 @@ export function TerminalPane({
     searchAddonRef.current = searchAddon;
     lastShellSizeRef.current = null;
 
-    if (copyOnSelect) {
-      terminal.onSelectionChange(() => {
-        const selection = terminal.getSelection();
-        if (selection) {
-          void navigator.clipboard.writeText(selection);
-        }
-      });
-    }
+    terminal.onSelectionChange(() => {
+      if (!copyOnSelectRef.current) {
+        return;
+      }
+
+      const selection = terminal.getSelection();
+      if (!selection) {
+        return;
+      }
+
+      const writeText = navigator.clipboard?.writeText;
+      if (!writeText) {
+        showCopyFeedback("failed");
+        return;
+      }
+
+      void writeText.call(navigator.clipboard, selection)
+        .then(() => showCopyFeedback("copied"))
+        .catch(() => showCopyFeedback("failed"));
+    });
 
     terminal.attachCustomKeyEventHandler((event) => {
       if (!activeRef.current) {
@@ -587,6 +633,20 @@ export function TerminalPane({
         className="terminal-shell themed-terminal-shell min-h-0 flex-1 overflow-hidden"
         ref={shellRef}
       />
+      {copyFeedback && (
+        <div
+          aria-live="polite"
+          className={cn(
+            "terminal-copy-feedback absolute left-1/2 top-2 z-20 -translate-x-1/2 rounded-sm px-2 py-1 text-xs",
+            copyFeedback === "failed" && "terminal-copy-feedback-error",
+          )}
+          role="status"
+        >
+          {copyFeedback === "copied"
+            ? t('terminal.feedback.copied')
+            : t('terminal.feedback.copyFailed')}
+        </div>
+      )}
     </section>
   );
 }

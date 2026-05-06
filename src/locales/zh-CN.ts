@@ -87,6 +87,8 @@ const zhCN = {
   'terminal.notice.writeFailedMessage': '连接不可用，请重连后再试。',
   'terminal.notice.closedLabel': '已关闭',
   'terminal.notice.pressEnterReconnect': '按回车重连。',
+  'terminal.feedback.copied': '已复制',
+  'terminal.feedback.copyFailed': '复制失败',
   'terminal.search.placeholder': '搜索...',
   'terminal.search.previous': '上一个匹配',
   'terminal.search.next': '下一个匹配',

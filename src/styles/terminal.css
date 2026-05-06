@@ -11,3 +11,17 @@
   overflow-y: auto !important;
   background: var(--app-terminal-bg) !important;
 }
+
+.terminal-copy-feedback {
+  background: color-mix(in srgb, var(--app-surface) 88%, var(--app-primary-bg) 12%);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow);
+  color: var(--app-text);
+  pointer-events: none;
+}
+
+.terminal-copy-feedback-error {
+  background: var(--app-toast-error-bg);
+  border-color: var(--app-toast-error-border);
+  color: var(--app-toast-error-text);
+}

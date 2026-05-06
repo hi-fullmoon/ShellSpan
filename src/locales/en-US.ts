@@ -87,6 +87,8 @@ const enUS = {
   'terminal.notice.writeFailedMessage': 'The connection is unavailable. Reconnect and try again.',
   'terminal.notice.closedLabel': 'Closed',
   'terminal.notice.pressEnterReconnect': 'Press Enter to reconnect.',
+  'terminal.feedback.copied': 'Copied',
+  'terminal.feedback.copyFailed': 'Copy failed',
   'terminal.search.placeholder': 'Search...',
   'terminal.search.previous': 'Previous match',
   'terminal.search.next': 'Next match',
