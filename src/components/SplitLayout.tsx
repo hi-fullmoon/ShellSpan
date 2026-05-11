@@ -47,7 +47,7 @@ interface SplitLayoutProps {
   children: ReactElement<SlotConfig> | ReactElement<SlotConfig>[];
 }
 
-const SASH_SIZE = 10;
+const SASH_SIZE = 0;
 
 function readStoredSize(storageKey: string | undefined, fallback: number) {
   if (!storageKey || typeof window === 'undefined') {

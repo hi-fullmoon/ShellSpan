@@ -3,10 +3,12 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { ConnectionForm } from './components/ConnectionForm';
+import { CloseSessionDialog } from './components/CloseSessionDialog';
+import { ConnectDialog } from './components/ConnectDialog';
+import { DeleteProfileDialog } from './components/DeleteProfileDialog';
+import { ExitAppDialog } from './components/ExitAppDialog';
 import { FileManager } from './components/FileManager';
-import { CloseIcon } from './components/Icons';
-import { ScrollArea } from './components/ScrollArea';
+import { HostKeyDialog } from './components/HostKeyDialog';
 import { TitleBar } from './components/TitleBar';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
@@ -1179,7 +1181,7 @@ function App() {
   };
 
   const workspaceContent = (
-    <section className="flex h-full w-full min-h-0 min-w-0 flex-col gap-1">
+    <section className="flex h-full w-full min-h-0 min-w-0 flex-col">
       {errorMessage ? (
         <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
           <span className="truncate">{errorMessage}</span>
@@ -1318,151 +1320,46 @@ function App() {
         preferences={preferences}
       />
 
-      {connectDialogOpen ? (
-        <div className="app-overlay" role="presentation">
-          <ScrollArea
-            className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl p-2.5 rounded-lg!"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('app.connectDialog.ariaLabel')}
-            orientation="both"
-          >
-            <div className="mb-2 flex items-start justify-between gap-2">
-              <div>
-                <p className="label">{t('app.connectDialog.kicker')}</p>
-                <h3 className="dialog-title mt-1 text-sm font-semibold">{t('app.connectDialog.title')}</h3>
-              </div>
-              <button aria-label={t('app.connectDialog.close')} className="icon-btn" onClick={() => setConnectDialogOpen(false)} type="button">
-                <CloseIcon />
-              </button>
-            </div>
-            <ConnectionForm
-              profile={draftProfile}
-              onProfileChange={(profile) => {
-                setDraftProfile(profile);
-                setErrorMessage(undefined);
-              }}
-              onConnect={(profile, remember, rememberPassword) => {
-                void handleConnect(profile, remember, rememberPassword);
-              }}
-            />
-          </ScrollArea>
-        </div>
-      ) : null}
+      <ConnectDialog
+        draftProfile={draftProfile}
+        onClose={() => setConnectDialogOpen(false)}
+        onConnect={(profile, remember, rememberPassword) => {
+          void handleConnect(profile, remember, rememberPassword);
+        }}
+        onProfileChange={(profile) => {
+          setDraftProfile(profile);
+          setErrorMessage(undefined);
+        }}
+        open={connectDialogOpen}
+      />
 
-      {pendingDeleteProfile ? (
-        <div className="app-overlay" role="presentation">
-          <div
-            className="app-dialog surface w-full max-w-sm p-3"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('app.deleteProfileDialog.ariaLabel')}
-          >
-            <div className="flex flex-col gap-1">
-              <p className="label">{t('app.deleteProfileDialog.kicker')}</p>
-              <h3 className="dialog-title text-sm font-semibold">{t('app.deleteProfileDialog.title')}</h3>
-              <p className="dialog-description text-xs">{t('app.deleteProfileDialog.description', { name: pendingDeleteProfile.name })}</p>
-            </div>
+      <DeleteProfileDialog
+        onClose={() => setPendingDeleteProfileId(undefined)}
+        onConfirm={confirmDeleteSavedProfile}
+        open={!!pendingDeleteProfileId}
+        profile={pendingDeleteProfile}
+      />
 
-            <div className="mt-3 flex justify-end gap-1">
-              <button className="btn-cancel" onClick={() => setPendingDeleteProfileId(undefined)} type="button">
-                {t('app.common.cancel')}
-              </button>
-              <button className="btn-danger" onClick={confirmDeleteSavedProfile} type="button">
-                {t('app.common.delete')}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <CloseSessionDialog
+        onClose={() => setPendingCloseSessionId(undefined)}
+        onConfirm={confirmCloseSession}
+        open={!!pendingCloseSessionId}
+        session={pendingCloseSession}
+      />
 
-      {pendingCloseSession ? (
-        <div className="app-overlay" role="presentation">
-          <div
-            className="app-dialog surface w-full max-w-sm p-3"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('app.closeSessionDialog.ariaLabel')}
-          >
-            <div className="flex flex-col gap-1">
-              <p className="label">{t('app.closeSessionDialog.kicker')}</p>
-              <h3 className="dialog-title text-sm font-semibold">{t('app.closeSessionDialog.title')}</h3>
-              <p className="dialog-description text-xs">{t('app.closeSessionDialog.description', { name: pendingCloseSession.title })}</p>
-            </div>
+      <ExitAppDialog
+        onClose={() => setExitDialogOpen(false)}
+        onConfirm={confirmAppExit}
+        open={exitDialogOpen}
+      />
 
-            <div className="mt-3 flex justify-end gap-1">
-              <button className="btn-cancel" onClick={() => setPendingCloseSessionId(undefined)} type="button">
-                {t('app.common.cancel')}
-              </button>
-              <button className="btn-danger" onClick={confirmCloseSession} type="button">
-                {t('app.common.close')}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {exitDialogOpen ? (
-        <div className="app-overlay" role="presentation">
-          <div
-            className="app-dialog surface w-full max-w-sm p-3"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('app.exitDialog.ariaLabel')}
-          >
-            <div className="flex flex-col gap-1">
-              <p className="label">{t('app.exitDialog.kicker')}</p>
-              <h3 className="dialog-title text-sm font-semibold">{t('app.exitDialog.title')}</h3>
-              <p className="dialog-description text-xs">{t('app.exitDialog.description')}</p>
-            </div>
-
-            <div className="mt-3 flex justify-end gap-1">
-              <button className="btn-cancel" onClick={() => setExitDialogOpen(false)} type="button">
-                {t('app.common.cancel')}
-              </button>
-              <button className="btn-danger" onClick={confirmAppExit} type="button">
-                {t('app.common.exit')}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {hostKeyDialog.open && hostKeyDialog.profile && (
-        <div className="app-overlay" role="presentation">
-          <div
-            className="app-dialog surface w-full max-w-md p-4"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('hostKey.dialog.ariaLabel')}
-          >
-            <div className="flex flex-col gap-1">
-              <p className="label">{t('hostKey.dialog.kicker')}</p>
-              <h3 className="dialog-title text-sm font-semibold">{t('hostKey.dialog.title', { host: hostKeyDialog.profile.host })}</h3>
-            </div>
-
-            <p className="dialog-description mt-3 text-xs">{t('hostKey.dialog.description')}</p>
-
-            <div className="mt-3 bg-slate-900/80 p-3 font-mono text-xs text-slate-300 break-all">{hostKeyDialog.fingerprint}</div>
-
-            <p className="mt-3 text-[11px] text-amber-400/80">{t('hostKey.dialog.warning')}</p>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="btn-cancel" onClick={() => setHostKeyDialog({ open: false })} type="button">
-                {t('app.common.cancel')}
-              </button>
-              <button className="btn-primary" onClick={() => void handleTrustAndConnect()} type="button">
-                {t('hostKey.dialog.trustAndConnect')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <HostKeyDialog
+        fingerprint={hostKeyDialog.fingerprint}
+        onClose={() => setHostKeyDialog({ open: false })}
+        onTrustAndConnect={() => void handleTrustAndConnect()}
+        open={hostKeyDialog.open && !!hostKeyDialog.profile}
+        profile={hostKeyDialog.profile}
+      />
 
       <UpdateRestartDialog
         downloadProgress={updateDownloadProgress}
