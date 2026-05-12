@@ -274,7 +274,7 @@ export function SplitLayout({ className, direction = 'horizontal', storageKey, c
         ref={containerRef}
       >
         {/* 第一面板 */}
-        {slots[0] && !firstCollapsed && (
+        {slots[0] && (
           <div
             className={cn(
               'grid h-full min-h-0 overflow-hidden',
@@ -305,7 +305,7 @@ export function SplitLayout({ className, direction = 'horizontal', storageKey, c
         )}
 
         {/* 第二面板 */}
-        {slots[1] && !secondCollapsed && (
+        {slots[1] && (
           <div
             className={cn(
               'grid h-full min-h-0 overflow-hidden',

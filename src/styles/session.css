@@ -1,3 +1,11 @@
+.session-tabs-container {
+  border-bottom: 1px solid transparent;
+}
+
+[data-theme='light'] .session-tabs-container {
+  border-bottom-color: var(--app-border);
+}
+
 .session-tab {
   box-shadow: none;
 }

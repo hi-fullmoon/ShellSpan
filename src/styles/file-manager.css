@@ -21,10 +21,12 @@
 
 .file-manager-progress-track {
   background: color-mix(in srgb, var(--app-surface-muted) 72%, var(--app-bg) 28%);
+  border-radius: 4px;
 }
 
 .file-manager-progress-bar {
   background: var(--app-primary-bg);
+  border-radius: 4px;
 }
 
 .file-manager-progress-bar-upload {

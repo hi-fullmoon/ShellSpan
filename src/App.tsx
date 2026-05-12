@@ -163,6 +163,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const [errorMessage, setErrorMessage] = useState<string>();
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
@@ -864,6 +865,8 @@ function App() {
   };
 
   const handleConnect = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
+    if (isConnecting) return;
+
     if (!profile.host.trim() || !profile.username.trim()) {
       appLogger.warn('连接参数校验失败：Host 或 Username 为空');
       setErrorMessage(t('app.error.hostUsernameRequired'));
@@ -876,6 +879,7 @@ function App() {
       return;
     }
 
+    setIsConnecting(true);
     try {
       appLogger.info('开始检查主机密钥', {
         host: profile.host.trim(),
@@ -926,6 +930,8 @@ function App() {
     } catch (error) {
       appLogger.error('主机密钥检查或连接失败', error);
       setErrorMessage(String(error));
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -1276,7 +1282,7 @@ function App() {
       <div className="flex flex-1 gap-0 p-0 min-h-0">
         <SplitLayout className="min-w-0 flex-1" storageKey="termbridge.layout.main">
           <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showFileManager} defaultSize={320} minSize={280} name="fileManager">
-            {({ collapsed }) => (!collapsed ? <FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} /> : null)}
+            {() => <FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} />}
           </SplitLayout.Slot>
 
           <SplitLayout.Slot className="min-h-0" minSize={520} name="workspace">
@@ -1287,25 +1293,23 @@ function App() {
                 </SplitLayout.Slot>
 
                 <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showSidebar} defaultSize={212} fixed minSize={212} name="sidebar">
-                  {({ collapsed }) =>
-                    !collapsed ? (
-                      <Sidebar
-                        connectedCount={connectedSessions}
-                        runtimeLabel={runtimeText}
-                        savedProfiles={savedProfiles}
-                        onDeleteProfile={handleDeleteSavedProfile}
-                        onRenameProfile={handleRenameSavedProfile}
-                        onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
-                        onTogglePinnedProfile={handleToggleSavedProfilePinned}
-                        onReuseProfile={loadProfile}
-                        onOpenConnect={() => {
-                          setDraftProfile(createEmptyProfile());
-                          setErrorMessage(undefined);
-                          setConnectDialogOpen(true);
-                        }}
-                      />
-                    ) : null
-                  }
+                  {() => (
+                    <Sidebar
+                      connectedCount={connectedSessions}
+                      runtimeLabel={runtimeText}
+                      savedProfiles={savedProfiles}
+                      onDeleteProfile={handleDeleteSavedProfile}
+                      onRenameProfile={handleRenameSavedProfile}
+                      onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
+                      onTogglePinnedProfile={handleToggleSavedProfilePinned}
+                      onReuseProfile={loadProfile}
+                      onOpenConnect={() => {
+                        setDraftProfile(createEmptyProfile());
+                        setErrorMessage(undefined);
+                        setConnectDialogOpen(true);
+                      }}
+                    />
+                  )}
                 </SplitLayout.Slot>
               </SplitLayout>
             )}
@@ -1322,6 +1326,7 @@ function App() {
 
       <ConnectDialog
         draftProfile={draftProfile}
+        isConnecting={isConnecting}
         onClose={() => setConnectDialogOpen(false)}
         onConnect={(profile, remember, rememberPassword) => {
           void handleConnect(profile, remember, rememberPassword);

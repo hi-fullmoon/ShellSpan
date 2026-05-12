@@ -295,7 +295,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
 
   if (sessions.length === 0) {
     return (
-      <div className="surface session-tabs-empty flex flex-col justify-center items-start gap-1 px-2 py-1.5 text-xs">
+      <div className="session-tabs-container surface session-tabs-empty flex flex-col justify-center items-start gap-1 px-2 py-1.5 text-xs">
         <span className="label">{t('sessionTabs.label')}</span>
         <div>{t('sessionTabs.empty')}</div>
       </div>
@@ -319,7 +319,7 @@ export function SessionTabs({ sessions, activeSessionId, onSelect, onClose, onRe
   );
 
   return (
-    <div className="surface min-w-0 flex flex-col gap-0 p-0">
+    <div className="session-tabs-container surface min-w-0 flex flex-col gap-0 p-0">
       <span className="label p-[0.25rem_0.5rem_0]">{t('sessionTabs.label')}</span>
       <ScrollArea className="min-w-0 max-w-full" onWheel={handleWheel} orientation="horizontal" ref={scrollRef} scrollbar="hover" scrollbarSize={4}>
         <DndContext

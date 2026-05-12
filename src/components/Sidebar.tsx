@@ -142,7 +142,7 @@ export function Sidebar({
   };
 
   return (
-    <aside className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1">
+    <aside className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
       <div className="surface flex flex-col gap-1 p-1">
         <div className="flex items-start justify-between gap-1.5">
           <div className="flex min-w-0 items-center gap-1.5">

@@ -1,10 +1,10 @@
-import { useState, type ChangeEvent, FormEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { FormEvent, useState, type ChangeEvent } from 'react';
 import { t } from '../lib/i18n';
 import { parseQuickConnect } from '../lib/profile';
+import type { ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
 import { FolderIcon } from './Icons';
 import { Segment } from './Segment';
-import type { ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
 
 type TabKey = 'basic' | 'jumpHost' | 'portForwarding';
 
@@ -13,11 +13,12 @@ interface ConnectionFormProps {
   onProfileChange: (profile: ConnectionProfile) => void;
   onConnect: (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => void;
   compact?: boolean;
+  isConnecting?: boolean;
 }
 
 const tabKeys: TabKey[] = ['basic', 'jumpHost', 'portForwarding'];
 
-export function ConnectionForm({ profile, onProfileChange, onConnect, compact = false }: ConnectionFormProps) {
+export function ConnectionForm({ profile, onProfileChange, onConnect, compact = false, isConnecting }: ConnectionFormProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('basic');
 
   const handleTextChange = (field: keyof ConnectionProfile) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -528,8 +529,8 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       </div>
 
       <div className="flex flex-col gap-0.5">
-        <button className="btn-primary w-full" type="submit">
-          {t('connectionForm.submit')}
+        <button className="btn-primary w-full" disabled={isConnecting} type="submit">
+          {isConnecting ? t('connectionForm.connecting') : t('connectionForm.submit')}
         </button>
         <small className="text-xs text-(--app-text-muted)">{t('connectionForm.hint')}</small>
       </div>
