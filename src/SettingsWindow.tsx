@@ -86,9 +86,10 @@ export default function SettingsWindow() {
   const [storedPreferences, setStoredPreferences] = useLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
   const preferences = useMemo(() => normalizePreferences(storedPreferences), [storedPreferences]);
   const appliedTheme = preferences.theme === 'system' ? getSystemThemeMode() : preferences.theme;
-  // Initialize i18n
+  // Sync locale before first render so t() returns correct translations immediately
+  syncI18nLocale(preferences.locale);
+  // Initialize i18n asynchronously (intl.init is async)
   useEffect(() => {
-    syncI18nLocale(preferences.locale);
     void initI18n(preferences.locale);
   }, [preferences.locale]);
 
