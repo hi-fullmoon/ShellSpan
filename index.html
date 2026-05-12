@@ -7,6 +7,19 @@
       content="width=device-width, initial-scale=1.0"
     />
     <title>TermBridge</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('termbridge.preferences');
+          var prefs = raw ? JSON.parse(raw) : {};
+          var theme = prefs.theme || 'dark';
+          if (theme === 'system') {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.style.backgroundColor = theme === 'light' ? '#edf4fb' : '#020617';
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
