@@ -1,10 +1,10 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { PinIcon, StarIcon } from './Icons';
+import { PinIcon, StarIcon, PlusIcon } from './Icons';
 import { Tooltip } from './Tooltip';
 import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
-import type { ConnectionProfile } from '../types';
+import type { ConnectionGroup, ConnectionProfile } from '../types';
 
 const HISTORY_ITEM_DOUBLE_CLICK_DELAY_MS = 220;
 
@@ -12,6 +12,7 @@ interface HistoryMenuState {
   profile: ConnectionProfile;
   x: number;
   y: number;
+  showColorPicker?: boolean;
 }
 
 function clampMenuPosition(x: number, y: number, width: number, height: number) {
@@ -26,10 +27,16 @@ interface SidebarProps {
   connectedCount: number;
   runtimeLabel: string;
   savedProfiles: ConnectionProfile[];
+  groups?: ConnectionGroup[];
   onDeleteProfile: (profileId: string) => void;
   onRenameProfile: (profileId: string, name: string) => void;
   onToggleFavoriteProfile: (profileId: string) => void;
   onTogglePinnedProfile: (profileId: string) => void;
+  onSetProfileColor: (profileId: string, color?: string) => void;
+  onMoveProfileToGroup?: (profileId: string, groupId?: string) => void;
+  onAddGroup?: (name: string) => void;
+  onDeleteGroup?: (groupId: string) => void;
+  onRenameGroup?: (groupId: string, name: string) => void;
   onReuseProfile: (profile: ConnectionProfile) => void;
   onOpenConnect: () => void;
 }
@@ -44,14 +51,82 @@ export function countFavoriteProfiles(profiles: ConnectionProfile[]) {
   return profiles.filter((profile) => profile.favorite).length;
 }
 
+const PRESET_COLORS = [
+  '#ef4444', '#f97316', '#f59e0b', '#84cc16',
+  '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6',
+  '#d946ef', '#f43f5e',
+];
+
+interface ProfileItemProps {
+  profile: ConnectionProfile;
+  onClick: () => void;
+  onDoubleClick: () => void;
+  onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+}
+
+function ProfileItem({ profile, onClick, onDoubleClick, onContextMenu }: ProfileItemProps) {
+  return (
+    <button
+      className="history-item surface-muted rounded-sm flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      onDragStart={(event) => event.preventDefault()}
+      onMouseDown={(event) => {
+        if (event.button === 2) {
+          event.preventDefault();
+        }
+      }}
+      onContextMenu={onContextMenu}
+      type="button"
+    >
+      {profile.color ? (
+        <span
+          className="h-5 w-1 shrink-0 rounded-full"
+          style={{ backgroundColor: profile.color }}
+        />
+      ) : (
+        <span className="h-5 w-1 shrink-0 rounded-full" />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <strong className="block truncate text-xs">{profile.name}</strong>
+          {profile.pinned ? (
+            <Tooltip content={t('sidebar.badge.pinned')}>
+              <span className="inline-flex h-4 w-4 items-center justify-center text-cyan-300">
+                <PinIcon />
+              </span>
+            </Tooltip>
+          ) : null}
+          {profile.favorite ? (
+            <Tooltip content={t('sidebar.badge.favorite')}>
+              <span className="inline-flex h-4 w-4 items-center justify-center text-amber-300">
+                <StarIcon />
+              </span>
+            </Tooltip>
+          ) : null}
+        </div>
+        <span className="text-subtle block truncate mt-1 text-[11px]">
+          {profile.username}@{profile.host}:{profile.port}
+        </span>
+      </div>
+    </button>
+  );
+}
+
 export function Sidebar({
   connectedCount,
   runtimeLabel,
   savedProfiles,
+  groups = [],
   onDeleteProfile,
   onRenameProfile,
   onToggleFavoriteProfile,
   onTogglePinnedProfile,
+  onSetProfileColor,
+  onMoveProfileToGroup,
+  onAddGroup,
+  onDeleteGroup,
+  onRenameGroup,
   onReuseProfile,
   onOpenConnect,
 }: SidebarProps) {
@@ -60,8 +135,95 @@ export function Sidebar({
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuState>();
   const [renamingProfileId, setRenamingProfileId] = useState<string>();
   const [renameValue, setRenameValue] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [groupMenu, setGroupMenu] = useState<{ group: ConnectionGroup; x: number; y: number } | null>(null);
+  const [renamingGroupId, setRenamingGroupId] = useState<string>();
+  const [renameGroupValue, setRenameGroupValue] = useState('');
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [newGroupValue, setNewGroupValue] = useState('');
   const sortedProfiles = useMemo(() => sortSavedProfiles(savedProfiles), [savedProfiles]);
   const favoriteCount = useMemo(() => countFavoriteProfiles(savedProfiles), [savedProfiles]);
+  const filteredProfiles = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return sortedProfiles;
+    return sortedProfiles.filter((p) =>
+      p.name.toLowerCase().includes(query) ||
+      p.host.toLowerCase().includes(query) ||
+      p.username.toLowerCase().includes(query),
+    );
+  }, [sortedProfiles, searchQuery]);
+
+  const { ungroupedProfiles, groupedProfiles } = useMemo(() => {
+    const ungrouped: ConnectionProfile[] = [];
+    const grouped = new Map<string, ConnectionProfile[]>();
+    for (const profile of filteredProfiles) {
+      if (profile.groupId) {
+        const list = grouped.get(profile.groupId) ?? [];
+        list.push(profile);
+        grouped.set(profile.groupId, list);
+      } else {
+        ungrouped.push(profile);
+      }
+    }
+    return { ungroupedProfiles: ungrouped, groupedProfiles: grouped };
+  }, [filteredProfiles]);
+
+  const toggleGroupExpanded = (groupId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
+  const openGroupMenu = (event: ReactMouseEvent<HTMLDivElement>, group: ConnectionGroup) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setGroupMenu({ group, x: event.clientX, y: event.clientY });
+  };
+
+  const startRenamingGroup = (group: ConnectionGroup) => {
+    setGroupMenu(null);
+    setRenamingGroupId(group.id);
+    setRenameGroupValue(group.name);
+  };
+
+  const closeRenameGroupDialog = () => {
+    setRenamingGroupId(undefined);
+    setRenameGroupValue('');
+  };
+
+  const openNewGroupDialog = () => {
+    setNewGroupOpen(true);
+    setNewGroupValue('');
+  };
+
+  const closeNewGroupDialog = () => {
+    setNewGroupOpen(false);
+    setNewGroupValue('');
+  };
+
+  const commitNewGroup = () => {
+    const name = newGroupValue.trim();
+    if (name && onAddGroup) {
+      onAddGroup(name);
+    }
+    closeNewGroupDialog();
+  };
+
+  const commitRenameGroup = () => {
+    if (!renamingGroupId) return;
+    const nextName = renameGroupValue.trim();
+    if (nextName && onRenameGroup) {
+      onRenameGroup(renamingGroupId, nextName);
+    }
+    closeRenameGroupDialog();
+  };
 
   useLayoutEffect(() => {
     if (!historyMenu || !menuRef.current) {
@@ -182,52 +344,82 @@ export function Sidebar({
             <p className="label">{t('sidebar.history')}</p>
             <h2 className="text-sm font-semibold">{t('sidebar.historyTitle')}</h2>
           </div>
-          <span className="text-subtle text-xs">{savedProfiles.length}</span>
+          <div className="flex items-center gap-1.5">
+            {onAddGroup ? (
+              <button
+                className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-(--app-text-muted) transition hover:bg-(--app-icon-hover) hover:text-(--app-text-soft)"
+                onClick={openNewGroupDialog}
+                title={t('sidebar.groups.newGroup')}
+                type="button"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+            <span className="text-subtle text-xs">
+              {searchQuery.trim() ? `${filteredProfiles.length} / ${savedProfiles.length}` : savedProfiles.length}
+            </span>
+          </div>
+        </div>
+        <div className="px-1 pb-0.5">
+          <input
+            className="themed-input w-full px-2 py-1 text-xs outline-none transition focus:ring-1 focus:ring-cyan-400/50"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={t('sidebar.searchPlaceholder')}
+            value={searchQuery}
+          />
         </div>
         <ScrollArea className="flex-1 p-1">
           {sortedProfiles.length === 0 ? (
             <div className="text-subtle px-1 py-2 text-xs leading-relaxed">{t('sidebar.emptyHistory')}</div>
+          ) : filteredProfiles.length === 0 ? (
+            <div className="text-subtle px-1 py-2 text-xs leading-relaxed">{t('sidebar.emptyHistory')}</div>
           ) : (
             <div className="flex flex-col gap-1">
-              {sortedProfiles.map((profile) => (
-                <button
-                  className="history-item surface-muted rounded-sm flex select-none items-center gap-1.5 px-1.5 py-0.5 text-left transition"
+              {/* Ungrouped profiles */}
+              {ungroupedProfiles.map((profile) => (
+                <ProfileItem
                   key={profile.id}
+                  profile={profile}
                   onClick={() => handleReuseClick(profile)}
                   onDoubleClick={() => handleRenameDoubleClick(profile)}
-                  onDragStart={(event) => event.preventDefault()}
-                  onMouseDown={(event) => {
-                    if (event.button === 2) {
-                      event.preventDefault();
-                    }
-                  }}
                   onContextMenu={(event) => openHistoryMenu(event, profile)}
-                  type="button"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1">
-                      <strong className="block truncate text-xs">{profile.name}</strong>
-                      {profile.pinned ? (
-                        <Tooltip content={t('sidebar.badge.pinned')}>
-                          <span className="inline-flex h-4 w-4 items-center justify-center text-cyan-300">
-                            <PinIcon />
-                          </span>
-                        </Tooltip>
-                      ) : null}
-                      {profile.favorite ? (
-                        <Tooltip content={t('sidebar.badge.favorite')}>
-                          <span className="inline-flex h-4 w-4 items-center justify-center text-amber-300">
-                            <StarIcon />
-                          </span>
-                        </Tooltip>
-                      ) : null}
-                    </div>
-                    <span className="text-subtle block truncate mt-1 text-[11px]">
-                      {profile.username}@{profile.host}:{profile.port}
-                    </span>
-                  </div>
-                </button>
+                />
               ))}
+
+              {/* Grouped profiles */}
+              {groups.map((group) => {
+                const groupProfiles = groupedProfiles.get(group.id) ?? [];
+                if (!groupProfiles.length) return null;
+                const isExpanded = expandedGroups.has(group.id);
+                return (
+                  <div key={group.id} className="flex flex-col gap-0.5">
+                    <div
+                      className="flex cursor-pointer select-none items-center gap-1 rounded-sm px-1.5 py-0.5 transition hover:bg-white/5"
+                      onClick={() => toggleGroupExpanded(group.id)}
+                      onContextMenu={(event) => openGroupMenu(event, group)}
+                    >
+                      <span className="text-[10px] text-slate-400 transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                        ▶
+                      </span>
+                      <span className="truncate text-xs font-medium">{group.name}</span>
+                      <span className="text-subtle text-[10px]">({groupProfiles.length})</span>
+                    </div>
+                    {isExpanded && (
+                      <div className="flex flex-col gap-0.5 pl-3">
+                        {groupProfiles.map((profile) => (
+                          <ProfileItem
+                            key={profile.id}
+                            profile={profile}
+                            onClick={() => handleReuseClick(profile)}
+                            onDoubleClick={() => handleRenameDoubleClick(profile)}
+                            onContextMenu={(event) => openHistoryMenu(event, profile)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </ScrollArea>
@@ -289,6 +481,77 @@ export function Sidebar({
                 >
                   {t('sidebar.menu.delete')}
                 </button>
+                {historyMenu.showColorPicker ? (
+                  <div className="mt-1 grid grid-cols-5 gap-1 p-1">
+                    {PRESET_COLORS.map((color) => (
+                      <button
+                        className="h-5 w-5 rounded-full transition hover:scale-110"
+                        key={color}
+                        onClick={() => {
+                          onSetProfileColor(historyMenu.profile.id, color);
+                          setHistoryMenu(undefined);
+                        }}
+                        style={{ backgroundColor: color }}
+                        type="button"
+                      />
+                    ))}
+                    <button
+                      className="flex h-5 w-5 items-center justify-center rounded-full border border-(--app-border) text-[10px] text-(--app-text-muted) transition hover:bg-(--app-surface-hover)"
+                      onClick={() => {
+                        onSetProfileColor(historyMenu.profile.id, undefined);
+                        setHistoryMenu(undefined);
+                      }}
+                      title={t('sidebar.menu.clearColor')}
+                      type="button"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                    onClick={() =>
+                      setHistoryMenu((current) => (current ? { ...current, showColorPicker: true } : current))
+                    }
+                    type="button"
+                  >
+                    {t('sidebar.menu.setColor')}
+                  </button>
+                )}
+                {groups.length > 0 && onMoveProfileToGroup ? (
+                  <>
+                    <div className="themed-menu-divider my-1 h-px" />
+                    <div className="flex flex-col">
+                      <span className="px-2 py-0.5 text-[10px] text-slate-400">{t('sidebar.groups.moveTo')}</span>
+                      {historyMenu.profile.groupId && (
+                        <button
+                          className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                          onClick={() => {
+                            onMoveProfileToGroup(historyMenu.profile.id, undefined);
+                            setHistoryMenu(undefined);
+                          }}
+                          type="button"
+                        >
+                          {t('sidebar.groups.ungrouped')}
+                        </button>
+                      )}
+                      {groups.map((group) => (
+                        <button
+                          className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                          disabled={group.id === historyMenu.profile.groupId}
+                          key={group.id}
+                          onClick={() => {
+                            onMoveProfileToGroup(historyMenu.profile.id, group.id);
+                            setHistoryMenu(undefined);
+                          }}
+                          type="button"
+                        >
+                          {group.name}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
               </div>
             </>,
             document.body,
@@ -333,6 +596,143 @@ export function Sidebar({
                     {t('sidebar.renameDialog.cancel')}
                   </button>
                   <button className="btn-primary" disabled={!renameValue.trim()} onClick={commitRename} type="button">
+                    {t('sidebar.renameDialog.save')}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {groupMenu
+        ? createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setGroupMenu(null)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setGroupMenu(null);
+                }}
+                role="presentation"
+              />
+              <div
+                className="themed-menu fixed z-50 max-w-24 rounded-lg p-1 backdrop-blur"
+                onClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.preventDefault()}
+                style={{ left: groupMenu.x, top: groupMenu.y }}
+              >
+                <button
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                  onClick={() => startRenamingGroup(groupMenu.group)}
+                  type="button"
+                >
+                  {t('sidebar.menu.rename')}
+                </button>
+                {onDeleteGroup ? (
+                  <button
+                    className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition text-rose-400 hover:text-rose-300"
+                    onClick={() => {
+                      onDeleteGroup(groupMenu.group.id);
+                      setGroupMenu(null);
+                    }}
+                    type="button"
+                  >
+                    {t('common.delete')}
+                  </button>
+                ) : null}
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
+
+      {renamingGroupId
+        ? createPortal(
+            <div className="app-overlay" role="presentation">
+              <div
+                className="surface rounded-lg w-full max-w-sm p-3"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label={t('sidebar.groups.renameAriaLabel')}
+              >
+                <div className="flex flex-col gap-1">
+                  <p className="label">{t('sidebar.groups.renameKicker')}</p>
+                  <h3 className="themed-heading text-sm font-semibold">{t('sidebar.groups.renameTitle')}</h3>
+                </div>
+
+                <input
+                  autoFocus
+                  className="themed-input mt-3 w-full px-3 py-2 text-sm outline-none transition focus:border-cyan-400/60"
+                  onChange={(event) => setRenameGroupValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitRenameGroup();
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      closeRenameGroupDialog();
+                    }
+                  }}
+                  placeholder={t('sidebar.groups.renamePlaceholder')}
+                  value={renameGroupValue}
+                />
+
+                <div className="mt-3 flex justify-end gap-1">
+                  <button className="btn-cancel" onClick={closeRenameGroupDialog} type="button">
+                    {t('sidebar.renameDialog.cancel')}
+                  </button>
+                  <button className="btn-primary" disabled={!renameGroupValue.trim()} onClick={commitRenameGroup} type="button">
+                    {t('sidebar.renameDialog.save')}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {newGroupOpen
+        ? createPortal(
+            <div className="app-overlay" role="presentation">
+              <div
+                className="surface rounded-lg w-full max-w-sm p-3"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label={t('sidebar.groups.newAriaLabel')}
+              >
+                <div className="flex flex-col gap-1">
+                  <p className="label">{t('sidebar.groups.newKicker')}</p>
+                  <h3 className="themed-heading text-sm font-semibold">{t('sidebar.groups.newTitle')}</h3>
+                </div>
+
+                <input
+                  autoFocus
+                  className="themed-input mt-3 w-full px-3 py-2 text-sm outline-none transition focus:border-cyan-400/60"
+                  onChange={(event) => setNewGroupValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitNewGroup();
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      closeNewGroupDialog();
+                    }
+                  }}
+                  placeholder={t('sidebar.groups.newPlaceholder')}
+                  value={newGroupValue}
+                />
+
+                <div className="mt-3 flex justify-end gap-1">
+                  <button className="btn-cancel" onClick={closeNewGroupDialog} type="button">
+                    {t('sidebar.renameDialog.cancel')}
+                  </button>
+                  <button className="btn-primary" disabled={!newGroupValue.trim()} onClick={commitNewGroup} type="button">
                     {t('sidebar.renameDialog.save')}
                   </button>
                 </div>

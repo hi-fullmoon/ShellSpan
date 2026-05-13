@@ -105,7 +105,7 @@
   background: transparent;
 }
 
-.termbridge-file-grid .ag-row.ag-row-selected::after {
+.termbridge-file-grid:not(.batch-mode) .ag-row.ag-row-selected::after {
   z-index: 100;
   position: absolute;
   content: '';

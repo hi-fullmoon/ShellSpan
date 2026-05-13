@@ -135,6 +135,15 @@ export function CloseIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function PlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M8 3.5v9" />
+      <path d="M3.5 8h9" />
+    </svg>
+  );
+}
+
 export function SettingsIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...baseProps(props)}>
@@ -218,6 +227,44 @@ export function GlobeIcon(props: SVGProps<SVGSVGElement>) {
       <path d="M2.8 8h10.4" />
       <path d="M8 2.5c1.8 1.6 2.8 3.5 2.8 5.5S9.8 11.9 8 13.5" />
       <path d="M8 2.5C6.2 4.1 5.2 6 5.2 8s1 3.9 2.8 5.5" />
+    </svg>
+  );
+}
+
+export function BookmarkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M4 2.5h8a1 1 0 0 1 1 1v10.5l-5-3-5 3V3.5a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+
+export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M4 6l4 4 4-4" />
+    </svg>
+  );
+}
+
+export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M8 2.5v7" />
+      <path d="M5.5 7 8 9.5 10.5 7" />
+      <path d="M3 11.5h10" />
+    </svg>
+  );
+}
+
+export function TrashIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" />
+      <path d="M2.5 3.5h11" />
+      <path d="M4.5 3.5v9a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-9" />
+      <path d="M6.5 6.5v5" />
+      <path d="M9.5 6.5v5" />
     </svg>
   );
 }

@@ -87,6 +87,11 @@ function SessionTabCard({
             : 'cursor-grab',
         tabProps?.className,
       )}
+      style={{
+        borderLeftWidth: session.profile.color ? 3 : undefined,
+        borderLeftColor: session.profile.color,
+        ...tabProps?.style,
+      }}
       data-session-tab={session.sessionId}
       onDoubleClick={() => onRenameStart?.(session)}
     >

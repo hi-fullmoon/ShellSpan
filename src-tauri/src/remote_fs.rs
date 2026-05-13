@@ -2,9 +2,10 @@ use crate::connection::connect_sftp;
 use crate::models::{
     CopyRemotePathRequest, CreateRemoteEntryKind, CreateRemoteEntryRequest, DeleteProgressTracker,
     DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
-    OpenRemoteFileRequest, RemoteDirectoryListing, RemoteDirectoryRequest, RemoteFileEntry,
-    RemoteFileKind, RenameRemotePathRequest, UpdateRemotePermissionsRequest, UploadConflictPolicy,
-    UploadLocalPathsRequest, UploadProgressTracker, UploadScanStats,
+    OpenRemoteFileRequest, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RemoteFileEntry, RemoteFileKind, RenameRemotePathRequest,
+    UpdateRemotePermissionsRequest, UploadConflictPolicy, UploadLocalPathsRequest,
+    UploadProgressTracker, UploadScanStats,
 };
 use log::warn;
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
@@ -466,6 +467,64 @@ pub(crate) fn open_remote_file_blocking(request: OpenRemoteFileRequest) -> Resul
         .map_err(|error| format!("failed to finalize temp file: {error}"))?;
 
     open_path_with_default_app(&local_path)
+}
+
+const PREVIEW_SIZE_LIMIT: u64 = 1024 * 1024;
+
+pub(crate) fn read_remote_file_blocking(
+    request: ReadRemoteFileRequest,
+) -> Result<ReadRemoteFileResponse, String> {
+    let connected = connect_sftp(&request.connection)?;
+    let remote_path = Path::new(&request.path);
+
+    let stat = connected
+        .sftp
+        .lstat(remote_path)
+        .map_err(|error| format!("failed to inspect remote file: {error}"))?;
+
+    if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
+        return Err("cannot preview a directory".to_string());
+    }
+
+    let size = stat.size.unwrap_or(0);
+    if size > PREVIEW_SIZE_LIMIT {
+        return Err(format!(
+            "file too large to preview: {} bytes (limit: {} bytes)",
+            size, PREVIEW_SIZE_LIMIT
+        ));
+    }
+
+    let file_name = remote_path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "remote-file".to_string());
+
+    let mut remote_file = connected
+        .sftp
+        .open(remote_path)
+        .map_err(|error| format!("failed to open remote file: {error}"))?;
+
+    let mut buffer = Vec::with_capacity(size as usize);
+    remote_file
+        .read_to_end(&mut buffer)
+        .map_err(|error| format!("failed to read remote file: {error}"))?;
+
+    let (content, is_text) = match String::from_utf8(buffer) {
+        Ok(text) => (text, true),
+        Err(error) => {
+            let lossy = String::from_utf8_lossy(error.as_bytes()).to_string();
+            (lossy, false)
+        }
+    };
+
+    Ok(ReadRemoteFileResponse {
+        path: request.path,
+        name: file_name,
+        content,
+        size,
+        is_text,
+    })
 }
 
 fn cleanup_stale_open_temp_files(open_root: &Path) {

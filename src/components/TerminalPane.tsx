@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 import { createLogger } from '../lib/logger';
 import { isTauriRuntime } from '../lib/tauri';
@@ -27,6 +27,11 @@ import type {
   CursorStyle,
 } from "../types";
 
+export interface TerminalPaneRef {
+  sendData: (data: string) => void;
+  exportBuffer: () => string;
+}
+
 interface TerminalPaneProps {
   session: SessionState;
   active: boolean;
@@ -42,7 +47,7 @@ interface TerminalPaneProps {
 const terminalLogger = createLogger("terminal");
 type CopyFeedback = "copied" | "failed";
 
-export function TerminalPane({
+export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(function TerminalPane({
   session,
   active,
   onReconnect,
@@ -52,7 +57,7 @@ export function TerminalPane({
   cursorStyle = 'block',
   cursorBlink = true,
   copyOnSelect = false,
-}: TerminalPaneProps) {
+}, ref) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -127,6 +132,39 @@ export function TerminalPane({
       }
     };
   }, []);
+
+  useImperativeHandle(ref, () => ({
+    sendData: (data: string) => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      if (statusRef.current === "connected") {
+        void invoke("write_session", {
+          sessionId: session.sessionId,
+          data,
+        }).catch((error) => {
+          terminalLogger.error("Snippet 写入失败", {
+            sessionId: session.sessionId,
+            error: String(error),
+          });
+        });
+      } else {
+        terminal.write(data);
+      }
+    },
+    exportBuffer: () => {
+      const terminal = terminalRef.current;
+      if (!terminal) return "";
+      const lines: string[] = [];
+      const buffer = terminal.buffer.active;
+      for (let y = 0; y < buffer.length; y++) {
+        const line = buffer.getLine(y);
+        if (line) {
+          lines.push(line.translateToString(true));
+        }
+      }
+      return lines.join("\n");
+    },
+  }), [session.sessionId]);
 
   useEffect(() => {
     statusRef.current = session.status;
@@ -649,4 +687,4 @@ export function TerminalPane({
       )}
     </section>
   );
-}
+});

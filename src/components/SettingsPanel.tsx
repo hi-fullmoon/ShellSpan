@@ -211,7 +211,7 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
   };
 
   const resetShortcut = (action: ShortcutAction) => {
-    const next = { ...preferences.keyboardShortcuts };
+    const next: Partial<Record<ShortcutAction, string>> = { ...preferences.keyboardShortcuts };
     delete next[action];
     onChange({ ...preferences, keyboardShortcuts: next });
   };

@@ -6,6 +6,7 @@ export interface FileManagerSessionState {
   listing?: RemoteDirectoryListing;
   pathInput: string;
   selectedPath?: string;
+  selectedPaths?: string[];
   uploadProgress?: UploadProgressState;
   downloadProgress?: DownloadProgressState;
 }

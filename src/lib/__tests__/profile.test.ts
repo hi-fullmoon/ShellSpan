@@ -26,6 +26,7 @@ describe("createEmptyProfile", () => {
       password: "",
       privateKeyPath: "",
       passphrase: "",
+      bookmarks: [],
     });
   });
 });
@@ -55,6 +56,9 @@ describe("sanitizeProfileForStorage", () => {
       rememberPassword: true,
       password: "",
       passphrase: "",
+      bookmarks: [],
+      color: undefined,
+      jumpHost: undefined,
     });
   });
 
@@ -77,6 +81,9 @@ describe("sanitizeProfileForStorage", () => {
       passphrase: "",
       pinned: true,
       favorite: true,
+      bookmarks: [],
+      color: undefined,
+      jumpHost: undefined,
     });
   });
 });

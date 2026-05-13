@@ -4,11 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
 
 export default defineConfig({
-  plugins: [
-    tailwindcss(),
-    react(),
-    codeInspectorPlugin({ bundler: 'vite' }),
-  ],
+  plugins: [codeInspectorPlugin({ bundler: 'vite' }), tailwindcss(), react()],
   server: {
     host: '0.0.0.0',
     port: 1420,

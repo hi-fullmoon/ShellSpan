@@ -84,6 +84,7 @@ describe("Sidebar", () => {
         onReuseProfile={onReuseProfile}
         onToggleFavoriteProfile={vi.fn()}
         onTogglePinnedProfile={vi.fn()}
+        onSetProfileColor={vi.fn()}
         runtimeLabel="Desktop"
         savedProfiles={profiles}
       />,
@@ -113,6 +114,7 @@ describe("Sidebar", () => {
         onReuseProfile={vi.fn()}
         onToggleFavoriteProfile={vi.fn()}
         onTogglePinnedProfile={vi.fn()}
+        onSetProfileColor={vi.fn()}
         runtimeLabel="Desktop"
         savedProfiles={[]}
       />,
@@ -131,6 +133,7 @@ describe("Sidebar", () => {
         onReuseProfile={vi.fn()}
         onToggleFavoriteProfile={vi.fn()}
         onTogglePinnedProfile={vi.fn()}
+        onSetProfileColor={vi.fn()}
         runtimeLabel="Desktop"
         savedProfiles={profiles}
       />,
@@ -152,6 +155,7 @@ describe("Sidebar", () => {
         onReuseProfile={onReuseProfile}
         onToggleFavoriteProfile={vi.fn()}
         onTogglePinnedProfile={vi.fn()}
+        onSetProfileColor={vi.fn()}
         runtimeLabel="Desktop"
         savedProfiles={profiles}
       />,
@@ -174,6 +178,7 @@ describe("Sidebar", () => {
         onReuseProfile={vi.fn()}
         onToggleFavoriteProfile={vi.fn()}
         onTogglePinnedProfile={vi.fn()}
+        onSetProfileColor={vi.fn()}
         runtimeLabel="Desktop"
         savedProfiles={profiles}
       />,

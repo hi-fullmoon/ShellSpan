@@ -25,9 +25,11 @@
     "@xterm/xterm": "^6.0.0",
     "ag-grid-community": "^35.2.1",
     "ag-grid-react": "^35.2.1",
+    "clsx": "^2.1.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-intl-universal": "^2.13.4",
+    "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

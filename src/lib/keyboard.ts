@@ -6,7 +6,8 @@ export type ShortcutAction =
   | 'nextTab'
   | 'prevTab'
   | 'togglePrimarySidebar'
-  | 'toggleSecondarySidebar';
+  | 'toggleSecondarySidebar'
+  | 'exportTerminal';
 
 export interface ParsedBinding {
   key: string;
@@ -25,6 +26,7 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   'prevTab',
   'togglePrimarySidebar',
   'toggleSecondarySidebar',
+  'exportTerminal',
 ];
 
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
@@ -36,6 +38,7 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   prevTab: 'CmdOrCtrl+Shift+Tab',
   togglePrimarySidebar: 'CmdOrCtrl+Shift+E',
   toggleSecondarySidebar: 'CmdOrCtrl+Shift+S',
+  exportTerminal: 'CmdOrCtrl+Shift+T',
 };
 
 export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
@@ -47,6 +50,7 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   prevTab: 'shortcuts.action.prevTab',
   togglePrimarySidebar: 'shortcuts.action.togglePrimarySidebar',
   toggleSecondarySidebar: 'shortcuts.action.toggleSecondarySidebar',
+  exportTerminal: 'shortcuts.action.exportTerminal',
 };
 
 function isMac(): boolean {

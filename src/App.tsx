@@ -15,6 +15,7 @@ import { Sidebar } from './components/Sidebar';
 import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane } from './components/TerminalPane';
+import { SnippetsPanel } from './components/SnippetsPanel';
 import { Toast } from './components/Toast';
 import { TooltipProvider } from './components/Tooltip';
 import { UpdateRestartDialog } from './components/UpdateRestartDialog';
@@ -33,7 +34,8 @@ import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
 import { DEFAULT_SHORTCUTS, matchesBinding } from './lib/keyboard';
 import type { ShortcutAction } from './lib/keyboard';
-import type { AppPreferences, ConnectionProfile, HostKeyCheckResponse, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
+import type { TerminalPaneRef } from './components/TerminalPane';
+import type { AppPreferences, ConnectionGroup, ConnectionProfile, HostKeyCheckResponse, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
 
 const appLogger = createLogger('app');
 const SYSTEM_OPEN_SETTINGS_EVENT = 'system-open-settings';
@@ -96,7 +98,7 @@ function normalizePreferences(value: Partial<AppPreferences> | null | undefined)
     autoReconnect: value?.autoReconnect !== false,
     startupUpdateCheck: value?.startupUpdateCheck !== false,
     historyLimit: typeof value?.historyLimit === 'number' && value.historyLimit >= 3 && value.historyLimit <= 20 ? value.historyLimit : 8,
-    keyboardShortcuts: value?.keyboardShortcuts ?? {},
+    keyboardShortcuts: (value?.keyboardShortcuts ?? {}) as AppPreferences['keyboardShortcuts'],
   };
 }
 
@@ -172,6 +174,7 @@ async function openSettingsWindow(preferences?: AppPreferences): Promise<void> {
 function App() {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
   const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>('termbridge.savedProfiles', [], ['windbridge.savedProfiles']);
+  const [savedGroups, setSavedGroups] = useLocalStorage<ConnectionGroup[]>('termbridge.groups', []);
   const [storedPreferences, setStoredPreferences] = useLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
@@ -210,6 +213,7 @@ function App() {
   const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
   const sessionsRef = useRef<SessionState[]>([]);
   const preferencesRef = useRef(preferences);
+  const terminalPaneRefs = useRef<Record<string, TerminalPaneRef>>({});
   const autoReconnectAttemptedRef = useRef<Record<string, true>>({});
   const dialogStateRef = useRef({
     hostKeyOpen: false,
@@ -342,6 +346,22 @@ function App() {
       if (matchesBinding(merged.toggleSecondarySidebar, event)) {
         event.preventDefault();
         setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar }));
+        return;
+      }
+
+      if (matchesBinding(merged.exportTerminal, event)) {
+        event.preventDefault();
+        const pane = activeSessionId ? terminalPaneRefs.current[activeSessionId] : undefined;
+        if (pane) {
+          const content = pane.exportBuffer();
+          const blob = new Blob([content], { type: 'text/plain' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `terminal-${activeSessionId}.txt`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
         return;
       }
     };
@@ -1077,6 +1097,49 @@ function App() {
     );
   };
 
+  const handleSetSavedProfileColor = (profileId: string, color?: string) => {
+    setSavedProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId
+          ? {
+              ...profile,
+              color,
+            }
+          : profile,
+      ),
+    );
+  };
+
+  const handleMoveProfileToGroup = (profileId: string, groupId?: string) => {
+    setSavedProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId
+          ? { ...profile, groupId }
+          : profile,
+      ),
+    );
+  };
+
+  const handleAddGroup = (name: string) => {
+    const id = crypto.randomUUID();
+    setSavedGroups((current) => [...current, { id, name }]);
+  };
+
+  const handleDeleteGroup = (groupId: string) => {
+    setSavedGroups((current) => current.filter((g) => g.id !== groupId));
+    setSavedProfiles((current) =>
+      current.map((profile) =>
+        profile.groupId === groupId ? { ...profile, groupId: undefined } : profile,
+      ),
+    );
+  };
+
+  const handleRenameGroup = (groupId: string, name: string) => {
+    setSavedGroups((current) =>
+      current.map((g) => (g.id === groupId ? { ...g, name } : g)),
+    );
+  };
+
   const handleReconnectSession = async (sessionId: string, options?: { automatic?: boolean }) => {
     const automatic = options?.automatic ?? false;
     const target = sessionsRef.current.find((item) => item.sessionId === sessionId);
@@ -1272,6 +1335,13 @@ function App() {
                 onReconnect={() => {
                   void handleReconnectSession(session.sessionId);
                 }}
+                ref={(el) => {
+                  if (el) {
+                    terminalPaneRefs.current[session.sessionId] = el;
+                  } else {
+                    delete terminalPaneRefs.current[session.sessionId];
+                  }
+                }}
                 session={session}
                 terminalTheme={preferences.terminalTheme}
               />
@@ -1302,7 +1372,39 @@ function App() {
       <div className="flex flex-1 gap-0 p-0 min-h-0">
         <SplitLayout className="min-w-0 flex-1" storageKey="termbridge.layout.main">
           <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showFileManager} defaultSize={320} minSize={280} name="fileManager">
-            {() => <FileManager ignoreWindowDragDrop={reorderingSessions} session={activeSession} />}
+            {() => {
+              const activeProfileId = activeSession?.profile.id;
+              const activeBookmarks = activeProfileId
+                ? (savedProfiles.find((p) => p.id === activeProfileId)?.bookmarks ?? [])
+                : [];
+              return (
+                <FileManager
+                  bookmarks={activeBookmarks}
+                  ignoreWindowDragDrop={reorderingSessions}
+                  session={activeSession}
+                  onAddBookmark={(path) => {
+                    if (!activeProfileId) return;
+                    setSavedProfiles((prev) =>
+                      prev.map((p) =>
+                        p.id === activeProfileId
+                          ? { ...p, bookmarks: [...new Set([...(p.bookmarks ?? []), path])] }
+                          : p,
+                      ),
+                    );
+                  }}
+                  onRemoveBookmark={(path) => {
+                    if (!activeProfileId) return;
+                    setSavedProfiles((prev) =>
+                      prev.map((p) =>
+                        p.id === activeProfileId
+                          ? { ...p, bookmarks: (p.bookmarks ?? []).filter((b) => b !== path) }
+                          : p,
+                      ),
+                    );
+                  }}
+                />
+              );
+            }}
           </SplitLayout.Slot>
 
           <SplitLayout.Slot className="min-h-0" minSize={520} name="workspace">
@@ -1312,23 +1414,39 @@ function App() {
                   {() => workspaceContent}
                 </SplitLayout.Slot>
 
-                <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showSidebar} defaultSize={212} fixed minSize={212} name="sidebar">
+                <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showSidebar} defaultSize={280} fixed minSize={240} name="sidebar">
                   {() => (
-                    <Sidebar
-                      connectedCount={connectedSessions}
-                      runtimeLabel={runtimeText}
-                      savedProfiles={savedProfiles}
-                      onDeleteProfile={handleDeleteSavedProfile}
-                      onRenameProfile={handleRenameSavedProfile}
-                      onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
-                      onTogglePinnedProfile={handleToggleSavedProfilePinned}
-                      onReuseProfile={loadProfile}
-                      onOpenConnect={() => {
-                        setDraftProfile(createEmptyProfile());
-                        setErrorMessage(undefined);
-                        setConnectDialogOpen(true);
-                      }}
-                    />
+                    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+                      <Sidebar
+                        connectedCount={connectedSessions}
+                        groups={savedGroups}
+                        runtimeLabel={runtimeText}
+                        savedProfiles={savedProfiles}
+                        onAddGroup={handleAddGroup}
+                        onDeleteGroup={handleDeleteGroup}
+                        onDeleteProfile={handleDeleteSavedProfile}
+                        onMoveProfileToGroup={handleMoveProfileToGroup}
+                        onRenameGroup={handleRenameGroup}
+                        onRenameProfile={handleRenameSavedProfile}
+                        onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
+                        onTogglePinnedProfile={handleToggleSavedProfilePinned}
+                        onSetProfileColor={handleSetSavedProfileColor}
+                        onReuseProfile={loadProfile}
+                        onOpenConnect={() => {
+                          setDraftProfile(createEmptyProfile());
+                          setErrorMessage(undefined);
+                          setConnectDialogOpen(true);
+                        }}
+                      />
+                      <SnippetsPanel
+                        onSendCommand={(command) => {
+                          const pane = activeSessionId ? terminalPaneRefs.current[activeSessionId] : undefined;
+                          if (pane) {
+                            pane.sendData(command + '\r');
+                          }
+                        }}
+                      />
+                    </div>
                   )}
                 </SplitLayout.Slot>
               </SplitLayout>
@@ -1346,6 +1464,7 @@ function App() {
 
       <ConnectDialog
         draftProfile={draftProfile}
+        groups={savedGroups}
         isConnecting={isConnecting}
         onClose={() => setConnectDialogOpen(false)}
         onConnect={(profile, remember, rememberPassword) => {

@@ -26,6 +26,12 @@ describe("cn", () => {
       "rounded bg-slate-900 p-2",
     );
   });
+
+  it("supports clsx inputs and merges tailwind conflicts", () => {
+    expect(cn("rounded px-2", ["text-sm", null], { "bg-slate-900": true, hidden: false }, "px-4")).toBe(
+      "rounded text-sm bg-slate-900 px-4",
+    );
+  });
 });
 
 describe("sessionStatusTone", () => {

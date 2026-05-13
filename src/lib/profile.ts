@@ -42,6 +42,7 @@ export function createEmptyProfile(): ConnectionProfile {
     password: "",
     privateKeyPath: "",
     passphrase: "",
+    bookmarks: [],
   };
 }
 
@@ -52,6 +53,8 @@ export function sanitizeProfileForStorage(
     ...profile,
     pinned: profile.pinned ?? false,
     favorite: profile.favorite ?? false,
+    bookmarks: profile.bookmarks ?? [],
+    color: profile.color,
     password: "", // always clear — passwords are stored in OS keychain
     passphrase: "",
     jumpHost: profile.jumpHost

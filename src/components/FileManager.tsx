@@ -6,6 +6,7 @@ import {
   type ICellRendererParams,
   type RowClickedEvent,
   type RowDoubleClickedEvent,
+  type SelectionChangedEvent,
 } from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
 import { invoke } from '@tauri-apps/api/core';
@@ -19,7 +20,7 @@ import { addPathWrapOpportunities } from '../lib/ui';
 import { isTauriRuntime } from '../lib/tauri';
 import { useFileManagerStore } from '../stores/fileManagerStore';
 import { cn, fileKindColor } from '../lib/ui';
-import { ArrowUpIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
+import { ArrowUpIcon, BookmarkIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
 import { Tooltip } from './Tooltip';
 import { ScrollArea } from './ScrollArea';
 import { Toast, type ToastAction } from './Toast';
@@ -28,6 +29,7 @@ import type {
   DownloadProgressEvent,
   DownloadProgressState,
   RemoteDirectoryListing,
+  RemoteFileContent,
   RemoteFileEntry,
   RemoteFileKind,
   SessionState,
@@ -38,6 +40,9 @@ import type {
 interface FileManagerProps {
   session?: SessionState;
   ignoreWindowDragDrop?: boolean;
+  bookmarks?: string[];
+  onAddBookmark?: (path: string) => void;
+  onRemoveBookmark?: (path: string) => void;
 }
 
 type EntryDialogMode = 'newFile' | 'newDirectory' | 'rename';
@@ -437,9 +442,10 @@ function OverlayPanel({ children, className, ...props }: { children: ReactNode; 
   );
 }
 
-export function FileManager({ session, ignoreWindowDragDrop = false }: FileManagerProps) {
+export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks = [], onAddBookmark, onRemoveBookmark }: FileManagerProps) {
   const gridRef = useRef<AgGridReact<RemoteFileEntry> | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const bookmarkButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadSessionByOperationRef = useRef<Record<string, string>>({});
   const latestWindowDropStateRef = useRef<WindowDragDropState>({
     ready: false,
@@ -453,17 +459,23 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const hasLoadedAnyListingRef = useRef(false);
   const [clipboard, setClipboard] = useState<ClipboardState>();
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteState>();
+  const [pendingBatchDelete, setPendingBatchDelete] = useState<RemoteFileEntry[]>();
   const [pendingUploadConflict, setPendingUploadConflict] = useState<PendingUploadConflictState>();
   const [properties, setProperties] = useState<PropertiesState>();
   const [permissionEdit, setPermissionEdit] = useState<PermissionEditState>();
   const [dialog, setDialog] = useState<EntryDialogState>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState>();
+  const [bookmarkMenuOpen, setBookmarkMenuOpen] = useState(false);
+  const [bookmarkMenuPos, setBookmarkMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [preview, setPreview] = useState<RemoteFileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgressState>();
   const [toast, setToast] = useState<ToastState>();
+  const [filterQuery, setFilterQuery] = useState('');
+  const [batchMode, setBatchMode] = useState(false);
   const sessionId = session?.sessionId;
   const fileManagerState = useFileManagerStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
   const updateSessionState = useFileManagerStore((state) => state.updateSessionState);
@@ -487,12 +499,25 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
   const listing = fileManagerState?.listing;
   const pathInput = fileManagerState?.pathInput ?? '';
   const selectedPath = fileManagerState?.selectedPath;
+  const selectedPaths = fileManagerState?.selectedPaths ?? [];
   const error = fileManagerState?.error;
   const uploadProgress = fileManagerState?.uploadProgress;
   const selectedEntry = useMemo(() => listing?.entries.find((entry) => entry.path === selectedPath), [listing, selectedPath]);
+  const selectedEntries = useMemo(() => listing?.entries.filter((entry) => selectedPaths.includes(entry.path)) ?? [], [listing, selectedPaths]);
+  const filteredEntries = useMemo(() => {
+    if (!listing || !filterQuery.trim()) {
+      return listing?.entries ?? [];
+    }
+    const query = filterQuery.toLowerCase();
+    return listing.entries.filter((entry) => entry.name.toLowerCase().includes(query));
+  }, [listing, filterQuery]);
   const ready = !!session && session.status === 'connected' && !!connection;
   const readOnly = !!session && session.status !== 'connected';
   const currentPath = listing?.path;
+  const isCurrentPathBookmarked = useMemo(() => {
+    if (!currentPath) return false;
+    return bookmarks.includes(currentPath);
+  }, [currentPath, bookmarks]);
   const sensitivePathWarning = !!currentPath && !error && isSensitivePath(currentPath);
   const showInitialLoadingHint = !hasLoadedAnyListingRef.current;
   const locale = getActiveLocale();
@@ -580,6 +605,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     [],
   );
 
+  const rowSelection = useMemo(
+    () => (batchMode ? { mode: 'multiRow' as const, checkboxes: true as const } : { mode: 'singleRow' as const, checkboxes: false as const }),
+    [batchMode],
+  );
+
   const setPathInput = (value: string) => {
     if (!sessionId) {
       return;
@@ -594,6 +624,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     }
 
     updateSessionState(sessionId, { selectedPath: value });
+  };
+
+  const setSelectedPaths = (value: string[]) => {
+    if (!sessionId) {
+      return;
+    }
+
+    updateSessionState(sessionId, { selectedPaths: value });
   };
 
   const setFileError = (value?: string) => {
@@ -970,9 +1008,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       return;
     }
 
+    const paths = new Set(selectedPaths);
     let hasSelectedRow = false;
     api.forEachNode((node) => {
-      const shouldSelect = !!selectedPath && node.data?.path === selectedPath;
+      const shouldSelect = node.data ? paths.has(node.data.path) : false;
       if (node.isSelected() !== shouldSelect) {
         node.setSelected(shouldSelect);
       }
@@ -984,7 +1023,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     if (!hasSelectedRow && api.getSelectedRows().length) {
       api.deselectAll();
     }
-  }, [selectedPath, listing]);
+  }, [selectedPaths, listing]);
 
   useEffect(() => {
     setClipboard(undefined);
@@ -1015,6 +1054,15 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
       window.removeEventListener('click', closeMenu);
     };
   }, []);
+
+  useEffect(() => {
+    if (!bookmarkMenuOpen) return;
+    const closeBookmarkMenu = () => setBookmarkMenuOpen(false);
+    window.addEventListener('click', closeBookmarkMenu);
+    return () => {
+      window.removeEventListener('click', closeBookmarkMenu);
+    };
+  }, [bookmarkMenuOpen]);
 
   useLayoutEffect(() => {
     if (!contextMenu || !menuRef.current) {
@@ -1487,6 +1535,93 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     }
   };
 
+  const handleBatchDownload = async () => {
+    if (!ready || !selectedPaths.length || !connection || !sessionId) {
+      return;
+    }
+
+    const targets = selectedEntries.filter((entry) => entry.kind !== 'directory');
+    if (!targets.length) {
+      setToast({
+        message: t('fileManager.feedback.downloadNothing'),
+        tone: 'info',
+      });
+      return;
+    }
+
+    let destinationDirectory: string;
+    try {
+      const selected = await invoke<string[]>('pick_local_folder');
+      if (!selected.length) {
+        return;
+      }
+      destinationDirectory = selected[0];
+    } catch (nextError) {
+      setToast({
+        message: String(nextError),
+        tone: 'error',
+      });
+      return;
+    }
+
+    const operationId = createOperationId();
+    fileManagerLogger.info('开始批量下载', {
+      sessionId,
+      operationId,
+      count: targets.length,
+      destinationDirectory,
+    });
+    setWorking(true);
+    setFileError(undefined);
+    setToast(undefined);
+    setContextMenu(undefined);
+    setDownloadProgress({
+      operationId,
+      currentPath: targets[0].path,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      totalSteps: targets.length,
+      completedSteps: 0,
+      cancelling: false,
+    });
+
+    try {
+      await invoke('download_remote_paths', {
+        request: {
+          ...connection,
+          remotePaths: targets.map((entry) => entry.path),
+          destinationDirectory,
+          operationId,
+        },
+      });
+      setToast({
+        message: t('fileManager.feedback.downloadMulti', { count: targets.length }),
+        tone: 'success',
+      });
+      fileManagerLogger.info('批量下载完成', {
+        sessionId,
+        operationId,
+        count: targets.length,
+        destinationDirectory,
+      });
+    } catch (nextError) {
+      const message = String(nextError);
+      const cancelled = message.includes('download cancelled');
+      if (cancelled) {
+        fileManagerLogger.info('批量下载已取消', { sessionId, operationId });
+      } else {
+        fileManagerLogger.error('批量下载失败', { sessionId, operationId, error: message });
+      }
+      setToast({
+        message: cancelled ? t('fileManager.feedback.downloadCancelled') : message,
+        tone: cancelled ? 'info' : 'error',
+      });
+    } finally {
+      setDownloadProgress(undefined);
+      setWorking(false);
+    }
+  };
+
   const handleCopy = (entry?: RemoteFileEntry) => {
     const target = entry ?? selectedEntry;
     if (!target) {
@@ -1528,6 +1663,36 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
         message: String(nextError),
         tone: 'error',
       });
+    }
+  };
+
+  const handlePreview = async (entry?: RemoteFileEntry) => {
+    const target = entry ?? selectedEntry;
+    if (!target || !connection || !sessionId) {
+      return;
+    }
+    if (target.kind === 'directory') {
+      return;
+    }
+
+    setSelectedPath(target.path);
+    setContextMenu(undefined);
+    setWorking(true);
+    setFileError(undefined);
+
+    try {
+      const result = await invoke<RemoteFileContent>('preview_remote_file', {
+        connection,
+        path: target.path,
+      });
+      setPreview(result);
+    } catch (nextError) {
+      setToast({
+        message: formatDirectoryLoadError(nextError, target.path),
+        tone: 'error',
+      });
+    } finally {
+      setWorking(false);
     }
   };
 
@@ -1643,6 +1808,65 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     }
   };
 
+  const handleBatchDelete = () => {
+    if (!ready || !selectedPaths.length) {
+      return;
+    }
+    const targets = selectedEntries;
+    if (!targets.length) {
+      return;
+    }
+    setPendingBatchDelete(targets);
+    setContextMenu(undefined);
+  };
+
+  const confirmBatchDelete = async () => {
+    if (!ready || !pendingBatchDelete?.length || !connection) {
+      return;
+    }
+
+    setWorking(true);
+    setFileError(undefined);
+    setToast(undefined);
+    setContextMenu(undefined);
+    setPendingBatchDelete(undefined);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const target of pendingBatchDelete) {
+      try {
+        await invoke('delete_remote_path', {
+          request: {
+            ...connection,
+            path: target.path,
+            operationId: createOperationId(),
+          },
+        });
+        successCount += 1;
+      } catch {
+        failCount += 1;
+      }
+    }
+
+    setSelectedPaths([]);
+    setSelectedPath(undefined);
+    await loadDirectory(currentPath);
+
+    if (failCount === 0) {
+      setToast({
+        message: t('fileManager.feedback.deleteSuccess'),
+        tone: 'success',
+      });
+    } else {
+      setToast({
+        message: `${successCount} deleted, ${failCount} failed`,
+        tone: 'error',
+      });
+    }
+    setWorking(false);
+  };
+
   const handlePaste = async () => {
     if (!ready || !clipboard || !connection || !currentPath) {
       return;
@@ -1744,12 +1968,35 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     });
   };
 
+  const openBookmarkMenu = () => {
+    if (!bookmarks.length || !bookmarkButtonRef.current) return;
+    const rect = bookmarkButtonRef.current.getBoundingClientRect();
+    setBookmarkMenuPos({ x: rect.left, y: rect.bottom + 4 });
+    setBookmarkMenuOpen(true);
+  };
+
   const handleGridRowClick = (event: RowClickedEvent<RemoteFileEntry>) => {
     if (!event.data) {
       return;
     }
 
     setSelectedPath(event.data.path);
+
+    if (!batchMode && !event.node.isSelected()) {
+      const api = gridRef.current?.api;
+      if (api) {
+        api.deselectAll();
+        event.node.setSelected(true);
+      }
+    }
+  };
+
+  const handleGridSelectionChanged = (event: SelectionChangedEvent<RemoteFileEntry>) => {
+    const paths = event.api.getSelectedRows().map((row) => row.path);
+    setSelectedPaths(paths);
+    if (paths.length === 1) {
+      setSelectedPath(paths[0]);
+    }
   };
 
   const handleGridRowDoubleClick = (event: RowDoubleClickedEvent<RemoteFileEntry>) => {
@@ -1773,6 +2020,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
     mouseEvent.preventDefault();
     mouseEvent.stopPropagation();
     setSelectedPath(target.path);
+
+    const api = gridRef.current?.api;
+    if (api && !batchMode) {
+      api.deselectAll();
+      event.node.setSelected(true);
+    }
+
     setContextMenu({
       x: mouseEvent.clientX,
       y: mouseEvent.clientY,
@@ -1791,7 +2045,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
           </h3>
         </div>
         <div className="flex items-center gap-1">
-          <span className="file-manager-count px-2 py-1 text-[10px]">{listing ? listing?.entries.length : ''}</span>
+          <span className="file-manager-count px-2 py-1 text-[10px]">
+            {listing ? (filterQuery.trim() ? `${filteredEntries.length} / ${listing.entries.length}` : listing.entries.length) : ''}
+          </span>
         </div>
       </div>
 
@@ -1826,6 +2082,21 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 value={pathInput}
               />
               <button
+                aria-label={t('fileManager.bookmarks.jump')}
+                className={cn('icon-btn h-6 w-6 px-0', isCurrentPathBookmarked && 'text-amber-400')}
+                disabled={!ready || !currentPath || loading || working}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openBookmarkMenu();
+                }}
+                ref={bookmarkButtonRef}
+                type="button"
+              >
+                <Tooltip content={t('fileManager.bookmarks.jump')}>
+                  <BookmarkIcon />
+                </Tooltip>
+              </button>
+              <button
                 aria-label={t('fileManager.actions.refresh')}
                 className="icon-btn h-6 w-6 px-0"
                 disabled={!ready || loading || working}
@@ -1848,6 +2119,64 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 </Tooltip>
               </button>
             </form>
+
+            {listing && (
+              <div className="flex items-center gap-1 px-0.5">
+                <input
+                  className="themed-input min-w-0 flex-1 px-2 py-0.5 text-[11px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
+                  onChange={(event) => setFilterQuery(event.target.value)}
+                  placeholder={t('fileManager.filterPlaceholder')}
+                  type="text"
+                  value={filterQuery}
+                />
+                {filterQuery.trim() && (
+                  <button className="icon-btn h-5 w-5 px-0 text-[10px]" onClick={() => setFilterQuery('')} type="button">
+                    <CloseIcon />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {batchMode && (
+              <div className="flex items-center gap-1 px-0.5">
+                <span className="text-[11px] text-slate-400">
+                  {selectedPaths.length > 0 ? t('fileManager.batch.selected', { count: selectedPaths.length }) : t('fileManager.batch.hint')}
+                </span>
+                <div className="flex-1" />
+                {selectedPaths.length > 0 && (
+                  <>
+                    <button
+                      className="icon-btn h-6 px-1.5 text-[11px]"
+                      disabled={!ready || working}
+                      onClick={() => void handleBatchDownload()}
+                      type="button"
+                    >
+                      {t('fileManager.menu.download')}
+                    </button>
+                    <button
+                      className="icon-btn h-6 px-1.5 text-[11px] text-rose-400 hover:text-rose-300"
+                      disabled={!ready || working}
+                      onClick={() => handleBatchDelete()}
+                      type="button"
+                    >
+                      {t('common.delete')}
+                    </button>
+                  </>
+                )}
+                <button
+                  className="icon-btn h-6 px-1.5 text-[11px]"
+                  disabled={working}
+                  onClick={() => {
+                    setBatchMode(false);
+                    setSelectedPaths([]);
+                    setSelectedPath(undefined);
+                  }}
+                  type="button"
+                >
+                  {t('fileManager.batch.exit')}
+                </button>
+              </div>
+            )}
 
             {error ? <div className="border border-rose-900 bg-rose-950/40 px-2 py-2 text-xs text-rose-300 rounded-sm">{error}</div> : null}
             {readOnly && listing ? (
@@ -1875,7 +2204,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                   <div className="surface-muted px-2 py-2 text-xs text-slate-400 rounded-sm">{t('fileManager.loading')}</div>
                 ) : null
               ) : !listing ? null : (
-                <div className="ag-theme-quartz termbridge-file-grid h-full">
+                <div className={cn('ag-theme-quartz termbridge-file-grid h-full', batchMode && 'batch-mode')}>
                   <AgGridReact<RemoteFileEntry>
                     animateRows={false}
                     defaultColDef={defaultColDef}
@@ -1888,10 +2217,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     onCellContextMenu={handleGridContextMenu}
                     onRowClicked={handleGridRowClick}
                     onRowDoubleClicked={handleGridRowDoubleClick}
+                    onSelectionChanged={handleGridSelectionChanged}
                     overlayNoRowsTemplate={`<span class="termbridge-grid-overlay">${t('fileManager.emptyDirectory')}</span>`}
                     ref={gridRef}
-                    rowSelection={{ mode: 'singleRow', checkboxes: false }}
-                    rowData={listing.entries}
+                    rowSelection={rowSelection}
+                    rowData={filteredEntries}
                     rowHeight={28}
                     suppressCellFocus
                     suppressContextMenu
@@ -1920,115 +2250,163 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
               {contextMenu.target === 'entry' ? (
-                <div className="flex flex-col">
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.newFile')}
-                    onClick={() => openCreateDialog('newFile')}
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.newDirectory')}
-                    onClick={() => openCreateDialog('newDirectory')}
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.uploadFile')}
-                    onClick={() => void handleSelectUploadFiles()}
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.uploadFolder')}
-                    onClick={() => void handleSelectUploadFolder()}
-                  />
-                  {contextMenu.entry?.kind === 'directory' ? (
+                batchMode ? (
+                  <div className="flex flex-col">
+                    <MenuButton
+                      disabled={!ready || loading || working || !selectedPaths.length}
+                      label={t('fileManager.menu.download')}
+                      onClick={() => void handleBatchDownload()}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working || !selectedPaths.length}
+                      label={t('fileManager.menu.delete')}
+                      onClick={() => handleBatchDelete()}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col">
                     <MenuButton
                       disabled={!ready || loading || working}
-                      label={t('fileManager.menu.open')}
-                      onClick={() => {
-                        if (contextMenu.entry) {
-                          void loadDirectory(contextMenu.entry.path);
+                      label={t('fileManager.menu.newFile')}
+                      onClick={() => openCreateDialog('newFile')}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.newDirectory')}
+                      onClick={() => openCreateDialog('newDirectory')}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.uploadFile')}
+                      onClick={() => void handleSelectUploadFiles()}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.uploadFolder')}
+                      onClick={() => void handleSelectUploadFolder()}
+                    />
+                    {contextMenu.entry?.kind === 'directory' ? (
+                      <MenuButton
+                        disabled={!ready || loading || working}
+                        label={t('fileManager.menu.open')}
+                        onClick={() => {
+                          if (contextMenu.entry) {
+                            void loadDirectory(contextMenu.entry.path);
+                          }
+                        }}
+                      />
+                    ) : null}
+                    {contextMenu.entry?.kind === 'directory' && onAddBookmark && onRemoveBookmark ? (
+                      <MenuButton
+                        disabled={!ready || loading || working}
+                        label={
+                          contextMenu.entry && bookmarks.includes(contextMenu.entry.path)
+                            ? t('fileManager.bookmarks.remove')
+                            : t('fileManager.bookmarks.add')
                         }
+                        onClick={() => {
+                          if (!contextMenu.entry) return;
+                          if (bookmarks.includes(contextMenu.entry.path)) {
+                            onRemoveBookmark(contextMenu.entry.path);
+                          } else {
+                            onAddBookmark(contextMenu.entry.path);
+                          }
+                        }}
+                      />
+                    ) : null}
+                    {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
+                      <MenuButton
+                        disabled={!ready || loading || working}
+                        label={t('fileManager.menu.openWithDefaultEditor')}
+                        onClick={() => void handleOpenWithDefaultEditor(contextMenu.entry)}
+                      />
+                    ) : null}
+                    {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
+                      <MenuButton
+                        disabled={!ready || loading || working}
+                        label={t('fileManager.menu.preview')}
+                        onClick={() => void handlePreview(contextMenu.entry)}
+                      />
+                    ) : null}
+                    <MenuDivider />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.download')}
+                      onClick={() => void handleDownload(contextMenu.entry)}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.batch.enter')}
+                      onClick={() => {
+                        setBatchMode(true);
+                        setContextMenu(undefined);
                       }}
                     />
-                  ) : null}
-                  {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
+                    <MenuDivider />
                     <MenuButton
                       disabled={!ready || loading || working}
-                      label={t('fileManager.menu.openWithDefaultEditor')}
-                      onClick={() => void handleOpenWithDefaultEditor(contextMenu.entry)}
+                      label={t('fileManager.menu.rename')}
+                      onClick={() => openRenameDialog(contextMenu.entry)}
                     />
-                  ) : null}
-                  <MenuDivider />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.download')}
-                    onClick={() => void handleDownload(contextMenu.entry)}
-                  />
-                  <MenuDivider />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.rename')}
-                    onClick={() => openRenameDialog(contextMenu.entry)}
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.copy')}
-                    onClick={() => handleCopy(contextMenu.entry)}
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.delete')}
-                    onClick={() => handleDelete(contextMenu.entry)}
-                  />
-                  <MenuDivider />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.copyName')}
-                    onClick={() => void handleCopyText(t('fileManager.copyLabel.name'), contextMenu.entry?.name ?? '')}
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={contextMenu.entry?.kind === 'directory' ? t('fileManager.menu.copyDirectoryPath') : t('fileManager.menu.copyFilePath')}
-                    onClick={() =>
-                      void handleCopyText(
-                        contextMenu.entry?.kind === 'directory' ? t('fileManager.copyLabel.directoryPath') : t('fileManager.copyLabel.filePath'),
-                        contextMenu.entry?.path ?? '',
-                      )
-                    }
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.copyContainingDirectory')}
-                    onClick={() =>
-                      void handleCopyText(
-                        t('fileManager.copyLabel.directoryPath'),
-                        contextMenu.entry
-                          ? contextMenu.entry.kind === 'directory'
-                            ? contextMenu.entry.path
-                            : parentDirectoryPath(contextMenu.entry.path)
-                          : (currentPath ?? ''),
-                      )
-                    }
-                  />
-                  <MenuDivider />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.actions.refresh')}
-                    onClick={() => void loadDirectory(currentPath)}
-                  />
-                  <MenuDivider />
-                  <MenuButton
-                    disabled={!ready || loading || working || contextMenu.entry?.permissions === undefined}
-                    label={t('fileManager.menu.editPermissions')}
-                    onClick={() => openPermissionEdit(contextMenu.entry)}
-                  />
-                  <MenuButton
-                    disabled={!ready || loading || working}
-                    label={t('fileManager.menu.properties')}
-                    onClick={() => openProperties(contextMenu.entry)}
-                  />
-                </div>
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.copy')}
+                      onClick={() => handleCopy(contextMenu.entry)}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.delete')}
+                      onClick={() => handleDelete(contextMenu.entry)}
+                    />
+                    <MenuDivider />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.copyName')}
+                      onClick={() => void handleCopyText(t('fileManager.copyLabel.name'), contextMenu.entry?.name ?? '')}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={contextMenu.entry?.kind === 'directory' ? t('fileManager.menu.copyDirectoryPath') : t('fileManager.menu.copyFilePath')}
+                      onClick={() =>
+                        void handleCopyText(
+                          contextMenu.entry?.kind === 'directory' ? t('fileManager.copyLabel.directoryPath') : t('fileManager.copyLabel.filePath'),
+                          contextMenu.entry?.path ?? '',
+                        )
+                      }
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.copyContainingDirectory')}
+                      onClick={() =>
+                        void handleCopyText(
+                          t('fileManager.copyLabel.directoryPath'),
+                          contextMenu.entry
+                            ? contextMenu.entry.kind === 'directory'
+                              ? contextMenu.entry.path
+                              : parentDirectoryPath(contextMenu.entry.path)
+                            : (currentPath ?? ''),
+                        )
+                      }
+                    />
+                    <MenuDivider />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.actions.refresh')}
+                      onClick={() => void loadDirectory(currentPath)}
+                    />
+                    <MenuDivider />
+                    <MenuButton
+                      disabled={!ready || loading || working || contextMenu.entry?.permissions === undefined}
+                      label={t('fileManager.menu.editPermissions')}
+                      onClick={() => openPermissionEdit(contextMenu.entry)}
+                    />
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.menu.properties')}
+                      onClick={() => openProperties(contextMenu.entry)}
+                    />
+                  </div>
+                )
               ) : (
                 <div className="flex flex-col">
                   <MenuButton
@@ -2063,17 +2441,117 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                     onClick={() => void handleCopyText(t('fileManager.copyLabel.currentDirectoryPath'), currentPath ?? '')}
                   />
                   <MenuDivider />
+                  {!batchMode ? (
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={t('fileManager.batch.enter')}
+                      onClick={() => {
+                        setBatchMode(true);
+                        setContextMenu(undefined);
+                      }}
+                    />
+                  ) : null}
                   <MenuButton
                     disabled={!ready || loading || working}
                     label={t('fileManager.actions.refresh')}
                     onClick={() => void loadDirectory(currentPath)}
                   />
+                  {currentPath && onAddBookmark && onRemoveBookmark ? (
+                    <MenuButton
+                      disabled={!ready || loading || working}
+                      label={isCurrentPathBookmarked ? t('fileManager.bookmarks.remove') : t('fileManager.bookmarks.add')}
+                      onClick={() => {
+                        if (isCurrentPathBookmarked) {
+                          onRemoveBookmark(currentPath);
+                        } else {
+                          onAddBookmark(currentPath);
+                        }
+                      }}
+                    />
+                  ) : null}
                 </div>
               )}
             </div>,
             document.body,
           )
         : null}
+
+      {bookmarkMenuOpen && bookmarkMenuPos
+        ? createPortal(
+            <div
+              className="themed-menu fixed z-50 min-w-44 rounded-lg p-1 backdrop-blur"
+              onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
+              style={{ left: bookmarkMenuPos.x, top: bookmarkMenuPos.y }}
+            >
+              {bookmarks.length === 0 ? (
+                <div className="px-2 py-1 text-[12px] text-slate-400">{t('fileManager.bookmarks.empty')}</div>
+              ) : (
+                <div className="flex max-h-60 flex-col overflow-auto">
+                  {bookmarks.map((path) => (
+                    <button
+                      className="themed-menu-item px-2 py-1 text-left text-[12px] font-medium transition"
+                      key={path}
+                      onClick={() => {
+                        setBookmarkMenuOpen(false);
+                        void loadDirectory(path);
+                      }}
+                      type="button"
+                    >
+                      {path}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {preview ? (
+        <OverlayLayer>
+          <OverlayPanel className="max-w-3xl w-[80vw] h-[70vh] flex flex-col">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.preview.title')}</p>
+                <h4 className="themed-heading mt-1 text-[15px] font-semibold tracking-[0.01em]">{preview.name}</h4>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-subtle text-xs">
+                  {t('fileManager.preview.size')}: {formatSize(preview.size)}
+                </span>
+                {preview.isText && (
+                  <button
+                    className="icon-btn h-7 px-2 text-xs"
+                    onClick={() => void handleCopyText(t('fileManager.preview.copy'), preview.content)}
+                    type="button"
+                  >
+                    {t('fileManager.preview.copy')}
+                  </button>
+                )}
+                <button
+                  aria-label={t('fileManager.preview.close')}
+                  className="icon-btn"
+                  onClick={() => setPreview(null)}
+                  title={t('fileManager.preview.close')}
+                  type="button"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <ScrollArea className="flex-1 mt-2 min-h-0">
+              {preview.isText ? (
+                <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-all p-2 rounded-sm bg-(--app-surface-muted)">
+                  {preview.content}
+                </pre>
+              ) : (
+                <div className="flex items-center justify-center h-full p-4 text-xs text-slate-400">{t('fileManager.preview.binary')}</div>
+              )}
+            </ScrollArea>
+          </OverlayPanel>
+        </OverlayLayer>
+      ) : null}
 
       {properties ? (
         <OverlayLayer>
@@ -2436,6 +2914,39 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 {t('fileManager.dialog.cancel')}
               </button>
               <button className="btn-danger" onClick={() => void confirmDelete()} type="button">
+                {t('fileManager.deleteConfirm.confirm')}
+              </button>
+            </div>
+          </OverlayPanel>
+        </OverlayLayer>
+      ) : null}
+
+      {pendingBatchDelete?.length ? (
+        <OverlayLayer>
+          <OverlayPanel className="app-dialog max-w-sm" role="dialog" aria-modal="true" aria-label={t('fileManager.deleteConfirm.kicker')}>
+            <div className="flex flex-col gap-1">
+              <p className="dialog-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.deleteConfirm.kicker')}</p>
+              <h4 className="dialog-title text-[15px] font-semibold tracking-[0.01em]">
+                {t('fileManager.batch.deleteTitle', { count: pendingBatchDelete.length })}
+              </h4>
+              <p className="dialog-description text-xs leading-5">{t('fileManager.batch.deleteDescription', { count: pendingBatchDelete.length })}</p>
+              <div className="max-h-32 overflow-auto">
+                {pendingBatchDelete.map((entry) => (
+                  <div key={entry.path} className="flex items-center gap-1.5 px-2 py-1 text-[12px]">
+                    <span className={cn('inline-flex h-4 w-4 shrink-0 items-center justify-center', fileKindColor(entry.kind))}>
+                      {fileKindIcon(entry.kind)}
+                    </span>
+                    <span className="truncate">{entry.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-1">
+              <button className="btn-cancel" onClick={() => setPendingBatchDelete(undefined)} type="button">
+                {t('fileManager.dialog.cancel')}
+              </button>
+              <button className="btn-danger" onClick={() => void confirmBatchDelete()} type="button">
                 {t('fileManager.deleteConfirm.confirm')}
               </button>
             </div>

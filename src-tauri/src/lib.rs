@@ -22,7 +22,8 @@ pub(crate) use connection::{
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
     download_remote_paths_blocking, list_remote_directory_blocking, open_remote_file_blocking,
-    rename_remote_path_blocking, update_remote_permissions_blocking, upload_local_paths_blocking,
+    read_remote_file_blocking, rename_remote_path_blocking, update_remote_permissions_blocking,
+    upload_local_paths_blocking,
 };
 pub(crate) use session::{
     classify_closed_reason, is_transport_disconnect_message, run_ssh_session,
@@ -149,6 +150,7 @@ pub fn run() {
             commands::pick_local_folder,
             commands::pick_private_key_file,
             commands::open_remote_file,
+            commands::preview_remote_file,
             commands::update_remote_permissions,
             commands::check_host_key,
             commands::trust_host,

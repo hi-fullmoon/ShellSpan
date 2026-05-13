@@ -1,8 +1,11 @@
 // ui.ts — merged from ui/index.ts, pathDisplay.ts
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
 import type { RemoteFileKind, SessionStatus, TerminalTheme, CursorStyle } from '../types';
 
-export function cn(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(' ');
+export function cn(...parts: ClassValue[]) {
+  return twMerge(clsx(...parts));
 }
 
 export function sessionStatusTone(status: SessionStatus) {

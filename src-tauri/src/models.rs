@@ -148,6 +148,24 @@ pub(crate) struct UpdateRemotePermissionsRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ReadRemoteFileRequest {
+    #[serde(flatten)]
+    pub(crate) connection: RemoteConnectionRequest,
+    pub(crate) path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReadRemoteFileResponse {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) content: String,
+    pub(crate) size: u64,
+    pub(crate) is_text: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DownloadRemotePathsRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,

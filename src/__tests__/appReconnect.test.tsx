@@ -166,15 +166,16 @@ vi.mock('../lib/tauri', () => ({
   isTauriRuntime: () => true,
 }));
 
-vi.mock('../lib/updateStartupPolicy', () => ({
-  markStartupUpdateCheck: vi.fn(),
-  shouldRunStartupUpdateCheck: () => false,
-}));
-
-vi.mock('../lib/updater', () => ({
-  checkForUpdate: vi.fn(async () => null),
-  downloadAndInstallUpdate: vi.fn(),
-}));
+vi.mock('../lib/update', async () => {
+  const actual = await vi.importActual<typeof import('../lib/update')>('../lib/update');
+  return {
+    ...actual,
+    markStartupUpdateCheck: vi.fn(),
+    shouldRunStartupUpdateCheck: () => false,
+    checkForUpdate: vi.fn(async () => null),
+    downloadAndInstallUpdate: vi.fn(),
+  };
+});
 
 import App from '../App';
 

@@ -24,8 +24,8 @@ interface TooltipContextValue {
 
 const TooltipContext = createContext<TooltipContextValue | null>(null);
 
-const TOOLTIP_OFFSET_X = 12;
-const TOOLTIP_OFFSET_Y = 20;
+const TOOLTIP_OFFSET_X = 6;
+const TOOLTIP_OFFSET_Y = 8;
 const VIEWPORT_EDGE = 8;
 
 export function TooltipProvider({ children }: { children: ReactNode }) {
@@ -39,6 +39,8 @@ export function TooltipProvider({ children }: { children: ReactNode }) {
   const showTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const moveRafRef = useRef<number | undefined>(undefined);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const clampPosition = useCallback(
     (x: number, y: number, width: number, height: number) => {
@@ -71,6 +73,22 @@ export function TooltipProvider({ children }: { children: ReactNode }) {
       clearTimeout(hideTimerRef.current);
       hideTimerRef.current = undefined;
     }
+
+    // 如果 tooltip 已经在显示，直接更新内容，不需要等待延迟
+    if (stateRef.current.visible) {
+      setState((prev) => ({ ...prev, content }));
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = tooltipRef.current;
+          const width = el?.offsetWidth ?? 0;
+          const height = el?.offsetHeight ?? 0;
+          const pos = clampPosition(x, y, width, height);
+          setState((s) => ({ ...s, x: pos.x, y: pos.y, visible: true }));
+        });
+      });
+      return;
+    }
+
     showTimerRef.current = setTimeout(() => {
       showTimerRef.current = undefined;
       // 先触发 content 渲染（此时可能还在视口外或尺寸不准，但 opacity 为 0 用户看不到）
@@ -193,6 +211,12 @@ export function Tooltip({ content, children }: TooltipProps) {
 
   const handleMouseLeave = useCallback(() => {
     hide();
+  }, [hide]);
+
+  useEffect(() => {
+    return () => {
+      hide();
+    };
   }, [hide]);
 
   return (

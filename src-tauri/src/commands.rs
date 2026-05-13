@@ -3,9 +3,9 @@ use crate::models::{
     AuthMethod, ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest,
     DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
     JumpHostConfig, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
-    RemoteDirectoryListing, RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand,
-    SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
-    UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
+    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteDirectoryListing, RemoteDirectoryRequest,
+    RenameRemotePathRequest, SessionCommand, SessionCreateRequest, SessionStatus, SessionSummary,
+    TrustHostRequest, UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
 use std::sync::{
@@ -336,6 +336,28 @@ pub(crate) async fn open_remote_file(request: OpenRemoteFileRequest) -> Result<(
         .map_err(|error| format!("failed to join open file task: {error}"))?;
     if result.is_ok() {
         info!("Opened remote file successfully");
+    }
+    result
+}
+
+#[tauri::command]
+pub(crate) async fn preview_remote_file(
+    request: ReadRemoteFileRequest,
+) -> Result<ReadRemoteFileResponse, String> {
+    info!(
+        "Previewing remote file path={} {}",
+        request.path,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let result =
+        tauri::async_runtime::spawn_blocking(move || read_remote_file_blocking(request))
+            .await
+            .map_err(|error| format!("failed to join file preview task: {error}"))?;
+    if let Ok(ref response) = result {
+        info!(
+            "Previewed remote file path={} size={} is_text={}",
+            response.path, response.size, response.is_text
+        );
     }
     result
 }

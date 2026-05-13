@@ -2,18 +2,19 @@ import { ConnectionForm } from './ConnectionForm';
 import { Dialog, DialogHeader } from './Dialog';
 import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
-import type { ConnectionProfile } from '../types';
+import type { ConnectionGroup, ConnectionProfile } from '../types';
 
 interface ConnectDialogProps {
   open: boolean;
   draftProfile: ConnectionProfile;
+  groups?: ConnectionGroup[];
   isConnecting?: boolean;
   onClose: () => void;
   onProfileChange: (profile: ConnectionProfile) => void;
   onConnect: (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => void;
 }
 
-export function ConnectDialog({ open, draftProfile, isConnecting, onClose, onProfileChange, onConnect }: ConnectDialogProps) {
+export function ConnectDialog({ open, draftProfile, groups, isConnecting, onClose, onProfileChange, onConnect }: ConnectDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
       <ScrollArea
@@ -31,7 +32,7 @@ export function ConnectDialog({ open, draftProfile, isConnecting, onClose, onPro
           onClose={onClose}
           title={t('app.connectDialog.title')}
         />
-        <ConnectionForm profile={draftProfile} isConnecting={isConnecting} onProfileChange={onProfileChange} onConnect={onConnect} />
+        <ConnectionForm profile={draftProfile} groups={groups} isConnecting={isConnecting} onProfileChange={onProfileChange} onConnect={onConnect} />
       </ScrollArea>
     </Dialog>
   );

@@ -1,19 +1,19 @@
-export type AuthMethod = "password" | "key";
-export type PortForwardKind = "local" | "remote";
-export type SessionStatus = "connecting" | "connected" | "disconnected" | "error";
-export type ThemePreference = "dark" | "light" | "system";
-export type LocalePreference = "zh-CN" | "en-US";
-export type TerminalTheme = "default" | "dracula" | "solarized-dark" | "solarized-light" | "one-dark" | "monokai";
-export type CursorStyle = "block" | "line" | "bar";
+export type AuthMethod = 'password' | 'key';
+export type PortForwardKind = 'local' | 'remote';
+export type SessionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type ThemePreference = 'dark' | 'light' | 'system';
+export type LocalePreference = 'zh-CN' | 'en-US';
+export type TerminalTheme = 'default' | 'dracula' | 'solarized-dark' | 'solarized-light' | 'one-dark' | 'monokai';
+export type CursorStyle = 'block' | 'line' | 'bar';
 export type ShortcutAction =
-  | "closeDialog"
-  | "newConnection"
-  | "openSettings"
-  | "closeSession"
-  | "nextTab"
-  | "prevTab"
-  | "togglePrimarySidebar"
-  | "toggleSecondarySidebar";
+  | 'closeDialog'
+  | 'newConnection'
+  | 'openSettings'
+  | 'closeSession'
+  | 'nextTab'
+  | 'prevTab'
+  | 'togglePrimarySidebar'
+  | 'toggleSecondarySidebar';
 
 export interface AppPreferences {
   theme: ThemePreference;
@@ -32,6 +32,12 @@ export interface AppPreferences {
   keyboardShortcuts?: Partial<Record<ShortcutAction, string>>;
 }
 
+export interface ConnectionGroup {
+  id: string;
+  name: string;
+  color?: string;
+}
+
 export interface ConnectionProfile {
   id: string;
   name: string;
@@ -47,6 +53,9 @@ export interface ConnectionProfile {
   passphrase?: string;
   jumpHost?: JumpHostConfig;
   portForwards?: PortForwardConfig[];
+  bookmarks?: string[];
+  color?: string;
+  groupId?: string;
 }
 
 export interface SessionSummary {
@@ -81,7 +90,7 @@ export interface SessionState extends SessionSummary {
   createdAt: number;
 }
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface SshStatusEvent {
   sessionId: string;
@@ -97,12 +106,12 @@ export interface SshDataEvent {
 export interface SshClosedEvent {
   sessionId: string;
   reason?: string;
-  reasonKind: "local_close" | "controller_dropped" | "remote_exit" | "transport_disconnect" | "error";
+  reasonKind: 'local_close' | 'controller_dropped' | 'remote_exit' | 'transport_disconnect' | 'error';
   retryable: boolean;
 }
 
 export interface HostKeyCheckResponse {
-  status: "match" | "mismatch" | "notFound" | "failure";
+  status: 'match' | 'mismatch' | 'notFound' | 'failure';
   fingerprint?: string;
   message?: string;
 }
@@ -140,7 +149,7 @@ export interface DownloadProgressState extends DownloadProgressEvent {
   cancelling?: boolean;
 }
 
-export type RemoteFileKind = "directory" | "file" | "symlink" | "other";
+export type RemoteFileKind = 'directory' | 'file' | 'symlink' | 'other';
 
 export interface RemoteFileEntry {
   path: string;
@@ -161,14 +170,15 @@ export interface RemoteDirectoryListing {
   entries: RemoteFileEntry[];
 }
 
-export type UpdatePhase =
-  | "idle"
-  | "checking"
-  | "update_available"
-  | "downloading"
-  | "downloaded"
-  | "no_update"
-  | "error";
+export interface RemoteFileContent {
+  path: string;
+  name: string;
+  content: string;
+  size: number;
+  isText: boolean;
+}
+
+export type UpdatePhase = 'idle' | 'checking' | 'update_available' | 'downloading' | 'downloaded' | 'no_update' | 'error';
 
 export interface UpdateVersionMetadata {
   currentVersion?: string;
@@ -182,11 +192,17 @@ export interface UpdateState {
   error?: string;
 }
 
+export interface CommandSnippet {
+  id: string;
+  name: string;
+  command: string;
+}
+
 export type UpdateAction =
-  | { type: "checkStarted" }
-  | { type: "noUpdateFound" }
-  | { type: "updateFound"; payload: { latestVersion: string } }
-  | { type: "downloadStarted" }
-  | { type: "downloadCompleted"; payload: { downloadedVersion: string } }
-  | { type: "downloadFailed"; payload: { message: string } }
-  | { type: "reset" };
+  | { type: 'checkStarted' }
+  | { type: 'noUpdateFound' }
+  | { type: 'updateFound'; payload: { latestVersion: string } }
+  | { type: 'downloadStarted' }
+  | { type: 'downloadCompleted'; payload: { downloadedVersion: string } }
+  | { type: 'downloadFailed'; payload: { message: string } }
+  | { type: 'reset' };
