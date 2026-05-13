@@ -85,6 +85,14 @@
     -moz-osx-font-smoothing: grayscale;
     background: var(--app-bg);
     color: var(--app-text);
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    user-select: text;
   }
 
   #root {

@@ -4,6 +4,7 @@ import { t } from '../lib/i18n';
 import { parseQuickConnect } from '../lib/profile';
 import type { ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
 import { FolderIcon } from './Icons';
+import { Tooltip } from './Tooltip';
 import { Segment } from './Segment';
 
 type TabKey = 'basic' | 'jumpHost' | 'portForwarding';
@@ -219,9 +220,10 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                       type="button"
                       className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-sm text-(--app-text-muted) transition hover:bg-(--app-icon-hover) hover:text-(--app-text-soft)"
                       onClick={() => handlePickPrivateKey('profile')}
-                      title={t('connectionForm.selectPrivateKey')}
                     >
-                      <FolderIcon className="h-4 w-4" />
+                      <Tooltip content={t('connectionForm.selectPrivateKey')}>
+                        <FolderIcon className="h-4 w-4" />
+                      </Tooltip>
                     </button>
                   </div>
                 </label>
@@ -403,9 +405,10 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                       type="button"
                       className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-sm text-(--app-text-muted) transition hover:bg-(--app-icon-hover) hover:text-(--app-text-soft)"
                       onClick={() => handlePickPrivateKey('jumpHost')}
-                      title={t('connectionForm.selectPrivateKey')}
                     >
-                      <FolderIcon className="h-4 w-4" />
+                      <Tooltip content={t('connectionForm.selectPrivateKey')}>
+                        <FolderIcon className="h-4 w-4" />
+                      </Tooltip>
                     </button>
                   </div>
                 </label>
@@ -440,7 +443,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
             <p className="text-[11px] text-(--app-text-muted)">{t('connectionForm.portForwardingHint')}</p>
             <div className="port-forward-list">
               {(profile.portForwards ?? []).map((fw, i) => (
-                <div key={i} className="flex flex-wrap items-end gap-1.5 border border-(--app-border) p-1.5">
+                <div key={i} className="flex flex-wrap items-end gap-1.5 border border-(--app-border) p-1.5 rounded-s">
                   <label className="flex flex-col gap-0.5">
                     <span className="text-[10px] font-medium text-(--app-text-muted)">{t('connectionForm.portForwardKind')}</span>
                     <select

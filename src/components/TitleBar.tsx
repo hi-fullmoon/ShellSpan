@@ -1,6 +1,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useCallback, useEffect, useState } from 'react';
 import { PrimarySidebarActiveIcon, PrimarySidebarIcon, SecondarySidebarActiveIcon, SecondarySidebarIcon } from './Icons';
+import { Tooltip } from './Tooltip';
 import { isTauriRuntime } from '../lib/tauri';
 
 interface TitleBarProps {
@@ -69,19 +70,21 @@ export function TitleBar({
           aria-label={primarySideVisible ? 'Hide primary side' : 'Show primary side'}
           className="title-bar-btn"
           onClick={onTogglePrimarySide}
-          title={primarySideVisible ? 'Hide Explorer' : 'Show Explorer'}
           type="button"
         >
-          {primarySideVisible ? <PrimarySidebarActiveIcon /> : <PrimarySidebarIcon />}
+          <Tooltip content={primarySideVisible ? 'Hide Explorer' : 'Show Explorer'}>
+            {primarySideVisible ? <PrimarySidebarActiveIcon /> : <PrimarySidebarIcon />}
+          </Tooltip>
         </button>
         <button
           aria-label={secondarySideVisible ? 'Hide secondary side' : 'Show secondary side'}
           className="title-bar-btn"
           onClick={onToggleSecondarySide}
-          title={secondarySideVisible ? 'Hide Sidebar' : 'Show Sidebar'}
           type="button"
         >
-          {secondarySideVisible ? <SecondarySidebarActiveIcon /> : <SecondarySidebarIcon />}
+          <Tooltip content={secondarySideVisible ? 'Hide Sidebar' : 'Show Sidebar'}>
+            {secondarySideVisible ? <SecondarySidebarActiveIcon /> : <SecondarySidebarIcon />}
+          </Tooltip>
         </button>
 
         {isTauri && !IS_MAC && (
@@ -92,7 +95,9 @@ export function TitleBar({
               onClick={handleMinimize}
               type="button"
             >
-              <MinimizeIcon />
+              <Tooltip content="Minimize">
+                <MinimizeIcon />
+              </Tooltip>
             </button>
             <button
               aria-label={isMaximized ? 'Restore' : 'Maximize'}
@@ -100,7 +105,9 @@ export function TitleBar({
               onClick={handleMaximize}
               type="button"
             >
-              {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
+              <Tooltip content={isMaximized ? 'Restore' : 'Maximize'}>
+                {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
+              </Tooltip>
             </button>
             <button
               aria-label="Close"
@@ -108,7 +115,9 @@ export function TitleBar({
               onClick={handleClose}
               type="button"
             >
-              <CloseWindowIcon />
+              <Tooltip content="Close">
+                <CloseWindowIcon />
+              </Tooltip>
             </button>
           </div>
         )}

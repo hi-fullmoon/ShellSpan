@@ -330,3 +330,27 @@
   border-color: var(--app-icon-border);
   background: color-mix(in srgb, var(--app-surface-muted) 84%, var(--app-primary-bg) 10%);
 }
+
+.tooltip-bubble {
+  position: fixed;
+  z-index: 9999;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  background: var(--app-surface);
+  color: var(--app-text);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow);
+  backdrop-filter: blur(12px);
+}
+
+.tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

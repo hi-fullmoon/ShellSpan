@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { PinIcon, StarIcon } from './Icons';
+import { Tooltip } from './Tooltip';
 import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
 import type { ConnectionProfile } from '../types';
@@ -207,14 +208,18 @@ export function Sidebar({
                     <div className="flex items-center gap-1">
                       <strong className="block truncate text-xs">{profile.name}</strong>
                       {profile.pinned ? (
-                        <span className="inline-flex h-4 w-4 items-center justify-center text-cyan-300" title={t('sidebar.badge.pinned')}>
-                          <PinIcon />
-                        </span>
+                        <Tooltip content={t('sidebar.badge.pinned')}>
+                          <span className="inline-flex h-4 w-4 items-center justify-center text-cyan-300">
+                            <PinIcon />
+                          </span>
+                        </Tooltip>
                       ) : null}
                       {profile.favorite ? (
-                        <span className="inline-flex h-4 w-4 items-center justify-center text-amber-300" title={t('sidebar.badge.favorite')}>
-                          <StarIcon />
-                        </span>
+                        <Tooltip content={t('sidebar.badge.favorite')}>
+                          <span className="inline-flex h-4 w-4 items-center justify-center text-amber-300">
+                            <StarIcon />
+                          </span>
+                        </Tooltip>
                       ) : null}
                     </div>
                     <span className="text-subtle block truncate mt-1 text-[11px]">

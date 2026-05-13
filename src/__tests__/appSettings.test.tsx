@@ -8,10 +8,19 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
-const { emitSystemOpenSettings, listenMock, resetMockListeners } = vi.hoisted(() => {
+const {
+  createdWebviewWindows,
+  emitSystemOpenSettings,
+  getSettingsWindowByLabelMock,
+  listenMock,
+  resetMockListeners,
+  resetMockWebviewWindows,
+} = vi.hoisted(() => {
   const listeners = new Map<string, (event: { payload?: unknown }) => void>();
+  const createdWebviewWindows: Array<{ label: string; options: { url?: string } }> = [];
 
   return {
+    createdWebviewWindows,
     emitSystemOpenSettings: async () => {
       const handler = listeners.get('system-open-settings');
       if (!handler) {
@@ -29,6 +38,10 @@ const { emitSystemOpenSettings, listenMock, resetMockListeners } = vi.hoisted(()
       });
     }),
     resetMockListeners: () => listeners.clear(),
+    resetMockWebviewWindows: () => {
+      createdWebviewWindows.length = 0;
+    },
+    getSettingsWindowByLabelMock: vi.fn(),
   };
 });
 
@@ -50,9 +63,11 @@ vi.mock('@tauri-apps/api/window', () => ({
 
 vi.mock('@tauri-apps/api/webviewWindow', () => ({
   WebviewWindow: class MockWebviewWindow {
-    static async getByLabel() { throw new Error('mock: webview window unavailable'); }
+    static async getByLabel() { return getSettingsWindowByLabelMock(); }
     static getAll() { return []; }
-    constructor() {}
+    constructor(label: string, options: { url?: string }) {
+      createdWebviewWindows.push({ label, options });
+    }
     once() {}
   },
 }));
@@ -141,8 +156,10 @@ import App from '../App';
 describe('App settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getSettingsWindowByLabelMock.mockRejectedValue(new Error('mock: webview window unavailable'));
     listenMock.mockClear();
     resetMockListeners();
+    resetMockWebviewWindows();
     window.localStorage.clear();
     delete document.documentElement.dataset.theme;
   });
@@ -163,6 +180,25 @@ describe('App settings', () => {
 
     expect(screen.getByRole('dialog', { name: '应用设置' })).toBeInTheDocument();
     expect(screen.getByLabelText('主题')).toBeInTheDocument();
+  });
+
+  it('passes the current locale to the settings window on first open', async () => {
+    getSettingsWindowByLabelMock.mockResolvedValue(undefined);
+    window.localStorage.setItem('termbridge.preferences', JSON.stringify({ locale: 'en-US' }));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(listenMock).toHaveBeenCalledWith('system-open-settings', expect.any(Function));
+    });
+    await emitSystemOpenSettings();
+
+    expect(createdWebviewWindows[0]).toMatchObject({
+      label: 'settings',
+      options: expect.objectContaining({
+        url: expect.stringContaining('locale=en-US'),
+      }),
+    });
   });
 
   it('switches locale with translated copy and persists the theme selection', async () => {

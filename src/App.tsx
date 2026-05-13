@@ -16,6 +16,7 @@ import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane } from './components/TerminalPane';
 import { Toast } from './components/Toast';
+import { TooltipProvider } from './components/Tooltip';
 import { UpdateRestartDialog } from './components/UpdateRestartDialog';
 import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { createLogger } from './lib/logger';
@@ -112,7 +113,20 @@ function reorderSessions(sessions: SessionState[], draggedSessionId: string, tar
   return nextSessions;
 }
 
-async function openSettingsWindow(): Promise<void> {
+function buildSettingsWindowUrl(preferences?: AppPreferences) {
+  if (!preferences) {
+    return '/index.html#settings';
+  }
+
+  const params = new URLSearchParams({
+    locale: preferences.locale,
+    theme: preferences.theme,
+  });
+
+  return `/index.html?${params.toString()}#settings`;
+}
+
+async function openSettingsWindow(preferences?: AppPreferences): Promise<void> {
   appLogger.info('openSettingsWindow called');
   if (!isTauriRuntime()) {
     appLogger.info('Not in tauri runtime, dispatching fallback');
@@ -132,7 +146,7 @@ async function openSettingsWindow(): Promise<void> {
     appLogger.info('Creating new settings window');
     const IS_MAC_OS = /mac/i.test(navigator.platform);
     const settingsWindow = new WebviewWindow('settings', {
-      url: '/index.html#settings',
+      url: buildSettingsWindowUrl(preferences),
       title: IS_MAC_OS ? '' : 'Settings',
       width: 640,
       height: 560,
@@ -195,6 +209,7 @@ function App() {
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
   const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
   const sessionsRef = useRef<SessionState[]>([]);
+  const preferencesRef = useRef(preferences);
   const autoReconnectAttemptedRef = useRef<Record<string, true>>({});
   const dialogStateRef = useRef({
     hostKeyOpen: false,
@@ -279,7 +294,7 @@ function App() {
       if (matchesBinding(merged.openSettings, event)) {
         event.preventDefault();
         if (isTauriRuntime()) {
-          void openSettingsWindow();
+          void openSettingsWindow(preferences);
         } else {
           setSettingsDialogOpen(true);
         }
@@ -338,6 +353,10 @@ function App() {
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
+
+  useEffect(() => {
+    preferencesRef.current = preferences;
+  }, [preferences]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -675,7 +694,7 @@ function App() {
     const attach = async () => {
       try {
         const nextStopSystemOpenSettings = await listen(SYSTEM_OPEN_SETTINGS_EVENT, () => {
-          void openSettingsWindow();
+          void openSettingsWindow(preferencesRef.current);
         });
 
         if (cancelled) {
@@ -1272,7 +1291,8 @@ function App() {
   }, [setStoredPreferences]);
 
   return (
-    <main className="h-screen overflow-hidden flex flex-col">
+    <TooltipProvider>
+      <main className="h-screen overflow-hidden flex flex-col">
       <TitleBar
         onTogglePrimarySide={handleTogglePrimarySide}
         onToggleSecondarySide={handleToggleSecondarySide}
@@ -1382,6 +1402,7 @@ function App() {
         tone={updateToast?.tone ?? 'info'}
       />
     </main>
+    </TooltipProvider>
   );
 }
 

@@ -17,7 +17,7 @@ export function ConnectDialog({ open, draftProfile, isConnecting, onClose, onPro
   return (
     <Dialog open={open} onClose={onClose}>
       <ScrollArea
-        className="app-dialog surface max-h-[calc(100vh-16px)] w-full max-w-xl p-2.5 rounded-lg!"
+        className="app-dialog surface max-h-[calc(100vh-28px)] w-full max-w-xl p-2.5 rounded-lg!"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -31,12 +31,7 @@ export function ConnectDialog({ open, draftProfile, isConnecting, onClose, onPro
           onClose={onClose}
           title={t('app.connectDialog.title')}
         />
-        <ConnectionForm
-          profile={draftProfile}
-          isConnecting={isConnecting}
-          onProfileChange={onProfileChange}
-          onConnect={onConnect}
-        />
+        <ConnectionForm profile={draftProfile} isConnecting={isConnecting} onProfileChange={onProfileChange} onConnect={onConnect} />
       </ScrollArea>
     </Dialog>
   );

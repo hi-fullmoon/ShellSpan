@@ -20,6 +20,7 @@ import { isTauriRuntime } from '../lib/tauri';
 import { useFileManagerStore } from '../stores/fileManagerStore';
 import { cn, fileKindColor } from '../lib/ui';
 import { ArrowUpIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
+import { Tooltip } from './Tooltip';
 import { ScrollArea } from './ScrollArea';
 import { Toast, type ToastAction } from './Toast';
 import type {
@@ -1807,13 +1808,15 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
           <>
             <form className="flex items-center gap-1" onSubmit={(event) => void handlePathSubmit(event)}>
               <button
+                aria-label={t('fileManager.actions.parent')}
                 className="icon-btn h-6 w-6 px-0"
                 disabled={!ready || !listing?.parentPath || loading || working}
                 onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
-                title={t('fileManager.actions.parent')}
                 type="button"
               >
-                <ArrowUpIcon />
+                <Tooltip content={t('fileManager.actions.parent')}>
+                  <ArrowUpIcon />
+                </Tooltip>
               </button>
               <input
                 className="themed-input min-w-0 flex-1 px-2 py-0.5 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
@@ -1823,22 +1826,26 @@ export function FileManager({ session, ignoreWindowDragDrop = false }: FileManag
                 value={pathInput}
               />
               <button
+                aria-label={t('fileManager.actions.refresh')}
                 className="icon-btn h-6 w-6 px-0"
                 disabled={!ready || loading || working}
                 onClick={() => void loadDirectory(currentPath)}
-                title={t('fileManager.actions.refresh')}
                 type="button"
               >
-                <RefreshIcon />
+                <Tooltip content={t('fileManager.actions.refresh')}>
+                  <RefreshIcon />
+                </Tooltip>
               </button>
               <button
+                aria-label={t('fileManager.actions.more')}
                 className="icon-btn h-6 w-6 px-0"
                 disabled={!ready || !currentPath || loading || working}
                 onClick={openToolbarMenu}
-                title={t('fileManager.actions.more')}
                 type="button"
               >
-                <DotsIcon />
+                <Tooltip content={t('fileManager.actions.more')}>
+                  <DotsIcon />
+                </Tooltip>
               </button>
             </form>
 

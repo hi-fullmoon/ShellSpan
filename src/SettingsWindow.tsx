@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { SettingsPanel } from './components/SettingsPanel';
 import { initI18n, syncI18nLocale, t } from './lib/i18n';
-import { useLocalStorage } from './hooks/useLocalStorage';
 import { isTauriRuntime } from './lib/tauri';
 import type { AppPreferences } from './types';
 
@@ -71,6 +70,7 @@ function getSystemThemeMode() {
 }
 
 const SETTINGS_CHANGED_EVENT = 'settings-changed';
+const PREFERENCES_STORAGE_KEY = 'termbridge.preferences';
 
 function readLocalStorage<T>(key: string, fallback: T): T {
   try {
@@ -82,8 +82,30 @@ function readLocalStorage<T>(key: string, fallback: T): T {
   return fallback;
 }
 
+function readLaunchPreferences(): Partial<AppPreferences> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const locale = params.get('locale');
+  const theme = params.get('theme');
+
+  return {
+    ...(locale === 'en-US' || locale === 'zh-CN' ? { locale } : {}),
+    ...(theme === 'dark' || theme === 'light' || theme === 'system' ? { theme } : {}),
+  };
+}
+
+function readInitialPreferences() {
+  return {
+    ...readLocalStorage<Partial<AppPreferences>>(PREFERENCES_STORAGE_KEY, defaultPreferences),
+    ...readLaunchPreferences(),
+  };
+}
+
 export default function SettingsWindow() {
-  const [storedPreferences, setStoredPreferences] = useLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
+  const [storedPreferences, setStoredPreferences] = useState<Partial<AppPreferences>>(() => readInitialPreferences());
   const preferences = useMemo(() => normalizePreferences(storedPreferences), [storedPreferences]);
   const appliedTheme = preferences.theme === 'system' ? getSystemThemeMode() : preferences.theme;
   // Sync locale before first render so t() returns correct translations immediately
@@ -100,13 +122,17 @@ export default function SettingsWindow() {
     }
   }, [appliedTheme]);
 
+  useEffect(() => {
+    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(storedPreferences));
+  }, [storedPreferences]);
+
   // Listen for main window to refresh us (in case main changes something)
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
     const attach = async () => {
       unlisten = await listen(SETTINGS_CHANGED_EVENT, () => {
         // Re-read localStorage to sync with main window changes
-        const prefs = readLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
+        const prefs = readLocalStorage<Partial<AppPreferences>>(PREFERENCES_STORAGE_KEY, defaultPreferences);
         setStoredPreferences(prefs);
       });
     };
@@ -118,7 +144,7 @@ export default function SettingsWindow() {
 
   const handleChange = useCallback(
     (nextPreferences: AppPreferences) => {
-      window.localStorage.setItem('termbridge.preferences', JSON.stringify(nextPreferences));
+      window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(nextPreferences));
       setStoredPreferences(nextPreferences);
       void emitTo('main', SETTINGS_CHANGED_EVENT, {});
     },

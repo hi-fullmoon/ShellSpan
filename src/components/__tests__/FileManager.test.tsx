@@ -137,9 +137,9 @@ describe("FileManager", () => {
     expect(screen.getByText("keep.txt")).toBeInTheDocument();
     expect(screen.getByText("终端已断开，文件管理器当前仅支持查看。")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("输入远程路径并回车")).toBeDisabled();
-    expect(screen.getByTitle("返回上级目录")).toBeDisabled();
-    expect(screen.getByTitle("刷新")).toBeDisabled();
-    expect(screen.getByTitle("更多操作")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "返回上级目录" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "更多操作" })).toBeDisabled();
   });
 
   it("uses theme-aware classes for the subtitle, path input, and file name", () => {
