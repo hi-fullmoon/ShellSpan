@@ -117,10 +117,15 @@ function reorderSessions(sessions: SessionState[], draggedSessionId: string, ins
     }
   }
   const [draggedSession] = nextSessions.splice(draggedIndex, 1);
-  const adjustedIndex = insertIndex > draggedIndex ? insertIndex - 1 : insertIndex;
+  const adjustedIndex = insertIndex;
+
+  const lastPinnedAfterSplice = draggedSession.pinned ? lastPinnedIndex - 1 : lastPinnedIndex;
+
   if (draggedSession.pinned) {
-    draggedSession.pinned = false;
-  } else if (lastPinnedIndex !== -1 && adjustedIndex <= lastPinnedIndex) {
+    if (lastPinnedAfterSplice === -1 || adjustedIndex > lastPinnedAfterSplice) {
+      draggedSession.pinned = false;
+    }
+  } else if (lastPinnedAfterSplice !== -1 && adjustedIndex <= lastPinnedAfterSplice) {
     draggedSession.pinned = true;
   }
   nextSessions.splice(adjustedIndex, 0, draggedSession);
