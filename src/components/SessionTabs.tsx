@@ -61,6 +61,7 @@ interface SessionTabCardProps {
   onRenameCommit?: () => void;
   onRenameStart?: (session: SessionState) => void;
   onSelect: (sessionId: string) => void;
+  onTogglePin?: (sessionId: string) => void;
   renameValue?: string;
   renaming?: boolean;
   showDropIndicator?: boolean;
@@ -87,6 +88,7 @@ function SessionTabCard({
   onRenameCommit,
   onRenameStart,
   onSelect,
+  onTogglePin,
   renameValue,
   renaming = false,
   showDropIndicator,
@@ -157,13 +159,7 @@ function SessionTabCard({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5 select-none">
-            {session.pinned ? (
-              <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center text-[var(--app-text-muted)]">
-                <PinIcon />
-              </span>
-            ) : (
-              <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
-            )}
+            <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
             <span className="min-w-0 flex-1">
               <strong className="block truncate text-[12px] font-medium text-left" title={session.title}>
                 {session.title}
@@ -171,7 +167,23 @@ function SessionTabCard({
             </span>
           </div>
 
-          {!session.pinned && (
+          {session.pinned ? (
+            <button
+              aria-label={t('sessionTabs.contextMenu.unpin')}
+              className={cn(
+                'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border-none bg-transparent p-0 opacity-0 transition-all',
+                active ? 'opacity-100' : 'group-hover:opacity-100',
+                'hover:bg-black/10 dark:hover:bg-white/15',
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                onTogglePin?.(session.sessionId);
+              }}
+              type="button"
+            >
+              <PinIcon />
+            </button>
+          ) : (
             <button
               aria-label={t('sessionTabs.close')}
               className={cn(
@@ -204,6 +216,7 @@ function SortableSessionTab({
   onRenameCommit,
   onRenameStart,
   onSelect,
+  onTogglePin,
   renameValue,
   renaming,
   showDropIndicator,
@@ -218,6 +231,7 @@ function SortableSessionTab({
   onRenameCommit: () => void;
   onRenameStart: (session: SessionState) => void;
   onSelect: (sessionId: string) => void;
+  onTogglePin?: (sessionId: string) => void;
   renameValue: string;
   renaming: boolean;
   showDropIndicator?: boolean;
@@ -241,6 +255,7 @@ function SortableSessionTab({
       onRenameCommit={onRenameCommit}
       onRenameStart={onRenameStart}
       onSelect={onSelect}
+      onTogglePin={onTogglePin}
       renameValue={renameValue}
       renaming={renaming}
       session={session}
@@ -491,8 +506,14 @@ export function SessionTabs({
     setDraggingSessionId(nextId);
     onDragStateChange?.(true);
 
-    const pointerEvent = event.activatorEvent as PointerEvent;
-    dragStartPosRef.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
+    const container = scrollRef.current;
+    if (container) {
+      const tab = container.querySelector<HTMLElement>(`[data-session-tab="${nextId}"]`);
+      if (tab) {
+        const rect = tab.getBoundingClientRect();
+        dragStartPosRef.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    }
   };
 
   const handleDragMove = (event: DragMoveEvent) => {
@@ -624,6 +645,7 @@ export function SessionTabs({
                   onRenameCommit={handleRenameCommit}
                   onRenameStart={handleRenameStart}
                   onSelect={onSelect}
+                  onTogglePin={onTogglePin}
                   renameValue={renameValue}
                   renaming={session.sessionId === renamingSessionId}
                   session={session}
