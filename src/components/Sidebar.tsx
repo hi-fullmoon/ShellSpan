@@ -78,14 +78,6 @@ function ProfileItem({ profile, onClick, onDoubleClick, onContextMenu }: Profile
       onContextMenu={onContextMenu}
       type="button"
     >
-      {profile.color ? (
-        <span
-          className="h-5 w-1 shrink-0 rounded-full"
-          style={{ backgroundColor: profile.color }}
-        />
-      ) : (
-        <span className="h-5 w-1 shrink-0 rounded-full" />
-      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
           <strong className="block truncate text-xs">{profile.name}</strong>
