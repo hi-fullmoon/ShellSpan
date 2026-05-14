@@ -40,6 +40,7 @@ interface SessionTabsProps {
   onCloseToRight?: (sessionId: string) => void;
   onCloseToLeft?: (sessionId: string) => void;
   onCloseAll?: () => void;
+  onSetColor?: (sessionId: string, color?: string) => void;
   onDragStateChange?: (dragging: boolean) => void;
 }
 
@@ -248,6 +249,12 @@ function SortableSessionTab({
   );
 }
 
+const TAB_COLORS = [
+  '#ef4444', '#f97316', '#f59e0b', '#84cc16',
+  '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6',
+  '#d946ef', '#f43f5e',
+];
+
 function TabContextMenu({
   menu,
   sessions,
@@ -258,6 +265,7 @@ function TabContextMenu({
   onCloseToLeft,
   onCloseAll,
   onRenameStart,
+  onSetColor,
   onCloseMenu,
 }: {
   menu: TabContextMenuState;
@@ -269,6 +277,7 @@ function TabContextMenu({
   onCloseToLeft?: (sessionId: string) => void;
   onCloseAll?: () => void;
   onRenameStart?: (session: SessionState) => void;
+  onSetColor?: (sessionId: string, color?: string) => void;
   onCloseMenu: () => void;
 }) {
   const sessionIndex = sessions.findIndex((s) => s.sessionId === menu.session.sessionId);
@@ -349,6 +358,36 @@ function TabContextMenu({
         >
           {t('sessionTabs.contextMenu.rename')}
         </button>
+        {onSetColor && (
+          <>
+            <div className="my-1 h-px bg-[var(--app-border)]" />
+            <div className="flex items-center gap-1 px-2 py-1">
+              <button
+                className={cn(
+                  'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] transition-transform hover:scale-110',
+                  !menu.session.profile.color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
+                )}
+                onClick={() => handle(() => onSetColor(menu.session.sessionId, undefined))}
+                title={t('sidebar.menu.clearColor')}
+                type="button"
+              >
+                <span className="absolute block h-px w-full rotate-45 bg-[var(--app-text-muted)]/50" />
+              </button>
+              {TAB_COLORS.map((color) => (
+                <button
+                  className={cn(
+                    'h-4 w-4 shrink-0 rounded-full transition-transform hover:scale-110',
+                    menu.session.profile.color === color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
+                  )}
+                  key={color}
+                  onClick={() => handle(() => onSetColor(menu.session.sessionId, color))}
+                  style={{ backgroundColor: color }}
+                  type="button"
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </>,
     document.body,
@@ -366,6 +405,7 @@ export function SessionTabs({
   onCloseToRight,
   onCloseToLeft,
   onCloseAll,
+  onSetColor,
   onDragStateChange,
 }: SessionTabsProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -536,7 +576,7 @@ export function SessionTabs({
         orientation="horizontal"
         ref={scrollRef}
         scrollbar="hover"
-        scrollbarSize={4}
+        scrollbarSize={3}
       >
         <DndContext
           collisionDetection={closestCenter}
@@ -583,6 +623,7 @@ export function SessionTabs({
           onCloseToLeft={onCloseToLeft}
           onCloseToRight={onCloseToRight}
           onRenameStart={handleRenameStart}
+          onSetColor={onSetColor}
           sessions={sessions}
         />
       ) : null}

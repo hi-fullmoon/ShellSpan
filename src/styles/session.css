@@ -51,6 +51,16 @@
   color: var(--app-text);
 }
 
+.session-tabs-container .scroll-area {
+  --scroll-area-thumb-color: color-mix(in srgb, var(--app-text-muted) 30%, transparent);
+  --scroll-area-thumb-hover-color: color-mix(in srgb, var(--app-text-muted) 50%, transparent);
+}
+
+.session-tabs-container .scroll-area-track-horizontal {
+  right: 2px;
+  left: 2px;
+}
+
 .session-tab-input {
   background: color-mix(in srgb, var(--app-bg) 45%, var(--app-icon-bg) 55%);
   color: var(--app-text);

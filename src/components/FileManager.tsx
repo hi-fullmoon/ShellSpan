@@ -2326,6 +2326,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                           } else {
                             onAddBookmark(contextMenu.entry.path);
                           }
+                          setContextMenu(undefined);
                         }}
                       />
                     ) : null}
@@ -2492,6 +2493,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                         } else {
                           onAddBookmark(currentPath);
                         }
+                        setContextMenu(undefined);
                       }}
                     />
                   ) : null}

@@ -247,17 +247,14 @@ export function ConnectionForm({ profile, groups = [], onProfileChange, onConnec
               <div className="flex flex-wrap items-center gap-2 px-1 py-0.5">
                 <button
                   className={cn(
-                    'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-(--app-border) text-(--app-text-muted) transition-transform hover:scale-110',
-                    profile.color === undefined && 'ring-2 ring-offset-1 ring-cyan-400',
+                    'relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-(--app-border) bg-(--app-bg) transition-transform hover:scale-110',
+                    profile.color === undefined && 'ring-1 ring-offset-1 ring-(--app-primary-bg)',
                   )}
                   onClick={() => onProfileChange({ ...profile, color: undefined })}
                   title={t('sidebar.menu.clearColor')}
                   type="button"
                 >
-                  <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 16 16">
-                    <circle cx="8" cy="8" r="5.5" />
-                    <path d="m5 5 6 6" />
-                  </svg>
+                  <span className="absolute block h-px w-full rotate-45 bg-(--app-text-muted)/50" />
                 </button>
                 {[
                   '#ef4444', '#f97316', '#f59e0b', '#84cc16',

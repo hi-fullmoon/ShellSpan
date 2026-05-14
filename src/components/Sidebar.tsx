@@ -12,7 +12,6 @@ interface HistoryMenuState {
   profile: ConnectionProfile;
   x: number;
   y: number;
-  showColorPicker?: boolean;
 }
 
 function clampMenuPosition(x: number, y: number, width: number, height: number) {
@@ -481,43 +480,6 @@ export function Sidebar({
                 >
                   {t('sidebar.menu.delete')}
                 </button>
-                {historyMenu.showColorPicker ? (
-                  <div className="mt-1 grid grid-cols-5 gap-1 p-1">
-                    {PRESET_COLORS.map((color) => (
-                      <button
-                        className="h-5 w-5 rounded-full transition hover:scale-110"
-                        key={color}
-                        onClick={() => {
-                          onSetProfileColor(historyMenu.profile.id, color);
-                          setHistoryMenu(undefined);
-                        }}
-                        style={{ backgroundColor: color }}
-                        type="button"
-                      />
-                    ))}
-                    <button
-                      className="flex h-5 w-5 items-center justify-center rounded-full border border-(--app-border) text-[10px] text-(--app-text-muted) transition hover:bg-(--app-surface-hover)"
-                      onClick={() => {
-                        onSetProfileColor(historyMenu.profile.id, undefined);
-                        setHistoryMenu(undefined);
-                      }}
-                      title={t('sidebar.menu.clearColor')}
-                      type="button"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
-                    onClick={() =>
-                      setHistoryMenu((current) => (current ? { ...current, showColorPicker: true } : current))
-                    }
-                    type="button"
-                  >
-                    {t('sidebar.menu.setColor')}
-                  </button>
-                )}
                 {groups.length > 0 && onMoveProfileToGroup ? (
                   <>
                     <div className="themed-menu-divider my-1 h-px" />

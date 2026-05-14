@@ -1332,6 +1332,21 @@ function App() {
             ),
           );
         }}
+        onSetColor={(sessionId, color) => {
+          setSessions((current) =>
+            current.map((session) =>
+              session.sessionId === sessionId
+                ? {
+                    ...session,
+                    profile: {
+                      ...session.profile,
+                      color,
+                    },
+                  }
+                : session,
+            ),
+          );
+        }}
         onReorder={(draggedSessionId, insertIndex) => {
           setSessions((current) => reorderSessions(current, draggedSessionId, insertIndex));
         }}
