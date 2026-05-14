@@ -111,6 +111,9 @@ function reorderSessions(sessions: SessionState[], draggedSessionId: string, ins
   const nextSessions = [...sessions];
   const [draggedSession] = nextSessions.splice(draggedIndex, 1);
   const adjustedIndex = insertIndex > draggedIndex ? insertIndex - 1 : insertIndex;
+  if (draggedSession.pinned) {
+    draggedSession.pinned = false;
+  }
   nextSessions.splice(adjustedIndex, 0, draggedSession);
   return nextSessions;
 }
@@ -1295,12 +1298,14 @@ function App() {
         }}
         onCloseAll={() => {
           for (const session of sessions) {
-            void handleCloseSession(session.sessionId);
+            if (!session.pinned) {
+              void handleCloseSession(session.sessionId);
+            }
           }
         }}
         onCloseOthers={(sessionId) => {
           for (const session of sessions) {
-            if (session.sessionId !== sessionId) {
+            if (session.sessionId !== sessionId && !session.pinned) {
               void handleCloseSession(session.sessionId);
             }
           }
@@ -1309,14 +1314,18 @@ function App() {
           const index = sessions.findIndex((s) => s.sessionId === sessionId);
           if (index <= 0) return;
           for (let i = 0; i < index; i++) {
-            void handleCloseSession(sessions[i].sessionId);
+            if (!sessions[i].pinned) {
+              void handleCloseSession(sessions[i].sessionId);
+            }
           }
         }}
         onCloseToRight={(sessionId) => {
           const index = sessions.findIndex((s) => s.sessionId === sessionId);
           if (index < 0 || index >= sessions.length - 1) return;
           for (let i = index + 1; i < sessions.length; i++) {
-            void handleCloseSession(sessions[i].sessionId);
+            if (!sessions[i].pinned) {
+              void handleCloseSession(sessions[i].sessionId);
+            }
           }
         }}
         onDragStateChange={setReorderingSessions}
