@@ -1,35 +1,37 @@
-# Contributing to TermBridge
+# 贡献指南
 
-Thank you for contributing! Please follow these guidelines to ensure code quality and consistency.
+感谢你的贡献！请遵循以下规范，以确保代码质量和一致性。
 
-## Development Environment
+## 开发环境
 
-- **Node.js**: >=24 <25 (use nvm)
-- **Package Manager**: pnpm 10.33.0
-- **Rust**: latest stable (for Tauri)
+- **Node.js**: >=24 <25（推荐使用 nvm）
+- **包管理器**: pnpm 10.33.0
+- **Rust**: latest stable（用于 Tauri）
 
 ```bash
-# Install dependencies
+# 安装依赖
 pnpm install
 
-# Start dev server
+# 启动开发服务器
 pnpm dev
 
-# Start Tauri dev mode
+# 启动 Tauri 开发模式
 pnpm tauri:dev
 
-# Build
+# 构建
 pnpm build
 
-# Run tests
+# 运行测试
 pnpm test
 ```
 
-## Commit Convention
+## 提交规范
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/).
+> **注意**: 所有 git commit message 必须使用英文。
 
-### Format
+我们遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
+
+### 格式
 
 ```
 <type>(<scope>): <subject>
@@ -39,36 +41,36 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/).
 <footer>
 ```
 
-### Types
+### 类型
 
-| Type | Purpose | Example |
-|------|---------|---------|
-| `feat` | new feature | `feat(term): add split pane support` |
-| `fix` | bug fix | `fix(ui): resolve button click issue` |
-| `docs` | documentation | `docs(readme): update install guide` |
-| `style` | formatting | `style: format code` |
-| `refactor` | restructuring | `refactor(store): refactor settings store` |
-| `perf` | performance | `perf(term): optimize terminal rendering` |
-| `test` | tests | `test(hooks): add useTerminal tests` |
-| `chore` | tooling | `chore(deps): upgrade dependencies` |
-| `ci` | CI config | `ci: add automated tests` |
-| `build` | build system | `build: configure vite optimization` |
-| `revert` | rollback | `revert: revert feat(term) split pane` |
+| 类型 | 用途 | 示例 |
+|------|------|------|
+| `feat` | 新功能 | `feat(term): add split pane support` |
+| `fix` | 修复 bug | `fix(ui): resolve button click issue` |
+| `docs` | 文档更新 | `docs(readme): update install guide` |
+| `style` | 代码格式 | `style: format code` |
+| `refactor` | 代码重构 | `refactor(store): refactor settings store` |
+| `perf` | 性能优化 | `perf(term): optimize terminal rendering` |
+| `test` | 测试相关 | `test(hooks): add useTerminal tests` |
+| `chore` | 工具/构建 | `chore(deps): upgrade dependencies` |
+| `ci` | CI 配置 | `ci: add automated tests` |
+| `build` | 构建系统 | `build: configure vite optimization` |
+| `revert` | 回滚 | `revert: revert feat(term) split pane` |
 
-### Scopes
+### 作用域
 
-- `ui` - UI components
-- `term` - terminal features
-- `settings` - settings panel
-- `i18n` - internationalization
-- `store` - Zustand stores
-- `hook` - custom hooks
-- `tauri` - Tauri backend/commands
-- `deps` - dependency updates
-- `build` - build config
-- `test` - tests
+- `ui` - UI 组件
+- `term` - 终端功能
+- `settings` - 设置面板
+- `i18n` - 国际化
+- `store` - Zustand 状态存储
+- `hook` - 自定义 Hook
+- `tauri` - Tauri 后端/命令
+- `deps` - 依赖更新
+- `build` - 构建配置
+- `test` - 测试
 
-### Examples
+### 示例
 
 ```
 feat(term): add split pane support
@@ -91,99 +93,99 @@ fix(ui): resolve settings panel scroll lag
 chore(deps): upgrade React to 19.2.5
 ```
 
-## Code Standards
+## 代码规范
 
 ### TypeScript
 
-- strict mode enabled (strict: true)
-- no `any`, use `unknown` + type guards
-- interfaces: PascalCase (e.g. `TerminalConfig`)
-- type aliases: PascalCase (e.g. `ThemeType`)
+- 启用严格模式 (strict: true)
+- 禁用 `any`，使用 `unknown` + 类型守卫
+- interface: PascalCase（例如 `TerminalConfig`）
+- type 别名: PascalCase（例如 `ThemeType`）
 
 ### React
 
-- function components with arrow functions
-- props types named `XxxProps` (e.g. `ButtonProps`)
-- custom hooks prefixed with `use`
-- complete dependency arrays in useEffect
-- functional state updates
+- 使用箭头函数的函数组件
+- props 类型命名为 `XxxProps`（例如 `ButtonProps`）
+- 自定义 Hook 以 `use` 为前缀
+- useEffect 依赖数组必须完整
+- 使用函数式状态更新
 
-### File Organization
+### 文件组织
 
 ```
 src/
-  components/       # reusable UI components
+  components/       # 可复用 UI 组件
     Button.tsx
     Terminal/
       index.tsx
       Terminal.tsx
       TerminalHeader.tsx
       types.ts
-  hooks/            # custom hooks
+  hooks/            # 自定义 Hooks
     useTerminal.ts
-  stores/           # Zustand stores
+  stores/           # Zustand 状态存储
     settingsStore.ts
-  lib/              # utility functions
+  lib/              # 工具函数
     utils.ts
-  types.ts          # global types
-  locales/          # i18n
+  types.ts          # 全局类型
+  locales/          # 国际化
 ```
 
-### Naming
+### 命名规范
 
-- component files: PascalCase.tsx
-- utility files: camelCase.ts
-- constants: UPPER_SNAKE_CASE
-- CSS classes: Tailwind first, custom classes in kebab-case
+- 组件文件: PascalCase.tsx
+- 工具文件: camelCase.ts
+- 常量: UPPER_SNAKE_CASE
+- CSS 类: 优先使用 Tailwind，自定义类使用 kebab-case
 
-## Pre-commit Checklist
+## 提交前检查清单
 
-Before committing:
+提交前请确认：
 
-- [ ] `pnpm build` succeeds (tsc + vite build)
-- [ ] `pnpm test` passes
-- [ ] no `console.log` / `debugger` / `TODO`
-- [ ] commit message follows convention
-- [ ] Tauri commands tested (if `src-tauri/` modified)
+- [ ] `pnpm build` 成功（tsc + vite build）
+- [ ] `pnpm test` 通过
+- [ ] 无 `console.log` / `debugger` / `TODO`
+- [ ] commit message 符合规范
+- [ ] Tauri 命令已测试（如修改了 `src-tauri/`）
 
-## Automated Pre-commit Checks
+## 自动化提交前检查
 
-Git Hooks are configured to automatically check:
+Git Hooks 已配置为自动检查：
 
-1. **Commit message format** - must follow Conventional Commits
-2. **Debug code detection** - flags console.log / debugger / TODO
-3. **Large file warning** - warns on changes >500 lines
-4. **TypeScript check** - runs `tsc --noEmit`
-5. **Test check** - runs `pnpm test`
+1. **提交信息格式** - 必须符合 Conventional Commits
+2. **调试代码检测** - 标记 console.log / debugger / TODO
+3. **大文件警告** - 改动超过 500 行时警告
+4. **TypeScript 检查** - 运行 `tsc --noEmit`
+5. **测试检查** - 运行 `pnpm test`
 
-## Code Review
+## 代码审查
 
-All submissions require code review. Focus areas:
+所有提交都需要经过代码审查。审查重点：
 
-### Security
-- Tauri command parameter validation
-- no sensitive path exposure
-- terminal input sanitization
+### 安全性
+- Tauri 命令参数校验
+- 不得暴露敏感路径
+- 终端输入净化
 
-### Performance
-- avoid unnecessary re-renders
-- virtualize large data lists
-- terminal output buffer management
+### 性能
+- 避免不必要的重渲染
+- 大数据列表使用虚拟滚动
+- 终端输出缓冲区管理
 
-### Accessibility
-- keyboard navigation
-- proper ARIA labels
-- color contrast
+### 可访问性
+- 键盘导航
+- 正确的 ARIA 标签
+- 颜色对比度
 
-## Reporting Issues
+## 问题反馈
 
-Found a bug or have a feature request? Create an issue:
+发现 bug 或有功能建议？请创建 issue：
 
-1. Use a clear title
-2. Describe reproduction steps (for bugs)
-3. Explain expected behavior
-4. Provide environment info (OS, Node version, etc.)
+1. 使用清晰的标题
+2. 描述复现步骤（针对 bug）
+3. 说明预期行为
+4. 提供环境信息（操作系统、Node 版本等）
 
-## License
+## 许可证
 
-By submitting code, you agree to license it under MIT.
+提交代码即表示你同意以 MIT 许可证授权。

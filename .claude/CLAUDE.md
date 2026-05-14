@@ -1,14 +1,16 @@
-# TermBridge Project Guidelines
+# TermBridge 项目规范
 
-## Project Info
-- **Stack**: React 19 + TypeScript 6 + Vite 8 + Tauri 2 + Tailwind CSS 4
-- **Package Manager**: pnpm 10.33.0
-- **Node Version**: >=24 <25
-- **Test Framework**: Vitest + @testing-library/react + jsdom
+## 项目信息
+- **技术栈**: React 19 + TypeScript 6 + Vite 8 + Tauri 2 + Tailwind CSS 4
+- **包管理器**: pnpm 10.33.0
+- **Node 版本**: >=24 <25
+- **测试框架**: Vitest + @testing-library/react + jsdom
 
-## Commit Convention
+## 提交规范
 
-### Format
+> **注意**: 所有 git commit message 必须使用英文。
+
+### 格式
 ```
 <type>(<scope>): <subject>
 
@@ -17,34 +19,34 @@
 <footer>
 ```
 
-### Types
-| Type | Purpose |
-|------|---------|
-| feat | new feature |
-| fix | bug fix |
-| docs | documentation |
-| style | formatting (no functional change) |
-| refactor | code restructuring |
-| perf | performance improvement |
-| test | tests |
-| chore | build/tooling/dependencies |
-| ci | CI/CD config |
-| build | build system |
-| revert | rollback |
+### 类型
+| 类型 | 用途 |
+|------|------|
+| feat | 新功能 |
+| fix | 修复 bug |
+| docs | 文档更新 |
+| style | 代码格式（无功能改动） |
+| refactor | 代码重构 |
+| perf | 性能优化 |
+| test | 测试相关 |
+| chore | 构建/工具/依赖 |
+| ci | CI/CD 配置 |
+| build | 构建系统 |
+| revert | 回滚 |
 
-### Scopes
-- `ui` - UI components
-- `term` - terminal features
-- `settings` - settings panel
-- `i18n` - internationalization
-- `store` - Zustand stores
-- `hook` - custom hooks
-- `tauri` - Tauri backend/commands
-- `deps` - dependency updates
-- `build` - build config
-- `test` - tests
+### 作用域
+- `ui` - UI 组件
+- `term` - 终端功能
+- `settings` - 设置面板
+- `i18n` - 国际化
+- `store` - Zustand 状态管理
+- `hook` - 自定义 Hook
+- `tauri` - Tauri 后端/命令
+- `deps` - 依赖更新
+- `build` - 构建配置
+- `test` - 测试
 
-### Examples
+### 示例
 ```
 feat(term): add split pane support
 
@@ -66,92 +68,92 @@ fix(ui): resolve settings panel scroll lag
 chore(deps): upgrade React to 19.2.5
 ```
 
-## Code Standards
+## 代码规范
 
 ### TypeScript
-- strict mode enabled (strict: true)
-- no `any`, use `unknown` + type guards
-- interfaces: PascalCase (e.g. `TerminalConfig`)
-- type aliases: PascalCase (e.g. `ThemeType`)
-- enums: PascalCase + UPPER_SNAKE_CASE values (e.g. `enum ColorScheme { DARK = 'dark' }`)
-- generic params: T, K, V or meaningful names
+- 启用严格模式 (strict: true)
+- 禁用 `any`，使用 `unknown` + 类型守卫
+- interface: PascalCase（例如 `TerminalConfig`）
+- type 别名: PascalCase（例如 `ThemeType`）
+- enum: PascalCase + UPPER_SNAKE_CASE 值（例如 `enum ColorScheme { DARK = 'dark' }`）
+- 泛型参数: T, K, V 或有意义的名称
 
 ### React
-- function components with arrow functions
-- props types named `XxxProps` (e.g. `ButtonProps`)
-- use React.FC or explicit return type
-- custom hooks prefixed with `use`
-- complete dependency arrays in useEffect
-- functional state updates (e.g. `setState(prev => ...)`)
+- 使用箭头函数的函数组件
+- props 类型命名为 `XxxProps`（例如 `ButtonProps`）
+- 使用 React.FC 或显式返回类型
+- 自定义 Hook 以 `use` 为前缀
+- useEffect 依赖数组必须完整
+- 使用函数式状态更新（例如 `setState(prev => ...)`）
 
-### File Organization
+### 文件组织
 ```
 src/
-  components/       # reusable UI components
+  components/       # 可复用 UI 组件
     Button.tsx
     Terminal/
       index.tsx
       Terminal.tsx
       TerminalHeader.tsx
       types.ts
-  hooks/            # custom hooks
+  hooks/            # 自定义 Hooks
     useTerminal.ts
-  stores/           # Zustand stores
+  stores/           # Zustand 状态存储
     settingsStore.ts
-  lib/              # utility functions
+  lib/              # 工具函数
     utils.ts
-  types.ts          # global types
-  locales/          # i18n
+  types.ts          # 全局类型
+  locales/          # 国际化
 ```
 
-### Naming
-- component files: PascalCase.tsx
-- utility files: camelCase.ts
-- constants: UPPER_SNAKE_CASE
-- CSS classes: Tailwind first, custom classes in kebab-case
+### 命名规范
+- 组件文件: PascalCase.tsx
+- 工具文件: camelCase.ts
+- 常量: UPPER_SNAKE_CASE
+- CSS 类: 优先使用 Tailwind，自定义类使用 kebab-case
 
-### Prohibited
-- no console.log / debugger in commits
-- no TODO without corresponding issue
-- no hardcoded secrets/passwords
-- no unused imports
-- no type errors (tsc must pass)
+### 禁止事项
+- 提交中不得包含 console.log / debugger
+- 不得有无对应 issue 的 TODO
+- 不得硬编码密钥/密码
+- 不得有无用导入
+- 不得有类型错误（tsc 必须通过）
 
-## Pre-commit Checklist
+## 提交前检查清单
 
-- [ ] `pnpm build` succeeds (tsc + vite build)
-- [ ] `pnpm test` passes
-- [ ] no console.log / debugger / TODO
-- [ ] commit message follows convention
-- [ ] Tauri commands tested (if src-tauri/ modified)
+- [ ] `pnpm build` 成功（tsc + vite build）
+- [ ] `pnpm test` 通过
+- [ ] 无 console.log / debugger / TODO
+- [ ] commit message 符合规范
+- [ ] Tauri 命令已测试（如修改了 src-tauri/）
 
-## Review Focus
+## 审查重点
 
-### Security
-- Tauri command parameter validation
-- no sensitive path exposure
-- terminal input sanitization
+### 安全性
+- Tauri 命令参数校验
+- 不得暴露敏感路径
+- 终端输入净化
 
-### Performance
-- avoid unnecessary re-renders
-- virtualize large data lists
-- terminal output buffer management
+### 性能
+- 避免不必要的重渲染
+- 大数据列表使用虚拟滚动
+- 终端输出缓冲区管理
 
-### Accessibility
-- keyboard navigation
-- proper ARIA labels
-- color contrast
+### 可访问性
+- 键盘导航
+- 正确的 ARIA 标签
+- 颜色对比度
 
-## Tauri Specific
+## Tauri 特定规范
 
-### Command Naming
+### 命令命名
 - snake_case
-- module prefix: `term_`, `settings_`, `window_`
+- 模块前缀: `term_`, `settings_`, `window_`
 
-### Error Handling
-- all commands return `Result<T, String>`
-- frontend handles errors uniformly
+### 错误处理
+- 所有命令返回 `Result<T, String>`
+- 前端统一处理错误
 
-### Permissions
-- principle of least privilege
-- new permissions declared in capabilities
+### 权限
+- 最小权限原则
+- 新权限需在 capabilities 中声明
