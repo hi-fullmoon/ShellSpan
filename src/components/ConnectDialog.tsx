@@ -15,7 +15,7 @@ interface ConnectDialogProps {
 
 export function ConnectDialog({ open, draftProfile, isConnecting, onClose, onProfileChange, onConnect }: ConnectDialogProps) {
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog open={open}>
       <ScrollArea
         className="app-dialog surface max-h-[calc(100vh-28px)] w-full max-w-xl p-2.5 rounded-lg!"
         onClick={(event) => event.stopPropagation()}

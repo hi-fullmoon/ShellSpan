@@ -30,7 +30,6 @@ interface SidebarProps {
   onRenameProfile: (profileId: string, name: string) => void;
   onToggleFavoriteProfile: (profileId: string) => void;
   onTogglePinnedProfile: (profileId: string) => void;
-  onSetProfileColor: (profileId: string, color?: string) => void;
   onReuseProfile: (profile: ConnectionProfile) => void;
   onOpenConnect: () => void;
 }
@@ -44,12 +43,6 @@ export function sortSavedProfiles(profiles: ConnectionProfile[]) {
 export function countFavoriteProfiles(profiles: ConnectionProfile[]) {
   return profiles.filter((profile) => profile.favorite).length;
 }
-
-const PRESET_COLORS = [
-  '#ef4444', '#f97316', '#f59e0b', '#84cc16',
-  '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6',
-  '#d946ef', '#f43f5e',
-];
 
 interface ProfileItemProps {
   profile: ConnectionProfile;
@@ -107,7 +100,6 @@ export function Sidebar({
   onRenameProfile,
   onToggleFavoriteProfile,
   onTogglePinnedProfile,
-  onSetProfileColor,
   onReuseProfile,
   onOpenConnect,
 }: SidebarProps) {
@@ -339,24 +331,6 @@ export function Sidebar({
                 >
                   {t('sidebar.menu.delete')}
                 </button>
-                <div className="themed-menu-divider my-1 h-px" />
-                <div className="flex flex-wrap gap-1 px-2 py-1">
-                  {PRESET_COLORS.map((color) => (
-                    <button
-                      className="h-4 w-4 rounded-full transition-transform hover:scale-110"
-                      key={color}
-                      onClick={() => {
-                        onSetProfileColor(historyMenu.profile.id, color === historyMenu.profile.color ? undefined : color);
-                        setHistoryMenu(undefined);
-                      }}
-                      style={{
-                        backgroundColor: color,
-                        boxShadow: color === historyMenu.profile.color ? `0 0 0 2px ${color}` : undefined,
-                      }}
-                      type="button"
-                    />
-                  ))}
-                </div>
               </div>
             </>,
             document.body,

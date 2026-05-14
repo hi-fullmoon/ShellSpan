@@ -1113,19 +1113,6 @@ function App() {
     );
   };
 
-  const handleSetSavedProfileColor = (profileId: string, color?: string) => {
-    setSavedProfiles((current) =>
-      current.map((profile) =>
-        profile.id === profileId
-          ? {
-              ...profile,
-              color,
-            }
-          : profile,
-      ),
-    );
-  };
-
   const handleReconnectSession = async (sessionId: string, options?: { automatic?: boolean }) => {
     const automatic = options?.automatic ?? false;
     const target = sessionsRef.current.find((item) => item.sessionId === sessionId);
@@ -1468,7 +1455,6 @@ function App() {
                         onRenameProfile={handleRenameSavedProfile}
                         onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
                         onTogglePinnedProfile={handleToggleSavedProfilePinned}
-                        onSetProfileColor={handleSetSavedProfileColor}
                         onReuseProfile={loadProfile}
                         onOpenConnect={() => {
                           setDraftProfile(createEmptyProfile());

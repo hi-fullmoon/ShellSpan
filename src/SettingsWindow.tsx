@@ -174,7 +174,8 @@ export default function SettingsWindow() {
       )}
       {isTauri && !IS_MAC && (
         <div className="settings-title-bar" data-tauri-drag-region>
-          <div className="settings-title-bar-left" data-tauri-drag-region>
+          <div className="settings-title-bar-left !pl-0" data-tauri-drag-region />
+          <div className="settings-title-bar-center" data-tauri-drag-region>
             <span className="settings-title-bar-text" data-tauri-drag-region>{t('settings.title')}</span>
           </div>
           <div className="settings-title-bar-right settings-title-bar-controls" data-tauri-drag-region>
