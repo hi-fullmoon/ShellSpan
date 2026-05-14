@@ -7,7 +7,7 @@ function baseProps(props: SVGProps<SVGSVGElement>) {
     stroke: 'currentColor',
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
-    strokeWidth: 1.8,
+    strokeWidth: 1.5,
     viewBox: '0 0 16 16',
     width: 14,
     ...props,

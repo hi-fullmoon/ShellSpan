@@ -102,16 +102,16 @@ function normalizePreferences(value: Partial<AppPreferences> | null | undefined)
   };
 }
 
-function reorderSessions(sessions: SessionState[], draggedSessionId: string, targetSessionId: string) {
+function reorderSessions(sessions: SessionState[], draggedSessionId: string, insertIndex: number) {
   const draggedIndex = sessions.findIndex((session) => session.sessionId === draggedSessionId);
-  const targetIndex = sessions.findIndex((session) => session.sessionId === targetSessionId);
-  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
+  if (draggedIndex === -1) {
     return sessions;
   }
 
   const nextSessions = [...sessions];
   const [draggedSession] = nextSessions.splice(draggedIndex, 1);
-  nextSessions.splice(targetIndex, 0, draggedSession);
+  const adjustedIndex = insertIndex > draggedIndex ? insertIndex - 1 : insertIndex;
+  nextSessions.splice(adjustedIndex, 0, draggedSession);
   return nextSessions;
 }
 
@@ -1290,6 +1290,35 @@ function App() {
       <SessionTabs
         sessions={sessions}
         activeSessionId={activeSessionId}
+        onClose={(sessionId) => {
+          setPendingCloseSessionId(sessionId);
+        }}
+        onCloseAll={() => {
+          for (const session of sessions) {
+            void handleCloseSession(session.sessionId);
+          }
+        }}
+        onCloseOthers={(sessionId) => {
+          for (const session of sessions) {
+            if (session.sessionId !== sessionId) {
+              void handleCloseSession(session.sessionId);
+            }
+          }
+        }}
+        onCloseToLeft={(sessionId) => {
+          const index = sessions.findIndex((s) => s.sessionId === sessionId);
+          if (index <= 0) return;
+          for (let i = 0; i < index; i++) {
+            void handleCloseSession(sessions[i].sessionId);
+          }
+        }}
+        onCloseToRight={(sessionId) => {
+          const index = sessions.findIndex((s) => s.sessionId === sessionId);
+          if (index < 0 || index >= sessions.length - 1) return;
+          for (let i = index + 1; i < sessions.length; i++) {
+            void handleCloseSession(sessions[i].sessionId);
+          }
+        }}
         onDragStateChange={setReorderingSessions}
         onRename={(sessionId, title) => {
           setSessions((current) =>
@@ -1303,13 +1332,10 @@ function App() {
             ),
           );
         }}
-        onReorder={(draggedSessionId, targetSessionId) => {
-          setSessions((current) => reorderSessions(current, draggedSessionId, targetSessionId));
+        onReorder={(draggedSessionId, insertIndex) => {
+          setSessions((current) => reorderSessions(current, draggedSessionId, insertIndex));
         }}
         onSelect={setActiveSessionId}
-        onClose={(sessionId) => {
-          setPendingCloseSessionId(sessionId);
-        }}
       />
 
       <section className="surface relative min-h-0 flex-1 overflow-hidden">

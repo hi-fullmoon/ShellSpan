@@ -117,9 +117,7 @@ describe("SessionTabs", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Stagingdeploy@staging\.example\.com/i }),
-    );
+    fireEvent.click(screen.getByText("Staging"));
     fireEvent.click(screen.getAllByRole("button", { name: "关闭会话标签" })[1]!);
 
     expect(onSelect).toHaveBeenCalledWith("session-2");
@@ -162,7 +160,6 @@ describe("SessionTabs", () => {
     );
 
     expect(screen.getByText("Production").closest("[data-session-tab]")).toHaveClass("session-tab");
-    expect(screen.getByText("root@prod.example.com")).toHaveClass("session-tab-subtitle");
     expect(screen.getByText("Production").closest(".scroll-area")).toHaveClass("scroll-area-scrollbar-hover");
   });
 

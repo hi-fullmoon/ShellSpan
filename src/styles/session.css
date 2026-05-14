@@ -1,34 +1,52 @@
 .session-tabs-container {
-  border-bottom: 1px solid transparent;
-}
-
-[data-theme='light'] .session-tabs-container {
-  border-bottom-color: var(--app-border);
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-bg);
 }
 
 .session-tab {
-  box-shadow: none;
+  position: relative;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  border-right: 1px solid var(--app-border);
+  background: transparent;
+  margin-bottom: 0;
+}
+
+.session-tab::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
 }
 
 .session-tab-active {
-  border-color: color-mix(in srgb, var(--app-primary-bg) 55%, transparent);
-  background: color-mix(in srgb, var(--app-surface) 82%, var(--app-primary-bg) 12%);
+  background: var(--app-surface);
   color: var(--app-text);
 }
 
+.session-tab-active::after {
+  background: var(--app-primary-bg);
+}
+
 .session-tab-inactive {
-  border-color: var(--app-border);
-  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
   color: var(--app-text-soft);
 }
 
 .session-tab-inactive:hover {
-  border-color: var(--app-icon-border);
-  background: color-mix(in srgb, var(--app-surface) 78%, var(--app-primary-bg) 6%);
+  background: color-mix(in srgb, var(--app-surface) 60%, transparent);
+  color: var(--app-text);
+}
+
+.session-tab:last-child {
+  border-right: none;
 }
 
 .session-tab-renaming {
-  border-color: color-mix(in srgb, var(--app-primary-bg) 65%, transparent);
   background: var(--app-surface);
   color: var(--app-text);
 }

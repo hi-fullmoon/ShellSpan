@@ -262,19 +262,6 @@ function parentDirectoryPath(path: string) {
   return `${normalized.startsWith('/') ? '/' : ''}${parts.join('/')}`;
 }
 
-const SENSITIVE_PATH_PATTERNS = ['/etc', '/root', '/boot', '/var/log', '/proc', '/sys'];
-
-function isSensitivePath(path: string): boolean {
-  const normalized = path.replace(/\\+/g, '/');
-  if (SENSITIVE_PATH_PATTERNS.some((sp) => normalized === sp || normalized.startsWith(`${sp}/`))) {
-    return true;
-  }
-  if (/(?:^|\/)\.ssh(?:\/|$)/.test(normalized)) {
-    return true;
-  }
-  return false;
-}
-
 function kindLabel(kind: RemoteFileKind) {
   switch (kind) {
     case 'directory':
@@ -518,7 +505,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     if (!currentPath) return false;
     return bookmarks.includes(currentPath);
   }, [currentPath, bookmarks]);
-  const sensitivePathWarning = !!currentPath && !error && isSensitivePath(currentPath);
   const showInitialLoadingHint = !hasLoadedAnyListingRef.current;
   const locale = getActiveLocale();
   const columnDefs = useMemo<ColDef<RemoteFileEntry>[]>(
@@ -1958,6 +1944,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
     event.preventDefault();
     event.stopPropagation();
+    setBookmarkMenuOpen(false);
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -1971,6 +1958,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
     event.preventDefault();
     event.stopPropagation();
+    setBookmarkMenuOpen(false);
     const rect = event.currentTarget.getBoundingClientRect();
     setContextMenu({
       x: rect.left,
@@ -1981,6 +1969,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
   const openBookmarkMenu = () => {
     if (!bookmarks.length || !bookmarkButtonRef.current) return;
+    setContextMenu(undefined);
     const rect = bookmarkButtonRef.current.getBoundingClientRect();
     setBookmarkMenuPos({ x: rect.left, y: rect.bottom + 4 });
     setBookmarkMenuOpen(true);
@@ -2030,6 +2019,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     mouseEvent.preventDefault();
     mouseEvent.stopPropagation();
+    setBookmarkMenuOpen(false);
     setSelectedPath(target.path);
 
     const api = gridRef.current?.api;
@@ -2195,12 +2185,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                 {t('fileManager.readOnly')}
               </div>
             ) : null}
-            {sensitivePathWarning && !error ? (
-              <div className="border border-amber-900/80 bg-amber-950/30 px-2 py-2 text-xs text-amber-200 rounded-sm">
-                {t('fileManager.sensitivePathWarning')}
-              </div>
-            ) : null}
-
             <ScrollArea
               className="flex-1"
               onMouseDown={(event) => {

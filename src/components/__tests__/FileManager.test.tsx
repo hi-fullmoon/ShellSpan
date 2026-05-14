@@ -186,27 +186,4 @@ describe("FileManager", () => {
     expect(screen.getByPlaceholderText("0755")).toBeInTheDocument();
   });
 
-  it("shows a warning banner when navigating to a sensitive path", () => {
-    useFileManagerStore.setState({
-      sessions: {
-        "session-1": {
-          pathInput: "/etc",
-          listing: {
-            path: "/etc",
-            parentPath: "/",
-            entries: [
-              {
-                path: "/etc/nginx",
-                name: "nginx",
-                kind: "directory",
-              },
-            ],
-          },
-        },
-      },
-    });
-
-    render(<FileManager session={connectedSession} />);
-    expect(screen.getByText(/系统敏感目录/)).toBeInTheDocument();
-  });
 });
