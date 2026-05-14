@@ -171,8 +171,7 @@ function SessionTabCard({
             <button
               aria-label={t('sessionTabs.contextMenu.unpin')}
               className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border-none bg-transparent p-0 opacity-0 transition-all',
-                active ? 'opacity-100' : 'group-hover:opacity-100',
+                'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border-none bg-transparent p-0 opacity-100 transition-all',
                 'hover:bg-black/10 dark:hover:bg-white/15',
               )}
               onClick={(event) => {
