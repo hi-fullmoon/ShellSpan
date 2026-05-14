@@ -34,6 +34,8 @@ const enUS = {
   'sessionTabs.contextMenu.closeToLeft': 'Close Tabs to the Left',
   'sessionTabs.contextMenu.closeAll': 'Close All',
   'sessionTabs.contextMenu.rename': 'Rename',
+  'sessionTabs.contextMenu.pin': 'Pin',
+  'sessionTabs.contextMenu.unpin': 'Unpin',
   'app.ready': 'Ready',
   'app.emptyState.title': 'Start a new remote workspace',
   'app.emptyState.description': 'Connect via SSH to browse remote files, operate terminals, and manage sessions in an integrated workspace.',

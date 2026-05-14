@@ -1347,6 +1347,16 @@ function App() {
             ),
           );
         }}
+        onTogglePin={(sessionId) => {
+          setSessions((current) => {
+            const next = current.map((session) =>
+              session.sessionId === sessionId
+                ? { ...session, pinned: !session.pinned }
+                : session,
+            );
+            return next.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+          });
+        }}
         onReorder={(draggedSessionId, insertIndex) => {
           setSessions((current) => reorderSessions(current, draggedSessionId, insertIndex));
         }}

@@ -23,7 +23,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { CloseIcon } from './Icons';
+import { CloseIcon, PinIcon } from './Icons';
 import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
 import { cn, sessionStatusDot } from '../lib/ui';
@@ -41,6 +41,7 @@ interface SessionTabsProps {
   onCloseToLeft?: (sessionId: string) => void;
   onCloseAll?: () => void;
   onSetColor?: (sessionId: string, color?: string) => void;
+  onTogglePin?: (sessionId: string) => void;
   onDragStateChange?: (dragging: boolean) => void;
 }
 
@@ -156,7 +157,13 @@ function SessionTabCard({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5 select-none">
-            <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
+            {session.pinned ? (
+              <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center text-[var(--app-text-muted)]">
+                <PinIcon />
+              </span>
+            ) : (
+              <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
+            )}
             <span className="min-w-0 flex-1">
               <strong className="block truncate text-[12px] font-medium text-left" title={session.title}>
                 {session.title}
@@ -164,21 +171,23 @@ function SessionTabCard({
             </span>
           </div>
 
-          <button
-            aria-label={t('sessionTabs.close')}
-            className={cn(
-              'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border-none bg-transparent p-0 opacity-0 transition-all',
-              active ? 'opacity-100' : 'group-hover:opacity-100',
-              'hover:bg-black/10 dark:hover:bg-white/15',
-            )}
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose(session.sessionId);
-            }}
-            type="button"
-          >
-            <CloseIcon />
-          </button>
+          {!session.pinned && (
+            <button
+              aria-label={t('sessionTabs.close')}
+              className={cn(
+                'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border-none bg-transparent p-0 opacity-0 transition-all',
+                active ? 'opacity-100' : 'group-hover:opacity-100',
+                'hover:bg-black/10 dark:hover:bg-white/15',
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose(session.sessionId);
+              }}
+              type="button"
+            >
+              <CloseIcon />
+            </button>
+          )}
         </>
       )}
     </div>
@@ -266,6 +275,7 @@ function TabContextMenu({
   onCloseAll,
   onRenameStart,
   onSetColor,
+  onTogglePin,
   onCloseMenu,
 }: {
   menu: TabContextMenuState;
@@ -278,6 +288,7 @@ function TabContextMenu({
   onCloseAll?: () => void;
   onRenameStart?: (session: SessionState) => void;
   onSetColor?: (sessionId: string, color?: string) => void;
+  onTogglePin?: (sessionId: string) => void;
   onCloseMenu: () => void;
 }) {
   const sessionIndex = sessions.findIndex((s) => s.sessionId === menu.session.sessionId);
@@ -353,6 +364,13 @@ function TabContextMenu({
         <div className="my-1 h-px bg-[var(--app-border)]" />
         <button
           className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
+          onClick={() => handle(() => onTogglePin?.(menu.session.sessionId))}
+          type="button"
+        >
+          {menu.session.pinned ? t('sessionTabs.contextMenu.unpin') : t('sessionTabs.contextMenu.pin')}
+        </button>
+        <button
+          className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
           onClick={() => handle(() => onRenameStart?.(menu.session))}
           type="button"
         >
@@ -406,6 +424,7 @@ export function SessionTabs({
   onCloseToLeft,
   onCloseAll,
   onSetColor,
+  onTogglePin,
   onDragStateChange,
 }: SessionTabsProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -624,6 +643,7 @@ export function SessionTabs({
           onCloseToRight={onCloseToRight}
           onRenameStart={handleRenameStart}
           onSetColor={onSetColor}
+          onTogglePin={onTogglePin}
           sessions={sessions}
         />
       ) : null}

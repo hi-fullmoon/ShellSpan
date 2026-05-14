@@ -34,6 +34,8 @@ const zhCN = {
   'sessionTabs.contextMenu.closeToLeft': '关闭左侧所有',
   'sessionTabs.contextMenu.closeAll': '关闭所有',
   'sessionTabs.contextMenu.rename': '重命名',
+  'sessionTabs.contextMenu.pin': '置顶',
+  'sessionTabs.contextMenu.unpin': '取消置顶',
   'app.ready': '就绪',
   'app.emptyState.title': '开始一个新的远程工作区',
   'app.emptyState.description': '建立 SSH 连接后，即可在集成的工作区中浏览远程文件、操作终端并管理会话。',

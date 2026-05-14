@@ -88,6 +88,7 @@ export interface SessionState extends SessionSummary {
   status: SessionStatus;
   note?: string;
   createdAt: number;
+  pinned?: boolean;
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
