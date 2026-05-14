@@ -504,12 +504,18 @@ export function SessionTabs({
 
     const tabs = container.querySelectorAll<HTMLElement>('[data-session-tab]');
     let newInsertIndex = 0;
+    let skippedBefore = 0;
 
     for (let i = 0; i < tabs.length; i++) {
-      const rect = tabs[i].getBoundingClientRect();
+      const tab = tabs[i];
+      if (tab.dataset.sessionTab === draggingSessionId) {
+        skippedBefore++;
+        continue;
+      }
+      const rect = tab.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
       if (currentX > centerX) {
-        newInsertIndex = i + 1;
+        newInsertIndex = i - skippedBefore + 1;
       }
     }
 
