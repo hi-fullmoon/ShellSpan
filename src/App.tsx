@@ -109,10 +109,19 @@ function reorderSessions(sessions: SessionState[], draggedSessionId: string, ins
   }
 
   const nextSessions = [...sessions];
+  let lastPinnedIndex = -1;
+  for (let i = nextSessions.length - 1; i >= 0; i--) {
+    if (nextSessions[i].pinned) {
+      lastPinnedIndex = i;
+      break;
+    }
+  }
   const [draggedSession] = nextSessions.splice(draggedIndex, 1);
   const adjustedIndex = insertIndex > draggedIndex ? insertIndex - 1 : insertIndex;
   if (draggedSession.pinned) {
     draggedSession.pinned = false;
+  } else if (lastPinnedIndex !== -1 && adjustedIndex <= lastPinnedIndex) {
+    draggedSession.pinned = true;
   }
   nextSessions.splice(adjustedIndex, 0, draggedSession);
   return nextSessions;
