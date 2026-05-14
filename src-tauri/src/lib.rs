@@ -161,6 +161,7 @@ pub fn run() {
             commands::migrate_passwords,
             commands::start_port_forwards,
             commands::stop_port_forwards,
+            commands::open_url,
         ]);
 
     menu::configure_builder(builder)

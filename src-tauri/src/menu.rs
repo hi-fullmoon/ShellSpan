@@ -11,10 +11,13 @@ const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
 const SYSTEM_OPEN_SETTINGS_EVENT: &str = "system-open-settings";
 const SYSTEM_CHECK_UPDATE_EVENT: &str = "system-check-update";
 const SYSTEM_REQUEST_APP_EXIT_EVENT: &str = "system-request-app-exit";
+const SYSTEM_ABOUT_EVENT: &str = "system-about";
 #[cfg(target_os = "windows")]
 const TRAY_SHOW_MAIN_WINDOW_ID: &str = "tray.show_main_window";
 #[cfg(target_os = "windows")]
 const TRAY_QUIT_ID: &str = "tray.quit";
+#[cfg(target_os = "windows")]
+const TRAY_ABOUT_ID: &str = "tray.about";
 
 pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
     let mut builder = builder;
@@ -38,8 +41,11 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
 
                 let tray_menu = build_windows_tray_menu(app.handle())
                     .map_err(|error| format!("failed to create tray menu: {error}"))?;
-                let mut tray_builder =
-                    tauri::tray::TrayIconBuilder::with_id("main").menu(&tray_menu);
+                let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main")
+                    .menu(&tray_menu)
+                    .on_menu_event(|app, event| {
+                        handle_menu_event(app, event.id.as_ref());
+                    });
 
                 if let Some(icon) = app.default_window_icon().cloned() {
                     tray_builder = tray_builder.icon(icon);
@@ -91,6 +97,13 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
     if is_check_update_menu_id(menu_id) {
         if let Err(error) = emit_system_check_update(app) {
             error!("failed to handle check-update menu event: {error}");
+        }
+        return;
+    }
+
+    if menu_id == TRAY_ABOUT_ID {
+        if let Err(error) = emit_system_about(app) {
+            error!("failed to handle about menu event: {error}");
         }
         return;
     }
@@ -152,6 +165,11 @@ fn emit_system_check_update(app: &AppHandle) -> Result<(), String> {
 fn emit_system_request_app_exit(app: &AppHandle) -> Result<(), String> {
     app.emit(SYSTEM_REQUEST_APP_EXIT_EVENT, ())
         .map_err(|error| format!("failed to emit {SYSTEM_REQUEST_APP_EXIT_EVENT} event: {error}"))
+}
+
+fn emit_system_about(app: &AppHandle) -> Result<(), String> {
+    app.emit(SYSTEM_ABOUT_EVENT, ())
+        .map_err(|error| format!("failed to emit {SYSTEM_ABOUT_EVENT} event: {error}"))
 }
 
 #[cfg(target_os = "macos")]
@@ -223,6 +241,7 @@ fn build_windows_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<t
         true,
         None::<&str>,
     )?;
+    let about_item = MenuItem::with_id(app, TRAY_ABOUT_ID, "About", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, TRAY_QUIT_ID, "Quit", true, None::<&str>)?;
 
     Menu::with_items(
@@ -231,6 +250,7 @@ fn build_windows_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<t
             &show_main_window_item,
             &open_settings_item,
             &check_update_item,
+            &about_item,
             &quit_item,
         ],
     )

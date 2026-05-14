@@ -506,6 +506,32 @@ pub(crate) async fn trust_host(
     result
 }
 
+#[tauri::command]
+pub(crate) fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "", &url])
+            .spawn()
+            .map_err(|error| format!("failed to open URL: {error}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|error| format!("failed to open URL: {error}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|error| format!("failed to open URL: {error}"))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn spawn_ssh_thread(
     app: AppHandle,
     session_id: String,

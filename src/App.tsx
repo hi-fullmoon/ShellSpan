@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { AboutDialog } from './components/AboutDialog';
 import { CloseSessionDialog } from './components/CloseSessionDialog';
 import { ConnectDialog } from './components/ConnectDialog';
 import { DeleteProfileDialog } from './components/DeleteProfileDialog';
@@ -201,6 +202,7 @@ function App() {
   const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [reorderingSessions, setReorderingSessions] = useState(false);
 
   // Listen for fallback event when settings window cannot be opened
@@ -802,6 +804,39 @@ function App() {
     return () => {
       cancelled = true;
       stopAppExitRequest?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let stopAboutRequest: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const attach = async () => {
+      try {
+        const nextStopAboutRequest = await listen('system-about', () => {
+          setAboutDialogOpen(true);
+        });
+
+        if (cancelled) {
+          nextStopAboutRequest();
+          return;
+        }
+
+        stopAboutRequest = nextStopAboutRequest;
+      } catch (error) {
+        appLogger.error('监听 about 事件失败', { error: String(error) });
+      }
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      stopAboutRequest?.();
     };
   }, []);
 
@@ -1518,6 +1553,11 @@ function App() {
         onClose={() => setExitDialogOpen(false)}
         onConfirm={confirmAppExit}
         open={exitDialogOpen}
+      />
+
+      <AboutDialog
+        onClose={() => setAboutDialogOpen(false)}
+        open={aboutDialogOpen}
       />
 
       <HostKeyDialog
