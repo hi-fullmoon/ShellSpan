@@ -1,31 +1,16 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
-import { Terminal } from "@xterm/xterm";
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { t } from "../lib/i18n";
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
+import { Terminal } from '@xterm/xterm';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { t } from '../lib/i18n';
 import { createLogger } from '../lib/logger';
 import { isTauriRuntime } from '../lib/tauri';
-import {
-  formatTerminalNoticeLine,
-  formatTerminalPrefixedText,
-  formatTerminalStatusLine,
-} from '../lib/terminal';
-import {
-  shouldDisableTerminalInput,
-  shouldReconnectFromInput,
-  shouldWarnOnClosedSession,
-} from '../lib/terminal';
-import { cn, getCurrentThemeMode, getTerminalTheme, getCursorStyle } from "../lib/ui";
-import type {
-  SessionState,
-  SshClosedEvent,
-  SshDataEvent,
-  SshStatusEvent,
-  TerminalTheme,
-  CursorStyle,
-} from "../types";
+import { formatTerminalNoticeLine, formatTerminalPrefixedText, formatTerminalStatusLine } from '../lib/terminal';
+import { shouldDisableTerminalInput, shouldReconnectFromInput, shouldWarnOnClosedSession } from '../lib/terminal';
+import { cn, getCurrentThemeMode, getTerminalTheme, getCursorStyle } from '../lib/ui';
+import type { SessionState, SshClosedEvent, SshDataEvent, SshStatusEvent, TerminalTheme, CursorStyle } from '../types';
 
 export interface TerminalPaneRef {
   sendData: (data: string) => void;
@@ -44,20 +29,23 @@ interface TerminalPaneProps {
   copyOnSelect?: boolean;
 }
 
-const terminalLogger = createLogger("terminal");
-type CopyFeedback = "copied" | "failed";
+const terminalLogger = createLogger('terminal');
+type CopyFeedback = 'copied' | 'failed';
 
-export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(function TerminalPane({
-  session,
-  active,
-  onReconnect,
-  fontSize = 14,
-  lineHeight = 1.25,
-  terminalTheme = 'default',
-  cursorStyle = 'block',
-  cursorBlink = true,
-  copyOnSelect = false,
-}, ref) {
+export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(function TerminalPane(
+  {
+    session,
+    active,
+    onReconnect,
+    fontSize = 14,
+    lineHeight = 1.25,
+    terminalTheme = 'default',
+    cursorStyle = 'block',
+    cursorBlink = true,
+    copyOnSelect = false,
+  },
+  ref,
+) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -77,7 +65,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const [showSearch, setShowSearch] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
 
@@ -101,7 +89,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       return;
     }
 
-    const prefix = needsSystemLineBreakRef.current ? "\r\n" : "";
+    const prefix = needsSystemLineBreakRef.current ? '\r\n' : '';
     terminal.writeln(`${prefix}${line}`);
     needsSystemLineBreakRef.current = false;
   };
@@ -133,47 +121,49 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     };
   }, []);
 
-  useImperativeHandle(ref, () => ({
-    sendData: (data: string) => {
-      const terminal = terminalRef.current;
-      if (!terminal) return;
-      if (statusRef.current === "connected") {
-        void invoke("write_session", {
-          sessionId: session.sessionId,
-          data,
-        }).catch((error) => {
-          terminalLogger.error("Snippet 写入失败", {
+  useImperativeHandle(
+    ref,
+    () => ({
+      sendData: (data: string) => {
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+        if (statusRef.current === 'connected') {
+          void invoke('write_session', {
             sessionId: session.sessionId,
-            error: String(error),
+            data,
+          }).catch((error) => {
+            terminalLogger.error('Snippet 写入失败', {
+              sessionId: session.sessionId,
+              error: String(error),
+            });
           });
-        });
-      } else {
-        terminal.write(data);
-      }
-    },
-    exportBuffer: () => {
-      const terminal = terminalRef.current;
-      if (!terminal) return "";
-      const lines: string[] = [];
-      const buffer = terminal.buffer.active;
-      for (let y = 0; y < buffer.length; y++) {
-        const line = buffer.getLine(y);
-        if (line) {
-          lines.push(line.translateToString(true));
+        } else {
+          terminal.write(data);
         }
-      }
-      return lines.join("\n");
-    },
-  }), [session.sessionId]);
+      },
+      exportBuffer: () => {
+        const terminal = terminalRef.current;
+        if (!terminal) return '';
+        const lines: string[] = [];
+        const buffer = terminal.buffer.active;
+        for (let y = 0; y < buffer.length; y++) {
+          const line = buffer.getLine(y);
+          if (line) {
+            lines.push(line.translateToString(true));
+          }
+        }
+        return lines.join('\n');
+      },
+    }),
+    [session.sessionId],
+  );
 
   useEffect(() => {
     statusRef.current = session.status;
     if (terminalRef.current) {
-      terminalRef.current.options.disableStdin = shouldDisableTerminalInput(
-        session.status,
-      );
+      terminalRef.current.options.disableStdin = shouldDisableTerminalInput(session.status);
     }
-    if (session.status === "connected") {
+    if (session.status === 'connected') {
       inputBlockedNoticeRef.current = false;
       reconnectRequestedRef.current = false;
     }
@@ -196,15 +186,14 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       return;
     }
 
-    terminalLogger.info("初始化终端面板", { sessionId: session.sessionId });
+    terminalLogger.info('初始化终端面板', { sessionId: session.sessionId });
 
     const terminal = new Terminal({
       cursorBlink,
       cursorStyle: getCursorStyle(cursorStyle),
       allowProposedApi: true,
       convertEol: true,
-      fontFamily:
-        '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace',
+      fontFamily: '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace',
       fontSize,
       lineHeight,
       theme: getTerminalTheme(terminalTheme, getCurrentThemeMode()),
@@ -242,27 +231,28 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
 
       const writeText = navigator.clipboard?.writeText;
       if (!writeText) {
-        showCopyFeedback("failed");
+        showCopyFeedback('failed');
         return;
       }
 
-      void writeText.call(navigator.clipboard, selection)
-        .then(() => showCopyFeedback("copied"))
-        .catch(() => showCopyFeedback("failed"));
+      void writeText
+        .call(navigator.clipboard, selection)
+        .then(() => showCopyFeedback('copied'))
+        .catch(() => showCopyFeedback('failed'));
     });
 
     terminal.attachCustomKeyEventHandler((event) => {
       if (!activeRef.current) {
         return true;
       }
-      if (event.type === "keydown") {
+      if (event.type === 'keydown') {
         const isCtrlOrMeta = event.ctrlKey || event.metaKey;
-        if (isCtrlOrMeta && event.key === "f") {
+        if (isCtrlOrMeta && event.key === 'f') {
           event.preventDefault();
           setShowSearch(true);
           return false;
         }
-        if (event.key === "Escape") {
+        if (event.key === 'Escape') {
           setShowSearch((current) => {
             if (current) {
               searchAddonRef.current?.clearDecorations?.();
@@ -287,57 +277,37 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme"],
+      attributeFilter: ['data-theme'],
     });
 
     terminal.onData((data) => {
-      if (statusRef.current !== "connected") {
-        const shouldReconnect = shouldReconnectFromInput(
-          statusRef.current,
-          data,
-        );
+      if (statusRef.current !== 'connected') {
+        const shouldReconnect = shouldReconnectFromInput(statusRef.current, data);
 
         if (shouldReconnect && !reconnectRequestedRef.current) {
           reconnectRequestedRef.current = true;
-          writeSystemLine(
-            formatTerminalNoticeLine(
-              t('terminal.notice.reconnectingLabel'),
-              t('terminal.notice.reconnectingMessage'),
-              "36",
-            ),
-          );
+          writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.reconnectingLabel'), t('terminal.notice.reconnectingMessage'), '36'));
           onReconnect();
           return;
         }
 
         if (!inputBlockedNoticeRef.current) {
-          writeSystemLine(
-            formatTerminalNoticeLine(
-              t('terminal.notice.hintLabel'),
-              t('terminal.notice.disconnectedHint'),
-            ),
-          );
+          writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
           inputBlockedNoticeRef.current = true;
         }
         return;
       }
 
-      invoke("write_session", {
+      invoke('write_session', {
         sessionId: session.sessionId,
         data,
       }).catch((error) => {
-        terminalLogger.error("写入会话失败", {
+        terminalLogger.error('写入会话失败', {
           sessionId: session.sessionId,
           error: String(error),
         });
         inputBlockedNoticeRef.current = true;
-        writeSystemLine(
-          formatTerminalNoticeLine(
-            t('terminal.notice.writeFailedLabel'),
-            t('terminal.notice.writeFailedMessage'),
-            "31",
-          ),
-        );
+        writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
       });
     });
 
@@ -354,7 +324,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       }
 
       const sendResize = () => {
-        void invoke("resize_session", {
+        void invoke('resize_session', {
           sessionId: session.sessionId,
           cols: nextTerminal.cols,
           rows: nextTerminal.rows,
@@ -390,12 +360,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       }
 
       const previousSize = lastShellSizeRef.current;
-      if (
-        !force &&
-        previousSize &&
-        previousSize.width === width &&
-        previousSize.height === height
-      ) {
+      if (!force && previousSize && previousSize.width === width && previousSize.height === height) {
         return;
       }
 
@@ -430,12 +395,12 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     scheduleResize(true);
     const resizeObserver = new ResizeObserver(handleViewportResize);
     resizeObserver.observe(shellRef.current);
-    window.addEventListener("resize", handleViewportResize);
+    window.addEventListener('resize', handleViewportResize);
 
     return () => {
-      terminalLogger.debug("销毁终端实例", { sessionId: session.sessionId });
+      terminalLogger.debug('销毁终端实例', { sessionId: session.sessionId });
       resizeObserver.disconnect();
-      window.removeEventListener("resize", handleViewportResize);
+      window.removeEventListener('resize', handleViewportResize);
       scheduleResizeRef.current = null;
       clearPendingResizeSync();
       lastShellSizeRef.current = null;
@@ -475,7 +440,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
 
   useEffect(() => {
     if (!isTauriRuntime()) {
-      terminalLogger.warn("非 Tauri 运行时，跳过终端事件监听", {
+      terminalLogger.warn('非 Tauri 运行时，跳过终端事件监听', {
         sessionId: session.sessionId,
       });
       return;
@@ -487,12 +452,12 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     let cancelled = false;
 
     const attach = async () => {
-      const nextDisposeData = await listen<SshDataEvent>("ssh-data", (event) => {
+      const nextDisposeData = await listen<SshDataEvent>('ssh-data', (event) => {
         if (event.payload.sessionId !== session.sessionId) {
           return;
         }
         if (needsConnectedShellSpacingRef.current) {
-          terminalRef.current?.write("\r\n");
+          terminalRef.current?.write('\r\n');
           needsConnectedShellSpacingRef.current = false;
         }
         terminalRef.current?.write(event.payload.chunk);
@@ -505,13 +470,13 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       }
       disposeData = nextDisposeData;
 
-      const nextDisposeStatus = await listen<SshStatusEvent>("ssh-status", (event) => {
+      const nextDisposeStatus = await listen<SshStatusEvent>('ssh-status', (event) => {
         if (event.payload.sessionId !== session.sessionId) {
           return;
         }
-        terminalLogger.info("会话状态更新", event.payload);
+        terminalLogger.info('会话状态更新', event.payload);
         writeSystemLine(formatTerminalStatusLine(event.payload.status, event.payload.message));
-        needsConnectedShellSpacingRef.current = event.payload.status === "connected";
+        needsConnectedShellSpacingRef.current = event.payload.status === 'connected';
       });
 
       if (cancelled) {
@@ -520,28 +485,19 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       }
       disposeStatus = nextDisposeStatus;
 
-      const nextDisposeClosed = await listen<SshClosedEvent>("ssh-closed", (event) => {
+      const nextDisposeClosed = await listen<SshClosedEvent>('ssh-closed', (event) => {
         if (event.payload.sessionId !== session.sessionId) {
           return;
         }
         if (shouldWarnOnClosedSession(statusRef.current)) {
-          terminalLogger.warn("会话关闭事件", event.payload);
+          terminalLogger.warn('会话关闭事件', event.payload);
         } else {
-          terminalLogger.debug("会话关闭事件（错误态已记录）", event.payload);
+          terminalLogger.debug('会话关闭事件（错误态已记录）', event.payload);
         }
         writeSystemLine(
-          formatTerminalNoticeLine(
-            t('terminal.notice.closedLabel'),
-            event.payload.reason ? `: ${event.payload.reason}` : undefined,
-            "31",
-          ),
+          formatTerminalNoticeLine(t('terminal.notice.closedLabel'), event.payload.reason ? `: ${event.payload.reason}` : undefined, '31'),
         );
-        writeSystemLine(
-          formatTerminalNoticeLine(
-            t('terminal.notice.hintLabel'),
-            t('terminal.notice.pressEnterReconnect'),
-          ),
-        );
+        writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.pressEnterReconnect')));
         inputBlockedNoticeRef.current = true;
       });
 
@@ -571,13 +527,13 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     }
   }, [showSearch]);
 
-  const performSearch = (direction: "next" | "previous") => {
+  const performSearch = (direction: 'next' | 'previous') => {
     const addon = searchAddonRef.current;
     if (!addon || !searchTerm) {
       return;
     }
     const options = { caseSensitive };
-    if (direction === "next") {
+    if (direction === 'next') {
       addon.findNext(searchTerm, options);
     } else {
       addon.findPrevious(searchTerm, options);
@@ -587,19 +543,15 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
   const closeSearch = () => {
     searchAddonRef.current?.clearDecorations?.();
     setShowSearch(false);
-    setSearchTerm("");
+    setSearchTerm('');
     terminalRef.current?.focus();
   };
 
   return (
-    <section
-      className={cn(
-        "absolute inset-0 flex flex-col",
-        active ? "opacity-100" : "pointer-events-none opacity-0",
-      )}
-    >
+    <section className={cn('absolute inset-0 flex flex-col', active ? 'opacity-100' : 'pointer-events-none opacity-0')}>
       {showSearch && (
-        <div className="absolute right-2 top-2 z-30 flex items-center gap-1.5 rounded-lg p-1.5 backdrop-blur-sm"
+        <div
+          className="absolute right-2 top-2 z-30 flex items-center gap-1.5 rounded-lg p-1.5 backdrop-blur-sm"
           style={{ background: 'var(--app-surface)', border: '1px solid var(--app-border)', boxShadow: 'var(--app-shadow)' }}
         >
           <input
@@ -617,11 +569,11 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
               }
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === 'Enter') {
                 e.preventDefault();
-                performSearch(e.shiftKey ? "previous" : "next");
+                performSearch(e.shiftKey ? 'previous' : 'next');
               }
-              if (e.key === "Escape") {
+              if (e.key === 'Escape') {
                 e.preventDefault();
                 closeSearch();
               }
@@ -629,22 +581,17 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
           />
           <button
             className="icon-btn h-6 w-6 px-0 text-xs"
-            onClick={() => performSearch("previous")}
+            onClick={() => performSearch('previous')}
             title={t('terminal.search.previous')}
             type="button"
           >
             ↑
           </button>
-          <button
-            className="icon-btn h-6 w-6 px-0 text-xs"
-            onClick={() => performSearch("next")}
-            title={t('terminal.search.next')}
-            type="button"
-          >
+          <button className="icon-btn h-6 w-6 px-0 text-xs" onClick={() => performSearch('next')} title={t('terminal.search.next')} type="button">
             ↓
           </button>
           <button
-            className={cn("icon-btn h-6 w-6 px-0 text-xs", caseSensitive && "bg-cyan-500/20 text-cyan-300")}
+            className={cn('icon-btn h-6 w-6 px-0 text-xs', caseSensitive && 'bg-cyan-500/20 text-cyan-300')}
             onClick={() => {
               const next = !caseSensitive;
               setCaseSensitive(next);
@@ -657,32 +604,22 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
           >
             Aa
           </button>
-          <button
-            className="icon-btn h-6 w-6 px-0 text-xs"
-            onClick={closeSearch}
-            title={t('terminal.search.close')}
-            type="button"
-          >
+          <button className="icon-btn h-6 w-6 px-0 text-xs" onClick={closeSearch} title={t('terminal.search.close')} type="button">
             ✕
           </button>
         </div>
       )}
-      <div
-        className="terminal-shell themed-terminal-shell min-h-0 flex-1 overflow-hidden"
-        ref={shellRef}
-      />
+      <div className="terminal-shell themed-terminal-shell min-h-0 flex-1 overflow-hidden" ref={shellRef} />
       {copyFeedback && (
         <div
           aria-live="polite"
           className={cn(
-            "terminal-copy-feedback absolute left-1/2 top-2 z-20 -translate-x-1/2 rounded-sm px-2 py-1 text-xs",
-            copyFeedback === "failed" && "terminal-copy-feedback-error",
+            'terminal-copy-feedback absolute left-1/2 top-2 z-20 -translate-x-1/2 rounded-sm px-2 py-1 text-xs',
+            copyFeedback === 'failed' && 'terminal-copy-feedback-error',
           )}
           role="status"
         >
-          {copyFeedback === "copied"
-            ? t('terminal.feedback.copied')
-            : t('terminal.feedback.copyFailed')}
+          {copyFeedback === 'copied' ? t('terminal.feedback.copied') : t('terminal.feedback.copyFailed')}
         </div>
       )}
     </section>

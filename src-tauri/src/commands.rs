@@ -295,6 +295,32 @@ pub(crate) fn cancel_download(
 }
 
 #[tauri::command]
+pub(crate) fn open_path(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| format!("failed to open path: {error}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| format!("failed to open path: {error}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| format!("failed to open path: {error}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub(crate) fn pick_local_files() -> Result<Vec<String>, String> {
     let paths = rfd::FileDialog::new()
         .set_title("选择要上传的文件")
@@ -307,9 +333,9 @@ pub(crate) fn pick_local_files() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub(crate) fn pick_local_folder() -> Result<Vec<String>, String> {
+pub(crate) fn pick_local_folder(title: Option<String>) -> Result<Vec<String>, String> {
     let path = rfd::FileDialog::new()
-        .set_title("选择要上传的文件夹")
+        .set_title(&title.unwrap_or_else(|| "选择文件夹".to_string()))
         .pick_folder()
         .map(|path| path.to_string_lossy().to_string());
     Ok(path.into_iter().collect())

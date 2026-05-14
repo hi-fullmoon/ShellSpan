@@ -7,7 +7,7 @@ use crate::models::{
     UpdateRemotePermissionsRequest, UploadConflictPolicy, UploadLocalPathsRequest,
     UploadProgressTracker, UploadScanStats,
 };
-use log::warn;
+use log::{info, warn};
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::{
     cmp::Ordering,
@@ -270,12 +270,23 @@ pub(crate) fn download_remote_paths_blocking(
             .to_string_lossy()
             .to_string();
         let destination_path = destination_directory.join(&file_name);
+        info!(
+            "Downloading remote_path={} to destination_path={}",
+            remote_path.display(),
+            destination_path.display()
+        );
         download_remote_entry_to_path(
             &connected.sftp,
             remote_path,
             &destination_path,
             &mut progress,
         )?;
+        if !destination_path.exists() {
+            warn!(
+                "Downloaded file does not exist at destination_path={}",
+                destination_path.display()
+            );
+        }
     }
 
     progress.set_current_path(None)?;

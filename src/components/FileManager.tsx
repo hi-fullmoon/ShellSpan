@@ -606,7 +606,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   );
 
   const rowSelection = useMemo(
-    () => (batchMode ? { mode: 'multiRow' as const, checkboxes: true as const } : { mode: 'singleRow' as const, checkboxes: false as const }),
+    () =>
+      batchMode
+        ? { mode: 'multiRow' as const, checkboxes: true as const, enableClickSelection: false as const }
+        : { mode: 'singleRow' as const, checkboxes: false as const },
     [batchMode],
   );
 
@@ -934,7 +937,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setContextMenu(undefined);
 
     try {
-      const selectedPaths = await invoke<string[]>('pick_local_folder');
+      const selectedPaths = await invoke<string[]>('pick_local_folder', { title: t('fileManager.dialog.uploadFolder') });
       await handleUploadPaths(selectedPaths);
     } catch (nextError) {
       setToast({
@@ -1423,7 +1426,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     let destinationDirectory: string;
     try {
-      const selected = await invoke<string[]>('pick_local_folder');
+      const selected = await invoke<string[]>('pick_local_folder', { title: t('fileManager.dialog.downloadDestination') });
       if (!selected.length) {
         return;
       }
@@ -1466,8 +1469,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         },
       });
       setToast({
-        message: t('fileManager.feedback.downloadSingle', { name: target.name }),
+        message: t('fileManager.feedback.downloadSingle', { name: target.name, path: destinationDirectory }),
         tone: 'success',
+        action: {
+          label: t('fileManager.actions.openFolder'),
+          onClick: () => void invoke('open_path', { path: destinationDirectory }),
+        },
       });
       fileManagerLogger.info('下载完成', {
         sessionId,
@@ -1540,7 +1547,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       return;
     }
 
-    const targets = selectedEntries.filter((entry) => entry.kind !== 'directory');
+    const targets = selectedEntries;
     if (!targets.length) {
       setToast({
         message: t('fileManager.feedback.downloadNothing'),
@@ -1551,7 +1558,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     let destinationDirectory: string;
     try {
-      const selected = await invoke<string[]>('pick_local_folder');
+      const selected = await invoke<string[]>('pick_local_folder', { title: t('fileManager.dialog.downloadDestination') });
       if (!selected.length) {
         return;
       }
@@ -1595,8 +1602,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         },
       });
       setToast({
-        message: t('fileManager.feedback.downloadMulti', { count: targets.length }),
+        message: t('fileManager.feedback.downloadMulti', { count: targets.length, path: destinationDirectory }),
         tone: 'success',
+        action: {
+          label: t('fileManager.actions.openFolder'),
+          onClick: () => void invoke('open_path', { path: destinationDirectory }),
+        },
       });
       fileManagerLogger.info('批量下载完成', {
         sessionId,
@@ -2489,17 +2500,34 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
               ) : (
                 <div className="flex max-h-60 flex-col overflow-auto">
                   {bookmarks.map((path) => (
-                    <button
-                      className="themed-menu-item px-2 py-1 text-left text-[12px] font-medium transition"
+                    <div
+                      className="themed-menu-item flex items-center px-2 py-1 text-[12px] font-medium transition"
                       key={path}
-                      onClick={() => {
-                        setBookmarkMenuOpen(false);
-                        void loadDirectory(path);
-                      }}
-                      type="button"
                     >
-                      {path}
-                    </button>
+                      <button
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => {
+                          setBookmarkMenuOpen(false);
+                          void loadDirectory(path);
+                        }}
+                        type="button"
+                      >
+                        {path}
+                      </button>
+                      {onRemoveBookmark && (
+                        <button
+                          aria-label={t('fileManager.bookmarks.remove')}
+                          className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRemoveBookmark(path);
+                          }}
+                          type="button"
+                        >
+                          <CloseIcon />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
