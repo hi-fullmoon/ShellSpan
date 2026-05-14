@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { FormEvent, useState, type ChangeEvent } from 'react';
 import { t } from '../lib/i18n';
 import { parseQuickConnect } from '../lib/profile';
-import type { ConnectionGroup, ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
+import type { ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
 import { FolderIcon } from './Icons';
 import { cn } from '../lib/ui';
 import { Tooltip } from './Tooltip';
@@ -12,7 +12,6 @@ type TabKey = 'basic' | 'jumpHost' | 'portForwarding';
 
 interface ConnectionFormProps {
   profile: ConnectionProfile;
-  groups?: ConnectionGroup[];
   onProfileChange: (profile: ConnectionProfile) => void;
   onConnect: (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => void;
   compact?: boolean;
@@ -21,7 +20,7 @@ interface ConnectionFormProps {
 
 const tabKeys: TabKey[] = ['basic', 'jumpHost', 'portForwarding'];
 
-export function ConnectionForm({ profile, groups = [], onProfileChange, onConnect, compact = false, isConnecting }: ConnectionFormProps) {
+export function ConnectionForm({ profile, onProfileChange, onConnect, compact = false, isConnecting }: ConnectionFormProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('basic');
 
   const handleTextChange = (field: keyof ConnectionProfile) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -274,27 +273,6 @@ export function ConnectionForm({ profile, groups = [], onProfileChange, onConnec
                 ))}
               </div>
             </label>
-
-            {groups.length > 0 ? (
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-medium text-(--app-text-soft)">{t('connectionForm.group')}</span>
-                <select
-                  className="themed-input h-8.5 px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
-                  value={profile.groupId ?? ''}
-                  onChange={(event) =>
-                    onProfileChange({
-                      ...profile,
-                      groupId: event.target.value || undefined,
-                    })
-                  }
-                >
-                  <option value="">{t('connectionForm.noGroup')}</option>
-                  {groups.map((group) => (
-                    <option key={group.id} value={group.id}>{group.name}</option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
 
             <div className="flex flex-wrap gap-1">
               <label className="themed-checkbox-row flex items-center gap-2 px-3 py-1.5 text-xs">

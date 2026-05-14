@@ -32,12 +32,6 @@ export interface AppPreferences {
   keyboardShortcuts?: Partial<Record<ShortcutAction, string>>;
 }
 
-export interface ConnectionGroup {
-  id: string;
-  name: string;
-  color?: string;
-}
-
 export interface ConnectionProfile {
   id: string;
   name: string;
@@ -55,7 +49,6 @@ export interface ConnectionProfile {
   portForwards?: PortForwardConfig[];
   bookmarks?: string[];
   color?: string;
-  groupId?: string;
 }
 
 export interface SessionSummary {

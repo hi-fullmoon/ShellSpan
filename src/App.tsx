@@ -35,7 +35,7 @@ import { cn, sessionStatusTone } from './lib/ui';
 import { DEFAULT_SHORTCUTS, matchesBinding } from './lib/keyboard';
 import type { ShortcutAction } from './lib/keyboard';
 import type { TerminalPaneRef } from './components/TerminalPane';
-import type { AppPreferences, ConnectionGroup, ConnectionProfile, HostKeyCheckResponse, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
+import type { AppPreferences, ConnectionProfile, HostKeyCheckResponse, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
 
 const appLogger = createLogger('app');
 const SYSTEM_OPEN_SETTINGS_EVENT = 'system-open-settings';
@@ -191,7 +191,6 @@ async function openSettingsWindow(preferences?: AppPreferences): Promise<void> {
 function App() {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
   const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>('termbridge.savedProfiles', [], ['windbridge.savedProfiles']);
-  const [savedGroups, setSavedGroups] = useLocalStorage<ConnectionGroup[]>('termbridge.groups', []);
   const [storedPreferences, setStoredPreferences] = useLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
@@ -1127,36 +1126,6 @@ function App() {
     );
   };
 
-  const handleMoveProfileToGroup = (profileId: string, groupId?: string) => {
-    setSavedProfiles((current) =>
-      current.map((profile) =>
-        profile.id === profileId
-          ? { ...profile, groupId }
-          : profile,
-      ),
-    );
-  };
-
-  const handleAddGroup = (name: string) => {
-    const id = crypto.randomUUID();
-    setSavedGroups((current) => [...current, { id, name }]);
-  };
-
-  const handleDeleteGroup = (groupId: string) => {
-    setSavedGroups((current) => current.filter((g) => g.id !== groupId));
-    setSavedProfiles((current) =>
-      current.map((profile) =>
-        profile.groupId === groupId ? { ...profile, groupId: undefined } : profile,
-      ),
-    );
-  };
-
-  const handleRenameGroup = (groupId: string, name: string) => {
-    setSavedGroups((current) =>
-      current.map((g) => (g.id === groupId ? { ...g, name } : g)),
-    );
-  };
-
   const handleReconnectSession = async (sessionId: string, options?: { automatic?: boolean }) => {
     const automatic = options?.automatic ?? false;
     const target = sessionsRef.current.find((item) => item.sessionId === sessionId);
@@ -1493,14 +1462,9 @@ function App() {
                     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
                       <Sidebar
                         connectedCount={connectedSessions}
-                        groups={savedGroups}
                         runtimeLabel={runtimeText}
                         savedProfiles={savedProfiles}
-                        onAddGroup={handleAddGroup}
-                        onDeleteGroup={handleDeleteGroup}
                         onDeleteProfile={handleDeleteSavedProfile}
-                        onMoveProfileToGroup={handleMoveProfileToGroup}
-                        onRenameGroup={handleRenameGroup}
                         onRenameProfile={handleRenameSavedProfile}
                         onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
                         onTogglePinnedProfile={handleToggleSavedProfilePinned}
@@ -1538,7 +1502,6 @@ function App() {
 
       <ConnectDialog
         draftProfile={draftProfile}
-        groups={savedGroups}
         isConnecting={isConnecting}
         onClose={() => setConnectDialogOpen(false)}
         onConnect={(profile, remember, rememberPassword) => {
