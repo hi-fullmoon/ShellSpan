@@ -1053,6 +1053,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     };
   }, [bookmarkMenuOpen]);
 
+  useEffect(() => {
+    if (bookmarkMenuOpen && bookmarks.length === 0) {
+      setBookmarkMenuOpen(false);
+    }
+  }, [bookmarkMenuOpen, bookmarks.length]);
+
   useLayoutEffect(() => {
     if (!contextMenu || !menuRef.current) {
       return;
@@ -2082,21 +2088,23 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                 placeholder={t('fileManager.pathPlaceholder')}
                 value={pathInput}
               />
-              <button
-                aria-label={t('fileManager.bookmarks.jump')}
-                className={cn('icon-btn h-6 w-6 px-0', isCurrentPathBookmarked && 'text-amber-400')}
-                disabled={!ready || !currentPath || loading || working}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openBookmarkMenu();
-                }}
-                ref={bookmarkButtonRef}
-                type="button"
-              >
-                <Tooltip content={t('fileManager.bookmarks.jump')}>
-                  <BookmarkIcon />
-                </Tooltip>
-              </button>
+              {bookmarks.length > 0 && (
+                <button
+                  aria-label={t('fileManager.bookmarks.jump')}
+                  className={cn('icon-btn h-6 w-6 px-0', isCurrentPathBookmarked && 'text-amber-400')}
+                  disabled={!ready || !currentPath || loading || working}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openBookmarkMenu();
+                  }}
+                  ref={bookmarkButtonRef}
+                  type="button"
+                >
+                  <Tooltip content={t('fileManager.bookmarks.jump')}>
+                    <BookmarkIcon />
+                  </Tooltip>
+                </button>
+              )}
               <button
                 aria-label={t('fileManager.actions.refresh')}
                 className="icon-btn h-6 w-6 px-0"
@@ -2216,6 +2224,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                     overlayNoRowsTemplate={`<span class="termbridge-grid-overlay">${t('fileManager.emptyDirectory')}</span>`}
                     ref={gridRef}
                     rowSelection={rowSelection}
+                    selectionColumnDef={{ width: 28, minWidth: 28, maxWidth: 28, suppressSizeToFit: true, resizable: false }}
                     rowData={filteredEntries}
                     rowHeight={28}
                     suppressCellFocus
@@ -2256,6 +2265,17 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                       disabled={!ready || loading || working || !selectedPaths.length}
                       label={t('fileManager.menu.delete')}
                       onClick={() => handleBatchDelete()}
+                    />
+                    <MenuDivider />
+                    <MenuButton
+                      disabled={working}
+                      label={t('fileManager.batch.exit')}
+                      onClick={() => {
+                        setBatchMode(false);
+                        setSelectedPaths([]);
+                        setSelectedPath(undefined);
+                        setContextMenu(undefined);
+                      }}
                     />
                   </div>
                 ) : (
@@ -2445,7 +2465,18 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                         setContextMenu(undefined);
                       }}
                     />
-                  ) : null}
+                  ) : (
+                    <MenuButton
+                      disabled={working}
+                      label={t('fileManager.batch.exit')}
+                      onClick={() => {
+                        setBatchMode(false);
+                        setSelectedPaths([]);
+                        setSelectedPath(undefined);
+                        setContextMenu(undefined);
+                      }}
+                    />
+                  )}
                   <MenuButton
                     disabled={!ready || loading || working}
                     label={t('fileManager.actions.refresh')}
