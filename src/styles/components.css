@@ -253,7 +253,7 @@
 }
 
 .themed-menu-divider {
-  background: var(--app-border);
+  border-top: 1px solid var(--app-border);
 }
 
 .themed-toast {

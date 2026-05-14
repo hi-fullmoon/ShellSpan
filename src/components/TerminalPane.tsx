@@ -1,16 +1,33 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { FitAddon } from '@xterm/addon-fit';
-import { SearchAddon } from '@xterm/addon-search';
-import { Terminal } from '@xterm/xterm';
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { t } from '../lib/i18n';
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { Terminal } from "@xterm/xterm";
+import { createPortal } from 'react-dom';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../lib/i18n";
 import { createLogger } from '../lib/logger';
 import { isTauriRuntime } from '../lib/tauri';
-import { formatTerminalNoticeLine, formatTerminalPrefixedText, formatTerminalStatusLine } from '../lib/terminal';
-import { shouldDisableTerminalInput, shouldReconnectFromInput, shouldWarnOnClosedSession } from '../lib/terminal';
-import { cn, getCurrentThemeMode, getTerminalTheme, getCursorStyle } from '../lib/ui';
-import type { SessionState, SshClosedEvent, SshDataEvent, SshStatusEvent, TerminalTheme, CursorStyle } from '../types';
+import { useSnippetsStore } from "../stores/snippetsStore";
+import {
+  formatTerminalNoticeLine,
+  formatTerminalPrefixedText,
+  formatTerminalStatusLine,
+} from '../lib/terminal';
+import {
+  shouldDisableTerminalInput,
+  shouldReconnectFromInput,
+  shouldWarnOnClosedSession,
+} from '../lib/terminal';
+import { cn, getCurrentThemeMode, getTerminalTheme, getCursorStyle } from "../lib/ui";
+import type {
+  SessionState,
+  SshClosedEvent,
+  SshDataEvent,
+  SshStatusEvent,
+  TerminalTheme,
+  CursorStyle,
+} from "../types";
 
 export interface TerminalPaneRef {
   sendData: (data: string) => void;
@@ -32,20 +49,31 @@ interface TerminalPaneProps {
 const terminalLogger = createLogger('terminal');
 type CopyFeedback = 'copied' | 'failed';
 
-export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(function TerminalPane(
-  {
-    session,
-    active,
-    onReconnect,
-    fontSize = 14,
-    lineHeight = 1.25,
-    terminalTheme = 'default',
-    cursorStyle = 'block',
-    cursorBlink = true,
-    copyOnSelect = false,
-  },
-  ref,
-) {
+interface ContextMenuState {
+  x: number;
+  y: number;
+  hasSelection: boolean;
+}
+
+function clampMenuPosition(x: number, y: number, width: number, height: number) {
+  const edge = 8;
+  return {
+    x: Math.max(edge, Math.min(x, window.innerWidth - width - edge)),
+    y: Math.max(edge, Math.min(y, window.innerHeight - height - edge)),
+  };
+}
+
+export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(function TerminalPane({
+  session,
+  active,
+  onReconnect,
+  fontSize = 14,
+  lineHeight = 1.25,
+  terminalTheme = 'default',
+  cursorStyle = 'block',
+  cursorBlink = true,
+  copyOnSelect = false,
+}, ref) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -64,10 +92,15 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
   const needsConnectedShellSpacingRef = useRef(false);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [snippetSubmenuOpen, setSnippetSubmenuOpen] = useState(false);
+  const submenuRef = useRef<HTMLDivElement | null>(null);
+  const snippets = useSnippetsStore((state) => state.snippets);
 
   const showCopyFeedback = (feedback: CopyFeedback) => {
     if (!mountedRef.current) {
@@ -81,6 +114,75 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       copyFeedbackTimerRef.current = null;
       setCopyFeedback(null);
     }, 1000);
+  };
+
+  const handleContextMenuCopy = async () => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const selection = terminal.getSelection();
+    if (!selection) return;
+    try {
+      await navigator.clipboard.writeText(selection);
+      showCopyFeedback("copied");
+    } catch {
+      showCopyFeedback("failed");
+    }
+    setContextMenu(null);
+  };
+
+  const handleContextMenuPaste = async () => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return;
+      if (statusRef.current === "connected") {
+        await invoke("write_session", {
+          sessionId: session.sessionId,
+          data: text,
+        });
+      } else {
+        terminal.write(text);
+      }
+    } catch {
+      showCopyFeedback("failed");
+    }
+    setContextMenu(null);
+  };
+
+  const handleContextMenuSelectAll = () => {
+    terminalRef.current?.selectAll();
+    setContextMenu(null);
+  };
+
+  const handleContextMenuClear = () => {
+    terminalRef.current?.clear();
+    setContextMenu(null);
+  };
+
+  const handleContextMenuFind = () => {
+    setShowSearch(true);
+    setContextMenu(null);
+  };
+
+  const handleSendSnippet = (command: string) => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const data = command + "\r";
+    if (statusRef.current === "connected") {
+      void invoke("write_session", {
+        sessionId: session.sessionId,
+        data,
+      }).catch((error) => {
+        terminalLogger.error("快捷命令发送失败", {
+          sessionId: session.sessionId,
+          error: String(error),
+        });
+      });
+    } else {
+      terminal.write(data);
+    }
+    setContextMenu(null);
   };
 
   const writeSystemLine = (line: string) => {
@@ -121,22 +223,70 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     };
   }, []);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      sendData: (data: string) => {
-        const terminal = terminalRef.current;
-        if (!terminal) return;
-        if (statusRef.current === 'connected') {
-          void invoke('write_session', {
+  useLayoutEffect(() => {
+    if (!contextMenu || !menuRef.current) {
+      return;
+    }
+    const rect = menuRef.current.getBoundingClientRect();
+    const nextPosition = clampMenuPosition(contextMenu.x, contextMenu.y, rect.width, rect.height);
+    if (nextPosition.x === contextMenu.x && nextPosition.y === contextMenu.y) {
+      return;
+    }
+    setContextMenu((current) =>
+      current ? { ...current, x: nextPosition.x, y: nextPosition.y } : current,
+    );
+  }, [contextMenu]);
+
+  useLayoutEffect(() => {
+    if (!snippetSubmenuOpen || !menuRef.current || !submenuRef.current || !contextMenu) {
+      return;
+    }
+    const menuRect = menuRef.current.getBoundingClientRect();
+    const submenuRect = submenuRef.current.getBoundingClientRect();
+    const edge = 8;
+    const wouldOverflowRight = menuRect.right + submenuRect.width + edge > window.innerWidth;
+    if (wouldOverflowRight) {
+      submenuRef.current.style.left = "auto";
+      submenuRef.current.style.right = "100%";
+      submenuRef.current.style.marginLeft = "0";
+      submenuRef.current.style.marginRight = "4px";
+    } else {
+      submenuRef.current.style.left = "100%";
+      submenuRef.current.style.right = "auto";
+      submenuRef.current.style.marginLeft = "4px";
+      submenuRef.current.style.marginRight = "0";
+    }
+  }, [snippetSubmenuOpen, contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+    const handleWindowClick = () => setContextMenu(null);
+    window.addEventListener("click", handleWindowClick);
+    return () => window.removeEventListener("click", handleWindowClick);
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      setSnippetSubmenuOpen(false);
+    }
+  }, [contextMenu]);
+
+  useImperativeHandle(ref, () => ({
+    sendData: (data: string) => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      if (statusRef.current === "connected") {
+        void invoke("write_session", {
+          sessionId: session.sessionId,
+          data,
+        }).catch((error) => {
+          terminalLogger.error("Snippet 写入失败", {
             sessionId: session.sessionId,
-            data,
-          }).catch((error) => {
-            terminalLogger.error('Snippet 写入失败', {
-              sessionId: session.sessionId,
-              error: String(error),
-            });
+            error: String(error),
           });
+        });
         } else {
           terminal.write(data);
         }
@@ -218,6 +368,17 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     fitRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
     lastShellSizeRef.current = null;
+
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      if (!terminalRef.current) return;
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        hasSelection: !!terminalRef.current.getSelection(),
+      });
+    };
+    terminal.element?.addEventListener("contextmenu", handleContextMenu);
 
     terminal.onSelectionChange(() => {
       if (!copyOnSelectRef.current) {
@@ -398,7 +559,8 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     window.addEventListener('resize', handleViewportResize);
 
     return () => {
-      terminalLogger.debug('销毁终端实例', { sessionId: session.sessionId });
+      terminalLogger.debug("销毁终端实例", { sessionId: session.sessionId });
+      terminal.element?.removeEventListener("contextmenu", handleContextMenu);
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleViewportResize);
       scheduleResizeRef.current = null;
@@ -622,6 +784,101 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
           {copyFeedback === 'copied' ? t('terminal.feedback.copied') : t('terminal.feedback.copyFailed')}
         </div>
       )}
+      {contextMenu
+        ? createPortal(
+            <div
+              className="themed-menu fixed z-50 min-w-28 rounded-lg p-1 backdrop-blur"
+              onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
+              ref={menuRef}
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
+              <div className="flex flex-col">
+                <button
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                  disabled={!contextMenu.hasSelection}
+                  onClick={handleContextMenuCopy}
+                  type="button"
+                >
+                  {t('terminal.contextMenu.copy')}
+                </button>
+                <button
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                  onClick={handleContextMenuPaste}
+                  type="button"
+                >
+                  {t('terminal.contextMenu.paste')}
+                </button>
+                <div className="themed-menu-divider my-1 h-px" />
+                <button
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                  onClick={handleContextMenuSelectAll}
+                  type="button"
+                >
+                  {t('terminal.contextMenu.selectAll')}
+                </button>
+                <div className="themed-menu-divider my-1 h-px" />
+                <button
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                  onClick={handleContextMenuClear}
+                  type="button"
+                >
+                  {t('terminal.contextMenu.clear')}
+                </button>
+                <div className="themed-menu-divider my-1 h-px" />
+                <button
+                  className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                  onClick={handleContextMenuFind}
+                  type="button"
+                >
+                  {t('terminal.contextMenu.find')}
+                </button>
+                <div
+                  className="relative"
+                  onMouseEnter={() => setSnippetSubmenuOpen(true)}
+                  onMouseLeave={() => setSnippetSubmenuOpen(false)}
+                >
+                  <button
+                    className="themed-menu-item flex w-full items-center justify-between whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                    disabled={snippets.length === 0}
+                    type="button"
+                  >
+                    <span>{t('terminal.contextMenu.snippets')}</span>
+                    <span className="text-[10px] text-slate-400">▸</span>
+                  </button>
+                  {snippetSubmenuOpen && (
+                    <div
+                      className="themed-menu absolute top-0 z-50 min-w-28 rounded-lg p-1 backdrop-blur"
+                      ref={submenuRef}
+                      style={{ left: "100%", marginLeft: "4px" }}
+                    >
+                      {snippets.length === 0 ? (
+                        <div className="px-2 py-1 text-[11px] text-slate-400">
+                          {t('terminal.contextMenu.noSnippets')}
+                        </div>
+                      ) : (
+                        <div className="flex max-h-60 flex-col overflow-auto">
+                          {snippets.map((snippet) => (
+                            <button
+                              className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
+                              key={snippet.id}
+                              onClick={() => handleSendSnippet(snippet.command)}
+                              title={snippet.command}
+                              type="button"
+                            >
+                              {snippet.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 });
