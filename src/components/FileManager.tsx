@@ -595,7 +595,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     () =>
       batchMode
         ? { mode: 'multiRow' as const, checkboxes: true as const, enableClickSelection: false as const }
-        : { mode: 'singleRow' as const, checkboxes: false as const },
+        : { mode: 'singleRow' as const, checkboxes: false as const, enableClickSelection: true as const },
     [batchMode],
   );
 
@@ -1988,13 +1988,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     setSelectedPath(event.data.path);
 
-    if (!batchMode && !event.node.isSelected()) {
-      const api = gridRef.current?.api;
-      if (api) {
-        api.deselectAll();
-        event.node.setSelected(true);
-      }
-    }
   };
 
   const handleGridSelectionChanged = (event: SelectionChangedEvent<RemoteFileEntry>) => {
@@ -2028,10 +2021,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setBookmarkMenuOpen(false);
     setSelectedPath(target.path);
 
-    const api = gridRef.current?.api;
-    if (api && !batchMode) {
-      api.deselectAll();
-      event.node.setSelected(true);
+    if (!batchMode && event.node) {
+      event.node.setSelected(true, true);
     }
 
     setContextMenu({
@@ -2517,10 +2508,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
               ) : (
                 <div className="flex max-h-60 flex-col overflow-auto">
                   {bookmarks.map((path) => (
-                    <div
-                      className="themed-menu-item flex items-center px-2 py-1 text-[12px] font-medium transition"
-                      key={path}
-                    >
+                    <div className="themed-menu-item flex items-center px-2 py-1 text-[12px] font-medium transition" key={path}>
                       <button
                         className="min-w-0 flex-1 text-left"
                         onClick={() => {
