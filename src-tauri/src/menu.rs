@@ -101,11 +101,14 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
         return;
     }
 
-    if menu_id == TRAY_ABOUT_ID {
-        if let Err(error) = emit_system_about(app) {
-            error!("failed to handle about menu event: {error}");
+    #[cfg(target_os = "windows")]
+    {
+        if menu_id == TRAY_ABOUT_ID {
+            if let Err(error) = emit_system_about(app) {
+                error!("failed to handle about menu event: {error}");
+            }
+            return;
         }
-        return;
     }
 
     #[cfg(target_os = "macos")]
