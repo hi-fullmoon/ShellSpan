@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useSnippetsStore } from "../stores/snippetsStore";
 import { ScrollArea } from "./ScrollArea";
 import { Tooltip } from "./Tooltip";
+import { Input } from "@chakra-ui/react";
 import { t } from "../lib/i18n";
 import type { CommandSnippet } from "../types";
 
@@ -88,13 +89,13 @@ function SnippetDialog({
         </div>
 
         <div className="mt-3 flex flex-col gap-2">
-          <input
+          <Input
             ref={nameRef}
-            className="themed-input w-full px-3 py-1.5 text-sm outline-none transition focus:border-cyan-400/60"
+            className="themed-input w-full text-sm outline-none transition focus:border-cyan-400/60"
             placeholder={t("snippets.dialog.namePlaceholder")}
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
               if (e.key === "Enter" && name.trim() && command.trim()) {
                 onSave(name.trim(), command.trim());
                 onClose();
@@ -109,8 +110,8 @@ function SnippetDialog({
             rows={3}
             placeholder={t("snippets.dialog.commandPlaceholder")}
             value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={(e) => {
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCommand(e.target.value)}
+            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
               if (e.key === "Escape") {
                 onClose();
               }

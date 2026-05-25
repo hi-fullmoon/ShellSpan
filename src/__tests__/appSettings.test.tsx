@@ -1,8 +1,25 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '../test-utils';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@chakra-ui/react', async () => {
+  const actual = await vi.importActual('@chakra-ui/react');
+  return {
+    ...(actual as object),
+    Toaster: () => null,
+    Toast: {
+      Root: () => null,
+      Indicator: () => null,
+      Title: () => null,
+      Description: () => null,
+      ActionTrigger: () => null,
+      CloseTrigger: () => null,
+    },
+  };
+});
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -122,6 +139,7 @@ vi.mock('../components/TerminalPane', () => ({
 
 vi.mock('../components/Toast', () => ({
   Toast: () => null,
+  toaster: { create: vi.fn(), attrs: { overlap: false }, subscribe: () => () => {} },
 }));
 
 vi.mock('../components/UpdateRestartDialog', () => ({
@@ -209,9 +227,17 @@ describe('App settings', () => {
       expect(listenMock).toHaveBeenCalledWith('system-open-settings', expect.any(Function));
     });
     await emitSystemOpenSettings();
-    fireEvent.change(screen.getByLabelText('主题'), { target: { value: 'light' } });
-    fireEvent.click(screen.getByText('语言'));
-    fireEvent.change(screen.getByLabelText('语言'), { target: { value: 'en-US' } });
+    let selects = await waitFor(() => {
+      const s = document.querySelectorAll('select');
+      expect(s.length).toBeGreaterThan(0);
+      return s;
+    });
+    await userEvent.selectOptions(selects[0], 'light');
+    const tabs = document.querySelectorAll('.settings-tab');
+    expect(tabs.length).toBe(5);
+    fireEvent.click(tabs[1]);
+    selects = document.querySelectorAll('select');
+    await userEvent.selectOptions(selects[0], 'en-US');
 
     await waitFor(() => {
       expect(document.documentElement.dataset.theme).toBe('light');
@@ -246,8 +272,10 @@ describe('App settings', () => {
       expect(listenMock).toHaveBeenCalledWith('system-open-settings', expect.any(Function));
     });
     await emitSystemOpenSettings();
-
-    fireEvent.change(screen.getByLabelText('主题'), { target: { value: 'system' } });
+    await waitFor(() => {
+      expect(document.querySelector('select')).toBeInTheDocument();
+    });
+    await userEvent.selectOptions(document.querySelector('select')!, 'system');
 
     await waitFor(() => {
       expect(document.documentElement.dataset.theme).toBe('dark');

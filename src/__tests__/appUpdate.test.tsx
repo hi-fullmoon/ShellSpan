@@ -1,9 +1,25 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '../test-utils';
 import { invoke } from '@tauri-apps/api/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@chakra-ui/react', async () => {
+  const actual = await vi.importActual('@chakra-ui/react');
+  return {
+    ...(actual as object),
+    Toaster: () => null,
+    Toast: {
+      Root: () => null,
+      Indicator: () => null,
+      Title: () => null,
+      Description: () => null,
+      ActionTrigger: () => null,
+      CloseTrigger: () => null,
+    },
+  };
+});
 
 const {
   checkForUpdateMock,
@@ -140,6 +156,7 @@ vi.mock('../components/TerminalPane', () => ({
 
 vi.mock('../components/Toast', () => ({
   Toast: ({ message, open }: { message: string; open: boolean }) => (open ? <div>{message}</div> : null),
+  toaster: { create: vi.fn(), attrs: { overlap: false }, subscribe: () => () => {} },
 }));
 
 vi.mock('../components/UpdateRestartDialog', () => ({

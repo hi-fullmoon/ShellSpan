@@ -1,9 +1,25 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '../test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionProfile } from '../types';
+
+vi.mock('@chakra-ui/react', async () => {
+  const actual = await vi.importActual('@chakra-ui/react');
+  return {
+    ...(actual as object),
+    Toaster: () => null,
+    Toast: {
+      Root: () => null,
+      Indicator: () => null,
+      Title: () => null,
+      Description: () => null,
+      ActionTrigger: () => null,
+      CloseTrigger: () => null,
+    },
+  };
+});
 
 const savedProfile: ConnectionProfile = {
   id: 'saved-profile-1',
@@ -107,6 +123,7 @@ vi.mock('../components/TerminalPane', () => ({
 
 vi.mock('../components/Toast', () => ({
   Toast: () => null,
+  toaster: { create: vi.fn(), attrs: { overlap: false }, subscribe: () => () => {} },
 }));
 
 vi.mock('../components/UpdateRestartDialog', () => ({
@@ -144,18 +161,22 @@ describe('App connect dialog', () => {
     vi.clearAllMocks();
   });
 
-  it('resets the draft profile when opening a new connection after reusing history', () => {
+  it('resets the draft profile when opening a new connection after reusing history', async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开历史连接' }));
 
-    expect(screen.getByTestId('profile-name')).toHaveTextContent('Prod Server');
+    await waitFor(() => {
+      expect(screen.getByTestId('profile-name')).toHaveTextContent('Prod Server');
+    });
     expect(screen.getByTestId('profile-host')).toHaveTextContent('prod.example.com');
 
     fireEvent.click(screen.getByRole('button', { name: '关闭连接弹框' }));
     fireEvent.click(screen.getByRole('button', { name: '新建连接' }));
 
-    expect(screen.getByTestId('profile-name')).toHaveTextContent('New Session');
+    await waitFor(() => {
+      expect(screen.getByTestId('profile-name')).toHaveTextContent('New Session');
+    });
     expect(screen.getByTestId('profile-host')).toHaveTextContent('');
   });
 });

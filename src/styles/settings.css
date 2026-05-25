@@ -272,23 +272,6 @@
   color: var(--app-text-soft);
 }
 
-.settings-select {
-  height: 32px;
-  border: 1px solid var(--app-icon-border);
-  border-radius: 4px;
-  background: var(--app-icon-bg);
-  color: var(--app-text);
-  padding: 0 10px;
-  outline: none;
-  font-size: 12px;
-  appearance: none;
-}
-
-.settings-select:focus {
-  border-color: var(--app-primary-bg);
-  box-shadow: 0 0 0 3px rgb(14 165 233 / 0.14);
-}
-
 .connection-tab-panels {
   display: grid;
 }

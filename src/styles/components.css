@@ -120,73 +120,10 @@
   background: var(--app-icon-hover);
 }
 
-.segment {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 2px;
-  border: 1px solid color-mix(in srgb, var(--app-border) 72%, transparent);
-  border-radius: 6px;
-  padding: 2px;
-  background: color-mix(in srgb, var(--app-panel-secondary) 88%, var(--app-bg) 12%);
-}
-
-.segment-item {
-  min-width: 0;
-  height: 26px;
-  overflow: hidden;
-  border-radius: 4px;
-  padding: 0 8px;
-  color: var(--app-text-soft);
-  font-size: 11px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition:
-    background-color 150ms ease,
-    color 150ms ease,
-    opacity 150ms ease;
-}
-
-.segment-item:hover {
-  color: var(--app-text);
-}
-
-.segment-item-active {
-  background: color-mix(in srgb, var(--app-surface) 82%, var(--app-primary-bg) 12%);
-  color: var(--app-text);
-}
-
-.segment-item:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.app-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: grid;
-  place-items: center;
-  padding: 8px;
-  background: var(--app-overlay);
-  backdrop-filter: blur(14px);
-}
-
-.app-dialog {
-  width: 100%;
-  border-radius: 12px;
-}
-
-.dialog-title {
-  color: var(--app-text);
-}
-
 .themed-heading {
   color: var(--app-text);
 }
 
-.dialog-description,
 .text-subtle {
   color: var(--app-text-soft);
 }
@@ -213,23 +150,6 @@
   -moz-appearance: textfield;
 }
 
-.themed-checkbox-row {
-  border: 1px solid var(--app-border);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--app-surface-muted) 92%, transparent);
-  color: var(--app-text-soft);
-}
-
-.themed-checkbox {
-  height: 14px;
-  width: 14px;
-  border-radius: 4px;
-  border: 1px solid var(--app-icon-border);
-  background: var(--app-icon-bg);
-  color: var(--app-primary-bg);
-  accent-color: var(--app-primary-bg);
-}
-
 .themed-menu {
   display: flex;
   flex-direction: column;
@@ -254,39 +174,6 @@
 
 .themed-menu-divider {
   border-top: 1px solid var(--app-border);
-}
-
-.themed-toast {
-  background: var(--app-toast-bg);
-  border-color: var(--app-toast-border);
-  box-shadow: var(--app-toast-shadow);
-  color: var(--app-toast-text);
-}
-
-.themed-toast-info {
-  background: var(--app-toast-bg);
-  border-color: var(--app-toast-border);
-  color: var(--app-toast-text);
-}
-
-.themed-toast-success {
-  background: var(--app-toast-success-bg);
-  border-color: var(--app-toast-success-border);
-  color: var(--app-toast-success-text);
-}
-
-.themed-toast-error {
-  background: var(--app-toast-error-bg);
-  border-color: var(--app-toast-error-border);
-  color: var(--app-toast-error-text);
-}
-
-.themed-toast-button {
-  border-radius: 4px;
-}
-
-.themed-toast-button:hover {
-  background: var(--app-toast-action-hover);
 }
 
 .dialog-kicker {
@@ -331,26 +218,13 @@
   background: color-mix(in srgb, var(--app-surface-muted) 84%, var(--app-primary-bg) 10%);
 }
 
-.tooltip-bubble {
+.app-overlay {
   position: fixed;
-  z-index: 9999;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.4;
-  white-space: nowrap;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-  background: var(--app-surface);
-  color: var(--app-text);
-  border: 1px solid var(--app-border);
-  box-shadow: var(--app-shadow);
-  backdrop-filter: blur(12px);
-}
-
-.tooltip-trigger {
-  display: inline-flex;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
   align-items: center;
   justify-content: center;
+  padding: 1rem;
+  background: var(--app-overlay);
 }

@@ -17,8 +17,8 @@ import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane } from './components/TerminalPane';
 import { SnippetsPanel } from './components/SnippetsPanel';
-import { Toast } from './components/Toast';
-import { TooltipProvider } from './components/Tooltip';
+import { Toast, toaster } from './components/Toast';
+import { Toast as ChakraToast, Toaster } from '@chakra-ui/react';
 import { UpdateRestartDialog } from './components/UpdateRestartDialog';
 import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { createLogger } from './lib/logger';
@@ -1426,8 +1426,7 @@ function App() {
   }, [setStoredPreferences]);
 
   return (
-    <TooltipProvider>
-      <main className="h-screen overflow-hidden flex flex-col">
+    <main className="h-screen overflow-hidden flex flex-col">
       <TitleBar
         onTogglePrimarySide={handleTogglePrimarySide}
         onToggleSecondarySide={handleToggleSecondarySide}
@@ -1583,8 +1582,22 @@ function App() {
         open={Boolean(updateToast)}
         tone={updateToast?.tone ?? 'info'}
       />
+      <Toaster toaster={toaster}>
+        {(t) => (
+          <ChakraToast.Root key={t.id} maxW="420px">
+            <ChakraToast.Indicator />
+            <ChakraToast.Title>{t.title}</ChakraToast.Title>
+            {t.description && <ChakraToast.Description>{t.description}</ChakraToast.Description>}
+            {t.action && (
+              <ChakraToast.ActionTrigger onClick={t.action.onClick}>
+                {t.action.label}
+              </ChakraToast.ActionTrigger>
+            )}
+            <ChakraToast.CloseTrigger />
+          </ChakraToast.Root>
+        )}
+      </Toaster>
     </main>
-    </TooltipProvider>
   );
 }
 

@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent 
 import { PinIcon, StarIcon } from './Icons';
 import { Tooltip } from './Tooltip';
 import { ScrollArea } from './ScrollArea';
+import { Input } from '@chakra-ui/react';
 import { t } from '../lib/i18n';
 import type { ConnectionProfile } from '../types';
 
@@ -247,8 +248,9 @@ export function Sidebar({
           </div>
         </div>
         <div className="px-1 pb-0.5">
-          <input
-            className="themed-input w-full px-2 py-1 text-xs outline-none transition focus:ring-1 focus:ring-cyan-400/50"
+          <Input
+            size="sm"
+            className="themed-input w-full text-xs outline-none transition focus:ring-1 focus:ring-cyan-400/50"
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder={t('sidebar.searchPlaceholder')}
             value={searchQuery}
@@ -352,9 +354,9 @@ export function Sidebar({
                   <h3 className="themed-heading text-sm font-semibold">{t('sidebar.renameDialog.title')}</h3>
                 </div>
 
-                <input
+                <Input
                   autoFocus
-                  className="themed-input mt-3 w-full px-3 py-2 text-sm outline-none transition focus:border-cyan-400/60"
+                  className="themed-input mt-3 w-full text-sm outline-none transition focus:border-cyan-400/60"
                   onChange={(event) => setRenameValue(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {

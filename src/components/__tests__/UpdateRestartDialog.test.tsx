@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "../../test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UpdateRestartDialog } from "../UpdateRestartDialog";
 

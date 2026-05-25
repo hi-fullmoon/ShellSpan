@@ -1,7 +1,10 @@
-import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { createContext, useContext, useId, type ReactNode } from 'react';
 import { t } from '../lib/i18n';
 import { CloseIcon } from './Icons';
 import { cn } from '../lib/ui';
+
+const DialogTitleIdContext = createContext<string | undefined>(undefined);
 
 interface DialogProps {
   open: boolean;
@@ -10,14 +13,22 @@ interface DialogProps {
 }
 
 export function Dialog({ open, onClose, children }: DialogProps) {
-  if (!open) {
-    return null;
-  }
+  const titleId = useId();
 
-  return (
-    <div className="app-overlay" role="presentation" onClick={onClose}>
-      {children}
-    </div>
+  if (!open) return null;
+
+  return createPortal(
+    <DialogTitleIdContext.Provider value={titleId}>
+      <div
+        className="fixed inset-0 z-[1600] flex items-center justify-center p-4"
+        role="presentation"
+        style={{ background: 'var(--app-overlay)' }}
+        onClick={onClose}
+      >
+        {children}
+      </div>
+    </DialogTitleIdContext.Provider>,
+    document.body,
   );
 }
 
@@ -28,13 +39,20 @@ interface DialogPanelProps {
 }
 
 export function DialogPanel({ children, className, ariaLabel }: DialogPanelProps) {
+  const titleId = useContext(DialogTitleIdContext);
+
   return (
     <div
-      className={cn('app-dialog surface w-full max-w-sm p-3', className)}
-      onClick={(event) => event.stopPropagation()}
+      className={cn('rounded-md', className)}
       role="dialog"
-      aria-modal="true"
+      aria-modal="false"
       aria-label={ariaLabel}
+      aria-labelledby={ariaLabel ? undefined : titleId}
+      style={{
+        background: 'var(--app-panel-primary)',
+        color: 'var(--app-text)',
+      }}
+      onClick={(event: React.MouseEvent) => event.stopPropagation()}
     >
       {children}
     </div>
@@ -51,11 +69,13 @@ interface DialogHeaderProps {
 }
 
 export function DialogHeader({ kicker, title, description, onClose, closeLabel, className }: DialogHeaderProps) {
+  const titleId = useContext(DialogTitleIdContext);
+
   return (
     <div className={cn('flex items-start justify-between gap-2', className)}>
       <div className="flex flex-col gap-1">
         {kicker ? <p className="label">{kicker}</p> : null}
-        <h3 className="dialog-title text-sm font-semibold">{title}</h3>
+        <h3 id={titleId} className="dialog-title text-sm font-semibold">{title}</h3>
         {description ? <p className="dialog-description text-xs">{description}</p> : null}
       </div>
       {onClose ? (

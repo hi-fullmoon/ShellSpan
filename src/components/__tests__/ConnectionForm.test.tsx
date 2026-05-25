@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "../../test-utils";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionProfile } from "../../types";
 import { ConnectionForm } from "../ConnectionForm";
@@ -52,7 +53,7 @@ describe("ConnectionForm", () => {
     });
   });
 
-  it("switches to key auth and clears password fields", () => {
+  it("switches to key auth and clears password fields", async () => {
     const onProfileChange = vi.fn();
 
     render(
@@ -63,9 +64,8 @@ describe("ConnectionForm", () => {
       />,
     );
 
-    fireEvent.change(screen.getAllByRole("combobox")[0], {
-      target: { value: "key" },
-    });
+    const select = document.querySelector("select")!;
+    await userEvent.selectOptions(select, "key");
 
     expect(onProfileChange).toHaveBeenCalledWith({
       ...baseProfile,
@@ -108,10 +108,8 @@ describe("ConnectionForm", () => {
 
     expect(screen.getByDisplayValue("Demo")).toHaveClass("themed-input");
     expect(screen.getByDisplayValue("example.com")).toHaveClass("themed-input");
-    expect(screen.getAllByRole("combobox")[0]).toHaveClass("themed-input");
-    expect(screen.getByText("保存连接信息").closest("label")).toHaveClass("themed-checkbox-row");
-    expect(screen.getByText("保存密码").closest("label")).toHaveClass("themed-checkbox-row");
-    expect(screen.getAllByRole("checkbox")[0]).toHaveClass("themed-checkbox");
-    expect(screen.getAllByRole("checkbox")[1]).toHaveClass("themed-checkbox");
+    expect(document.querySelector('[class*="themed-input"] [role="combobox"], [class*="themed-input"][role="combobox"]')).toBeInTheDocument();
+    expect(screen.getByLabelText("保存连接信息")).toBeInTheDocument();
+    expect(screen.getByLabelText("保存密码")).toBeInTheDocument();
   });
 });

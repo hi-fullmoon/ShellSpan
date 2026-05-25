@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { GlobeIcon, MoonIcon, SunIcon } from './Icons';
+import { Input, Select, createListCollection, Checkbox } from '@chakra-ui/react';
 import { t } from '../lib/i18n';
 import { DEFAULT_SHORTCUTS, formatKeyBinding, recordKeyBinding, SHORTCUT_ACTIONS, SHORTCUT_LABELS, type ShortcutAction } from '../lib/keyboard';
 import type { AppPreferences, LocalePreference, ThemePreference, TerminalTheme, CursorStyle } from '../types';
@@ -35,16 +36,35 @@ function PreferenceSelect<T extends string>({
   onChange: (nextValue: T) => void;
   options: Array<{ value: T; label: string }>;
 }) {
+  const collection = useMemo(
+    () => createListCollection({ items: options.map((o) => ({ label: o.label, value: o.value })) }),
+    [options],
+  );
+
   return (
     <label className="settings-field" htmlFor={id}>
       <span className="settings-field-label">{label}</span>
-      <select aria-label={label} className="settings-select" id={id} onChange={(event) => onChange(event.target.value as T)} value={value}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <Select.Root
+        collection={collection}
+        size="sm"
+        value={[value]}
+        onValueChange={(details) => onChange(details.value[0] as T)}
+      >
+        <Select.Control className="settings-select">
+          <Select.Trigger aria-label={label} id={id}>
+            <Select.ValueText />
+          </Select.Trigger>
+          <Select.Indicator />
+        </Select.Control>
+        <Select.Content>
+          {collection.items.map((item) => (
+            <Select.Item key={item.value} item={item}>
+              <Select.ItemText>{item.label}</Select.ItemText>
+            </Select.Item>
+          ))}
+        </Select.Content>
+        <Select.HiddenSelect />
+      </Select.Root>
       <span className="settings-field-hint">{hint}</span>
     </label>
   );
@@ -73,11 +93,12 @@ function PreferenceNumber({
     <label className="settings-field" htmlFor={id}>
       <span className="settings-field-label">{label}</span>
       <div className="flex items-center gap-2">
-        <input
+        <Input
           className="settings-select w-20 text-center"
           id={id}
           max={max}
           min={min}
+          size="sm"
           onChange={(event) => {
             const next = Number(event.target.value);
             if (!Number.isNaN(next)) {
@@ -122,19 +143,20 @@ function PreferenceCheckbox({
   onChange: (nextValue: boolean) => void;
 }) {
   return (
-    <label className="themed-checkbox-row flex cursor-pointer items-center gap-2 px-2 py-1.5 text-[12px]" htmlFor={id}>
-      <input
-        checked={checked}
-        className="themed-checkbox h-3.5 w-3.5 shrink-0"
-        id={id}
-        onChange={(event) => onChange(event.target.checked)}
-        type="checkbox"
-      />
+    <Checkbox.Root
+      id={id}
+      className="themed-checkbox-row flex cursor-pointer items-center gap-2 px-2 py-1.5 text-[12px]"
+      checked={checked}
+      size="sm"
+      onCheckedChange={(details) => onChange(details.checked as boolean)}
+    >
+      <Checkbox.Control className="themed-checkbox shrink-0" />
+      <Checkbox.HiddenInput />
       <span className="flex flex-col gap-0.5">
-        <span className="font-medium text-(--app-text)">{label}</span>
+        <Checkbox.Label className="font-medium text-(--app-text)">{label}</Checkbox.Label>
         <span className="text-(--app-text-soft)">{hint}</span>
       </span>
-    </label>
+    </Checkbox.Root>
   );
 }
 

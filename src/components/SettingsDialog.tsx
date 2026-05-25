@@ -1,4 +1,4 @@
-import { Dialog, DialogHeader } from './Dialog';
+import { Dialog, DialogHeader, DialogPanel } from './Dialog';
 import { t } from '../lib/i18n';
 import { SettingsPanel } from './SettingsPanel';
 import type { AppPreferences } from '../types';
@@ -18,13 +18,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
-      <div
-        className="app-dialog settings-dialog"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('settings.title')}
-      >
+      <DialogPanel className="settings-dialog">
         <DialogHeader
           className="settings-dialog-header"
           closeLabel={t('settings.close')}
@@ -34,7 +28,7 @@ export function SettingsDialog({
           title={t('settings.title')}
         />
         <SettingsPanel onChange={onChange} preferences={preferences} />
-      </div>
+      </DialogPanel>
     </Dialog>
   );
 }

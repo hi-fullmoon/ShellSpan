@@ -22,6 +22,7 @@ import { useFileManagerStore } from '../stores/fileManagerStore';
 import { cn, fileKindColor } from '../lib/ui';
 import { ArrowUpIcon, BookmarkIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
 import { Tooltip } from './Tooltip';
+import { Checkbox } from '@chakra-ui/react';
 import { ScrollArea } from './ScrollArea';
 import { Toast, type ToastAction } from './Toast';
 import type {
@@ -2867,29 +2868,29 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
               </p>
             </div>
 
-            <label className="themed-checkbox-row flex items-center gap-2 px-2 py-2 text-[12px]">
-              <input
-                checked={pendingUploadConflict.applyToRemaining}
-                className="themed-checkbox h-3.5 w-3.5"
-                onChange={(event) =>
-                  setPendingUploadConflict((current) =>
-                    current
-                      ? {
-                          ...current,
-                          applyToRemaining: event.target.checked,
-                        }
-                      : current,
-                  )
-                }
-                type="checkbox"
-              />
-              <span>
-                {t('fileManager.uploadConflict.applyRemaining')}
-                {pendingUploadConflict.remainingConflicts > 0
+            <Checkbox.Root
+              className="themed-checkbox-row flex cursor-pointer items-center gap-2 px-2 py-2 text-[12px]"
+              checked={pendingUploadConflict.applyToRemaining}
+              size="sm"
+              onCheckedChange={(details) =>
+                setPendingUploadConflict((current) =>
+                  current
+                    ? {
+                        ...current,
+                        applyToRemaining: details.checked as boolean,
+                      }
+                    : current,
+                )
+              }
+            >
+              <Checkbox.Control className="themed-checkbox shrink-0" />
+              <Checkbox.HiddenInput />
+              <Checkbox.Label>
+                {t('fileManager.uploadConflict.applyRemaining') + (pendingUploadConflict.remainingConflicts > 0
                   ? t('fileManager.uploadConflict.remaining', { count: pendingUploadConflict.remainingConflicts })
-                  : t('fileManager.uploadConflict.last')}
-              </span>
-            </label>
+                  : '')}
+              </Checkbox.Label>
+            </Checkbox.Root>
 
             <div className="flex justify-end gap-1">
               <button

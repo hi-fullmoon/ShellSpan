@@ -1,10 +1,26 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '../test-utils';
 import { invoke } from '@tauri-apps/api/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionProfile } from '../types';
+
+vi.mock('@chakra-ui/react', async () => {
+  const actual = await vi.importActual('@chakra-ui/react');
+  return {
+    ...(actual as object),
+    Toaster: () => null,
+    Toast: {
+      Root: () => null,
+      Indicator: () => null,
+      Title: () => null,
+      Description: () => null,
+      ActionTrigger: () => null,
+      CloseTrigger: () => null,
+    },
+  };
+});
 
 const profile: ConnectionProfile = {
   id: 'profile-1',
@@ -147,6 +163,7 @@ vi.mock('../components/TerminalPane', () => ({
 
 vi.mock('../components/Toast', () => ({
   Toast: () => null,
+  toaster: { create: vi.fn(), attrs: { overlap: false }, subscribe: () => () => {} },
 }));
 
 vi.mock('../components/UpdateRestartDialog', () => ({
@@ -220,7 +237,7 @@ describe('App reconnect flow', () => {
       fireEvent.click(screen.getByRole('button', { name: '新建连接' }));
     });
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: '连接到服务器' })).getByRole('button', { name: '创建连接' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建连接' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenNthCalledWith(1, 'check_host_key', expect.anything());
@@ -268,7 +285,7 @@ describe('App reconnect flow', () => {
       fireEvent.click(screen.getByRole('button', { name: '新建连接' }));
     });
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: '连接到服务器' })).getByRole('button', { name: '创建连接' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建连接' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledTimes(2);

@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { ChakraProvider } from "./components/ChakraProvider";
 import App from "./App";
 import SettingsWindow from "./SettingsWindow";
 import "ag-grid-community/styles/ag-grid.css";
@@ -15,6 +16,8 @@ const isSettingsWindow = window.location.hash === "#settings";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {isSettingsWindow ? <SettingsWindow /> : <App />}
+    <ChakraProvider>
+      {isSettingsWindow ? <SettingsWindow /> : <App />}
+    </ChakraProvider>
   </React.StrictMode>,
 );
