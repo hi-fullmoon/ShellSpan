@@ -42,7 +42,7 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogPanel ariaLabel={t('app.aboutDialog.ariaLabel')}>
+      <DialogPanel className="w-full max-w-sm p-3" ariaLabel={t('app.aboutDialog.ariaLabel')}>
         <DialogHeader
           description={t('app.aboutDialog.description')}
           kicker={t('app.aboutDialog.kicker')}

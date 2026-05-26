@@ -12,7 +12,7 @@ interface CloseSessionDialogProps {
 export function CloseSessionDialog({ open, session, onClose, onConfirm }: CloseSessionDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogPanel ariaLabel={t('app.closeSessionDialog.ariaLabel')}>
+      <DialogPanel className="w-full max-w-sm p-3" ariaLabel={t('app.closeSessionDialog.ariaLabel')}>
         <DialogHeader
           description={t('app.closeSessionDialog.description', { name: session?.title ?? '' })}
           kicker={t('app.closeSessionDialog.kicker')}

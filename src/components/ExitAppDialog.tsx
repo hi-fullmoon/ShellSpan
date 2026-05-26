@@ -10,7 +10,7 @@ interface ExitAppDialogProps {
 export function ExitAppDialog({ open, onClose, onConfirm }: ExitAppDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogPanel ariaLabel={t('app.exitDialog.ariaLabel')}>
+      <DialogPanel className="w-full max-w-sm p-3" ariaLabel={t('app.exitDialog.ariaLabel')}>
         <DialogHeader
           description={t('app.exitDialog.description')}
           kicker={t('app.exitDialog.kicker')}

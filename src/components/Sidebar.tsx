@@ -214,6 +214,7 @@ export function Sidebar({
             className="themed-input w-full text-xs outline-none transition focus:ring-1 focus:ring-cyan-400/50"
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder={t('sidebar.searchPlaceholder')}
+            style={{ height: '26px', minHeight: '26px', paddingTop: '2px', paddingBottom: '2px' }}
             value={searchQuery}
           />
         </div>
