@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { GlobeIcon, MoonIcon, SunIcon } from './Icons';
-import { Input, Select, createListCollection, Checkbox } from '@chakra-ui/react';
+import { Input, Checkbox } from '@chakra-ui/react';
+import { FormSelect } from './FormSelect';
 import { t } from '../lib/i18n';
 import { DEFAULT_SHORTCUTS, formatKeyBinding, recordKeyBinding, SHORTCUT_ACTIONS, SHORTCUT_LABELS, type ShortcutAction } from '../lib/keyboard';
 import type { AppPreferences, LocalePreference, ThemePreference, TerminalTheme, CursorStyle } from '../types';
@@ -36,35 +37,17 @@ function PreferenceSelect<T extends string>({
   onChange: (nextValue: T) => void;
   options: Array<{ value: T; label: string }>;
 }) {
-  const collection = useMemo(
-    () => createListCollection({ items: options.map((o) => ({ label: o.label, value: o.value })) }),
-    [options],
-  );
-
   return (
     <label className="settings-field" htmlFor={id}>
       <span className="settings-field-label">{label}</span>
-      <Select.Root
-        collection={collection}
-        size="sm"
-        value={[value]}
-        onValueChange={(details) => onChange(details.value[0] as T)}
-      >
-        <Select.Control className="settings-select">
-          <Select.Trigger aria-label={label} id={id}>
-            <Select.ValueText />
-          </Select.Trigger>
-          <Select.Indicator />
-        </Select.Control>
-        <Select.Content>
-          {collection.items.map((item) => (
-            <Select.Item key={item.value} item={item}>
-              <Select.ItemText>{item.label}</Select.ItemText>
-            </Select.Item>
-          ))}
-        </Select.Content>
-        <Select.HiddenSelect />
-      </Select.Root>
+      <FormSelect
+        aria-label={label}
+        className="settings-select"
+        id={id}
+        onChange={(nextValue) => onChange(nextValue as T)}
+        options={options.map((o) => ({ label: o.label, value: o.value }))}
+        value={value}
+      />
       <span className="settings-field-hint">{hint}</span>
     </label>
   );

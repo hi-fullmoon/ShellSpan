@@ -23,6 +23,8 @@ export function Segment<T extends string>({ options, value, onChange, ariaLabel,
       value={value}
       onValueChange={(details) => onChange(details.value as T)}
       css={{
+        minHeight: 0,
+        padding: '2px',
         background: 'var(--app-icon-bg)',
         border: '1px solid var(--app-border)',
         borderRadius: '4px',
@@ -33,8 +35,12 @@ export function Segment<T extends string>({ options, value, onChange, ariaLabel,
           key={option.value}
           value={option.value}
           disabled={option.disabled}
-          className="flex-1 cursor-pointer rounded px-2 py-0.5 text-center text-xs font-medium transition-colors"
+          className="flex-1 cursor-pointer rounded px-2 text-center text-xs font-medium transition-colors"
           css={{
+            minHeight: '26px !important',
+            height: '26px !important',
+            padding: '2px 8px !important',
+            lineHeight: '1 !important',
             color: 'var(--app-text-soft)',
             '&[data-state="checked"], &[data-checked]': {
               background: 'color-mix(in srgb, var(--app-surface) 82%, var(--app-primary-bg) 12%)',

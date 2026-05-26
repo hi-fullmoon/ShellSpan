@@ -7,7 +7,8 @@ import { FolderIcon } from './Icons';
 import { cn } from '../lib/ui';
 import { Tooltip } from './Tooltip';
 import { Segment } from './Segment';
-import { Input, Select, createListCollection, Checkbox } from '@chakra-ui/react';
+import { Input, Checkbox } from '@chakra-ui/react';
+import { FormSelect } from './FormSelect';
 
 type TabKey = 'basic' | 'jumpHost' | 'portForwarding';
 
@@ -31,20 +32,6 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
       [field]: nextValue,
     });
   };
-
-  const authCollection = createListCollection({
-    items: [
-      { label: t('connectionForm.auth.password'), value: 'password' },
-      { label: t('connectionForm.auth.key'), value: 'key' },
-    ],
-  });
-
-  const forwardKindCollection = createListCollection({
-    items: [
-      { label: t('connectionForm.portForwardLocal'), value: 'local' },
-      { label: t('connectionForm.portForwardRemote'), value: 'remote' },
-    ],
-  });
 
   const handleAuthChange = (authMethod: ConnectionProfile['authMethod']) => {
     onProfileChange({
@@ -202,27 +189,15 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-(--app-text-soft)">{t('connectionForm.auth')}</span>
-                <Select.Root
-                  collection={authCollection}
-                  size="sm"
-                  value={[profile.authMethod]}
-                  onValueChange={(details) => handleAuthChange(details.value[0] as ConnectionProfile['authMethod'])}
-                >
-                  <Select.Control className="themed-input">
-                    <Select.Trigger>
-                      <Select.ValueText />
-                    </Select.Trigger>
-                    <Select.Indicator />
-                  </Select.Control>
-                  <Select.Content>
-                    {authCollection.items.map((item) => (
-                      <Select.Item key={item.value} item={item}>
-                        <Select.ItemText>{item.label}</Select.ItemText>
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                  <Select.HiddenSelect />
-                </Select.Root>
+                <FormSelect
+                  className="themed-input"
+                  onChange={(v) => handleAuthChange(v as ConnectionProfile['authMethod'])}
+                  options={[
+                    { label: t('connectionForm.auth.password'), value: 'password' },
+                    { label: t('connectionForm.auth.key'), value: 'key' },
+                  ]}
+                  value={profile.authMethod}
+                />
               </label>
             </div>
 
@@ -290,11 +265,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 >
                   <span className="absolute block h-px w-full rotate-45 bg-(--app-text-muted)/50" />
                 </button>
-                {[
-                  '#ef4444', '#f97316', '#f59e0b', '#84cc16',
-                  '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6',
-                  '#d946ef', '#f43f5e',
-                ].map((color) => (
+                {['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6', '#d946ef', '#f43f5e'].map((color) => (
                   <button
                     className={cn(
                       'h-5 w-5 shrink-0 rounded-full transition-transform hover:scale-110',
@@ -422,35 +393,23 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-(--app-text-soft)">{t('connectionForm.auth')}</span>
-                <Select.Root
-                  collection={authCollection}
-                  size="sm"
-                  value={[profile.jumpHost?.authMethod ?? 'password']}
-                  onValueChange={(details) => {
+                <FormSelect
+                  className="themed-input"
+                  onChange={(v) => {
                     const next: JumpHostConfig = {
                       host: profile.jumpHost?.host ?? '',
                       port: profile.jumpHost?.port ?? 22,
                       username: profile.jumpHost?.username ?? '',
-                      authMethod: details.value[0] as ConnectionProfile['authMethod'],
+                      authMethod: v as ConnectionProfile['authMethod'],
                     };
                     onProfileChange({ ...profile, jumpHost: next });
                   }}
-                >
-                  <Select.Control className="themed-input">
-                    <Select.Trigger>
-                      <Select.ValueText />
-                    </Select.Trigger>
-                    <Select.Indicator />
-                  </Select.Control>
-                  <Select.Content>
-                    {authCollection.items.map((item) => (
-                      <Select.Item key={item.value} item={item}>
-                        <Select.ItemText>{item.label}</Select.ItemText>
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                  <Select.HiddenSelect />
-                </Select.Root>
+                  options={[
+                    { label: t('connectionForm.auth.password'), value: 'password' },
+                    { label: t('connectionForm.auth.key'), value: 'key' },
+                  ]}
+                  value={profile.jumpHost?.authMethod ?? 'password'}
+                />
               </label>
             </div>
             {(profile.jumpHost?.authMethod ?? 'password') === 'password' ? (
@@ -540,31 +499,19 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 <div key={i} className="flex flex-wrap items-end gap-1.5 border border-(--app-border) p-1.5 rounded-s">
                   <label className="flex flex-col gap-0.5">
                     <span className="text-[10px] font-medium text-(--app-text-muted)">{t('connectionForm.portForwardKind')}</span>
-                    <Select.Root
-                      collection={forwardKindCollection}
-                      size="sm"
-                      value={[fw.kind]}
-                      onValueChange={(details) => {
+                    <FormSelect
+                      className="themed-input text-xs"
+                      onChange={(v) => {
                         const next = [...(profile.portForwards ?? [])];
-                        next[i] = { ...next[i], kind: details.value[0] as 'local' | 'remote' };
+                        next[i] = { ...next[i], kind: v as 'local' | 'remote' };
                         onProfileChange({ ...profile, portForwards: next });
                       }}
-                    >
-                      <Select.Control className="themed-input text-xs">
-                        <Select.Trigger>
-                          <Select.ValueText />
-                        </Select.Trigger>
-                        <Select.Indicator />
-                      </Select.Control>
-                      <Select.Content>
-                        {forwardKindCollection.items.map((item) => (
-                          <Select.Item key={item.value} item={item}>
-                            <Select.ItemText>{item.label}</Select.ItemText>
-                          </Select.Item>
-                        ))}
-                      </Select.Content>
-                      <Select.HiddenSelect />
-                    </Select.Root>
+                      options={[
+                        { label: t('connectionForm.portForwardLocal'), value: 'local' },
+                        { label: t('connectionForm.portForwardRemote'), value: 'remote' },
+                      ]}
+                      value={fw.kind}
+                    />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className="text-[10px] font-medium text-(--app-text-muted)">{t('connectionForm.port')}</span>
