@@ -451,12 +451,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     position: contextMenuPosition,
     open: openContextMenu,
     close: closeContextMenu,
+    menuRef: contextMenuRef,
   } = useContextMenu('file-manager');
   const {
     isOpen: bookmarkMenuOpen,
     position: bookmarkMenuPosition,
     open: openBookmarkMenu,
     close: closeBookmarkMenu,
+    menuRef: bookmarkMenuRef,
   } = useContextMenu('file-manager-bookmarks');
   const [preview, setPreview] = useState<RemoteFileContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -2194,6 +2196,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                   event.preventDefault();
                 }
               }}
+              ref={contextMenuRef}
               style={{ left: contextMenuPosition.x, top: contextMenuPosition.y }}
             >
               {contextMenuData.target === 'entry' ? (
@@ -2453,6 +2456,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
               className="themed-menu fixed z-50 min-w-44 rounded-lg p-1 backdrop-blur"
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
+              ref={bookmarkMenuRef}
               style={{ left: bookmarkMenuPosition.x, top: bookmarkMenuPosition.y }}
             >
               {bookmarks.length === 0 ? (

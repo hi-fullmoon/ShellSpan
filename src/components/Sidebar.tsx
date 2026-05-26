@@ -93,7 +93,7 @@ export function Sidebar({
 }: SidebarProps) {
   const clickTimerRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined);
   const [menuProfile, setMenuProfile] = useState<ConnectionProfile | null>(null);
-  const { isOpen: menuOpen, position: menuPosition, open: openMenu, close: closeMenu } = useContextMenu('sidebar-history');
+  const { isOpen: menuOpen, position: menuPosition, open: openMenu, close: closeMenu, menuRef } = useContextMenu('sidebar-history');
   const [renamingProfileId, setRenamingProfileId] = useState<string>();
   const [renameValue, setRenameValue] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -254,6 +254,7 @@ export function Sidebar({
                 className="themed-menu fixed z-50 max-w-24 rounded-lg p-1 backdrop-blur"
                 onClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.preventDefault()}
+                ref={menuRef}
                 style={{ left: menuPosition.x, top: menuPosition.y }}
               >
                 <button

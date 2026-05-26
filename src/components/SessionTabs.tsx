@@ -277,6 +277,7 @@ const TAB_COLORS = [
 function TabContextMenu({
   menuSession,
   menuPosition,
+  menuRef,
   sessions,
   activeSessionId,
   onClose,
@@ -291,6 +292,7 @@ function TabContextMenu({
 }: {
   menuSession: SessionState;
   menuPosition: { x: number; y: number };
+  menuRef: React.RefObject<HTMLDivElement | null>;
   sessions: SessionState[];
   activeSessionId?: string;
   onClose: (sessionId: string) => void;
@@ -328,6 +330,7 @@ function TabContextMenu({
         className="themed-menu fixed z-50 min-w-40 rounded-lg p-1 backdrop-blur"
         onClick={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
+        ref={menuRef}
         style={{ left: menuPosition.x, top: menuPosition.y }}
       >
         <button
@@ -445,7 +448,7 @@ export function SessionTabs({
   const [renamingSessionId, setRenamingSessionId] = useState<string>();
   const [renameValue, setRenameValue] = useState('');
   const [menuSession, setMenuSession] = useState<SessionState | null>(null);
-  const { isOpen: menuOpen, position: menuPosition, open: openMenu, close: closeMenu } = useContextMenu('session-tabs');
+  const { isOpen: menuOpen, position: menuPosition, open: openMenu, close: closeMenu, menuRef } = useContextMenu('session-tabs');
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -653,6 +656,7 @@ export function SessionTabs({
         <TabContextMenu
           activeSessionId={activeSessionId}
           menuPosition={menuPosition}
+          menuRef={menuRef}
           menuSession={menuSession}
           onClose={onClose}
           onCloseAll={onCloseAll}
