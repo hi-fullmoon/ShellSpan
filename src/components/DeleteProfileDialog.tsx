@@ -12,7 +12,7 @@ interface DeleteProfileDialogProps {
 export function DeleteProfileDialog({ open, profile, onClose, onConfirm }: DeleteProfileDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogPanel ariaLabel={t('app.deleteProfileDialog.ariaLabel')}>
+      <DialogPanel className="w-full max-w-sm p-3" ariaLabel={t('app.deleteProfileDialog.ariaLabel')}>
         <DialogHeader
           description={t('app.deleteProfileDialog.description', { name: profile?.name ?? '' })}
           kicker={t('app.deleteProfileDialog.kicker')}
