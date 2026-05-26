@@ -5,6 +5,8 @@ const MENU_OPEN_SETTINGS_ID: &str = "menu.open_settings";
 const MENU_CHECK_UPDATE_ID: &str = "menu.check_update";
 #[cfg(target_os = "macos")]
 const APP_QUIT_MENU_ID: &str = "menu.app_quit";
+#[cfg(target_os = "macos")]
+const MENU_ABOUT_ID: &str = "menu.about";
 #[cfg(target_os = "windows")]
 const TRAY_OPEN_SETTINGS_ID: &str = "tray.open_settings";
 const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
@@ -87,6 +89,16 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
 }
 
 fn handle_menu_event(app: &AppHandle, menu_id: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        if menu_id == MENU_ABOUT_ID {
+            if let Err(error) = emit_system_about(app) {
+                error!("failed to handle about menu event: {error}");
+            }
+            return;
+        }
+    }
+
     if is_open_settings_menu_id(menu_id) {
         if let Err(error) = emit_system_open_settings(app) {
             error!("failed to handle open-settings menu event: {error}");
@@ -191,6 +203,28 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
     });
 
     if let Some(app_submenu) = app_submenu {
+        let app_submenu_items = app_submenu.items()?;
+        for (index, item) in app_submenu_items.iter().enumerate() {
+            let text = match item {
+                MenuItemKind::MenuItem(menu_item) => menu_item.text().ok(),
+                MenuItemKind::Predefined(predefined) => predefined.text().ok(),
+                _ => continue,
+            };
+            if let Some(text) = text {
+                if text.to_lowercase().contains("about") {
+                    let _ = app_submenu.remove_at(index);
+                    break;
+                }
+            }
+        }
+
+        let about_item = MenuItem::with_id(
+            app,
+            MENU_ABOUT_ID,
+            "About TermBridge",
+            true,
+            None::<&str>,
+        )?;
         let settings_item = MenuItem::with_id(
             app,
             MENU_OPEN_SETTINGS_ID,
@@ -210,6 +244,7 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         let app_submenu_items = app_submenu.items()?;
         let quit_position = app_submenu_items.len().saturating_sub(1);
         let _ = app_submenu.remove_at(quit_position)?;
+        app_submenu.insert_items(&[&about_item], 0)?;
         let insert_position = macos_check_update_insert_position(app_submenu.items()?.len());
         app_submenu.insert_items(&[&settings_item], insert_position)?;
         app_submenu.insert_items(&[&check_update_item], insert_position + 1)?;
