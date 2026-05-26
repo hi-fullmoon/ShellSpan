@@ -5,23 +5,10 @@ import { Tooltip } from './Tooltip';
 import { ScrollArea } from './ScrollArea';
 import { Input } from '@chakra-ui/react';
 import { t } from '../lib/i18n';
+import { useContextMenu } from '../hooks/useContextMenu';
 import type { ConnectionProfile } from '../types';
 
 const HISTORY_ITEM_DOUBLE_CLICK_DELAY_MS = 220;
-
-interface HistoryMenuState {
-  profile: ConnectionProfile;
-  x: number;
-  y: number;
-}
-
-function clampMenuPosition(x: number, y: number, width: number, height: number) {
-  const edge = 8;
-  return {
-    x: Math.max(edge, Math.min(x, window.innerWidth - width - edge)),
-    y: Math.max(edge, Math.min(y, window.innerHeight - height - edge)),
-  };
-}
 
 interface SidebarProps {
   connectedCount: number;
@@ -104,9 +91,9 @@ export function Sidebar({
   onReuseProfile,
   onOpenConnect,
 }: SidebarProps) {
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined);
-  const [historyMenu, setHistoryMenu] = useState<HistoryMenuState>();
+  const [menuProfile, setMenuProfile] = useState<ConnectionProfile | null>(null);
+  const { isOpen: menuOpen, position: menuPosition, open: openMenu, close: closeMenu } = useContextMenu('sidebar-history');
   const [renamingProfileId, setRenamingProfileId] = useState<string>();
   const [renameValue, setRenameValue] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -122,42 +109,16 @@ export function Sidebar({
     );
   }, [sortedProfiles, searchQuery]);
 
-  useLayoutEffect(() => {
-    if (!historyMenu || !menuRef.current) {
-      return;
-    }
-
-    const rect = menuRef.current.getBoundingClientRect();
-    const nextPosition = clampMenuPosition(historyMenu.x, historyMenu.y, rect.width, rect.height);
-
-    if (nextPosition.x === historyMenu.x && nextPosition.y === historyMenu.y) {
-      return;
-    }
-
-    setHistoryMenu((current) =>
-      current
-        ? {
-            ...current,
-            x: nextPosition.x,
-            y: nextPosition.y,
-          }
-        : current,
-    );
-  }, [historyMenu]);
-
   const openHistoryMenu = (event: ReactMouseEvent<HTMLButtonElement>, profile: ConnectionProfile) => {
     event.preventDefault();
     event.stopPropagation();
 
-    setHistoryMenu({
-      profile,
-      x: event.clientX,
-      y: event.clientY,
-    });
+    setMenuProfile(profile);
+    openMenu(event.clientX, event.clientY);
   };
 
   const startRenamingProfile = (profile: ConnectionProfile) => {
-    setHistoryMenu(undefined);
+    closeMenu();
     setRenamingProfileId(profile.id);
     setRenameValue(profile.name);
   };
@@ -277,15 +238,15 @@ export function Sidebar({
         </ScrollArea>
       </section>
 
-      {historyMenu
+      {menuOpen && menuProfile && menuPosition
         ? createPortal(
             <>
               <div
                 className="fixed inset-0 z-40"
-                onClick={() => setHistoryMenu(undefined)}
+                onClick={closeMenu}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  setHistoryMenu(undefined);
+                  closeMenu();
                 }}
                 role="presentation"
               />
@@ -293,12 +254,11 @@ export function Sidebar({
                 className="themed-menu fixed z-50 max-w-24 rounded-lg p-1 backdrop-blur"
                 onClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.preventDefault()}
-                ref={menuRef}
-                style={{ left: historyMenu.x, top: historyMenu.y }}
+                style={{ left: menuPosition.x, top: menuPosition.y }}
               >
                 <button
                   className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
-                  onClick={() => startRenamingProfile(historyMenu.profile)}
+                  onClick={() => startRenamingProfile(menuProfile)}
                   type="button"
                 >
                   {t('sidebar.menu.rename')}
@@ -306,28 +266,28 @@ export function Sidebar({
                 <button
                   className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
                   onClick={() => {
-                    onTogglePinnedProfile(historyMenu.profile.id);
-                    setHistoryMenu(undefined);
+                    onTogglePinnedProfile(menuProfile.id);
+                    closeMenu();
                   }}
                   type="button"
                 >
-                  {historyMenu.profile.pinned ? t('sidebar.menu.unpin') : t('sidebar.menu.pin')}
+                  {menuProfile.pinned ? t('sidebar.menu.unpin') : t('sidebar.menu.pin')}
                 </button>
                 <button
                   className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
                   onClick={() => {
-                    onToggleFavoriteProfile(historyMenu.profile.id);
-                    setHistoryMenu(undefined);
+                    onToggleFavoriteProfile(menuProfile.id);
+                    closeMenu();
                   }}
                   type="button"
                 >
-                  {historyMenu.profile.favorite ? t('sidebar.menu.unfavorite') : t('sidebar.menu.favorite')}
+                  {menuProfile.favorite ? t('sidebar.menu.unfavorite') : t('sidebar.menu.favorite')}
                 </button>
                 <button
                   className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
                   onClick={() => {
-                    onDeleteProfile(historyMenu.profile.id);
-                    setHistoryMenu(undefined);
+                    onDeleteProfile(menuProfile.id);
+                    closeMenu();
                   }}
                   type="button"
                 >

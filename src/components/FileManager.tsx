@@ -19,6 +19,7 @@ import { createLogger } from '../lib/logger';
 import { addPathWrapOpportunities } from '../lib/ui';
 import { isTauriRuntime } from '../lib/tauri';
 import { useFileManagerStore } from '../stores/fileManagerStore';
+import { useContextMenu } from '../hooks/useContextMenu';
 import { cn, fileKindColor } from '../lib/ui';
 import { ArrowUpIcon, BookmarkIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
 import { Tooltip } from './Tooltip';
@@ -112,13 +113,6 @@ interface WindowDragDropState {
   ignoreWindowDragDrop?: boolean;
   loading: boolean;
   working: boolean;
-}
-
-interface ContextMenuState {
-  x: number;
-  y: number;
-  target: MenuTarget;
-  entry?: RemoteFileEntry;
 }
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -432,7 +426,6 @@ function OverlayPanel({ children, className, ...props }: { children: ReactNode; 
 
 export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks = [], onAddBookmark, onRemoveBookmark }: FileManagerProps) {
   const gridRef = useRef<AgGridReact<RemoteFileEntry> | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const bookmarkButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadSessionByOperationRef = useRef<Record<string, string>>({});
   const latestWindowDropStateRef = useRef<WindowDragDropState>({
@@ -452,9 +445,19 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   const [properties, setProperties] = useState<PropertiesState>();
   const [permissionEdit, setPermissionEdit] = useState<PermissionEditState>();
   const [dialog, setDialog] = useState<EntryDialogState>();
-  const [contextMenu, setContextMenu] = useState<ContextMenuState>();
-  const [bookmarkMenuOpen, setBookmarkMenuOpen] = useState(false);
-  const [bookmarkMenuPos, setBookmarkMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenuData, setContextMenuData] = useState<{ target: MenuTarget; entry?: RemoteFileEntry } | null>(null);
+  const {
+    isOpen: contextMenuOpen,
+    position: contextMenuPosition,
+    open: openContextMenu,
+    close: closeContextMenu,
+  } = useContextMenu('file-manager');
+  const {
+    isOpen: bookmarkMenuOpen,
+    position: bookmarkMenuPosition,
+    open: openBookmarkMenu,
+    close: closeBookmarkMenu,
+  } = useContextMenu('file-manager-bookmarks');
   const [preview, setPreview] = useState<RemoteFileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
@@ -640,7 +643,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     setLoading(true);
     setFileError(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
     fileManagerLogger.debug('开始加载目录', {
       sessionId,
       requestedPath,
@@ -683,7 +686,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setWorking(true);
     setFileError(undefined);
     setToast(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
 
     try {
       await task();
@@ -812,7 +815,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setWorking(true);
     setFileError(undefined);
     setToast(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
     uploadSessionByOperationRef.current[operationId] = sessionId;
     updateSessionState(sessionId, {
       uploadProgress: {
@@ -895,7 +898,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       return;
     }
     setDialog({ mode, value: '' });
-    setContextMenu(undefined);
+    closeContextMenu();
   };
 
   const handleSelectUploadFiles = async () => {
@@ -903,7 +906,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       return;
     }
 
-    setContextMenu(undefined);
+    closeContextMenu();
 
     try {
       const selectedPaths = await invoke<string[]>('pick_local_files');
@@ -921,7 +924,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       return;
     }
 
-    setContextMenu(undefined);
+    closeContextMenu();
 
     try {
       const selectedPaths = await invoke<string[]>('pick_local_folder', { title: t('fileManager.dialog.uploadFolder') });
@@ -1020,7 +1023,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setPendingDelete(undefined);
     setProperties(undefined);
     setDialog(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
     setToast(undefined);
     setDragActive(false);
     setDeleteProgress(undefined);
@@ -1037,51 +1040,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   }, [ready, sessionId, listing]);
 
   useEffect(() => {
-    const closeMenu = () => setContextMenu(undefined);
-    window.addEventListener('click', closeMenu);
-
-    return () => {
-      window.removeEventListener('click', closeMenu);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!bookmarkMenuOpen) return;
-    const closeBookmarkMenu = () => setBookmarkMenuOpen(false);
-    window.addEventListener('click', closeBookmarkMenu);
-    return () => {
-      window.removeEventListener('click', closeBookmarkMenu);
-    };
-  }, [bookmarkMenuOpen]);
-
-  useEffect(() => {
     if (bookmarkMenuOpen && bookmarks.length === 0) {
-      setBookmarkMenuOpen(false);
+      closeBookmarkMenu();
     }
   }, [bookmarkMenuOpen, bookmarks.length]);
 
-  useLayoutEffect(() => {
-    if (!contextMenu || !menuRef.current) {
-      return;
-    }
-
-    const rect = menuRef.current.getBoundingClientRect();
-    const nextPosition = clampMenuPosition(contextMenu.x, contextMenu.y, rect.width, rect.height);
-
-    if (nextPosition.x === contextMenu.x && nextPosition.y === contextMenu.y) {
-      return;
-    }
-
-    setContextMenu((current) =>
-      current
-        ? {
-            ...current,
-            x: nextPosition.x,
-            y: nextPosition.y,
-          }
-        : current,
-    );
-  }, [contextMenu]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -1308,7 +1271,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     setSelectedPath(target.path);
-    setContextMenu(undefined);
+    closeContextMenu();
     setDialog({
       mode: 'rename',
       value: target.name,
@@ -1325,7 +1288,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     setSelectedPath(target.path);
-    setContextMenu(undefined);
+    closeContextMenu();
     setProperties({
       entry: target,
       directoryPath: target.kind === 'directory' ? target.path : parentDirectoryPath(target.path),
@@ -1343,7 +1306,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     setSelectedPath(target.path);
-    setContextMenu(undefined);
+    closeContextMenu();
     setProperties({
       entry: target,
       directoryPath: target.kind === 'directory' ? target.path : parentDirectoryPath(target.path),
@@ -1397,7 +1360,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     setSelectedPath(target.path);
-    setContextMenu(undefined);
+    closeContextMenu();
     setPendingDelete({
       path: target.path,
       name: target.name,
@@ -1415,7 +1378,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     setSelectedPath(target.path);
-    setContextMenu(undefined);
+    closeContextMenu();
 
     let destinationDirectory: string;
     try {
@@ -1574,7 +1537,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setWorking(true);
     setFileError(undefined);
     setToast(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
     setDownloadProgress({
       operationId,
       currentPath: targets[0].path,
@@ -1650,11 +1613,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       },
     });
     setFileError(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
   };
 
   const handleCopyText = async (label: string, value: string) => {
-    setContextMenu(undefined);
+    closeContextMenu();
 
     try {
       await writeClipboardText(value);
@@ -1680,7 +1643,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     setSelectedPath(target.path);
-    setContextMenu(undefined);
+    closeContextMenu();
     setWorking(true);
     setFileError(undefined);
 
@@ -1722,7 +1685,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setWorking(true);
     setFileError(undefined);
     setToast(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
     setPendingDelete(undefined);
     setDeleteProgress({
       operationId,
@@ -1821,7 +1784,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       return;
     }
     setPendingBatchDelete(targets);
-    setContextMenu(undefined);
+    closeContextMenu();
   };
 
   const confirmBatchDelete = async () => {
@@ -1832,7 +1795,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setWorking(true);
     setFileError(undefined);
     setToast(undefined);
-    setContextMenu(undefined);
+    closeContextMenu();
     setPendingBatchDelete(undefined);
 
     let successCount = 0;
@@ -1899,7 +1862,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     setSelectedPath(target.path);
-    setContextMenu(undefined);
+    closeContextMenu();
     setWorking(true);
     setToast(undefined);
 
@@ -1951,12 +1914,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
     event.preventDefault();
     event.stopPropagation();
-    setBookmarkMenuOpen(false);
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      target: 'blank',
-    });
+    closeBookmarkMenu();
+    setContextMenuData({ target: 'blank' });
+    openContextMenu(event.clientX, event.clientY);
   };
 
   const openToolbarMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -1965,21 +1925,17 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
     event.preventDefault();
     event.stopPropagation();
-    setBookmarkMenuOpen(false);
+    closeBookmarkMenu();
     const rect = event.currentTarget.getBoundingClientRect();
-    setContextMenu({
-      x: rect.left,
-      y: rect.bottom + 6,
-      target: 'toolbar',
-    });
+    setContextMenuData({ target: 'toolbar' });
+    openContextMenu(rect.left, rect.bottom + 6);
   };
 
-  const openBookmarkMenu = () => {
+  const openBookmarkMenuFn = () => {
     if (!bookmarks.length || !bookmarkButtonRef.current) return;
-    setContextMenu(undefined);
+    closeContextMenu();
     const rect = bookmarkButtonRef.current.getBoundingClientRect();
-    setBookmarkMenuPos({ x: rect.left, y: rect.bottom + 4 });
-    setBookmarkMenuOpen(true);
+    openBookmarkMenu(rect.left, rect.bottom + 4);
   };
 
   const handleGridRowClick = (event: RowClickedEvent<RemoteFileEntry>) => {
@@ -2019,19 +1975,15 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     mouseEvent.preventDefault();
     mouseEvent.stopPropagation();
-    setBookmarkMenuOpen(false);
+    closeBookmarkMenu();
     setSelectedPath(target.path);
 
     if (!batchMode && event.node) {
       event.node.setSelected(true, true);
     }
 
-    setContextMenu({
-      x: mouseEvent.clientX,
-      y: mouseEvent.clientY,
-      target: 'entry',
-      entry: target,
-    });
+    setContextMenuData({ target: 'entry', entry: target });
+    openContextMenu(mouseEvent.clientX, mouseEvent.clientY);
   };
 
   return (
@@ -2087,7 +2039,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                   disabled={!ready || !currentPath || loading || working}
                   onClick={(e) => {
                     e.stopPropagation();
-                    openBookmarkMenu();
+                    openBookmarkMenuFn();
                   }}
                   ref={bookmarkButtonRef}
                   type="button"
@@ -2231,7 +2183,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         )}
       </div>
 
-      {contextMenu
+      {contextMenuOpen && contextMenuData && contextMenuPosition
         ? createPortal(
             <div
               className="themed-menu fixed z-50 min-w-33 rounded-lg p-1 backdrop-blur"
@@ -2242,10 +2194,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                   event.preventDefault();
                 }
               }}
-              ref={menuRef}
-              style={{ left: contextMenu.x, top: contextMenu.y }}
+              style={{ left: contextMenuPosition.x, top: contextMenuPosition.y }}
             >
-              {contextMenu.target === 'entry' ? (
+              {contextMenuData.target === 'entry' ? (
                 batchMode ? (
                   <div className="flex flex-col">
                     <MenuButton
@@ -2266,7 +2217,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                         setBatchMode(false);
                         setSelectedPaths([]);
                         setSelectedPath(undefined);
-                        setContextMenu(undefined);
+                        closeContextMenu();
                       }}
                     />
                   </div>
@@ -2292,93 +2243,93 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                       label={t('fileManager.menu.uploadFolder')}
                       onClick={() => void handleSelectUploadFolder()}
                     />
-                    {contextMenu.entry?.kind === 'directory' ? (
+                    {contextMenuData.entry?.kind === 'directory' ? (
                       <MenuButton
                         disabled={!ready || loading || working}
                         label={t('fileManager.menu.open')}
                         onClick={() => {
-                          if (contextMenu.entry) {
-                            void loadDirectory(contextMenu.entry.path);
+                          if (contextMenuData.entry) {
+                            void loadDirectory(contextMenuData.entry.path);
                           }
                         }}
                       />
                     ) : null}
-                    {contextMenu.entry?.kind === 'directory' && onAddBookmark && onRemoveBookmark ? (
+                    {contextMenuData.entry?.kind === 'directory' && onAddBookmark && onRemoveBookmark ? (
                       <MenuButton
                         disabled={!ready || loading || working}
                         label={
-                          contextMenu.entry && bookmarks.includes(contextMenu.entry.path)
+                          contextMenuData.entry && bookmarks.includes(contextMenuData.entry.path)
                             ? t('fileManager.bookmarks.remove')
                             : t('fileManager.bookmarks.add')
                         }
                         onClick={() => {
-                          if (!contextMenu.entry) return;
-                          if (bookmarks.includes(contextMenu.entry.path)) {
-                            onRemoveBookmark(contextMenu.entry.path);
+                          if (!contextMenuData.entry) return;
+                          if (bookmarks.includes(contextMenuData.entry.path)) {
+                            onRemoveBookmark(contextMenuData.entry.path);
                           } else {
-                            onAddBookmark(contextMenu.entry.path);
+                            onAddBookmark(contextMenuData.entry.path);
                           }
-                          setContextMenu(undefined);
+                          closeContextMenu();
                         }}
                       />
                     ) : null}
-                    {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
+                    {contextMenuData.entry && contextMenuData.entry.kind !== 'directory' ? (
                       <MenuButton
                         disabled={!ready || loading || working}
                         label={t('fileManager.menu.openWithDefaultEditor')}
-                        onClick={() => void handleOpenWithDefaultEditor(contextMenu.entry)}
+                        onClick={() => void handleOpenWithDefaultEditor(contextMenuData.entry)}
                       />
                     ) : null}
-                    {contextMenu.entry && contextMenu.entry.kind !== 'directory' ? (
+                    {contextMenuData.entry && contextMenuData.entry.kind !== 'directory' ? (
                       <MenuButton
                         disabled={!ready || loading || working}
                         label={t('fileManager.menu.preview')}
-                        onClick={() => void handlePreview(contextMenu.entry)}
+                        onClick={() => void handlePreview(contextMenuData.entry)}
                       />
                     ) : null}
                     <MenuDivider />
                     <MenuButton
                       disabled={!ready || loading || working}
                       label={t('fileManager.menu.download')}
-                      onClick={() => void handleDownload(contextMenu.entry)}
+                      onClick={() => void handleDownload(contextMenuData.entry)}
                     />
                     <MenuButton
                       disabled={!ready || loading || working}
                       label={t('fileManager.batch.enter')}
                       onClick={() => {
                         setBatchMode(true);
-                        setContextMenu(undefined);
+                        closeContextMenu();
                       }}
                     />
                     <MenuDivider />
                     <MenuButton
                       disabled={!ready || loading || working}
                       label={t('fileManager.menu.rename')}
-                      onClick={() => openRenameDialog(contextMenu.entry)}
+                      onClick={() => openRenameDialog(contextMenuData.entry)}
                     />
                     <MenuButton
                       disabled={!ready || loading || working}
                       label={t('fileManager.menu.copy')}
-                      onClick={() => handleCopy(contextMenu.entry)}
+                      onClick={() => handleCopy(contextMenuData.entry)}
                     />
                     <MenuButton
                       disabled={!ready || loading || working}
                       label={t('fileManager.menu.delete')}
-                      onClick={() => handleDelete(contextMenu.entry)}
+                      onClick={() => handleDelete(contextMenuData.entry)}
                     />
                     <MenuDivider />
                     <MenuButton
                       disabled={!ready || loading || working}
                       label={t('fileManager.menu.copyName')}
-                      onClick={() => void handleCopyText(t('fileManager.copyLabel.name'), contextMenu.entry?.name ?? '')}
+                      onClick={() => void handleCopyText(t('fileManager.copyLabel.name'), contextMenuData.entry?.name ?? '')}
                     />
                     <MenuButton
                       disabled={!ready || loading || working}
-                      label={contextMenu.entry?.kind === 'directory' ? t('fileManager.menu.copyDirectoryPath') : t('fileManager.menu.copyFilePath')}
+                      label={contextMenuData.entry?.kind === 'directory' ? t('fileManager.menu.copyDirectoryPath') : t('fileManager.menu.copyFilePath')}
                       onClick={() =>
                         void handleCopyText(
-                          contextMenu.entry?.kind === 'directory' ? t('fileManager.copyLabel.directoryPath') : t('fileManager.copyLabel.filePath'),
-                          contextMenu.entry?.path ?? '',
+                          contextMenuData.entry?.kind === 'directory' ? t('fileManager.copyLabel.directoryPath') : t('fileManager.copyLabel.filePath'),
+                          contextMenuData.entry?.path ?? '',
                         )
                       }
                     />
@@ -2388,10 +2339,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                       onClick={() =>
                         void handleCopyText(
                           t('fileManager.copyLabel.directoryPath'),
-                          contextMenu.entry
-                            ? contextMenu.entry.kind === 'directory'
-                              ? contextMenu.entry.path
-                              : parentDirectoryPath(contextMenu.entry.path)
+                          contextMenuData.entry
+                            ? contextMenuData.entry.kind === 'directory'
+                              ? contextMenuData.entry.path
+                              : parentDirectoryPath(contextMenuData.entry.path)
                             : (currentPath ?? ''),
                         )
                       }
@@ -2404,14 +2355,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                     />
                     <MenuDivider />
                     <MenuButton
-                      disabled={!ready || loading || working || contextMenu.entry?.permissions === undefined}
+                      disabled={!ready || loading || working || contextMenuData.entry?.permissions === undefined}
                       label={t('fileManager.menu.editPermissions')}
-                      onClick={() => openPermissionEdit(contextMenu.entry)}
+                      onClick={() => openPermissionEdit(contextMenuData.entry)}
                     />
                     <MenuButton
                       disabled={!ready || loading || working}
                       label={t('fileManager.menu.properties')}
-                      onClick={() => openProperties(contextMenu.entry)}
+                      onClick={() => openProperties(contextMenuData.entry)}
                     />
                   </div>
                 )
@@ -2455,7 +2406,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                       label={t('fileManager.batch.enter')}
                       onClick={() => {
                         setBatchMode(true);
-                        setContextMenu(undefined);
+                        closeContextMenu();
                       }}
                     />
                   ) : (
@@ -2466,7 +2417,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                         setBatchMode(false);
                         setSelectedPaths([]);
                         setSelectedPath(undefined);
-                        setContextMenu(undefined);
+                        closeContextMenu();
                       }}
                     />
                   )}
@@ -2485,7 +2436,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                         } else {
                           onAddBookmark(currentPath);
                         }
-                        setContextMenu(undefined);
+                        closeContextMenu();
                       }}
                     />
                   ) : null}
@@ -2496,13 +2447,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
           )
         : null}
 
-      {bookmarkMenuOpen && bookmarkMenuPos
+      {bookmarkMenuOpen && bookmarkMenuPosition
         ? createPortal(
             <div
               className="themed-menu fixed z-50 min-w-44 rounded-lg p-1 backdrop-blur"
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
-              style={{ left: bookmarkMenuPos.x, top: bookmarkMenuPos.y }}
+              style={{ left: bookmarkMenuPosition.x, top: bookmarkMenuPosition.y }}
             >
               {bookmarks.length === 0 ? (
                 <div className="px-2 py-1 text-[12px] text-slate-400">{t('fileManager.bookmarks.empty')}</div>
@@ -2513,7 +2464,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                       <button
                         className="min-w-0 flex-1 text-left"
                         onClick={() => {
-                          setBookmarkMenuOpen(false);
+                          closeBookmarkMenu();
                           void loadDirectory(path);
                         }}
                         type="button"

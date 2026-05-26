@@ -27,6 +27,7 @@ import { CloseIcon, PinIcon } from './Icons';
 import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
 import { cn, sessionStatusDot } from '../lib/ui';
+import { useContextMenu } from '../hooks/useContextMenu';
 import type { SessionState } from '../types';
 
 interface SessionTabsProps {
@@ -68,11 +69,6 @@ interface SessionTabCardProps {
   showDropIndicatorRight?: boolean;
 }
 
-interface TabContextMenuState {
-  x: number;
-  y: number;
-  session: SessionState;
-}
 
 function SessionTabCard({
   session,
@@ -279,7 +275,8 @@ const TAB_COLORS = [
 ];
 
 function TabContextMenu({
-  menu,
+  menuSession,
+  menuPosition,
   sessions,
   activeSessionId,
   onClose,
@@ -292,7 +289,8 @@ function TabContextMenu({
   onTogglePin,
   onCloseMenu,
 }: {
-  menu: TabContextMenuState;
+  menuSession: SessionState;
+  menuPosition: { x: number; y: number };
   sessions: SessionState[];
   activeSessionId?: string;
   onClose: (sessionId: string) => void;
@@ -305,7 +303,7 @@ function TabContextMenu({
   onTogglePin?: (sessionId: string) => void;
   onCloseMenu: () => void;
 }) {
-  const sessionIndex = sessions.findIndex((s) => s.sessionId === menu.session.sessionId);
+  const sessionIndex = sessions.findIndex((s) => s.sessionId === menuSession.sessionId);
   const hasRight = sessionIndex >= 0 && sessionIndex < sessions.length - 1;
   const hasLeft = sessionIndex > 0;
   const hasOthers = sessions.length > 1;
@@ -330,11 +328,11 @@ function TabContextMenu({
         className="themed-menu fixed z-50 min-w-40 rounded-lg p-1 backdrop-blur"
         onClick={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
-        style={{ left: menu.x, top: menu.y }}
+        style={{ left: menuPosition.x, top: menuPosition.y }}
       >
         <button
           className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
-          onClick={() => handle(() => onClose(menu.session.sessionId))}
+          onClick={() => handle(() => onClose(menuSession.sessionId))}
           type="button"
         >
           {t('sessionTabs.contextMenu.close')}
@@ -343,7 +341,7 @@ function TabContextMenu({
         {hasOthers && (
           <button
             className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
-            onClick={() => handle(() => onCloseOthers?.(menu.session.sessionId))}
+            onClick={() => handle(() => onCloseOthers?.(menuSession.sessionId))}
             type="button"
           >
             {t('sessionTabs.contextMenu.closeOthers')}
@@ -352,7 +350,7 @@ function TabContextMenu({
         {hasRight && (
           <button
             className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
-            onClick={() => handle(() => onCloseToRight?.(menu.session.sessionId))}
+            onClick={() => handle(() => onCloseToRight?.(menuSession.sessionId))}
             type="button"
           >
             {t('sessionTabs.contextMenu.closeToRight')}
@@ -361,7 +359,7 @@ function TabContextMenu({
         {hasLeft && (
           <button
             className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
-            onClick={() => handle(() => onCloseToLeft?.(menu.session.sessionId))}
+            onClick={() => handle(() => onCloseToLeft?.(menuSession.sessionId))}
             type="button"
           >
             {t('sessionTabs.contextMenu.closeToLeft')}
@@ -378,14 +376,14 @@ function TabContextMenu({
         <div className="my-1 h-px bg-[var(--app-border)]" />
         <button
           className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
-          onClick={() => handle(() => onTogglePin?.(menu.session.sessionId))}
+          onClick={() => handle(() => onTogglePin?.(menuSession.sessionId))}
           type="button"
         >
-          {menu.session.pinned ? t('sessionTabs.contextMenu.unpin') : t('sessionTabs.contextMenu.pin')}
+          {menuSession.pinned ? t('sessionTabs.contextMenu.unpin') : t('sessionTabs.contextMenu.pin')}
         </button>
         <button
           className="themed-menu-item flex w-full items-center rounded px-2 py-1 text-[12px] font-medium transition"
-          onClick={() => handle(() => onRenameStart?.(menu.session))}
+          onClick={() => handle(() => onRenameStart?.(menuSession))}
           type="button"
         >
           {t('sessionTabs.contextMenu.rename')}
@@ -397,9 +395,9 @@ function TabContextMenu({
               <button
                 className={cn(
                   'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] transition-transform hover:scale-110',
-                  !menu.session.profile.color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
+                  !menuSession.profile.color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
                 )}
-                onClick={() => handle(() => onSetColor(menu.session.sessionId, undefined))}
+                onClick={() => handle(() => onSetColor(menuSession.sessionId, undefined))}
                 title={t('sidebar.menu.clearColor')}
                 type="button"
               >
@@ -409,10 +407,10 @@ function TabContextMenu({
                 <button
                   className={cn(
                     'h-4 w-4 shrink-0 rounded-full transition-transform hover:scale-110',
-                    menu.session.profile.color === color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
+                    menuSession.profile.color === color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
                   )}
                   key={color}
-                  onClick={() => handle(() => onSetColor(menu.session.sessionId, color))}
+                  onClick={() => handle(() => onSetColor(menuSession.sessionId, color))}
                   style={{ backgroundColor: color }}
                   type="button"
                 />
@@ -446,7 +444,8 @@ export function SessionTabs({
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string>();
   const [renameValue, setRenameValue] = useState('');
-  const [contextMenu, setContextMenu] = useState<TabContextMenuState>();
+  const [menuSession, setMenuSession] = useState<SessionState | null>(null);
+  const { isOpen: menuOpen, position: menuPosition, open: openMenu, close: closeMenu } = useContextMenu('session-tabs');
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -455,15 +454,6 @@ export function SessionTabs({
       },
     }),
   );
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    const closeMenu = () => setContextMenu(undefined);
-    window.addEventListener('click', closeMenu);
-    return () => {
-      window.removeEventListener('click', closeMenu);
-    };
-  }, [contextMenu]);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -560,7 +550,7 @@ export function SessionTabs({
   const handleRenameStart = (session: SessionState) => {
     setRenamingSessionId(session.sessionId);
     setRenameValue(session.title);
-    setContextMenu(undefined);
+    closeMenu();
   };
 
   const handleRenameCancel = () => {
@@ -583,7 +573,8 @@ export function SessionTabs({
   const handleContextMenu = (event: ReactMouseEvent<HTMLDivElement>, session: SessionState) => {
     event.preventDefault();
     event.stopPropagation();
-    setContextMenu({ x: event.clientX, y: event.clientY, session });
+    setMenuSession(session);
+    openMenu(event.clientX, event.clientY);
   };
 
   if (sessions.length === 0) {
@@ -658,13 +649,14 @@ export function SessionTabs({
         </DndContext>
       </ScrollArea>
 
-      {contextMenu ? (
+      {menuOpen && menuSession && menuPosition ? (
         <TabContextMenu
           activeSessionId={activeSessionId}
-          menu={contextMenu}
+          menuPosition={menuPosition}
+          menuSession={menuSession}
           onClose={onClose}
           onCloseAll={onCloseAll}
-          onCloseMenu={() => setContextMenu(undefined)}
+          onCloseMenu={closeMenu}
           onCloseOthers={onCloseOthers}
           onCloseToLeft={onCloseToLeft}
           onCloseToRight={onCloseToRight}

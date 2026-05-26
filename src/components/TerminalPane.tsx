@@ -9,6 +9,7 @@ import { t } from "../lib/i18n";
 import { createLogger } from '../lib/logger';
 import { isTauriRuntime } from '../lib/tauri';
 import { useSnippetsStore } from "../stores/snippetsStore";
+import { useContextMenu } from "../hooks/useContextMenu";
 import {
   formatTerminalNoticeLine,
   formatTerminalPrefixedText,
@@ -49,20 +50,6 @@ interface TerminalPaneProps {
 const terminalLogger = createLogger('terminal');
 type CopyFeedback = 'copied' | 'failed';
 
-interface ContextMenuState {
-  x: number;
-  y: number;
-  hasSelection: boolean;
-}
-
-function clampMenuPosition(x: number, y: number, width: number, height: number) {
-  const edge = 8;
-  return {
-    x: Math.max(edge, Math.min(x, window.innerWidth - width - edge)),
-    y: Math.max(edge, Math.min(y, window.innerHeight - height - edge)),
-  };
-}
-
 export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(function TerminalPane({
   session,
   active,
@@ -92,12 +79,18 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
   const needsConnectedShellSpacingRef = useRef(false);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [menuHasSelection, setMenuHasSelection] = useState(false);
+  const {
+    isOpen: menuOpen,
+    position: menuPosition,
+    open: openMenu,
+    close: closeMenu,
+    menuRef,
+  } = useContextMenu(`terminal-pane-${session.sessionId}`);
   const [snippetSubmenuOpen, setSnippetSubmenuOpen] = useState(false);
   const submenuRef = useRef<HTMLDivElement | null>(null);
   const snippets = useSnippetsStore((state) => state.snippets);
@@ -127,7 +120,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     } catch {
       showCopyFeedback("failed");
     }
-    setContextMenu(null);
+    closeMenu();
   };
 
   const handleContextMenuPaste = async () => {
@@ -147,22 +140,22 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     } catch {
       showCopyFeedback("failed");
     }
-    setContextMenu(null);
+    closeMenu();
   };
 
   const handleContextMenuSelectAll = () => {
     terminalRef.current?.selectAll();
-    setContextMenu(null);
+    closeMenu();
   };
 
   const handleContextMenuClear = () => {
     terminalRef.current?.clear();
-    setContextMenu(null);
+    closeMenu();
   };
 
   const handleContextMenuFind = () => {
     setShowSearch(true);
-    setContextMenu(null);
+    closeMenu();
   };
 
   const handleSendSnippet = (command: string) => {
@@ -182,7 +175,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     } else {
       terminal.write(data);
     }
-    setContextMenu(null);
+    closeMenu();
   };
 
   const writeSystemLine = (line: string) => {
@@ -224,21 +217,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
   }, []);
 
   useLayoutEffect(() => {
-    if (!contextMenu || !menuRef.current) {
-      return;
-    }
-    const rect = menuRef.current.getBoundingClientRect();
-    const nextPosition = clampMenuPosition(contextMenu.x, contextMenu.y, rect.width, rect.height);
-    if (nextPosition.x === contextMenu.x && nextPosition.y === contextMenu.y) {
-      return;
-    }
-    setContextMenu((current) =>
-      current ? { ...current, x: nextPosition.x, y: nextPosition.y } : current,
-    );
-  }, [contextMenu]);
-
-  useLayoutEffect(() => {
-    if (!snippetSubmenuOpen || !menuRef.current || !submenuRef.current || !contextMenu) {
+    if (!snippetSubmenuOpen || !menuRef.current || !submenuRef.current || !menuPosition) {
       return;
     }
     const menuRect = menuRef.current.getBoundingClientRect();
@@ -256,22 +235,13 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
       submenuRef.current.style.marginLeft = "4px";
       submenuRef.current.style.marginRight = "0";
     }
-  }, [snippetSubmenuOpen, contextMenu]);
+  }, [snippetSubmenuOpen, menuPosition]);
 
   useEffect(() => {
-    if (!contextMenu) {
-      return;
-    }
-    const handleWindowClick = () => setContextMenu(null);
-    window.addEventListener("click", handleWindowClick);
-    return () => window.removeEventListener("click", handleWindowClick);
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!contextMenu) {
+    if (!menuOpen) {
       setSnippetSubmenuOpen(false);
     }
-  }, [contextMenu]);
+  }, [menuOpen]);
 
   useImperativeHandle(ref, () => ({
     sendData: (data: string) => {
@@ -372,11 +342,8 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     const handleContextMenu = (event: MouseEvent) => {
       event.preventDefault();
       if (!terminalRef.current) return;
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY,
-        hasSelection: !!terminalRef.current.getSelection(),
-      });
+      setMenuHasSelection(!!terminalRef.current.getSelection());
+      openMenu(event.clientX, event.clientY);
     };
     terminal.element?.addEventListener("contextmenu", handleContextMenu);
 
@@ -784,19 +751,19 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
           {copyFeedback === 'copied' ? t('terminal.feedback.copied') : t('terminal.feedback.copyFailed')}
         </div>
       )}
-      {contextMenu
+      {menuOpen && menuPosition
         ? createPortal(
             <div
               className="themed-menu fixed z-50 min-w-28 rounded-lg p-1 backdrop-blur"
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
               ref={menuRef}
-              style={{ left: contextMenu.x, top: contextMenu.y }}
+              style={{ left: menuPosition.x, top: menuPosition.y }}
             >
               <div className="flex flex-col">
                 <button
                   className="themed-menu-item w-full whitespace-nowrap px-2 py-1 text-left text-xs transition"
-                  disabled={!contextMenu.hasSelection}
+                  disabled={!menuHasSelection}
                   onClick={handleContextMenuCopy}
                   type="button"
                 >
