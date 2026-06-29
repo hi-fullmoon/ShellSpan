@@ -104,15 +104,6 @@
   margin-top: 2px;
 }
 
-.settings-dialog {
-  max-width: 680px;
-  padding: 16px;
-}
-
-.settings-content {
-  min-height: 340px;
-}
-
 .settings-tab {
   background: transparent;
   color: var(--app-text-soft);
@@ -195,13 +186,6 @@
 
 .shortcut-reset:hover {
   color: var(--app-text-soft);
-}
-
-.settings-dialog-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
 }
 
 .settings-grid {
