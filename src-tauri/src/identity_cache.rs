@@ -18,7 +18,7 @@ impl RemoteIdentityCache {
     ) {
         self.entries
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert((host.to_string(), id, kind), name);
     }
 
@@ -28,7 +28,7 @@ impl RemoteIdentityCache {
         ids: &[u32],
         kind: RemoteIdentityKind,
     ) -> (HashMap<u32, String>, Vec<u32>) {
-        let entries = self.entries.lock().unwrap();
+        let entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut found = HashMap::new();
         let mut missing = Vec::new();
         for id in ids {

@@ -27,7 +27,7 @@ pub(crate) fn connect_sftp(
     );
 
     if let Some(pool) = pool {
-        if let Ok(cached) = pool.get_or_create(request) {
+        if let Some(cached) = pool.get_or_create(request) {
             return Ok(cached);
         }
     }

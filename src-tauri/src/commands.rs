@@ -4,9 +4,10 @@ use crate::models::{
     AuthMethod, ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest,
     DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
     JumpHostConfig, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
-    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteDirectoryListing, RemoteDirectoryRequest,
-    RenameRemotePathRequest, SessionCommand, SessionCreateRequest, SessionStatus, SessionSummary,
-    TrustHostRequest, UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
+    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
+    SessionStatus, SessionSummary, TrustHostRequest, UpdateRemotePermissionsRequest,
+    UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
 use std::sync::{
@@ -21,6 +22,7 @@ use uuid::Uuid;
 pub(crate) fn create_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
+    pool: State<'_, SftpPool>,
     request: SessionCreateRequest,
 ) -> Result<SessionSummary, String> {
     validate_connection_fields(&request.host, &request.username)?;
@@ -45,7 +47,8 @@ pub(crate) fn create_session(
         "Created SSH session session_id={} title={} host={} port={} username={}",
         session_id, summary.title, summary.host, summary.port, summary.username
     );
-    spawn_ssh_thread(app, session_id, request, rx);
+    let connection_request = remote_connection_request_from_session(&request);
+    spawn_ssh_thread(app, session_id, request, rx, pool.inner().clone(), connection_request);
     Ok(summary)
 }
 
@@ -573,15 +576,33 @@ pub(crate) fn open_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+fn remote_connection_request_from_session(
+    request: &SessionCreateRequest,
+) -> RemoteConnectionRequest {
+    RemoteConnectionRequest {
+        host: request.host.clone(),
+        port: request.port,
+        username: request.username.clone(),
+        auth_method: request.auth_method,
+        password: request.password.clone(),
+        private_key_path: request.private_key_path.clone(),
+        passphrase: request.passphrase.clone(),
+        jump_host: request.jump_host.clone(),
+    }
+}
+
 pub(crate) fn spawn_ssh_thread(
     app: AppHandle,
     session_id: String,
     request: SessionCreateRequest,
     rx: std::sync::mpsc::Receiver<SessionCommand>,
+    pool: SftpPool,
+    connection_request: RemoteConnectionRequest,
 ) {
     thread::spawn(move || {
         debug!("Spawned SSH worker session_id={session_id}");
         let run_result = run_ssh_session(&app, &session_id, &request, rx);
+        pool.invalidate(&connection_request);
 
         match run_result {
             Ok(message) => {

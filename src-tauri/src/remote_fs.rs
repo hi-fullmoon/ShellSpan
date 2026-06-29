@@ -34,7 +34,6 @@ pub(crate) fn is_connection_error(message: &str) -> bool {
         || lower.contains("connection aborted")
         || lower.contains("broken pipe")
         || lower.contains("draining incoming flow")
-        || lower.contains("socket")
 }
 
 pub(crate) fn list_remote_directory_blocking(
@@ -61,13 +60,12 @@ fn list_remote_directory_inner(
 ) -> Result<RemoteDirectoryListing, String> {
     let host = request.connection.host.clone();
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     list_remote_directory_from_sftp(
         &host,
         &connected.session,
         &connected.sftp,
         request.path.as_deref(),
-        pool,
         cache,
     )
 }
@@ -76,10 +74,26 @@ pub(crate) fn create_remote_entry_blocking(
     request: CreateRemoteEntryRequest,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = create_remote_entry_inner(request, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn create_remote_entry_inner(
+    request: CreateRemoteEntryRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     validate_remote_name(&request.name)?;
 
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let parent_path = Path::new(&request.parent_path);
     ensure_remote_directory(&connected.sftp, parent_path)?;
 
@@ -118,10 +132,26 @@ pub(crate) fn rename_remote_path_blocking(
     request: RenameRemotePathRequest,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = rename_remote_path_inner(request, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn rename_remote_path_inner(
+    request: RenameRemotePathRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     validate_remote_name(&request.new_name)?;
 
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let source_path = Path::new(&request.path);
     let parent_path = source_path
         .parent()
@@ -153,8 +183,24 @@ pub(crate) fn update_remote_permissions_blocking(
     request: UpdateRemotePermissionsRequest,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = update_remote_permissions_inner(request, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn update_remote_permissions_inner(
+    request: UpdateRemotePermissionsRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = std::path::Path::new(&request.path);
     let mut stat = connected
         .sftp
@@ -173,8 +219,26 @@ pub(crate) fn delete_remote_path_blocking(
     cancel_flag: Arc<AtomicBool>,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = delete_remote_path_inner(app, request, cancel_flag, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn delete_remote_path_inner(
+    app: AppHandle,
+    request: DeleteRemotePathRequest,
+    cancel_flag: Arc<AtomicBool>,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let target_path = Path::new(&request.path);
     let total_steps = count_remote_delete_steps(&connected.sftp, target_path)?;
     let mut progress =
@@ -190,8 +254,24 @@ pub(crate) fn copy_remote_path_blocking(
     request: CopyRemotePathRequest,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = copy_remote_path_inner(request, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn copy_remote_path_inner(
+    request: CopyRemotePathRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let source_path = Path::new(&request.source_path);
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
@@ -221,12 +301,30 @@ pub(crate) fn upload_local_paths_blocking(
     cancel_flag: Arc<AtomicBool>,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = upload_local_paths_inner(app, request, cancel_flag, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn upload_local_paths_inner(
+    app: AppHandle,
+    request: UploadLocalPathsRequest,
+    cancel_flag: Arc<AtomicBool>,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     if request.local_paths.is_empty() {
         return Err("no local files were provided for upload".to_string());
     }
 
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
     if !request.conflict_policies.is_empty()
@@ -284,12 +382,30 @@ pub(crate) fn download_remote_paths_blocking(
     cancel_flag: Arc<AtomicBool>,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = download_remote_paths_inner(app, request, cancel_flag, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn download_remote_paths_inner(
+    app: AppHandle,
+    request: DownloadRemotePathsRequest,
+    cancel_flag: Arc<AtomicBool>,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     if request.remote_paths.is_empty() {
         return Err("no remote paths were provided for download".to_string());
     }
 
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let destination_directory = Path::new(&request.destination_directory);
     fs::create_dir_all(destination_directory)
         .map_err(|error| format!("failed to create destination directory: {error}"))?;
@@ -504,8 +620,24 @@ pub(crate) fn open_remote_file_blocking(
     request: OpenRemoteFileRequest,
     pool: Option<&SftpPool>,
 ) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = open_remote_file_inner(request, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn open_remote_file_inner(
+    request: OpenRemoteFileRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let remote_path = Path::new(&request.path);
     let stat = connected
         .sftp
@@ -549,8 +681,24 @@ pub(crate) fn read_remote_file_blocking(
     request: ReadRemoteFileRequest,
     pool: Option<&SftpPool>,
 ) -> Result<ReadRemoteFileResponse, String> {
+    let connection = request.connection.clone();
+    let result = read_remote_file_inner(request, pool);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn read_remote_file_inner(
+    request: ReadRemoteFileRequest,
+    pool: Option<&SftpPool>,
+) -> Result<ReadRemoteFileResponse, String> {
     let connected = connect_sftp(&request.connection, pool)?;
-    let connected = connected.lock().unwrap();
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let remote_path = Path::new(&request.path);
 
     let stat = connected
@@ -647,7 +795,6 @@ fn list_remote_directory_from_sftp(
     session: &Session,
     sftp: &Sftp,
     requested_path: Option<&str>,
-    _pool: Option<&SftpPool>,
     cache: Option<&RemoteIdentityCache>,
 ) -> Result<RemoteDirectoryListing, String> {
     let requested_path = requested_path.unwrap_or(".");
@@ -1415,5 +1562,11 @@ mod tests {
     fn ignores_unrelated_errors() {
         assert!(!is_connection_error("file not found"));
         assert!(!is_connection_error("permission denied"));
+    }
+
+    #[test]
+    fn does_not_treat_socket_substring_as_connection_error() {
+        assert!(!is_connection_error("socket error"));
+        assert!(!is_connection_error("invalid socket path"));
     }
 }
