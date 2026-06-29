@@ -12,7 +12,18 @@ pub(crate) struct ConnectionKey {
     password_hash: String,
     private_key_path_hash: String,
     passphrase_hash: String,
-    jump_host_hash: Option<String>,
+    jump_host: Option<JumpHostKey>,
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub(crate) struct JumpHostKey {
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: AuthMethod,
+    password_hash: String,
+    private_key_path_hash: String,
+    passphrase_hash: String,
 }
 
 #[derive(Default, Clone)]
@@ -54,6 +65,20 @@ impl SftpPool {
     }
 }
 
+impl ConnectionKey {
+    pub(crate) fn jump_host_key(jump_host: Option<&JumpHostConfig>) -> Option<JumpHostKey> {
+        jump_host.map(|jump_host| JumpHostKey {
+            host: jump_host.host.clone(),
+            port: jump_host.port,
+            username: jump_host.username.clone(),
+            auth_method: jump_host.auth_method,
+            password_hash: credential_marker(jump_host.password.as_deref()),
+            private_key_path_hash: credential_marker(jump_host.private_key_path.as_deref()),
+            passphrase_hash: credential_marker(jump_host.passphrase.as_deref()),
+        })
+    }
+}
+
 pub(crate) fn connection_key(request: &RemoteConnectionRequest) -> ConnectionKey {
     ConnectionKey {
         host: request.host.clone(),
@@ -63,21 +88,8 @@ pub(crate) fn connection_key(request: &RemoteConnectionRequest) -> ConnectionKey
         password_hash: credential_marker(request.password.as_deref()),
         private_key_path_hash: credential_marker(request.private_key_path.as_deref()),
         passphrase_hash: credential_marker(request.passphrase.as_deref()),
-        jump_host_hash: request.jump_host.as_ref().map(jump_host_marker),
+        jump_host: ConnectionKey::jump_host_key(request.jump_host.as_ref()),
     }
-}
-
-fn jump_host_marker(jump_host: &JumpHostConfig) -> String {
-    format!(
-        "{}:{}:{}:{}:{}:{}:{}",
-        jump_host.host,
-        jump_host.port,
-        jump_host.username,
-        jump_host.auth_method.as_str(),
-        credential_marker(jump_host.password.as_deref()),
-        credential_marker(jump_host.private_key_path.as_deref()),
-        credential_marker(jump_host.passphrase.as_deref()),
-    )
 }
 
 fn credential_marker(value: Option<&str>) -> String {
@@ -253,17 +265,18 @@ mod tests {
         };
 
         let key = connection_key(&request);
+        let jump_host_key = key.jump_host.as_ref().expect("jump host key present");
 
         assert!(
-            !key.jump_host_hash.as_ref().expect("jump host hash present").contains(jump_pass),
+            !jump_host_key.password_hash.contains(jump_pass),
             "key must not contain raw jump-host password"
         );
         assert!(
-            !key.jump_host_hash.as_ref().expect("jump host hash present").contains(jump_phrase),
+            !jump_host_key.passphrase_hash.contains(jump_phrase),
             "key must not contain raw jump-host passphrase"
         );
         assert!(
-            !key.jump_host_hash.as_ref().expect("jump host hash present").contains(jump_key_path),
+            !jump_host_key.private_key_path_hash.contains(jump_key_path),
             "key must not contain raw jump-host private key path"
         );
     }
@@ -342,5 +355,50 @@ mod tests {
         };
 
         assert_ne!(connection_key(&third), connection_key(&fourth));
+    }
+
+    #[test]
+    fn connection_key_distinguishes_jump_host_fields_with_colons() {
+        // A structured jump-host key must not collide when user-controlled
+        // strings contain delimiters that would have merged fields in the old
+        // format-string key.
+        let first = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: Some(JumpHostConfig {
+                host: "a".to_string(),
+                port: 1,
+                username: "1:b".to_string(),
+                auth_method: AuthMethod::Password,
+                password: None,
+                private_key_path: None,
+                passphrase: None,
+            }),
+        };
+        let second = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: Some(JumpHostConfig {
+                host: "a:1".to_string(),
+                port: 1,
+                username: "b".to_string(),
+                auth_method: AuthMethod::Password,
+                password: None,
+                private_key_path: None,
+                passphrase: None,
+            }),
+        };
+
+        assert_ne!(connection_key(&first), connection_key(&second));
     }
 }
