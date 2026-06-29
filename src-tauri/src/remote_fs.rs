@@ -34,6 +34,11 @@ pub(crate) fn is_connection_error(message: &str) -> bool {
         || lower.contains("connection aborted")
         || lower.contains("broken pipe")
         || lower.contains("draining incoming flow")
+        || lower.contains("socket error")
+        || lower.contains("failed reading from socket")
+        || lower.contains("socket closed")
+        || lower.contains("socket disconnect")
+        || lower.contains("socket disconnected")
 }
 
 pub(crate) fn list_remote_directory_blocking(
@@ -1565,8 +1570,17 @@ mod tests {
     }
 
     #[test]
-    fn does_not_treat_socket_substring_as_connection_error() {
-        assert!(!is_connection_error("socket error"));
+    fn detects_specific_socket_phrases_as_connection_error() {
+        assert!(is_connection_error("socket error"));
+        assert!(is_connection_error("failed reading from socket"));
+        assert!(is_connection_error("socket closed"));
+        assert!(is_connection_error("socket disconnect"));
+        assert!(is_connection_error("socket disconnected"));
+    }
+
+    #[test]
+    fn does_not_treat_generic_socket_substring_as_connection_error() {
         assert!(!is_connection_error("invalid socket path"));
+        assert!(!is_connection_error("socket"));
     }
 }
