@@ -1,4 +1,4 @@
-use crate::models::{ConnectedSftp, RemoteConnectionRequest};
+use crate::models::{ConnectedSftp, JumpHostConfig, RemoteConnectionRequest};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +8,7 @@ pub(crate) struct SftpPool {
 }
 
 impl SftpPool {
-    pub(crate) fn get_or_create(
+    pub(crate) fn get(
         &self,
         request: &RemoteConnectionRequest,
     ) -> Option<Arc<Mutex<ConnectedSftp>>> {
@@ -43,7 +43,7 @@ impl SftpPool {
 
 fn connection_key(request: &RemoteConnectionRequest) -> String {
     format!(
-        "{}:{}:{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}:{}:{}:{}",
         request.host,
         request.port,
         request.username,
@@ -51,7 +51,24 @@ fn connection_key(request: &RemoteConnectionRequest) -> String {
         credential_marker(request.password.as_deref()),
         credential_marker(request.private_key_path.as_deref()),
         credential_marker(request.passphrase.as_deref()),
+        jump_host_marker(request.jump_host.as_ref()),
     )
+}
+
+fn jump_host_marker(jump_host: Option<&JumpHostConfig>) -> String {
+    match jump_host {
+        None => "no-jump".to_string(),
+        Some(jump) => format!(
+            "jump:{}:{}:{}:{}:{}:{}:{}",
+            jump.host,
+            jump.port,
+            jump.username,
+            jump.auth_method.as_str(),
+            credential_marker(jump.password.as_deref()),
+            credential_marker(jump.private_key_path.as_deref()),
+            credential_marker(jump.passphrase.as_deref()),
+        ),
+    }
 }
 
 fn credential_marker(value: Option<&str>) -> String {
@@ -83,7 +100,7 @@ mod tests {
         // We cannot create a real Session in a unit test, but we can verify the behavior by
         // attempting to get a connection after invalidate returns None.
         pool.invalidate(&request);
-        assert!(pool.get_or_create(&request).is_none());
+        assert!(pool.get(&request).is_none());
     }
 
     #[test]
