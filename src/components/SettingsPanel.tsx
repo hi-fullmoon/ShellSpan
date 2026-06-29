@@ -75,38 +75,22 @@ function PreferenceNumber({
   return (
     <label className="settings-field" htmlFor={id}>
       <span className="settings-field-label">{label}</span>
-      <div className="flex items-center gap-2">
-        <Input
-          className="settings-select w-20 text-center"
-          id={id}
-          max={max}
-          min={min}
-          size="sm"
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            if (!Number.isNaN(next)) {
-              onChange(Math.max(min, Math.min(max, next)));
-            }
-          }}
-          step={step ?? 1}
-          type="number"
-          value={value}
-        />
-        <input
-          max={max}
-          min={min}
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            if (!Number.isNaN(next)) {
-              onChange(Math.max(min, Math.min(max, next)));
-            }
-          }}
-          step={step ?? 1}
-          style={{ flex: 1 }}
-          type="range"
-          value={value}
-        />
-      </div>
+      <Input
+        className="settings-select w-20 text-center"
+        id={id}
+        max={max}
+        min={min}
+        size="sm"
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          if (!Number.isNaN(next)) {
+            onChange(Math.max(min, Math.min(max, next)));
+          }
+        }}
+        step={step ?? 1}
+        type="number"
+        value={value}
+      />
       <span className="settings-field-hint">{hint}</span>
     </label>
   );
@@ -239,7 +223,7 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
         </div>
       )}
 
-      <div className="settings-content h-0 flex-1 overflow-auto px-2 pb-2">
+      <div className="settings-content px-2 pb-2">
         {/* ───── Tab: Appearance ───── */}
         {(showTabs ? activeTab === 'appearance' : true) && (
           <div className="flex flex-col gap-3 mt-2.5">
