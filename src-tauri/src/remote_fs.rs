@@ -1,4 +1,5 @@
 use crate::connection::connect_sftp;
+use crate::sftp_pool::SftpPool;
 use crate::models::{
     CopyRemotePathRequest, CreateRemoteEntryKind, CreateRemoteEntryRequest, DeleteProgressTracker,
     DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
@@ -26,17 +27,26 @@ const OPEN_TEMP_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
 
 pub(crate) fn list_remote_directory_blocking(
     request: RemoteDirectoryRequest,
+    pool: Option<&SftpPool>,
 ) -> Result<RemoteDirectoryListing, String> {
-    let connected = connect_sftp(&request.connection)?;
-    list_remote_directory_from_sftp(&connected.session, &connected.sftp, request.path.as_deref())
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
+    list_remote_directory_from_sftp(
+        &connected.session,
+        &connected.sftp,
+        request.path.as_deref(),
+        pool,
+    )
 }
 
 pub(crate) fn create_remote_entry_blocking(
     request: CreateRemoteEntryRequest,
+    pool: Option<&SftpPool>,
 ) -> Result<(), String> {
     validate_remote_name(&request.name)?;
 
-    let connected = connect_sftp(&request.connection)?;
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let parent_path = Path::new(&request.parent_path);
     ensure_remote_directory(&connected.sftp, parent_path)?;
 
@@ -71,10 +81,14 @@ pub(crate) fn create_remote_entry_blocking(
     Ok(())
 }
 
-pub(crate) fn rename_remote_path_blocking(request: RenameRemotePathRequest) -> Result<(), String> {
+pub(crate) fn rename_remote_path_blocking(
+    request: RenameRemotePathRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
     validate_remote_name(&request.new_name)?;
 
-    let connected = connect_sftp(&request.connection)?;
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let source_path = Path::new(&request.path);
     let parent_path = source_path
         .parent()
@@ -104,8 +118,10 @@ pub(crate) fn rename_remote_path_blocking(request: RenameRemotePathRequest) -> R
 
 pub(crate) fn update_remote_permissions_blocking(
     request: UpdateRemotePermissionsRequest,
+    pool: Option<&SftpPool>,
 ) -> Result<(), String> {
-    let connected = connect_sftp(&request.connection)?;
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let path = std::path::Path::new(&request.path);
     let mut stat = connected
         .sftp
@@ -122,8 +138,10 @@ pub(crate) fn delete_remote_path_blocking(
     app: AppHandle,
     request: DeleteRemotePathRequest,
     cancel_flag: Arc<AtomicBool>,
+    pool: Option<&SftpPool>,
 ) -> Result<(), String> {
-    let connected = connect_sftp(&request.connection)?;
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let target_path = Path::new(&request.path);
     let total_steps = count_remote_delete_steps(&connected.sftp, target_path)?;
     let mut progress =
@@ -135,8 +153,12 @@ pub(crate) fn delete_remote_path_blocking(
     Ok(())
 }
 
-pub(crate) fn copy_remote_path_blocking(request: CopyRemotePathRequest) -> Result<(), String> {
-    let connected = connect_sftp(&request.connection)?;
+pub(crate) fn copy_remote_path_blocking(
+    request: CopyRemotePathRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let source_path = Path::new(&request.source_path);
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
@@ -164,12 +186,14 @@ pub(crate) fn upload_local_paths_blocking(
     app: AppHandle,
     request: UploadLocalPathsRequest,
     cancel_flag: Arc<AtomicBool>,
+    pool: Option<&SftpPool>,
 ) -> Result<(), String> {
     if request.local_paths.is_empty() {
         return Err("no local files were provided for upload".to_string());
     }
 
-    let connected = connect_sftp(&request.connection)?;
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
     if !request.conflict_policies.is_empty()
@@ -225,12 +249,14 @@ pub(crate) fn download_remote_paths_blocking(
     app: AppHandle,
     request: DownloadRemotePathsRequest,
     cancel_flag: Arc<AtomicBool>,
+    pool: Option<&SftpPool>,
 ) -> Result<(), String> {
     if request.remote_paths.is_empty() {
         return Err("no remote paths were provided for download".to_string());
     }
 
-    let connected = connect_sftp(&request.connection)?;
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let destination_directory = Path::new(&request.destination_directory);
     fs::create_dir_all(destination_directory)
         .map_err(|error| format!("failed to create destination directory: {error}"))?;
@@ -441,8 +467,12 @@ fn download_remote_file(
     Ok(())
 }
 
-pub(crate) fn open_remote_file_blocking(request: OpenRemoteFileRequest) -> Result<(), String> {
-    let connected = connect_sftp(&request.connection)?;
+pub(crate) fn open_remote_file_blocking(
+    request: OpenRemoteFileRequest,
+    pool: Option<&SftpPool>,
+) -> Result<(), String> {
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let remote_path = Path::new(&request.path);
     let stat = connected
         .sftp
@@ -484,8 +514,10 @@ const PREVIEW_SIZE_LIMIT: u64 = 1024 * 1024;
 
 pub(crate) fn read_remote_file_blocking(
     request: ReadRemoteFileRequest,
+    pool: Option<&SftpPool>,
 ) -> Result<ReadRemoteFileResponse, String> {
-    let connected = connect_sftp(&request.connection)?;
+    let connected = connect_sftp(&request.connection, pool)?;
+    let connected = connected.lock().unwrap();
     let remote_path = Path::new(&request.path);
 
     let stat = connected
@@ -581,6 +613,7 @@ fn list_remote_directory_from_sftp(
     session: &Session,
     sftp: &Sftp,
     requested_path: Option<&str>,
+    pool: Option<&SftpPool>,
 ) -> Result<RemoteDirectoryListing, String> {
     let requested_path = requested_path.unwrap_or(".");
     let resolved_path = sftp
@@ -594,7 +627,7 @@ fn list_remote_directory_from_sftp(
         .map(|(path, stat)| map_remote_file(path, stat))
         .collect::<Vec<_>>();
 
-    enrich_remote_entry_owners(session, &mut entries);
+    enrich_remote_entry_owners(session, &mut entries, pool);
     entries.sort_by(sort_remote_entries);
 
     let current_path = path_to_string(&resolved_path);
@@ -614,7 +647,11 @@ fn list_remote_directory_from_sftp(
     })
 }
 
-fn enrich_remote_entry_owners(session: &Session, entries: &mut [RemoteFileEntry]) {
+fn enrich_remote_entry_owners(
+    session: &Session,
+    entries: &mut [RemoteFileEntry],
+    _pool: Option<&SftpPool>,
+) {
     let owner_ids = entries
         .iter()
         .filter_map(|entry| entry.owner_uid)

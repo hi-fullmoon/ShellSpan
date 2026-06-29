@@ -1,4 +1,5 @@
 use super::*;
+use crate::sftp_pool::SftpPool;
 use crate::models::{
     AuthMethod, ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest,
     DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
@@ -107,6 +108,7 @@ pub(crate) fn request_app_exit(app: AppHandle) {
 #[tauri::command]
 pub(crate) async fn list_remote_directory(
     request: RemoteDirectoryRequest,
+    pool: State<'_, SftpPool>,
 ) -> Result<RemoteDirectoryListing, String> {
     let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
     debug!(
@@ -114,10 +116,12 @@ pub(crate) async fn list_remote_directory(
         requested_path,
         summarize_remote_connection_request(&request.connection)
     );
-    let result =
-        tauri::async_runtime::spawn_blocking(move || list_remote_directory_blocking(request))
-            .await
-            .map_err(|error| format!("failed to join directory listing task: {error}"))?;
+    let pool = pool.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        list_remote_directory_blocking(request, Some(&pool))
+    })
+    .await
+    .map_err(|error| format!("failed to join directory listing task: {error}"))?;
     if let Ok(listing) = &result {
         debug!(
             "Listed remote directory path={} entries={}",
@@ -129,7 +133,10 @@ pub(crate) async fn list_remote_directory(
 }
 
 #[tauri::command]
-pub(crate) async fn create_remote_entry(request: CreateRemoteEntryRequest) -> Result<(), String> {
+pub(crate) async fn create_remote_entry(
+    request: CreateRemoteEntryRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), String> {
     info!(
         "Creating remote entry parent_path={} name={} kind={:?} {}",
         request.parent_path,
@@ -137,10 +144,12 @@ pub(crate) async fn create_remote_entry(request: CreateRemoteEntryRequest) -> Re
         request.kind,
         summarize_remote_connection_request(&request.connection)
     );
-    let result =
-        tauri::async_runtime::spawn_blocking(move || create_remote_entry_blocking(request))
-            .await
-            .map_err(|error| format!("failed to join create entry task: {error}"))?;
+    let pool = pool.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        create_remote_entry_blocking(request, Some(&pool))
+    })
+    .await
+    .map_err(|error| format!("failed to join create entry task: {error}"))?;
     if result.is_ok() {
         info!("Created remote entry successfully");
     }
@@ -148,16 +157,22 @@ pub(crate) async fn create_remote_entry(request: CreateRemoteEntryRequest) -> Re
 }
 
 #[tauri::command]
-pub(crate) async fn rename_remote_path(request: RenameRemotePathRequest) -> Result<(), String> {
+pub(crate) async fn rename_remote_path(
+    request: RenameRemotePathRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), String> {
     info!(
         "Renaming remote path path={} new_name={} {}",
         request.path,
         request.new_name,
         summarize_remote_connection_request(&request.connection)
     );
-    let result = tauri::async_runtime::spawn_blocking(move || rename_remote_path_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join rename task: {error}"))?;
+    let pool = pool.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        rename_remote_path_blocking(request, Some(&pool))
+    })
+    .await
+    .map_err(|error| format!("failed to join rename task: {error}"))?;
     if result.is_ok() {
         info!("Renamed remote path successfully");
     }
@@ -169,6 +184,7 @@ pub(crate) async fn delete_remote_path(
     app: AppHandle,
     deletes: State<'_, DeleteCancellationRegistry>,
     request: DeleteRemotePathRequest,
+    pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
     info!(
         "Deleting remote path operation_id={} path={} {}",
@@ -178,8 +194,9 @@ pub(crate) async fn delete_remote_path(
     );
     let cancel_flag = deletes.register(request.operation_id.clone())?;
     let operation_id = request.operation_id.clone();
+    let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        delete_remote_path_blocking(app, request, cancel_flag)
+        delete_remote_path_blocking(app, request, cancel_flag, Some(&pool))
     })
     .await
     .map_err(|error| format!("failed to join delete task: {error}"))?;
@@ -193,16 +210,22 @@ pub(crate) async fn delete_remote_path(
 }
 
 #[tauri::command]
-pub(crate) async fn copy_remote_path(request: CopyRemotePathRequest) -> Result<(), String> {
+pub(crate) async fn copy_remote_path(
+    request: CopyRemotePathRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), String> {
     info!(
         "Copying remote path source_path={} destination_directory={} {}",
         request.source_path,
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
-    let result = tauri::async_runtime::spawn_blocking(move || copy_remote_path_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join copy task: {error}"))?;
+    let pool = pool.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        copy_remote_path_blocking(request, Some(&pool))
+    })
+    .await
+    .map_err(|error| format!("failed to join copy task: {error}"))?;
     if result.is_ok() {
         info!("Copied remote path successfully");
     }
@@ -214,6 +237,7 @@ pub(crate) async fn upload_local_paths(
     app: AppHandle,
     uploads: State<'_, UploadCancellationRegistry>,
     request: UploadLocalPathsRequest,
+    pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
     info!(
         "Uploading local paths operation_id={} count={} destination_directory={} {}",
@@ -224,8 +248,9 @@ pub(crate) async fn upload_local_paths(
     );
     let cancel_flag = uploads.register(request.operation_id.clone())?;
     let operation_id = request.operation_id.clone();
+    let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        upload_local_paths_blocking(app, request, cancel_flag)
+        upload_local_paths_blocking(app, request, cancel_flag, Some(&pool))
     })
     .await
     .map_err(|error| format!("failed to join upload task: {error}"))?;
@@ -261,6 +286,7 @@ pub(crate) async fn download_remote_paths(
     app: AppHandle,
     downloads: State<'_, DownloadCancellationRegistry>,
     request: DownloadRemotePathsRequest,
+    pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
     info!(
         "Downloading remote paths operation_id={} count={} destination_directory={} {}",
@@ -271,8 +297,9 @@ pub(crate) async fn download_remote_paths(
     );
     let cancel_flag = downloads.register(request.operation_id.clone())?;
     let operation_id = request.operation_id.clone();
+    let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        download_remote_paths_blocking(app, request, cancel_flag)
+        download_remote_paths_blocking(app, request, cancel_flag, Some(&pool))
     })
     .await
     .map_err(|error| format!("failed to join download task: {error}"))?;
@@ -351,15 +378,21 @@ pub(crate) fn pick_private_key_file() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-pub(crate) async fn open_remote_file(request: OpenRemoteFileRequest) -> Result<(), String> {
+pub(crate) async fn open_remote_file(
+    request: OpenRemoteFileRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), String> {
     info!(
         "Opening remote file path={} {}",
         request.path,
         summarize_remote_connection_request(&request.connection)
     );
-    let result = tauri::async_runtime::spawn_blocking(move || open_remote_file_blocking(request))
-        .await
-        .map_err(|error| format!("failed to join open file task: {error}"))?;
+    let pool = pool.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        open_remote_file_blocking(request, Some(&pool))
+    })
+    .await
+    .map_err(|error| format!("failed to join open file task: {error}"))?;
     if result.is_ok() {
         info!("Opened remote file successfully");
     }
@@ -369,16 +402,19 @@ pub(crate) async fn open_remote_file(request: OpenRemoteFileRequest) -> Result<(
 #[tauri::command]
 pub(crate) async fn preview_remote_file(
     request: ReadRemoteFileRequest,
+    pool: State<'_, SftpPool>,
 ) -> Result<ReadRemoteFileResponse, String> {
     info!(
         "Previewing remote file path={} {}",
         request.path,
         summarize_remote_connection_request(&request.connection)
     );
-    let result =
-        tauri::async_runtime::spawn_blocking(move || read_remote_file_blocking(request))
-            .await
-            .map_err(|error| format!("failed to join file preview task: {error}"))?;
+    let pool = pool.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        read_remote_file_blocking(request, Some(&pool))
+    })
+    .await
+    .map_err(|error| format!("failed to join file preview task: {error}"))?;
     if let Ok(ref response) = result {
         info!(
             "Previewed remote file path={} size={} is_text={}",
@@ -391,6 +427,7 @@ pub(crate) async fn preview_remote_file(
 #[tauri::command]
 pub(crate) async fn update_remote_permissions(
     request: UpdateRemotePermissionsRequest,
+    pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
     info!(
         "Updating remote permissions path={} permissions={:04o} {}",
@@ -398,10 +435,12 @@ pub(crate) async fn update_remote_permissions(
         request.permissions,
         summarize_remote_connection_request(&request.connection)
     );
-    let result =
-        tauri::async_runtime::spawn_blocking(move || update_remote_permissions_blocking(request))
-            .await
-            .map_err(|error| format!("failed to join permissions update task: {error}"))?;
+    let pool = pool.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        update_remote_permissions_blocking(request, Some(&pool))
+    })
+    .await
+    .map_err(|error| format!("failed to join permissions update task: {error}"))?;
     if result.is_ok() {
         info!("Updated remote permissions successfully");
     }

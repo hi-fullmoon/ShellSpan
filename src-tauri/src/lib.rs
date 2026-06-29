@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
 use models::{DownloadCancellationRegistry, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
+use crate::sftp_pool::SftpPool;
 
 pub(crate) use connection::{
     summarize_remote_connection_request, summarize_session_request, validate_connection_fields,
@@ -130,6 +131,7 @@ pub fn run() {
         .manage(DeleteCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(port_forward::PortForwardManager::default())
+        .manage(SftpPool::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::write_session,

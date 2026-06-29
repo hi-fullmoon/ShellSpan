@@ -1,4 +1,5 @@
 use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest, SessionCreateRequest};
+use crate::sftp_pool::SftpPool;
 use log::debug;
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
@@ -6,6 +7,7 @@ use std::{
     io::copy,
     net::{TcpListener, TcpStream, ToSocketAddrs},
     path::Path,
+    sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
@@ -14,12 +16,21 @@ const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
 const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 
-pub(crate) fn connect_sftp(request: &RemoteConnectionRequest) -> Result<ConnectedSftp, String> {
+pub(crate) fn connect_sftp(
+    request: &RemoteConnectionRequest,
+    pool: Option<&SftpPool>,
+) -> Result<Arc<Mutex<ConnectedSftp>>, String> {
     validate_connection_fields(&request.host, &request.username)?;
     debug!(
         "Connecting SFTP {}",
         summarize_remote_connection_request(request)
     );
+
+    if let Some(pool) = pool {
+        if let Ok(cached) = pool.get_or_create(request) {
+            return Ok(cached);
+        }
+    }
 
     let (session, jump_session) = if let Some(ref jump) = request.jump_host {
         let (jump_session, target_session) = connect_through_jump_host(
@@ -50,15 +61,21 @@ pub(crate) fn connect_sftp(request: &RemoteConnectionRequest) -> Result<Connecte
         .sftp()
         .map_err(|error| format!("failed to open sftp subsystem: {error}"))?;
 
+    let connected = Arc::new(Mutex::new(ConnectedSftp {
+        session,
+        sftp,
+        _jump_session: jump_session,
+    }));
+
+    if let Some(pool) = pool {
+        pool.insert(request, connected.clone());
+    }
+
     debug!(
         "Connected SFTP host={} port={} username={}",
         request.host, request.port, request.username
     );
-    Ok(ConnectedSftp {
-        session,
-        sftp,
-        _jump_session: jump_session,
-    })
+    Ok(connected)
 }
 
 pub(crate) fn validate_connection_fields(host: &str, username: &str) -> Result<(), String> {
@@ -356,6 +373,18 @@ mod tests {
         assert!(!summary.contains("super-secret"));
         assert!(!summary.contains("keep-me-out-of-logs"));
         assert!(!summary.contains("/Users/alice/.ssh/id_ed25519"));
+    }
+
+    #[test]
+    fn connect_sftp_returns_shared_connection() {
+        use crate::sftp_pool::SftpPool;
+        // We cannot open a real SSH session in a unit test, but this test documents the expected
+        // return type and ensures the signature compiles with the pool argument.
+        fn expect_shared(_result: Result<std::sync::Arc<std::sync::Mutex<crate::models::ConnectedSftp>>, String>) {}
+        fn dummy_call(request: &crate::models::RemoteConnectionRequest, pool: &SftpPool) {
+            expect_shared(connect_sftp(request, Some(pool)));
+        }
+        let _ = dummy_call;
     }
 
     #[test]
