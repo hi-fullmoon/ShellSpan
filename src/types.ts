@@ -13,7 +13,8 @@ export type ShortcutAction =
   | 'nextTab'
   | 'prevTab'
   | 'togglePrimarySidebar'
-  | 'toggleSecondarySidebar';
+  | 'toggleSecondarySidebar'
+  | 'exportTerminal';
 
 export interface AppPreferences {
   theme: ThemePreference;

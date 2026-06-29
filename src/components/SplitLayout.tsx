@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { cn } from '../lib/ui';
 
 type SplitDirection = 'horizontal' | 'vertical';
@@ -123,11 +123,11 @@ export function SplitLayout({ className, direction = 'horizontal', storageKey, c
     }
   }, [controlledDefaultSize, storageKey]);
 
-  const clampSize = (nextSize: number, containerSize: number) => {
+  const clampSize = useCallback((nextSize: number, containerSize: number) => {
     const available = Math.max(controlledMinSize, containerSize - otherMinSize - SASH_SIZE);
     const maxSize = controlledMaxSize !== undefined ? Math.min(controlledMaxSize, available) : available;
     return Math.max(controlledMinSize, Math.min(nextSize, maxSize));
-  };
+  }, [controlledMinSize, otherMinSize, controlledMaxSize]);
 
   useLayoutEffect(() => {
     const element = containerRef.current;
@@ -151,7 +151,7 @@ export function SplitLayout({ className, direction = 'horizontal', storageKey, c
 
     resizeObserver.observe(element);
     return () => resizeObserver.disconnect();
-  }, [direction, controlledMaxSize, controlledMinSize, otherMinSize, fixedSlot]);
+  }, [direction, fixedSlot, clampSize]);
 
   useEffect(() => {
     if (storageKey && typeof window !== 'undefined') {

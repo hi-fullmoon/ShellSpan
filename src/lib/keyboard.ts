@@ -1,13 +1,6 @@
-export type ShortcutAction =
-  | 'closeDialog'
-  | 'newConnection'
-  | 'openSettings'
-  | 'closeSession'
-  | 'nextTab'
-  | 'prevTab'
-  | 'togglePrimarySidebar'
-  | 'toggleSecondarySidebar'
-  | 'exportTerminal';
+import type { ShortcutAction } from '../types';
+
+export type { ShortcutAction };
 
 export interface ParsedBinding {
   key: string;

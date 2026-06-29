@@ -27,7 +27,7 @@ import { CloseIcon, PinIcon } from './Icons';
 import { Input } from '@chakra-ui/react';
 import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
-import { cn, sessionStatusDot } from '../lib/ui';
+import { cn, PROFILE_COLORS, sessionStatusDot } from '../lib/ui';
 import { useContextMenu } from '../hooks/useContextMenu';
 import type { SessionState } from '../types';
 
@@ -270,11 +270,7 @@ function SortableSessionTab({
   );
 }
 
-const TAB_COLORS = [
-  '#ef4444', '#f97316', '#f59e0b', '#84cc16',
-  '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6',
-  '#d946ef', '#f43f5e',
-];
+const TAB_COLORS = PROFILE_COLORS;
 
 function TabContextMenu({
   menuSession,

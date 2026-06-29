@@ -3,7 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "../../test-utils";
 import { afterEach, describe, expect, it } from "vitest";
-import { Tooltip, TooltipProvider } from "../Tooltip";
+import { Tooltip } from "../Tooltip";
 
 describe("Tooltip", () => {
   afterEach(() => {
@@ -12,11 +12,9 @@ describe("Tooltip", () => {
 
   it("renders the trigger children", () => {
     render(
-      <TooltipProvider>
-        <Tooltip content="Open details">
-          <button type="button">Open</button>
-        </Tooltip>
-      </TooltipProvider>,
+      <Tooltip content="Open details">
+        <button type="button">Open</button>
+      </Tooltip>,
     );
 
     expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument();

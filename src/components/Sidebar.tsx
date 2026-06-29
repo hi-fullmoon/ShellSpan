@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { PinIcon, StarIcon } from './Icons';
 import { Tooltip } from './Tooltip';
 import { ScrollArea } from './ScrollArea';

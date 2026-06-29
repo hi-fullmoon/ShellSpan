@@ -1,7 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AboutDialog } from './components/AboutDialog';
 import { CloseSessionDialog } from './components/CloseSessionDialog';
 import { ConnectDialog } from './components/ConnectDialog';
@@ -14,461 +12,125 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
-import { TerminalPane } from './components/TerminalPane';
+import { TerminalPane, type TerminalPaneRef } from './components/TerminalPane';
 import { SnippetsPanel } from './components/SnippetsPanel';
 import { Toast, toaster } from './components/Toast';
 import { Toast as ChakraToast, Toaster } from '@chakra-ui/react';
 import { UpdateRestartDialog } from './components/UpdateRestartDialog';
 import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { createLogger } from './lib/logger';
-import { useLocalStorage } from './hooks/useLocalStorage';
-import { createEmptyProfile, describeSession, sanitizeProfileForStorage } from './lib/profile';
-import { applyStatusToSessions, consumeBufferedSessionStatus, type PendingSessionStatusEvents } from './lib/session';
-import { insertSessionAfterActive } from './lib/session';
-import { markStartupUpdateCheck, shouldRunStartupUpdateCheck } from './lib/update';
-import { updateFlowReducer } from './lib/update';
-import { checkForUpdate, downloadAndInstallUpdate } from './lib/update';
+import { createEmptyProfile } from './lib/profile';
+import { normalizePreferences, reorderSessions } from './lib/appHelpers';
 import { isTauriRuntime } from './lib/tauri';
-import { shouldWarnOnClosedSession } from './lib/terminal';
 import { useFileManagerStore } from './stores/fileManagerStore';
 import { cn, sessionStatusTone } from './lib/ui';
-import { DEFAULT_SHORTCUTS, matchesBinding } from './lib/keyboard';
-import type { ShortcutAction } from './lib/keyboard';
-import type { TerminalPaneRef } from './components/TerminalPane';
-import type { AppPreferences, ConnectionProfile, HostKeyCheckResponse, SessionState, SessionSummary, SshClosedEvent, SshStatusEvent } from './types';
+import { usePreferences } from './hooks/usePreferences';
+import { useSavedProfiles } from './hooks/useSavedProfiles';
+import { useSessions } from './hooks/useSessions';
+import { useConnectionFlow } from './hooks/useConnectionFlow';
+import { useUpdateFlow } from './hooks/useUpdateFlow';
+import { useTauriSystemEvents, readPreferencesFromLocalStorage } from './hooks/useTauriSystemEvents';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import type { AppPreferences } from './types';
 
 const appLogger = createLogger('app');
-const SYSTEM_OPEN_SETTINGS_EVENT = 'system-open-settings';
-const SETTINGS_CHANGED_EVENT = 'settings-changed';
-const defaultPreferences: AppPreferences = {
-  theme: 'dark',
-  locale: 'zh-CN',
-  terminalFontSize: 14,
-  terminalLineHeight: 1.2,
-  terminalTheme: 'default',
-  cursorStyle: 'block',
-  cursorBlink: true,
-  copyOnSelect: false,
-  showFileManager: true,
-  showSidebar: true,
-  autoReconnect: true,
-  startupUpdateCheck: true,
-  historyLimit: 8,
-  keyboardShortcuts: {},
-};
-
-function getSystemThemeMode() {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return 'dark' as const;
-  }
-
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? ('dark' as const) : ('light' as const);
-}
-
-const validTerminalThemes: Array<AppPreferences['terminalTheme']> = [
-  'default',
-  'dracula',
-  'solarized-dark',
-  'solarized-light',
-  'one-dark',
-  'monokai',
-];
-const validCursorStyles: Array<AppPreferences['cursorStyle']> = ['block', 'line', 'bar'];
-
-function normalizePreferences(value: Partial<AppPreferences> | null | undefined): AppPreferences {
-  return {
-    theme: value?.theme === 'light' || value?.theme === 'system' ? value.theme : 'dark',
-    locale: value?.locale === 'en-US' ? 'en-US' : 'zh-CN',
-    terminalFontSize:
-      typeof value?.terminalFontSize === 'number' && value.terminalFontSize >= 10 && value.terminalFontSize <= 20 ? value.terminalFontSize : 14,
-    terminalLineHeight:
-      typeof value?.terminalLineHeight === 'number' && value.terminalLineHeight >= 1 && value.terminalLineHeight <= 2
-        ? value.terminalLineHeight
-        : 1.2,
-    terminalTheme: validTerminalThemes.includes(value?.terminalTheme as AppPreferences['terminalTheme'])
-      ? (value!.terminalTheme as AppPreferences['terminalTheme'])
-      : 'default',
-    cursorStyle: validCursorStyles.includes(value?.cursorStyle as AppPreferences['cursorStyle'])
-      ? (value!.cursorStyle as AppPreferences['cursorStyle'])
-      : 'block',
-    cursorBlink: value?.cursorBlink !== false,
-    copyOnSelect: value?.copyOnSelect === true,
-    showFileManager: value?.showFileManager !== false,
-    showSidebar: value?.showSidebar !== false,
-    autoReconnect: value?.autoReconnect !== false,
-    startupUpdateCheck: value?.startupUpdateCheck !== false,
-    historyLimit: typeof value?.historyLimit === 'number' && value.historyLimit >= 3 && value.historyLimit <= 20 ? value.historyLimit : 8,
-    keyboardShortcuts: (value?.keyboardShortcuts ?? {}) as AppPreferences['keyboardShortcuts'],
-  };
-}
-
-function reorderSessions(sessions: SessionState[], draggedSessionId: string, insertIndex: number) {
-  const draggedIndex = sessions.findIndex((session) => session.sessionId === draggedSessionId);
-  if (draggedIndex === -1) {
-    return sessions;
-  }
-
-  const nextSessions = [...sessions];
-  let lastPinnedIndex = -1;
-  for (let i = nextSessions.length - 1; i >= 0; i--) {
-    if (nextSessions[i].pinned) {
-      lastPinnedIndex = i;
-      break;
-    }
-  }
-  const [draggedSession] = nextSessions.splice(draggedIndex, 1);
-  const adjustedIndex = insertIndex;
-
-  const lastPinnedAfterSplice = draggedSession.pinned ? lastPinnedIndex - 1 : lastPinnedIndex;
-
-  if (draggedSession.pinned) {
-    if (lastPinnedAfterSplice === -1 || adjustedIndex > lastPinnedAfterSplice) {
-      draggedSession.pinned = false;
-    }
-  } else if (lastPinnedAfterSplice !== -1 && adjustedIndex <= lastPinnedAfterSplice) {
-    draggedSession.pinned = true;
-  }
-  nextSessions.splice(adjustedIndex, 0, draggedSession);
-  return nextSessions;
-}
 
 function App() {
-  const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
-  const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>('termbridge.savedProfiles', [], ['windbridge.savedProfiles']);
-  const [storedPreferences, setStoredPreferences] = useLocalStorage<Partial<AppPreferences>>('termbridge.preferences', defaultPreferences);
-  const [sessions, setSessions] = useState<SessionState[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string>();
-  const [errorMessage, setErrorMessage] = useState<string>();
-  const [connectDialogOpen, setConnectDialogOpen] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
-  const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string>();
-  const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
-  const [exitDialogOpen, setExitDialogOpen] = useState(false);
-  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
-  const [reorderingSessions, setReorderingSessions] = useState(false);
+  const { storedPreferences, setStoredPreferences, preferences, appliedTheme } = usePreferences();
+  const {
+    savedProfiles,
+    setSavedProfiles,
+    pendingDeleteProfileId,
+    setPendingDeleteProfileId,
+    handleDeleteSavedProfile,
+    handleToggleSavedProfilePinned,
+    handleToggleSavedProfileFavorite,
+    handleRenameSavedProfile,
+    confirmDeleteSavedProfile,
+  } = useSavedProfiles();
 
-  const [updateState, dispatchUpdateState] = useReducer(updateFlowReducer, { phase: 'idle' });
-  const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number>();
-  const [updateToast, setUpdateToast] = useState<{ message: string; tone: 'info' | 'success' | 'error' }>();
-  const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
-  const [, setIntlVersion] = useState(0);
-  const [systemThemeMode, setSystemThemeMode] = useState<'dark' | 'light'>(() => getSystemThemeMode());
-  const [hostKeyDialog, setHostKeyDialog] = useState<{
-    open: boolean;
-    profile?: ConnectionProfile;
-    fingerprint?: string;
-    remember?: boolean;
-    rememberPassword?: boolean;
-  }>({ open: false });
-  const preferences = useMemo(() => normalizePreferences(storedPreferences), [storedPreferences]);
-  const appliedTheme = preferences.theme === 'system' ? systemThemeMode : preferences.theme;
+  const [errorMessage, setErrorMessage] = useState<string>();
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
-  const pendingStatusEventsRef = useRef<PendingSessionStatusEvents>({});
-  const sessionsRef = useRef<SessionState[]>([]);
-  const preferencesRef = useRef(preferences);
   const terminalPaneRefs = useRef<Record<string, TerminalPaneRef>>({});
-  const autoReconnectAttemptedRef = useRef<Record<string, true>>({});
-  const dialogStateRef = useRef({
-    hostKeyOpen: false,
-    connectOpen: false,
-    settingsOpen: false,
-    pendingDelete: false,
-    pendingClose: false,
-    exitOpen: false,
+
+  const {
+    sessions,
+    setSessions,
+    activeSessionId,
+    setActiveSessionId,
+    sessionsRef,
+    pendingStatusEventsRef,
+    handleCloseSession,
+    handleReconnectSession,
+  } = useSessions({
+    autoReconnect: preferences.autoReconnect,
+    setErrorMessage,
+    removeFileManagerSessionState,
+    replaceFileManagerSessionStateKey,
   });
 
-  useEffect(() => {
-    dialogStateRef.current = {
-      hostKeyOpen: hostKeyDialog.open,
-      connectOpen: connectDialogOpen,
-      settingsOpen: settingsDialogOpen,
-      pendingDelete: !!pendingDeleteProfileId,
-      pendingClose: !!pendingCloseSessionId,
-      exitOpen: exitDialogOpen,
-    };
-  }, [hostKeyDialog.open, connectDialogOpen, settingsDialogOpen, pendingDeleteProfileId, pendingCloseSessionId, exitDialogOpen]);
+  const {
+    draftProfile,
+    setDraftProfile,
+    connectDialogOpen,
+    setConnectDialogOpen,
+    isConnecting,
+    hostKeyDialog,
+    setHostKeyDialog,
+    handleConnect,
+    handleTrustAndConnect,
+    loadProfile,
+  } = useConnectionFlow({
+    historyLimit: preferences.historyLimit,
+    setSavedProfiles,
+    setSessions,
+    sessionsRef,
+    activeSessionId,
+    setActiveSessionId,
+    pendingStatusEventsRef,
+    setErrorMessage,
+  });
 
-  // Global keyboard shortcuts
-  useEffect(() => {
-    const merged = { ...DEFAULT_SHORTCUTS, ...preferences.keyboardShortcuts };
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
+  const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
+  const [reorderingSessions, setReorderingSessions] = useState(false);
+  const [, setIntlVersion] = useState(0);
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      // Check if an input element is focused (allow xterm's hidden textarea)
-      const activeEl = document.activeElement;
-      const tag = activeEl?.tagName.toLowerCase();
-      const isXterm = activeEl && (activeEl as HTMLElement).classList.contains('xterm-helper-textarea');
-      const isInput = !isXterm && (tag === 'input' || tag === 'textarea' || tag === 'select');
+  const {
+    updateState,
+    updateDownloadProgress,
+    updateToast,
+    restartDialogOpen,
+    handleInstallUpdateNow,
+    handleInstallUpdateLater,
+    setUpdateToast,
+  } = useUpdateFlow({ startupUpdateCheck: preferences.startupUpdateCheck });
 
-      const dlg = dialogStateRef.current;
-      const anyDialogOpen = dlg.hostKeyOpen || dlg.connectOpen || dlg.settingsOpen || dlg.pendingDelete || dlg.pendingClose || dlg.exitOpen;
-
-      // Escape always closes the active dialog, even if input is focused
-      if (matchesBinding(merged.closeDialog, event)) {
-        if (dlg.hostKeyOpen) {
-          setHostKeyDialog({ open: false });
-          event.preventDefault();
-          return;
-        }
-        if (dlg.connectOpen) {
-          setConnectDialogOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (dlg.settingsOpen) {
-          setSettingsDialogOpen(false);
-          event.preventDefault();
-          return;
-        }
-        if (dlg.pendingDelete) {
-          setPendingDeleteProfileId(undefined);
-          event.preventDefault();
-          return;
-        }
-        if (dlg.pendingClose) {
-          setPendingCloseSessionId(undefined);
-          event.preventDefault();
-          return;
-        }
-        if (dlg.exitOpen) {
-          setExitDialogOpen(false);
-          event.preventDefault();
-          return;
-        }
-        return;
+  useTauriSystemEvents({
+    onOpenSettings: useCallback(() => setSettingsDialogOpen(true), []),
+    onRequestAppExit: useCallback(() => setExitDialogOpen(true), []),
+    onAbout: useCallback(() => setAboutDialogOpen(true), []),
+    onSettingsChangedExternal: useCallback(() => {
+      const external = readPreferencesFromLocalStorage();
+      if (external) {
+        setStoredPreferences(() => external);
       }
-
-      // Skip other shortcuts when a dialog or input is active
-      if (anyDialogOpen || isInput) return;
-
-      if (matchesBinding(merged.newConnection, event)) {
-        event.preventDefault();
-        setDraftProfile(createEmptyProfile());
-        setErrorMessage(undefined);
-        setConnectDialogOpen(true);
-        return;
-      }
-
-      if (matchesBinding(merged.openSettings, event)) {
-        event.preventDefault();
-        setSettingsDialogOpen(true);
-        return;
-      }
-
-      if (matchesBinding(merged.closeSession, event)) {
-        event.preventDefault();
-        const currentSessions = sessionsRef.current;
-        if (currentSessions.length > 0) {
-          setPendingCloseSessionId(activeSessionId ?? currentSessions[currentSessions.length - 1].sessionId);
-        }
-        return;
-      }
-
-      if (matchesBinding(merged.nextTab, event)) {
-        event.preventDefault();
-        const currentSessions = sessionsRef.current;
-        if (currentSessions.length > 1) {
-          const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
-          const next = idx === -1 ? currentSessions[0] : currentSessions[(idx + 1) % currentSessions.length];
-          setActiveSessionId(next.sessionId);
-        }
-        return;
-      }
-
-      if (matchesBinding(merged.prevTab, event)) {
-        event.preventDefault();
-        const currentSessions = sessionsRef.current;
-        if (currentSessions.length > 1) {
-          const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
-          const prev =
-            idx === -1 ? currentSessions[currentSessions.length - 1] : currentSessions[(idx - 1 + currentSessions.length) % currentSessions.length];
-          setActiveSessionId(prev.sessionId);
-        }
-        return;
-      }
-
-      if (matchesBinding(merged.togglePrimarySidebar, event)) {
-        event.preventDefault();
-        setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager }));
-        return;
-      }
-
-      if (matchesBinding(merged.toggleSecondarySidebar, event)) {
-        event.preventDefault();
-        setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar }));
-        return;
-      }
-
-      if (matchesBinding(merged.exportTerminal, event)) {
-        event.preventDefault();
-        const pane = activeSessionId ? terminalPaneRefs.current[activeSessionId] : undefined;
-        if (pane) {
-          const content = pane.exportBuffer();
-          const blob = new Blob([content], { type: 'text/plain' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `terminal-${activeSessionId}.txt`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-        return;
-      }
-    };
-
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [preferences.keyboardShortcuts, preferences.showFileManager, preferences.showSidebar, activeSessionId]);
-
-  useEffect(() => {
-    sessionsRef.current = sessions;
-  }, [sessions]);
-
-  useEffect(() => {
-    preferencesRef.current = preferences;
-  }, [preferences]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return;
-    }
-
-    const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const applySystemTheme = () => {
-      setSystemThemeMode(darkMediaQuery.matches ? 'dark' : 'light');
-    };
-
-    applySystemTheme();
-    if (typeof darkMediaQuery.addEventListener === 'function') {
-      darkMediaQuery.addEventListener('change', applySystemTheme);
-      return () => {
-        darkMediaQuery.removeEventListener('change', applySystemTheme);
-      };
-    }
-
-    darkMediaQuery.addListener(applySystemTheme);
-    return () => {
-      darkMediaQuery.removeListener(applySystemTheme);
-    };
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = appliedTheme;
-  }, [appliedTheme]);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    try {
-      void getCurrentWindow()
-        .setTheme(preferences.theme === 'system' ? null : preferences.theme)
-        .catch((error) => {
-          appLogger.warn('同步原生窗口主题失败', { error: String(error), theme: preferences.theme });
-        });
-    } catch (error) {
-      appLogger.warn('获取原生窗口实例失败，跳过窗口主题同步', { error: String(error), theme: preferences.theme });
-    }
-  }, [preferences.theme]);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      appLogger.warn('当前运行在浏览器预览模式，SSH 功能不可用');
-      return;
-    }
-
-    let stopStatus: UnlistenFn | undefined;
-    let stopClosed: UnlistenFn | undefined;
-    let cancelled = false;
-
-    const attach = async () => {
-      const nextStopStatus = await listen<SshStatusEvent>('ssh-status', (event) => {
-        appLogger.debug('收到会话状态事件', event.payload);
-        setSessions((current) => applyStatusToSessions(current, event.payload, pendingStatusEventsRef.current));
-      });
-
-      if (cancelled) {
-        nextStopStatus();
-        return;
-      }
-      stopStatus = nextStopStatus;
-
-      const nextStopClosed = await listen<SshClosedEvent>('ssh-closed', (event) => {
-        // Stop port forwards when session closes
-        if (isTauriRuntime()) {
-          const forwardOpId = `pf-${event.payload.sessionId}`;
-          void invoke('stop_port_forwards', { operationId: forwardOpId }).catch(() => {
-            /* port forwards may not have been started */
-          });
-        }
-
-        const currentSession = sessionsRef.current.find((session) => session.sessionId === event.payload.sessionId);
-        const shouldAutoReconnect =
-          !!currentSession &&
-          preferences.autoReconnect &&
-          event.payload.reasonKind === 'transport_disconnect' &&
-          event.payload.retryable &&
-          !autoReconnectAttemptedRef.current[event.payload.sessionId];
-
-        if (currentSession) {
-          if (shouldWarnOnClosedSession(currentSession.status)) {
-            appLogger.warn('会话已关闭', event.payload);
-          } else {
-            appLogger.debug('会话关闭事件（错误态已记录）', event.payload);
-          }
-        }
-
-        if (shouldAutoReconnect) {
-          autoReconnectAttemptedRef.current[event.payload.sessionId] = true;
-        }
-
-        setSessions((current) =>
-          current.map((session) => {
-            if (session.sessionId !== event.payload.sessionId) {
-              return session;
-            }
-
-            return {
-              ...session,
-              status: shouldAutoReconnect ? 'connecting' : session.status === 'error' ? 'error' : 'disconnected',
-              note: shouldAutoReconnect ? t('app.note.autoReconnecting') : event.payload.reason,
-            };
-          }),
-        );
-
-        if (shouldAutoReconnect) {
-          void handleReconnectSession(event.payload.sessionId, { automatic: true });
-        }
-      });
-
-      if (cancelled) {
-        nextStopClosed();
-        return;
-      }
-      stopClosed = nextStopClosed;
-    };
-
-    void attach();
-
-    return () => {
-      cancelled = true;
-      stopStatus?.();
-      stopClosed?.();
-    };
-  }, [preferences.autoReconnect]);
+    }, [setStoredPreferences]),
+  });
 
   const activeSession = useMemo(() => sessions.find((item) => item.sessionId === activeSessionId), [activeSessionId, sessions]);
   const connectedSessions = useMemo(() => sessions.filter((item) => item.status === 'connected').length, [sessions]);
-  syncI18nLocale(preferences.locale);
   const pendingDeleteProfile = useMemo(
     () => savedProfiles.find((item) => item.id === pendingDeleteProfileId),
     [pendingDeleteProfileId, savedProfiles],
   );
   const pendingCloseSession = useMemo(() => sessions.find((item) => item.sessionId === pendingCloseSessionId), [pendingCloseSessionId, sessions]);
   const runtimeText = isTauriRuntime() ? t('runtime.desktop') : t('runtime.browser');
-  const restartDialogOpen = updateState.phase === 'downloaded' && !restartDialogDismissed;
+
+  syncI18nLocale(preferences.locale);
 
   useEffect(() => {
     let cancelled = false;
@@ -488,676 +150,74 @@ function App() {
     };
   }, [preferences.locale]);
 
-  // Migrate passwords from localStorage to OS keychain (one-time)
-  useEffect(() => {
-    if (!isTauriRuntime() || !savedProfiles.length) {
-      return;
-    }
-
-    const migrated = localStorage.getItem('termbridge.passwordsMigrated');
-    if (migrated === '1') {
-      return;
-    }
-
-    const passwordsToMigrate: Array<[string, string]> = [];
-    for (const profile of savedProfiles) {
-      if (profile.rememberPassword && profile.password) {
-        passwordsToMigrate.push([profile.id, profile.password]);
-      }
-    }
-
-    if (passwordsToMigrate.length === 0) {
-      localStorage.setItem('termbridge.passwordsMigrated', '1');
-      return;
-    }
-
-    appLogger.info('Migrating passwords to keychain', { count: passwordsToMigrate.length });
-
-    invoke<Array<[string, boolean]>>('migrate_passwords', {
-      profiles: passwordsToMigrate,
-    })
-      .then((results) => {
-        const allSucceeded = results.every(([, ok]) => ok);
-        if (allSucceeded) {
-          localStorage.setItem('termbridge.passwordsMigrated', '1');
-          // Clear passwords from localStorage profiles
-          setSavedProfiles((current) =>
-            current.map((p) => ({
-              ...p,
-              password: '',
-            })),
-          );
-          appLogger.info('Passwords migrated to keychain successfully');
-        } else {
-          appLogger.warn('Some passwords failed to migrate', { results });
+  useKeyboardShortcuts({
+    keyboardShortcuts: preferences.keyboardShortcuts,
+    showFileManager: preferences.showFileManager,
+    showSidebar: preferences.showSidebar,
+    activeSessionId,
+    dialogState: {
+      hostKeyOpen: hostKeyDialog.open,
+      connectOpen: connectDialogOpen,
+      settingsOpen: settingsDialogOpen,
+      pendingDelete: !!pendingDeleteProfileId,
+      pendingClose: !!pendingCloseSessionId,
+      exitOpen: exitDialogOpen,
+    },
+    handlers: {
+      closeHostKeyDialog: () => setHostKeyDialog({ open: false }),
+      closeConnectDialog: () => setConnectDialogOpen(false),
+      closeSettingsDialog: () => setSettingsDialogOpen(false),
+      cancelPendingDelete: () => setPendingDeleteProfileId(undefined),
+      cancelPendingClose: () => setPendingCloseSessionId(undefined),
+      closeExitDialog: () => setExitDialogOpen(false),
+      openNewConnection: () => {
+        setDraftProfile(createEmptyProfile());
+        setErrorMessage(undefined);
+        setConnectDialogOpen(true);
+      },
+      openSettings: () => setSettingsDialogOpen(true),
+      requestCloseActiveSession: () => {
+        const currentSessions = sessionsRef.current;
+        if (currentSessions.length > 0) {
+          setPendingCloseSessionId(activeSessionId ?? currentSessions[currentSessions.length - 1].sessionId);
         }
-      })
-      .catch((error) => {
-        appLogger.error('Password migration failed', { error: String(error) });
-      });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const runUpdateCheck = useCallback(async (mode: 'startup' | 'manual') => {
-    if (!isTauriRuntime()) {
-      if (mode === 'manual') {
-        setUpdateToast({
-          message: t('app.update.manualUnavailable'),
-          tone: 'error',
-        });
-      }
-      return;
-    }
-
-    dispatchUpdateState({ type: 'checkStarted' });
-    setUpdateDownloadProgress(undefined);
-
-    try {
-      const available = await checkForUpdate();
-      if (mode === 'startup') {
-        markStartupUpdateCheck(Date.now());
-      }
-      if (!available) {
-        dispatchUpdateState({ type: 'noUpdateFound' });
-        if (mode === 'manual') {
-          setUpdateToast({
-            message: t('app.update.latest'),
-            tone: 'info',
-          });
+      },
+      selectNextTab: () => {
+        const currentSessions = sessionsRef.current;
+        if (currentSessions.length > 1) {
+          const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
+          const next = idx === -1 ? currentSessions[0] : currentSessions[(idx + 1) % currentSessions.length];
+          setActiveSessionId(next.sessionId);
         }
-        return;
-      }
-
-      dispatchUpdateState({
-        type: 'updateFound',
-        payload: {
-          latestVersion: available.version,
-        },
-      });
-      dispatchUpdateState({ type: 'downloadStarted' });
-      setUpdateDownloadProgress(0);
-
-      await downloadAndInstallUpdate(available, (percent) => {
-        setUpdateDownloadProgress(percent);
-      });
-
-      setUpdateDownloadProgress(100);
-      dispatchUpdateState({
-        type: 'downloadCompleted',
-        payload: {
-          downloadedVersion: available.version,
-        },
-      });
-      setRestartDialogDismissed(false);
-    } catch (error) {
-      const message = t('app.update.failed', { error: String(error) });
-      appLogger.error('检查或下载更新失败', { mode, error: String(error) });
-      dispatchUpdateState({
-        type: 'downloadFailed',
-        payload: {
-          message,
-        },
-      });
-      if (mode === 'manual') {
-        setUpdateToast({
-          message,
-          tone: 'error',
-        });
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime() || !preferences.startupUpdateCheck || !shouldRunStartupUpdateCheck(Date.now())) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        await runUpdateCheck('startup');
-      })();
-    }, 8000);
-
-    return () => window.clearTimeout(timer);
-  }, [runUpdateCheck, preferences.startupUpdateCheck]);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let stopSystemCheckUpdate: UnlistenFn | undefined;
-    let cancelled = false;
-
-    const attach = async () => {
-      try {
-        const nextStopSystemCheckUpdate = await listen('system-check-update', () => {
-          void runUpdateCheck('manual');
-        });
-
-        if (cancelled) {
-          nextStopSystemCheckUpdate();
-          return;
+      },
+      selectPrevTab: () => {
+        const currentSessions = sessionsRef.current;
+        if (currentSessions.length > 1) {
+          const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
+          const prev =
+            idx === -1 ? currentSessions[currentSessions.length - 1] : currentSessions[(idx - 1 + currentSessions.length) % currentSessions.length];
+          setActiveSessionId(prev.sessionId);
         }
-
-        stopSystemCheckUpdate = nextStopSystemCheckUpdate;
-      } catch (error) {
-        appLogger.error('监听系统更新检查事件失败', { error: String(error) });
-      }
-    };
-
-    void attach();
-
-    return () => {
-      cancelled = true;
-      stopSystemCheckUpdate?.();
-    };
-  }, [runUpdateCheck]);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let stopSystemOpenSettings: UnlistenFn | undefined;
-    let stopSettingsChanged: UnlistenFn | undefined;
-    let cancelled = false;
-
-    const attach = async () => {
-      try {
-        const nextStopSystemOpenSettings = await listen(SYSTEM_OPEN_SETTINGS_EVENT, () => {
-          setSettingsDialogOpen(true);
-        });
-
-        if (cancelled) {
-          nextStopSystemOpenSettings();
-          return;
+      },
+      togglePrimarySidebar: () =>
+        setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager })),
+      toggleSecondarySidebar: () =>
+        setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar })),
+      exportActiveTerminal: () => {
+        const pane = activeSessionId ? terminalPaneRefs.current[activeSessionId] : undefined;
+        if (pane) {
+          const content = pane.exportBuffer();
+          const blob = new Blob([content], { type: 'text/plain' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `terminal-${activeSessionId}.txt`;
+          a.click();
+          URL.revokeObjectURL(url);
         }
-
-        stopSystemOpenSettings = nextStopSystemOpenSettings;
-
-        const nextStopSettingsChanged = await listen(SETTINGS_CHANGED_EVENT, () => {
-          // Re-read localStorage to sync with settings window changes
-          try {
-            const rawPrefs = window.localStorage.getItem('termbridge.preferences');
-            if (rawPrefs) {
-              setStoredPreferences(JSON.parse(rawPrefs));
-            }
-          } catch {
-            // ignore parse errors
-          }
-        });
-
-        if (cancelled) {
-          nextStopSettingsChanged();
-          return;
-        }
-
-        stopSettingsChanged = nextStopSettingsChanged;
-      } catch (error) {
-        appLogger.error('监听系统设置事件失败', { error: String(error) });
-      }
-    };
-
-    void attach();
-
-    return () => {
-      cancelled = true;
-      stopSystemOpenSettings?.();
-      stopSettingsChanged?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let stopAppExitRequest: UnlistenFn | undefined;
-    let cancelled = false;
-
-    const attach = async () => {
-      try {
-        const nextStopAppExitRequest = await listen('system-request-app-exit', () => {
-          setExitDialogOpen(true);
-        });
-
-        if (cancelled) {
-          nextStopAppExitRequest();
-          return;
-        }
-
-        stopAppExitRequest = nextStopAppExitRequest;
-      } catch (error) {
-        appLogger.error('监听系统退出请求事件失败', { error: String(error) });
-      }
-    };
-
-    void attach();
-
-    return () => {
-      cancelled = true;
-      stopAppExitRequest?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let stopAboutRequest: UnlistenFn | undefined;
-    let cancelled = false;
-
-    const attach = async () => {
-      try {
-        const nextStopAboutRequest = await listen('system-about', () => {
-          setAboutDialogOpen(true);
-        });
-
-        if (cancelled) {
-          nextStopAboutRequest();
-          return;
-        }
-
-        stopAboutRequest = nextStopAboutRequest;
-      } catch (error) {
-        appLogger.error('监听 about 事件失败', { error: String(error) });
-      }
-    };
-
-    void attach();
-
-    return () => {
-      cancelled = true;
-      stopAboutRequest?.();
-    };
-  }, []);
-
-  const createSessionFromProfile = async (profile: ConnectionProfile) => {
-    const request: Record<string, unknown> = {
-      name: describeSession(profile),
-      host: profile.host.trim(),
-      port: profile.port,
-      username: profile.username.trim(),
-      authMethod: profile.authMethod,
-      password: profile.password || undefined,
-      privateKeyPath: profile.privateKeyPath?.trim() || undefined,
-      passphrase: profile.passphrase || undefined,
-      terminalCols: 120,
-      terminalRows: 32,
-    };
-    if (profile.jumpHost) {
-      request.jumpHost = {
-        host: profile.jumpHost.host.trim(),
-        port: profile.jumpHost.port,
-        username: profile.jumpHost.username.trim(),
-        authMethod: profile.jumpHost.authMethod,
-        password: profile.jumpHost.password || undefined,
-        privateKeyPath: profile.jumpHost.privateKeyPath?.trim() || undefined,
-        passphrase: profile.jumpHost.passphrase || undefined,
-      };
-    }
-    return invoke<SessionSummary>('create_session', { request });
-  };
-
-  const proceedWithConnection = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
-    try {
-      if (remember) {
-        // Store password in OS keychain before saving profile
-        if (rememberPassword && profile.password && isTauriRuntime()) {
-          try {
-            await invoke('store_password', {
-              profileId: profile.id,
-              password: profile.password,
-            });
-          } catch (error) {
-            appLogger.warn('Failed to store password in keychain', { error: String(error) });
-          }
-        }
-        const nextProfile = sanitizeProfileForStorage({
-          ...profile,
-          rememberPassword,
-        });
-        setSavedProfiles((current) => {
-          const others = current.filter((item) => item.id !== nextProfile.id);
-          return [nextProfile, ...others].slice(0, preferences.historyLimit);
-        });
-      }
-
-      const summary = await createSessionFromProfile(profile);
-      const bufferedStatus = consumeBufferedSessionStatus(summary.sessionId, pendingStatusEventsRef.current);
-      const nextSession: SessionState = {
-        ...summary,
-        profile,
-        status: bufferedStatus?.status ?? 'connecting',
-        note: bufferedStatus?.note,
-        createdAt: Date.now(),
-      };
-      const insertAfterSessionId = activeSessionId;
-      sessionsRef.current = insertSessionAfterActive(sessionsRef.current, nextSession, insertAfterSessionId);
-      setSessions((current) => insertSessionAfterActive(current, nextSession, insertAfterSessionId));
-      setActiveSessionId(summary.sessionId);
-
-      // Start port forwards if configured
-      if ((profile.portForwards?.length ?? 0) > 0 && isTauriRuntime()) {
-        const forwardOpId = `pf-${summary.sessionId}`;
-        void invoke('start_port_forwards', {
-          operationId: forwardOpId,
-          host: profile.host.trim(),
-          port: profile.port,
-          username: profile.username.trim(),
-          authMethod: profile.authMethod,
-          password: profile.password || undefined,
-          privateKeyPath: profile.privateKeyPath?.trim() || undefined,
-          passphrase: profile.passphrase || undefined,
-          jumpHost: profile.jumpHost
-            ? {
-                host: profile.jumpHost.host.trim(),
-                port: profile.jumpHost.port,
-                username: profile.jumpHost.username.trim(),
-                authMethod: profile.jumpHost.authMethod,
-                password: profile.jumpHost.password || undefined,
-                privateKeyPath: profile.jumpHost.privateKeyPath?.trim() || undefined,
-                passphrase: profile.jumpHost.passphrase || undefined,
-              }
-            : undefined,
-          forwards: profile.portForwards,
-        }).catch((error) => {
-          appLogger.warn('Failed to start port forwards', { error: String(error) });
-        });
-      }
-
-      setDraftProfile({
-        ...createEmptyProfile(),
-        username: profile.username,
-        port: profile.port,
-        authMethod: profile.authMethod,
-        rememberPassword: false,
-        privateKeyPath: profile.privateKeyPath ?? '',
-      });
-      setErrorMessage(undefined);
-      setConnectDialogOpen(false);
-      appLogger.info('SSH 会话创建成功', {
-        sessionId: summary.sessionId,
-        title: summary.title,
-      });
-    } catch (error) {
-      appLogger.error('SSH 会话创建失败', error);
-      setErrorMessage(String(error));
-    }
-  };
-
-  const handleConnect = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
-    if (isConnecting) return;
-
-    if (!profile.host.trim() || !profile.username.trim()) {
-      appLogger.warn('连接参数校验失败：Host 或 Username 为空');
-      setErrorMessage(t('app.error.hostUsernameRequired'));
-      return;
-    }
-
-    if (!isTauriRuntime()) {
-      appLogger.warn('浏览器预览模式下尝试建立连接');
-      setErrorMessage(t('app.error.desktopOnly'));
-      return;
-    }
-
-    setIsConnecting(true);
-    try {
-      appLogger.info('开始检查主机密钥', {
-        host: profile.host.trim(),
-        port: profile.port,
-      });
-
-      const checkResult = await invoke<HostKeyCheckResponse>('check_host_key', {
-        request: {
-          host: profile.host.trim(),
-          port: profile.port,
-        },
-      });
-
-      if (checkResult.status === 'mismatch') {
-        appLogger.warn('主机密钥不匹配，可能存在中间人攻击', {
-          host: profile.host.trim(),
-          port: profile.port,
-        });
-        setErrorMessage(t('app.error.hostKeyMismatch'));
-        return;
-      }
-
-      if (checkResult.status === 'failure') {
-        appLogger.warn('主机密钥检查失败', {
-          host: profile.host.trim(),
-          port: profile.port,
-        });
-        setErrorMessage(checkResult.message || t('app.error.hostKeyCheckFailed'));
-        return;
-      }
-
-      if (checkResult.status === 'notFound') {
-        appLogger.info('首次连接到该主机，等待用户确认指纹', {
-          host: profile.host.trim(),
-          fingerprint: checkResult.fingerprint,
-        });
-        setHostKeyDialog({
-          open: true,
-          profile,
-          fingerprint: checkResult.fingerprint,
-          remember,
-          rememberPassword,
-        });
-        return;
-      }
-
-      await proceedWithConnection(profile, remember, rememberPassword);
-    } catch (error) {
-      appLogger.error('主机密钥检查或连接失败', error);
-      setErrorMessage(String(error));
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const handleTrustAndConnect = async () => {
-    if (!hostKeyDialog.profile) return;
-
-    const { profile, remember, rememberPassword } = hostKeyDialog;
-    try {
-      await invoke('trust_host', {
-        request: {
-          host: profile.host.trim(),
-          port: profile.port,
-        },
-      });
-      setHostKeyDialog({ open: false });
-      await proceedWithConnection(profile, remember ?? false, rememberPassword ?? false);
-    } catch (error) {
-      appLogger.error('信任主机失败', error);
-      setErrorMessage(String(error));
-    }
-  };
-
-  const loadProfile = async (profile: ConnectionProfile) => {
-    let password = '';
-    if (profile.rememberPassword && isTauriRuntime()) {
-      try {
-        const stored = await invoke<string | null>('retrieve_password', {
-          profileId: profile.id,
-        });
-        if (stored) {
-          password = stored;
-        }
-      } catch (error) {
-        appLogger.warn('Failed to retrieve password from keychain', { error: String(error) });
-      }
-    }
-    setDraftProfile({
-      ...profile,
-      password,
-      passphrase: '',
-    });
-    setErrorMessage(undefined);
-    setConnectDialogOpen(true);
-  };
-
-  const handleCloseSession = async (sessionId: string) => {
-    delete pendingStatusEventsRef.current[sessionId];
-
-    if (!isTauriRuntime()) {
-      appLogger.warn('浏览器预览模式下关闭会话', { sessionId });
-      setSessions((current) => current.filter((session) => session.sessionId !== sessionId));
-      removeFileManagerSessionState(sessionId);
-      return;
-    }
-
-    try {
-      appLogger.info('请求关闭会话', { sessionId });
-      await invoke('close_session', { sessionId });
-    } finally {
-      // Stop port forwards if running
-      if (isTauriRuntime()) {
-        const forwardOpId = `pf-${sessionId}`;
-        void invoke('stop_port_forwards', { operationId: forwardOpId }).catch((error) => {
-          appLogger.warn('Failed to stop port forwards', { error: String(error) });
-        });
-      }
-      let nextActiveSessionId: string | undefined;
-      setSessions((current) => {
-        const remaining = current.filter((session) => session.sessionId !== sessionId);
-        nextActiveSessionId = remaining[0]?.sessionId;
-        return remaining;
-      });
-      setActiveSessionId((current) => (current === sessionId ? nextActiveSessionId : current));
-      removeFileManagerSessionState(sessionId);
-      appLogger.info('会话已从前端状态移除', { sessionId });
-    }
-  };
-
-  const handleDeleteSavedProfile = (profileId: string) => {
-    const target = savedProfiles.find((item) => item.id === profileId);
-    if (!target) {
-      return;
-    }
-
-    setPendingDeleteProfileId(profileId);
-  };
-
-  const handleToggleSavedProfilePinned = (profileId: string) => {
-    setSavedProfiles((current) =>
-      current.map((profile) =>
-        profile.id === profileId
-          ? {
-              ...profile,
-              pinned: !profile.pinned,
-            }
-          : profile,
-      ),
-    );
-  };
-
-  const handleToggleSavedProfileFavorite = (profileId: string) => {
-    setSavedProfiles((current) =>
-      current.map((profile) =>
-        profile.id === profileId
-          ? {
-              ...profile,
-              favorite: !profile.favorite,
-            }
-          : profile,
-      ),
-    );
-  };
-
-  const handleRenameSavedProfile = (profileId: string, name: string) => {
-    setSavedProfiles((current) =>
-      current.map((profile) =>
-        profile.id === profileId
-          ? {
-              ...profile,
-              name,
-            }
-          : profile,
-      ),
-    );
-  };
-
-  const handleReconnectSession = async (sessionId: string, options?: { automatic?: boolean }) => {
-    const automatic = options?.automatic ?? false;
-    const target = sessionsRef.current.find((item) => item.sessionId === sessionId);
-    if (!target) {
-      return;
-    }
-
-    if (!isTauriRuntime()) {
-      appLogger.warn('浏览器预览模式下尝试重连会话', { sessionId });
-      setErrorMessage(t('app.error.desktopOnly'));
-      return;
-    }
-
-    try {
-      appLogger.info('开始重连会话', { sessionId });
-      const summary = await createSessionFromProfile(target.profile);
-      setSessions((current) => {
-        const bufferedStatus = consumeBufferedSessionStatus(summary.sessionId, pendingStatusEventsRef.current);
-        const nextSession: SessionState = {
-          ...summary,
-          title: target.title,
-          profile: target.profile,
-          status: bufferedStatus?.status ?? 'connecting',
-          note: bufferedStatus?.note,
-          createdAt: Date.now(),
-        };
-        return current.map((item) => (item.sessionId === sessionId ? nextSession : item));
-      });
-      setActiveSessionId((current) => (current === sessionId ? summary.sessionId : current));
-      replaceFileManagerSessionStateKey(sessionId, summary.sessionId);
-      delete autoReconnectAttemptedRef.current[sessionId];
-      delete autoReconnectAttemptedRef.current[summary.sessionId];
-      setErrorMessage(undefined);
-      appLogger.info('会话重连成功', {
-        fromSessionId: sessionId,
-        toSessionId: summary.sessionId,
-        automatic,
-      });
-    } catch (error) {
-      appLogger.error('会话重连失败', {
-        sessionId,
-        automatic,
-        error: String(error),
-      });
-      setSessions((current) =>
-        current.map((item) =>
-          item.sessionId === sessionId
-            ? {
-                ...item,
-                status: 'error',
-                note: automatic
-                  ? t('app.error.autoReconnectFailed', { error: String(error) })
-                  : t('app.error.reconnectFailed', { error: String(error) }),
-              }
-            : item,
-        ),
-      );
-      setErrorMessage(
-        automatic ? t('app.error.autoReconnectFailed', { error: String(error) }) : t('app.error.reconnectFailed', { error: String(error) }),
-      );
-    }
-  };
-
-  const confirmDeleteSavedProfile = () => {
-    if (!pendingDeleteProfileId) {
-      return;
-    }
-
-    appLogger.info('删除历史连接', { profileId: pendingDeleteProfileId });
-    if (isTauriRuntime()) {
-      void invoke('remove_password', { profileId: pendingDeleteProfileId }).catch((error) => {
-        appLogger.warn('Failed to remove password from keychain', { error: String(error) });
-      });
-    }
-    setSavedProfiles((current) => current.filter((item) => item.id !== pendingDeleteProfileId));
-    setPendingDeleteProfileId(undefined);
-  };
+      },
+    },
+  });
 
   const confirmCloseSession = () => {
     if (!pendingCloseSessionId) {
@@ -1174,40 +234,13 @@ function App() {
     void invoke('request_app_exit');
   };
 
-  const handleInstallUpdateNow = () => {
-    appLogger.info('用户确认立即重启安装更新');
-    void (async () => {
-      try {
-        await invoke('request_app_restart');
-        return;
-      } catch (error) {
-        appLogger.error('调用原生重启失败，回退到窗口刷新', { error: String(error) });
-      }
+  const handleTogglePrimarySide = useCallback(() => {
+    setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager }));
+  }, [setStoredPreferences]);
 
-      setUpdateToast({
-        message: t('app.update.restartFallback'),
-        tone: 'info',
-      });
-
-      window.setTimeout(() => {
-        try {
-          window.location.reload();
-        } catch (error) {
-          const message = t('app.update.reloadFailed', { error: String(error) });
-          appLogger.error('回退刷新失败', { error: String(error) });
-          setUpdateToast({
-            message,
-            tone: 'error',
-          });
-        }
-      }, 1000);
-    })();
-  };
-
-  const handleInstallUpdateLater = () => {
-    appLogger.info('用户选择稍后安装更新');
-    setRestartDialogDismissed(true);
-  };
+  const handleToggleSecondarySide = useCallback(() => {
+    setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar }));
+  }, [setStoredPreferences]);
 
   const workspaceContent = (
     <section className="flex h-full w-full min-h-0 min-w-0 flex-col">
@@ -1349,14 +382,6 @@ function App() {
       </section>
     </section>
   );
-
-  const handleTogglePrimarySide = useCallback(() => {
-    setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager }));
-  }, [setStoredPreferences]);
-
-  const handleToggleSecondarySide = useCallback(() => {
-    setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar }));
-  }, [setStoredPreferences]);
 
   return (
     <main className="h-screen overflow-hidden flex flex-col">
@@ -1535,3 +560,7 @@ function App() {
 }
 
 export default App;
+
+// Re-export for compatibility with any external consumers expecting these helpers.
+export { normalizePreferences } from './lib/appHelpers';
+export type { AppPreferences };

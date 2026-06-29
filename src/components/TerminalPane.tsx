@@ -22,6 +22,7 @@ import {
   shouldWarnOnClosedSession,
 } from '../lib/terminal';
 import { cn, getCurrentThemeMode, getTerminalTheme, getCursorStyle } from "../lib/ui";
+import { subscribeThemeMode } from "../lib/themeObserver";
 import type {
   SessionState,
   SshClosedEvent,
@@ -395,7 +396,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
     });
     writeSystemLine(formatTerminalPrefixedText(t('terminal.notice.preparing')));
 
-    const themeObserver = new MutationObserver(() => {
+    const unsubscribeTheme = subscribeThemeMode(() => {
       const nextTerminal = terminalRef.current;
       if (!nextTerminal) {
         return;
@@ -403,10 +404,6 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
 
       nextTerminal.options.theme = getTerminalTheme(terminalTheme, getCurrentThemeMode());
       nextTerminal.refresh?.(0, nextTerminal.rows - 1);
-    });
-    themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
     });
 
     terminal.onData((data) => {
@@ -539,7 +536,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
         frameRef.current = null;
       }
       terminal.dispose();
-      themeObserver.disconnect();
+      unsubscribeTheme();
       terminalRef.current = null;
       fitRef.current = null;
       searchAddonRef.current = null;

@@ -4,7 +4,7 @@ import { t } from '../lib/i18n';
 import { parseQuickConnect } from '../lib/profile';
 import type { ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
 import { FolderIcon } from './Icons';
-import { cn } from '../lib/ui';
+import { cn, PROFILE_COLORS } from '../lib/ui';
 import { Tooltip } from './Tooltip';
 import { Segment } from './Segment';
 import { Input, Checkbox } from '@chakra-ui/react';
@@ -281,7 +281,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 >
                   <span className="absolute block h-px w-full rotate-45 bg-(--app-text-muted)/50" />
                 </button>
-                {['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6', '#d946ef', '#f43f5e'].map((color) => (
+                {PROFILE_COLORS.map((color) => (
                   <button
                     className={cn(
                       'h-5 w-5 shrink-0 rounded-full transition-transform',

@@ -54,7 +54,11 @@ export function t(key: string, variables?: Record<string, string | number>, defa
   }
 
   try {
-    return intl.get(key, variables).d(fallback);
+    const result = intl.get(key, variables).d(fallback);
+    if (result === fallback && fallback === key && import.meta.env.DEV) {
+      console.warn(`[i18n] missing key: ${key}`);
+    }
+    return result;
   } catch {
     return interpolate(fallback, variables);
   }
