@@ -591,6 +591,17 @@ fn remote_connection_request_from_session(
     }
 }
 
+struct PoolInvalidationGuard<'a> {
+    pool: &'a SftpPool,
+    connection_request: &'a RemoteConnectionRequest,
+}
+
+impl<'a> Drop for PoolInvalidationGuard<'a> {
+    fn drop(&mut self) {
+        self.pool.invalidate(self.connection_request);
+    }
+}
+
 pub(crate) fn spawn_ssh_thread(
     app: AppHandle,
     session_id: String,
@@ -601,8 +612,11 @@ pub(crate) fn spawn_ssh_thread(
 ) {
     thread::spawn(move || {
         debug!("Spawned SSH worker session_id={session_id}");
+        let _guard = PoolInvalidationGuard {
+            pool: &pool,
+            connection_request: &connection_request,
+        };
         let run_result = run_ssh_session(&app, &session_id, &request, rx);
-        pool.invalidate(&connection_request);
 
         match run_result {
             Ok(message) => {
