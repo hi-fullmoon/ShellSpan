@@ -63,11 +63,14 @@ fn list_remote_directory_inner(
     pool: Option<&SftpPool>,
     cache: Option<&RemoteIdentityCache>,
 ) -> Result<RemoteDirectoryListing, String> {
-    let host = request.connection.host.clone();
+    let scope = format!(
+        "{}:{}:{}",
+        request.connection.host, request.connection.port, request.connection.username
+    );
     let connected = connect_sftp(&request.connection, pool)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     list_remote_directory_from_sftp(
-        &host,
+        &scope,
         &connected.session,
         &connected.sftp,
         request.path.as_deref(),
@@ -796,7 +799,7 @@ fn cleanup_stale_open_temp_files(open_root: &Path) {
 }
 
 fn list_remote_directory_from_sftp(
-    host: &str,
+    scope: &str,
     session: &Session,
     sftp: &Sftp,
     requested_path: Option<&str>,
@@ -814,7 +817,7 @@ fn list_remote_directory_from_sftp(
         .map(|(path, stat)| map_remote_file(path, stat))
         .collect::<Vec<_>>();
 
-    enrich_remote_entry_owners(host, session, &mut entries, cache);
+    enrich_remote_entry_owners(scope, session, &mut entries, cache);
     entries.sort_by(sort_remote_entries);
 
     let current_path = path_to_string(&resolved_path);
@@ -835,7 +838,7 @@ fn list_remote_directory_from_sftp(
 }
 
 fn enrich_remote_entry_owners(
-    host: &str,
+    scope: &str,
     session: &Session,
     entries: &mut [RemoteFileEntry],
     cache: Option<&RemoteIdentityCache>,
@@ -849,8 +852,8 @@ fn enrich_remote_entry_owners(
         .filter_map(|entry| entry.group_gid)
         .collect::<HashSet<_>>();
 
-    let owner_names = resolve_identity_names(host, session, cache, &owner_ids, RemoteIdentityKind::User);
-    let group_names = resolve_identity_names(host, session, cache, &group_ids, RemoteIdentityKind::Group);
+    let owner_names = resolve_identity_names(scope, session, cache, &owner_ids, RemoteIdentityKind::User);
+    let group_names = resolve_identity_names(scope, session, cache, &group_ids, RemoteIdentityKind::Group);
 
     for entry in entries {
         entry.owner_name = entry.owner_uid.and_then(|uid| owner_names.get(&uid).cloned());
@@ -859,7 +862,7 @@ fn enrich_remote_entry_owners(
 }
 
 fn resolve_identity_names(
-    host: &str,
+    scope: &str,
     session: &Session,
     cache: Option<&RemoteIdentityCache>,
     ids: &HashSet<u32>,
@@ -872,7 +875,7 @@ fn resolve_identity_names(
     let ids_vec: Vec<u32> = ids.iter().copied().collect();
 
     let (mut names, missing_ids) = if let Some(cache) = cache {
-        cache.resolve_names(host, &ids_vec, kind)
+        cache.resolve_names(scope, &ids_vec, kind)
     } else {
         (HashMap::new(), ids_vec)
     };
@@ -882,7 +885,7 @@ fn resolve_identity_names(
             Ok(resolved) => {
                 if let Some(cache) = cache {
                     for (id, name) in &resolved {
-                        cache.insert(host, *id, kind, name.clone());
+                        cache.insert(scope, *id, kind, name.clone());
                     }
                 }
                 names.extend(resolved);
