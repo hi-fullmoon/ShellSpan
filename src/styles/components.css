@@ -234,3 +234,7 @@
   padding: 1rem;
   background: var(--app-overlay);
 }
+
+[data-scope="select"][data-part="content"][data-state="closed"] {
+  display: none !important;
+}

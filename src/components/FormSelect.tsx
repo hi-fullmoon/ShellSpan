@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Select, createListCollection } from '@chakra-ui/react';
 
 interface FormSelectProps {
@@ -13,20 +13,14 @@ interface FormSelectProps {
 
 export function FormSelect({ value, onChange, options, className = 'themed-input', placeholder, id, 'aria-label': ariaLabel }: FormSelectProps) {
   const collection = useMemo(() => createListCollection({ items: options.map((o) => ({ label: o.label, value: o.value })) }), [options]);
-  const [open, setOpen] = useState(false);
 
   return (
     <Select.Root
       collection={collection}
-      positioning={{ sameWidth: true, strategy: 'fixed', gutter: 4 }}
+      positioning={{ sameWidth: true, gutter: 4 }}
       size="sm"
       value={[value]}
-      open={open}
-      onOpenChange={(details) => setOpen(details.open)}
-      onValueChange={(details) => {
-        onChange(details.value[0]);
-        setOpen(false);
-      }}
+      onValueChange={(details) => onChange(details.value[0])}
     >
       <Select.Control>
         <Select.Trigger aria-label={ariaLabel} id={id} className={className}>

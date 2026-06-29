@@ -550,7 +550,7 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                       max={65535}
                     />
                   </label>
-                  <label className="port-forward-field">
+                  <label className="port-forward-field flex-1">
                     <span>{t('connectionForm.remoteHost')}</span>
                     <Input
                       size="sm"
