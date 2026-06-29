@@ -1,5 +1,5 @@
 use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest, SessionCreateRequest};
-use crate::sftp_pool::SftpPool;
+use crate::sftp_pool::{connection_key, SftpPool};
 use log::debug;
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
@@ -67,14 +67,16 @@ pub(crate) fn connect_sftp(
         _jump_session: jump_session,
     }));
 
-    if let Some(pool) = pool {
-        pool.insert(request, connected.clone());
-    }
-
     debug!(
         "Connected SFTP host={} port={} username={}",
         request.host, request.port, request.username
     );
+
+    if let Some(pool) = pool {
+        let key = connection_key(request);
+        return Ok(pool.get_or_insert(&key, connected));
+    }
+
     Ok(connected)
 }
 

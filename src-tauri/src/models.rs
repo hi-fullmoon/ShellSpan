@@ -217,7 +217,7 @@ pub(crate) struct TrustHostRequest {
     pub(crate) port: u16,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AuthMethod {
     Password,

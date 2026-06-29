@@ -1,11 +1,23 @@
-use crate::models::{ConnectedSftp, JumpHostConfig, RemoteConnectionRequest};
+use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub(crate) struct ConnectionKey {
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: AuthMethod,
+    password_hash: String,
+    private_key_path_hash: String,
+    passphrase_hash: String,
+    jump_host_hash: Option<String>,
+}
+
 #[derive(Default, Clone)]
 pub(crate) struct SftpPool {
-    sessions: Arc<Mutex<HashMap<String, Arc<Mutex<ConnectedSftp>>>>>,
+    sessions: Arc<Mutex<HashMap<ConnectionKey, Arc<Mutex<ConnectedSftp>>>>>,
 }
 
 impl SftpPool {
@@ -21,16 +33,16 @@ impl SftpPool {
         sessions.get(&key).cloned()
     }
 
-    pub(crate) fn insert(
+    pub(crate) fn get_or_insert(
         &self,
-        request: &RemoteConnectionRequest,
-        connected: Arc<Mutex<ConnectedSftp>>,
-    ) {
-        let key = connection_key(request);
-        self.sessions
+        key: &ConnectionKey,
+        new_connection: Arc<Mutex<ConnectedSftp>>,
+    ) -> Arc<Mutex<ConnectedSftp>> {
+        let mut sessions = self
+            .sessions
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(key, connected);
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.entry(key.clone()).or_insert(new_connection).clone()
     }
 
     pub(crate) fn invalidate(&self, request: &RemoteConnectionRequest) {
@@ -42,34 +54,30 @@ impl SftpPool {
     }
 }
 
-fn connection_key(request: &RemoteConnectionRequest) -> String {
-    format!(
-        "{}:{}:{}:{}:{}:{}:{}:{}",
-        request.host,
-        request.port,
-        request.username,
-        request.auth_method.as_str(),
-        credential_marker(request.password.as_deref()),
-        credential_marker(request.private_key_path.as_deref()),
-        credential_marker(request.passphrase.as_deref()),
-        jump_host_marker(request.jump_host.as_ref()),
-    )
+pub(crate) fn connection_key(request: &RemoteConnectionRequest) -> ConnectionKey {
+    ConnectionKey {
+        host: request.host.clone(),
+        port: request.port,
+        username: request.username.clone(),
+        auth_method: request.auth_method,
+        password_hash: credential_marker(request.password.as_deref()),
+        private_key_path_hash: credential_marker(request.private_key_path.as_deref()),
+        passphrase_hash: credential_marker(request.passphrase.as_deref()),
+        jump_host_hash: request.jump_host.as_ref().map(jump_host_marker),
+    }
 }
 
-fn jump_host_marker(jump_host: Option<&JumpHostConfig>) -> String {
-    match jump_host {
-        None => "no-jump".to_string(),
-        Some(jump) => format!(
-            "jump:{}:{}:{}:{}:{}:{}:{}",
-            jump.host,
-            jump.port,
-            jump.username,
-            jump.auth_method.as_str(),
-            credential_marker(jump.password.as_deref()),
-            credential_marker(jump.private_key_path.as_deref()),
-            credential_marker(jump.passphrase.as_deref()),
-        ),
-    }
+fn jump_host_marker(jump_host: &JumpHostConfig) -> String {
+    format!(
+        "{}:{}:{}:{}:{}:{}:{}",
+        jump_host.host,
+        jump_host.port,
+        jump_host.username,
+        jump_host.auth_method.as_str(),
+        credential_marker(jump_host.password.as_deref()),
+        credential_marker(jump_host.private_key_path.as_deref()),
+        credential_marker(jump_host.passphrase.as_deref()),
+    )
 }
 
 fn credential_marker(value: Option<&str>) -> String {
@@ -95,7 +103,7 @@ mod tests {
     use crate::models::{AuthMethod, RemoteConnectionRequest};
 
     #[test]
-    fn invalidate_removes_cached_connection() {
+    fn invalidate_does_not_panic_on_empty_pool() {
         let pool = SftpPool::default();
         let request = RemoteConnectionRequest {
             host: "example.com".to_string(),
@@ -108,8 +116,6 @@ mod tests {
             jump_host: None,
         };
 
-        // We cannot create a real Session in a unit test, but we can verify the behavior by
-        // attempting to get a connection after invalidate returns None.
         pool.invalidate(&request);
         assert!(pool.get(&request).is_none());
     }
@@ -209,15 +215,15 @@ mod tests {
         let key = connection_key(&request);
 
         assert!(
-            !key.contains(host_pass),
+            !key.host.contains(host_pass),
             "key must not contain raw password"
         );
         assert!(
-            !key.contains(host_phrase),
+            !key.passphrase_hash.contains(host_phrase),
             "key must not contain raw passphrase"
         );
         assert!(
-            !key.contains(host_key_path),
+            !key.private_key_path_hash.contains(host_key_path),
             "key must not contain raw private key path"
         );
     }
@@ -249,21 +255,21 @@ mod tests {
         let key = connection_key(&request);
 
         assert!(
-            !key.contains(jump_pass),
+            !key.jump_host_hash.as_ref().expect("jump host hash present").contains(jump_pass),
             "key must not contain raw jump-host password"
         );
         assert!(
-            !key.contains(jump_phrase),
+            !key.jump_host_hash.as_ref().expect("jump host hash present").contains(jump_phrase),
             "key must not contain raw jump-host passphrase"
         );
         assert!(
-            !key.contains(jump_key_path),
+            !key.jump_host_hash.as_ref().expect("jump host hash present").contains(jump_key_path),
             "key must not contain raw jump-host private key path"
         );
     }
 
     #[test]
-    fn equal_credentials_produce_equal_hashes() {
+    fn equal_credentials_produce_equal_keys() {
         let base = RemoteConnectionRequest {
             host: "example.com".to_string(),
             port: 22,
@@ -285,5 +291,56 @@ mod tests {
         let identical = base.clone();
 
         assert_eq!(connection_key(&base), connection_key(&identical));
+    }
+
+    #[test]
+    fn connection_key_distinguishes_colon_in_host_and_username() {
+        // A structured key must not collide when user-controlled strings contain
+        // delimiters that would have merged fields in the old format-string key.
+        let first = RemoteConnectionRequest {
+            host: "example.com:2222".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let second = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 2222,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: None,
+        };
+
+        assert_ne!(connection_key(&first), connection_key(&second));
+
+        let third = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice:bob".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let fourth = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("bob:secret".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: None,
+        };
+
+        assert_ne!(connection_key(&third), connection_key(&fourth));
     }
 }
