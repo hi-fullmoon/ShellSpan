@@ -7,6 +7,7 @@ mod models;
 mod port_forward;
 mod remote_fs;
 mod session;
+mod sftp_pool;
 
 use log::LevelFilter;
 #[cfg(target_os = "macos")]
