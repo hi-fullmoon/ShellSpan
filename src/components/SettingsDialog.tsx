@@ -18,7 +18,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogPanel className="flex h-[560px] max-h-[80vh] w-full max-w-lg flex-col overflow-hidden">
+      <DialogPanel className="flex h-[640px] max-h-[84vh] w-full max-w-xl flex-col overflow-hidden">
         <DialogHeader
           className="flex items-start justify-between gap-3 px-4 pt-4 pb-2 shrink-0"
           closeLabel={t('settings.close')}
