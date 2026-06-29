@@ -64,6 +64,9 @@
 .session-tab-input {
   background: color-mix(in srgb, var(--app-bg) 45%, var(--app-icon-bg) 55%);
   color: var(--app-text);
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .session-tab-subtitle,
