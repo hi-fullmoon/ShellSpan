@@ -134,6 +134,7 @@ pub fn run() {
         .manage(DownloadCancellationRegistry::default())
         .manage(port_forward::PortForwardManager::default())
         .manage(SftpPool::default())
+        .manage(RemoteIdentityCache::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::write_session,
