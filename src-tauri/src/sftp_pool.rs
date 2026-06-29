@@ -72,9 +72,9 @@ impl ConnectionKey {
             port: jump_host.port,
             username: jump_host.username.clone(),
             auth_method: jump_host.auth_method,
-            password_hash: credential_marker(jump_host.password.as_deref()),
-            private_key_path_hash: credential_marker(jump_host.private_key_path.as_deref()),
-            passphrase_hash: credential_marker(jump_host.passphrase.as_deref()),
+            password_hash: hash_secret(jump_host.password.as_deref()),
+            private_key_path_hash: hash_secret(jump_host.private_key_path.as_deref()),
+            passphrase_hash: hash_secret(jump_host.passphrase.as_deref()),
         })
     }
 }
@@ -85,15 +85,11 @@ pub(crate) fn connection_key(request: &RemoteConnectionRequest) -> ConnectionKey
         port: request.port,
         username: request.username.clone(),
         auth_method: request.auth_method,
-        password_hash: credential_marker(request.password.as_deref()),
-        private_key_path_hash: credential_marker(request.private_key_path.as_deref()),
-        passphrase_hash: credential_marker(request.passphrase.as_deref()),
+        password_hash: hash_secret(request.password.as_deref()),
+        private_key_path_hash: hash_secret(request.private_key_path.as_deref()),
+        passphrase_hash: hash_secret(request.passphrase.as_deref()),
         jump_host: ConnectionKey::jump_host_key(request.jump_host.as_ref()),
     }
-}
-
-fn credential_marker(value: Option<&str>) -> String {
-    hash_secret(value)
 }
 
 fn hash_secret(value: Option<&str>) -> String {
