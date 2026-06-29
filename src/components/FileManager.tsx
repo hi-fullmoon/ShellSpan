@@ -23,7 +23,7 @@ import { useContextMenu } from '../hooks/useContextMenu';
 import { cn, fileKindColor } from '../lib/ui';
 import { ArrowUpIcon, BookmarkIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from './Icons';
 import { Tooltip } from './Tooltip';
-import { Checkbox } from '@chakra-ui/react';
+import { Input, Checkbox } from '@chakra-ui/react';
 import { ScrollArea } from './ScrollArea';
 import { Toast, type ToastAction } from './Toast';
 import type {
@@ -2027,11 +2027,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                   <ArrowUpIcon />
                 </Tooltip>
               </button>
-              <input
-                className="themed-input min-w-0 flex-1 px-2 py-0.5 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
+              <Input
+                className="themed-input !h-6 min-w-0 flex-1 px-2 py-0.5 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
                 disabled={readOnly || loading || working}
                 onChange={(event) => setPathInput(event.target.value)}
                 placeholder={t('fileManager.pathPlaceholder')}
+                size="xs"
                 value={pathInput}
               />
               {bookmarks.length > 0 && (
@@ -2077,15 +2078,16 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
             {listing && (
               <div className="flex items-center gap-1 px-0.5">
-                <input
-                  className="themed-input min-w-0 flex-1 px-2 py-0.5 text-[11px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
+                <Input
+                  className="themed-input !h-6 min-w-0 flex-1 px-2 py-0.5 text-[11px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
                   onChange={(event) => setFilterQuery(event.target.value)}
                   placeholder={t('fileManager.filterPlaceholder')}
+                  size="xs"
                   type="text"
                   value={filterQuery}
                 />
                 {filterQuery.trim() && (
-                  <button className="icon-btn h-5 w-5 px-0 text-[10px]" onClick={() => setFilterQuery('')} type="button">
+                  <button className="icon-btn h-6 w-6 px-0 text-[10px]" onClick={() => setFilterQuery('')} type="button">
                     <CloseIcon />
                   </button>
                 )}
@@ -2604,7 +2606,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                 <div className="flex flex-col gap-2 border border-cyan-900/50 bg-cyan-950/20 p-2 rounded-sm">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-medium tracking-[0.02em]">{t('fileManager.permissionEdit.label')}</span>
-                    <input
+                    <Input
                       aria-label={t('fileManager.permissionEdit.label')}
                       autoFocus
                       className="themed-input w-20 px-2 py-1 font-mono text-[12px] leading-5 outline-none"
@@ -2615,6 +2617,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                         }
                       }}
                       placeholder="0755"
+                      size="xs"
                       value={permissionEdit.value}
                     />
                     <span className="text-[11px] text-slate-400">
@@ -2781,7 +2784,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
               </h4>
             </div>
 
-            <input
+            <Input
               autoFocus
               className="themed-input px-3 py-2 text-[13px] leading-5 outline-none transition focus:border-cyan-400/60"
               onChange={(event) => setDialog((current) => (current ? { ...current, value: event.target.value } : current))}

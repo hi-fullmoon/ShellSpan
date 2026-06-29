@@ -24,6 +24,7 @@ const tabKeys: TabKey[] = ['basic', 'jumpHost', 'portForwarding'];
 
 export function ConnectionForm({ profile, onProfileChange, onConnect, compact = false, isConnecting }: ConnectionFormProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('basic');
+  const [hoveredColor, setHoveredColor] = useState<string | 'clear' | null>(null);
 
   const handleTextChange = (field: keyof ConnectionProfile) => (event: ChangeEvent<HTMLInputElement>) => {
     const nextValue = field === 'port' ? Number(event.target.value) : event.target.value;
@@ -256,10 +257,13 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
               <div className="flex flex-wrap items-center gap-2 px-1 py-0.5">
                 <button
                   className={cn(
-                    'relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-(--app-border) bg-(--app-bg) transition-transform hover:scale-110',
+                    'relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-(--app-border) bg-(--app-bg) transition-transform',
+                    hoveredColor === 'clear' && 'scale-110',
                     profile.color === undefined && 'ring-1 ring-offset-1 ring-(--app-primary-bg)',
                   )}
                   onClick={() => onProfileChange({ ...profile, color: undefined })}
+                  onMouseEnter={() => setHoveredColor('clear')}
+                  onMouseLeave={() => setHoveredColor(null)}
                   title={t('sidebar.menu.clearColor')}
                   type="button"
                 >
@@ -268,11 +272,14 @@ export function ConnectionForm({ profile, onProfileChange, onConnect, compact = 
                 {['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6', '#d946ef', '#f43f5e'].map((color) => (
                   <button
                     className={cn(
-                      'h-5 w-5 shrink-0 rounded-full transition-transform hover:scale-110',
+                      'h-5 w-5 shrink-0 rounded-full transition-transform',
+                      hoveredColor === color && 'scale-110',
                       profile.color === color && 'ring-2 ring-offset-1 ring-cyan-400',
                     )}
                     key={color}
                     onClick={() => onProfileChange({ ...profile, color })}
+                    onMouseEnter={() => setHoveredColor(color)}
+                    onMouseLeave={() => setHoveredColor(null)}
                     style={{ backgroundColor: color }}
                     type="button"
                   />

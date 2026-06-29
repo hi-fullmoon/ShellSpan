@@ -5,6 +5,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import { createPortal } from 'react-dom';
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { Input } from '@chakra-ui/react';
 import { t } from "../lib/i18n";
 import { createLogger } from '../lib/logger';
 import { isTauriRuntime } from '../lib/tauri';
@@ -683,10 +684,11 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
           className="absolute right-2 top-2 z-30 flex items-center gap-1.5 rounded-lg p-1.5 backdrop-blur-sm"
           style={{ background: 'var(--app-surface)', border: '1px solid var(--app-border)', boxShadow: 'var(--app-shadow)' }}
         >
-          <input
+          <Input
             ref={searchInputRef}
             className="themed-input h-7 w-44 px-2 text-xs outline-none"
             placeholder={t('terminal.search.placeholder')}
+            size="xs"
             type="text"
             value={searchTerm}
             onChange={(e) => {

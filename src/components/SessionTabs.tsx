@@ -24,6 +24,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { CloseIcon, PinIcon } from './Icons';
+import { Input } from '@chakra-ui/react';
 import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
 import { cn, sessionStatusDot } from '../lib/ui';
@@ -131,7 +132,7 @@ function SessionTabCard({
         <div className="flex min-w-0 flex-1 items-center gap-1.5 select-none">
           <span className={cn('h-2 w-2 rounded-sm', sessionStatusDot(session.status))} />
           <span className="min-w-0 flex-1">
-            <input
+            <Input
               autoFocus
               className="session-tab-input block w-full outline-0 border-none px-1 py-0.5 text-[12px] font-medium leading-4 outline-none"
               onBlur={onRenameCommit}
@@ -148,6 +149,7 @@ function SessionTabCard({
                   onRenameCancel?.();
                 }
               }}
+              size="xs"
               value={renameValue}
             />
           </span>
@@ -309,6 +311,7 @@ function TabContextMenu({
   const hasRight = sessionIndex >= 0 && sessionIndex < sessions.length - 1;
   const hasLeft = sessionIndex > 0;
   const hasOthers = sessions.length > 1;
+  const [hoveredColor, setHoveredColor] = useState<string | 'clear' | null>(null);
 
   const handle = (action: () => void) => {
     action();
@@ -397,10 +400,13 @@ function TabContextMenu({
             <div className="flex items-center gap-1 px-2 py-1">
               <button
                 className={cn(
-                  'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] transition-transform hover:scale-110',
+                  'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] transition-transform',
+                  hoveredColor === 'clear' && 'scale-110',
                   !menuSession.profile.color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
                 )}
                 onClick={() => handle(() => onSetColor(menuSession.sessionId, undefined))}
+                onMouseEnter={() => setHoveredColor('clear')}
+                onMouseLeave={() => setHoveredColor(null)}
                 title={t('sidebar.menu.clearColor')}
                 type="button"
               >
@@ -409,11 +415,14 @@ function TabContextMenu({
               {TAB_COLORS.map((color) => (
                 <button
                   className={cn(
-                    'h-4 w-4 shrink-0 rounded-full transition-transform hover:scale-110',
+                    'h-4 w-4 shrink-0 rounded-full transition-transform',
+                    hoveredColor === color && 'scale-110',
                     menuSession.profile.color === color && 'ring-1 ring-offset-1 ring-[var(--app-primary-bg)]',
                   )}
                   key={color}
                   onClick={() => handle(() => onSetColor(menuSession.sessionId, color))}
+                  onMouseEnter={() => setHoveredColor(color)}
+                  onMouseLeave={() => setHoveredColor(null)}
                   style={{ backgroundColor: color }}
                   type="button"
                 />
