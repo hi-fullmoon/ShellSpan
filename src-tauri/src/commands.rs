@@ -109,6 +109,7 @@ pub(crate) fn request_app_exit(app: AppHandle) {
 pub(crate) async fn list_remote_directory(
     request: RemoteDirectoryRequest,
     pool: State<'_, SftpPool>,
+    cache: State<'_, RemoteIdentityCache>,
 ) -> Result<RemoteDirectoryListing, String> {
     let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
     debug!(
@@ -117,8 +118,9 @@ pub(crate) async fn list_remote_directory(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
+    let cache = cache.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        list_remote_directory_blocking(request, Some(&pool))
+        list_remote_directory_blocking(request, Some(&pool), Some(&cache))
     })
     .await
     .map_err(|error| format!("failed to join directory listing task: {error}"))?;

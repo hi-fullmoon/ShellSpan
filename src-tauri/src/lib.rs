@@ -1,5 +1,6 @@
 mod commands;
 mod connection;
+mod identity_cache;
 mod keychain;
 mod known_hosts;
 mod menu;
@@ -21,6 +22,7 @@ use crate::sftp_pool::SftpPool;
 pub(crate) use connection::{
     summarize_remote_connection_request, summarize_session_request, validate_connection_fields,
 };
+pub(crate) use identity_cache::RemoteIdentityCache;
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
     download_remote_paths_blocking, list_remote_directory_blocking, open_remote_file_blocking,

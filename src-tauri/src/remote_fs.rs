@@ -1,4 +1,5 @@
 use crate::connection::connect_sftp;
+use crate::identity_cache::RemoteIdentityCache;
 use crate::sftp_pool::SftpPool;
 use crate::models::{
     CopyRemotePathRequest, CreateRemoteEntryKind, CreateRemoteEntryRequest, DeleteProgressTracker,
@@ -28,14 +29,18 @@ const OPEN_TEMP_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
 pub(crate) fn list_remote_directory_blocking(
     request: RemoteDirectoryRequest,
     pool: Option<&SftpPool>,
+    cache: Option<&RemoteIdentityCache>,
 ) -> Result<RemoteDirectoryListing, String> {
+    let host = request.connection.host.clone();
     let connected = connect_sftp(&request.connection, pool)?;
     let connected = connected.lock().unwrap();
     list_remote_directory_from_sftp(
+        &host,
         &connected.session,
         &connected.sftp,
         request.path.as_deref(),
         pool,
+        cache,
     )
 }
 
@@ -610,10 +615,12 @@ fn cleanup_stale_open_temp_files(open_root: &Path) {
 }
 
 fn list_remote_directory_from_sftp(
+    host: &str,
     session: &Session,
     sftp: &Sftp,
     requested_path: Option<&str>,
-    pool: Option<&SftpPool>,
+    _pool: Option<&SftpPool>,
+    cache: Option<&RemoteIdentityCache>,
 ) -> Result<RemoteDirectoryListing, String> {
     let requested_path = requested_path.unwrap_or(".");
     let resolved_path = sftp
@@ -627,7 +634,7 @@ fn list_remote_directory_from_sftp(
         .map(|(path, stat)| map_remote_file(path, stat))
         .collect::<Vec<_>>();
 
-    enrich_remote_entry_owners(session, &mut entries, pool);
+    enrich_remote_entry_owners(host, session, &mut entries, cache);
     entries.sort_by(sort_remote_entries);
 
     let current_path = path_to_string(&resolved_path);
@@ -648,9 +655,10 @@ fn list_remote_directory_from_sftp(
 }
 
 fn enrich_remote_entry_owners(
+    host: &str,
     session: &Session,
     entries: &mut [RemoteFileEntry],
-    _pool: Option<&SftpPool>,
+    cache: Option<&RemoteIdentityCache>,
 ) {
     let owner_ids = entries
         .iter()
@@ -661,43 +669,69 @@ fn enrich_remote_entry_owners(
         .filter_map(|entry| entry.group_gid)
         .collect::<HashSet<_>>();
 
-    let owner_names = resolve_remote_identity_names(session, &owner_ids, RemoteIdentityKind::User)
-        .unwrap_or_else(|error| {
-            warn!("failed to resolve remote owner names: {error}");
-            HashMap::new()
-        });
-    let group_names = resolve_remote_identity_names(session, &group_ids, RemoteIdentityKind::Group)
-        .unwrap_or_else(|error| {
-            warn!("failed to resolve remote group names: {error}");
-            HashMap::new()
-        });
+    let owner_names = resolve_identity_names(host, session, cache, &owner_ids, RemoteIdentityKind::User);
+    let group_names = resolve_identity_names(host, session, cache, &group_ids, RemoteIdentityKind::Group);
 
     for entry in entries {
-        entry.owner_name = entry
-            .owner_uid
-            .and_then(|uid| owner_names.get(&uid).cloned());
-        entry.group_name = entry
-            .group_gid
-            .and_then(|gid| group_names.get(&gid).cloned());
+        entry.owner_name = entry.owner_uid.and_then(|uid| owner_names.get(&uid).cloned());
+        entry.group_name = entry.group_gid.and_then(|gid| group_names.get(&gid).cloned());
     }
 }
 
-#[derive(Clone, Copy)]
-enum RemoteIdentityKind {
+fn resolve_identity_names(
+    host: &str,
+    session: &Session,
+    cache: Option<&RemoteIdentityCache>,
+    ids: &HashSet<u32>,
+    kind: RemoteIdentityKind,
+) -> HashMap<u32, String> {
+    if ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let ids_vec: Vec<u32> = ids.iter().copied().collect();
+
+    let (mut names, missing_ids) = if let Some(cache) = cache {
+        cache.resolve_names(host, &ids_vec, kind)
+    } else {
+        (HashMap::new(), ids_vec)
+    };
+
+    if !missing_ids.is_empty() {
+        match resolve_remote_identity_names(session, &missing_ids, kind) {
+            Ok(resolved) => {
+                if let Some(cache) = cache {
+                    for (id, name) in &resolved {
+                        cache.insert(host, *id, kind, name.clone());
+                    }
+                }
+                names.extend(resolved);
+            }
+            Err(error) => {
+                warn!("failed to resolve remote {:?} names: {}", kind, error);
+            }
+        }
+    }
+
+    names
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum RemoteIdentityKind {
     User,
     Group,
 }
 
 fn resolve_remote_identity_names(
     session: &Session,
-    ids: &HashSet<u32>,
+    ids: &[u32],
     kind: RemoteIdentityKind,
 ) -> Result<HashMap<u32, String>, String> {
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let mut sorted_ids = ids.iter().copied().collect::<Vec<_>>();
+    let mut sorted_ids = ids.to_vec();
     sorted_ids.sort_unstable();
 
     let command = build_remote_identity_lookup_command(&sorted_ids, kind);
