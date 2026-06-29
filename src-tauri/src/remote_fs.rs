@@ -26,7 +26,35 @@ use uuid::Uuid;
 
 const OPEN_TEMP_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
 
+pub(crate) fn is_connection_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("ssh transport disconnected")
+        || lower.contains("transport read")
+        || lower.contains("connection reset")
+        || lower.contains("connection aborted")
+        || lower.contains("broken pipe")
+        || lower.contains("draining incoming flow")
+        || lower.contains("socket")
+}
+
 pub(crate) fn list_remote_directory_blocking(
+    request: RemoteDirectoryRequest,
+    pool: Option<&SftpPool>,
+    cache: Option<&RemoteIdentityCache>,
+) -> Result<RemoteDirectoryListing, String> {
+    let connection = request.connection.clone();
+    let result = list_remote_directory_inner(request, pool, cache);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn list_remote_directory_inner(
     request: RemoteDirectoryRequest,
     pool: Option<&SftpPool>,
     cache: Option<&RemoteIdentityCache>,
@@ -1361,5 +1389,31 @@ mod tests {
                 .expect("new names should upload without additional confirmation");
 
         assert_eq!(resolved, Some(String::from("report.txt")));
+    }
+
+    #[test]
+    fn detects_transport_disconnected_as_connection_error() {
+        assert!(is_connection_error("SSH transport disconnected"));
+    }
+
+    #[test]
+    fn detects_transport_read_as_connection_error() {
+        assert!(is_connection_error("transport read error"));
+    }
+
+    #[test]
+    fn detects_connection_reset_as_connection_error() {
+        assert!(is_connection_error("connection reset by peer"));
+    }
+
+    #[test]
+    fn detects_broken_pipe_as_connection_error() {
+        assert!(is_connection_error("broken pipe"));
+    }
+
+    #[test]
+    fn ignores_unrelated_errors() {
+        assert!(!is_connection_error("file not found"));
+        assert!(!is_connection_error("permission denied"));
     }
 }

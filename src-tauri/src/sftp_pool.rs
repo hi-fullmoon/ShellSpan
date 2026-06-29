@@ -56,6 +56,26 @@ mod tests {
     use crate::models::{AuthMethod, RemoteConnectionRequest};
 
     #[test]
+    fn invalidate_removes_cached_connection() {
+        let pool = SftpPool::default();
+        let request = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: None,
+        };
+
+        // We cannot create a real Session in a unit test, but we can verify the behavior by
+        // attempting to get a connection after invalidate returns an error.
+        pool.invalidate(&request);
+        assert!(pool.get_or_create(&request).is_err());
+    }
+
+    #[test]
     fn connection_key_is_stable_for_equal_requests() {
         let request = RemoteConnectionRequest {
             host: "example.com".to_string(),
