@@ -1,4 +1,5 @@
 use crate::models::{ConnectedSftp, JumpHostConfig, RemoteConnectionRequest};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -72,10 +73,20 @@ fn jump_host_marker(jump_host: Option<&JumpHostConfig>) -> String {
 }
 
 fn credential_marker(value: Option<&str>) -> String {
+    hash_secret(value)
+}
+
+fn hash_secret(value: Option<&str>) -> String {
+    let mut hasher = Sha256::new();
     match value {
-        Some(v) => format!("some:{v}"),
-        None => "none".to_string(),
+        None => hasher.update(b"N"),
+        Some("") => hasher.update(b"E"),
+        Some(v) => {
+            hasher.update(b"V:");
+            hasher.update(v.as_bytes());
+        }
     }
+    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]
@@ -177,5 +188,102 @@ mod tests {
         };
 
         assert_ne!(connection_key(&base), connection_key(&with_none_password));
+    }
+
+    #[test]
+    fn connection_key_does_not_contain_raw_secrets() {
+        let host_pass = "super-secret-password";
+        let host_phrase = "super-secret-passphrase";
+        let host_key_path = "/home/alice/.ssh/id_rsa";
+        let request = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some(host_pass.to_string()),
+            private_key_path: Some(host_key_path.to_string()),
+            passphrase: Some(host_phrase.to_string()),
+            jump_host: None,
+        };
+
+        let key = connection_key(&request);
+
+        assert!(
+            !key.contains(host_pass),
+            "key must not contain raw password"
+        );
+        assert!(
+            !key.contains(host_phrase),
+            "key must not contain raw passphrase"
+        );
+        assert!(
+            !key.contains(host_key_path),
+            "key must not contain raw private key path"
+        );
+    }
+
+    #[test]
+    fn connection_key_does_not_contain_jump_host_raw_secrets() {
+        let jump_pass = "jump-secret-password";
+        let jump_phrase = "jump-secret-passphrase";
+        let jump_key_path = "/home/alice/.ssh/jump_id_rsa";
+        let request = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("host-password".to_string()),
+            private_key_path: None,
+            passphrase: None,
+            jump_host: Some(JumpHostConfig {
+                host: "jump.example.com".to_string(),
+                port: 22,
+                username: "jump".to_string(),
+                auth_method: AuthMethod::Key,
+                password: Some(jump_pass.to_string()),
+                private_key_path: Some(jump_key_path.to_string()),
+                passphrase: Some(jump_phrase.to_string()),
+            }),
+        };
+
+        let key = connection_key(&request);
+
+        assert!(
+            !key.contains(jump_pass),
+            "key must not contain raw jump-host password"
+        );
+        assert!(
+            !key.contains(jump_phrase),
+            "key must not contain raw jump-host passphrase"
+        );
+        assert!(
+            !key.contains(jump_key_path),
+            "key must not contain raw jump-host private key path"
+        );
+    }
+
+    #[test]
+    fn equal_credentials_produce_equal_hashes() {
+        let base = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            private_key_path: Some("/path/to/key".to_string()),
+            passphrase: Some("phrase".to_string()),
+            jump_host: Some(JumpHostConfig {
+                host: "jump.example.com".to_string(),
+                port: 22,
+                username: "jump".to_string(),
+                auth_method: AuthMethod::Key,
+                password: Some("jump-secret".to_string()),
+                private_key_path: Some("/path/to/jump/key".to_string()),
+                passphrase: Some("jump-phrase".to_string()),
+            }),
+        };
+        let identical = base.clone();
+
+        assert_eq!(connection_key(&base), connection_key(&identical));
     }
 }
