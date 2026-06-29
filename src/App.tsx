@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AboutDialog } from './components/AboutDialog';
 import { CloseSessionDialog } from './components/CloseSessionDialog';
@@ -133,62 +132,6 @@ function reorderSessions(sessions: SessionState[], draggedSessionId: string, ins
   return nextSessions;
 }
 
-function buildSettingsWindowUrl(preferences?: AppPreferences) {
-  if (!preferences) {
-    return '/index.html#settings';
-  }
-
-  const params = new URLSearchParams({
-    locale: preferences.locale,
-    theme: preferences.theme,
-  });
-
-  return `/index.html?${params.toString()}#settings`;
-}
-
-async function openSettingsWindow(preferences?: AppPreferences): Promise<void> {
-  appLogger.info('openSettingsWindow called');
-  if (!isTauriRuntime()) {
-    appLogger.info('Not in tauri runtime, dispatching fallback');
-    window.dispatchEvent(new CustomEvent('open-settings-fallback'));
-    return;
-  }
-  try {
-    appLogger.info('Checking for existing settings window');
-    const existing = await WebviewWindow.getByLabel('settings');
-    if (existing) {
-      appLogger.info('Existing settings window found, focusing');
-      await existing.unminimize();
-      await existing.show();
-      await existing.setFocus();
-      return;
-    }
-    appLogger.info('Creating new settings window');
-    const IS_MAC_OS = /mac/i.test(navigator.platform);
-    const settingsWindow = new WebviewWindow('settings', {
-      url: buildSettingsWindowUrl(preferences),
-      title: IS_MAC_OS ? '' : 'Settings',
-      width: 640,
-      height: 560,
-      resizable: false,
-      center: true,
-      transparent: IS_MAC_OS,
-      titleBarStyle: IS_MAC_OS ? 'overlay' : undefined,
-      decorations: IS_MAC_OS,
-      alwaysOnTop: false,
-    });
-    settingsWindow.once('tauri://created', () => {
-      appLogger.info('Settings window created successfully');
-    });
-    settingsWindow.once('tauri://error', (e) => {
-      appLogger.error('Failed to create settings window', { error: String(e.payload) });
-    });
-  } catch (error) {
-    appLogger.error('Exception in openSettingsWindow', { error: String(error) });
-    window.dispatchEvent(new CustomEvent('open-settings-fallback'));
-  }
-}
-
 function App() {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
   const [savedProfiles, setSavedProfiles] = useLocalStorage<ConnectionProfile[]>('termbridge.savedProfiles', [], ['windbridge.savedProfiles']);
@@ -205,12 +148,6 @@ function App() {
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [reorderingSessions, setReorderingSessions] = useState(false);
 
-  // Listen for fallback event when settings window cannot be opened
-  useEffect(() => {
-    const handler = () => setSettingsDialogOpen(true);
-    window.addEventListener('open-settings-fallback', handler);
-    return () => window.removeEventListener('open-settings-fallback', handler);
-  }, []);
   const [updateState, dispatchUpdateState] = useReducer(updateFlowReducer, { phase: 'idle' });
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number>();
   const [updateToast, setUpdateToast] = useState<{ message: string; tone: 'info' | 'success' | 'error' }>();
@@ -315,11 +252,7 @@ function App() {
 
       if (matchesBinding(merged.openSettings, event)) {
         event.preventDefault();
-        if (isTauriRuntime()) {
-          void openSettingsWindow(preferences);
-        } else {
-          setSettingsDialogOpen(true);
-        }
+        setSettingsDialogOpen(true);
         return;
       }
 
@@ -732,7 +665,7 @@ function App() {
     const attach = async () => {
       try {
         const nextStopSystemOpenSettings = await listen(SYSTEM_OPEN_SETTINGS_EVENT, () => {
-          void openSettingsWindow(preferencesRef.current);
+          setSettingsDialogOpen(true);
         });
 
         if (cancelled) {
