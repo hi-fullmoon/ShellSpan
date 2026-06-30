@@ -2,12 +2,12 @@ use super::*;
 use crate::sftp_pool::SftpPool;
 use crate::models::{
     AuthMethod, ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest,
-    DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
-    JumpHostConfig, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
-    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
-    SessionStatus, SessionSummary, TrustHostRequest, UpdateRemotePermissionsRequest,
-    UploadLocalPathsRequest,
+    CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest,
+    HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, ManagedSession, OpenRemoteFileRequest,
+    PortForwardConfig, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
+    RemoteDirectoryListing, RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand,
+    SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
+    UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
 use std::sync::{
@@ -19,19 +19,85 @@ use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 #[tauri::command]
-pub(crate) fn create_session(
+pub(crate) async fn create_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
     pool: State<'_, SftpPool>,
     request: SessionCreateRequest,
-) -> Result<SessionSummary, String> {
-    validate_connection_fields(&request.host, &request.username)?;
+) -> Result<SessionSummary, CreateSessionError> {
+    validate_connection_fields(&request.host, &request.username).map_err(|message| {
+        CreateSessionError::Other { message }
+    })?;
     info!(
         "Creating SSH session {}",
         summarize_session_request(&request)
     );
 
     let session_id = Uuid::new_v4().to_string();
+
+    if request.jump_host.is_none() {
+        let host_key_check = {
+            let app = app.clone();
+            let host = request.host.clone();
+            let port = request.port;
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::known_hosts::check_host_key_blocking(
+                    &app,
+                    &HostKeyCheckRequest { host, port },
+                )
+            })
+            .await
+            .map_err(|error| CreateSessionError::Other {
+                message: format!("failed to join host key check task: {error}"),
+            })?
+            .map_err(|message| {
+                if let Some(kind) = crate::known_hosts::classify_host_key_error(&message) {
+                    match kind {
+                        crate::known_hosts::HostKeyErrorKind::Unknown => {
+                            CreateSessionError::HostKeyUnknown {
+                                host: request.host.clone(),
+                                port: request.port,
+                                fingerprint: None,
+                            }
+                        }
+                        crate::known_hosts::HostKeyErrorKind::Mismatch => {
+                            CreateSessionError::HostKeyMismatch {
+                                host: request.host.clone(),
+                                port: request.port,
+                            }
+                        }
+                    }
+                } else {
+                    CreateSessionError::Other { message }
+                }
+            })?
+        };
+
+        match host_key_check.status {
+            HostKeyCheckStatus::Match => {}
+            HostKeyCheckStatus::NotFound => {
+                return Err(CreateSessionError::HostKeyUnknown {
+                    host: request.host.clone(),
+                    port: request.port,
+                    fingerprint: host_key_check.fingerprint,
+                });
+            }
+            HostKeyCheckStatus::Mismatch => {
+                return Err(CreateSessionError::HostKeyMismatch {
+                    host: request.host.clone(),
+                    port: request.port,
+                });
+            }
+            HostKeyCheckStatus::Failure => {
+                return Err(CreateSessionError::Other {
+                    message: host_key_check
+                        .message
+                        .unwrap_or_else(|| "host key check failed".to_string()),
+                });
+            }
+        }
+    }
+
     let summary = SessionSummary {
         session_id: session_id.clone(),
         title: request.name.clone(),
@@ -41,7 +107,7 @@ pub(crate) fn create_session(
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
-    state.insert(session_id.clone(), ManagedSession { sender: tx })?;
+    state.insert(session_id.clone(), ManagedSession { sender: tx }).map_err(|message| CreateSessionError::Other { message })?;
 
     info!(
         "Created SSH session session_id={} title={} host={} port={} username={}",
