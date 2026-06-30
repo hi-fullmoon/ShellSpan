@@ -18,6 +18,7 @@ import { getActiveLocale, t } from '../lib/i18n';
 import { createLogger } from '../lib/logger';
 import { addPathWrapOpportunities } from '../lib/ui';
 import { isTauriRuntime } from '../lib/tauri';
+import { useOperationStore } from '../stores/operationStore';
 import { useFileManagerStore } from '../stores/fileManagerStore';
 import { useContextMenu } from '../hooks/useContextMenu';
 import { cn, fileKindColor } from '../lib/ui';
@@ -29,14 +30,12 @@ import { Toast, type ToastAction } from './Toast';
 import type {
   DeleteProgressEvent,
   DownloadProgressEvent,
-  DownloadProgressState,
   RemoteDirectoryListing,
   RemoteFileContent,
   RemoteFileEntry,
   RemoteFileKind,
   SessionState,
   UploadProgressEvent,
-  UploadProgressState,
 } from '../types';
 
 interface FileManagerProps {
@@ -200,45 +199,24 @@ function createOperationId() {
   return `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function uploadProgressPercent(progress?: UploadProgressState) {
-  if (!progress) {
-    return 0;
+function operationProgressPercent(event: { totalBytes: number; completedBytes: number; totalSteps: number; completedSteps: number }): number {
+  if (event.totalBytes > 0) {
+    return Math.min(100, Math.round((event.completedBytes / event.totalBytes) * 100));
   }
 
-  if (progress.totalBytes > 0) {
-    return Math.min(100, Math.round((progress.uploadedBytes / progress.totalBytes) * 100));
-  }
-
-  if (progress.totalSteps > 0) {
-    return Math.min(100, Math.round((progress.completedSteps / progress.totalSteps) * 100));
+  if (event.totalSteps > 0) {
+    return Math.min(100, Math.round((event.completedSteps / event.totalSteps) * 100));
   }
 
   return 0;
 }
 
-function downloadProgressPercent(progress?: DownloadProgressState) {
-  if (!progress) {
-    return 0;
+function formatOperationTotalText(event: { totalBytes: number; completedBytes: number; totalSteps: number; completedSteps: number }): string {
+  if (event.totalBytes > 0) {
+    return `${formatSize(event.completedBytes)} / ${formatSize(event.totalBytes)}`;
   }
 
-  if (progress.totalBytes > 0) {
-    return Math.min(100, Math.round((progress.downloadedBytes / progress.totalBytes) * 100));
-  }
-
-  if (progress.totalSteps > 0) {
-    const percent = (progress.completedSteps / progress.totalSteps) * 100;
-    return Math.min(100, percent > 0 && percent < 1 ? 1 : Math.round(percent));
-  }
-
-  return 0;
-}
-
-function stepProgressPercent(progress?: { totalSteps: number; completedSteps: number }) {
-  if (!progress || progress.totalSteps <= 0) {
-    return 0;
-  }
-
-  return Math.min(100, Math.round((progress.completedSteps / progress.totalSteps) * 100));
+  return t('fileManager.progress.items', { completed: event.completedSteps, total: event.totalSteps });
 }
 
 function parentDirectoryPath(path: string) {
@@ -464,14 +442,18 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const [deleteProgress, setDeleteProgress] = useState<DeleteProgressState>();
-  const [downloadProgress, setDownloadProgress] = useState<DownloadProgressState>();
   const [toast, setToast] = useState<ToastState>();
   const [filterQuery, setFilterQuery] = useState('');
   const [batchMode, setBatchMode] = useState(false);
   const sessionId = session?.sessionId;
   const fileManagerState = useFileManagerStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
   const updateSessionState = useFileManagerStore((state) => state.updateSessionState);
+  const {
+    startOperation,
+    updateOperation,
+    setOperationStatus,
+    setCancelling,
+  } = useOperationStore();
 
   const connection = useMemo(() => {
     if (!session) {
@@ -494,7 +476,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   const selectedPath = fileManagerState?.selectedPath;
   const selectedPaths = fileManagerState?.selectedPaths ?? [];
   const error = fileManagerState?.error;
-  const uploadProgress = fileManagerState?.uploadProgress;
   const selectedEntry = useMemo(() => listing?.entries.find((entry) => entry.path === selectedPath), [listing, selectedPath]);
   const selectedEntries = useMemo(() => listing?.entries.filter((entry) => selectedPaths.includes(entry.path)) ?? [], [listing, selectedPaths]);
   const filteredEntries = useMemo(() => {
@@ -809,6 +790,19 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     const operationId = createOperationId();
+    const firstName = localPathName(resolvedUpload.acceptedPaths[0]);
+    const operationTitle =
+      resolvedUpload.acceptedPaths.length === 1
+        ? t('operationStatus.title.uploadSingle', { name: firstName })
+        : t('operationStatus.title.uploadMulti', { count: resolvedUpload.acceptedPaths.length });
+    startOperation({
+      id: operationId,
+      type: 'upload',
+      title: operationTitle,
+      progress: 0,
+      totalText: t('fileManager.progress.items', { completed: 0, total: resolvedUpload.acceptedPaths.length }),
+      canCancel: true,
+    });
     fileManagerLogger.info('开始上传', {
       sessionId,
       destinationDirectory: currentPath,
@@ -819,17 +813,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setToast(undefined);
     closeContextMenu();
     uploadSessionByOperationRef.current[operationId] = sessionId;
-    updateSessionState(sessionId, {
-      uploadProgress: {
-        operationId,
-        currentPath: resolvedUpload.acceptedPaths[0],
-        totalBytes: 0,
-        uploadedBytes: 0,
-        totalSteps: resolvedUpload.acceptedPaths.length,
-        completedSteps: 0,
-        cancelling: false,
-      },
-    });
 
     try {
       await invoke('upload_local_paths', {
@@ -845,11 +828,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       const skippedSuffix = resolvedUpload.skippedConflicts
         ? t('fileManager.feedback.uploadSkippedSuffix', { count: resolvedUpload.skippedConflicts })
         : '';
+      setOperationStatus(operationId, 'completed');
       setToast({
         message:
           resolvedUpload.acceptedPaths.length === 1
             ? t('fileManager.feedback.uploadSingle', {
-                name: localPathName(resolvedUpload.acceptedPaths[0]),
+                name: firstName,
                 suffix: skippedSuffix,
               })
             : t('fileManager.feedback.uploadMulti', {
@@ -871,8 +855,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         await loadDirectory(currentPath);
       }
       if (cancelled) {
+        setOperationStatus(operationId, 'cancelled');
         fileManagerLogger.info('上传已取消', { sessionId, operationId });
       } else {
+        setOperationStatus(operationId, 'failed', message);
         fileManagerLogger.error('上传失败', { sessionId, operationId, error: message });
       }
       setToast({
@@ -881,7 +867,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       });
     } finally {
       delete uploadSessionByOperationRef.current[operationId];
-      updateSessionState(sessionId, (current) => (current.uploadProgress?.operationId === operationId ? { uploadProgress: undefined } : {}));
       setWorking(false);
     }
   };
@@ -939,23 +924,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
   };
 
-  const handleCancelUpload = async () => {
-    if (!uploadProgress || uploadProgress.cancelling || !sessionId) {
+  const handleCancelUpload = async (operationId: string) => {
+    if (!sessionId) {
       return;
     }
 
-    const operationId = uploadProgress.operationId;
+    setCancelling(operationId);
     fileManagerLogger.info('请求取消上传', { sessionId, operationId });
-    updateSessionState(sessionId, (current) =>
-      current.uploadProgress?.operationId === operationId
-        ? {
-            uploadProgress: {
-              ...current.uploadProgress,
-              cancelling: true,
-            },
-          }
-        : {},
-    );
 
     try {
       await invoke('cancel_upload', {
@@ -963,16 +938,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       });
     } catch (nextError) {
       fileManagerLogger.error('取消上传失败', { sessionId, operationId, error: String(nextError) });
-      updateSessionState(sessionId, (current) =>
-        current.uploadProgress?.operationId === operationId
-          ? {
-              uploadProgress: {
-                ...current.uploadProgress,
-                cancelling: false,
-              },
-            }
-          : {},
-      );
+      setOperationStatus(operationId, 'running');
       setToast({
         message: String(nextError),
         tone: 'error',
@@ -1028,7 +994,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     closeContextMenu();
     setToast(undefined);
     setDragActive(false);
-    setDeleteProgress(undefined);
 
     if (!ready) {
       return;
@@ -1064,21 +1029,20 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
           return;
         }
 
-        updateSessionState(targetSessionId, (current) =>
-          current.uploadProgress?.operationId === operationId
-            ? {
-                uploadProgress: {
-                  operationId: event.payload.operationId,
-                  currentPath: event.payload.currentPath,
-                  totalBytes: event.payload.totalBytes,
-                  uploadedBytes: event.payload.uploadedBytes,
-                  totalSteps: event.payload.totalSteps,
-                  completedSteps: event.payload.completedSteps,
-                  cancelling: current.uploadProgress.cancelling,
-                },
-              }
-            : {},
-        );
+        updateOperation(operationId, {
+          progress: operationProgressPercent({
+            totalBytes: event.payload.totalBytes,
+            completedBytes: event.payload.uploadedBytes,
+            totalSteps: event.payload.totalSteps,
+            completedSteps: event.payload.completedSteps,
+          }),
+          totalText: formatOperationTotalText({
+            totalBytes: event.payload.totalBytes,
+            completedBytes: event.payload.uploadedBytes,
+            totalSteps: event.payload.totalSteps,
+            completedSteps: event.payload.completedSteps,
+          }),
+        });
       });
 
       if (cancelled) {
@@ -1095,7 +1059,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       cancelled = true;
       dispose?.();
     };
-  }, [updateSessionState]);
+  }, [updateOperation]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -1107,17 +1071,20 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     const attach = async () => {
       const unlisten = await listen<DeleteProgressEvent>('delete-progress', (event) => {
-        setDeleteProgress((current) =>
-          current && current.operationId === event.payload.operationId
-            ? {
-                operationId: event.payload.operationId,
-                currentPath: event.payload.currentPath,
-                totalSteps: event.payload.totalSteps,
-                completedSteps: event.payload.completedSteps,
-                cancelling: current.cancelling,
-              }
-            : current,
-        );
+        updateOperation(event.payload.operationId, {
+          progress: operationProgressPercent({
+            totalBytes: 0,
+            completedBytes: 0,
+            totalSteps: event.payload.totalSteps,
+            completedSteps: event.payload.completedSteps,
+          }),
+          totalText: formatOperationTotalText({
+            totalBytes: 0,
+            completedBytes: 0,
+            totalSteps: event.payload.totalSteps,
+            completedSteps: event.payload.completedSteps,
+          }),
+        });
       });
 
       if (cancelled) {
@@ -1134,7 +1101,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       cancelled = true;
       dispose?.();
     };
-  }, []);
+  }, [updateOperation]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -1146,19 +1113,20 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     const attach = async () => {
       const unlisten = await listen<DownloadProgressEvent>('download-progress', (event) => {
-        setDownloadProgress((current) =>
-          current && current.operationId === event.payload.operationId
-            ? {
-                operationId: event.payload.operationId,
-                currentPath: event.payload.currentPath,
-                totalBytes: event.payload.totalBytes,
-                downloadedBytes: event.payload.downloadedBytes,
-                totalSteps: event.payload.totalSteps,
-                completedSteps: event.payload.completedSteps,
-                cancelling: current.cancelling,
-              }
-            : current,
-        );
+        updateOperation(event.payload.operationId, {
+          progress: operationProgressPercent({
+            totalBytes: event.payload.totalBytes,
+            completedBytes: event.payload.downloadedBytes,
+            totalSteps: event.payload.totalSteps,
+            completedSteps: event.payload.completedSteps,
+          }),
+          totalText: formatOperationTotalText({
+            totalBytes: event.payload.totalBytes,
+            completedBytes: event.payload.downloadedBytes,
+            totalSteps: event.payload.totalSteps,
+            completedSteps: event.payload.completedSteps,
+          }),
+        });
       });
 
       if (cancelled) {
@@ -1175,7 +1143,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       cancelled = true;
       dispose?.();
     };
-  }, []);
+  }, [updateOperation]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -1398,6 +1366,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     const operationId = createOperationId();
+    startOperation({
+      id: operationId,
+      type: 'download',
+      title: t('operationStatus.title.downloadSingle', { name: target.name }),
+      progress: 0,
+      totalText: t('fileManager.progress.items', { completed: 0, total: 1 }),
+      canCancel: true,
+    });
     fileManagerLogger.info('开始下载', {
       sessionId,
       operationId,
@@ -1407,15 +1383,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setWorking(true);
     setFileError(undefined);
     setToast(undefined);
-    setDownloadProgress({
-      operationId,
-      currentPath: target.path,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      totalSteps: 1,
-      completedSteps: 0,
-      cancelling: false,
-    });
 
     try {
       await invoke('download_remote_paths', {
@@ -1426,6 +1393,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
           operationId,
         },
       });
+      setOperationStatus(operationId, 'completed');
       setToast({
         message: t('fileManager.feedback.downloadSingle', { name: target.name, path: destinationDirectory }),
         tone: 'success',
@@ -1444,8 +1412,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       const message = String(nextError);
       const cancelled = message.includes('download cancelled');
       if (cancelled) {
+        setOperationStatus(operationId, 'cancelled');
         fileManagerLogger.info('下载已取消', { sessionId, operationId, remotePath: target.path });
       } else {
+        setOperationStatus(operationId, 'failed', message);
         fileManagerLogger.error('下载失败', {
           sessionId,
           operationId,
@@ -1458,26 +1428,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         tone: cancelled ? 'info' : 'error',
       });
     } finally {
-      setDownloadProgress(undefined);
       setWorking(false);
     }
   };
 
-  const handleCancelDownload = async () => {
-    if (!downloadProgress || downloadProgress.cancelling) {
-      return;
-    }
-
-    const operationId = downloadProgress.operationId;
+  const handleCancelDownload = async (operationId: string) => {
     fileManagerLogger.info('请求取消下载', { sessionId, operationId });
-    setDownloadProgress((current) =>
-      current && current.operationId === operationId
-        ? {
-            ...current,
-            cancelling: true,
-          }
-        : current,
-    );
+    setCancelling(operationId);
 
     try {
       await invoke('cancel_download', {
@@ -1485,14 +1442,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       });
     } catch (nextError) {
       fileManagerLogger.error('取消下载失败', { sessionId, operationId, error: String(nextError) });
-      setDownloadProgress((current) =>
-        current && current.operationId === operationId
-          ? {
-              ...current,
-              cancelling: false,
-            }
-          : current,
-      );
+      setOperationStatus(operationId, 'running');
       setToast({
         message: String(nextError),
         tone: 'error',
@@ -1530,6 +1480,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
 
     const operationId = createOperationId();
+    startOperation({
+      id: operationId,
+      type: 'download',
+      title: t('operationStatus.title.downloadMulti', { count: targets.length }),
+      progress: 0,
+      totalText: t('fileManager.progress.items', { completed: 0, total: targets.length }),
+      canCancel: true,
+    });
     fileManagerLogger.info('开始批量下载', {
       sessionId,
       operationId,
@@ -1540,15 +1498,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setFileError(undefined);
     setToast(undefined);
     closeContextMenu();
-    setDownloadProgress({
-      operationId,
-      currentPath: targets[0].path,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      totalSteps: targets.length,
-      completedSteps: 0,
-      cancelling: false,
-    });
 
     try {
       await invoke('download_remote_paths', {
@@ -1559,6 +1508,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
           operationId,
         },
       });
+      setOperationStatus(operationId, 'completed');
       setToast({
         message: t('fileManager.feedback.downloadMulti', { count: targets.length, path: destinationDirectory }),
         tone: 'success',
@@ -1577,8 +1527,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       const message = String(nextError);
       const cancelled = message.includes('download cancelled');
       if (cancelled) {
+        setOperationStatus(operationId, 'cancelled');
         fileManagerLogger.info('批量下载已取消', { sessionId, operationId });
       } else {
+        setOperationStatus(operationId, 'failed', message);
         fileManagerLogger.error('批量下载失败', { sessionId, operationId, error: message });
       }
       setToast({
@@ -1586,7 +1538,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         tone: cancelled ? 'info' : 'error',
       });
     } finally {
-      setDownloadProgress(undefined);
       setWorking(false);
     }
   };
@@ -1677,6 +1628,14 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
 
     const target = pendingDelete;
     const operationId = createOperationId();
+    startOperation({
+      id: operationId,
+      type: 'delete',
+      title: t('operationStatus.title.deleteSingle', { name: target.name }),
+      progress: 0,
+      totalText: t('fileManager.progress.items', { completed: 0, total: 1 }),
+      canCancel: true,
+    });
     fileManagerLogger.info('开始删除远程路径', {
       sessionId,
       operationId,
@@ -1689,13 +1648,6 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     setToast(undefined);
     closeContextMenu();
     setPendingDelete(undefined);
-    setDeleteProgress({
-      operationId,
-      currentPath: target.path,
-      totalSteps: 1,
-      completedSteps: 0,
-      cancelling: false,
-    });
 
     try {
       await invoke('delete_remote_path', {
@@ -1709,6 +1661,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       setProperties(undefined);
       setSelectedPath(undefined);
       await loadDirectory(currentPath);
+      setOperationStatus(operationId, 'completed');
       setToast({
         message: t('fileManager.feedback.deleteSuccess'),
         tone: 'success',
@@ -1721,8 +1674,10 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         await loadDirectory(currentPath);
       }
       if (cancelled) {
+        setOperationStatus(operationId, 'cancelled');
         fileManagerLogger.info('删除已取消', { sessionId, operationId, path: target.path });
       } else {
+        setOperationStatus(operationId, 'failed', message);
         fileManagerLogger.error('删除失败', {
           sessionId,
           operationId,
@@ -1735,26 +1690,13 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         tone: cancelled ? 'info' : 'error',
       });
     } finally {
-      setDeleteProgress(undefined);
       setWorking(false);
     }
   };
 
-  const handleCancelDelete = async () => {
-    if (!deleteProgress || deleteProgress.cancelling) {
-      return;
-    }
-
-    const operationId = deleteProgress.operationId;
+  const handleCancelDelete = async (operationId: string) => {
     fileManagerLogger.info('请求取消删除', { sessionId, operationId });
-    setDeleteProgress((current) =>
-      current && current.operationId === operationId
-        ? {
-            ...current,
-            cancelling: true,
-          }
-        : current,
-    );
+    setCancelling(operationId);
 
     try {
       await invoke('cancel_delete', {
@@ -1762,14 +1704,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       });
     } catch (nextError) {
       fileManagerLogger.error('取消删除失败', { sessionId, operationId, error: String(nextError) });
-      setDeleteProgress((current) =>
-        current && current.operationId === operationId
-          ? {
-              ...current,
-              cancelling: false,
-            }
-          : current,
-      );
+      setOperationStatus(operationId, 'running');
       setToast({
         message: String(nextError),
         tone: 'error',
@@ -2648,115 +2583,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         </OverlayLayer>
       ) : null}
 
-      {uploadProgress ? (
-        <OverlayLayer tone="progress">
-          <OverlayPanel className="max-w-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">
-                {uploadProgress.cancelling ? t('fileManager.uploadProgress.cancelling') : t('fileManager.uploadProgress.title')}
-              </span>
-              <span className="file-manager-progress-meta text-xs font-medium">{uploadProgressPercent(uploadProgress)}%</span>
-            </div>
-
-            <div className="file-manager-progress-track h-2 overflow-hidden">
-              <div
-                className="file-manager-progress-bar file-manager-progress-bar-upload h-full transition-[width] duration-150"
-                style={{ width: `${uploadProgressPercent(uploadProgress)}%` }}
-              />
-            </div>
-
-            <div className="flex flex-col gap-0.5">
-              <strong className="file-manager-progress-title truncate text-sm">
-                {uploadProgress.currentPath ? localPathName(uploadProgress.currentPath) : t('fileManager.uploadProgress.preparing')}
-              </strong>
-              <span className="file-manager-progress-meta text-xs">
-                {uploadProgress.totalBytes > 0
-                  ? `${formatSize(uploadProgress.uploadedBytes)} / ${formatSize(uploadProgress.totalBytes)}`
-                  : t('fileManager.progress.items', { completed: uploadProgress.completedSteps, total: uploadProgress.totalSteps })}
-              </span>
-            </div>
-
-            <div className="flex justify-end">
-              <button className="icon-btn" disabled={uploadProgress.cancelling} onClick={() => void handleCancelUpload()} type="button">
-                {uploadProgress.cancelling ? t('fileManager.uploadProgress.cancellingButton') : t('fileManager.uploadProgress.cancel')}
-              </button>
-            </div>
-          </OverlayPanel>
-        </OverlayLayer>
-      ) : null}
-
-      {deleteProgress ? (
-        <OverlayLayer tone="progress">
-          <OverlayPanel className="max-w-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">
-                {deleteProgress.cancelling ? t('fileManager.deleteProgress.cancelling') : t('fileManager.deleteProgress.title')}
-              </span>
-              <span className="file-manager-progress-meta text-xs font-medium">{stepProgressPercent(deleteProgress)}%</span>
-            </div>
-
-            <div className="file-manager-progress-track h-2 overflow-hidden">
-              <div
-                className="file-manager-progress-bar file-manager-progress-bar-delete h-full transition-[width] duration-150"
-                style={{ width: `${stepProgressPercent(deleteProgress)}%` }}
-              />
-            </div>
-
-            <div className="flex flex-col gap-0.5">
-              <strong className="file-manager-progress-title truncate text-sm">
-                {deleteProgress.currentPath ? localPathName(deleteProgress.currentPath) : t('fileManager.deleteProgress.preparing')}
-              </strong>
-              <span className="file-manager-progress-meta text-xs">
-                {t('fileManager.progress.items', { completed: deleteProgress.completedSteps, total: deleteProgress.totalSteps })}
-              </span>
-            </div>
-            <div className="flex justify-end">
-              <button className="icon-btn" disabled={deleteProgress.cancelling} onClick={() => void handleCancelDelete()} type="button">
-                {deleteProgress.cancelling ? t('fileManager.deleteProgress.cancellingButton') : t('fileManager.deleteProgress.cancel')}
-              </button>
-            </div>
-          </OverlayPanel>
-        </OverlayLayer>
-      ) : null}
-
-      {downloadProgress ? (
-        <OverlayLayer tone="progress">
-          <OverlayPanel className="max-w-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">
-                {downloadProgress.cancelling ? t('fileManager.downloadProgress.cancelling') : t('fileManager.downloadProgress.title')}
-              </span>
-              <span className="file-manager-progress-meta text-xs font-medium">{downloadProgressPercent(downloadProgress)}%</span>
-            </div>
-
-            <div className="file-manager-progress-track h-2 overflow-hidden">
-              <div
-                className="file-manager-progress-bar file-manager-progress-bar-download h-full transition-[width] duration-150"
-                style={{ width: `${downloadProgressPercent(downloadProgress)}%` }}
-              />
-            </div>
-
-            <div className="flex flex-col gap-0.5">
-              <strong className="file-manager-progress-title truncate text-sm">
-                {downloadProgress.currentPath ? localPathName(downloadProgress.currentPath) : t('fileManager.downloadProgress.preparing')}
-              </strong>
-              <span className="file-manager-progress-meta text-xs">
-                {downloadProgress.totalBytes > 0
-                  ? `${formatSize(downloadProgress.downloadedBytes)} / ${formatSize(downloadProgress.totalBytes)}`
-                  : t('fileManager.progress.items', { completed: downloadProgress.completedSteps, total: downloadProgress.totalSteps })}
-              </span>
-            </div>
-
-            <div className="flex justify-end">
-              <button className="icon-btn" disabled={downloadProgress.cancelling} onClick={() => void handleCancelDownload()} type="button">
-                {downloadProgress.cancelling ? t('fileManager.downloadProgress.cancellingButton') : t('fileManager.downloadProgress.cancel')}
-              </button>
-            </div>
-          </OverlayPanel>
-        </OverlayLayer>
-      ) : null}
-
-      {dragActive && ready && !uploadProgress && !deleteProgress && !downloadProgress ? (
+      {dragActive && ready ? (
         <OverlayLayer tone="progress">
           <OverlayPanel className="max-w-xs gap-1 text-center">
             <span className="file-manager-progress-kicker text-[11px] font-medium tracking-[0.08em]">{t('fileManager.dragDrop.title')}</span>

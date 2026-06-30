@@ -257,6 +257,16 @@ export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function UploadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M8 13.5v-7" />
+      <path d="M5.5 9 8 6.5 10.5 9" />
+      <path d="M3 4.5h10" />
+    </svg>
+  );
+}
+
 export function TrashIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...baseProps(props)}>
