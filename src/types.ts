@@ -111,6 +111,35 @@ export interface HostKeyCheckResponse {
   message?: string;
 }
 
+export interface CreateSessionHostKeyUnknownError {
+  type: 'hostKeyUnknown';
+  payload: {
+    host: string;
+    port: number;
+    fingerprint?: string;
+  };
+}
+
+export interface CreateSessionHostKeyMismatchError {
+  type: 'hostKeyMismatch';
+  payload: {
+    host: string;
+    port: number;
+  };
+}
+
+export interface CreateSessionOtherError {
+  type: 'other';
+  payload: {
+    message: string;
+  };
+}
+
+export type CreateSessionError =
+  | CreateSessionHostKeyUnknownError
+  | CreateSessionHostKeyMismatchError
+  | CreateSessionOtherError;
+
 export interface UploadProgressEvent {
   operationId: string;
   currentPath?: string;

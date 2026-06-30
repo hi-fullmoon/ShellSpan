@@ -6,7 +6,7 @@ import { isTauriRuntime } from '../lib/tauri';
 import { createSessionFromProfile } from '../lib/sessionCreate';
 import { createEmptyProfile, sanitizeProfileForStorage } from '../lib/profile';
 import { consumeBufferedSessionStatus, insertSessionAfterActive, type PendingSessionStatusEvents } from '../lib/session';
-import type { ConnectionProfile, HostKeyCheckResponse, SessionState } from '../types';
+import type { ConnectionProfile, CreateSessionError, HostKeyCheckResponse, SessionState } from '../types';
 
 const connectionLogger = createLogger('app');
 
@@ -56,6 +56,21 @@ export function useConnectionFlow({
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [hostKeyDialog, setHostKeyDialog] = useState<HostKeyDialogState>({ open: false });
+
+  const openHostKeyDialog = (
+    profile: ConnectionProfile,
+    fingerprint: string | undefined,
+    remember: boolean,
+    rememberPassword: boolean,
+  ) => {
+    setHostKeyDialog({
+      open: true,
+      profile,
+      fingerprint,
+      remember,
+      rememberPassword,
+    });
+  };
 
   const proceedWithConnection = async (profile: ConnectionProfile, remember: boolean, rememberPassword: boolean) => {
     try {
@@ -140,6 +155,23 @@ export function useConnectionFlow({
       });
     } catch (error) {
       connectionLogger.error('SSH 会话创建失败', error);
+
+      const hostKeyError = parseCreateSessionError(error);
+      if (hostKeyError?.type === 'hostKeyUnknown') {
+        openHostKeyDialog(
+          profile,
+          hostKeyError.payload.fingerprint,
+          remember,
+          rememberPassword,
+        );
+        return;
+      }
+
+      if (hostKeyError?.type === 'hostKeyMismatch') {
+        setErrorMessage(t('app.error.hostKeyMismatch'));
+        return;
+      }
+
       setErrorMessage(String(error));
     }
   };
@@ -196,13 +228,7 @@ export function useConnectionFlow({
           host: profile.host.trim(),
           fingerprint: checkResult.fingerprint,
         });
-        setHostKeyDialog({
-          open: true,
-          profile,
-          fingerprint: checkResult.fingerprint,
-          remember,
-          rememberPassword,
-        });
+        openHostKeyDialog(profile, checkResult.fingerprint, remember, rememberPassword);
         return;
       }
 
@@ -268,5 +294,63 @@ export function useConnectionFlow({
     handleConnect,
     handleTrustAndConnect,
     loadProfile,
+  };
+}
+
+function parseCreateSessionError(error: unknown): CreateSessionError | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  const record = error as Record<string, unknown>;
+  const type = record.type;
+  const payload = record.payload;
+
+  if (type !== 'hostKeyUnknown' && type !== 'hostKeyMismatch' && type !== 'other') {
+    return undefined;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const payloadRecord = payload as Record<string, unknown>;
+
+  if (type === 'hostKeyUnknown') {
+    const host = payloadRecord.host;
+    const port = payloadRecord.port;
+    if (typeof host !== 'string' || typeof port !== 'number') {
+      return undefined;
+    }
+    return {
+      type: 'hostKeyUnknown',
+      payload: {
+        host,
+        port,
+        fingerprint: typeof payloadRecord.fingerprint === 'string' ? payloadRecord.fingerprint : undefined,
+      },
+    };
+  }
+
+  if (type === 'hostKeyMismatch') {
+    const host = payloadRecord.host;
+    const port = payloadRecord.port;
+    if (typeof host !== 'string' || typeof port !== 'number') {
+      return undefined;
+    }
+    return {
+      type: 'hostKeyMismatch',
+      payload: { host, port },
+    };
+  }
+
+  const message = payloadRecord.message;
+  if (typeof message !== 'string') {
+    return undefined;
+  }
+
+  return {
+    type: 'other',
+    payload: { message },
   };
 }
