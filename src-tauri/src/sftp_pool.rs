@@ -2,6 +2,9 @@ use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionR
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+const SFTP_POOL_IDLE_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(crate) struct ConnectionKey {
@@ -28,7 +31,12 @@ pub(crate) struct JumpHostKey {
 
 #[derive(Default, Clone)]
 pub(crate) struct SftpPool {
-    sessions: Arc<Mutex<HashMap<ConnectionKey, Arc<Mutex<ConnectedSftp>>>>>,
+    sessions: Arc<Mutex<HashMap<ConnectionKey, PooledEntry>>>,
+}
+
+struct PooledEntry {
+    connection: Arc<Mutex<ConnectedSftp>>,
+    last_used: Instant,
 }
 
 impl SftpPool {
@@ -37,11 +45,17 @@ impl SftpPool {
         request: &RemoteConnectionRequest,
     ) -> Option<Arc<Mutex<ConnectedSftp>>> {
         let key = connection_key(request);
-        let sessions = self
+        let mut sessions = self
             .sessions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        sessions.get(&key).cloned()
+        let entry = sessions.get_mut(&key)?;
+        if entry.last_used.elapsed() > SFTP_POOL_IDLE_TTL {
+            sessions.remove(&key);
+            return None;
+        }
+        entry.last_used = Instant::now();
+        Some(entry.connection.clone())
     }
 
     pub(crate) fn get_or_insert(
@@ -53,7 +67,12 @@ impl SftpPool {
             .sessions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        sessions.entry(key.clone()).or_insert(new_connection).clone()
+        let entry = sessions.entry(key.clone()).or_insert(PooledEntry {
+            connection: new_connection,
+            last_used: Instant::now(),
+        });
+        entry.last_used = Instant::now();
+        entry.connection.clone()
     }
 
     pub(crate) fn invalidate(&self, request: &RemoteConnectionRequest) {

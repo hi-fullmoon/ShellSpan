@@ -16,12 +16,12 @@ use ssh2::BlockDirections;
 use std::os::fd::AsRawFd;
 
 use crate::{
-    connection::{connect_tcp_stream, connect_through_jump_host, open_authenticated_session, summarize_session_request},
+    connection::{connect_tcp_stream, connect_through_jump_host, open_authenticated_session, summarize_session_request, SSH_SESSION_KEEPALIVE_INTERVAL_SECS},
     emit_data, emit_status,
+    known_hosts::known_hosts_path,
     models::{ClosedReasonKind, SessionCommand, SessionCreateRequest, SessionStatus},
 };
 
-const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 
 pub(crate) fn run_ssh_session(
@@ -43,6 +43,8 @@ pub(crate) fn run_ssh_session(
     )?;
 
     let mut _jump_session_holder: Option<Box<ssh2::Session>> = None;
+    let known_hosts = known_hosts_path(app).ok();
+    let known_hosts_ref = known_hosts.as_deref();
     let session = if let Some(ref jump) = request.jump_host {
         let (jump_session, target_session) = connect_through_jump_host(
             jump,
@@ -53,6 +55,7 @@ pub(crate) fn run_ssh_session(
             request.password.as_deref(),
             request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
+            known_hosts_ref,
         )?;
         _jump_session_holder = Some(Box::new(jump_session));
         target_session
@@ -65,6 +68,9 @@ pub(crate) fn run_ssh_session(
             request.password.as_deref(),
             request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
+            &request.host,
+            request.port,
+            known_hosts_ref,
         )?
     };
 
@@ -419,7 +425,8 @@ fn wait_for_session_socket(session: &Session, timeout: Duration) -> Result<(), S
         return Ok(());
     }
 
-    let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128);
+    let timeout_ms = i32::try_from(timeout_ms).unwrap_or(i32::MAX);
     let mut poll_fd = pollfd {
         fd: session.as_raw_fd(),
         events,
@@ -452,7 +459,20 @@ fn wait_for_session_socket(_session: &Session, timeout: Duration) -> Result<(), 
 fn graceful_shutdown(channel: &mut Channel) {
     let _ = channel.send_eof();
     let _ = channel.close();
-    let _ = channel.wait_close();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        match channel.wait_close() {
+            Ok(()) => return,
+            Err(error) => {
+                let io_error: std::io::Error = error.into();
+                if is_retryable_channel_error_kind(io_error.kind()) {
+                    thread::sleep(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS));
+                } else {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

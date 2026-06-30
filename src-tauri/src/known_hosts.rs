@@ -1,19 +1,67 @@
 use log::{debug, error, info, warn};
-use ssh2::{CheckResult, HostKeyType, KnownHostFileKind, KnownHostKeyFormat};
+use ssh2::{CheckResult, HostKeyType, KnownHostFileKind, KnownHostKeyFormat, Session};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
-use crate::connection::open_session_for_host_key;
+use crate::connection::{open_session_for_host_key, validate_host};
 use crate::models::{HostKeyCheckRequest, HostKeyCheckResult, HostKeyCheckStatus, TrustHostRequest};
 
 const KNOWN_HOSTS_FILENAME: &str = "known_hosts";
 
-fn get_known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
     let app_local_data = app
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("failed to resolve app local data dir: {error}"))?;
     Ok(app_local_data.join(KNOWN_HOSTS_FILENAME))
+}
+
+fn get_known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
+    known_hosts_path(app)
+}
+
+pub(crate) fn verify_session_host_key(
+    session: &Session,
+    host: &str,
+    port: u16,
+    known_hosts_file: &Path,
+) -> Result<(), String> {
+    let (key, _key_type) = session
+        .host_key()
+        .ok_or_else(|| "failed to retrieve host key from ssh session".to_string())?;
+
+    let mut known_hosts = session
+        .known_hosts()
+        .map_err(|error| format!("failed to initialize known hosts: {error}"))?;
+
+    if known_hosts_file.exists() {
+        match known_hosts.read_file(known_hosts_file, KnownHostFileKind::OpenSSH) {
+            Ok(count) => debug!("Loaded {count} known hosts from file"),
+            Err(error) => warn!("Failed to read known hosts file: {error}"),
+        }
+    }
+
+    let check_result = if port == 22 {
+        known_hosts.check(host, key)
+    } else {
+        known_hosts.check_port(host, port, key)
+    };
+
+    match check_result {
+        CheckResult::Match => {
+            debug!("Host key matches known hosts for {host}:{port}");
+            Ok(())
+        }
+        CheckResult::Mismatch => Err(format!(
+            "host key for {host}:{port} does not match the known key — possible man-in-the-middle attack"
+        )),
+        CheckResult::NotFound => Err(format!(
+            "host key for {host}:{port} is not known — trust this host before connecting"
+        )),
+        CheckResult::Failure => Err(format!(
+            "failed to verify host key for {host}:{port}"
+        )),
+    }
 }
 
 fn ensure_known_hosts_dir(path: &Path) -> Result<(), String> {
@@ -67,6 +115,7 @@ pub(crate) fn check_host_key_blocking(
     let port = request.port;
 
     debug!("Checking host key for {host}:{port}");
+    validate_host(host)?;
 
     let session = open_session_for_host_key(host, port)?;
 
@@ -141,6 +190,7 @@ pub(crate) fn trust_host_blocking(
     let port = request.port;
 
     info!("Trusting host {host}:{port}");
+    validate_host(host)?;
 
     let session = open_session_for_host_key(host, port)?;
 
@@ -188,4 +238,21 @@ pub(crate) fn trust_host_blocking(
 
     info!("Added {host}:{port} to known hosts file");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64url_encode_matches_known_vectors() {
+        assert_eq!(base64url_encode(b""), "");
+        assert_eq!(base64url_encode(b"f"), "Zg");
+        assert_eq!(base64url_encode(b"fo"), "Zm8");
+        assert_eq!(base64url_encode(b"foo"), "Zm9v");
+        assert_eq!(base64url_encode(b"foob"), "Zm9vYg");
+        assert_eq!(base64url_encode(b"fooba"), "Zm9vYmE");
+        assert_eq!(base64url_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64url_encode(b"\xff\xfe\xfd"), "__79");
+    }
 }

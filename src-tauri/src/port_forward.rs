@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::copy;
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -61,6 +62,7 @@ pub(crate) fn start_port_forwards(
     jump_host: Option<JumpHostConfig>,
     forwards: Vec<PortForwardConfig>,
     cancel_flag: Arc<AtomicBool>,
+    known_hosts_path: Option<String>,
 ) {
     info!("Starting port forwards count={}", forwards.len());
 
@@ -78,6 +80,9 @@ pub(crate) fn start_port_forwards(
         let phrase = passphrase.clone();
         let jh = jump_host.clone();
         let cancel = cancel_flag.clone();
+        let kh: Option<std::path::PathBuf> = known_hosts_path
+            .as_deref()
+            .map(|s| std::path::PathBuf::from(s));
 
         match config.kind {
             PortForwardKind::Local => {
@@ -88,7 +93,7 @@ pub(crate) fn start_port_forwards(
                         pwd.as_deref(), key.as_deref(), phrase.as_deref(),
                         jh.as_ref(),
                         config.local_port, &remote_host, config.remote_port,
-                        cancel,
+                        cancel, kh.as_deref(),
                     )
                 }));
             }
@@ -100,7 +105,7 @@ pub(crate) fn start_port_forwards(
                         pwd.as_deref(), key.as_deref(), phrase.as_deref(),
                         jh.as_ref(),
                         config.local_port, &remote_host, config.remote_port,
-                        cancel,
+                        cancel, kh.as_deref(),
                     )
                 }));
             }
@@ -130,13 +135,24 @@ fn open_forward_session(
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
     jump_host: Option<&JumpHostConfig>,
+    known_hosts_path: Option<&Path>,
 ) -> Result<ssh2::Session, String> {
     if let Some(jump) = jump_host {
         let _ = jump;
         Err("jump host for port forwarding is not yet supported".to_string())
     } else {
         let tcp = connect_tcp_stream(host, port)?;
-        let session = open_authenticated_session(tcp, username, auth_method, password, private_key_path, passphrase)?;
+        let session = open_authenticated_session(
+            tcp,
+            username,
+            auth_method,
+            password,
+            private_key_path,
+            passphrase,
+            host,
+            port,
+            known_hosts_path,
+        )?;
         session.set_keepalive(true, 30);
         Ok(session)
     }
@@ -157,11 +173,13 @@ fn local_forward_worker(
     remote_host: &str,
     remote_port: u16,
     cancel_flag: Arc<AtomicBool>,
+    known_hosts_path: Option<&Path>,
 ) {
     let result = local_forward_loop(
         host, port, username, auth_method,
         password, private_key_path, passphrase,
         jump_host, local_port, remote_host, remote_port, cancel_flag,
+        known_hosts_path,
     );
     if let Err(e) = result {
         warn!("Local forward 127.0.0.1:{local_port} failed: {e}");
@@ -181,8 +199,9 @@ fn local_forward_loop(
     remote_host: &str,
     remote_port: u16,
     cancel_flag: Arc<AtomicBool>,
+    known_hosts_path: Option<&Path>,
 ) -> Result<(), String> {
-    let session = open_forward_session(host, port, username, auth_method, password, private_key_path, passphrase, jump_host)?;
+    let session = open_forward_session(host, port, username, auth_method, password, private_key_path, passphrase, jump_host, known_hosts_path)?;
     let remote_host = remote_host.to_owned();
 
     let listener = TcpListener::bind(("127.0.0.1", local_port))
@@ -238,11 +257,13 @@ fn remote_forward_worker(
     remote_host: &str,
     remote_port: u16,
     cancel_flag: Arc<AtomicBool>,
+    known_hosts_path: Option<&Path>,
 ) {
     let result = remote_forward_loop(
         host, port, username, auth_method,
         password, private_key_path, passphrase,
         jump_host, local_port, remote_host, remote_port, cancel_flag,
+        known_hosts_path,
     );
     if let Err(e) = result {
         warn!("Remote forward {remote_host}:{remote_port} failed: {e}");
@@ -262,9 +283,10 @@ fn remote_forward_loop(
     remote_host: &str,
     remote_port: u16,
     cancel_flag: Arc<AtomicBool>,
+    known_hosts_path: Option<&Path>,
 ) -> Result<(), String> {
-    let session = open_forward_session(host, port, username, auth_method, password, private_key_path, passphrase, jump_host)?;
-    session.set_blocking(true);
+    let session = open_forward_session(host, port, username, auth_method, password, private_key_path, passphrase, jump_host, known_hosts_path)?;
+    session.set_blocking(false);
     let remote_host = remote_host.to_owned();
 
     let (mut listener, _) = session
@@ -292,8 +314,13 @@ fn remote_forward_loop(
                 }
             }
             Err(e) => {
-                warn!("Remote forward accept error: {e}");
-                thread::sleep(Duration::from_millis(500));
+                let io_error: std::io::Error = e.into();
+                if io_error.kind() == std::io::ErrorKind::WouldBlock {
+                    thread::sleep(Duration::from_millis(100));
+                } else {
+                    warn!("Remote forward accept error: {io_error}");
+                    thread::sleep(Duration::from_millis(500));
+                }
             }
         }
     }

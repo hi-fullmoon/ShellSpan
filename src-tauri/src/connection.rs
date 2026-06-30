@@ -1,6 +1,7 @@
+use crate::known_hosts::verify_session_host_key;
 use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest, SessionCreateRequest};
 use crate::sftp_pool::{connection_key, SftpPool};
-use log::debug;
+use log::{debug, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
 use std::{
@@ -14,11 +15,12 @@ use std::{
 
 const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
-const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
+pub(crate) const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 
 pub(crate) fn connect_sftp(
     request: &RemoteConnectionRequest,
     pool: Option<&SftpPool>,
+    known_hosts_path: Option<&Path>,
 ) -> Result<Arc<Mutex<ConnectedSftp>>, String> {
     validate_connection_fields(&request.host, &request.username)?;
     debug!(
@@ -32,6 +34,20 @@ pub(crate) fn connect_sftp(
         }
     }
 
+    let connected = create_sftp_connection(request, known_hosts_path)?;
+
+    if let Some(pool) = pool {
+        let key = connection_key(request);
+        return Ok(pool.get_or_insert(&key, connected));
+    }
+
+    Ok(connected)
+}
+
+fn create_sftp_connection(
+    request: &RemoteConnectionRequest,
+    known_hosts_path: Option<&Path>,
+) -> Result<Arc<Mutex<ConnectedSftp>>, String> {
     let (session, jump_session) = if let Some(ref jump) = request.jump_host {
         let (jump_session, target_session) = connect_through_jump_host(
             jump,
@@ -42,6 +58,7 @@ pub(crate) fn connect_sftp(
             request.password.as_deref(),
             request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
+            known_hosts_path,
         )?;
         (target_session, Some(jump_session))
     } else {
@@ -53,6 +70,9 @@ pub(crate) fn connect_sftp(
             request.password.as_deref(),
             request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
+            &request.host,
+            request.port,
+            known_hosts_path,
         )?;
         (session, None)
     };
@@ -72,22 +92,64 @@ pub(crate) fn connect_sftp(
         request.host, request.port, request.username
     );
 
-    if let Some(pool) = pool {
-        let key = connection_key(request);
-        return Ok(pool.get_or_insert(&key, connected));
-    }
-
     Ok(connected)
 }
 
 pub(crate) fn validate_connection_fields(host: &str, username: &str) -> Result<(), String> {
-    if host.trim().is_empty() {
+    let host = host.trim();
+    if host.is_empty() {
         return Err("host is required".to_string());
     }
     if username.trim().is_empty() {
         return Err("username is required".to_string());
     }
+    if is_blocked_host(host) {
+        return Err(format!("connections to {host} are blocked"));
+    }
     Ok(())
+}
+
+pub(crate) fn validate_host(host: &str) -> Result<(), String> {
+    let host = host.trim();
+    if host.is_empty() {
+        return Err("host is required".to_string());
+    }
+    if is_blocked_host(host) {
+        return Err(format!("connections to {host} are blocked"));
+    }
+    Ok(())
+}
+
+fn is_blocked_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    if lower == "metadata.google.internal" {
+        return true;
+    }
+    let candidate = lower.trim_start_matches("http://").trim_start_matches("https://");
+    let candidate = candidate.split('/').next().unwrap_or(candidate);
+    let candidate = strip_port(candidate);
+    let blocked_literals = [
+        "169.254.169.254",
+        "fd00:ec2::254",
+        "0.0.0.0",
+        "::",
+    ];
+    blocked_literals.contains(&candidate)
+}
+
+fn strip_port(host: &str) -> &str {
+    if host.starts_with('[') {
+        if let Some(end) = host.find(']') {
+            return &host[1..end];
+        }
+        return host;
+    }
+    if host.matches(':').count() == 1 {
+        if let Some(idx) = host.find(':') {
+            return &host[..idx];
+        }
+    }
+    host
 }
 
 fn has_secret_value(value: Option<&str>) -> bool {
@@ -175,6 +237,9 @@ pub(crate) fn open_authenticated_session(
     password: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
+    host: &str,
+    port: u16,
+    known_hosts_path: Option<&Path>,
 ) -> Result<Session, String> {
     debug!(
         "Opening authenticated SSH session username={} auth_method={}",
@@ -186,6 +251,10 @@ pub(crate) fn open_authenticated_session(
     session
         .handshake()
         .map_err(|error| format!("ssh handshake failed: {error}"))?;
+
+    if let Some(path) = known_hosts_path {
+        verify_session_host_key(&session, host, port, path)?;
+    }
 
     authenticate(
         &mut session,
@@ -225,6 +294,7 @@ pub(crate) fn connect_through_jump_host(
     target_password: Option<&str>,
     target_private_key_path: Option<&str>,
     target_passphrase: Option<&str>,
+    known_hosts_path: Option<&Path>,
 ) -> Result<(Session, Session), String> {
     debug!(
         "Connecting through jump host {}:{} to target {}:{}",
@@ -240,6 +310,9 @@ pub(crate) fn connect_through_jump_host(
         jump.password.as_deref(),
         jump.private_key_path.as_deref(),
         jump.passphrase.as_deref(),
+        &jump.host,
+        jump.port,
+        known_hosts_path,
     )?;
 
     // 2. Create a local TCP socket pair for bridging
@@ -249,17 +322,31 @@ pub(crate) fn connect_through_jump_host(
         .local_addr()
         .map_err(|e| format!("failed to get local bridge address: {e}"))?
         .port();
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| format!("failed to set bridge listener nonblocking: {e}"))?;
 
     // 3. Open direct-tcpip channel through jump host to target
     let channel = jump_session
         .channel_direct_tcpip(target_host, target_port, Some(("127.0.0.1", local_port)))
         .map_err(|e| format!("failed to open direct-tcpip through jump host: {e}"))?;
 
-    // 4. Accept connection from the other side of the bridge
-    let server_stream = listener
-        .accept()
-        .map_err(|e| format!("failed to accept bridge connection: {e}"))?
-        .0;
+    // 4. Spawn a thread that accepts the bridge connection and bridges data
+    //    between the jump channel and the server side. The accept must run
+    //    concurrently with the client connect below, otherwise neither side
+    //    would ever complete the TCP handshake.
+    let bridge_handle = thread::spawn(move || {
+        match accept_bridge_with_timeout(&listener, Duration::from_secs(15)) {
+            Ok(server_stream) => {
+                if let Err(error) = bridge_channel_tcp(channel, server_stream) {
+                    warn!("Jump host bridge thread ended with error: {error}");
+                }
+            }
+            Err(error) => {
+                warn!("Jump host bridge accept failed: {error}");
+            }
+        }
+    });
 
     // 5. Connect client side of the bridge (this will be the target session's TCP stream)
     let client_stream = TcpStream::connect(("127.0.0.1", local_port))
@@ -267,12 +354,7 @@ pub(crate) fn connect_through_jump_host(
     configure_tcp_stream(&client_stream)
         .map_err(|e| format!("failed to configure bridge client socket: {e}"))?;
 
-    // 6. Spawn a thread to bridge data between the jump channel and the server side
-    thread::spawn(move || {
-        let _ = bridge_channel_tcp(channel, server_stream);
-    });
-
-    // 7. Open authenticated session on the client stream
+    // 6. Open authenticated session on the client stream
     let target_session = open_authenticated_session(
         client_stream,
         target_username,
@@ -280,10 +362,38 @@ pub(crate) fn connect_through_jump_host(
         target_password,
         target_private_key_path,
         target_passphrase,
+        target_host,
+        target_port,
+        known_hosts_path,
     )?;
+
+    // Detach the bridge thread — it runs until the channel closes.
+    std::mem::forget(bridge_handle);
 
     debug!("Connected to target through jump host successfully");
     Ok((jump_session, target_session))
+}
+
+fn accept_bridge_with_timeout(
+    listener: &TcpListener,
+    timeout: Duration,
+) -> Result<TcpStream, std::io::Error> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => return Ok(stream),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "bridge accept timed out",
+                    ));
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 fn bridge_channel_tcp(
@@ -297,11 +407,15 @@ fn bridge_channel_tcp(
     let mut channel_clone = channel.stream(0);
 
     let t1 = thread::spawn(move || {
-        let _ = copy(&mut tcp_clone, &mut channel_clone);
+        if let Err(error) = copy(&mut tcp_clone, &mut channel_clone) {
+            warn!("Jump host bridge copy (tcp -> channel) failed: {error}");
+        }
     });
 
     let t2 = thread::spawn(move || {
-        let _ = copy(&mut channel, &mut tcp);
+        if let Err(error) = copy(&mut channel, &mut tcp) {
+            warn!("Jump host bridge copy (channel -> tcp) failed: {error}");
+        }
     });
 
     let _ = t1.join();
@@ -380,13 +494,28 @@ mod tests {
     #[test]
     fn connect_sftp_returns_shared_connection() {
         use crate::sftp_pool::SftpPool;
-        // We cannot open a real SSH session in a unit test, but this test documents the expected
-        // return type and ensures the signature compiles with the pool argument.
         fn expect_shared(_result: Result<std::sync::Arc<std::sync::Mutex<crate::models::ConnectedSftp>>, String>) {}
         fn dummy_call(request: &crate::models::RemoteConnectionRequest, pool: &SftpPool) {
-            expect_shared(connect_sftp(request, Some(pool)));
+            expect_shared(connect_sftp(request, Some(pool), None));
         }
         let _ = dummy_call;
+    }
+
+    #[test]
+    fn validate_connection_fields_blocks_metadata_endpoint() {
+        assert!(validate_connection_fields("169.254.169.254", "alice").is_err());
+        assert!(validate_connection_fields("metadata.google.internal", "alice").is_err());
+        assert!(validate_connection_fields("0.0.0.0", "alice").is_err());
+        assert!(validate_connection_fields("::", "alice").is_err());
+        assert!(validate_connection_fields("fd00:ec2::254", "alice").is_err());
+        assert!(validate_connection_fields("[::]:22", "alice").is_err());
+        assert!(validate_connection_fields("169.254.169.254:22", "alice").is_err());
+    }
+
+    #[test]
+    fn validate_connection_fields_allows_normal_hosts() {
+        assert!(validate_connection_fields("example.com", "alice").is_ok());
+        assert!(validate_connection_fields("192.168.1.1", "alice").is_ok());
     }
 
     #[test]

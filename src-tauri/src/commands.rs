@@ -89,9 +89,16 @@ pub(crate) fn close_session(
 ) -> Result<(), String> {
     info!("Closing SSH session session_id={session_id}");
     let result = state.send(&session_id, SessionCommand::Close);
-    let _ = state.remove(&session_id);
-    if let Err(error) = &result {
-        warn!("Failed to close SSH session session_id={session_id}: {error}");
+    match &result {
+        Ok(()) => {
+            let _ = state.remove(&session_id);
+        }
+        Err(error) => {
+            let remove_result = state.remove(&session_id);
+            warn!(
+                "Failed to close SSH session session_id={session_id}: {error} (remove result: {remove_result:?})"
+            );
+        }
     }
     result
 }
@@ -110,6 +117,7 @@ pub(crate) fn request_app_exit(app: AppHandle) {
 
 #[tauri::command]
 pub(crate) async fn list_remote_directory(
+    app: AppHandle,
     request: RemoteDirectoryRequest,
     pool: State<'_, SftpPool>,
     cache: State<'_, RemoteIdentityCache>,
@@ -122,8 +130,9 @@ pub(crate) async fn list_remote_directory(
     );
     let pool = pool.inner().clone();
     let cache = cache.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        list_remote_directory_blocking(request, Some(&pool), Some(&cache))
+        list_remote_directory_blocking(request, Some(&pool), Some(&cache), known_hosts.as_deref())
     })
     .await
     .map_err(|error| format!("failed to join directory listing task: {error}"))?;
@@ -139,6 +148,7 @@ pub(crate) async fn list_remote_directory(
 
 #[tauri::command]
 pub(crate) async fn create_remote_entry(
+    app: AppHandle,
     request: CreateRemoteEntryRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
@@ -150,8 +160,9 @@ pub(crate) async fn create_remote_entry(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        create_remote_entry_blocking(request, Some(&pool))
+        create_remote_entry_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
     .map_err(|error| format!("failed to join create entry task: {error}"))?;
@@ -163,6 +174,7 @@ pub(crate) async fn create_remote_entry(
 
 #[tauri::command]
 pub(crate) async fn rename_remote_path(
+    app: AppHandle,
     request: RenameRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
@@ -173,8 +185,9 @@ pub(crate) async fn rename_remote_path(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        rename_remote_path_blocking(request, Some(&pool))
+        rename_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
     .map_err(|error| format!("failed to join rename task: {error}"))?;
@@ -216,6 +229,7 @@ pub(crate) async fn delete_remote_path(
 
 #[tauri::command]
 pub(crate) async fn copy_remote_path(
+    app: AppHandle,
     request: CopyRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
@@ -226,8 +240,9 @@ pub(crate) async fn copy_remote_path(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        copy_remote_path_blocking(request, Some(&pool))
+        copy_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
     .map_err(|error| format!("failed to join copy task: {error}"))?;
@@ -328,24 +343,32 @@ pub(crate) fn cancel_download(
 
 #[tauri::command]
 pub(crate) fn open_path(path: String) -> Result<(), String> {
+    let path = std::path::Path::new(&path);
+    if !path.exists() {
+        return Err(format!("path does not exist: {}", path.display()));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("failed to canonicalize path: {error}"))?;
+
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&path)
+            .arg(&canonical)
             .spawn()
             .map_err(|error| format!("failed to open path: {error}"))?;
     }
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
-            .arg(&path)
+            .arg(&canonical)
             .spawn()
             .map_err(|error| format!("failed to open path: {error}"))?;
     }
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(&path)
+            .arg(&canonical)
             .spawn()
             .map_err(|error| format!("failed to open path: {error}"))?;
     }
@@ -353,37 +376,50 @@ pub(crate) fn open_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) fn pick_local_files() -> Result<Vec<String>, String> {
-    let paths = rfd::FileDialog::new()
-        .set_title("选择要上传的文件")
-        .pick_files()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    Ok(paths)
+pub(crate) async fn pick_local_files() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let paths = rfd::FileDialog::new()
+            .set_title("选择要上传的文件")
+            .pick_files()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        Ok(paths)
+    })
+    .await
+    .map_err(|error| format!("failed to run file dialog: {error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn pick_local_folder(title: Option<String>) -> Result<Vec<String>, String> {
-    let path = rfd::FileDialog::new()
-        .set_title(&title.unwrap_or_else(|| "选择文件夹".to_string()))
-        .pick_folder()
-        .map(|path| path.to_string_lossy().to_string());
-    Ok(path.into_iter().collect())
+pub(crate) async fn pick_local_folder(title: Option<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = rfd::FileDialog::new()
+            .set_title(&title.unwrap_or_else(|| "选择文件夹".to_string()))
+            .pick_folder()
+            .map(|path| path.to_string_lossy().to_string());
+        Ok(path.into_iter().collect())
+    })
+    .await
+    .map_err(|error| format!("failed to run folder dialog: {error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn pick_private_key_file() -> Result<Option<String>, String> {
-    let path = rfd::FileDialog::new()
-        .set_title("选择私钥文件")
-        .pick_file()
-        .map(|path| path.to_string_lossy().to_string());
-    Ok(path)
+pub(crate) async fn pick_private_key_file() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = rfd::FileDialog::new()
+            .set_title("选择私钥文件")
+            .pick_file()
+            .map(|path| path.to_string_lossy().to_string());
+        Ok(path)
+    })
+    .await
+    .map_err(|error| format!("failed to run key file dialog: {error}"))?
 }
 
 #[tauri::command]
 pub(crate) async fn open_remote_file(
+    app: AppHandle,
     request: OpenRemoteFileRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
@@ -393,8 +429,9 @@ pub(crate) async fn open_remote_file(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        open_remote_file_blocking(request, Some(&pool))
+        open_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
     .map_err(|error| format!("failed to join open file task: {error}"))?;
@@ -406,6 +443,7 @@ pub(crate) async fn open_remote_file(
 
 #[tauri::command]
 pub(crate) async fn preview_remote_file(
+    app: AppHandle,
     request: ReadRemoteFileRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<ReadRemoteFileResponse, String> {
@@ -415,8 +453,9 @@ pub(crate) async fn preview_remote_file(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        read_remote_file_blocking(request, Some(&pool))
+        read_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
     .map_err(|error| format!("failed to join file preview task: {error}"))?;
@@ -431,6 +470,7 @@ pub(crate) async fn preview_remote_file(
 
 #[tauri::command]
 pub(crate) async fn update_remote_permissions(
+    app: AppHandle,
     request: UpdateRemotePermissionsRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
@@ -441,8 +481,9 @@ pub(crate) async fn update_remote_permissions(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        update_remote_permissions_blocking(request, Some(&pool))
+        update_remote_permissions_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
     .map_err(|error| format!("failed to join permissions update task: {error}"))?;
@@ -476,6 +517,7 @@ pub(crate) fn migrate_passwords(
 
 #[tauri::command]
 pub(crate) fn start_port_forwards(
+    app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     operation_id: String,
     host: String,
@@ -489,17 +531,22 @@ pub(crate) fn start_port_forwards(
     forwards: Vec<PortForwardConfig>,
 ) -> Result<(), String> {
     info!("Starting port forwards operation_id={operation_id} count={}", forwards.len());
+    validate_connection_fields(&host, &username)?;
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
     forwards_state.register(operation_id.clone(), cancel_flag.clone())?;
 
     let manager = (&*forwards_state).clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
     thread::spawn(move || {
         crate::port_forward::start_port_forwards(
             manager, operation_id,
             host, port, username, auth_method,
             password, private_key_path, passphrase,
             jump_host, forwards, cancel_flag,
+            known_hosts,
         );
     });
 
@@ -552,6 +599,20 @@ pub(crate) async fn trust_host(
 
 #[tauri::command]
 pub(crate) fn open_url(url: String) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    let allowed = lower.starts_with("https://")
+        || lower.starts_with("http://")
+        || lower.starts_with("mailto:");
+    if !allowed {
+        return Err(format!("refused to open URL with disallowed scheme: {url}"));
+    }
+    if url.contains('\n') || url.contains('\r') {
+        return Err("refused to open URL containing newline characters".to_string());
+    }
+    if contains_shell_metacharacters(&url) {
+        return Err(format!("refused to open URL containing shell metacharacters: {url}"));
+    }
+
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
@@ -574,6 +635,10 @@ pub(crate) fn open_url(url: String) -> Result<(), String> {
             .map_err(|error| format!("failed to open URL: {error}"))?;
     }
     Ok(())
+}
+
+fn contains_shell_metacharacters(input: &str) -> bool {
+    input.chars().any(|c| matches!(c, '&' | '|' | '<' | '>' | '(' | ')' | '^' | '"' | '%' | '!'))
 }
 
 fn remote_connection_request_from_session(

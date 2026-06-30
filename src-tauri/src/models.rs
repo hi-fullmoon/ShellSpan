@@ -368,15 +368,79 @@ pub(crate) struct ConnectedSftp {
     pub(crate) _jump_session: Option<Session>,
 }
 
-#[derive(Default)]
-pub(crate) struct UploadCancellationRegistry {
+pub(crate) struct CancellationRegistry {
+    kind: &'static str,
     operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
-#[derive(Default)]
-pub(crate) struct DeleteCancellationRegistry {
-    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+impl CancellationRegistry {
+    pub(crate) fn new(kind: &'static str) -> Self {
+        Self {
+            kind,
+            operations: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut guard = self
+            .operations
+            .lock()
+            .map_err(|_| format!("{} cancellation registry poisoned", self.kind))?;
+        guard.insert(operation_id, flag.clone());
+        Ok(flag)
+    }
+
+    pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
+        let guard = self
+            .operations
+            .lock()
+            .map_err(|_| format!("{} cancellation registry poisoned", self.kind))?;
+        let flag = guard
+            .get(operation_id)
+            .ok_or_else(|| format!("{} operation {operation_id} not found", self.kind))?;
+        flag.store(true, AtomicOrdering::SeqCst);
+        Ok(())
+    }
+
+    pub(crate) fn remove(&self, operation_id: &str) -> Result<(), String> {
+        let mut guard = self
+            .operations
+            .lock()
+            .map_err(|_| format!("{} cancellation registry poisoned", self.kind))?;
+        guard.remove(operation_id);
+        Ok(())
+    }
 }
+
+macro_rules! cancellation_registry {
+    ($name:ident, $kind:literal) => {
+        pub(crate) struct $name(CancellationRegistry);
+
+        impl $name {
+            pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
+                self.0.register(operation_id)
+            }
+
+            pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
+                self.0.cancel(operation_id)
+            }
+
+            pub(crate) fn remove(&self, operation_id: &str) -> Result<(), String> {
+                self.0.remove(operation_id)
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(CancellationRegistry::new($kind))
+            }
+        }
+    };
+}
+
+cancellation_registry!(UploadCancellationRegistry, "upload");
+cancellation_registry!(DeleteCancellationRegistry, "delete");
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct DownloadScanStats {
@@ -460,43 +524,7 @@ impl DownloadProgressTracker {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct DownloadCancellationRegistry {
-    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
-}
-
-impl DownloadCancellationRegistry {
-    pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
-        let flag = Arc::new(AtomicBool::new(false));
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "download cancellation registry poisoned".to_string())?;
-        guard.insert(operation_id, flag.clone());
-        Ok(flag)
-    }
-
-    pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "download cancellation registry poisoned".to_string())?;
-        let flag = guard
-            .get(operation_id)
-            .ok_or_else(|| format!("download operation {operation_id} not found"))?;
-        flag.store(true, AtomicOrdering::SeqCst);
-        Ok(())
-    }
-
-    pub(crate) fn remove(&self, operation_id: &str) -> Result<(), String> {
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "download cancellation registry poisoned".to_string())?;
-        guard.remove(operation_id);
-        Ok(())
-    }
-}
+cancellation_registry!(DownloadCancellationRegistry, "download");
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct UploadScanStats {
@@ -672,68 +700,5 @@ impl SessionManager {
     }
 }
 
-impl UploadCancellationRegistry {
-    pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
-        let flag = Arc::new(AtomicBool::new(false));
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
-        guard.insert(operation_id, flag.clone());
-        Ok(flag)
-    }
 
-    pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
-        let flag = guard
-            .get(operation_id)
-            .ok_or_else(|| format!("upload operation {operation_id} not found"))?;
-        flag.store(true, AtomicOrdering::SeqCst);
-        Ok(())
-    }
 
-    pub(crate) fn remove(&self, operation_id: &str) -> Result<(), String> {
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "upload cancellation registry poisoned".to_string())?;
-        guard.remove(operation_id);
-        Ok(())
-    }
-}
-
-impl DeleteCancellationRegistry {
-    pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
-        let flag = Arc::new(AtomicBool::new(false));
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "delete cancellation registry poisoned".to_string())?;
-        guard.insert(operation_id, flag.clone());
-        Ok(flag)
-    }
-
-    pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "delete cancellation registry poisoned".to_string())?;
-        let flag = guard
-            .get(operation_id)
-            .ok_or_else(|| format!("delete operation {operation_id} not found"))?;
-        flag.store(true, AtomicOrdering::SeqCst);
-        Ok(())
-    }
-
-    pub(crate) fn remove(&self, operation_id: &str) -> Result<(), String> {
-        let mut guard = self
-            .operations
-            .lock()
-            .map_err(|_| "delete cancellation registry poisoned".to_string())?;
-        guard.remove(operation_id);
-        Ok(())
-    }
-}
