@@ -62,7 +62,7 @@
 }
 
 .session-tab-input {
-  background: color-mix(in srgb, var(--app-bg) 45%, var(--app-icon-bg) 55%);
+  background: transparent;
   color: var(--app-text);
   border: none !important;
   outline: none !important;
