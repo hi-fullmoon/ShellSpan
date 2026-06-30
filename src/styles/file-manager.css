@@ -44,3 +44,22 @@
 .file-entry-name {
   color: var(--app-text);
 }
+
+:root {
+  --fm-bg: var(--app-bg);
+  --fm-surface: var(--app-surface);
+  --fm-surface-elevated: var(--app-surface-muted);
+  --fm-border: var(--app-border);
+  --fm-text: var(--app-text);
+  --fm-text-soft: var(--app-text-soft);
+  --fm-text-muted: var(--app-text-muted);
+  --fm-primary: var(--app-primary-bg);
+  --fm-primary-dim: color-mix(in srgb, var(--app-primary-bg) 20%, transparent);
+  --fm-success: #34d399;
+  --fm-warning: #fbbf24;
+  --fm-danger: #fb7185;
+  --fm-directory: #60a5fa;
+  --fm-executable: #34d399;
+  --fm-symlink: #c084fc;
+  --fm-hidden: var(--app-text-muted);
+}

@@ -4,6 +4,8 @@ TermBridge 是一个基于 Tauri 2、React 和 Rust 构建的跨平台 SSH 桌�
 
 它把常用的 SSH 终端能力和远程文件管理放进同一个桌面应用里，适合作为轻量的 SSH / SFTP 工作台。
 
+最新版本与安装包可从 [GitHub Releases](https://github.com/hi-fullmoon/TermBridge/releases/latest) 获取。
+
 ## 项目定位
 
 TermBridge 关注的是一条尽量顺手的远程运维主链路：
@@ -16,42 +18,65 @@ TermBridge 关注的是一条尽量顺手的远程运维主链路：
 
 如果你想要一个比纯命令行更直观、又比重量级 IDE 更轻的桌面 SSH 客户端，这个项目就是围绕这个方向设计的。
 
+## 下载安装
+
+前往 [Releases](https://github.com/hi-fullmoon/TermBridge/releases/latest)，根据系统架构选择安装包：
+
+- Apple Silicon Mac：`darwin-aarch64` DMG
+- Intel Mac：`darwin-x86_64` DMG
+- 64 位 Windows：`windows-x86_64` 安装程序
+
+项目目前没有正式发布 Linux 安装包。macOS 首次启动时如果被系统安全策略拦截，请在“系统设置 → 隐私与安全性”中确认是否允许打开。
+
 ## 当前能力
 
 ### 连接与会话
 
 - 支持密码认证和私钥认证
-- 支持保存连接信息
-- 密码认证下可选保存密码
+- 支持 `user@host:port` 格式快速连接
+- 支持保存连接信息，密码可选存入操作系统钥匙串
+- 支持首次连接主机指纹确认和 `known_hosts` 校验
+- 支持密码或私钥认证的 SSH 跳板机
+- 支持本地端口转发和远程端口转发
 - 支持多标签终端会话
-- 支持会话状态展示与异常关闭提示
-- 支持会话标签切换与排序
+- 支持会话状态展示、异常关闭提示和自动重连
+- 支持会话标签切换、排序、固定和重命名
 - 支持历史连接复用、重命名、收藏、置顶、删除
+
+### 终端体验
+
+- 支持复制、粘贴、全选、清屏和终端内容查找
+- 支持命令片段的新增、编辑、删除和快速发送
+- 支持导出当前终端内容
+- 支持终端主题、字体、光标和复制行为设置
+- 支持自定义新建连接、切换标签、开关侧栏等快捷键
 
 ### 文件管理
 
 - 内置远程文件管理器
-- 支持目录浏览和手动输入路径跳转
+- 支持目录浏览、路径跳转和目录书签
 - 支持新建文件、新建文件夹、重命名、复制、删除
-- 支持查看文件属性
+- 支持查看文件属性和修改 Unix 权限
 - 支持复制名称、文件路径、目录路径
 - 支持使用系统默认应用打开远程文件
-- 支持拖拽上传文件或文件夹
-- 支持上传进度展示与上传取消
-- 支持删除进度展示
+- 支持上传、下载文件或文件夹
+- 支持拖拽上传，以及同名目标的覆盖、跳过和批量处理
+- 支持上传、下载、删除进度展示与取消
 
 ### 桌面能力
 
 - 前后端统一日志
+- 支持浅色、深色和跟随系统主题
+- 支持简体中文和英文界面
 - 应用启动后自动检查更新
 - 支持手动触发更新检查
-- 已配置应用图标与打包产物
+- 支持 Windows x86_64、macOS Intel 和 Apple Silicon 发布产物
 
 ## 技术栈
 
 - 桌面框架：Tauri 2
-- 前端：React 18 + TypeScript + Vite
-- UI 样式：Tailwind CSS
+- 前端：React 19 + TypeScript + Vite 8
+- UI：Chakra UI 3 + Tailwind CSS 4
 - 终端渲染：xterm.js
 - 文件表格：AG Grid
 - 状态管理：Zustand
@@ -66,7 +91,7 @@ TermBridge 关注的是一条尽量顺手的远程运维主链路：
 - Rust 工具链，并确保 `cargo` 可用
 - 满足 Tauri 2 对当前系统的构建依赖
 
-仓库当前使用 `pnpm-lock.yaml`，推荐使用 pnpm 9；如果你习惯 npm，也可以直接运行脚本。
+仓库当前使用 `pnpm-lock.yaml`，推荐使用项目声明的 pnpm 11。
 
 如果终端里找不到 `cargo`，先执行：
 
@@ -143,11 +168,10 @@ pnpm tauri:build
 ## 数据与安全说明
 
 - 历史连接信息保存在前端本地存储中
-- 只有勾选“保存密码”时，密码才会随连接信息一起保存在本地
-- 私钥口令仅参与当前连接，不会持久化保存
+- 只有勾选“保存密码”时，主机密码才会存入操作系统钥匙串；密码不会写入前端本地存储
+- 私钥口令、跳板机密码和跳板机私钥口令仅参与当前连接，不会持久化保存
+- 首次连接需要确认主机指纹，信任后写入应用自己的 `known_hosts` 文件
 - 日志不会记录明文密码、私钥内容、私钥口令或终端实时输入输出内容
-
-当前实现更偏向“可用的桌面客户端基础版”，安全能力仍有继续增强空间，见下方“当前限制”。
 
 ## 日志说明
 
@@ -203,19 +227,13 @@ https://github.com/hi-fullmoon/TermBridge/releases/latest/download/latest.json
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
-推荐发布流程：
+推荐在工作区干净且 `main` 已同步时执行：
 
 ```bash
-# 1. 更新版本号
-
-# 2. 提交版本变更
-git add package.json src-tauri/tauri.conf.json
-git commit -m "chore(release): bump version to 1.0.2"
-
-# 3. 打标签并推送
-git tag v1.0.2
-git push origin main --tags
+pnpm run version
 ```
+
+脚本会选择 patch、minor 或 major 版本，并同步更新 `package.json`、`Cargo.toml` 和 `tauri.conf.json`，随后创建提交、带注释的 `v*` tag 并推送。
 
 推送 `v*` tag 后，GitHub Actions 会自动执行 `.github/workflows/release.yml`，构建 Windows 与 macOS 多平台产物并发布。
 
@@ -231,13 +249,13 @@ cp .env.example .env.local
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD=...
 
 gh auth login
-pnpm release:github -- --version 0.1.1 --notes "Release v0.1.1"
+pnpm release -- --version 1.2.13 --notes "Release v1.2.13"
 ```
 
 如果你直接执行脚本，也可以这样调用：
 
 ```bash
-bash scripts/release-github.sh --version 0.1.1 --notes "Release v0.1.1"
+bash scripts/release-github.sh --version 1.2.13 --notes "Release v1.2.13"
 ```
 
 这条本地脚本只会发布“当前机器可构建的平台”。例如：
@@ -262,12 +280,10 @@ bash scripts/release-github.sh --version 0.1.1 --notes "Release v0.1.1"
 
 ## 当前限制
 
-- 暂未实现 `known_hosts` / 主机指纹校验管理
-- 暂未接入系统钥匙串级别的密码安全存储
-- 暂未实现端口转发、代理跳板、分屏窗格等高级连接能力
+- 端口转发暂不支持通过跳板机建立，也不支持动态 SOCKS 转发
+- 暂未实现分屏终端窗格
 - 上传暂不支持符号链接
 - 使用系统默认应用打开远程文件时，会先下载到本地临时目录
-- 删除进度当前支持展示，但不支持取消
 - 当前主要以 macOS 和 Windows 作为目标平台
 
 ## 常见排查
