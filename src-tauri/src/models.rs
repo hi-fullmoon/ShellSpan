@@ -210,6 +210,23 @@ pub(crate) enum HostKeyCheckStatus {
     Failure,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "type", content = "payload")]
+pub(crate) enum CreateSessionError {
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        fingerprint: Option<String>,
+    },
+    HostKeyMismatch {
+        host: String,
+        port: u16,
+    },
+    Other {
+        message: String,
+    },
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TrustHostRequest {

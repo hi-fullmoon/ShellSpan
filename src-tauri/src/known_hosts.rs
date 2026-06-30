@@ -6,6 +6,23 @@ use tauri::{AppHandle, Manager};
 use crate::connection::{open_session_for_host_key, validate_host};
 use crate::models::{HostKeyCheckRequest, HostKeyCheckResult, HostKeyCheckStatus, TrustHostRequest};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostKeyErrorKind {
+    Unknown,
+    Mismatch,
+}
+
+pub(crate) fn classify_host_key_error(message: &str) -> Option<HostKeyErrorKind> {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("is not known") || lower.contains("trust this host") {
+        Some(HostKeyErrorKind::Unknown)
+    } else if lower.contains("does not match") || lower.contains("man-in-the-middle") {
+        Some(HostKeyErrorKind::Mismatch)
+    } else {
+        None
+    }
+}
+
 const KNOWN_HOSTS_FILENAME: &str = "known_hosts";
 
 pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -254,5 +271,29 @@ mod tests {
         assert_eq!(base64url_encode(b"fooba"), "Zm9vYmE");
         assert_eq!(base64url_encode(b"foobar"), "Zm9vYmFy");
         assert_eq!(base64url_encode(b"\xff\xfe\xfd"), "__79");
+    }
+
+    #[test]
+    fn classify_host_key_error_detects_unknown() {
+        assert_eq!(
+            classify_host_key_error("host key for example.com:22 is not known — trust this host before connecting"),
+            Some(HostKeyErrorKind::Unknown)
+        );
+    }
+
+    #[test]
+    fn classify_host_key_error_detects_mismatch() {
+        assert_eq!(
+            classify_host_key_error("host key for example.com:22 does not match the known key — possible man-in-the-middle attack"),
+            Some(HostKeyErrorKind::Mismatch)
+        );
+    }
+
+    #[test]
+    fn classify_host_key_error_returns_none_for_unrelated() {
+        assert_eq!(
+            classify_host_key_error("failed to connect to example.com:22"),
+            None
+        );
     }
 }
