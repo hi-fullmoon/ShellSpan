@@ -278,3 +278,21 @@ export function TrashIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function HomeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M3 7.5 8 3.5l5 4" />
+      <path d="M5 8.5V13a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V8.5" />
+    </svg>
+  );
+}
+
+export function CopyIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M11.5 3.5h-6a1 1 0 0 0-1 1v6" />
+      <path d="M5.5 5.5h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
