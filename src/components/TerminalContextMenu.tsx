@@ -6,6 +6,7 @@ import { useSnippetsStore } from '../stores/snippetsStore';
 import { t } from '../lib/i18n';
 
 interface TerminalContextMenuProps {
+  shellRef: React.RefObject<HTMLDivElement | null>;
   terminalRef: React.RefObject<Terminal | null>;
   sessionId: string;
   writeToSession: (data: string) => void;
@@ -14,6 +15,7 @@ interface TerminalContextMenuProps {
 }
 
 export function TerminalContextMenu({
+  shellRef,
   terminalRef,
   sessionId,
   writeToSession,
@@ -32,24 +34,31 @@ export function TerminalContextMenu({
   const submenuRef = useRef<HTMLDivElement | null>(null);
   const snippets = useSnippetsStore((state) => state.snippets);
 
-  // Bind the context menu to the xterm element.
+  // Bind the context menu to the terminal shell container so it stays attached
+  // even if the xterm instance is created after this component mounts.
   useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal || !terminal.element) {
+    const shell = shellRef.current;
+    if (!shell) {
       return;
     }
 
     const handleContextMenu = (event: MouseEvent) => {
+      const terminal = terminalRef.current;
+      const target = event.target as Element | null;
+      if (!terminal || !target || !terminal.element?.contains(target)) {
+        return;
+      }
+
       event.preventDefault();
       setMenuHasSelection(!!terminal.getSelection());
       openMenu(event.clientX, event.clientY);
     };
 
-    terminal.element.addEventListener('contextmenu', handleContextMenu);
+    shell.addEventListener('contextmenu', handleContextMenu);
     return () => {
-      terminal.element?.removeEventListener('contextmenu', handleContextMenu);
+      shell.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [terminalRef, openMenu]);
+  }, [shellRef, terminalRef, openMenu]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -145,7 +154,7 @@ export function TerminalContextMenu({
     <>
       {createPortal(
         <div
-          className="themed-menu fixed z-50 min-w-28 rounded-lg p-1 backdrop-blur"
+          className="themed-menu fixed z-[1700] min-w-28 rounded-lg p-1 backdrop-blur"
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
           ref={menuRef}

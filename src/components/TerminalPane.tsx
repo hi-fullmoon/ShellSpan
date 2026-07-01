@@ -166,6 +166,7 @@ export const TerminalPane = forwardRef<TerminalPaneRef, TerminalPaneProps>(funct
         </div>
       )}
       <TerminalContextMenu
+        shellRef={shellRef}
         terminalRef={terminalRef}
         sessionId={session.sessionId}
         writeToSession={writeToSession}

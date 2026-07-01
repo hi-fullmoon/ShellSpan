@@ -17,7 +17,7 @@ export function FormSelect({ value, onChange, options, className = 'themed-input
   return (
     <Select.Root
       collection={collection}
-      positioning={{ sameWidth: true, gutter: 4 }}
+      positioning={{ strategy: 'fixed', sameWidth: true, gutter: 4 }}
       size="sm"
       value={[value]}
       onValueChange={(details) => onChange(details.value[0])}
