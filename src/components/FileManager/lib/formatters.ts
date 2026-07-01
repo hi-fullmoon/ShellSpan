@@ -1,6 +1,23 @@
 import { getActiveLocale, t } from '../../../lib/i18n';
 import type { RemoteFileEntry, RemoteFileKind } from '../../../types';
 
+export function formatDirectoryLoadError(error: unknown, requestedPath?: string): string {
+  const message = String(error);
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('[sftp(2)]') && normalized.includes('no such file')) {
+    if (requestedPath?.trim()) {
+      return t('fileManager.error.pathMissingWithPath', {
+        label: t('fileManager.property.path'),
+        path: requestedPath.trim(),
+      });
+    }
+    return t('fileManager.error.pathMissing', { label: t('fileManager.property.path') });
+  }
+
+  return t('fileManager.error.loadDirectory', { message });
+}
+
 export function formatSize(size?: number): string {
   if (size === undefined) {
     return '--';

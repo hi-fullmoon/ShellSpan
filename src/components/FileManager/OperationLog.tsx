@@ -27,10 +27,12 @@ function relativeTime(timestamp: number): string {
   return t('fileManager.log.hoursAgo', { hours });
 }
 
+const EMPTY_LOGS: OperationLogEntry[] = [];
+
 export function OperationLog({ sessionId }: { sessionId?: string }) {
   const [expanded, setExpanded] = useState(false);
   const logs = useFileManagerStore((state) =>
-    sessionId ? (state.sessions[sessionId]?.operationLogs ?? []) : [],
+    sessionId ? (state.sessions[sessionId]?.operationLogs ?? EMPTY_LOGS) : EMPTY_LOGS,
   );
   const clearOperationLogs = useFileManagerStore((state) => state.clearOperationLogs);
 
