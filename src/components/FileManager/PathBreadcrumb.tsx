@@ -1,7 +1,7 @@
 import { type FormEvent, useMemo, useState } from 'react';
 import { t } from '../../lib/i18n';
 import { Input } from '@chakra-ui/react';
-import { HomeIcon, CopyIcon } from '../Icons';
+import { CopyIcon, HomeIcon } from '../Icons';
 
 interface PathBreadcrumbProps {
   currentPath?: string;
