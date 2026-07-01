@@ -176,6 +176,7 @@ const zhCN = {
   'fileManager.actions.more': '更多操作',
   'fileManager.actions.openFolder': '打开文件夹',
   'fileManager.pathPlaceholder': '输入远程路径并回车',
+  'fileManager.readOnly': '终端已断开，文件管理器当前仅支持查看。',
   'fileManager.empty.noSessionTitle': '未连接远程主机',
   'fileManager.emptyDirectoryTitle': '此目录为空',
   'fileManager.actions.root': '根目录',

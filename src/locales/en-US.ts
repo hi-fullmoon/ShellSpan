@@ -176,6 +176,7 @@ const enUS = {
   'fileManager.actions.more': 'More actions',
   'fileManager.actions.openFolder': 'Open Folder',
   'fileManager.pathPlaceholder': 'Enter a remote path and press Enter',
+  'fileManager.readOnly': 'Terminal disconnected. File manager is currently read-only.',
   'fileManager.empty.noSessionTitle': 'No remote host connected',
   'fileManager.emptyDirectoryTitle': 'This directory is empty',
   'fileManager.actions.root': 'Root',
