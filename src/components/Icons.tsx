@@ -296,3 +296,112 @@ export function CopyIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function FilePlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5 2.5h4l2 2v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" />
+      <path d="M9 2.5v2h2" />
+      <path d="M8 6.5v4" />
+      <path d="M6 8.5h4" />
+    </svg>
+  );
+}
+
+export function FolderPlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M2.5 5.5h11v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M2.5 5.5V4.7a1 1 0 0 1 1-1h2l1 1h5a1 1 0 0 1 1 1v.8" />
+      <path d="M8 7.5v4" />
+      <path d="M6 9.5h4" />
+    </svg>
+  );
+}
+
+export function UploadFolderIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M2.5 6.5h11v5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M2.5 6.5V5.7a1 1 0 0 1 1-1h2l1 1h5a1 1 0 0 1 1 1v.8" />
+      <path d="M8 9.5V6.5" />
+      <path d="M6.5 8 8 6.5 9.5 8" />
+    </svg>
+  );
+}
+
+export function ListIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M4 4.5h8" />
+      <path d="M4 8h8" />
+      <path d="M4 11.5h8" />
+    </svg>
+  );
+}
+
+export function CompactIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M4 4.5h8" />
+      <path d="M4 11.5h8" />
+    </svg>
+  );
+}
+
+export function OpenIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M8 2.5v5" />
+      <path d="M5.5 7 8 9.5 10.5 7" />
+      <path d="M3 11.5h10" />
+    </svg>
+  );
+}
+
+export function EditIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M10.5 2.5 13 5" />
+      <path d="M3 10.5 9.5 4l2.5 2.5-6.5 6.5H3v-2.5z" />
+    </svg>
+  );
+}
+
+export function PreviewIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="8" cy="8" r="2.5" />
+      <path d="M2.5 8s2-4 5.5-4 5.5 4 5.5 4-2 4-5.5 4S2.5 8 2.5 8z" />
+    </svg>
+  );
+}
+
+export function RenameIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M10.5 2.5 13 5" />
+      <path d="M3 10.5 9.5 4l2.5 2.5-6.5 6.5H3v-2.5z" />
+      <path d="M2.5 13.5h11" />
+    </svg>
+  );
+}
+
+export function PropertiesIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 5v3" />
+      <path d="M8 9.5v1.5" />
+    </svg>
+  );
+}
+
+export function ShieldIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M8 2.5 3.5 4.5v4c0 3 2.5 5 4.5 5.5 2-.5 4.5-2.5 4.5-5.5v-4L8 2.5z" />
+      <path d="M6 8l1.5 1.5L11 6" />
+    </svg>
+  );
+}
