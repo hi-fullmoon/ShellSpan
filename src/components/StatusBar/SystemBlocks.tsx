@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef } from 'react';
 import type { SessionState, UpdateState } from '../../types';
 import { StatusBlock } from './StatusBlock';
 import { StatusBlockTooltip } from './StatusBlockTooltip';
 import { t } from '../../lib/i18n';
 import { cn } from '../../lib/ui';
+import { useDelayedHover } from './useDelayedHover';
+import type { StatusTone } from './types';
 
 interface SystemBlocksProps {
   sessions: SessionState[];
@@ -54,14 +56,14 @@ function SystemBlock({
 }: {
   icon: React.ReactNode;
   progress: number;
-  tone: 'active' | 'success' | 'error' | 'neutral';
+  tone: StatusTone;
   tooltip: { title: string; subtitle?: string };
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [hovered, setHovered] = useState(false);
+  const { hovered, onMouseEnter, onMouseLeave } = useDelayedHover(200);
 
   return (
-    <div ref={ref} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+    <div ref={ref} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <StatusBlock icon={icon} progress={progress} tone={tone} />
       <StatusBlockTooltip open={hovered} anchorRef={ref} data={tooltip} />
     </div>

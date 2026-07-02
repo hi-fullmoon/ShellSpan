@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { DotsIcon } from '../Icons';
 import type { OperationItem } from '../../stores/operationStore';
+import { t } from '../../lib/i18n';
 
 import { StatusBlock } from './StatusBlock';
 import { StatusBlockTooltip } from './StatusBlockTooltip';
 import { operationIcon, operationStatusText, operationTone, operationTypeLabel } from './statusHelpers';
+import { useDelayedHover } from './useDelayedHover';
 
 const BLOCK_SIZE = 24;
 const BLOCK_GAP = 4;
@@ -76,13 +78,13 @@ export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: Tas
       ))}
       {hidden.length > 0 ? (
         <button
-          className="icon-btn flex h-6 w-6 shrink-0 items-center justify-center p-0"
+          className="icon-btn flex h-6 w-6 shrink-0 items-center justify-center p-0 text-[9px] font-semibold"
           onClick={onOpenDialog}
           type="button"
-          title={`${hidden.length} more`}
+          title={t('statusBar.overflow.more', { count: hidden.length })}
           data-testid="task-overflow-button"
         >
-          <DotsIcon />
+          {hidden.length}
         </button>
       ) : null}
     </div>
@@ -91,19 +93,24 @@ export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: Tas
 
 function TaskBlock({ operation, onCancel, onRemove }: { operation: OperationItem; onCancel: () => void; onRemove: () => void }) {
   const blockRef = useRef<HTMLDivElement>(null);
-  const [hovered, setHovered] = useState(false);
+  const { hovered, onMouseEnter, onMouseLeave } = useDelayedHover(200);
   const isRunning = operation.status === 'running';
   const isCancelling = operation.status === 'cancelling';
-  const isCompleted = operation.status === 'completed';
-  const isFailed = operation.status === 'failed';
+
+  const tooltipAction =
+    (isRunning || isCancelling) && operation.canCancel
+      ? {
+          label: t('operationStatus.actions.cancel'),
+          onClick: onCancel,
+          disabled: isCancelling,
+        }
+      : {
+          label: t('operationStatus.actions.remove'),
+          onClick: onRemove,
+        };
 
   return (
-    <div
-      ref={blockRef}
-      className="relative"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
+    <div ref={blockRef} className="relative" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <StatusBlock icon={operationIcon(operation.type)} progress={operation.progress} tone={operationTone(operation.status)} />
       <StatusBlockTooltip
         open={hovered}
@@ -113,29 +120,9 @@ function TaskBlock({ operation, onCancel, onRemove }: { operation: OperationItem
           subtitle: operationStatusText(operation.status),
           detail: operation.totalText ? `${operation.progress}% · ${operation.totalText}` : `${operation.progress}%`,
           errorMessage: operation.errorMessage,
+          action: tooltipAction,
         }}
       />
-      {(isRunning || isCancelling) && operation.canCancel ? (
-        <button
-          className="icon-btn absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full p-0 text-[8px]"
-          disabled={isCancelling}
-          onClick={onCancel}
-          title={operationStatusText('cancelling')}
-          type="button"
-        >
-          ×
-        </button>
-      ) : null}
-      {!isRunning && !isCancelling ? (
-        <button
-          className="icon-btn absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full p-0 text-[8px]"
-          onClick={onRemove}
-          title={operationStatusText('cancelled')}
-          type="button"
-        >
-          ×
-        </button>
-      ) : null}
     </div>
   );
 }

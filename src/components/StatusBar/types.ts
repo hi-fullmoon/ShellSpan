@@ -23,4 +23,9 @@ export interface StatusBlockTooltipData {
   subtitle?: string;
   detail?: string;
   errorMessage?: string;
+  action?: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+  };
 }

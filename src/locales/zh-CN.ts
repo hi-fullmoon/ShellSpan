@@ -371,6 +371,7 @@ const zhCN = {
   'statusBar.taskDialog.title': '所有任务',
   'statusBar.system.sessions': '{connected} / {count} 个会话已连接',
   'statusBar.system.update': '应用更新',
+  'statusBar.overflow.more': '还有 {count} 个任务',
   'settings.subtitle': '风格与偏好',
   'settings.title': '应用设置',
   'settings.description': '在这里统一管理界面主题、语言偏好和后续会继续扩展的体验设置。',

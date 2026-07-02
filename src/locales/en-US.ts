@@ -371,6 +371,7 @@ const enUS = {
   'statusBar.taskDialog.title': 'All Tasks',
   'statusBar.system.sessions': '{connected} / {count} sessions connected',
   'statusBar.system.update': 'App Update',
+  'statusBar.overflow.more': '{count} more tasks',
   'settings.subtitle': 'Style and preferences',
   'settings.title': 'Settings',
   'settings.description': 'Manage theme, language, and the preference options we will continue expanding here.',

@@ -2,7 +2,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, cleanup, waitFor } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StatusBlock } from '../StatusBar/StatusBlock';
 import { StatusBlockTooltip } from '../StatusBar/StatusBlockTooltip';
@@ -76,6 +76,7 @@ describe('TaskBlocks', () => {
   afterEach(() => {
     cleanup();
     useOperationStore.setState({ operations: [], expanded: false });
+    vi.useRealTimers();
   });
 
   it('renders visible task blocks', () => {
@@ -90,7 +91,7 @@ describe('TaskBlocks', () => {
     expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
   });
 
-  it('renders overflow button when blocks exceed container width', async () => {
+  it('renders overflow button with hidden count when blocks exceed container width', async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const callbacks: Array<() => void> = [];
 
@@ -127,11 +128,69 @@ describe('TaskBlocks', () => {
       callbacks[0]?.();
 
       await waitFor(() => {
-        expect(container.querySelector('[data-testid="task-overflow-button"]')).toBeInTheDocument();
+        const button = container.querySelector('[data-testid="task-overflow-button"]');
+        expect(button).toBeInTheDocument();
+        expect(button).toHaveTextContent(String(operations.length));
       });
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
     }
+  });
+
+  it('shows tooltip with cancel action after hover delay', () => {
+    vi.useFakeTimers();
+    const onCancel = vi.fn();
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+    ] as OperationItem[];
+
+    const { container } = render(
+      <TaskBlocks operations={operations} onCancel={onCancel} onRemove={() => {}} onOpenDialog={() => {}} />,
+    );
+
+    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
+    fireEvent.mouseEnter(block);
+
+    expect(document.querySelector('[role="tooltip"]')).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    expect(tooltip).toBeInTheDocument();
+    expect(tooltip).toHaveTextContent('取消');
+
+    const cancelButton = tooltip.querySelector('button') as HTMLElement;
+    fireEvent.click(cancelButton);
+    expect(onCancel).toHaveBeenCalledWith('op-1');
+  });
+
+  it('shows tooltip with remove action for completed operations after hover delay', () => {
+    vi.useFakeTimers();
+    const onRemove = vi.fn();
+    const operations = [
+      { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
+    ] as OperationItem[];
+
+    const { container } = render(
+      <TaskBlocks operations={operations} onCancel={() => {}} onRemove={onRemove} onOpenDialog={() => {}} />,
+    );
+
+    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
+    fireEvent.mouseEnter(block);
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    expect(tooltip).toBeInTheDocument();
+    expect(tooltip).toHaveTextContent('移除');
+
+    const removeButton = tooltip.querySelector('button') as HTMLElement;
+    fireEvent.click(removeButton);
+    expect(onRemove).toHaveBeenCalledWith('op-1');
   });
 });
 
@@ -280,6 +339,14 @@ describe('StatusBar', () => {
       <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
     );
     expect(container.querySelector('[data-testid="status-block"]')).toBeInTheDocument();
+  });
+
+  it('renders system blocks when update is available', () => {
+    const { container } = render(
+      <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'update_available' }} updateDownloadProgress={undefined} />,
+    );
+    expect(container.querySelector('[data-testid="status-bar"]')).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(1);
   });
 });
 

@@ -19,6 +19,7 @@ export function StatusBar({ sessions, activeSession, updateState, updateDownload
   const hasSystemInfo =
     sessions.length > 0 ||
     updateState.phase === 'checking' ||
+    updateState.phase === 'update_available' ||
     updateState.phase === 'downloading' ||
     updateState.phase === 'downloaded' ||
     updateState.phase === 'error';
