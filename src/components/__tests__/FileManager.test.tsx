@@ -19,12 +19,10 @@ vi.mock("ag-grid-react", () => ({
       rowData,
       onCellContextMenu,
       onRowClicked,
-      onSelectionChanged,
     }: {
       rowData?: Array<{ path: string; name: string; kind: string }>;
       onCellContextMenu?: (event: { data: { path: string; name: string; kind: string }; event: MouseEvent }) => void;
       onRowClicked?: (event: { data: { path: string; name: string; kind: string } }) => void;
-      onSelectionChanged?: (event: { api: { getSelectedRows: () => Array<{ path: string }> } }) => void;
     },
     _ref,
   ) {
@@ -33,10 +31,7 @@ vi.mock("ag-grid-react", () => ({
         {rowData?.map((entry) => (
           <button
             key={entry.path}
-            onClick={() => {
-              onRowClicked?.({ data: entry });
-              onSelectionChanged?.({ api: { getSelectedRows: () => [entry] } });
-            }}
+            onClick={() => onRowClicked?.({ data: entry })}
             onContextMenu={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -140,28 +135,40 @@ describe("FileManager", () => {
     render(<FileManager session={disconnectedSession} />);
 
     expect(screen.getByText("keep.txt")).toBeInTheDocument();
-    expect(screen.getByText((content) => content.includes("终端已断开"))).toBeInTheDocument();
+    expect(screen.getByText("终端已断开，文件管理器当前仅支持查看。")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("输入远程路径并回车")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "返回上级目录" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "更多操作" })).toBeDisabled();
   });
 
-  it("uses theme-aware classes for the subtitle, breadcrumb, and file name", () => {
+  it("uses theme-aware classes for the subtitle, path input, and file name", () => {
     const { container } = render(<FileManager session={disconnectedSession} />);
 
     expect(screen.getByText("文件")).toHaveClass("label");
     expect(screen.getByText("远程文件管理器")).toHaveClass("themed-heading");
-    expect(screen.getByRole("button", { name: "根目录" })).toBeInTheDocument();
-    expect(screen.getByText("var")).toBeInTheDocument();
-    expect(screen.getByText("www")).toBeInTheDocument();
+    expect(screen.getByText("1")).toHaveClass("file-manager-count");
+    expect(screen.getByPlaceholderText("输入远程路径并回车")).toHaveClass("themed-input");
     expect(screen.getByText("keep.txt")).toHaveClass("file-entry-name");
     expect(container.querySelector(".scroll-area")).toBeTruthy();
   });
 
-  it("opens the create file dialog from blank context menu", () => {
+  it("uses theme-aware classes for the file context menu and entry dialogs", () => {
     render(<FileManager session={connectedSession} />);
 
-    fireEvent.contextMenu(screen.getByTestId("file-grid"));
+    fireEvent.contextMenu(screen.getByText("keep.txt"));
 
-    const buttons = screen.getAllByRole("button", { name: "新建文件" });
-    fireEvent.click(buttons[buttons.length - 1]);
+    const createFileMenuItem = screen.getByRole("button", { name: "新建文件" });
+    expect(createFileMenuItem.closest(".themed-menu")).toHaveClass("themed-menu");
+    expect(createFileMenuItem).toHaveClass("themed-menu-item");
+
+    fireEvent.click(screen.getByRole("button", { name: "属性" }));
+    expect(screen.getByText("属性")).toHaveClass("dialog-kicker");
+    expect(screen.getByText("名称").closest("div")).toHaveClass("themed-property-row");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭属性弹框" }));
+    fireEvent.contextMenu(screen.getByTestId("file-grid"));
+    fireEvent.click(screen.getByRole("button", { name: "新建文件" }));
 
     expect(screen.getByText("新建")).toHaveClass("dialog-kicker");
     expect(screen.getByPlaceholderText("example.txt")).toHaveClass("themed-input");
@@ -179,60 +186,4 @@ describe("FileManager", () => {
     expect(screen.getByPlaceholderText("0755")).toBeInTheDocument();
   });
 
-  it("renders breadcrumb segments for the current path", () => {
-    render(<FileManager session={connectedSession} />);
-
-    expect(screen.getByRole("button", { name: "根目录" })).toBeInTheDocument();
-    expect(screen.getByText("var")).toBeInTheDocument();
-    expect(screen.getByText("www")).toBeInTheDocument();
-  });
-
-  it("shows batch toolbar when multiple rows are selected", () => {
-    useFileManagerStore.setState({
-      sessions: {
-        "session-1": {
-          pathInput: "/var/www",
-          selectedPaths: ["/var/www/keep.txt", "/var/www/other.txt"],
-          listing: {
-            path: "/var/www",
-            parentPath: "/var",
-            entries: [
-              { path: "/var/www/keep.txt", name: "keep.txt", kind: "file", permissions: 420 },
-              { path: "/var/www/other.txt", name: "other.txt", kind: "file", permissions: 420 },
-            ],
-          },
-        },
-      },
-    });
-
-    render(<FileManager session={connectedSession} />);
-
-    expect(screen.getByText("已选择 2 项")).toBeInTheDocument();
-    const downloadButtons = screen.getAllByRole("button", { name: "下载" });
-    expect(downloadButtons.length).toBeGreaterThanOrEqual(1);
-    const deleteButtons = screen.getAllByRole("button", { name: "删除" });
-    expect(deleteButtons.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("renders operation log panel when logs exist", () => {
-    useFileManagerStore.setState({
-      sessions: {
-        "session-1": {
-          pathInput: "/var/www",
-          operationLogs: [
-            { id: "log-1", type: "upload", status: "completed", message: "Uploaded keep.txt", timestamp: Date.now() },
-          ],
-          listing: {
-            path: "/var/www",
-            parentPath: "/var",
-            entries: [],
-          },
-        },
-      },
-    });
-
-    render(<FileManager session={connectedSession} />);
-
-    expect(screen.getByText("Uploaded keep.txt")).toBeInTheDocument();
-  });
 });

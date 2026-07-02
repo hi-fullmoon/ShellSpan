@@ -8,8 +8,8 @@
   --ag-header-background-color: var(--app-surface);
   --ag-header-foreground-color: var(--app-text-muted);
   --ag-data-background-color: transparent !important;
-  --ag-odd-row-background-color: transparent;
-  --ag-even-row-background-color: transparent;
+  --ag-odd-row-background-color: var(--app-surface-muted);
+  --ag-even-row-background-color: var(--app-surface-muted);
   --ag-row-hover-color: color-mix(in srgb, var(--app-surface-muted) 84%, var(--app-primary-bg) 12%);
   --ag-selected-row-background-color: color-mix(in srgb, var(--app-surface-muted) 78%, var(--app-primary-bg) 18%);
   --ag-row-border-color: transparent;
@@ -69,19 +69,7 @@
 }
 
 .termbridge-file-grid .ag-row {
-  position: relative;
   background: transparent;
-}
-
-.termbridge-file-grid .ag-row.ag-row-selected::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--app-primary-bg);
-  z-index: 1;
 }
 
 .termbridge-file-grid .ag-row .ag-cell {
@@ -115,6 +103,18 @@
 .termbridge-file-grid .ag-row-hover:not(.ag-full-width-row)::before,
 .termbridge-file-grid .ag-row-hover.ag-full-width-row.ag-row-group::before {
   background: transparent;
+}
+
+.termbridge-file-grid:not(.batch-mode) .ag-row.ag-row-selected::after {
+  z-index: 100;
+  position: absolute;
+  content: '';
+  width: 100%;
+  height: 100%;
+  left: 0;
+  top: 1px;
+  border: 1px solid color-mix(in srgb, var(--app-primary-bg) 85%, white 15%);
+  pointer-events: none;
 }
 
 .termbridge-file-grid .ag-cell-focus,
