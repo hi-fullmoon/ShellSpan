@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DotsIcon } from '../Icons';
 import type { OperationItem } from '../../stores/operationStore';
-import { cn } from '../../lib/ui';
+
 import { StatusBlock } from './StatusBlock';
 import { StatusBlockTooltip } from './StatusBlockTooltip';
 import { operationIcon, operationStatusText, operationTone, operationTypeLabel } from './statusHelpers';
@@ -20,11 +20,6 @@ interface TaskBlocksProps {
 export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: TaskBlocksProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState<number>(operations.length);
-
-  const activeCount = useMemo(
-    () => operations.filter((op) => op.status === 'running' || op.status === 'cancelling').length,
-    [operations],
-  );
 
   useEffect(() => {
     if (!containerRef.current || typeof ResizeObserver === 'undefined') {
@@ -64,13 +59,13 @@ export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: Tas
     observer.observe(element);
 
     return () => observer.disconnect();
-  }, [operations.length]);
+  }, [operations]);
 
   const visible = operations.slice(0, visibleCount);
   const hidden = operations.slice(visibleCount);
 
   return (
-    <div ref={containerRef} className={cn('flex min-w-0 flex-1 items-center gap-1')}>
+    <div ref={containerRef} className="flex min-w-0 flex-1 items-center gap-1">
       {visible.map((operation) => (
         <TaskBlock
           key={operation.id}

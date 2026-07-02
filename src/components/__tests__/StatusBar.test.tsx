@@ -2,7 +2,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
+import { render, cleanup, waitFor } from '@testing-library/react';
 import { StatusBlock } from '../StatusBar/StatusBlock';
 import { StatusBlockTooltip } from '../StatusBar/StatusBlockTooltip';
 import { TaskBlocks } from '../StatusBar/TaskBlocks';
@@ -83,5 +83,49 @@ describe('TaskBlocks', () => {
       <TaskBlocks operations={operations} onCancel={() => {}} onRemove={() => {}} onOpenDialog={() => {}} />,
     );
     expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
+  });
+
+  it('renders overflow button when blocks exceed container width', async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const callbacks: Array<() => void> = [];
+
+    globalThis.ResizeObserver = class MockResizeObserver {
+      constructor(callback: () => void) {
+        callbacks.push(callback);
+      }
+
+      observe() {}
+
+      unobserve() {}
+
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      const operations = Array.from({ length: 5 }, (_, i) => ({
+        id: `op-${i}`,
+        type: 'upload',
+        title: `File ${i}`,
+        status: 'running',
+        progress: 10,
+        canCancel: true,
+        createdAt: i,
+      })) as OperationItem[];
+
+      const { container } = render(
+        <TaskBlocks operations={operations} onCancel={() => {}} onRemove={() => {}} onOpenDialog={() => {}} />,
+      );
+
+      const wrapper = container.firstChild as HTMLElement;
+      Object.defineProperty(wrapper, 'clientWidth', { value: 40, configurable: true });
+
+      callbacks[0]?.();
+
+      await waitFor(() => {
+        expect(container.querySelector('[data-testid="task-overflow-button"]')).toBeInTheDocument();
+      });
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 });
