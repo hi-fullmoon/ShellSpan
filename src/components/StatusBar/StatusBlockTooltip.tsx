@@ -24,17 +24,23 @@ export function StatusBlockTooltip({ open, anchorRef, data, onMouseEnter, onMous
       if (!anchorRef.current) return;
       const rect = anchorRef.current.getBoundingClientRect();
       const tooltipWidth = tooltipRef.current?.offsetWidth ?? 0;
+      const tooltipHeight = tooltipRef.current?.offsetHeight ?? 0;
       const center = rect.left + rect.width / 2;
-      if (tooltipWidth === 0) {
-        setCoords({ left: center, top: rect.top });
-        return;
+
+      let left = center;
+      if (tooltipWidth > 0) {
+        const minLeft = TOOLTIP_MARGIN + tooltipWidth / 2;
+        const maxLeft = window.innerWidth - TOOLTIP_MARGIN - tooltipWidth / 2;
+        left = Math.max(minLeft, Math.min(center, maxLeft));
       }
-      const minLeft = TOOLTIP_MARGIN + tooltipWidth / 2;
-      const maxLeft = window.innerWidth - TOOLTIP_MARGIN - tooltipWidth / 2;
-      setCoords({
-        left: Math.max(minLeft, Math.min(center, maxLeft)),
-        top: rect.top,
-      });
+
+      let top = rect.top;
+      if (tooltipHeight > 0) {
+        const minTop = TOOLTIP_MARGIN + 6 + tooltipHeight;
+        top = Math.max(minTop, rect.top);
+      }
+
+      setCoords({ left, top });
     };
 
     updateCoords();

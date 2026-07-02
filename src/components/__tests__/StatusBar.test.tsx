@@ -111,6 +111,28 @@ describe('StatusBlockTooltip', () => {
     // 1024 - margin 8 - half tooltip width 100 = 916
     expect(tooltip).toHaveStyle({ left: '916px' });
   });
+
+  it('clamps tooltip position to stay below top viewport edge', () => {
+    Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true, writable: true });
+    const anchorRef = {
+      current: {
+        getBoundingClientRect: () =>
+          ({ left: 100, top: 5, width: 20, height: 20, right: 120, bottom: 25, x: 100, y: 5, toJSON: () => {} }) as DOMRect,
+      } as HTMLElement,
+    };
+
+    render(<StatusBlockTooltip open anchorRef={anchorRef} data={{ title: 'Title' }} />);
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    Object.defineProperty(tooltip, 'offsetWidth', { value: 200, configurable: true });
+    Object.defineProperty(tooltip, 'offsetHeight', { value: 100, configurable: true });
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    // margin 8 + tooltip height 100 = 108
+    expect(tooltip).toHaveStyle({ top: '108px' });
+  });
 });
 
 describe('TaskBlocks', () => {
@@ -137,7 +159,7 @@ describe('TaskBlocks', () => {
     expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
   });
 
-  it('renders overflow button with hidden count when blocks exceed container width', async () => {
+  it('renders overflow button with dots icon when blocks exceed container width', async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const callbacks: Array<() => void> = [];
 
@@ -176,7 +198,8 @@ describe('TaskBlocks', () => {
       await waitFor(() => {
         const button = container.querySelector('[data-testid="task-overflow-button"]');
         expect(button).toBeInTheDocument();
-        expect(button).toHaveTextContent(String(operations.length));
+        expect(button).toContainHTML('svg');
+        expect(button).toHaveAttribute('title', expect.stringContaining('5'));
       });
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { SessionState, UpdateState } from '../../types';
 import { useOperationStore } from '../../stores/operationStore';
 import { TaskBlocks } from './TaskBlocks';
@@ -13,7 +14,13 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ sessions, activeSession, updateState, updateDownloadProgress }: StatusBarProps) {
-  const { operations, setCancelling, removeOperation } = useOperationStore();
+  const { operations, setCancelling, removeOperation } = useOperationStore(
+    useShallow((state) => ({
+      operations: state.operations,
+      setCancelling: state.setCancelling,
+      removeOperation: state.removeOperation,
+    })),
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const hasSystemInfo =

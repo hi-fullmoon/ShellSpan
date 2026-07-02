@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OperationItem } from '../../stores/operationStore';
 import { t } from '../../lib/i18n';
+import { DotsIcon } from '../Icons';
 
 import { StatusBlock } from './StatusBlock';
 import { StatusBlockTooltip } from './StatusBlockTooltip';
@@ -20,11 +21,14 @@ interface TaskBlocksProps {
 
 export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: TaskBlocksProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const operationsRef = useRef(operations);
   const [visibleCount, setVisibleCount] = useState<number>(operations.length);
+
+  operationsRef.current = operations;
 
   useEffect(() => {
     if (!containerRef.current || typeof ResizeObserver === 'undefined') {
-      setVisibleCount(operations.length);
+      setVisibleCount(operationsRef.current.length);
       return;
     }
 
@@ -33,17 +37,18 @@ export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: Tas
     const updateVisibleCount = () => {
       const width = element.clientWidth;
       if (width === 0) {
-        setVisibleCount(operations.length);
+        setVisibleCount(operationsRef.current.length);
         return;
       }
 
+      const currentOperations = operationsRef.current;
       const overflowSpace = OVERFLOW_BUTTON_WIDTH + BLOCK_GAP;
       let count = 0;
       let used = 0;
 
-      for (let i = 0; i < operations.length; i++) {
+      for (let i = 0; i < currentOperations.length; i++) {
         const nextUsed = used + BLOCK_SIZE + (count > 0 ? BLOCK_GAP : 0);
-        if (nextUsed + (i < operations.length - 1 ? overflowSpace : 0) <= width) {
+        if (nextUsed + (i < currentOperations.length - 1 ? overflowSpace : 0) <= width) {
           count += 1;
           used = nextUsed;
         } else {
@@ -60,7 +65,7 @@ export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: Tas
     observer.observe(element);
 
     return () => observer.disconnect();
-  }, [operations]);
+  }, [operations.length]);
 
   const visible = operations.slice(0, visibleCount);
   const hidden = operations.slice(visibleCount);
@@ -77,13 +82,13 @@ export function TaskBlocks({ operations, onCancel, onRemove, onOpenDialog }: Tas
       ))}
       {hidden.length > 0 ? (
         <button
-          className="icon-btn flex h-6 w-6 shrink-0 items-center justify-center p-0 text-[9px] font-semibold"
+          className="icon-btn flex h-6 w-6 shrink-0 items-center justify-center p-0"
           onClick={onOpenDialog}
           type="button"
           title={t('statusBar.overflow.more', { count: hidden.length })}
           data-testid="task-overflow-button"
         >
-          {hidden.length}
+          <DotsIcon />
         </button>
       ) : null}
     </div>
