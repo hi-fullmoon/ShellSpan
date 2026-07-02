@@ -7,9 +7,11 @@ interface StatusBlockTooltipProps {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   data: StatusBlockTooltipData;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
-export function StatusBlockTooltip({ open, anchorRef, data }: StatusBlockTooltipProps) {
+export function StatusBlockTooltip({ open, anchorRef, data, onMouseEnter, onMouseLeave }: StatusBlockTooltipProps) {
   const [coords, setCoords] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
 
   useEffect(() => {
@@ -51,6 +53,8 @@ export function StatusBlockTooltip({ open, anchorRef, data }: StatusBlockTooltip
         color: 'var(--app-text)',
       }}
       role="tooltip"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <div className="font-medium">{data.title}</div>
       {data.subtitle ? <div className="mt-0.5 text-subtle">{data.subtitle}</div> : null}

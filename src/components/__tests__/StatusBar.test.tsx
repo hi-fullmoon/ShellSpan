@@ -192,6 +192,43 @@ describe('TaskBlocks', () => {
     fireEvent.click(removeButton);
     expect(onRemove).toHaveBeenCalledWith('op-1');
   });
+
+  it('keeps tooltip open when cursor moves from block to tooltip across the gap', () => {
+    vi.useFakeTimers();
+    const onCancel = vi.fn();
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+    ] as OperationItem[];
+
+    const { container } = render(
+      <TaskBlocks operations={operations} onCancel={onCancel} onRemove={() => {}} onOpenDialog={() => {}} />,
+    );
+
+    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
+    fireEvent.mouseEnter(block);
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    expect(tooltip).toBeInTheDocument();
+
+    fireEvent.mouseLeave(block);
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(document.querySelector('[role="tooltip"]')).toBeInTheDocument();
+
+    fireEvent.mouseEnter(tooltip);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(document.querySelector('[role="tooltip"]')).toBeInTheDocument();
+
+    fireEvent.click(tooltip.querySelector('button') as HTMLElement);
+    expect(onCancel).toHaveBeenCalledWith('op-1');
+  });
 });
 
 describe('TaskDialog', () => {

@@ -65,7 +65,7 @@ function SystemBlock({
   return (
     <div ref={ref} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <StatusBlock icon={icon} progress={progress} tone={tone} />
-      <StatusBlockTooltip open={hovered} anchorRef={ref} data={tooltip} />
+      <StatusBlockTooltip open={hovered} anchorRef={ref} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} data={tooltip} />
     </div>
   );
 }

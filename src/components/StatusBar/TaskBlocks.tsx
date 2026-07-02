@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { DotsIcon } from '../Icons';
 import type { OperationItem } from '../../stores/operationStore';
 import { t } from '../../lib/i18n';
 
@@ -115,6 +114,8 @@ function TaskBlock({ operation, onCancel, onRemove }: { operation: OperationItem
       <StatusBlockTooltip
         open={hovered}
         anchorRef={blockRef}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
         data={{
           title: `${operationTypeLabel(operation.type)} · ${operation.title}`,
           subtitle: operationStatusText(operation.status),
