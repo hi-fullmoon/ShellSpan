@@ -10,6 +10,7 @@ import { SystemBlocks } from '../StatusBar/SystemBlocks';
 import { TaskBlocks } from '../StatusBar/TaskBlocks';
 import type { SessionState } from '../../types';
 import { TaskDialog } from '../StatusBar/TaskDialog';
+import { StatusBar } from '../StatusBar';
 import { useOperationStore, type OperationItem } from '../../stores/operationStore';
 import { operationTone, operationTypeLabel, operationStatusText } from '../StatusBar/statusHelpers';
 
@@ -254,6 +255,31 @@ describe('SystemBlocks', () => {
       <SystemBlocks sessions={sessions} activeSession={sessions[0]} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
     );
     expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
+  });
+});
+
+describe('StatusBar', () => {
+  beforeEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  it('renders null when empty', () => {
+    const { container } = render(<StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders task blocks when operations exist', () => {
+    useOperationStore.getState().startOperation({ id: 'op-1', type: 'upload', title: 'A', progress: 10 });
+    const { container } = render(
+      <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
+    );
+    expect(container.querySelector('[data-testid="status-block"]')).toBeInTheDocument();
   });
 });
 
