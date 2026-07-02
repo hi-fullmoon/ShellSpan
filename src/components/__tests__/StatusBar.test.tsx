@@ -4,6 +4,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { StatusBlock } from '../StatusBar/StatusBlock';
+import { StatusBlockTooltip } from '../StatusBar/StatusBlockTooltip';
 import { operationTone, operationTypeLabel, operationStatusText } from '../StatusBar/statusHelpers';
 
 describe('StatusBlock', () => {
@@ -38,5 +39,23 @@ describe('statusHelpers', () => {
 
   it('returns localized status text', () => {
     expect(operationStatusText('running')).toBe('进行中');
+  });
+});
+
+describe('StatusBlockTooltip', () => {
+  it('renders nothing when closed', () => {
+    const { container } = render(
+      <StatusBlockTooltip open={false} anchorRef={{ current: null }} data={{ title: 'Upload' }} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders detail content when open', () => {
+    const { getByText } = render(
+      <StatusBlockTooltip open={true} anchorRef={{ current: null }} data={{ title: 'Upload file.txt', subtitle: '进行中', detail: '45%' }} />,
+    );
+    expect(getByText('Upload file.txt')).toBeInTheDocument();
+    expect(getByText('进行中')).toBeInTheDocument();
+    expect(getByText('45%')).toBeInTheDocument();
   });
 });
