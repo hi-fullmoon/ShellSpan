@@ -135,12 +135,10 @@ describe('TaskBlocks', () => {
 describe('TaskDialog', () => {
   beforeEach(() => {
     cleanup();
-    useOperationStore.setState({ operations: [], expanded: false });
   });
 
   afterEach(() => {
     cleanup();
-    useOperationStore.setState({ operations: [], expanded: false });
   });
 
   it('renders all tasks when open', () => {
@@ -171,10 +169,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
     ] as OperationItem[];
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    expect(getByText('取消')).toBeInTheDocument();
+    expect(getByTestId('task-cancel-button')).toBeInTheDocument();
   });
 
   it('shows remove button for completed operations', () => {
@@ -182,10 +180,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
     ] as OperationItem[];
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    expect(getByText('移除')).toBeInTheDocument();
+    expect(getByTestId('task-remove-button')).toBeInTheDocument();
   });
 
   it('shows cancel all button when there are cancellable operations', () => {
@@ -194,10 +192,10 @@ describe('TaskDialog', () => {
       { id: 'op-2', type: 'download', title: 'B', status: 'running', progress: 20, canCancel: true, createdAt: 2 },
     ] as OperationItem[];
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    expect(getByText('全部取消')).toBeInTheDocument();
+    expect(getByTestId('task-cancel-all-button')).toBeInTheDocument();
   });
 
   it('calls onCancel when cancel button is clicked', async () => {
@@ -207,10 +205,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
     ] as OperationItem[];
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={onCancel} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    await user.click(getByText('取消'));
+    await user.click(getByTestId('task-cancel-button'));
     expect(onCancel).toHaveBeenCalledWith('op-1');
   });
 
@@ -221,10 +219,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
     ] as OperationItem[];
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={onRemove} onCancelAll={() => {}} />,
     );
-    await user.click(getByText('移除'));
+    await user.click(getByTestId('task-remove-button'));
     expect(onRemove).toHaveBeenCalledWith('op-1');
   });
 
@@ -235,10 +233,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
     ] as OperationItem[];
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={onCancelAll} />,
     );
-    await user.click(getByText('全部取消'));
+    await user.click(getByTestId('task-cancel-all-button'));
     expect(onCancelAll).toHaveBeenCalled();
   });
 });

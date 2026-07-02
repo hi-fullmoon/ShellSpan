@@ -35,6 +35,7 @@ export function TaskDialog({ open, onClose, operations, onCancel, onRemove, onCa
               {operation.status === 'running' && operation.canCancel ? (
                 <button
                   className="text-[10px] text-sky-400 hover:text-sky-300"
+                  data-testid="task-cancel-button"
                   onClick={() => onCancel(operation.id)}
                   type="button"
                 >
@@ -43,6 +44,7 @@ export function TaskDialog({ open, onClose, operations, onCancel, onRemove, onCa
               ) : operation.status !== 'running' && operation.status !== 'cancelling' ? (
                 <button
                   className="text-[10px] text-slate-400 hover:text-slate-300"
+                  data-testid="task-remove-button"
                   onClick={() => onRemove(operation.id)}
                   type="button"
                 >
@@ -54,7 +56,7 @@ export function TaskDialog({ open, onClose, operations, onCancel, onRemove, onCa
         </div>
         {cancellable.length > 0 ? (
           <DialogFooter>
-            <button className="btn-danger" onClick={onCancelAll} type="button">
+            <button className="btn-danger" data-testid="task-cancel-all-button" onClick={onCancelAll} type="button">
               {t('operationStatus.actions.cancelAll')}
             </button>
           </DialogFooter>
