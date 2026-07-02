@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { describe, expect, it } from 'vitest';
-import { render } from '@testing-library/react';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { render, cleanup } from '@testing-library/react';
 import { StatusBlock } from '../StatusBar/StatusBlock';
 import { StatusBlockTooltip } from '../StatusBar/StatusBlockTooltip';
+import { TaskBlocks } from '../StatusBar/TaskBlocks';
+import { useOperationStore, type OperationItem } from '../../stores/operationStore';
 import { operationTone, operationTypeLabel, operationStatusText } from '../StatusBar/statusHelpers';
 
 describe('StatusBlock', () => {
@@ -57,5 +59,29 @@ describe('StatusBlockTooltip', () => {
     expect(getByText('Upload file.txt')).toBeInTheDocument();
     expect(getByText('进行中')).toBeInTheDocument();
     expect(getByText('45%')).toBeInTheDocument();
+  });
+});
+
+describe('TaskBlocks', () => {
+  beforeEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  it('renders visible task blocks', () => {
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+      { id: 'op-2', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
+    ] as OperationItem[];
+
+    const { container } = render(
+      <TaskBlocks operations={operations} onCancel={() => {}} onRemove={() => {}} onOpenDialog={() => {}} />,
+    );
+    expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
   });
 });
