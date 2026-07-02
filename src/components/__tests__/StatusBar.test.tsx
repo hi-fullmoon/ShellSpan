@@ -6,7 +6,9 @@ import { render, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StatusBlock } from '../StatusBar/StatusBlock';
 import { StatusBlockTooltip } from '../StatusBar/StatusBlockTooltip';
+import { SystemBlocks } from '../StatusBar/SystemBlocks';
 import { TaskBlocks } from '../StatusBar/TaskBlocks';
+import type { SessionState } from '../../types';
 import { TaskDialog } from '../StatusBar/TaskDialog';
 import { useOperationStore, type OperationItem } from '../../stores/operationStore';
 import { operationTone, operationTypeLabel, operationStatusText } from '../StatusBar/statusHelpers';
@@ -240,3 +242,18 @@ describe('TaskDialog', () => {
     expect(onCancelAll).toHaveBeenCalled();
   });
 });
+
+describe('SystemBlocks', () => {
+  it('renders session count block', () => {
+    const sessions = [
+      { sessionId: 's1', status: 'connected', host: 'host1' },
+      { sessionId: 's2', status: 'connecting', host: 'host2' },
+    ] as SessionState[];
+
+    const { container } = render(
+      <SystemBlocks sessions={sessions} activeSession={sessions[0]} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
+    );
+    expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
+  });
+});
+

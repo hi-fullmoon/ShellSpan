@@ -369,6 +369,8 @@ const enUS = {
   'operationStatus.actions.expand': 'Expand',
   'operationStatus.actions.collapse': 'Collapse',
   'statusBar.taskDialog.title': 'All Tasks',
+  'statusBar.system.sessions': '{count} sessions · {connected} connected',
+  'statusBar.system.update': 'Update',
   'settings.subtitle': 'Style and preferences',
   'settings.title': 'Settings',
   'settings.description': 'Manage theme, language, and the preference options we will continue expanding here.',
