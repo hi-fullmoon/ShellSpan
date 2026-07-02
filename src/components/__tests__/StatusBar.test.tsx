@@ -283,3 +283,68 @@ describe('StatusBar', () => {
   });
 });
 
+describe('StatusBar overflow', () => {
+  beforeEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  it('opens task dialog when overflow button is clicked', async () => {
+    const user = userEvent.setup();
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const callbacks: Array<() => void> = [];
+
+    globalThis.ResizeObserver = class MockResizeObserver {
+      constructor(callback: () => void) {
+        callbacks.push(callback);
+      }
+
+      observe() {}
+
+      unobserve() {}
+
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      const operations = Array.from({ length: 20 }, (_, i) => ({
+        id: `op-${i}`,
+        type: 'upload',
+        title: `File ${i}`,
+        status: 'running',
+        progress: 10,
+        canCancel: true,
+        createdAt: i,
+      })) as OperationItem[];
+
+      useOperationStore.setState({ operations });
+
+      const { container } = render(
+        <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
+      );
+
+      const taskBlocksContainer = container.querySelector('[data-testid="status-bar"] > div');
+      if (!taskBlocksContainer) throw new Error('TaskBlocks container not found');
+      Object.defineProperty(taskBlocksContainer, 'clientWidth', { value: 40, configurable: true });
+
+      callbacks[0]?.();
+
+      const overflow = await waitFor(() => {
+        const button = container.querySelector('[data-testid="task-overflow-button"]');
+        expect(button).toBeInTheDocument();
+        return button as HTMLElement;
+      });
+
+      await user.click(overflow);
+      expect(document.querySelector('[role="dialog"]')).toBeInTheDocument();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+});
+
