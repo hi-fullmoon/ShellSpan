@@ -7,6 +7,38 @@ import { cn } from '../../lib/ui';
 import { useDelayedHover } from './useDelayedHover';
 import type { StatusTone } from './types';
 
+function sessionStatusText(status: SessionState['status']): string {
+  switch (status) {
+    case 'connected':
+      return t('app.status.connected');
+    case 'connecting':
+      return t('app.status.connecting');
+    case 'error':
+      return t('app.status.error');
+    case 'disconnected':
+      return t('app.status.disconnected');
+    default:
+      return status;
+  }
+}
+
+function updatePhaseText(phase: UpdateState['phase']): string {
+  switch (phase) {
+    case 'checking':
+      return t('statusBar.system.updateChecking');
+    case 'update_available':
+      return t('statusBar.system.updateAvailable');
+    case 'downloading':
+      return t('statusBar.system.downloading');
+    case 'downloaded':
+      return t('statusBar.system.downloaded');
+    case 'error':
+      return t('statusBar.system.updateFailed');
+    default:
+      return phase;
+  }
+}
+
 interface SystemBlocksProps {
   sessions: SessionState[];
   activeSession: SessionState | undefined;
@@ -33,7 +65,7 @@ export function SystemBlocks({ sessions, activeSession, updateState, updateDownl
           icon={<HostInitial host={activeSession.host} />}
           progress={100}
           tone={activeSession.status === 'connected' ? 'success' : activeSession.status === 'error' ? 'error' : 'active'}
-          tooltip={{ title: activeSession.title || activeSession.host, subtitle: activeSession.status }}
+          tooltip={{ title: activeSession.title || activeSession.host, subtitle: sessionStatusText(activeSession.status) }}
         />
       ) : null}
       {hasUpdate ? (
@@ -41,7 +73,7 @@ export function SystemBlocks({ sessions, activeSession, updateState, updateDownl
           icon={<UpdateIcon phase={updateState.phase} />}
           progress={updateDownloadProgress ?? (updateState.phase === 'downloaded' ? 100 : 0)}
           tone={updateState.phase === 'error' ? 'error' : updateState.phase === 'downloaded' ? 'success' : 'active'}
-          tooltip={{ title: t('statusBar.system.update'), subtitle: updateState.phase }}
+          tooltip={{ title: t('statusBar.system.update'), subtitle: updatePhaseText(updateState.phase) }}
         />
       ) : null}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../lib/ui';
 import type { StatusBlockTooltipData } from './types';
@@ -11,27 +11,40 @@ interface StatusBlockTooltipProps {
   onMouseLeave?: () => void;
 }
 
+const TOOLTIP_MARGIN = 8;
+
 export function StatusBlockTooltip({ open, anchorRef, data, onMouseEnter, onMouseLeave }: StatusBlockTooltipProps) {
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open || !anchorRef.current) return;
 
     const updateCoords = () => {
       if (!anchorRef.current) return;
       const rect = anchorRef.current.getBoundingClientRect();
+      const tooltipWidth = tooltipRef.current?.offsetWidth ?? 0;
+      const center = rect.left + rect.width / 2;
+      if (tooltipWidth === 0) {
+        setCoords({ left: center, top: rect.top });
+        return;
+      }
+      const minLeft = TOOLTIP_MARGIN + tooltipWidth / 2;
+      const maxLeft = window.innerWidth - TOOLTIP_MARGIN - tooltipWidth / 2;
       setCoords({
-        left: rect.left + rect.width / 2,
+        left: Math.max(minLeft, Math.min(center, maxLeft)),
         top: rect.top,
       });
     };
 
     updateCoords();
+    const rafId = requestAnimationFrame(updateCoords);
 
     window.addEventListener('scroll', updateCoords, { passive: true });
     window.addEventListener('resize', updateCoords);
 
     return () => {
+      cancelAnimationFrame(rafId);
       window.removeEventListener('scroll', updateCoords);
       window.removeEventListener('resize', updateCoords);
     };
@@ -41,6 +54,7 @@ export function StatusBlockTooltip({ open, anchorRef, data, onMouseEnter, onMous
 
   return createPortal(
     <div
+      ref={tooltipRef}
       className={cn(
         'fixed z-[1700] max-w-[240px] -translate-x-1/2 -translate-y-full rounded-md px-2.5 py-2 text-xs',
         'border shadow-lg',

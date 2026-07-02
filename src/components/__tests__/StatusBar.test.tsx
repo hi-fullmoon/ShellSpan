@@ -50,6 +50,10 @@ describe('statusHelpers', () => {
 });
 
 describe('StatusBlockTooltip', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it('renders nothing when closed', () => {
     const { container } = render(
       <StatusBlockTooltip open={false} anchorRef={{ current: null }} data={{ title: 'Upload' }} />,
@@ -64,6 +68,48 @@ describe('StatusBlockTooltip', () => {
     expect(getByText('Upload file.txt')).toBeInTheDocument();
     expect(getByText('进行中')).toBeInTheDocument();
     expect(getByText('45%')).toBeInTheDocument();
+  });
+
+  it('clamps tooltip position to stay within left viewport edge', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true, writable: true });
+    const anchorRef = {
+      current: {
+        getBoundingClientRect: () =>
+          ({ left: 5, top: 100, width: 20, height: 20, right: 25, bottom: 120, x: 5, y: 100, toJSON: () => {} }) as DOMRect,
+      } as HTMLElement,
+    };
+
+    render(<StatusBlockTooltip open anchorRef={anchorRef} data={{ title: 'Title' }} />);
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    Object.defineProperty(tooltip, 'offsetWidth', { value: 200, configurable: true });
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    // margin 8 + half tooltip width 100 = 108
+    expect(tooltip).toHaveStyle({ left: '108px' });
+  });
+
+  it('clamps tooltip position to stay within right viewport edge', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true, writable: true });
+    const anchorRef = {
+      current: {
+        getBoundingClientRect: () =>
+          ({ left: 1010, top: 100, width: 20, height: 20, right: 1030, bottom: 120, x: 1010, y: 100, toJSON: () => {} }) as DOMRect,
+      } as HTMLElement,
+    };
+
+    render(<StatusBlockTooltip open anchorRef={anchorRef} data={{ title: 'Title' }} />);
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    Object.defineProperty(tooltip, 'offsetWidth', { value: 200, configurable: true });
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    // 1024 - margin 8 - half tooltip width 100 = 916
+    expect(tooltip).toHaveStyle({ left: '916px' });
   });
 });
 
@@ -341,6 +387,15 @@ describe('TaskDialog', () => {
 });
 
 describe('SystemBlocks', () => {
+  beforeEach(() => {
+    cleanup();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
   it('renders session count block', () => {
     const sessions = [
       { sessionId: 's1', status: 'connected', host: 'host1' },
@@ -351,6 +406,47 @@ describe('SystemBlocks', () => {
       <SystemBlocks sessions={sessions} activeSession={sessions[0]} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
     );
     expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
+  });
+
+  it('shows localized subtitle for active session status', () => {
+    vi.useFakeTimers();
+    const sessions = [{ sessionId: 's1', status: 'connected', host: 'host1' }] as SessionState[];
+
+    const { container } = render(
+      <SystemBlocks sessions={sessions} activeSession={sessions[0]} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
+    );
+
+    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
+    fireEvent.mouseEnter(block);
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    expect(tooltip).toBeInTheDocument();
+    expect(tooltip).toHaveTextContent('已连接');
+    expect(tooltip).not.toHaveTextContent('connected');
+  });
+
+  it('shows localized subtitle for update phase', () => {
+    vi.useFakeTimers();
+
+    const { container } = render(
+      <SystemBlocks sessions={[]} activeSession={undefined} updateState={{ phase: 'downloading' }} updateDownloadProgress={50} />,
+    );
+
+    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
+    fireEvent.mouseEnter(block);
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+    expect(tooltip).toBeInTheDocument();
+    expect(tooltip).toHaveTextContent('正在下载更新');
+    expect(tooltip).not.toHaveTextContent('downloading');
   });
 });
 
