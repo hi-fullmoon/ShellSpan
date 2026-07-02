@@ -368,7 +368,7 @@ const zhCN = {
   'operationStatus.actions.clearCompleted': '清除已完成',
   'operationStatus.actions.expand': '展开',
   'operationStatus.actions.collapse': '收起',
-  'statusBar.taskDialog.title': '任务',
+  'statusBar.taskDialog.title': '所有任务',
   'settings.subtitle': '风格与偏好',
   'settings.title': '应用设置',
   'settings.description': '在这里统一管理界面主题、语言偏好和后续会继续扩展的体验设置。',

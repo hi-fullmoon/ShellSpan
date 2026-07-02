@@ -368,7 +368,7 @@ const enUS = {
   'operationStatus.actions.clearCompleted': 'Clear completed',
   'operationStatus.actions.expand': 'Expand',
   'operationStatus.actions.collapse': 'Collapse',
-  'statusBar.taskDialog.title': 'Tasks',
+  'statusBar.taskDialog.title': 'All Tasks',
   'settings.subtitle': 'Style and preferences',
   'settings.title': 'Settings',
   'settings.description': 'Manage theme, language, and the preference options we will continue expanding here.',

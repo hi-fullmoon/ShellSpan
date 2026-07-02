@@ -3,7 +3,6 @@ import type { OperationItem } from '../../stores/operationStore';
 import { t } from '../../lib/i18n';
 import { StatusBlock } from './StatusBlock';
 import { operationIcon, operationTone } from './statusHelpers';
-import { cn } from '../../lib/ui';
 
 interface TaskDialogProps {
   open: boolean;
