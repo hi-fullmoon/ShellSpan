@@ -7,7 +7,7 @@ import { DeleteProfileDialog } from './components/DeleteProfileDialog';
 import { ExitAppDialog } from './components/ExitAppDialog';
 import { FileManager } from './components/FileManager';
 import { HostKeyDialog } from './components/HostKeyDialog';
-import { OperationStatusBar } from './components/OperationStatusBar';
+import { StatusBar } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
@@ -472,7 +472,12 @@ function App() {
         </SplitLayout>
       </div>
 
-      <OperationStatusBar />
+      <StatusBar
+        sessions={sessions}
+        activeSession={activeSession}
+        updateState={updateState}
+        updateDownloadProgress={updateDownloadProgress}
+      />
 
       <SettingsDialog
         onChange={setStoredPreferences}
