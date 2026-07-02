@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { StatusBlock } from '../StatusBar/StatusBlock';
 import { StatusBlockTooltip } from '../StatusBar/StatusBlockTooltip';
 import { TaskBlocks } from '../StatusBar/TaskBlocks';
+import { TaskDialog } from '../StatusBar/TaskDialog';
 import { useOperationStore, type OperationItem } from '../../stores/operationStore';
 import { operationTone, operationTypeLabel, operationStatusText } from '../StatusBar/statusHelpers';
 
@@ -127,5 +129,116 @@ describe('TaskBlocks', () => {
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
     }
+  });
+});
+
+describe('TaskDialog', () => {
+  beforeEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useOperationStore.setState({ operations: [], expanded: false });
+  });
+
+  it('renders all tasks when open', () => {
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+      { id: 'op-2', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
+    ] as OperationItem[];
+
+    const { getAllByTestId } = render(
+      <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
+    );
+    expect(getAllByTestId('status-block')).toHaveLength(2);
+  });
+
+  it('does not render when closed', () => {
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+    ] as OperationItem[];
+
+    const { container } = render(
+      <TaskDialog open={false} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('shows cancel button for running cancellable operations', () => {
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+    ] as OperationItem[];
+
+    const { getByText } = render(
+      <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
+    );
+    expect(getByText('取消')).toBeInTheDocument();
+  });
+
+  it('shows remove button for completed operations', () => {
+    const operations = [
+      { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
+    ] as OperationItem[];
+
+    const { getByText } = render(
+      <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
+    );
+    expect(getByText('移除')).toBeInTheDocument();
+  });
+
+  it('shows cancel all button when there are cancellable operations', () => {
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+      { id: 'op-2', type: 'download', title: 'B', status: 'running', progress: 20, canCancel: true, createdAt: 2 },
+    ] as OperationItem[];
+
+    const { getByText } = render(
+      <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
+    );
+    expect(getByText('全部取消')).toBeInTheDocument();
+  });
+
+  it('calls onCancel when cancel button is clicked', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+    ] as OperationItem[];
+
+    const { getByText } = render(
+      <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={onCancel} onRemove={() => {}} onCancelAll={() => {}} />,
+    );
+    await user.click(getByText('取消'));
+    expect(onCancel).toHaveBeenCalledWith('op-1');
+  });
+
+  it('calls onRemove when remove button is clicked', async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn();
+    const operations = [
+      { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
+    ] as OperationItem[];
+
+    const { getByText } = render(
+      <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={onRemove} onCancelAll={() => {}} />,
+    );
+    await user.click(getByText('移除'));
+    expect(onRemove).toHaveBeenCalledWith('op-1');
+  });
+
+  it('calls onCancelAll when cancel all button is clicked', async () => {
+    const user = userEvent.setup();
+    const onCancelAll = vi.fn();
+    const operations = [
+      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
+    ] as OperationItem[];
+
+    const { getByText } = render(
+      <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={onCancelAll} />,
+    );
+    await user.click(getByText('全部取消'));
+    expect(onCancelAll).toHaveBeenCalled();
   });
 });
