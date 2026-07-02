@@ -369,7 +369,7 @@ const zhCN = {
   'operationStatus.actions.expand': '展开',
   'operationStatus.actions.collapse': '收起',
   'statusBar.taskDialog.title': '所有任务',
-  'statusBar.system.sessions': '{count} 个会话 · {connected} 已连接',
+  'statusBar.system.sessions': '{connected} / {count} 个会话已连接',
   'statusBar.system.update': '应用更新',
   'settings.subtitle': '风格与偏好',
   'settings.title': '应用设置',
