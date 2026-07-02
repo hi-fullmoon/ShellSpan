@@ -1,8 +1,7 @@
 import { Dialog, DialogPanel, DialogHeader, DialogFooter } from '../Dialog';
 import type { OperationItem } from '../../stores/operationStore';
 import { t } from '../../lib/i18n';
-import { StatusBlock } from './StatusBlock';
-import { operationIcon, operationTone } from './statusHelpers';
+import { TaskRow } from './TaskRow';
 
 interface TaskDialogProps {
   open: boolean;
@@ -20,38 +19,14 @@ export function TaskDialog({ open, onClose, operations, onCancel, onRemove, onCa
     <Dialog open={open} onClose={onClose}>
       <DialogPanel className="w-full max-w-md p-4" ariaLabel={t('statusBar.taskDialog.title')}>
         <DialogHeader title={t('statusBar.taskDialog.title')} onClose={onClose} />
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-col gap-1">
           {operations.map((operation) => (
-            <div key={operation.id} className="flex w-16 flex-col items-center gap-1">
-              <StatusBlock
-                icon={operationIcon(operation.type)}
-                progress={operation.progress}
-                tone={operationTone(operation.status)}
-                size="lg"
-              />
-              <span className="max-w-full truncate text-[10px]" title={operation.title}>
-                {operation.title}
-              </span>
-              {operation.status === 'running' && operation.canCancel ? (
-                <button
-                  className="text-[10px] text-sky-400 hover:text-sky-300"
-                  data-testid="task-cancel-button"
-                  onClick={() => onCancel(operation.id)}
-                  type="button"
-                >
-                  {t('operationStatus.actions.cancel')}
-                </button>
-              ) : operation.status !== 'running' && operation.status !== 'cancelling' ? (
-                <button
-                  className="text-[10px] text-slate-400 hover:text-slate-300"
-                  data-testid="task-remove-button"
-                  onClick={() => onRemove(operation.id)}
-                  type="button"
-                >
-                  {t('operationStatus.actions.remove')}
-                </button>
-              ) : null}
-            </div>
+            <TaskRow
+              key={operation.id}
+              operation={operation}
+              onCancel={() => onCancel(operation.id)}
+              onRemove={() => onRemove(operation.id)}
+            />
           ))}
         </div>
         {cancellable.length > 0 ? (

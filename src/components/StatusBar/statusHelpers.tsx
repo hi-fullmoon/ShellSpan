@@ -58,3 +58,16 @@ export function operationStatusText(status: OperationStatus): string {
       return t('operationStatus.status.cancelled');
   }
 }
+
+export function operationActionLabel(status: OperationStatus): string {
+  switch (status) {
+    case 'running':
+    case 'cancelling':
+      return t('operationStatus.actions.cancel');
+    case 'completed':
+      return t('operationStatus.actions.discard');
+    case 'failed':
+    case 'cancelled':
+      return t('operationStatus.actions.remove');
+  }
+}

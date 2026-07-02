@@ -14,6 +14,7 @@ export interface OperationItem {
   canCancel: boolean;
   errorMessage?: string;
   createdAt: number;
+  cancel?: () => Promise<void>;
 }
 
 export interface OperationUpdate {
@@ -29,6 +30,7 @@ export interface OperationStartInput {
   progress?: number;
   totalText?: string;
   canCancel?: boolean;
+  cancel?: () => Promise<void>;
 }
 
 interface OperationStoreState {
@@ -72,6 +74,7 @@ export const useOperationStore = create<OperationStoreState>((set) => ({
       progress: clampProgress(input.progress),
       totalText: input.totalText,
       canCancel: input.canCancel ?? true,
+      cancel: input.cancel,
       createdAt: Date.now(),
     };
 

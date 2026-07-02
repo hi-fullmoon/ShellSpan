@@ -405,3 +405,63 @@ export function ShieldIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function SearchIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="7" cy="7" r="4" />
+      <path d="m12.5 12.5-3-3" />
+    </svg>
+  );
+}
+
+export function XIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="m5 5 6 6" />
+      <path d="m11 5-6 6" />
+    </svg>
+  );
+}
+
+export function MoreHorizontalIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="4" cy="8" r="1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="8" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function FolderOpenIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M2.5 6.5h11v5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M2.5 6.5V4.7a1 1 0 0 1 1-1h2l1 1h5a1 1 0 0 1 1 1v.8" />
+      <path d="m14 5-1.5 7.5H3.5" />
+    </svg>
+  );
+}
+
+export function ServerIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <rect x="2.5" y="2.5" width="11" height="4" rx="1" />
+      <rect x="2.5" y="7.5" width="11" height="4" rx="1" />
+      <path d="M5 4.5h1" />
+      <path d="M5 9.5h1" />
+      <path d="M4.5 13.5v-2h6.5v2" />
+    </svg>
+  );
+}
+
+export function AlertIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M8 2.5 2 13h12L8 2.5z" />
+      <path d="M8 6v3.5" />
+      <circle cx="8" cy="11.5" r=".7" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

@@ -8,11 +8,19 @@ import { StatusBlock } from '../StatusBar/StatusBlock';
 import { StatusBlockTooltip } from '../StatusBar/StatusBlockTooltip';
 import { SystemBlocks } from '../StatusBar/SystemBlocks';
 import { TaskBlocks } from '../StatusBar/TaskBlocks';
+import { TaskRow } from '../StatusBar/TaskRow';
+import { ProgressBar } from '../StatusBar/ProgressBar';
 import type { SessionState } from '../../types';
 import { TaskDialog } from '../StatusBar/TaskDialog';
 import { StatusBar } from '../StatusBar';
 import { useOperationStore, type OperationItem } from '../../stores/operationStore';
-import { operationTone, operationTypeLabel, operationStatusText } from '../StatusBar/statusHelpers';
+import {
+  operationTone,
+  operationTypeLabel,
+  operationStatusText,
+  operationActionLabel,
+} from '../StatusBar/statusHelpers';
+import { parseByteRange, formatSpeedSize, formatEta } from '../StatusBar/useOperationSpeedEta';
 
 describe('StatusBlock', () => {
   it('renders small block with icon and progress bar', () => {
@@ -31,6 +39,26 @@ describe('StatusBlock', () => {
   });
 });
 
+describe('ProgressBar', () => {
+  it('renders track and fill at correct width', () => {
+    const { container } = render(
+      <ProgressBar progress={62} tone="active" className="h-3 w-32" />,
+    );
+    expect(container.querySelector('[data-testid="progress-bar"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-testid="progress-bar-fill"]')).toHaveStyle({ width: '62%' });
+  });
+
+  it('clamps progress between 0 and 100', () => {
+    const { container: below } = render(<ProgressBar progress={-10} tone="active" />);
+    expect(below.querySelector('[data-testid="progress-bar-fill"]')).toHaveStyle({ width: '0%' });
+
+    cleanup();
+
+    const { container: above } = render(<ProgressBar progress={150} tone="active" />);
+    expect(above.querySelector('[data-testid="progress-bar-fill"]')).toHaveStyle({ width: '100%' });
+  });
+});
+
 describe('statusHelpers', () => {
   it('maps running to active tone', () => {
     expect(operationTone('running')).toBe('active');
@@ -46,6 +74,39 @@ describe('statusHelpers', () => {
 
   it('returns localized status text', () => {
     expect(operationStatusText('running')).toBe('进行中');
+  });
+
+  it('returns action label by status', () => {
+    expect(operationActionLabel('running')).toBe('取消');
+    expect(operationActionLabel('cancelling')).toBe('取消');
+    expect(operationActionLabel('completed')).toBe('丢弃');
+    expect(operationActionLabel('failed')).toBe('移除');
+    expect(operationActionLabel('cancelled')).toBe('移除');
+  });
+});
+
+describe('useOperationSpeedEta helpers', () => {
+  it('parses byte range from totalText', () => {
+    const range = parseByteRange('13.3 MB / 26.6 MB');
+    expect(range).toBeDefined();
+    expect(range?.completed).toBeCloseTo(13.3 * 1024 ** 2, 0);
+    expect(range?.total).toBeCloseTo(26.6 * 1024 ** 2, 0);
+  });
+
+  it('returns undefined when totalText is item count', () => {
+    expect(parseByteRange('2 / 5 items')).toBeUndefined();
+  });
+
+  it('formats speed size', () => {
+    expect(formatSpeedSize(1024)).toBe('1.0 KB');
+    expect(formatSpeedSize(1024 ** 2)).toBe('1.0 MB');
+  });
+
+  it('formats ETA durations', () => {
+    expect(formatEta(0.5)).toBe('不到 1 秒');
+    expect(formatEta(45)).toBe('45 秒');
+    expect(formatEta(90)).toBe('2 分钟');
+    expect(formatEta(7200)).toBe('2 小时');
   });
 });
 
@@ -135,6 +196,100 @@ describe('StatusBlockTooltip', () => {
   });
 });
 
+describe('TaskRow', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders title, progress text, and progress bar', () => {
+    const operation = {
+      id: 'op-1',
+      type: 'download',
+      title: 'filezilla.tar.bz2',
+      status: 'running',
+      progress: 50,
+      totalText: '13.3 MB / 26.6 MB',
+      canCancel: true,
+      createdAt: 1,
+    } as OperationItem;
+
+    const { getByTestId } = render(
+      <TaskRow operation={operation} onCancel={() => {}} onRemove={() => {}} />,
+    );
+
+    expect(getByTestId('task-row')).toHaveTextContent('filezilla.tar.bz2');
+    expect(getByTestId('task-row-progress-text')).toHaveTextContent('13.3 MB / 26.6 MB');
+    expect(getByTestId('progress-bar-fill')).toHaveStyle({ width: '50%' });
+  });
+
+  it('shows Cancel action for running operation', () => {
+    const operation = {
+      id: 'op-1',
+      type: 'upload',
+      title: 'A',
+      status: 'running',
+      progress: 10,
+      canCancel: true,
+      createdAt: 1,
+    } as OperationItem;
+
+    const onCancel = vi.fn();
+    const { getByTestId } = render(
+      <TaskRow operation={operation} onCancel={onCancel} onRemove={() => {}} />,
+    );
+
+    const action = getByTestId('task-row-action');
+    expect(action).toHaveTextContent('取消');
+    fireEvent.click(action);
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('shows Discard action for completed operation', () => {
+    const operation = {
+      id: 'op-1',
+      type: 'download',
+      title: 'B',
+      status: 'completed',
+      progress: 100,
+      canCancel: true,
+      createdAt: 1,
+    } as OperationItem;
+
+    const onRemove = vi.fn();
+    const { getByTestId } = render(
+      <TaskRow operation={operation} onCancel={() => {}} onRemove={onRemove} />,
+    );
+
+    const action = getByTestId('task-row-action');
+    expect(action).toHaveTextContent('丢弃');
+    fireEvent.click(action);
+    expect(onRemove).toHaveBeenCalled();
+  });
+
+  it('shows Remove action for failed operation', () => {
+    const operation = {
+      id: 'op-1',
+      type: 'download',
+      title: 'C',
+      status: 'failed',
+      progress: 30,
+      errorMessage: 'network error',
+      canCancel: true,
+      createdAt: 1,
+    } as OperationItem;
+
+    const onRemove = vi.fn();
+    const { getByTestId } = render(
+      <TaskRow operation={operation} onCancel={() => {}} onRemove={onRemove} />,
+    );
+
+    const action = getByTestId('task-row-action');
+    expect(action).toHaveTextContent('移除');
+    fireEvent.click(action);
+    expect(onRemove).toHaveBeenCalled();
+  });
+});
+
 describe('TaskBlocks', () => {
   beforeEach(() => {
     cleanup();
@@ -147,7 +302,7 @@ describe('TaskBlocks', () => {
     vi.useRealTimers();
   });
 
-  it('renders visible task blocks', () => {
+  it('renders visible task rows', () => {
     const operations = [
       { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
       { id: 'op-2', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
@@ -156,10 +311,10 @@ describe('TaskBlocks', () => {
     const { container } = render(
       <TaskBlocks operations={operations} onCancel={() => {}} onRemove={() => {}} onOpenDialog={() => {}} />,
     );
-    expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-testid="task-row"]')).toHaveLength(2);
   });
 
-  it('renders overflow button with dots icon when blocks exceed container width', async () => {
+  it('renders overflow button when rows exceed container height', async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const callbacks: Array<() => void> = [];
 
@@ -191,7 +346,7 @@ describe('TaskBlocks', () => {
       );
 
       const wrapper = container.firstChild as HTMLElement;
-      Object.defineProperty(wrapper, 'clientWidth', { value: 40, configurable: true });
+      Object.defineProperty(wrapper, 'clientHeight', { value: 30, configurable: true });
 
       callbacks[0]?.();
 
@@ -206,8 +361,7 @@ describe('TaskBlocks', () => {
     }
   });
 
-  it('shows tooltip with cancel action after hover delay', () => {
-    vi.useFakeTimers();
+  it('calls onCancel when Cancel action is clicked', () => {
     const onCancel = vi.fn();
     const operations = [
       { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
@@ -217,26 +371,12 @@ describe('TaskBlocks', () => {
       <TaskBlocks operations={operations} onCancel={onCancel} onRemove={() => {}} onOpenDialog={() => {}} />,
     );
 
-    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
-    fireEvent.mouseEnter(block);
-
-    expect(document.querySelector('[role="tooltip"]')).not.toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-
-    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
-    expect(tooltip).toBeInTheDocument();
-    expect(tooltip).toHaveTextContent('取消');
-
-    const cancelButton = tooltip.querySelector('button') as HTMLElement;
-    fireEvent.click(cancelButton);
+    const action = container.querySelector('[data-testid="task-row-action"]') as HTMLElement;
+    fireEvent.click(action);
     expect(onCancel).toHaveBeenCalledWith('op-1');
   });
 
-  it('shows tooltip with remove action for completed operations after hover delay', () => {
-    vi.useFakeTimers();
+  it('calls onRemove when Discard action is clicked for completed operations', () => {
     const onRemove = vi.fn();
     const operations = [
       { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
@@ -246,57 +386,9 @@ describe('TaskBlocks', () => {
       <TaskBlocks operations={operations} onCancel={() => {}} onRemove={onRemove} onOpenDialog={() => {}} />,
     );
 
-    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
-    fireEvent.mouseEnter(block);
-
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-
-    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
-    expect(tooltip).toBeInTheDocument();
-    expect(tooltip).toHaveTextContent('移除');
-
-    const removeButton = tooltip.querySelector('button') as HTMLElement;
-    fireEvent.click(removeButton);
+    const action = container.querySelector('[data-testid="task-row-action"]') as HTMLElement;
+    fireEvent.click(action);
     expect(onRemove).toHaveBeenCalledWith('op-1');
-  });
-
-  it('keeps tooltip open when cursor moves from block to tooltip across the gap', () => {
-    vi.useFakeTimers();
-    const onCancel = vi.fn();
-    const operations = [
-      { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
-    ] as OperationItem[];
-
-    const { container } = render(
-      <TaskBlocks operations={operations} onCancel={onCancel} onRemove={() => {}} onOpenDialog={() => {}} />,
-    );
-
-    const block = container.querySelector('[data-testid="status-block"]') as HTMLElement;
-    fireEvent.mouseEnter(block);
-
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-
-    const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
-    expect(tooltip).toBeInTheDocument();
-
-    fireEvent.mouseLeave(block);
-    act(() => {
-      vi.advanceTimersByTime(50);
-    });
-    expect(document.querySelector('[role="tooltip"]')).toBeInTheDocument();
-
-    fireEvent.mouseEnter(tooltip);
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-    expect(document.querySelector('[role="tooltip"]')).toBeInTheDocument();
-
-    fireEvent.click(tooltip.querySelector('button') as HTMLElement);
-    expect(onCancel).toHaveBeenCalledWith('op-1');
   });
 });
 
@@ -318,7 +410,7 @@ describe('TaskDialog', () => {
     const { getAllByTestId } = render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    expect(getAllByTestId('status-block')).toHaveLength(2);
+    expect(getAllByTestId('task-row')).toHaveLength(2);
   });
 
   it('does not render when closed', () => {
@@ -337,10 +429,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
     ] as OperationItem[];
 
-    const { getByTestId } = render(
+    render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    expect(getByTestId('task-cancel-button')).toBeInTheDocument();
+    expect(document.querySelector('[data-testid="task-row-action"]')).toHaveTextContent('取消');
   });
 
   it('shows remove button for completed operations', () => {
@@ -348,10 +440,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
     ] as OperationItem[];
 
-    const { getByTestId } = render(
+    render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    expect(getByTestId('task-remove-button')).toBeInTheDocument();
+    expect(document.querySelector('[data-testid="task-row-action"]')).toHaveTextContent('丢弃');
   });
 
   it('shows cancel all button when there are cancellable operations', () => {
@@ -373,10 +465,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'upload', title: 'A', status: 'running', progress: 10, canCancel: true, createdAt: 1 },
     ] as OperationItem[];
 
-    const { getByTestId } = render(
+    render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={onCancel} onRemove={() => {}} onCancelAll={() => {}} />,
     );
-    await user.click(getByTestId('task-cancel-button'));
+    await user.click(document.querySelector('[data-testid="task-row-action"]') as HTMLElement);
     expect(onCancel).toHaveBeenCalledWith('op-1');
   });
 
@@ -387,10 +479,10 @@ describe('TaskDialog', () => {
       { id: 'op-1', type: 'download', title: 'B', status: 'completed', progress: 100, canCancel: true, createdAt: 2 },
     ] as OperationItem[];
 
-    const { getByTestId } = render(
+    render(
       <TaskDialog open={true} onClose={() => {}} operations={operations} onCancel={() => {}} onRemove={onRemove} onCancelAll={() => {}} />,
     );
-    await user.click(getByTestId('task-remove-button'));
+    await user.click(document.querySelector('[data-testid="task-row-action"]') as HTMLElement);
     expect(onRemove).toHaveBeenCalledWith('op-1');
   });
 
@@ -489,20 +581,48 @@ describe('StatusBar', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders task blocks when operations exist', () => {
+  it('renders task rows when operations exist', () => {
     useOperationStore.getState().startOperation({ id: 'op-1', type: 'upload', title: 'A', progress: 10 });
     const { container } = render(
       <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
     );
-    expect(container.querySelector('[data-testid="status-block"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-testid="task-row"]')).toBeInTheDocument();
   });
 
-  it('renders system blocks when update is available', () => {
+  it('calls operation cancel callback when cancel action is clicked', async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn();
+    useOperationStore.getState().startOperation({
+      id: 'op-1',
+      type: 'upload',
+      title: 'A',
+      progress: 10,
+      cancel,
+    });
+
     const { container } = render(
-      <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'update_available' }} updateDownloadProgress={undefined} />,
+      <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
+    );
+
+    await user.click(container.querySelector('[data-testid="task-row-action"]') as HTMLElement);
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('auto-hides 3 seconds after all operations complete', () => {
+    vi.useFakeTimers();
+    useOperationStore.getState().startOperation({ id: 'op-1', type: 'upload', title: 'A', progress: 100, status: 'completed' });
+
+    const { container } = render(
+      <StatusBar sessions={[]} activeSession={undefined} updateState={{ phase: 'idle' }} updateDownloadProgress={undefined} />,
     );
     expect(container.querySelector('[data-testid="status-bar"]')).toBeInTheDocument();
-    expect(container.querySelectorAll('[data-testid="status-block"]')).toHaveLength(1);
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(container.querySelector('[data-testid="status-bar"]')).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 });
 
@@ -553,7 +673,7 @@ describe('StatusBar overflow', () => {
 
       const taskBlocksContainer = container.querySelector('[data-testid="status-bar"] > div');
       if (!taskBlocksContainer) throw new Error('TaskBlocks container not found');
-      Object.defineProperty(taskBlocksContainer, 'clientWidth', { value: 40, configurable: true });
+      Object.defineProperty(taskBlocksContainer, 'clientHeight', { value: 30, configurable: true });
 
       callbacks[0]?.();
 
@@ -570,4 +690,3 @@ describe('StatusBar overflow', () => {
     }
   });
 });
-

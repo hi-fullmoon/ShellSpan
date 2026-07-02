@@ -1,80 +1,87 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { SessionState, UpdateState } from '../../types';
 import { useOperationStore } from '../../stores/operationStore';
 import { TaskBlocks } from './TaskBlocks';
 import { TaskDialog } from './TaskDialog';
-import { SystemBlocks } from './SystemBlocks';
 
-interface StatusBarProps {
-  sessions: SessionState[];
-  activeSession: SessionState | undefined;
-  updateState: UpdateState;
-  updateDownloadProgress: number | undefined;
+const AUTO_HIDE_DELAY_MS = 3000;
+
+export interface StatusBarProps {
+  sessions?: SessionState[];
+  activeSession?: SessionState;
+  updateState?: UpdateState;
+  updateDownloadProgress?: number;
 }
 
-export function StatusBar({ sessions, activeSession, updateState, updateDownloadProgress }: StatusBarProps) {
-  const { operations, setCancelling, removeOperation } = useOperationStore(
+export function StatusBar(_props: StatusBarProps) {
+  const { operations, setCancelling, removeOperation, clearCompleted } = useOperationStore(
     useShallow((state) => ({
       operations: state.operations,
       setCancelling: state.setCancelling,
       removeOperation: state.removeOperation,
+      clearCompleted: state.clearCompleted,
     })),
   );
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const hasSystemInfo =
-    sessions.length > 0 ||
-    updateState.phase === 'checking' ||
-    updateState.phase === 'update_available' ||
-    updateState.phase === 'downloading' ||
-    updateState.phase === 'downloaded' ||
-    updateState.phase === 'error';
+  const allCompleted = useMemo(
+    () =>
+      operations.length > 0 &&
+      operations.every((op) => op.status !== 'running' && op.status !== 'cancelling'),
+    [operations],
+  );
 
-  if (operations.length === 0 && !hasSystemInfo) {
+  useEffect(() => {
+    if (!allCompleted) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      clearCompleted();
+    }, AUTO_HIDE_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [allCompleted, clearCompleted]);
+
+  if (operations.length === 0) {
     return null;
   }
+
+  const handleCancel = async (id: string) => {
+    const operation = operations.find((op) => op.id === id);
+    if (operation?.cancel) {
+      await operation.cancel();
+    } else {
+      setCancelling(id);
+    }
+  };
 
   const handleCancelAll = () => {
     operations.forEach((op) => {
       if (op.status === 'running' && op.canCancel) {
-        setCancelling(op.id);
+        void handleCancel(op.id);
       }
     });
   };
 
   return (
     <div
-      className="surface border-t flex h-[30px] items-center gap-2 px-2"
+      className="surface border-t border-t-[var(--app-border)] flex h-auto min-h-[30px] max-h-40 items-stretch gap-2 px-2 py-1"
       data-testid="status-bar"
     >
-      {operations.length > 0 ? (
-        <TaskBlocks
-          operations={operations}
-          onCancel={(id) => setCancelling(id)}
-          onRemove={(id) => removeOperation(id)}
-          onOpenDialog={() => setDialogOpen(true)}
-        />
-      ) : null}
-
-      {operations.length > 0 && hasSystemInfo ? (
-        <div className="h-4 w-px shrink-0 bg-[var(--app-border)]" />
-      ) : null}
-
-      {hasSystemInfo ? (
-        <SystemBlocks
-          sessions={sessions}
-          activeSession={activeSession}
-          updateState={updateState}
-          updateDownloadProgress={updateDownloadProgress}
-        />
-      ) : null}
+      <TaskBlocks
+        operations={operations}
+        onCancel={handleCancel}
+        onRemove={(id) => removeOperation(id)}
+        onOpenDialog={() => setDialogOpen(true)}
+      />
 
       <TaskDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         operations={operations}
-        onCancel={(id) => setCancelling(id)}
+        onCancel={handleCancel}
         onRemove={(id) => removeOperation(id)}
         onCancelAll={handleCancelAll}
       />

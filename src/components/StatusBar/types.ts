@@ -29,3 +29,16 @@ export interface StatusBlockTooltipData {
     disabled?: boolean;
   };
 }
+
+export interface ProgressBarProps {
+  progress: number;
+  tone: StatusTone;
+  className?: string;
+}
+
+export interface TaskRowProps {
+  operation: OperationItem;
+  onCancel: () => void;
+  onRemove: () => void;
+  className?: string;
+}
