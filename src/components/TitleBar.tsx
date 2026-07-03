@@ -1,8 +1,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useCallback, useEffect, useState } from 'react';
-import { PrimarySidebarActiveIcon, PrimarySidebarIcon, SecondarySidebarActiveIcon, SecondarySidebarIcon } from './Icons';
-import { Tooltip } from './Tooltip';
 import { isTauriRuntime } from '../lib/tauri';
+import { PrimarySidebarActiveIcon, PrimarySidebarIcon, SecondarySidebarActiveIcon, SecondarySidebarIcon, Tooltip } from './ui';
 
 interface TitleBarProps {
   primarySideVisible: boolean;

@@ -1,8 +1,8 @@
 import { createPortal } from 'react-dom';
 import { createContext, useContext, useId, type ReactNode } from 'react';
-import { t } from '../lib/i18n';
+import { t } from '../../lib/i18n';
 import { CloseIcon } from './Icons';
-import { cn } from '../lib/ui';
+import { cn } from '../../lib/ui';
 
 const DialogTitleIdContext = createContext<string | undefined>(undefined);
 

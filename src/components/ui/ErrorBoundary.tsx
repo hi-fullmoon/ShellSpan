@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { createLogger } from '../lib/logger';
-import { t } from '../lib/i18n';
+import { createLogger } from '../../lib/logger';
+import { t } from '../../lib/i18n';
 
 const errorLogger = createLogger('error-boundary');
 

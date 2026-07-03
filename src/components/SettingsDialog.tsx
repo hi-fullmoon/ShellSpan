@@ -1,4 +1,4 @@
-import { Dialog, DialogHeader, DialogPanel } from './Dialog';
+import { Dialog, DialogHeader, DialogPanel } from './ui';
 import { t } from '../lib/i18n';
 import { SettingsPanel } from './SettingsPanel';
 import type { AppPreferences } from '../types';

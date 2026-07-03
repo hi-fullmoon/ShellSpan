@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { t } from '../../lib/i18n';
-import { UploadIcon, DownloadIcon, TrashIcon, FileIcon } from '../Icons';
+import { UploadIcon, DownloadIcon, TrashIcon, FileIcon } from '../ui';
 import type { OperationStatus, OperationType } from '../../stores/operationStore';
 import type { StatusTone } from './types';
 

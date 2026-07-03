@@ -1,4 +1,4 @@
-import { Dialog, DialogPanel, DialogHeader, DialogFooter } from '../Dialog';
+import { Dialog, DialogPanel, DialogHeader, DialogFooter } from '../ui';
 import type { OperationItem } from '../../stores/operationStore';
 import { t } from '../../lib/i18n';
 import { TaskRow } from './TaskRow';

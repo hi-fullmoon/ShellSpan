@@ -1,5 +1,5 @@
 import { render as tlRender, type RenderOptions } from '@testing-library/react';
-import { ChakraProvider } from './components/ChakraProvider';
+import { ChakraProvider } from './components/ui';
 import type { ReactElement, ReactNode } from 'react';
 
 function Wrapper({ children }: { children: ReactNode }) {

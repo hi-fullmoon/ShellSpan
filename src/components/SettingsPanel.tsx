@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { GlobeIcon, MoonIcon, SunIcon } from './Icons';
 import { Input, Checkbox } from '@chakra-ui/react';
-import { FormSelect } from './FormSelect';
 import { t } from '../lib/i18n';
 import { DEFAULT_SHORTCUTS, formatKeyBinding, recordKeyBinding, SHORTCUT_ACTIONS, SHORTCUT_LABELS, type ShortcutAction } from '../lib/keyboard';
 import type { AppPreferences, LocalePreference, ThemePreference, TerminalTheme, CursorStyle } from '../types';
+import { GlobeIcon, MoonIcon, SunIcon, FormSelect } from './ui';
 
 export interface SettingsPanelProps {
   preferences: AppPreferences;

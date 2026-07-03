@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useState } from 'react';
-import { Dialog, DialogFooter, DialogHeader, DialogPanel } from './Dialog';
+import { Dialog, DialogFooter, DialogHeader, DialogPanel } from './ui';
 import { t } from '../lib/i18n';
 import { isTauriRuntime } from '../lib/tauri';
 

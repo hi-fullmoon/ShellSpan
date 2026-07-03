@@ -1,7 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { ChakraProvider } from "./components/ChakraProvider";
-import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ChakraProvider, ErrorBoundary } from "./components/ui";
 import App from "./App";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";

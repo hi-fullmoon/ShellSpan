@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OperationItem } from '../../stores/operationStore';
 import { t } from '../../lib/i18n';
-import { DotsIcon } from '../Icons';
+import { DotsIcon } from '../ui';
 import { TaskRow } from './TaskRow';
 
 const ROW_HEIGHT = 36;

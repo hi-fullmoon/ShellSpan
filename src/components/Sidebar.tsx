@@ -1,12 +1,10 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { PinIcon, StarIcon } from './Icons';
-import { Tooltip } from './Tooltip';
-import { ScrollArea } from './ScrollArea';
 import { Input } from '@chakra-ui/react';
 import { t } from '../lib/i18n';
 import { useContextMenu } from '../hooks/useContextMenu';
 import type { ConnectionProfile } from '../types';
+import { PinIcon, StarIcon, Tooltip, ScrollArea } from './ui';
 
 const HISTORY_ITEM_DOUBLE_CLICK_DELAY_MS = 220;
 

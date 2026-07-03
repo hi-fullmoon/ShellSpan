@@ -3,12 +3,9 @@ import { FormEvent, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { t } from '../lib/i18n';
 import { parseQuickConnect } from '../lib/profile';
 import type { ConnectionProfile, JumpHostConfig, PortForwardConfig } from '../types';
-import { FolderIcon } from './Icons';
 import { cn, PROFILE_COLORS } from '../lib/ui';
-import { Tooltip } from './Tooltip';
-import { Segment } from './Segment';
 import { Input, Checkbox } from '@chakra-ui/react';
-import { FormSelect } from './FormSelect';
+import { FolderIcon, Tooltip, Segment, FormSelect } from './ui';
 
 type TabKey = 'basic' | 'jumpHost' | 'portForwarding';
 

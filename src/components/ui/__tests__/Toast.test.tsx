@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render } from "../../test-utils";
+import { cleanup, render } from "../../../test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Toast } from "../Toast";
 

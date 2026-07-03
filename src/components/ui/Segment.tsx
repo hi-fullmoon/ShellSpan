@@ -1,5 +1,5 @@
 import { SegmentGroup } from '@chakra-ui/react';
-import { cn } from '../lib/ui';
+import { cn } from '../../lib/ui';
 
 export interface SegmentOption<T extends string> {
   value: T;

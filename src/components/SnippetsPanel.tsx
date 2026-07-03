@@ -1,11 +1,10 @@
 import { createPortal } from "react-dom";
 import { useState, useRef, useEffect } from "react";
 import { useSnippetsStore } from "../stores/snippetsStore";
-import { ScrollArea } from "./ScrollArea";
-import { Tooltip } from "./Tooltip";
 import { Input } from "@chakra-ui/react";
 import { t } from "../lib/i18n";
 import type { CommandSnippet } from "../types";
+import { ScrollArea, Tooltip } from './ui';
 
 interface SnippetsPanelProps {
   onSendCommand: (command: string) => void;

@@ -11,7 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type UIEventHandler,
 } from 'react';
-import { cn } from '../lib/ui';
+import { cn } from '../../lib/ui';
 
 type ScrollAreaOrientation = 'vertical' | 'horizontal' | 'both';
 type ScrollAreaScrollbar = 'default' | 'hover';

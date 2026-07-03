@@ -1,5 +1,5 @@
 import { ConnectionForm } from './ConnectionForm';
-import { Dialog, DialogHeader, DialogPanel } from './Dialog';
+import { Dialog, DialogHeader, DialogPanel } from './ui';
 import { t } from '../lib/i18n';
 import type { ConnectionProfile } from '../types';
 

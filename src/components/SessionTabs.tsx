@@ -11,6 +11,7 @@ import {
   type DragStartEvent,
   type UniqueIdentifier,
 } from '@dnd-kit/core';
+import { CloseIcon, PinIcon, ScrollArea } from './ui';
 import { SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -23,9 +24,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { CloseIcon, PinIcon } from './Icons';
 import { Input } from '@chakra-ui/react';
-import { ScrollArea } from './ScrollArea';
 import { t } from '../lib/i18n';
 import { cn, PROFILE_COLORS, sessionStatusDot } from '../lib/ui';
 import { useContextMenu } from '../hooks/useContextMenu';

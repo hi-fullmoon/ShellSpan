@@ -1,4 +1,4 @@
-import { Dialog, DialogFooter, DialogHeader, DialogPanel } from './Dialog';
+import { Dialog, DialogFooter, DialogHeader, DialogPanel } from './ui';
 import { t } from '../lib/i18n';
 import type { SessionState } from '../types';
 

@@ -80,7 +80,7 @@ vi.mock('../components/FileManager', () => ({
   FileManager: () => null,
 }));
 
-vi.mock('../components/Icons', () => ({
+vi.mock('../components/ui/Icons', () => ({
   CloseIcon: () => null,
   PrimarySidebarIcon: () => null,
   PrimarySidebarActiveIcon: () => null,
@@ -119,7 +119,7 @@ vi.mock('../components/TerminalPane', () => ({
   TerminalPane: () => null,
 }));
 
-vi.mock('../components/Toast', () => ({
+vi.mock('../components/ui/Toast', () => ({
   Toast: () => null,
   toaster: { create: vi.fn(), attrs: { overlap: false }, subscribe: () => () => {} },
 }));

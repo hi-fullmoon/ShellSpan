@@ -15,7 +15,7 @@ import { SplitLayout } from './components/SplitLayout';
 import { SessionTabs } from './components/SessionTabs';
 import { TerminalPane, type TerminalPaneRef } from './components/TerminalPane';
 import { SnippetsPanel } from './components/SnippetsPanel';
-import { Toast, toaster } from './components/Toast';
+import { Toast, toaster } from './components/ui';
 import { Toast as ChakraToast, Toaster } from '@chakra-ui/react';
 import { UpdateRestartDialog } from './components/UpdateRestartDialog';
 import { initI18n, syncI18nLocale, t } from './lib/i18n';
