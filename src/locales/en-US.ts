@@ -175,6 +175,8 @@ const enUS = {
   'fileManager.actions.parent': 'Go to parent directory',
   'fileManager.actions.refresh': 'Refresh',
   'fileManager.actions.more': 'More actions',
+  'fileManager.actions.filter': 'Filter',
+  'fileManager.actions.actions': 'Actions',
   'fileManager.actions.openFolder': 'Open Folder',
   'fileManager.pathPlaceholder': 'Enter a remote path and press Enter',
   'fileManager.readOnly': 'The terminal is disconnected, so the file manager is currently view-only.',
@@ -417,8 +419,6 @@ const enUS = {
   'shortcuts.action.closeSession': 'Close Session',
   'shortcuts.action.nextTab': 'Next Tab',
   'shortcuts.action.prevTab': 'Previous Tab',
-  'shortcuts.action.togglePrimarySidebar': 'Toggle File Manager',
-  'shortcuts.action.toggleSecondarySidebar': 'Toggle Sidebar',
   'shortcuts.action.exportTerminal': 'Export Terminal Content',
   'shortcuts.recording': 'Press keys...',
   'shortcuts.reset': 'Reset',
@@ -435,6 +435,10 @@ const enUS = {
   'snippets.edit': 'Edit',
   'snippets.delete': 'Delete',
   'snippets.send': 'Send to Terminal',
+  'snippets.newSnippet': 'New snippet',
+  'snippets.shellHistory': 'Shell History',
+  'snippets.empty.title': 'Create snippet',
+  'snippets.empty.description': 'Save your most used commands as snippets to reuse them in one click.',
   'snippets.dialog.kicker': 'New Snippet',
   'snippets.dialog.editKicker': 'Edit Snippet',
   'snippets.dialog.title': 'Add Command Snippet',
@@ -443,6 +447,97 @@ const enUS = {
   'snippets.dialog.commandPlaceholder': 'e.g. sudo systemctl restart nginx',
   'snippets.dialog.save': 'Save',
   'snippets.dialog.cancel': 'Cancel',
+
+  // Keychain
+  'keychain.title': 'Keys',
+  'keychain.newKey': 'New key',
+  'keychain.toolbar.certificate': 'Certificate',
+  'keychain.toolbar.touchId': 'Touch ID',
+  'keychain.toolbar.fido2': 'FIDO2',
+  'keychain.type': 'Type {type}',
+  'keychain.empty.title': 'Add a key',
+  'keychain.empty.description': 'Save SSH keys to use them across your hosts.',
+
+  // Navigation
+  'nav.my': 'My',
+  'nav.sftp': 'SFTP',
+  'nav.terminal': 'Terminal',
+  'nav.myTooltip': 'My workspace',
+  'nav.sftpTooltip': 'SFTP transfer',
+  'nav.terminalTooltip': 'Terminal sessions',
+
+  // My section
+  'my.menu.savedConnections': 'Hosts',
+  'my.menu.recentConnections': 'Recent Connections',
+  'my.menu.keychain': 'Keychain',
+  'my.menu.portForwards': 'Port Forwards',
+  'my.menu.snippets': 'Snippets',
+  'my.menu.knownHosts': 'Known Hosts',
+  'my.menu.logs': 'Logs',
+  'my.menu.settings': 'Settings',
+  'my.newConnection': 'New Connection',
+
+  // Saved connections
+  'savedConnections.title': 'Hosts',
+  'savedConnections.empty': 'No saved connections yet.',
+  'savedConnections.connect': 'Connect',
+  'savedConnections.newHost': 'New host',
+  'savedConnections.terminal': 'Terminal',
+  'savedConnections.serial': 'Serial',
+  'savedConnections.searchPlaceholder': 'Find a host or ssh user@hostname...',
+  'savedConnections.edit': 'Edit',
+  'savedConnections.delete': 'Delete',
+  'savedConnections.empty.title': 'No hosts yet',
+  'savedConnections.empty.description': 'Add a host to get started.',
+  'savedConnections.empty.noMatch': 'No hosts match your search.',
+
+  // Recent connections
+  'recentConnections.title': 'Recent Connections',
+  'recentConnections.empty': 'No recent connections.',
+  'recentConnections.connect': 'Reconnect',
+  'recentConnections.clear': 'Clear History',
+
+  // Port forwards
+  'portForwards.title': 'Port Forwards',
+  'portForwards.empty': 'No port forward rules configured.',
+  'portForwards.localPort': 'Local Port',
+  'portForwards.remoteHost': 'Remote Host',
+  'portForwards.remotePort': 'Remote Port',
+  'portForwards.newForwarding': 'New forwarding',
+  'portForwards.empty.title': 'Set up port forwarding',
+  'portForwards.empty.description': 'Save port forwarding to access databases, web apps, and other services.',
+
+  // Known hosts
+  'knownHosts.title': 'Known Hosts',
+  'knownHosts.empty': 'No known hosts yet.',
+  'knownHosts.remove': 'Remove',
+  'knownHosts.removeConfirm': 'Remove trusted host key for {host}?',
+  'knownHosts.import': 'Import',
+  'knownHosts.empty.title': 'No known hosts',
+  'knownHosts.empty.description': 'Known hosts will appear here once you connect to a server.',
+
+  // Logs
+  'logs.title': 'Application Logs',
+  'logs.empty': 'No log files found.',
+  'logs.refresh': 'Refresh',
+  'logs.upgrade.title': 'Logs are not available on your current plan',
+  'logs.upgrade.action': 'Upgrade',
+  'logs.upgrade.description': 'to enable logs.',
+
+  // SFTP
+  'sftp.local': 'Local Files',
+  'sftp.remote': 'Remote Files',
+  'sftp.remoteTabs': 'Remote Sessions',
+  'sftp.empty': 'No remote session connected. Open a terminal session or connect from My section.',
+  'sftp.empty.title': 'No remote session',
+  'sftp.empty.description': 'Connect to a remote host to browse its file system.',
+  'sftp.newConnection': 'New Connection',
+  'sftp.addRemote': 'Add Remote',
+
+  // Terminal
+  'terminal.newTab': 'New connection',
+  'terminal.empty.title': 'No terminal sessions',
+  'terminal.empty.description': 'Click + to start a new SSH session.',
 } as const;
 
 export default enUS;

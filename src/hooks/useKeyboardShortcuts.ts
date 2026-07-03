@@ -4,7 +4,6 @@ import { DEFAULT_SHORTCUTS, matchesBinding } from '../lib/keyboard';
 interface DialogState {
   hostKeyOpen: boolean;
   connectOpen: boolean;
-  settingsOpen: boolean;
   pendingDelete: boolean;
   pendingClose: boolean;
   exitOpen: boolean;
@@ -13,7 +12,6 @@ interface DialogState {
 interface KeyboardHandlers {
   closeHostKeyDialog: () => void;
   closeConnectDialog: () => void;
-  closeSettingsDialog: () => void;
   cancelPendingDelete: () => void;
   cancelPendingClose: () => void;
   closeExitDialog: () => void;
@@ -22,15 +20,11 @@ interface KeyboardHandlers {
   requestCloseActiveSession: () => void;
   selectNextTab: () => void;
   selectPrevTab: () => void;
-  togglePrimarySidebar: () => void;
-  toggleSecondarySidebar: () => void;
   exportActiveTerminal: () => void;
 }
 
 export interface UseKeyboardShortcutsOptions {
   keyboardShortcuts: Record<string, string> | undefined;
-  showFileManager: boolean;
-  showSidebar: boolean;
   activeSessionId: string | undefined;
   dialogState: DialogState;
   handlers: KeyboardHandlers;
@@ -38,8 +32,6 @@ export interface UseKeyboardShortcutsOptions {
 
 export function useKeyboardShortcuts({
   keyboardShortcuts,
-  showFileManager,
-  showSidebar,
   activeSessionId,
   dialogState,
   handlers,
@@ -67,7 +59,7 @@ export function useKeyboardShortcuts({
       const isInput = !isXterm && (tag === 'input' || tag === 'textarea' || tag === 'select');
 
       const dlg = dialogStateRef.current;
-      const anyDialogOpen = dlg.hostKeyOpen || dlg.connectOpen || dlg.settingsOpen || dlg.pendingDelete || dlg.pendingClose || dlg.exitOpen;
+      const anyDialogOpen = dlg.hostKeyOpen || dlg.connectOpen || dlg.pendingDelete || dlg.pendingClose || dlg.exitOpen;
 
       // Escape always closes the active dialog, even if input is focused
       if (matchesBinding(merged.closeDialog, event)) {
@@ -78,11 +70,6 @@ export function useKeyboardShortcuts({
         }
         if (dlg.connectOpen) {
           h.closeConnectDialog();
-          event.preventDefault();
-          return;
-        }
-        if (dlg.settingsOpen) {
-          h.closeSettingsDialog();
           event.preventDefault();
           return;
         }
@@ -137,18 +124,6 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      if (matchesBinding(merged.togglePrimarySidebar, event)) {
-        event.preventDefault();
-        h.togglePrimarySidebar();
-        return;
-      }
-
-      if (matchesBinding(merged.toggleSecondarySidebar, event)) {
-        event.preventDefault();
-        h.toggleSecondarySidebar();
-        return;
-      }
-
       if (matchesBinding(merged.exportTerminal, event)) {
         event.preventDefault();
         h.exportActiveTerminal();
@@ -158,5 +133,5 @@ export function useKeyboardShortcuts({
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [keyboardShortcuts, showFileManager, showSidebar, activeSessionId]);
+  }, [keyboardShortcuts, activeSessionId]);
 }

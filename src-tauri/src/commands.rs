@@ -3,13 +3,15 @@ use crate::sftp_pool::SftpPool;
 use crate::models::{
     AuthMethod, ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest,
     CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest,
-    HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, ManagedSession, OpenRemoteFileRequest,
-    PortForwardConfig, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
-    RemoteDirectoryListing, RemoteDirectoryRequest, RenameRemotePathRequest, SessionCommand,
+    HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KnownHostEntry, LocalDirectoryListing,
+    LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
+    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand,
     SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
+use base64::Engine;
 use std::sync::{
     atomic::AtomicBool,
     Arc, mpsc,
@@ -701,6 +703,251 @@ pub(crate) fn open_url(url: String) -> Result<(), String> {
             .map_err(|error| format!("failed to open URL: {error}"))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn list_known_hosts(app: AppHandle) -> Result<Vec<KnownHostEntry>, String> {
+    use crate::known_hosts::known_hosts_path;
+    use ssh2::{KnownHostFileKind, Session};
+    use std::fs;
+
+    let path = known_hosts_path(&app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = fs::read_to_string(&path).map_err(|error| format!("failed to read known hosts file: {error}"))?;
+    let session = Session::new().map_err(|error| format!("failed to create ssh session: {error}"))?;
+    let mut known_hosts = session.known_hosts().map_err(|error| format!("failed to initialize known hosts: {error}"))?;
+
+    if let Err(error) = known_hosts.read_file(&path, KnownHostFileKind::OpenSSH) {
+        log::warn!("Failed to parse known hosts file: {error}");
+    }
+
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 3 {
+            continue;
+        }
+
+        let host_port = parts[0];
+        let key_type_name = parts[1];
+        let key_b64 = parts[2];
+
+        let (host, port) = if let Some(stripped) = host_port.strip_prefix('[') {
+            if let Some((host, port)) = stripped.split_once("]:") {
+                let port = port.parse::<u16>().unwrap_or(22);
+                (host.to_string(), port)
+            } else {
+                continue;
+            }
+        } else {
+            (host_port.to_string(), 22)
+        };
+
+        let key = match base64::engine::general_purpose::STANDARD.decode(key_b64) {
+            Ok(key) => key,
+            Err(_) => continue,
+        };
+
+        let key_type = match key_type_name {
+            "ssh-rsa" => ssh2::HostKeyType::Rsa,
+            "ssh-dss" => ssh2::HostKeyType::Dss,
+            "ecdsa-sha2-nistp256" => ssh2::HostKeyType::Ecdsa256,
+            "ecdsa-sha2-nistp384" => ssh2::HostKeyType::Ecdsa384,
+            "ecdsa-sha2-nistp521" => ssh2::HostKeyType::Ecdsa521,
+            "ssh-ed25519" => ssh2::HostKeyType::Ed25519,
+            _ => ssh2::HostKeyType::Unknown,
+        };
+
+        let fingerprint = crate::known_hosts::compute_fingerprint(&key, key_type);
+        let type_prefix = match key_type {
+            ssh2::HostKeyType::Rsa => "RSA",
+            ssh2::HostKeyType::Dss => "DSA",
+            ssh2::HostKeyType::Ecdsa256 | ssh2::HostKeyType::Ecdsa384 | ssh2::HostKeyType::Ecdsa521 => "ECDSA",
+            ssh2::HostKeyType::Ed25519 => "ED25519",
+            ssh2::HostKeyType::Unknown => "UNKNOWN",
+        };
+
+        entries.push(KnownHostEntry {
+            host,
+            port,
+            fingerprint,
+            key_type: type_prefix.to_string(),
+        });
+    }
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub(crate) fn remove_known_host(app: AppHandle, host: String, port: u16) -> Result<(), String> {
+    use crate::known_hosts::known_hosts_path;
+    use std::fs;
+
+    let path = known_hosts_path(&app)?;
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&path).map_err(|error| format!("failed to read known hosts file: {error}"))?;
+    let target_prefix = if port == 22 {
+        format!("{host} ")
+    } else {
+        format!("[{host}]:{port} ")
+    };
+
+    let filtered: Vec<String> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return true;
+            }
+            !trimmed.starts_with(&target_prefix)
+        })
+        .map(|line| line.to_string())
+        .collect();
+
+    fs::write(&path, filtered.join("\n")).map_err(|error| format!("failed to write known hosts file: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
+    use std::fs;
+
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| format!("failed to resolve log dir: {error}"))?;
+
+    if !log_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&log_dir).map_err(|error| format!("failed to read log dir: {error}"))? {
+        let entry = entry.map_err(|error| format!("failed to read log dir entry: {error}"))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("termbridge") {
+            continue;
+        }
+
+        let metadata = entry.metadata().map_err(|error| format!("failed to read log file metadata: {error}"))?;
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+
+        files.push(LogFileInfo {
+            name,
+            size: metadata.len(),
+            modified_at,
+        });
+    }
+
+    files.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    Ok(files)
+}
+
+#[tauri::command]
+pub(crate) fn read_log_file(app: AppHandle, name: String) -> Result<String, String> {
+    use std::fs;
+
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| format!("failed to resolve log dir: {error}"))?;
+    let path = log_dir.join(&name);
+
+    if !path.exists() {
+        return Err(format!("log file not found: {name}"));
+    }
+
+    let metadata = fs::metadata(&path).map_err(|error| format!("failed to read log file metadata: {error}"))?;
+    const MAX_SIZE: u64 = 2 * 1024 * 1024;
+    let size = metadata.len().min(MAX_SIZE);
+
+    let content = if size == metadata.len() {
+        fs::read_to_string(&path).map_err(|error| format!("failed to read log file: {error}"))?
+    } else {
+        let mut file = fs::File::open(&path).map_err(|error| format!("failed to open log file: {error}"))?;
+        use std::io::Read;
+        let mut buffer = vec![0u8; size as usize];
+        file.read_exact(&mut buffer)
+            .map_err(|error| format!("failed to read log file: {error}"))?;
+        String::from_utf8_lossy(&buffer).to_string()
+    };
+
+    Ok(content)
+}
+
+#[tauri::command]
+pub(crate) fn list_local_directory(path: String) -> Result<LocalDirectoryListing, String> {
+    use std::fs;
+
+    let canonical = fs::canonicalize(&path).map_err(|error| format!("failed to resolve path: {error}"))?;
+    if !canonical.is_dir() {
+        return Err(format!("path is not a directory: {}", canonical.display()));
+    }
+
+    let parent_path = canonical
+        .parent()
+        .map(|parent| parent.to_string_lossy().to_string());
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&canonical).map_err(|error| format!("failed to read directory: {error}"))? {
+        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+        let metadata = entry.metadata().map_err(|error| format!("failed to read entry metadata: {error}"))?;
+        let path = entry.path().to_string_lossy().to_string();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        let kind = if metadata.is_dir() {
+            RemoteFileKind::Directory
+        } else if metadata.is_symlink() {
+            RemoteFileKind::Symlink
+        } else if metadata.is_file() {
+            RemoteFileKind::File
+        } else {
+            RemoteFileKind::Other
+        };
+
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+
+        entries.push(LocalFileEntry {
+            path,
+            name,
+            kind,
+            size: if metadata.is_dir() { None } else { Some(metadata.len()) },
+            modified_at,
+        });
+    }
+
+    entries.sort_by(|left, right| match (&left.kind, &right.kind) {
+        (RemoteFileKind::Directory, RemoteFileKind::Directory) => left.name.cmp(&right.name),
+        (RemoteFileKind::Directory, _) => std::cmp::Ordering::Less,
+        (_, RemoteFileKind::Directory) => std::cmp::Ordering::Greater,
+        _ => left.name.cmp(&right.name),
+    });
+
+    Ok(LocalDirectoryListing {
+        path: canonical.to_string_lossy().to_string(),
+        parent_path,
+        entries,
+    })
 }
 
 fn contains_shell_metacharacters(input: &str) -> bool {

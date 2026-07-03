@@ -175,6 +175,8 @@ const zhCN = {
   'fileManager.actions.parent': '返回上级目录',
   'fileManager.actions.refresh': '刷新',
   'fileManager.actions.more': '更多操作',
+  'fileManager.actions.filter': 'Filter',
+  'fileManager.actions.actions': 'Actions',
   'fileManager.actions.openFolder': '打开文件夹',
   'fileManager.pathPlaceholder': '输入远程路径并回车',
   'fileManager.readOnly': '终端已断开，文件管理器当前仅支持查看。',
@@ -417,8 +419,6 @@ const zhCN = {
   'shortcuts.action.closeSession': '关闭当前会话',
   'shortcuts.action.nextTab': '下一个标签',
   'shortcuts.action.prevTab': '上一个标签',
-  'shortcuts.action.togglePrimarySidebar': '切换文件管理器',
-  'shortcuts.action.toggleSecondarySidebar': '切换侧边栏',
   'shortcuts.action.exportTerminal': '导出终端内容',
   'shortcuts.recording': '按下按键...',
   'shortcuts.reset': '重置',
@@ -429,12 +429,16 @@ const zhCN = {
   'hostKey.dialog.warning': '接受未知主机的密钥存在安全风险。如果指纹不正确，您的连接可能被窃听。',
   'hostKey.dialog.trustAndConnect': '信任并连接',
   'snippets.subtitle': '命令',
-  'snippets.title': '命令片段',
+  'snippets.title': 'Snippets',
   'snippets.empty': '还没有保存的命令片段，点击 + 添加。',
   'snippets.add': '添加片段',
   'snippets.edit': '编辑',
   'snippets.delete': '删除',
   'snippets.send': '发送到终端',
+  'snippets.newSnippet': 'New snippet',
+  'snippets.shellHistory': 'Shell History',
+  'snippets.empty.title': 'Create snippet',
+  'snippets.empty.description': 'Save your most used commands as snippets to reuse them in one click.',
   'snippets.dialog.kicker': '新片段',
   'snippets.dialog.editKicker': '编辑片段',
   'snippets.dialog.title': '添加命令片段',
@@ -443,6 +447,97 @@ const zhCN = {
   'snippets.dialog.commandPlaceholder': '例如：sudo systemctl restart nginx',
   'snippets.dialog.save': '保存',
   'snippets.dialog.cancel': '取消',
+
+  // Keychain
+  'keychain.title': 'Keys',
+  'keychain.newKey': 'New key',
+  'keychain.toolbar.certificate': 'Certificate',
+  'keychain.toolbar.touchId': 'Touch ID',
+  'keychain.toolbar.fido2': 'FIDO2',
+  'keychain.type': 'Type {type}',
+  'keychain.empty.title': 'Add a key',
+  'keychain.empty.description': 'Save SSH keys to use them across your hosts.',
+
+  // Navigation
+  'nav.my': '我的',
+  'nav.sftp': 'SFTP',
+  'nav.terminal': '终端',
+  'nav.myTooltip': '我的工作区',
+  'nav.sftpTooltip': '文件传输',
+  'nav.terminalTooltip': '终端会话',
+
+  // My section
+  'my.menu.savedConnections': 'Hosts',
+  'my.menu.recentConnections': '最近连接',
+  'my.menu.keychain': 'Keychain',
+  'my.menu.portForwards': '端口转发',
+  'my.menu.snippets': 'Snippets',
+  'my.menu.knownHosts': 'Known Hosts',
+  'my.menu.logs': '日志',
+  'my.menu.settings': '设置',
+  'my.newConnection': '新建连接',
+
+  // Saved connections
+  'savedConnections.title': 'Hosts',
+  'savedConnections.empty': '暂无已保存连接。',
+  'savedConnections.connect': 'Connect',
+  'savedConnections.newHost': 'New host',
+  'savedConnections.terminal': 'Terminal',
+  'savedConnections.serial': 'Serial',
+  'savedConnections.searchPlaceholder': 'Find a host or ssh user@hostname...',
+  'savedConnections.edit': '编辑',
+  'savedConnections.delete': '删除',
+  'savedConnections.empty.title': 'No hosts yet',
+  'savedConnections.empty.description': 'Add a host to get started.',
+  'savedConnections.empty.noMatch': 'No hosts match your search.',
+
+  // Recent connections
+  'recentConnections.title': '最近连接',
+  'recentConnections.empty': '暂无最近连接。',
+  'recentConnections.connect': '重连',
+  'recentConnections.clear': '清空历史',
+
+  // Port forwards
+  'portForwards.title': '端口转发',
+  'portForwards.empty': '暂无端口转发规则。',
+  'portForwards.localPort': '本地端口',
+  'portForwards.remoteHost': '远程主机',
+  'portForwards.remotePort': '远程端口',
+  'portForwards.newForwarding': 'New forwarding',
+  'portForwards.empty.title': 'Set up port forwarding',
+  'portForwards.empty.description': 'Save port forwarding to access databases, web apps, and other services.',
+
+  // Known hosts
+  'knownHosts.title': 'Known Hosts',
+  'knownHosts.empty': '暂无已知主机。',
+  'knownHosts.remove': '移除',
+  'knownHosts.removeConfirm': '移除 {host} 的信任主机密钥？',
+  'knownHosts.import': 'Import',
+  'knownHosts.empty.title': 'No known hosts',
+  'knownHosts.empty.description': 'Known hosts will appear here once you connect to a server.',
+
+  // Logs
+  'logs.title': '应用日志',
+  'logs.empty': '暂无日志文件。',
+  'logs.refresh': '刷新',
+  'logs.upgrade.title': 'Logs are not available on your current plan',
+  'logs.upgrade.action': 'Upgrade',
+  'logs.upgrade.description': 'to enable logs.',
+
+  // SFTP
+  'sftp.local': '本地文件',
+  'sftp.remote': '远程文件',
+  'sftp.remoteTabs': '远程会话',
+  'sftp.empty': '未连接远程会话。请从“我的”连接或在终端新建会话。',
+  'sftp.empty.title': 'No remote session',
+  'sftp.empty.description': 'Connect to a remote host to browse its file system.',
+  'sftp.newConnection': '新建连接',
+  'sftp.addRemote': '添加远程',
+
+  // Terminal
+  'terminal.newTab': '新建连接',
+  'terminal.empty.title': '没有终端会话',
+  'terminal.empty.description': '点击 + 新建 SSH 会话',
 } as const;
 
 export default zhCN;

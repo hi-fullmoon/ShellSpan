@@ -9,11 +9,13 @@ export interface SettingsPanelProps {
   preferences: AppPreferences;
   onChange: (nextPreferences: AppPreferences) => void;
   showTabs?: boolean;
+  activeTab?: SettingsTab;
+  onTabChange?: (tab: SettingsTab) => void;
 }
 
-type SettingsTab = 'appearance' | 'language' | 'terminal' | 'behavior' | 'shortcuts';
+export type SettingsTab = 'appearance' | 'language' | 'terminal' | 'behavior' | 'shortcuts';
 
-const tabs: { key: SettingsTab; labelKey: string }[] = [
+export const SETTINGS_TABS: { key: SettingsTab; labelKey: string }[] = [
   { key: 'appearance', labelKey: 'settings.tabAppearance' },
   { key: 'language', labelKey: 'settings.tabLanguage' },
   { key: 'terminal', labelKey: 'settings.tabTerminal' },
@@ -22,14 +24,12 @@ const tabs: { key: SettingsTab; labelKey: string }[] = [
 ];
 
 function PreferenceSelect<T extends string>({
-  id,
   label,
   hint,
   value,
   onChange,
   options,
 }: {
-  id: string;
   label: string;
   hint: string;
   value: T;
@@ -37,12 +37,11 @@ function PreferenceSelect<T extends string>({
   options: Array<{ value: T; label: string }>;
 }) {
   return (
-    <label className="settings-field" htmlFor={id}>
+    <label className="settings-field">
       <span className="settings-field-label">{label}</span>
       <FormSelect
         aria-label={label}
         className="settings-select"
-        id={id}
         onChange={(nextValue) => onChange(nextValue as T)}
         options={options.map((o) => ({ label: o.label, value: o.value }))}
         value={value}
@@ -186,8 +185,19 @@ function ShortcutRow({
   );
 }
 
-export function SettingsPanel({ preferences, onChange, showTabs = true }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
+export function SettingsPanel({
+  preferences,
+  onChange,
+  showTabs = true,
+  activeTab: controlledActiveTab,
+  onTabChange,
+}: SettingsPanelProps) {
+  const [internalActiveTab, setInternalActiveTab] = useState<SettingsTab>('appearance');
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = (tab: SettingsTab) => {
+    setInternalActiveTab(tab);
+    onTabChange?.(tab);
+  };
 
   const shortcuts = { ...DEFAULT_SHORTCUTS, ...preferences.keyboardShortcuts };
 
@@ -209,7 +219,7 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
       {showTabs && (
         /* Tab bar */
         <div className="settings-tab-bar pt-2 mx-2">
-          {tabs.map((tab) => (
+          {SETTINGS_TABS.map((tab) => (
             <button
               key={tab.key}
               className={`settings-tab ${activeTab === tab.key ? 'settings-tab-active' : ''}`}
@@ -237,7 +247,6 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
 
               <PreferenceSelect<ThemePreference>
                 hint={t('settings.themeHint')}
-                id="settings-theme"
                 label={t('settings.theme')}
                 onChange={(theme) => onChange({ ...preferences, theme })}
                 options={[
@@ -246,14 +255,6 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
                   { value: 'light', label: t('settings.theme.light') },
                 ]}
                 value={preferences.theme}
-              />
-
-              <PreferenceCheckbox
-                checked={preferences.showFileManager}
-                hint={t('settings.showFileManagerHint')}
-                id="settings-show-file-manager"
-                label={t('settings.showFileManager')}
-                onChange={(showFileManager) => onChange({ ...preferences, showFileManager })}
               />
             </section>
           </div>
@@ -275,7 +276,6 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
 
               <PreferenceSelect<LocalePreference>
                 hint={t('settings.languageHint')}
-                id="settings-language"
                 label={t('settings.language')}
                 onChange={(locale) => onChange({ ...preferences, locale })}
                 options={[
@@ -337,7 +337,6 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
 
               <PreferenceSelect<TerminalTheme>
                 hint={t('settings.terminalThemeHint')}
-                id="settings-terminal-theme"
                 label={t('settings.terminalTheme')}
                 onChange={(terminalTheme) => onChange({ ...preferences, terminalTheme })}
                 options={[
@@ -353,7 +352,6 @@ export function SettingsPanel({ preferences, onChange, showTabs = true }: Settin
 
               <PreferenceSelect<CursorStyle>
                 hint={t('settings.cursorStyleHint')}
-                id="settings-cursor-style"
                 label={t('settings.cursorStyle')}
                 onChange={(cursorStyle) => onChange({ ...preferences, cursorStyle })}
                 options={[

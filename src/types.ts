@@ -12,9 +12,18 @@ export type ShortcutAction =
   | 'closeSession'
   | 'nextTab'
   | 'prevTab'
-  | 'togglePrimarySidebar'
-  | 'toggleSecondarySidebar'
   | 'exportTerminal';
+
+export type AppSection = 'my' | 'sftp' | 'terminal';
+
+export type MyMenuKey =
+  | 'savedConnections'
+  | 'recentConnections'
+  | 'keychain'
+  | 'portForwards'
+  | 'snippets'
+  | 'knownHosts'
+  | 'logs';
 
 export interface AppPreferences {
   theme: ThemePreference;
@@ -220,6 +229,44 @@ export interface CommandSnippet {
   id: string;
   name: string;
   command: string;
+}
+
+export interface RecentConnection {
+  id: string;
+  host: string;
+  port: number;
+  username: string;
+  name?: string;
+  connectedAt: number;
+  authMethod: AuthMethod;
+  privateKeyPath?: string;
+}
+
+export interface KnownHostEntry {
+  host: string;
+  port: number;
+  fingerprint: string;
+  keyType: string;
+}
+
+export interface LogFileInfo {
+  name: string;
+  size: number;
+  modifiedAt: number;
+}
+
+export interface LocalFileEntry {
+  path: string;
+  name: string;
+  kind: RemoteFileKind;
+  size?: number;
+  modifiedAt?: number;
+}
+
+export interface LocalDirectoryListing {
+  path: string;
+  parentPath?: string;
+  entries: LocalFileEntry[];
 }
 
 export type UpdateAction =

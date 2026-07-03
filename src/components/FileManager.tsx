@@ -8,7 +8,30 @@ import {
   type RowDoubleClickedEvent,
   type SelectionChangedEvent,
 } from 'ag-grid-community';
-import { ArrowUpIcon, BookmarkIcon, CloseIcon, DotsIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon, Tooltip, ScrollArea, Toast, type ToastAction } from './ui';
+import {
+  ArrowUpIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BookmarkIcon,
+  CloseIcon,
+  CodeFileIcon,
+  DotsIcon,
+  FileIcon,
+  FolderIcon,
+  HtmlFileIcon,
+  ImageIcon,
+  JsonFileIcon,
+  LinkIcon,
+  MarkdownFileIcon,
+  RefreshIcon,
+  SearchIcon,
+  ServerIcon,
+  ChevronDownIcon,
+  Tooltip,
+  ScrollArea,
+  Toast,
+  type ToastAction,
+} from './ui';
 import { AgGridReact } from 'ag-grid-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -22,7 +45,7 @@ import { isTauriRuntime } from '../lib/tauri';
 import { useOperationStore } from '../stores/operationStore';
 import { useFileManagerStore } from '../stores/fileManagerStore';
 import { useContextMenu } from '../hooks/useContextMenu';
-import { cn, fileKindColor } from '../lib/ui';
+import { cn, detectFileType, fileKindColor } from '../lib/ui';
 import { Input, Checkbox } from '@chakra-ui/react';
 import type {
   DeleteProgressEvent,
@@ -232,6 +255,21 @@ function parentDirectoryPath(path: string) {
   return `${normalized.startsWith('/') ? '/' : ''}${parts.join('/')}`;
 }
 
+function buildRemoteBreadcrumbs(path: string) {
+  const normalized = path.replace(/\\/g, '/');
+  const isAbsolute = normalized.startsWith('/');
+  const parts = normalized.split('/').filter(Boolean);
+  const crumbs: { name: string; path: string }[] = [];
+  let current = isAbsolute ? '' : '.';
+
+  for (const part of parts) {
+    current = current === '' ? `/${part}` : `${current}/${part}`;
+    crumbs.push({ name: part, path: current });
+  }
+
+  return crumbs;
+}
+
 function kindLabel(kind: RemoteFileKind) {
   switch (kind) {
     case 'directory':
@@ -307,15 +345,44 @@ function formatGroup(entry: RemoteFileEntry) {
   return entry.groupName?.trim() ? entry.groupName : entry.groupGid !== undefined ? `G${entry.groupGid}` : '--';
 }
 
+function FileTypeIcon({ name, kind }: { name: string; kind: RemoteFileKind }) {
+  const type = detectFileType(name, kind);
+  const colorClass = kind === 'directory' ? 'text-sky-400' : fileKindColor(kind);
+
+  switch (type) {
+    case 'folder':
+      return <FolderIcon className={cn('h-5 w-5', colorClass)} />;
+    case 'image':
+      return <ImageIcon className={cn('h-5 w-5', colorClass)} />;
+    case 'json':
+      return <JsonFileIcon className={cn('h-5 w-5', colorClass)} />;
+    case 'markdown':
+      return <MarkdownFileIcon className={cn('h-5 w-5', colorClass)} />;
+    case 'html':
+      return <HtmlFileIcon className={cn('h-5 w-5', colorClass)} />;
+    case 'code':
+      return <CodeFileIcon className={cn('h-5 w-5', colorClass)} />;
+    case 'symlink':
+      return <LinkIcon className={cn('h-5 w-5', colorClass)} />;
+    default:
+      return <FileIcon className={cn('h-5 w-5', colorClass)} />;
+  }
+}
+
 function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
   if (!data) {
     return null;
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-0.5">
-      <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center', fileKindColor(data.kind))}>{fileKindIcon(data.kind)}</span>
-      <span className="file-entry-name truncate text-[13px] font-medium leading-5 tracking-[0.01em]">{data.name}</span>
+    <div className="flex min-w-0 items-center gap-2 py-0.5">
+      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+        <FileTypeIcon kind={data.kind} name={data.name} />
+      </span>
+      <div className="flex min-w-0 flex-col">
+        <span className="file-entry-name truncate text-[13px] font-medium leading-5 tracking-[0.01em]">{data.name}</span>
+        <span className="truncate text-[10px] text-[var(--app-text-muted)]">{formatPermissionSymbolic(data.permissions, data.kind)}</span>
+      </div>
     </div>
   );
 }
@@ -519,8 +586,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         cellRenderer: NameCellRenderer,
         field: 'name',
         headerName: t('fileManager.columns.name'),
-        width: 240,
-        minWidth: 160,
+        width: 260,
+        minWidth: 180,
         resizable: true,
         suppressMovable: true,
         tooltipField: 'name',
@@ -529,22 +596,12 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       {
         field: 'modifiedAt',
         headerName: t('fileManager.columns.time'),
-        width: 142,
-        minWidth: 142,
+        width: 150,
+        minWidth: 150,
         resizable: true,
         suppressMovable: true,
         valueFormatter: ({ data }) => (data ? formatModified(data.modifiedAt) : '--'),
         cellClass: 'tabular-nums',
-      },
-      {
-        field: 'kind',
-        headerName: t('fileManager.columns.type'),
-        width: 88,
-        minWidth: 88,
-        resizable: true,
-        suppressMovable: true,
-        valueGetter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
-        valueFormatter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
       },
       {
         field: 'size',
@@ -556,9 +613,19 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         valueFormatter: ({ data }) => (data ? (data.kind === 'directory' ? '--' : formatSize(data.size)) : '--'),
       },
       {
+        field: 'kind',
+        headerName: t('fileManager.columns.type'),
+        width: 80,
+        minWidth: 80,
+        resizable: true,
+        suppressMovable: true,
+        valueGetter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
+        valueFormatter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
+      },
+      {
         headerName: t('fileManager.columns.permissions'),
-        width: 148,
-        minWidth: 148,
+        width: 120,
+        minWidth: 120,
         resizable: true,
         suppressMovable: true,
         valueGetter: ({ data }) => (data ? formatPermissionSymbolic(data.permissions, data.kind) : '--'),
@@ -567,8 +634,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       },
       {
         headerName: t('fileManager.columns.owner'),
-        width: 88,
-        minWidth: 88,
+        width: 80,
+        minWidth: 80,
         resizable: true,
         suppressMovable: true,
         valueGetter: ({ data }) => (data ? formatOwner(data) : '--'),
@@ -577,8 +644,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       },
       {
         headerName: t('fileManager.columns.group'),
-        width: 88,
-        minWidth: 88,
+        width: 80,
+        minWidth: 80,
         resizable: true,
         suppressMovable: true,
         valueGetter: ({ data }) => (data ? formatGroup(data) : '--'),
@@ -1888,23 +1955,31 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     openContextMenu(mouseEvent.clientX, mouseEvent.clientY);
   };
 
+  const headerTitle = session ? session.title : t('fileManager.title.inactive');
+  const breadcrumbs = currentPath ? buildRemoteBreadcrumbs(currentPath) : [];
+
   return (
-    <aside className="surface relative flex min-h-0 flex-col overflow-hidden font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
-      <div className="surface-header">
-        <div className="min-w-0">
-          <p className="label">{t('fileManager.subtitle')}</p>
-          <h3 className="themed-heading truncate text-[13px] font-semibold tracking-[0.01em]">
-            {session ? t('fileManager.title.active') : t('fileManager.title.inactive')}
-          </h3>
+    <aside className="relative flex min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] font-['PingFang_SC','Hiragino_Sans_GB','Microsoft_YaHei_UI','Noto_Sans_SC','Source_Han_Sans_SC',sans-serif]">
+      <div className="flex h-11 items-center justify-between border-b border-[var(--app-border)] px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="grid h-6 w-6 shrink-0 place-items-center rounded bg-[var(--app-primary-bg)] text-[var(--app-primary-text)]">
+            <ServerIcon />
+          </div>
+          <span className="truncate text-sm font-semibold text-[var(--app-text)]">{headerTitle}</span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="file-manager-count px-2 py-1 text-[10px]">
-            {listing ? (filterQuery.trim() ? `${filteredEntries.length} / ${listing.entries.length}` : listing.entries.length) : ''}
-          </span>
+          <button className="btn-ghost h-7 gap-1 px-2 text-xs" type="button">
+            <SearchIcon className="h-3.5 w-3.5" />
+            {t('fileManager.actions.filter')}
+          </button>
+          <button className="btn-ghost h-7 gap-1 px-2 text-xs" type="button">
+            {t('fileManager.actions.actions')}
+            <ChevronDownIcon className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-1 p-1">
+      <div className="flex min-h-0 flex-1 flex-col">
         {!session ? (
           <div className="surface-muted flex flex-1 items-center justify-center p-3 text-center text-xs text-slate-400 rounded-sm">
             {t('fileManager.empty.noSession')}
@@ -1915,30 +1990,42 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
           </div>
         ) : (
           <>
-            <form className="flex items-center gap-1" onSubmit={(event) => void handlePathSubmit(event)}>
+            <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-1.5">
               <button
                 aria-label={t('fileManager.actions.parent')}
-                className="icon-btn h-6 w-6 px-0"
+                className="icon-btn h-6 w-6"
                 disabled={!ready || !listing?.parentPath || loading || working}
                 onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
                 type="button"
               >
                 <Tooltip content={t('fileManager.actions.parent')}>
-                  <ArrowUpIcon />
+                  <ArrowUpIcon className="h-4 w-4" />
                 </Tooltip>
               </button>
-              <Input
-                className="themed-input !h-6 min-w-0 flex-1 px-2 py-0.5 font-mono text-[12px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
-                disabled={readOnly || loading || working}
-                onChange={(event) => setPathInput(event.target.value)}
-                placeholder={t('fileManager.pathPlaceholder')}
-                size="xs"
-                value={pathInput}
-              />
+              <button className="icon-btn h-6 w-6" disabled type="button">
+                <ArrowLeftIcon className="h-4 w-4" />
+              </button>
+              <button className="icon-btn h-6 w-6" disabled type="button">
+                <ArrowRightIcon className="h-4 w-4" />
+              </button>
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2 py-1">
+                {breadcrumbs.map((crumb, index) => (
+                  <span key={crumb.path} className="flex items-center gap-1">
+                    {index > 0 && <span className="text-[var(--app-text-muted)]">/</span>}
+                    <button
+                      className="truncate text-xs text-[var(--app-text-soft)] hover:text-[var(--app-text)]"
+                      onClick={() => void loadDirectory(crumb.path)}
+                      type="button"
+                    >
+                      {crumb.name}
+                    </button>
+                  </span>
+                ))}
+              </div>
               {bookmarks.length > 0 && (
                 <button
                   aria-label={t('fileManager.bookmarks.jump')}
-                  className={cn('icon-btn h-6 w-6 px-0', isCurrentPathBookmarked && 'text-amber-400')}
+                  className={cn('icon-btn h-6 w-6', isCurrentPathBookmarked && 'text-amber-400')}
                   disabled={!ready || !currentPath || loading || working}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1948,47 +2035,39 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                   type="button"
                 >
                   <Tooltip content={t('fileManager.bookmarks.jump')}>
-                    <BookmarkIcon />
+                    <BookmarkIcon className="h-4 w-4" />
                   </Tooltip>
                 </button>
               )}
               <button
                 aria-label={t('fileManager.actions.refresh')}
-                className="icon-btn h-6 w-6 px-0"
+                className="icon-btn h-6 w-6"
                 disabled={!ready || loading || working}
                 onClick={() => void loadDirectory(currentPath)}
                 type="button"
               >
                 <Tooltip content={t('fileManager.actions.refresh')}>
-                  <RefreshIcon />
+                  <RefreshIcon className="h-4 w-4" />
                 </Tooltip>
               </button>
-              <button
-                aria-label={t('fileManager.actions.more')}
-                className="icon-btn h-6 w-6 px-0"
-                disabled={!ready || !currentPath || loading || working}
-                onClick={openToolbarMenu}
-                type="button"
-              >
-                <Tooltip content={t('fileManager.actions.more')}>
-                  <DotsIcon />
-                </Tooltip>
-              </button>
-            </form>
+            </div>
 
             {listing && (
-              <div className="flex items-center gap-1 px-0.5">
-                <Input
-                  className="themed-input !h-6 min-w-0 flex-1 px-2 py-0.5 text-[11px] leading-5 outline-none transition focus:ring-1 focus:ring-cyan-400/50"
-                  onChange={(event) => setFilterQuery(event.target.value)}
-                  placeholder={t('fileManager.filterPlaceholder')}
-                  size="xs"
-                  type="text"
-                  value={filterQuery}
-                />
+              <div className="flex items-center gap-1 border-b border-[var(--app-border)] px-3 py-1.5">
+                <div className="flex flex-1 items-center gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2 py-1">
+                  <SearchIcon className="h-3.5 w-3.5 text-[var(--app-text-muted)]" />
+                  <input
+                    className="h-4 flex-1 border-0 bg-transparent p-0 text-xs text-[var(--app-text)] placeholder:text-[var(--app-text-muted)] outline-none"
+                    disabled={readOnly || loading || working}
+                    onChange={(event) => setFilterQuery(event.target.value)}
+                    placeholder={t('fileManager.filterPlaceholder')}
+                    type="text"
+                    value={filterQuery}
+                  />
+                </div>
                 {filterQuery.trim() && (
-                  <button className="icon-btn h-6 w-6 px-0 text-[10px]" onClick={() => setFilterQuery('')} type="button">
-                    <CloseIcon />
+                  <button className="icon-btn h-6 w-6 text-[10px]" onClick={() => setFilterQuery('')} type="button">
+                    <CloseIcon className="h-4 w-4" />
                   </button>
                 )}
               </div>

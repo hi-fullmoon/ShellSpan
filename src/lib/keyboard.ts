@@ -17,8 +17,6 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   'closeSession',
   'nextTab',
   'prevTab',
-  'togglePrimarySidebar',
-  'toggleSecondarySidebar',
   'exportTerminal',
 ];
 
@@ -29,8 +27,6 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   closeSession: 'CmdOrCtrl+W',
   nextTab: 'CmdOrCtrl+Tab',
   prevTab: 'CmdOrCtrl+Shift+Tab',
-  togglePrimarySidebar: 'CmdOrCtrl+Shift+E',
-  toggleSecondarySidebar: 'CmdOrCtrl+Shift+S',
   exportTerminal: 'CmdOrCtrl+Shift+T',
 };
 
@@ -41,8 +37,6 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   closeSession: 'shortcuts.action.closeSession',
   nextTab: 'shortcuts.action.nextTab',
   prevTab: 'shortcuts.action.prevTab',
-  togglePrimarySidebar: 'shortcuts.action.togglePrimarySidebar',
-  toggleSecondarySidebar: 'shortcuts.action.toggleSecondarySidebar',
   exportTerminal: 'shortcuts.action.exportTerminal',
 };
 

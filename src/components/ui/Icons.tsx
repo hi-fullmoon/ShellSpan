@@ -465,3 +465,186 @@ export function AlertIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function HostsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <path d="M5 6.5h6" />
+      <path d="M5 9.5h6" />
+    </svg>
+  );
+}
+
+export function KeychainIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="6.5" cy="7" r="2.5" />
+      <path d="M8.5 8.5 13.5 13.5" />
+      <path d="M11 11l2.5 2.5" />
+      <path d="M12.5 9.5 14 11" />
+    </svg>
+  );
+}
+
+export function SendIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M14 2 7 9" />
+      <path d="M14 2 9.5 13.5 7 9 2.5 6.5 14 2z" />
+    </svg>
+  );
+}
+
+export function ImageIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
+      <circle cx="5.5" cy="6.5" r="1" />
+      <path d="m3 11.5 3-3 2.5 2.5 2-2 2.5 2.5" />
+    </svg>
+  );
+}
+
+export function CodeFileIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5 2.5h4l2 2v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" />
+      <path d="M9 2.5v2h2" />
+      <path d="M6 7.5l1.5 1.5L6 10.5" />
+      <path d="M9 7.5 7.5 9 9 10.5" />
+    </svg>
+  );
+}
+
+export function JsonFileIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5 2.5h4l2 2v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" />
+      <path d="M9 2.5v2h2" />
+      <path d="M6.5 9V7" />
+      <path d="M8 6.5h1" />
+      <path d="M9.5 9V7" />
+    </svg>
+  );
+}
+
+export function MarkdownFileIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5 2.5h4l2 2v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" />
+      <path d="M9 2.5v2h2" />
+      <path d="M6.5 10V6.5l1.5 2 1.5-2V10" />
+    </svg>
+  );
+}
+
+export function HtmlFileIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5 2.5h4l2 2v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" />
+      <path d="M9 2.5v2h2" />
+      <path d="M6 8.5l1-2 1 2 1-2 1 2" />
+    </svg>
+  );
+}
+
+export function ForwardingIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M3.5 5.5 8 2.5l4.5 3" />
+      <path d="M3.5 10.5 8 13.5l4.5-3" />
+    </svg>
+  );
+}
+
+export function SnippetsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5.5 4.5h-2v7h2" />
+      <path d="M10.5 4.5h2v7h-2" />
+      <path d="M7.5 6.5h1" />
+      <path d="M7.5 9.5h1" />
+    </svg>
+  );
+}
+
+export function FingerprintIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M5 4c0-1.7 1.3-3 3-3s3 1.3 3 3" />
+      <path d="M4 7.5c0-2.2 1.8-4 4-4s4 1.8 4 4" />
+      <path d="M3 11c0-2.8 2.2-5 5-5s5 2.2 5 5" />
+      <path d="M5 14.5c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5" />
+    </svg>
+  );
+}
+
+export function ClockIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 5v3l2 2" />
+    </svg>
+  );
+}
+
+export function LayoutGridIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" />
+      <rect x="9" y="2.5" width="4.5" height="4.5" rx="1" />
+      <rect x="2.5" y="9" width="4.5" height="4.5" rx="1" />
+      <rect x="9" y="9" width="4.5" height="4.5" rx="1" />
+    </svg>
+  );
+}
+
+export function LayoutListIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <rect x="2.5" y="3" width="3" height="3" rx=".8" />
+      <path d="M7 4.5h6.5" />
+      <rect x="2.5" y="10" width="3" height="3" rx=".8" />
+      <path d="M7 11.5h6.5" />
+    </svg>
+  );
+}
+
+export function UbuntuIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)} viewBox="0 0 24 24" width="16" height="16">
+      <circle cx="12" cy="12" r="4.5" fill="none" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="8.5" cy="17.5" r="1.5" fill="currentColor" />
+      <circle cx="8.5" cy="6.5" r="1.5" fill="currentColor" />
+      <path d="M15 9.5a5.5 5.5 0 0 1 0 5" fill="none" />
+      <path d="M9 15a5.5 5.5 0 0 1-3-1" fill="none" />
+      <path d="M9 9a5.5 5.5 0 0 1-3 1" fill="none" />
+    </svg>
+  );
+}
+
+export function KeyTypeEcdsaIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)} viewBox="0 0 24 24" width="16" height="16">
+      <path d="M12 2v20" />
+      <path d="M2 12h20" />
+      <path d="M4.9 4.9l14.2 14.2" />
+      <path d="M19.1 4.9 4.9 19.1" />
+      <circle cx="12" cy="12" r="4" fill="none" />
+    </svg>
+  );
+}
+
+export function KeyTypeRsaIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)} viewBox="0 0 24 24" width="16" height="16">
+      <circle cx="7" cy="12" r="3.5" />
+      <path d="M10.5 12h9" />
+      <path d="M17 12v4" />
+      <path d="M20 12v2.5" />
+    </svg>
+  );
+}

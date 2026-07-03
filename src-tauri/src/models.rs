@@ -364,6 +364,40 @@ pub(crate) enum RemoteFileKind {
     Other,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KnownHostEntry {
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) fingerprint: String,
+    pub(crate) key_type: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LogFileInfo {
+    pub(crate) name: String,
+    pub(crate) size: u64,
+    pub(crate) modified_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalDirectoryListing {
+    pub(crate) path: String,
+    pub(crate) parent_path: Option<String>,
+    pub(crate) entries: Vec<LocalFileEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalFileEntry {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) kind: RemoteFileKind,
+    pub(crate) size: Option<u64>,
+    pub(crate) modified_at: Option<u64>,
+}
 pub(crate) enum SessionCommand {
     Write(String),
     Resize { cols: u32, rows: u32 },

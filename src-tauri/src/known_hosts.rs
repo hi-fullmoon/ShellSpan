@@ -110,7 +110,7 @@ fn base64url_encode(input: &[u8]) -> String {
     result
 }
 
-fn compute_fingerprint(key: &[u8], key_type: HostKeyType) -> String {
+pub(crate) fn compute_fingerprint(key: &[u8], key_type: HostKeyType) -> String {
     use sha2::{Digest, Sha256};
     let hash = Sha256::digest(key);
     let b64 = base64url_encode(&hash);

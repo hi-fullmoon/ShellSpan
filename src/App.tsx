@@ -5,26 +5,22 @@ import { CloseSessionDialog } from './components/CloseSessionDialog';
 import { ConnectDialog } from './components/ConnectDialog';
 import { DeleteProfileDialog } from './components/DeleteProfileDialog';
 import { ExitAppDialog } from './components/ExitAppDialog';
-import { FileManager } from './components/FileManager';
 import { HostKeyDialog } from './components/HostKeyDialog';
+import { MySection } from './components/MySection';
+import { SftpSection } from './components/SftpSection';
 import { StatusBar } from './components/StatusBar';
+import { TerminalSection } from './components/TerminalSection';
 import { TitleBar } from './components/TitleBar';
-import { SettingsDialog } from './components/SettingsDialog';
-import { Sidebar } from './components/Sidebar';
-import { SplitLayout } from './components/SplitLayout';
-import { SessionTabs } from './components/SessionTabs';
-import { TerminalPane, type TerminalPaneRef } from './components/TerminalPane';
-import { SnippetsPanel } from './components/SnippetsPanel';
+import { UpdateRestartDialog } from './components/UpdateRestartDialog';
 import { Toast, toaster } from './components/ui';
 import { Toast as ChakraToast, Toaster } from '@chakra-ui/react';
-import { UpdateRestartDialog } from './components/UpdateRestartDialog';
 import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { createLogger } from './lib/logger';
 import { createEmptyProfile } from './lib/profile';
-import { normalizePreferences, reorderSessions } from './lib/appHelpers';
-import { isTauriRuntime } from './lib/tauri';
+import { reorderSessions } from './lib/appHelpers';
 import { useFileManagerStore } from './stores/fileManagerStore';
-import { cn, sessionStatusTone } from './lib/ui';
+import { useAppStore } from './stores/appStore';
+import { useRecentConnectionsStore } from './stores/recentConnectionsStore';
 import { usePreferences } from './hooks/usePreferences';
 import { useSavedProfiles } from './hooks/useSavedProfiles';
 import { useSessions } from './hooks/useSessions';
@@ -32,12 +28,14 @@ import { useConnectionFlow } from './hooks/useConnectionFlow';
 import { useUpdateFlow } from './hooks/useUpdateFlow';
 import { useTauriSystemEvents, readPreferencesFromLocalStorage } from './hooks/useTauriSystemEvents';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import type { AppPreferences } from './types';
+import { type TerminalPaneRef } from './components/TerminalPane';
+import { listenSettingsChanged, openSettingsWindow } from './lib/settingsWindow';
+import type { AppPreferences, ConnectionProfile } from './types';
 
 const appLogger = createLogger('app');
 
 function App() {
-  const { storedPreferences, setStoredPreferences, preferences, appliedTheme } = usePreferences();
+  const { setStoredPreferences, preferences } = usePreferences();
   const {
     savedProfiles,
     setSavedProfiles,
@@ -50,10 +48,15 @@ function App() {
     confirmDeleteSavedProfile,
   } = useSavedProfiles();
 
+  const activeSection = useAppStore((state) => state.activeSection);
+  const setActiveSection = useAppStore((state) => state.setActiveSection);
+  const addRecentConnection = useRecentConnectionsStore((state) => state.add);
+
   const [errorMessage, setErrorMessage] = useState<string>();
   const removeFileManagerSessionState = useFileManagerStore((state) => state.removeSessionState);
   const replaceFileManagerSessionStateKey = useFileManagerStore((state) => state.replaceSessionStateKey);
   const terminalPaneRefs = useRef<Record<string, TerminalPaneRef>>({});
+  const connectFromSftpRef = useRef(false);
 
   const {
     sessions,
@@ -70,6 +73,24 @@ function App() {
     removeFileManagerSessionState,
     replaceFileManagerSessionStateKey,
   });
+
+  function handleSuccessfulConnection(profile: ConnectionProfile, sessionId: string) {
+    addRecentConnection({
+      host: profile.host,
+      port: profile.port,
+      username: profile.username,
+      name: profile.name,
+      authMethod: profile.authMethod,
+      privateKeyPath: profile.privateKeyPath,
+    });
+    if (connectFromSftpRef.current) {
+      setActiveSection('sftp');
+      useAppStore.getState().openSftpSession(sessionId);
+      connectFromSftpRef.current = false;
+    } else {
+      setActiveSection('terminal');
+    }
+  }
 
   const {
     draftProfile,
@@ -91,13 +112,12 @@ function App() {
     setActiveSessionId,
     pendingStatusEventsRef,
     setErrorMessage,
+    onSuccess: handleSuccessfulConnection,
   });
 
-  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string>();
-  const [reorderingSessions, setReorderingSessions] = useState(false);
   const [, setIntlVersion] = useState(0);
 
   const {
@@ -111,7 +131,9 @@ function App() {
   } = useUpdateFlow({ startupUpdateCheck: preferences.startupUpdateCheck });
 
   useTauriSystemEvents({
-    onOpenSettings: useCallback(() => setSettingsDialogOpen(true), []),
+    onOpenSettings: useCallback(() => {
+      void openSettingsWindow(preferences);
+    }, [preferences]),
     onRequestAppExit: useCallback(() => setExitDialogOpen(true), []),
     onAbout: useCallback(() => setAboutDialogOpen(true), []),
     onSettingsChangedExternal: useCallback(() => {
@@ -122,6 +144,16 @@ function App() {
     }, [setStoredPreferences]),
   });
 
+  useEffect(() => {
+    const stopListen = listenSettingsChanged((nextPreferences) => {
+      setStoredPreferences(() => nextPreferences);
+    });
+
+    return () => {
+      stopListen();
+    };
+  }, [setStoredPreferences]);
+
   const activeSession = useMemo(() => sessions.find((item) => item.sessionId === activeSessionId), [activeSessionId, sessions]);
   const connectedSessions = useMemo(() => sessions.filter((item) => item.status === 'connected').length, [sessions]);
   const pendingDeleteProfile = useMemo(
@@ -129,7 +161,6 @@ function App() {
     [pendingDeleteProfileId, savedProfiles],
   );
   const pendingCloseSession = useMemo(() => sessions.find((item) => item.sessionId === pendingCloseSessionId), [pendingCloseSessionId, sessions]);
-  const runtimeText = isTauriRuntime() ? t('runtime.desktop') : t('runtime.browser');
 
   syncI18nLocale(preferences.locale);
 
@@ -151,15 +182,37 @@ function App() {
     };
   }, [preferences.locale]);
 
+  const openConnectDialog = useCallback(() => {
+    connectFromSftpRef.current = false;
+    setDraftProfile(createEmptyProfile());
+    setErrorMessage(undefined);
+    setConnectDialogOpen(true);
+  }, [setDraftProfile, setConnectDialogOpen]);
+
+  const openConnectDialogFromSftp = useCallback(() => {
+    connectFromSftpRef.current = true;
+    setDraftProfile(createEmptyProfile());
+    setErrorMessage(undefined);
+    setConnectDialogOpen(true);
+  }, [setDraftProfile, setConnectDialogOpen]);
+
+  const handleOpenSettings = useCallback(() => {
+    void openSettingsWindow(preferences);
+  }, [preferences]);
+
+  const handleConnectProfile = useCallback(
+    async (profile: ConnectionProfile, remember = false, rememberPassword = false) => {
+      await handleConnect(profile, remember, rememberPassword);
+    },
+    [handleConnect],
+  );
+
   useKeyboardShortcuts({
     keyboardShortcuts: preferences.keyboardShortcuts,
-    showFileManager: preferences.showFileManager,
-    showSidebar: preferences.showSidebar,
     activeSessionId,
     dialogState: {
       hostKeyOpen: hostKeyDialog.open,
       connectOpen: connectDialogOpen,
-      settingsOpen: settingsDialogOpen,
       pendingDelete: !!pendingDeleteProfileId,
       pendingClose: !!pendingCloseSessionId,
       exitOpen: exitDialogOpen,
@@ -167,16 +220,11 @@ function App() {
     handlers: {
       closeHostKeyDialog: () => setHostKeyDialog({ open: false }),
       closeConnectDialog: () => setConnectDialogOpen(false),
-      closeSettingsDialog: () => setSettingsDialogOpen(false),
       cancelPendingDelete: () => setPendingDeleteProfileId(undefined),
       cancelPendingClose: () => setPendingCloseSessionId(undefined),
       closeExitDialog: () => setExitDialogOpen(false),
-      openNewConnection: () => {
-        setDraftProfile(createEmptyProfile());
-        setErrorMessage(undefined);
-        setConnectDialogOpen(true);
-      },
-      openSettings: () => setSettingsDialogOpen(true),
+      openNewConnection: openConnectDialog,
+      openSettings: handleOpenSettings,
       requestCloseActiveSession: () => {
         const currentSessions = sessionsRef.current;
         if (currentSessions.length > 0) {
@@ -196,14 +244,12 @@ function App() {
         if (currentSessions.length > 1) {
           const idx = currentSessions.findIndex((s) => s.sessionId === activeSessionId);
           const prev =
-            idx === -1 ? currentSessions[currentSessions.length - 1] : currentSessions[(idx - 1 + currentSessions.length) % currentSessions.length];
+            idx === -1
+              ? currentSessions[currentSessions.length - 1]
+              : currentSessions[(idx - 1 + currentSessions.length) % currentSessions.length];
           setActiveSessionId(prev.sessionId);
         }
       },
-      togglePrimarySidebar: () =>
-        setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager })),
-      toggleSecondarySidebar: () =>
-        setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar })),
       exportActiveTerminal: () => {
         const pane = activeSessionId ? terminalPaneRefs.current[activeSessionId] : undefined;
         if (pane) {
@@ -235,255 +281,173 @@ function App() {
     void invoke('request_app_exit');
   };
 
-  const handleTogglePrimarySide = useCallback(() => {
-    setStoredPreferences((prev) => ({ ...prev, showFileManager: !normalizePreferences(prev).showFileManager }));
-  }, [setStoredPreferences]);
+  const bookmarksByProfileId = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const profile of savedProfiles) {
+      if (profile.bookmarks?.length) {
+        map[profile.id] = profile.bookmarks;
+      }
+    }
+    return map;
+  }, [savedProfiles]);
 
-  const handleToggleSecondarySide = useCallback(() => {
-    setStoredPreferences((prev) => ({ ...prev, showSidebar: !normalizePreferences(prev).showSidebar }));
-  }, [setStoredPreferences]);
-
-  const workspaceContent = (
-    <section className="flex h-full w-full min-h-0 min-w-0 flex-col">
-      {errorMessage ? (
-        <div className="surface flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-rose-300">
-          <span className="truncate">{errorMessage}</span>
-          {activeSession ? (
-            <span className={cn('px-2 py-1 text-[10px]', sessionStatusTone(activeSession.status))}>
-              {activeSession.status === 'connected'
-                ? t('app.status.connected')
-                : activeSession.status === 'connecting'
-                  ? t('app.status.connecting')
-                  : activeSession.status === 'error'
-                    ? t('app.status.error')
-                    : t('app.status.disconnected')}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      <SessionTabs
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        onClose={(sessionId) => {
-          setPendingCloseSessionId(sessionId);
-        }}
-        onCloseAll={() => {
-          for (const session of sessions) {
-            if (!session.pinned) {
-              void handleCloseSession(session.sessionId);
-            }
-          }
-        }}
-        onCloseOthers={(sessionId) => {
-          for (const session of sessions) {
-            if (session.sessionId !== sessionId && !session.pinned) {
-              void handleCloseSession(session.sessionId);
-            }
-          }
-        }}
-        onCloseToLeft={(sessionId) => {
-          const index = sessions.findIndex((s) => s.sessionId === sessionId);
-          if (index <= 0) return;
-          for (let i = 0; i < index; i++) {
-            if (!sessions[i].pinned) {
-              void handleCloseSession(sessions[i].sessionId);
-            }
-          }
-        }}
-        onCloseToRight={(sessionId) => {
-          const index = sessions.findIndex((s) => s.sessionId === sessionId);
-          if (index < 0 || index >= sessions.length - 1) return;
-          for (let i = index + 1; i < sessions.length; i++) {
-            if (!sessions[i].pinned) {
-              void handleCloseSession(sessions[i].sessionId);
-            }
-          }
-        }}
-        onDragStateChange={setReorderingSessions}
-        onRename={(sessionId, title) => {
-          setSessions((current) =>
-            current.map((session) =>
-              session.sessionId === sessionId
-                ? {
-                    ...session,
-                    title,
-                  }
-                : session,
-            ),
-          );
-        }}
-        onSetColor={(sessionId, color) => {
-          setSessions((current) =>
-            current.map((session) =>
-              session.sessionId === sessionId
-                ? {
-                    ...session,
-                    profile: {
-                      ...session.profile,
-                      color,
-                    },
-                  }
-                : session,
-            ),
-          );
-        }}
-        onTogglePin={(sessionId) => {
-          setSessions((current) => {
-            const next = current.map((session) =>
-              session.sessionId === sessionId
-                ? { ...session, pinned: !session.pinned }
-                : session,
-            );
-            return next.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
-          });
-        }}
-        onReorder={(draggedSessionId, insertIndex) => {
-          setSessions((current) => reorderSessions(current, draggedSessionId, insertIndex));
-        }}
-        onSelect={setActiveSessionId}
-      />
-
-      <section className="surface relative min-h-0 flex-1 overflow-hidden">
-        {sessions.length === 0 ? (
-          <div className="flex h-full min-h-70 flex-col justify-between gap-1 p-1.5">
-            <div className="flex flex-col gap-1">
-              <span className="label">{t('app.ready')}</span>
-              <h3 className="themed-heading text-base font-semibold">{t('app.emptyState.title')}</h3>
-              <p className="text-xs leading-5 text-slate-400">{t('app.emptyState.description')}</p>
-            </div>
-          </div>
-        ) : (
-          <div className="relative h-full min-h-0">
-            {sessions.map((session) => (
-              <TerminalPane
-                active={session.sessionId === activeSessionId}
-                copyOnSelect={preferences.copyOnSelect}
-                cursorBlink={preferences.cursorBlink}
-                cursorStyle={preferences.cursorStyle}
-                fontSize={preferences.terminalFontSize}
-                key={session.sessionId}
-                lineHeight={preferences.terminalLineHeight}
-                onReconnect={() => {
-                  void handleReconnectSession(session.sessionId);
-                }}
-                ref={(el) => {
-                  if (el) {
-                    terminalPaneRefs.current[session.sessionId] = el;
-                  } else {
-                    delete terminalPaneRefs.current[session.sessionId];
-                  }
-                }}
-                session={session}
-                terminalTheme={preferences.terminalTheme}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-    </section>
+  const handleAddBookmark = useCallback(
+    (profileId: string, path: string) => {
+      setSavedProfiles((prev) =>
+        prev.map((p) =>
+          p.id === profileId ? { ...p, bookmarks: [...new Set([...(p.bookmarks ?? []), path])] } : p,
+        ),
+      );
+    },
+    [setSavedProfiles],
   );
+
+  const handleRemoveBookmark = useCallback(
+    (profileId: string, path: string) => {
+      setSavedProfiles((prev) =>
+        prev.map((p) =>
+          p.id === profileId ? { ...p, bookmarks: (p.bookmarks ?? []).filter((b) => b !== path) } : p,
+        ),
+      );
+    },
+    [setSavedProfiles],
+  );
+
+  const renderSection = () => {
+    switch (activeSection) {
+      case 'my':
+        return (
+          <MySection
+            savedProfiles={savedProfiles}
+            onConnectProfile={(profile) => {
+              void handleConnectProfile(profile, false, false);
+            }}
+            onEditProfile={(profile) => {
+              void loadProfile(profile);
+            }}
+            onDeleteProfile={handleDeleteSavedProfile}
+            onTogglePinProfile={handleToggleSavedProfilePinned}
+            onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
+            onRenameProfile={handleRenameSavedProfile}
+            onOpenConnectDialog={openConnectDialog}
+            onSendSnippetCommand={(command) => {
+              const pane = activeSessionId ? terminalPaneRefs.current[activeSessionId] : undefined;
+              if (pane) {
+                pane.sendData(`${command}\r`);
+              }
+            }}
+          />
+        );
+      case 'sftp':
+        return (
+          <SftpSection
+            bookmarksByProfileId={bookmarksByProfileId}
+            onNewConnection={openConnectDialogFromSftp}
+            sessions={sessions}
+            onAddBookmark={handleAddBookmark}
+            onRemoveBookmark={handleRemoveBookmark}
+          />
+        );
+      case 'terminal':
+        return (
+          <TerminalSection
+            activeSessionId={activeSessionId}
+            errorMessage={errorMessage}
+            preferences={{
+              terminalFontSize: preferences.terminalFontSize,
+              terminalLineHeight: preferences.terminalLineHeight,
+              terminalTheme: preferences.terminalTheme,
+              cursorStyle: preferences.cursorStyle,
+              cursorBlink: preferences.cursorBlink,
+              copyOnSelect: preferences.copyOnSelect,
+            }}
+            sessions={sessions}
+            onCloseAllSessions={() => {
+              for (const session of sessions) {
+                if (!session.pinned) {
+                  void handleCloseSession(session.sessionId);
+                }
+              }
+            }}
+            onCloseOtherSessions={(sessionId) => {
+              for (const session of sessions) {
+                if (session.sessionId !== sessionId && !session.pinned) {
+                  void handleCloseSession(session.sessionId);
+                }
+              }
+            }}
+            onCloseSession={(sessionId) => setPendingCloseSessionId(sessionId)}
+            onCloseSessionsToLeft={(sessionId) => {
+              const index = sessions.findIndex((s) => s.sessionId === sessionId);
+              if (index <= 0) return;
+              for (let i = 0; i < index; i++) {
+                if (!sessions[i].pinned) {
+                  void handleCloseSession(sessions[i].sessionId);
+                }
+              }
+            }}
+            onCloseSessionsToRight={(sessionId) => {
+              const index = sessions.findIndex((s) => s.sessionId === sessionId);
+              if (index < 0 || index >= sessions.length - 1) return;
+              for (let i = index + 1; i < sessions.length; i++) {
+                if (!sessions[i].pinned) {
+                  void handleCloseSession(sessions[i].sessionId);
+                }
+              }
+            }}
+            onNewConnection={openConnectDialog}
+            onReconnectSession={(sessionId) => {
+              void handleReconnectSession(sessionId);
+            }}
+            onRenameSession={(sessionId, title) => {
+              setSessions((current) =>
+                current.map((session) =>
+                  session.sessionId === sessionId ? { ...session, title } : session,
+                ),
+              );
+            }}
+            onReorderSessions={(draggedSessionId, insertIndex) => {
+              setSessions((current) => reorderSessions(current, draggedSessionId, insertIndex));
+            }}
+            onSelectSession={setActiveSessionId}
+            onSetSessionColor={(sessionId, color) => {
+              setSessions((current) =>
+                current.map((session) =>
+                  session.sessionId === sessionId
+                    ? { ...session, profile: { ...session.profile, color } }
+                    : session,
+                ),
+              );
+            }}
+            onToggleSessionPin={(sessionId) => {
+              setSessions((current) => {
+                const next = current.map((session) =>
+                  session.sessionId === sessionId ? { ...session, pinned: !session.pinned } : session,
+                );
+                return next.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+              });
+            }}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <main className="h-screen overflow-hidden flex flex-col">
       <TitleBar
-        onTogglePrimarySide={handleTogglePrimarySide}
-        onToggleSecondarySide={handleToggleSecondarySide}
-        primarySideVisible={preferences.showFileManager}
-        secondarySideVisible={preferences.showSidebar}
+        activeSection={activeSection}
+        onSectionChange={setActiveSection}
       />
-      <div className="flex flex-1 gap-0 p-0 min-h-0">
-        <SplitLayout className="min-w-0 flex-1" storageKey="termbridge.layout.main">
-          <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showFileManager} defaultSize={320} minSize={280} name="fileManager">
-            {() => {
-              const activeProfileId = activeSession?.profile.id;
-              const activeBookmarks = activeProfileId
-                ? (savedProfiles.find((p) => p.id === activeProfileId)?.bookmarks ?? [])
-                : [];
-              return (
-                <FileManager
-                  bookmarks={activeBookmarks}
-                  ignoreWindowDragDrop={reorderingSessions}
-                  session={activeSession}
-                  onAddBookmark={(path) => {
-                    if (!activeProfileId) return;
-                    setSavedProfiles((prev) =>
-                      prev.map((p) =>
-                        p.id === activeProfileId
-                          ? { ...p, bookmarks: [...new Set([...(p.bookmarks ?? []), path])] }
-                          : p,
-                      ),
-                    );
-                  }}
-                  onRemoveBookmark={(path) => {
-                    if (!activeProfileId) return;
-                    setSavedProfiles((prev) =>
-                      prev.map((p) =>
-                        p.id === activeProfileId
-                          ? { ...p, bookmarks: (p.bookmarks ?? []).filter((b) => b !== path) }
-                          : p,
-                      ),
-                    );
-                  }}
-                />
-              );
-            }}
-          </SplitLayout.Slot>
 
-          <SplitLayout.Slot className="min-h-0" minSize={520} name="workspace">
-            {() => (
-              <SplitLayout className="w-full" storageKey="termbridge.layout.sidebar">
-                <SplitLayout.Slot className="min-h-0" defaultSize={520} minSize={320} name="tabs">
-                  {() => workspaceContent}
-                </SplitLayout.Slot>
-
-                <SplitLayout.Slot className="min-h-0" collapsed={!preferences.showSidebar} defaultSize={280} fixed minSize={240} name="sidebar">
-                  {() => (
-                    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-                      <Sidebar
-                        connectedCount={connectedSessions}
-                        runtimeLabel={runtimeText}
-                        savedProfiles={savedProfiles}
-                        onDeleteProfile={handleDeleteSavedProfile}
-                        onRenameProfile={handleRenameSavedProfile}
-                        onToggleFavoriteProfile={handleToggleSavedProfileFavorite}
-                        onTogglePinnedProfile={handleToggleSavedProfilePinned}
-                        onReuseProfile={loadProfile}
-                        onOpenConnect={() => {
-                          setDraftProfile(createEmptyProfile());
-                          setErrorMessage(undefined);
-                          setConnectDialogOpen(true);
-                        }}
-                      />
-                      <SnippetsPanel
-                        onSendCommand={(command) => {
-                          const pane = activeSessionId ? terminalPaneRefs.current[activeSessionId] : undefined;
-                          if (pane) {
-                            pane.sendData(command + '\r');
-                          }
-                        }}
-                      />
-                    </div>
-                  )}
-                </SplitLayout.Slot>
-              </SplitLayout>
-            )}
-          </SplitLayout.Slot>
-        </SplitLayout>
-      </div>
+      <div className="relative min-h-0 flex-1">{renderSection()}</div>
 
       <StatusBar
         sessions={sessions}
         activeSession={activeSession}
         updateState={updateState}
         updateDownloadProgress={updateDownloadProgress}
-      />
-
-      <SettingsDialog
-        onChange={setStoredPreferences}
-        onClose={() => setSettingsDialogOpen(false)}
-        open={settingsDialogOpen}
-        preferences={preferences}
       />
 
       <ConnectDialog
@@ -520,10 +484,7 @@ function App() {
         open={exitDialogOpen}
       />
 
-      <AboutDialog
-        onClose={() => setAboutDialogOpen(false)}
-        open={aboutDialogOpen}
-      />
+      <AboutDialog onClose={() => setAboutDialogOpen(false)} open={aboutDialogOpen} />
 
       <HostKeyDialog
         fingerprint={hostKeyDialog.fingerprint}
@@ -549,14 +510,14 @@ function App() {
         tone={updateToast?.tone ?? 'info'}
       />
       <Toaster toaster={toaster}>
-        {(t) => (
-          <ChakraToast.Root key={t.id} maxW="420px">
+        {(toastItem) => (
+          <ChakraToast.Root key={toastItem.id} maxW="420px">
             <ChakraToast.Indicator />
-            <ChakraToast.Title>{t.title}</ChakraToast.Title>
-            {t.description && <ChakraToast.Description>{t.description}</ChakraToast.Description>}
-            {t.action && (
-              <ChakraToast.ActionTrigger onClick={t.action.onClick}>
-                {t.action.label}
+            <ChakraToast.Title>{toastItem.title}</ChakraToast.Title>
+            {toastItem.description && <ChakraToast.Description>{toastItem.description}</ChakraToast.Description>}
+            {toastItem.action && (
+              <ChakraToast.ActionTrigger onClick={toastItem.action.onClick}>
+                {toastItem.action.label}
               </ChakraToast.ActionTrigger>
             )}
             <ChakraToast.CloseTrigger />

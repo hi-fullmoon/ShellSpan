@@ -11,7 +11,7 @@ import {
   type DragStartEvent,
   type UniqueIdentifier,
 } from '@dnd-kit/core';
-import { CloseIcon, PinIcon, ScrollArea } from './ui';
+import { CloseIcon, PinIcon, PlusIcon, ScrollArea } from './ui';
 import { SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -44,6 +44,7 @@ interface SessionTabsProps {
   onSetColor?: (sessionId: string, color?: string) => void;
   onTogglePin?: (sessionId: string) => void;
   onDragStateChange?: (dragging: boolean) => void;
+  onNewConnection?: () => void;
 }
 
 interface SessionTabCardProps {
@@ -445,6 +446,7 @@ export function SessionTabs({
   onSetColor,
   onTogglePin,
   onDragStateChange,
+  onNewConnection,
 }: SessionTabsProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [draggingSessionId, setDraggingSessionId] = useState<string>();
@@ -650,6 +652,16 @@ export function SessionTabs({
                   showDropIndicatorRight={index === sessions.length - 1 && insertIndex === sessions.length}
                 />
               ))}
+              {onNewConnection ? (
+                <button
+                  aria-label={t('terminal.newTab')}
+                  className="session-tab session-tab-inactive flex h-[34px] w-9 shrink-0 cursor-pointer items-center justify-center transition hover:bg-[var(--app-surface-muted)]"
+                  onClick={onNewConnection}
+                  type="button"
+                >
+                  <PlusIcon />
+                </button>
+              ) : null}
             </div>
           </SortableContext>
           {typeof document === 'undefined' ? dragOverlay : createPortal(dragOverlay, document.body)}

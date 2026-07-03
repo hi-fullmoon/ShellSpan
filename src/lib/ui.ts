@@ -57,6 +57,51 @@ export function fileKindTone(kind: RemoteFileKind) {
   return `${fileKindColor(kind).replace('text-', 'bg-').replace('-300', '-500/12')} ${fileKindColor(kind)}`;
 }
 
+export type FileType = 'folder' | 'image' | 'code' | 'json' | 'markdown' | 'html' | 'symlink' | 'other' | 'file';
+
+export function detectFileType(name: string, kind: RemoteFileKind): FileType {
+  if (kind === 'directory') return 'folder';
+  const lower = name.toLowerCase();
+  const ext = lower.slice(((lower.lastIndexOf('.') - 1) >>> 0) + 2);
+  switch (ext) {
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+    case 'gif':
+    case 'webp':
+    case 'svg':
+    case 'bmp':
+    case 'ico':
+      return 'image';
+    case 'json':
+      return 'json';
+    case 'md':
+    case 'markdown':
+      return 'markdown';
+    case 'html':
+    case 'htm':
+      return 'html';
+    case 'js':
+    case 'ts':
+    case 'jsx':
+    case 'tsx':
+    case 'css':
+    case 'scss':
+    case 'py':
+    case 'go':
+    case 'rs':
+    case 'java':
+    case 'c':
+    case 'cpp':
+    case 'h':
+    case 'swift':
+    case 'kt':
+      return 'code';
+    default:
+      return 'file';
+  }
+}
+
 export function getCurrentThemeMode() {
   if (typeof document === 'undefined') {
     return 'dark' as const;

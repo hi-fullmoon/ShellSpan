@@ -3,47 +3,24 @@ import { useState, useRef, useEffect } from "react";
 import { useSnippetsStore } from "../stores/snippetsStore";
 import { Input } from "@chakra-ui/react";
 import { t } from "../lib/i18n";
+import { cn } from "../lib/ui";
 import type { CommandSnippet } from "../types";
-import { ScrollArea, Tooltip } from './ui';
+import {
+  ScrollArea,
+  SnippetsIcon,
+  PlusIcon,
+  SearchIcon,
+  LayoutGridIcon,
+  LayoutListIcon,
+  ClockIcon,
+  SendIcon,
+  EditIcon,
+  TrashIcon,
+  Tooltip,
+} from './ui';
 
 interface SnippetsPanelProps {
   onSendCommand: (command: string) => void;
-}
-
-function SendIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="22" y1="2" x2="11" y2="13" />
-      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </svg>
-  );
-}
-
-function EditIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
-  );
 }
 
 function SnippetDialog({
@@ -147,6 +124,7 @@ export function SnippetsPanel({ onSendCommand }: SnippetsPanelProps) {
   const deleteSnippet = useSnippetsStore((s) => s.deleteSnippet);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState<CommandSnippet | undefined>();
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const handleSave = (name: string, command: string) => {
     if (editingSnippet) {
@@ -167,73 +145,108 @@ export function SnippetsPanel({ onSendCommand }: SnippetsPanelProps) {
   };
 
   return (
-    <section className="surface flex min-h-0 flex-col overflow-hidden">
-      <div className="surface-header">
-        <div>
-          <p className="label">{t("snippets.subtitle")}</p>
-          <h2 className="text-sm font-semibold">{t("snippets.title")}</h2>
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--app-border)] px-4 py-2">
+        <div className="flex items-center gap-2">
+          <button className="btn-secondary" onClick={handleAdd} type="button">
+            <PlusIcon className="h-4 w-4" />
+            {t('snippets.newSnippet')}
+          </button>
+          <div className="h-4 w-px bg-[var(--app-border)]" />
+          <button className="btn-ghost text-[var(--app-text-soft)]" type="button">
+            <ClockIcon className="mr-1.5 h-4 w-4" />
+            {t('snippets.shellHistory')}
+          </button>
         </div>
-        <button
-          className="icon-btn h-6 w-6 px-0"
-          onClick={handleAdd}
-          title={t("snippets.add")}
-          type="button"
-        >
-          <Tooltip content={t("snippets.add")}>
-            <PlusIcon />
-          </Tooltip>
-        </button>
+
+        <div className="flex items-center gap-1">
+          <button className="icon-btn h-7 w-7" type="button">
+            <SearchIcon className="h-4 w-4" />
+          </button>
+          <button
+            className={cn('icon-btn h-7 w-7', viewMode === 'grid' && 'bg-[var(--app-surface-active)]')}
+            onClick={() => setViewMode('grid')}
+            type="button"
+          >
+            <LayoutGridIcon className="h-4 w-4" />
+          </button>
+          <button
+            className={cn('icon-btn h-7 w-7', viewMode === 'list' && 'bg-[var(--app-surface-active)]')}
+            onClick={() => setViewMode('list')}
+            type="button"
+          >
+            <LayoutListIcon className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      <ScrollArea className="flex-1 p-1">
+      <ScrollArea className="flex-1 p-4">
         {snippets.length === 0 ? (
-          <div className="text-subtle px-1 py-2 text-xs leading-relaxed">{t("snippets.empty")}</div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {snippets.map((snippet) => (
-              <div
-                key={snippet.id}
-                className="group surface-muted rounded-sm flex select-none items-center gap-1 px-1.5 py-1 text-left transition"
-              >
-                <div className="min-w-0 flex-1">
-                  <strong className="block truncate text-xs">{snippet.name}</strong>
-                  <span className="text-subtle block truncate text-[11px]">{snippet.command}</span>
-                </div>
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    className="icon-btn h-5 w-5 px-0 text-xs"
-                    onClick={() => onSendCommand(snippet.command)}
-                    title={t("snippets.send")}
-                    type="button"
-                  >
-                    <Tooltip content={t("snippets.send")}>
-                      <SendIcon />
-                    </Tooltip>
-                  </button>
-                  <button
-                    className="icon-btn h-5 w-5 px-0 text-xs"
-                    onClick={() => handleEdit(snippet)}
-                    title={t("snippets.edit")}
-                    type="button"
-                  >
-                    <Tooltip content={t("snippets.edit")}>
-                      <EditIcon />
-                    </Tooltip>
-                  </button>
-                  <button
-                    className="icon-btn h-5 w-5 px-0 text-xs text-rose-400"
-                    onClick={() => deleteSnippet(snippet.id)}
-                    title={t("snippets.delete")}
-                    type="button"
-                  >
-                    <Tooltip content={t("snippets.delete")}>
-                      <TrashIcon />
-                    </Tooltip>
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="flex h-full flex-col items-center justify-center pb-12 text-center">
+            <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-[var(--app-surface-muted)] text-[var(--app-text-muted)]">
+              <SnippetsIcon className="h-7 w-7" />
+            </div>
+            <h3 className="text-base font-semibold text-[var(--app-text)]">{t('snippets.empty.title')}</h3>
+            <p className="mt-1 max-w-sm text-sm text-[var(--app-text-soft)]">{t('snippets.empty.description')}</p>
           </div>
+        ) : (
+          <>
+            <h2 className="mb-3 text-sm font-semibold text-[var(--app-text)]">{t('snippets.title')}</h2>
+            <div
+              className={cn(
+                'gap-3',
+                viewMode === 'grid'
+                  ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+                  : 'flex flex-col',
+              )}
+            >
+              {snippets.map((snippet) => (
+                <div
+                  key={snippet.id}
+                  className="group relative rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] p-3 transition hover:border-[var(--app-border-strong)] hover:bg-[var(--app-surface-hover)]"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <strong className="block truncate text-sm font-medium text-[var(--app-text)]">{snippet.name}</strong>
+                      <span className="text-subtle block truncate text-xs">{snippet.command}</span>
+                    </div>
+                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        className="icon-btn h-6 w-6"
+                        onClick={() => onSendCommand(snippet.command)}
+                        title={t('snippets.send')}
+                        type="button"
+                      >
+                        <Tooltip content={t('snippets.send')}>
+                          <SendIcon className="h-3.5 w-3.5" />
+                        </Tooltip>
+                      </button>
+                      <button
+                        className="icon-btn h-6 w-6"
+                        onClick={() => handleEdit(snippet)}
+                        title={t('snippets.edit')}
+                        type="button"
+                      >
+                        <Tooltip content={t('snippets.edit')}>
+                          <EditIcon className="h-3.5 w-3.5" />
+                        </Tooltip>
+                      </button>
+                      <button
+                        className="icon-btn h-6 w-6 text-rose-400"
+                        onClick={() => deleteSnippet(snippet.id)}
+                        title={t('snippets.delete')}
+                        type="button"
+                      >
+                        <Tooltip content={t('snippets.delete')}>
+                          <TrashIcon className="h-3.5 w-3.5" />
+                        </Tooltip>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </ScrollArea>
 

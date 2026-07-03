@@ -27,6 +27,7 @@ export interface UseConnectionFlowOptions {
   setActiveSessionId: Dispatch<SetStateAction<string | undefined>>;
   pendingStatusEventsRef: MutableRefObject<PendingSessionStatusEvents>;
   setErrorMessage: (message: string | undefined) => void;
+  onSuccess?: (profile: ConnectionProfile, sessionId: string) => void;
 }
 
 export interface UseConnectionFlowResult {
@@ -51,6 +52,7 @@ export function useConnectionFlow({
   setActiveSessionId,
   pendingStatusEventsRef,
   setErrorMessage,
+  onSuccess,
 }: UseConnectionFlowOptions): UseConnectionFlowResult {
   const [draftProfile, setDraftProfile] = useState<ConnectionProfile>(createEmptyProfile());
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
@@ -149,6 +151,7 @@ export function useConnectionFlow({
       });
       setErrorMessage(undefined);
       setConnectDialogOpen(false);
+      onSuccess?.(profile, summary.sessionId);
       connectionLogger.info('SSH 会话创建成功', {
         sessionId: summary.sessionId,
         title: summary.title,

@@ -1,23 +1,18 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useCallback, useEffect, useState } from 'react';
 import { isTauriRuntime } from '../lib/tauri';
-import { PrimarySidebarActiveIcon, PrimarySidebarIcon, SecondarySidebarActiveIcon, SecondarySidebarIcon, Tooltip } from './ui';
+import { Tooltip } from './ui';
+import { SectionSwitcher } from './SectionSwitcher';
+import type { AppSection } from '../types';
 
 interface TitleBarProps {
-  primarySideVisible: boolean;
-  secondarySideVisible: boolean;
-  onTogglePrimarySide: () => void;
-  onToggleSecondarySide: () => void;
+  activeSection: AppSection;
+  onSectionChange: (section: AppSection) => void;
 }
 
 const IS_MAC = /mac/i.test(navigator.platform);
 
-export function TitleBar({
-  primarySideVisible,
-  secondarySideVisible,
-  onTogglePrimarySide,
-  onToggleSecondarySide,
-}: TitleBarProps) {
+export function TitleBar({ activeSection, onSectionChange }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const isTauri = isTauriRuntime();
 
@@ -58,34 +53,18 @@ export function TitleBar({
       className={`title-bar${IS_MAC ? ' title-bar-mac' : ''}${isTauri && !IS_MAC ? ' title-bar-windows' : ''}`}
       data-tauri-drag-region
     >
-      <div className="title-bar-left" data-tauri-drag-region />
+      <div className="title-bar-left flex items-center" data-tauri-drag-region>
+        <div className="flex h-full items-center pl-1" style={{ appRegion: 'no-drag', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <SectionSwitcher value={activeSection} onChange={onSectionChange} />
+        </div>
+        {IS_MAC ? <div className="flex-1" data-tauri-drag-region /> : null}
+      </div>
 
       <div className="title-bar-center" data-tauri-drag-region>
         <span className="title-bar-app-name" data-tauri-drag-region>TermBridge</span>
       </div>
 
       <div className="title-bar-right" data-tauri-drag-region>
-        <button
-          aria-label={primarySideVisible ? 'Hide primary side' : 'Show primary side'}
-          className="title-bar-btn"
-          onClick={onTogglePrimarySide}
-          type="button"
-        >
-          <Tooltip content={primarySideVisible ? 'Hide Explorer' : 'Show Explorer'}>
-            {primarySideVisible ? <PrimarySidebarActiveIcon /> : <PrimarySidebarIcon />}
-          </Tooltip>
-        </button>
-        <button
-          aria-label={secondarySideVisible ? 'Hide secondary side' : 'Show secondary side'}
-          className="title-bar-btn"
-          onClick={onToggleSecondarySide}
-          type="button"
-        >
-          <Tooltip content={secondarySideVisible ? 'Hide Sidebar' : 'Show Sidebar'}>
-            {secondarySideVisible ? <SecondarySidebarActiveIcon /> : <SecondarySidebarIcon />}
-          </Tooltip>
-        </button>
-
         {isTauri && !IS_MAC && (
           <div className="title-bar-window-controls">
             <button
