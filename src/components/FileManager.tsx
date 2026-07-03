@@ -9,7 +9,6 @@ import {
   type SelectionChangedEvent,
 } from 'ag-grid-community';
 import {
-  ArrowUpIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
   BookmarkIcon,
@@ -23,7 +22,6 @@ import {
   JsonFileIcon,
   LinkIcon,
   MarkdownFileIcon,
-  RefreshIcon,
   SearchIcon,
   ServerIcon,
   ChevronDownIcon,
@@ -374,6 +372,8 @@ function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
     return null;
   }
 
+  const isParentDirectory = data.name === '..';
+
   return (
     <div className="flex min-w-0 items-center gap-2 py-0.5">
       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
@@ -381,7 +381,9 @@ function NameCellRenderer({ data }: ICellRendererParams<RemoteFileEntry>) {
       </span>
       <div className="flex min-w-0 flex-col">
         <span className="file-entry-name truncate text-[13px] font-medium leading-5 tracking-[0.01em]">{data.name}</span>
-        <span className="truncate text-[10px] text-[var(--app-text-muted)]">{formatPermissionSymbolic(data.permissions, data.kind)}</span>
+        {!isParentDirectory && (
+          <span className="truncate text-[10px] text-[var(--app-text-muted)]">{formatPermissionSymbolic(data.permissions, data.kind)}</span>
+        )}
       </div>
     </div>
   );
@@ -507,8 +509,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   const [working, setWorking] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [toast, setToast] = useState<ToastState>();
-  const [filterQuery, setFilterQuery] = useState('');
   const [batchMode, setBatchMode] = useState(false);
+  const [isEditingPath, setIsEditingPath] = useState(false);
   const sessionId = session?.sessionId;
   const fileManagerState = useFileManagerStore((state) => (sessionId ? state.sessions[sessionId] : undefined));
   const updateSessionState = useFileManagerStore((state) => state.updateSessionState);
@@ -564,13 +566,20 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   const error = fileManagerState?.error;
   const selectedEntry = useMemo(() => listing?.entries.find((entry) => entry.path === selectedPath), [listing, selectedPath]);
   const selectedEntries = useMemo(() => listing?.entries.filter((entry) => selectedPaths.includes(entry.path)) ?? [], [listing, selectedPaths]);
-  const filteredEntries = useMemo(() => {
-    if (!listing || !filterQuery.trim()) {
-      return listing?.entries ?? [];
+  const gridEntries = useMemo(() => {
+    const entries = listing?.entries ?? [];
+    if (!listing?.parentPath) {
+      return entries;
     }
-    const query = filterQuery.toLowerCase();
-    return listing.entries.filter((entry) => entry.name.toLowerCase().includes(query));
-  }, [listing, filterQuery]);
+    const parentEntry: RemoteFileEntry = {
+      path: `${listing.parentPath}/..`,
+      name: '..',
+      kind: 'directory',
+      size: 0,
+      modifiedAt: 0,
+    };
+    return [parentEntry, ...entries];
+  }, [listing?.entries, listing?.parentPath]);
   const ready = !!session && session.status === 'connected' && !!connection;
   const readOnly = !!session && session.status !== 'connected';
   const currentPath = listing?.path;
@@ -600,7 +609,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         minWidth: 150,
         resizable: true,
         suppressMovable: true,
-        valueFormatter: ({ data }) => (data ? formatModified(data.modifiedAt) : '--'),
+        valueFormatter: ({ data }) => {
+          if (!data) return '--';
+          if (data.name === '..') return '';
+          return formatModified(data.modifiedAt);
+        },
         cellClass: 'tabular-nums',
       },
       {
@@ -610,7 +623,11 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         minWidth: 84,
         resizable: true,
         suppressMovable: true,
-        valueFormatter: ({ data }) => (data ? (data.kind === 'directory' ? '--' : formatSize(data.size)) : '--'),
+        valueFormatter: ({ data }) => {
+          if (!data) return '--';
+          if (data.name === '..') return '';
+          return data.kind === 'directory' ? '--' : formatSize(data.size);
+        },
       },
       {
         field: 'kind',
@@ -619,8 +636,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         minWidth: 80,
         resizable: true,
         suppressMovable: true,
-        valueGetter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
-        valueFormatter: ({ data }) => (data ? kindLabel(data.kind) : '--'),
+        valueGetter: ({ data }) => (data ? (data.name === '..' ? '' : kindLabel(data.kind)) : '--'),
+        valueFormatter: ({ data }) => (data ? (data.name === '..' ? '' : kindLabel(data.kind)) : '--'),
       },
       {
         headerName: t('fileManager.columns.permissions'),
@@ -628,8 +645,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         minWidth: 120,
         resizable: true,
         suppressMovable: true,
-        valueGetter: ({ data }) => (data ? formatPermissionSymbolic(data.permissions, data.kind) : '--'),
-        valueFormatter: ({ data }) => (data ? formatPermissionSymbolic(data.permissions, data.kind) : '--'),
+        valueGetter: ({ data }) => (data ? (data.name === '..' ? '' : formatPermissionSymbolic(data.permissions, data.kind)) : '--'),
+        valueFormatter: ({ data }) => (data ? (data.name === '..' ? '' : formatPermissionSymbolic(data.permissions, data.kind)) : '--'),
         cellClass: 'font-mono',
       },
       {
@@ -638,8 +655,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         minWidth: 80,
         resizable: true,
         suppressMovable: true,
-        valueGetter: ({ data }) => (data ? formatOwner(data) : '--'),
-        valueFormatter: ({ data }) => (data ? formatOwner(data) : '--'),
+        valueGetter: ({ data }) => (data ? (data.name === '..' ? '' : formatOwner(data)) : '--'),
+        valueFormatter: ({ data }) => (data ? (data.name === '..' ? '' : formatOwner(data)) : '--'),
         cellClass: 'font-mono',
       },
       {
@@ -648,8 +665,8 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         minWidth: 80,
         resizable: true,
         suppressMovable: true,
-        valueGetter: ({ data }) => (data ? formatGroup(data) : '--'),
-        valueFormatter: ({ data }) => (data ? formatGroup(data) : '--'),
+        valueGetter: ({ data }) => (data ? (data.name === '..' ? '' : formatGroup(data)) : '--'),
+        valueFormatter: ({ data }) => (data ? (data.name === '..' ? '' : formatGroup(data)) : '--'),
         cellClass: 'font-mono',
       },
     ],
@@ -660,6 +677,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
       sortable: true,
       menuTabs: [],
       unSortIcon: true,
+      suppressSizeToFit: true,
     }),
     [],
   );
@@ -1874,7 +1892,16 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     if (!nextPath) {
       return;
     }
+    setIsEditingPath(false);
     await loadDirectory(nextPath);
+  };
+
+  const startPathEdit = () => {
+    setIsEditingPath(true);
+  };
+
+  const cancelPathEdit = () => {
+    setIsEditingPath(false);
   };
 
   const openBlankMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -1917,7 +1944,9 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   };
 
   const handleGridSelectionChanged = (event: SelectionChangedEvent<RemoteFileEntry>) => {
-    const paths = event.api.getSelectedRows().map((row) => row.path);
+    const paths = event.api.getSelectedRows()
+      .filter((row) => row.name !== '..')
+      .map((row) => row.path);
     setSelectedPaths(paths);
     if (paths.length === 1) {
       setSelectedPath(paths[0]);
@@ -1925,7 +1954,18 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
   };
 
   const handleGridRowDoubleClick = (event: RowDoubleClickedEvent<RemoteFileEntry>) => {
-    if (!ready || !event.data || event.data.kind !== 'directory') {
+    if (!ready || !event.data) {
+      return;
+    }
+
+    if (event.data.name === '..') {
+      if (listing?.parentPath) {
+        void loadDirectory(listing.parentPath);
+      }
+      return;
+    }
+
+    if (event.data.kind !== 'directory') {
       return;
     }
 
@@ -1938,7 +1978,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
     }
     const target = event.data;
     const mouseEvent = event.event as MouseEvent | undefined;
-    if (!target || !mouseEvent) {
+    if (!target || !mouseEvent || target.name === '..') {
       return;
     }
 
@@ -1991,36 +2031,47 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
         ) : (
           <>
             <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-1.5">
-              <button
-                aria-label={t('fileManager.actions.parent')}
-                className="icon-btn h-6 w-6"
-                disabled={!ready || !listing?.parentPath || loading || working}
-                onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
-                type="button"
-              >
-                <Tooltip content={t('fileManager.actions.parent')}>
-                  <ArrowUpIcon className="h-4 w-4" />
-                </Tooltip>
-              </button>
               <button className="icon-btn h-6 w-6" disabled type="button">
                 <ArrowLeftIcon className="h-4 w-4" />
               </button>
               <button className="icon-btn h-6 w-6" disabled type="button">
                 <ArrowRightIcon className="h-4 w-4" />
               </button>
-              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2 py-1">
-                {breadcrumbs.map((crumb, index) => (
-                  <span key={crumb.path} className="flex items-center gap-1">
-                    {index > 0 && <span className="text-[var(--app-text-muted)]">/</span>}
-                    <button
-                      className="truncate text-xs text-[var(--app-text-soft)] hover:text-[var(--app-text)]"
-                      onClick={() => void loadDirectory(crumb.path)}
-                      type="button"
-                    >
-                      {crumb.name}
-                    </button>
-                  </span>
-                ))}
+              <div
+                className="flex h-7 min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2"
+                onDoubleClick={startPathEdit}
+              >
+                {isEditingPath ? (
+                  <form className="min-w-0 flex-1" onSubmit={handlePathSubmit}>
+                    <input
+                      autoFocus
+                      className="h-full w-full border-0 bg-transparent p-0 text-xs leading-none text-[var(--app-text)] outline-none"
+                      disabled={readOnly || loading || working}
+                      onBlur={cancelPathEdit}
+                      onChange={(event) => setPathInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          cancelPathEdit();
+                        }
+                      }}
+                      type="text"
+                      value={pathInput}
+                    />
+                  </form>
+                ) : (
+                  breadcrumbs.map((crumb, index) => (
+                    <span key={crumb.path} className="flex items-center gap-1">
+                      {index > 0 && <span className="text-[var(--app-text-muted)]">/</span>}
+                      <button
+                        className="truncate text-xs text-[var(--app-text-soft)] hover:text-[var(--app-text)]"
+                        onClick={() => void loadDirectory(crumb.path)}
+                        type="button"
+                      >
+                        {crumb.name}
+                      </button>
+                    </span>
+                  ))
+                )}
               </div>
               {bookmarks.length > 0 && (
                 <button
@@ -2039,39 +2090,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                   </Tooltip>
                 </button>
               )}
-              <button
-                aria-label={t('fileManager.actions.refresh')}
-                className="icon-btn h-6 w-6"
-                disabled={!ready || loading || working}
-                onClick={() => void loadDirectory(currentPath)}
-                type="button"
-              >
-                <Tooltip content={t('fileManager.actions.refresh')}>
-                  <RefreshIcon className="h-4 w-4" />
-                </Tooltip>
-              </button>
             </div>
-
-            {listing && (
-              <div className="flex items-center gap-1 border-b border-[var(--app-border)] px-3 py-1.5">
-                <div className="flex flex-1 items-center gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2 py-1">
-                  <SearchIcon className="h-3.5 w-3.5 text-[var(--app-text-muted)]" />
-                  <input
-                    className="h-4 flex-1 border-0 bg-transparent p-0 text-xs text-[var(--app-text)] placeholder:text-[var(--app-text-muted)] outline-none"
-                    disabled={readOnly || loading || working}
-                    onChange={(event) => setFilterQuery(event.target.value)}
-                    placeholder={t('fileManager.filterPlaceholder')}
-                    type="text"
-                    value={filterQuery}
-                  />
-                </div>
-                {filterQuery.trim() && (
-                  <button className="icon-btn h-6 w-6 text-[10px]" onClick={() => setFilterQuery('')} type="button">
-                    <CloseIcon className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-            )}
 
             {batchMode && (
               <div className="flex items-center gap-1 px-0.5">
@@ -2152,7 +2171,7 @@ export function FileManager({ session, ignoreWindowDragDrop = false, bookmarks =
                     ref={gridRef}
                     rowSelection={rowSelection}
                     selectionColumnDef={{ width: 28, minWidth: 28, maxWidth: 28, suppressSizeToFit: true, resizable: false }}
-                    rowData={filteredEntries}
+                    rowData={gridEntries}
                     rowHeight={28}
                     suppressCellFocus
                     suppressContextMenu

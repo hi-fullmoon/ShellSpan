@@ -186,6 +186,7 @@ const enUS = {
   'fileManager.error.invalidPermissions': 'Invalid permission format. Please enter an octal number between 0 and 7777.',
   'fileManager.feedback.permissionsUpdated': 'Permissions updated',
   'fileManager.loading': 'Loading remote directory...',
+  'fileManager.parentDirectory': 'Parent directory',
   'fileManager.emptyDirectory': 'There are no files to display in this directory.',
   'fileManager.columns.name': 'Name',
   'fileManager.columns.time': 'Modified',

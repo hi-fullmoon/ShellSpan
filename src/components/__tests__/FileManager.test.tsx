@@ -136,17 +136,14 @@ describe("FileManager", () => {
 
     expect(screen.getByText("keep.txt")).toBeInTheDocument();
     expect(screen.getByText("终端已断开，文件管理器当前仅支持查看。")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("筛选文件...")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "返回上级目录" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Actions" })).toBeInTheDocument();
   });
 
-  it("uses theme-aware classes for the header, filter input, and file name", () => {
+  it("uses theme-aware classes for the header, breadcrumb path, and file name", () => {
     const { container } = render(<FileManager session={disconnectedSession} />);
 
     expect(screen.getByText("Demo")).toHaveClass("text-sm", "font-semibold");
-    expect(screen.getByPlaceholderText("筛选文件...")).toHaveClass("bg-transparent");
+    expect(screen.getByText("var")).toHaveClass("text-xs");
     expect(screen.getByText("keep.txt")).toHaveClass("file-entry-name");
     expect(container.querySelector(".scroll-area")).toBeTruthy();
   });

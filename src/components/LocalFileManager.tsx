@@ -5,7 +5,6 @@ import { cn, detectFileType, fileKindColor } from '../lib/ui';
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
-  ArrowUpIcon,
   ChevronDownIcon,
   FileIcon,
   FolderIcon,
@@ -16,8 +15,6 @@ import {
   MarkdownFileIcon,
   HtmlFileIcon,
   LinkIcon,
-  DotsIcon,
-  RefreshIcon,
   ScrollArea,
   SearchIcon,
 } from './ui';
@@ -101,12 +98,16 @@ export function LocalFileManager({ className }: LocalFileManagerProps) {
   const [listing, setListing] = useState<LocalDirectoryListing | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  const [filterQuery, setFilterQuery] = useState('');
+  const [selectedPath, setSelectedPath] = useState<string | undefined>();
+  const [isEditingPath, setIsEditingPath] = useState(false);
+  const [editPath, setEditPath] = useState('');
 
   const loadDirectory = async (targetPath?: string) => {
     const requestedPath = targetPath ?? path;
     setLoading(true);
     setError(undefined);
+    setSelectedPath(undefined);
+    setIsEditingPath(false);
     try {
       const result = await invoke<LocalDirectoryListing>('list_local_directory', { path: requestedPath });
       setListing(result);
@@ -118,15 +119,28 @@ export function LocalFileManager({ className }: LocalFileManagerProps) {
     }
   };
 
+  const startPathEdit = () => {
+    setEditPath(listing?.path ?? path);
+    setIsEditingPath(true);
+  };
+
+  const cancelPathEdit = () => {
+    setIsEditingPath(false);
+  };
+
+  const submitPathEdit = (event?: React.FormEvent) => {
+    event?.preventDefault();
+    const nextPath = editPath.trim();
+    if (!nextPath) {
+      cancelPathEdit();
+      return;
+    }
+    void loadDirectory(nextPath);
+  };
+
   useEffect(() => {
     void loadDirectory();
   }, []);
-
-  const filteredEntries = useMemo(() => {
-    if (!listing || !filterQuery.trim()) return listing?.entries ?? [];
-    const query = filterQuery.toLowerCase();
-    return listing.entries.filter((entry) => entry.name.toLowerCase().includes(query));
-  }, [listing, filterQuery]);
 
   const breadcrumbs = useMemo(() => buildBreadcrumbs(listing?.path ?? path), [listing?.path, path]);
 
@@ -154,61 +168,48 @@ export function LocalFileManager({ className }: LocalFileManagerProps) {
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-1.5">
-        <button
-          aria-label={t('fileManager.actions.parent')}
-          className="icon-btn h-6 w-6"
-          disabled={!listing?.parentPath || loading}
-          onClick={() => listing?.parentPath && void loadDirectory(listing.parentPath)}
-          type="button"
-        >
-          <ArrowUpIcon className="h-4 w-4" />
-        </button>
         <button className="icon-btn h-6 w-6" disabled type="button">
           <ArrowLeftIcon className="h-4 w-4" />
         </button>
         <button className="icon-btn h-6 w-6" disabled type="button">
           <ArrowRightIcon className="h-4 w-4" />
         </button>
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2 py-1">
-          {breadcrumbs.map((crumb, index) => (
-            <span key={crumb.path} className="flex items-center gap-1">
-              {index > 0 && <span className="text-[var(--app-text-muted)]">/</span>}
-              <button
-                className="truncate text-xs text-[var(--app-text-soft)] hover:text-[var(--app-text)]"
-                onClick={() => void loadDirectory(crumb.path)}
-                type="button"
-              >
-                {crumb.name}
-              </button>
-            </span>
-          ))}
-        </div>
-        <button
-          aria-label={t('fileManager.actions.refresh')}
-          className="icon-btn h-6 w-6"
-          disabled={loading}
-          onClick={() => void loadDirectory()}
-          type="button"
+        <div
+          className="flex h-7 min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2"
+          onDoubleClick={startPathEdit}
         >
-          <RefreshIcon className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* Filter */}
-      {listing && (
-        <div className="flex items-center gap-1 border-b border-[var(--app-border)] px-3 py-1.5">
-          <div className="flex flex-1 items-center gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-2 py-1">
-            <SearchIcon className="h-3.5 w-3.5 text-[var(--app-text-muted)]" />
-            <input
-              className="h-4 flex-1 border-0 bg-transparent p-0 text-xs text-[var(--app-text)] placeholder:text-[var(--app-text-muted)] outline-none"
-              onChange={(event) => setFilterQuery(event.target.value)}
-              placeholder={t('fileManager.filterPlaceholder')}
-              type="text"
-              value={filterQuery}
-            />
-          </div>
+          {isEditingPath ? (
+            <form className="min-w-0 flex-1" onSubmit={submitPathEdit}>
+              <input
+                autoFocus
+                className="h-full w-full border-0 bg-transparent p-0 text-xs leading-none text-[var(--app-text)] outline-none"
+                onBlur={cancelPathEdit}
+                onChange={(event) => setEditPath(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    cancelPathEdit();
+                  }
+                }}
+                type="text"
+                value={editPath}
+              />
+            </form>
+          ) : (
+            breadcrumbs.map((crumb, index) => (
+              <span key={crumb.path} className="flex items-center gap-1">
+                {index > 0 && <span className="text-[var(--app-text-muted)]">/</span>}
+                <button
+                  className="truncate text-xs text-[var(--app-text-soft)] hover:text-[var(--app-text)]"
+                  onClick={() => void loadDirectory(crumb.path)}
+                  type="button"
+                >
+                  {crumb.name}
+                </button>
+              </span>
+            ))
+          )}
         </div>
-      )}
+      </div>
 
       {error ? (
         <div className="border border-rose-900 bg-rose-950/40 px-2 py-2 text-xs text-rose-300 rounded-sm m-2">
@@ -220,21 +221,30 @@ export function LocalFileManager({ className }: LocalFileManagerProps) {
         {loading && !listing ? (
           <div className="text-subtle px-3 py-2 text-xs">{t('fileManager.loading')}</div>
         ) : !listing ? null : (
-          <table className="w-full text-left text-xs">
+          <table className="w-full table-fixed text-left text-xs">
             <thead className="sticky top-0 z-10 bg-[var(--app-bg)] text-[var(--app-text-muted)]">
               <tr className="border-b border-[var(--app-border)]">
-                <th className="px-3 py-1.5 font-medium">{t('fileManager.columns.name')}</th>
-                <th className="px-3 py-1.5 font-medium">{t('fileManager.columns.time')}</th>
-                <th className="px-3 py-1.5 font-medium">{t('fileManager.columns.size')}</th>
-                <th className="px-3 py-1.5 font-medium">{t('fileManager.columns.type')}</th>
+                <th className="w-[55%] px-3 py-1.5 font-medium">{t('fileManager.columns.name')}</th>
+                <th className="w-[25%] px-3 py-1.5 font-medium">{t('fileManager.columns.time')}</th>
+                <th className="w-[12%] px-3 py-1.5 font-medium">{t('fileManager.columns.size')}</th>
+                <th className="w-[8%] px-3 py-1.5 font-medium">{t('fileManager.columns.type')}</th>
               </tr>
             </thead>
             <tbody>
-              {filteredEntries.map((entry) => (
+              {listing.parentPath && (
+                <LocalFileParentRow
+                  selected={selectedPath === `${listing.parentPath}/..`}
+                  onClick={() => setSelectedPath(`${listing.parentPath}/..`)}
+                  onDoubleClick={() => listing.parentPath && void loadDirectory(listing.parentPath)}
+                />
+              )}
+              {listing.entries.map((entry) => (
                 <LocalFileRow
                   key={entry.path}
                   entry={entry}
-                  onClick={() => {
+                  selected={selectedPath === entry.path}
+                  onClick={() => setSelectedPath(entry.path)}
+                  onDoubleClick={() => {
                     if (entry.kind === 'directory') {
                       void loadDirectory(entry.path);
                     }
@@ -249,11 +259,59 @@ export function LocalFileManager({ className }: LocalFileManagerProps) {
   );
 }
 
-function LocalFileRow({ entry, onClick }: { entry: LocalFileEntry; onClick: () => void }) {
+function LocalFileParentRow({
+  selected,
+  onClick,
+  onDoubleClick,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  onDoubleClick: () => void;
+}) {
   return (
     <tr
-      className="cursor-default border-b border-[var(--app-border)] transition hover:bg-[var(--app-surface-hover)]"
+      className={cn(
+        'cursor-default border-b border-[var(--app-border)] transition hover:bg-[var(--app-surface-hover)]',
+        selected && 'bg-[var(--app-surface-active)]',
+      )}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
+    >
+      <td className="px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <FolderIcon className="h-5 w-5 text-sky-400" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-[var(--app-text)]">..</div>
+            <div className="truncate text-[10px] text-[var(--app-text-muted)]">{t('fileManager.parentDirectory')}</div>
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-1.5 whitespace-nowrap text-[var(--app-text-soft)]">--</td>
+      <td className="px-3 py-1.5 whitespace-nowrap text-[var(--app-text-soft)]">--</td>
+      <td className="px-3 py-1.5 whitespace-nowrap text-[var(--app-text-soft)]">{t('fileManager.kind.directory')}</td>
+    </tr>
+  );
+}
+
+function LocalFileRow({
+  entry,
+  selected,
+  onClick,
+  onDoubleClick,
+}: {
+  entry: LocalFileEntry;
+  selected: boolean;
+  onClick: () => void;
+  onDoubleClick: () => void;
+}) {
+  return (
+    <tr
+      className={cn(
+        'cursor-default border-b border-[var(--app-border)] transition hover:bg-[var(--app-surface-hover)]',
+        selected && 'bg-[var(--app-surface-active)]',
+      )}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
     >
       <td className="px-3 py-1.5">
         <div className="flex items-center gap-2">

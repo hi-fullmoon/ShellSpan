@@ -42,7 +42,9 @@ export function SectionSwitcher({ value, onChange }: SectionSwitcherProps) {
             aria-selected={active}
             className={[
               'title-bar-btn relative z-10 flex h-7 !w-auto items-center justify-center rounded-xl px-3 text-sm font-medium whitespace-nowrap transition',
-              active ? '!text-[var(--app-primary-text)]' : 'text-[var(--app-text-muted)] hover:text-[var(--app-text-soft)]',
+              active
+                ? '!text-[var(--app-primary-bg)]'
+                : 'text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text-soft)]',
             ].join(' ')}
             onClick={() => onChange(section.value)}
             role="tab"
@@ -53,7 +55,7 @@ export function SectionSwitcher({ value, onChange }: SectionSwitcherProps) {
         );
       })}
       <div
-        className="pointer-events-none absolute top-1/2 h-7 -translate-y-1/2 rounded-[8px] bg-[var(--app-primary-bg)] transition-all duration-300 ease-out"
+        className="pointer-events-none absolute top-1/2 h-7 -translate-y-1/2 rounded-[8px] bg-[var(--app-primary-soft)] transition-all duration-300 ease-out"
         style={{ left: indicator.left, width: indicator.width }}
       />
     </div>

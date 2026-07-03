@@ -186,6 +186,7 @@ const zhCN = {
   'fileManager.error.invalidPermissions': '权限格式无效，请输入 0-7777 之间的八进制数字。',
   'fileManager.feedback.permissionsUpdated': '权限已更新',
   'fileManager.loading': '正在加载远程目录...',
+  'fileManager.parentDirectory': '上级目录',
   'fileManager.emptyDirectory': '当前目录没有可显示的文件。',
   'fileManager.columns.name': '名称',
   'fileManager.columns.time': '时间',
