@@ -15,7 +15,7 @@ interface ConnectDialogProps {
 export function ConnectDialog({ open, draftProfile, isConnecting, onClose, onProfileChange, onConnect }: ConnectDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogPanel className="flex h-[720px] max-h-[calc(100vh-28px)] w-[516px] flex-col overflow-hidden p-0!">
+      <DialogPanel className="flex max-h-[calc(100vh-28px)] w-[516px] flex-col overflow-hidden p-0!">
         <DialogHeader
           className="shrink-0 px-4 pt-4 pb-2"
           closeLabel={t('app.connectDialog.close')}

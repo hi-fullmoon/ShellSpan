@@ -36,7 +36,7 @@ export async function openSettingsWindow(preferences: AppPreferences): Promise<v
     minHeight: 420,
     resizable: true,
     fullscreen: false,
-    transparent: true,
+    transparent: false,
     decorations: false,
     alwaysOnTop: true,
     parent: 'main',

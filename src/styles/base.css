@@ -158,7 +158,7 @@
   }
 
   #root {
-    border-radius: var(--app-radius-lg);
+    border-radius: var(--app-radius-xs);
     overflow: hidden;
     background-color: var(--app-bg);
     background-image:

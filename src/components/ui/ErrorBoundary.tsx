@@ -43,7 +43,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <p className="label">{t('app.errorBoundary.kicker')}</p>
         <h2 className="themed-heading text-sm font-semibold">{t('app.errorBoundary.title')}</h2>
         <p className="text-subtle max-w-md text-xs leading-relaxed">{t('app.errorBoundary.description')}</p>
-        <pre className="themed-input max-w-lg overflow-auto rounded-md p-2 text-left text-[11px] text-rose-300">
+        <pre className="themed-input max-w-lg overflow-auto rounded-md p-2 text-left text-[11px] text-rose-300!">
           {error.message || String(error)}
         </pre>
         <button className="btn-primary" onClick={this.reset} type="button">

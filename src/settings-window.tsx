@@ -8,6 +8,7 @@ import { initI18n, syncI18nLocale, t } from './lib/i18n';
 import { createLogger } from './lib/logger';
 import { isTauriRuntime } from './lib/tauri';
 import { defaultPreferences, normalizePreferences } from './lib/appHelpers';
+import { useAppliedTheme } from './hooks/useAppliedTheme';
 import {
   closeSettingsWindow,
   emitSettingsChanged,
@@ -23,13 +24,21 @@ import './styles/index.css';
 const settingsLogger = createLogger('settings-window');
 
 function SettingsWindow() {
-  const [preferences, setPreferences] = useState<AppPreferences>(() => normalizePreferences(defaultPreferences));
+  const [preferences, setPreferences] = useState<AppPreferences>(() => {
+    if (typeof window !== 'undefined') {
+      const raw = window.localStorage.getItem('termbridge.preferences');
+      if (raw) {
+        try {
+          return normalizePreferences(JSON.parse(raw));
+        } catch (error) {
+          settingsLogger.warn('从 localStorage 读取偏好设置失败', { error: String(error) });
+        }
+      }
+    }
+    return normalizePreferences(defaultPreferences);
+  });
 
-  useEffect(() => {
-    // 让 decorations: false 的窗口圆角处能够透明，避免显示 body 背景色。
-    document.documentElement.style.backgroundColor = 'transparent';
-    document.body.style.backgroundColor = 'transparent';
-  }, []);
+  useAppliedTheme(preferences.theme);
 
   useEffect(() => {
     void initI18n(preferences.locale).catch((error) => {
@@ -40,12 +49,6 @@ function SettingsWindow() {
   useEffect(() => {
     syncI18nLocale(preferences.locale);
   }, [preferences.locale]);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = preferences.theme === 'system'
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : preferences.theme;
-  }, [preferences.theme]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -83,9 +86,9 @@ function SettingsWindow() {
   }, []);
 
   return (
-    <main className="h-screen overflow-hidden flex flex-col rounded-[var(--app-radius-lg)] border border-[var(--app-border)] bg-[var(--app-bg)] shadow-2xl">
+    <main className="h-screen overflow-hidden flex flex-col bg-[var(--app-bg)] shadow-2xl">
       <div
-        className="flex h-11 shrink-0 items-center justify-between rounded-t-[var(--app-radius-lg)] border-b border-[var(--app-border)] bg-[var(--app-surface-muted)] px-3"
+        className="flex h-11 shrink-0 items-center justify-between bg-[var(--app-surface-muted)] px-3"
         data-tauri-drag-region
       >
         <span className="text-sm font-semibold text-[var(--app-text)]" data-tauri-drag-region>
