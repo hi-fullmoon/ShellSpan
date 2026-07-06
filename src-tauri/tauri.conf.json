@@ -22,21 +22,6 @@
         "fullscreen": false,
         "transparent": true,
         "titleBarStyle": "Overlay"
-      },
-      {
-        "label": "settings",
-        "title": "Settings",
-        "width": 720,
-        "height": 540,
-        "minWidth": 600,
-        "minHeight": 420,
-        "resizable": true,
-        "fullscreen": false,
-        "transparent": true,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "parent": "main",
-        "url": "settings.html"
       }
     ],
     "security": {
