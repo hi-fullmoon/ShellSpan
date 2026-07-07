@@ -22,7 +22,8 @@ export const useLogStore = create<LogState>()((set, get) => ({
     set({ loading: true, error: undefined });
     try {
       const files = await invokeListLogFiles();
-      set({ files, loading: false });
+      const sortedFiles = files.sort((a, b) => b.modifiedAt - a.modifiedAt);
+      set({ files: sortedFiles, loading: false });
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : String(error),

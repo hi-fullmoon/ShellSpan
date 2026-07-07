@@ -1,12 +1,14 @@
-import React from 'react';
-import { cn } from '@/lib/utils';
+import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
+import { ResponsiveCardGrid } from '@/components/ui/ResponsiveCardGrid';
 import type { ConnectionProfile } from '@/types';
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];
+  onAdd: () => void;
   onEdit: (profile: ConnectionProfile) => void;
   onDelete: (profile: ConnectionProfile) => void;
   onConnectTerminal: (profile: ConnectionProfile) => void;
@@ -17,6 +19,7 @@ export interface ConnectionListProps {
 
 export const ConnectionList: React.FC<ConnectionListProps> = ({
   profiles,
+  onAdd,
   onEdit,
   onDelete,
   onConnectTerminal,
@@ -25,6 +28,25 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onPortForward,
 }) => {
   const { t } = useI18n();
+  const [query, setQuery] = useState('');
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredProfiles = profiles.filter((profile) => {
+    if (!normalizedQuery) return true;
+    const haystack = [
+      profile.name,
+      profile.host,
+      profile.username,
+      String(profile.port),
+      profile.jumpHost?.host,
+      profile.jumpHost?.username,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return haystack.includes(normalizedQuery);
+  });
 
   if (profiles.length === 0) {
     return (
@@ -35,19 +57,60 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   }
 
   return (
-    <div className="flex flex-col gap-1 overflow-y-auto p-2">
-      {profiles.map((profile) => (
-        <ConnectionCard
-          key={profile.id}
-          profile={profile}
-          onEdit={() => onEdit(profile)}
-          onDelete={() => onDelete(profile)}
-          onConnectTerminal={() => onConnectTerminal(profile)}
-          onConnectSftp={() => onConnectSftp(profile)}
-          onDuplicate={() => onDuplicate(profile)}
-          onPortForward={() => onPortForward(profile)}
-        />
-      ))}
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-app-text">
+            {t('workbench.connections.title')}
+          </div>
+          <div className="text-[11px] text-app-text-soft">
+            {t('workbench.connections.count', {
+              count: filteredProfiles.length,
+              total: profiles.length,
+            })}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('workbench.connections.searchPlaceholder')}
+            className="flex-1"
+          />
+          <Button variant="primary" size="sm" onClick={onAdd}>
+            {t('workbench.connections.new')}
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {filteredProfiles.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <EmptyState title={t('workbench.connections.filteredEmpty')} />
+          </div>
+        ) : (
+          <ResponsiveCardGrid
+            columns={1}
+            breakpoints={[
+              { minWidth: 800, columns: 2 },
+              { minWidth: 900, columns: 3 },
+            ]}
+          >
+            {filteredProfiles.map((profile) => (
+              <ConnectionCard
+                key={profile.id}
+                profile={profile}
+                onEdit={() => onEdit(profile)}
+                onDelete={() => onDelete(profile)}
+                onConnectTerminal={() => onConnectTerminal(profile)}
+                onConnectSftp={() => onConnectSftp(profile)}
+                onDuplicate={() => onDuplicate(profile)}
+                onPortForward={() => onPortForward(profile)}
+              />
+            ))}
+          </ResponsiveCardGrid>
+        )}
+      </div>
     </div>
   );
 };
@@ -74,10 +137,10 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   const { t } = useI18n();
 
   return (
-    <div className="group flex flex-col gap-2 rounded-xl border border-app-border bg-app-surface p-3 shadow-[var(--shadow-card)] transition-colors hover:border-app-primary/50">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">
+    <div className="group flex flex-col gap-3 rounded-xl border border-app-border bg-app-surface p-3 shadow-[var(--shadow-card)] transition-colors hover:border-app-primary/50">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -90,16 +153,40 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
               <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
           </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-app-text">
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium text-app-text">
               {profile.name}
             </span>
-            <span className="text-xs text-app-text-soft">
+            <span className="truncate text-xs text-app-text-soft">
               {profile.username}@{profile.host}:{profile.port}
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap gap-1">
+          <span className="rounded-md bg-app-primary/10 px-2 py-1 text-[10px] text-app-primary">
+            {profile.authMethod === 'password'
+              ? t('connection.form.auth.password')
+              : t('connection.form.auth.key')}
+          </span>
+          {profile.jumpHost && (
+            <span className="rounded-md bg-app-border/60 px-2 py-1 text-[10px] text-app-text-soft">
+              {t('connection.form.jumpHost')}
+            </span>
+          )}
+        </div>
+      </div>
+      {profile.jumpHost && (
+        <div className="rounded-lg border border-app-border/80 bg-app-background/40 px-2.5 py-2">
+          <div className="text-[10px] uppercase tracking-[0.08em] text-app-text-soft">
+            {t('connection.form.jumpHost')}
+          </div>
+          <div className="truncate text-xs text-app-text">
+            {profile.jumpHost.username}@{profile.jumpHost.host}:{profile.jumpHost.port}
+          </div>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1 sm:justify-end">
           <Button
             variant="ghost"
             size="icon"
@@ -137,7 +224,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             variant="ghost"
             size="icon"
             onClick={onPortForward}
-            title="Port forwards"
+            title={t('workbench.connections.portForwards')}
           >
             <svg
               viewBox="0 0 24 24"

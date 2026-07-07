@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/Button';
+import { invokeCloseSession } from '@/lib/tauri';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 
@@ -12,6 +13,13 @@ export const TerminalTabBar: React.FC = () => {
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
   const removeSession = useTerminalStore((state) => state.removeSession);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
+
+  const handleCloseSession = (sessionId: string): void => {
+    removeSession(sessionId);
+    invokeCloseSession(sessionId).catch(() => {
+      // Ignore close errors after the tab is dismissed locally.
+    });
+  };
 
   return (
     <div className="flex h-9 items-center gap-1 border-b border-app-border bg-app-surface-muted px-2">
@@ -33,7 +41,7 @@ export const TerminalTabBar: React.FC = () => {
           <span
             onClick={(e) => {
               e.stopPropagation();
-              removeSession(session.sessionId);
+              handleCloseSession(session.sessionId);
             }}
             className="hidden h-4 w-4 items-center justify-center rounded hover:bg-app-border group-hover:flex"
           >

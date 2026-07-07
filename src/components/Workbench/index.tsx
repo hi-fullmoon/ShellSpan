@@ -200,18 +200,11 @@ const Workbench: React.FC = () => {
       <WorkbenchSidebar activeTab={activeTab} onTabChange={setActiveTab} />
 
       <div className="flex h-full flex-1 flex-col overflow-hidden">
-        {activeTab === 'connections' && (
-          <div className="flex h-9 shrink-0 items-center justify-end border-b border-app-border bg-app-surface px-3">
-            <Button variant="primary" size="sm" onClick={handleAdd}>
-              {t('workbench.connections.new')}
-            </Button>
-          </div>
-        )}
-
         <div className="min-h-0 flex-1">
           {activeTab === 'connections' && (
             <ConnectionList
               profiles={profiles}
+              onAdd={handleAdd}
               onEdit={handleEdit}
               onDelete={setDeleting}
               onConnectTerminal={connectTerminal}

@@ -1,4 +1,5 @@
 import React, { Suspense } from 'react';
+import { cn } from '@/lib/utils';
 import { AppShell, MainContent } from '@/components/layout/AppShell';
 import { useAppStore } from '@/stores/appStore';
 import { useTheme } from '@/hooks/useTheme';
@@ -78,9 +79,30 @@ export const App: React.FC = () => {
             </div>
           }
         >
-          {activeSection === 'workbench' && <Workbench />}
-          {activeSection === 'terminal' && <Terminal />}
-          {activeSection === 'sftp' && <Sftp />}
+          <div
+            className={cn(
+              'h-full',
+              activeSection !== 'workbench' && 'hidden',
+            )}
+          >
+            <Workbench />
+          </div>
+          <div
+            className={cn(
+              'h-full',
+              activeSection !== 'terminal' && 'hidden',
+            )}
+          >
+            <Terminal />
+          </div>
+          <div
+            className={cn(
+              'h-full',
+              activeSection !== 'sftp' && 'hidden',
+            )}
+          >
+            <Sftp />
+          </div>
         </Suspense>
       </MainContent>
     </AppShell>

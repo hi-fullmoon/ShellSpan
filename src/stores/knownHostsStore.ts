@@ -31,14 +31,26 @@ export const useKnownHostsStore = create<KnownHostsState>()((set) => ({
     }
   },
   removeHost: async (host, port) => {
-    await invokeRemoveKnownHost(host, port);
-    set((state) => ({
-      hosts: state.hosts.filter(
-        (h) => !(h.host === host && h.port === port),
-      ),
-    }));
+    set({ error: undefined });
+    try {
+      await invokeRemoveKnownHost(host, port);
+      set((state) => ({
+        hosts: state.hosts.filter(
+          (h) => !(h.host === host && h.port === port),
+        ),
+      }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
   },
   trustHost: async (host, port) => {
-    await invokeTrustHost(host, port);
+    set({ error: undefined });
+    try {
+      await invokeTrustHost(host, port);
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
   },
 }));

@@ -4,7 +4,6 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import {
-  invokeCloseSession,
   invokeResizeSession,
   invokeWriteSession,
   listenToSshClosed,
@@ -108,9 +107,6 @@ export function useTerminalSession(
       terminalRef.current = null;
       fitAddonRef.current = null;
       searchAddonRef.current = null;
-      invokeCloseSession(session.sessionId).catch(() => {
-        // Ignore close errors.
-      });
     };
   }, [session.sessionId, containerRef, setStatus, setClosed]);
 

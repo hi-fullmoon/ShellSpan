@@ -1,0 +1,106 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { cn } from '@/lib/utils';
+
+interface TooltipProps {
+  content: string;
+  children: React.ReactNode;
+  className?: string;
+  placement?: 'top' | 'bottom';
+}
+
+export const Tooltip: React.FC<TooltipProps> = ({
+  content,
+  children,
+  className,
+  placement = 'top',
+}) => {
+  const [visible, setVisible] = useState(false);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<React.CSSProperties>({
+    top: -9999,
+    left: -9999,
+  });
+
+  const updatePosition = useCallback((): void => {
+    const trigger = triggerRef.current;
+    const tooltip = tooltipRef.current;
+    if (!trigger) return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const tooltipHeight = tooltip?.offsetHeight ?? 24;
+    const tooltipWidth = tooltip?.offsetWidth ?? 0;
+
+    const top =
+      placement === 'top'
+        ? triggerRect.top - 6
+        : triggerRect.bottom + 6;
+
+    const left = triggerRect.left + triggerRect.width / 2;
+    const halfWidth = tooltipWidth / 2;
+    const minLeft = halfWidth + 8;
+    const maxLeft = window.innerWidth - halfWidth - 8;
+    const adjustedLeft = Math.max(minLeft, Math.min(maxLeft, left));
+
+    setStyle({
+      top,
+      left: adjustedLeft,
+    });
+  }, [placement]);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    updatePosition();
+
+    const handleScroll = (): void => {
+      updatePosition();
+    };
+
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [visible, updatePosition]);
+
+  const show = useCallback((): void => {
+    setVisible(true);
+  }, []);
+
+  const hide = useCallback((): void => {
+    setVisible(false);
+  }, []);
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        className={className}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+      >
+        {children}
+      </span>
+      {visible &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            className={cn(
+              'fixed z-[100] -translate-x-1/2 rounded-md border border-app-border bg-app-surface px-2 py-1 text-xs text-app-text shadow-[var(--shadow-dialog)]',
+              placement === 'top' && '-translate-y-full',
+            )}
+            style={style}
+          >
+            {content}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+};
