@@ -193,13 +193,6 @@ export interface DeleteProgressEvent {
   completedSteps: number;
 }
 
-export interface PortForwardConfig {
-  kind: 'local' | 'remote';
-  localPort: number;
-  remoteHost: string;
-  remotePort: number;
-}
-
 export interface RemoteDirectoryRequest extends RemoteConnectionRequest {
   path?: string;
 }

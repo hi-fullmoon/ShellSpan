@@ -74,7 +74,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
               title={item.label}
             >
               <span className="flex h-4 w-4 items-center justify-center">{item.icon}</span>
-              <span className="flex-1 text-left">{item.label}</span>
+              <span className="flex-1 text-center">{item.label}</span>
             </button>
           );
         })}

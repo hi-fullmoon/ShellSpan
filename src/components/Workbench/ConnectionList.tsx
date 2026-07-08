@@ -14,7 +14,6 @@ export interface ConnectionListProps {
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
-  onPortForward: (profile: ConnectionProfile) => void;
 }
 
 export const ConnectionList: React.FC<ConnectionListProps> = ({
@@ -25,7 +24,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onConnectTerminal,
   onConnectSftp,
   onDuplicate,
-  onPortForward,
 }) => {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
@@ -58,7 +56,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-2">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-xs font-medium text-app-text">
             {t('workbench.connections.title')}
@@ -70,13 +68,14 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
             })}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('workbench.connections.searchPlaceholder')}
-            className="flex-1"
-          />
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <div className="min-w-0 flex-1 sm:w-64">
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t('workbench.connections.searchPlaceholder')}
+            />
+          </div>
           <Button variant="primary" size="sm" onClick={onAdd}>
             {t('workbench.connections.new')}
           </Button>
@@ -105,7 +104,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 onConnectTerminal={() => onConnectTerminal(profile)}
                 onConnectSftp={() => onConnectSftp(profile)}
                 onDuplicate={() => onDuplicate(profile)}
-                onPortForward={() => onPortForward(profile)}
               />
             ))}
           </ResponsiveCardGrid>
@@ -122,7 +120,6 @@ interface ConnectionCardProps {
   onConnectTerminal: () => void;
   onConnectSftp: () => void;
   onDuplicate: () => void;
-  onPortForward: () => void;
 }
 
 const ConnectionCard: React.FC<ConnectionCardProps> = ({
@@ -132,7 +129,6 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   onConnectTerminal,
   onConnectSftp,
   onDuplicate,
-  onPortForward,
 }) => {
   const { t } = useI18n();
 
@@ -218,22 +214,6 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
               className="h-4 w-4"
             >
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onPortForward}
-            title={t('workbench.connections.portForwards')}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="h-4 w-4"
-            >
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
           </Button>
           <Button

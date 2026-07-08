@@ -14,7 +14,6 @@ import type {
   KnownHostEntry,
   LocalDirectoryListing,
   LogFileInfo,
-  PortForwardConfig,
   RemoteConnectionRequest,
   RemoteDirectoryListing,
   RemoteDirectoryRequest,
@@ -192,38 +191,6 @@ export async function invokeRetrievePassword(
 
 export async function invokeRemovePassword(profileId: string): Promise<void> {
   return invoke('remove_password', { profileId });
-}
-
-export async function invokeStartPortForwards(
-  operationId: string,
-  host: string,
-  port: number,
-  username: string,
-  authMethod: AuthMethod,
-  password?: string,
-  privateKeyPath?: string,
-  passphrase?: string,
-  jumpHost?: JumpHostConfig,
-  forwards: PortForwardConfig[] = [],
-): Promise<void> {
-  return invoke('start_port_forwards', {
-    operationId,
-    host,
-    port,
-    username,
-    authMethod,
-    password,
-    privateKeyPath,
-    passphrase,
-    jumpHost,
-    forwards,
-  });
-}
-
-export async function invokeStopPortForwards(
-  operationId: string,
-): Promise<void> {
-  return invoke('stop_port_forwards', { operationId });
 }
 
 export function buildRemoteConnectionRequest(

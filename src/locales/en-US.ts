@@ -53,7 +53,6 @@ export default {
   'workbench.connections.empty': 'No connections yet. Create one to get started.',
   'workbench.connections.connectTerminal': 'Open Terminal',
   'workbench.connections.connectSftp': 'Open SFTP',
-  'workbench.connections.portForwards': 'Port Forwards',
   'workbench.connections.count': '{count}/{total} connections',
   'workbench.connections.searchPlaceholder': 'Search by name, host, user or jump host',
   'workbench.connections.filteredEmpty': 'No matching connections',

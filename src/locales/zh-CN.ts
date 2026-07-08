@@ -53,7 +53,6 @@ export default {
   'workbench.connections.empty': '暂无连接，点击右上角新建',
   'workbench.connections.connectTerminal': '打开终端',
   'workbench.connections.connectSftp': '打开 SFTP',
-  'workbench.connections.portForwards': '端口转发',
   'workbench.connections.count': '{count}/{total} 个连接',
   'workbench.connections.searchPlaceholder': '搜索名称、主机、用户或跳板机',
   'workbench.connections.filteredEmpty': '没有匹配的连接',

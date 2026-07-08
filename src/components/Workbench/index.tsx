@@ -18,14 +18,6 @@ import {
 } from '@/lib/tauri';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useSftpStore } from '@/stores/sftpStore';
-import { PortForwardDialog } from './PortForwardDialog';
-import {
-  buildConnectionKey,
-  startPortForwardsForProfile,
-  stopPortForwardsForProfile,
-  usePortForwardStore,
-} from '@/stores/portForwardStore';
-
 
 const Workbench: React.FC = () => {
   const { t } = useI18n();
@@ -47,9 +39,6 @@ const Workbench: React.FC = () => {
     mismatch: false,
     onTrust: () => {},
   });
-  const [portForwardProfile, setPortForwardProfile] = useState<
-    ConnectionProfile | undefined
-  >();
 
   const profiles = useProfileStore((state) => state.profiles);
   const addProfile = useProfileStore((state) => state.addProfile);
@@ -90,30 +79,6 @@ const Workbench: React.FC = () => {
 
   const handleDuplicate = async (profile: ConnectionProfile): Promise<void> => {
     await duplicateProfile(profile.id);
-  };
-
-  const handlePortForward = (profile: ConnectionProfile): void => {
-    setPortForwardProfile(profile);
-  };
-
-  const handleStartPortForwards = async (
-    forwards: import('@/types').PortForwardConfig[],
-  ): Promise<void> => {
-    if (!portForwardProfile) return;
-    const profile = await ensurePassword(portForwardProfile);
-    await startPortForwardsForProfile(profile, forwards);
-    setPortForwardProfile(undefined);
-  };
-
-  const handleStopPortForwards = async (): Promise<void> => {
-    if (!portForwardProfile) return;
-    const key = buildConnectionKey(
-      portForwardProfile.host,
-      portForwardProfile.port,
-      portForwardProfile.username,
-    );
-    await stopPortForwardsForProfile(key);
-    setPortForwardProfile(undefined);
   };
 
   const connectTerminal = async (
@@ -210,7 +175,6 @@ const Workbench: React.FC = () => {
               onConnectTerminal={connectTerminal}
               onConnectSftp={connectSftp}
               onDuplicate={handleDuplicate}
-              onPortForward={handlePortForward}
             />
           )}
           {activeTab === 'knownHosts' && <KnownHostsPanel />}
@@ -243,26 +207,6 @@ const Workbench: React.FC = () => {
         fingerprint={hostKeyDialog.fingerprint}
         mismatch={hostKeyDialog.mismatch}
         onTrust={hostKeyDialog.onTrust}
-      />
-
-      <PortForwardDialog
-        open={!!portForwardProfile}
-        onClose={() => setPortForwardProfile(undefined)}
-        onStart={handleStartPortForwards}
-        onStop={handleStopPortForwards}
-        activeForwards={
-          portForwardProfile
-            ? usePortForwardStore
-                .getState()
-                .findByConnection(
-                  buildConnectionKey(
-                    portForwardProfile.host,
-                    portForwardProfile.port,
-                    portForwardProfile.username,
-                  ),
-                )?.forwards
-            : undefined
-        }
       />
     </div>
   );

@@ -94,31 +94,32 @@ export const KnownHostsPanel: React.FC = () => {
               { minWidth: 800, columns: 2 },
               { minWidth: 900, columns: 3 },
             ]}
+            gap="0.375rem"
           >
             {filteredHosts.map((host) => (
               <div
                 key={`${host.host}:${host.port}`}
-                className="group flex flex-col gap-3 rounded-xl border border-app-border bg-app-surface p-3 shadow-[var(--shadow-card)] transition-colors hover:border-app-primary/50"
+                className="group flex flex-col gap-2 rounded-lg border border-app-border bg-app-surface p-2 shadow-[var(--shadow-card)] transition-colors hover:border-app-primary/50"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-app-primary/10 text-app-primary">
                       <svg
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
                         strokeWidth="2"
-                        className="h-4 w-4"
+                        className="h-3.5 w-3.5"
                       >
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                         <path d="M9 12l2 2 4-4" />
                       </svg>
                     </div>
                     <div className="flex min-w-0 flex-col">
-                      <span className="truncate text-sm font-medium text-app-text">
+                      <span className="truncate text-xs font-medium text-app-text">
                         {host.host}:{host.port}
                       </span>
-                      <span className="truncate text-xs text-app-text-soft">
+                      <span className="truncate text-[11px] text-app-text-soft">
                         {t('workbench.knownHosts.keyType')}: {host.keyType}
                       </span>
                     </div>
@@ -134,19 +135,19 @@ export const KnownHostsPanel: React.FC = () => {
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="2"
-                      className="h-4 w-4 text-app-error"
+                      className="h-3.5 w-3.5 text-app-error"
                     >
                       <polyline points="3 6 5 6 21 6" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
                   </Button>
                 </div>
-                <div className="rounded-lg border border-app-border/80 bg-app-background/40 px-2.5 py-2">
+                <div className="rounded-md border border-app-border/80 bg-app-background/40 px-2 py-1.5">
                   <div className="text-[10px] uppercase tracking-[0.08em] text-app-text-soft">
                     {t('workbench.knownHosts.fingerprint')}
                   </div>
                   <div
-                    className="break-all font-mono text-[11px] text-app-text"
+                    className="break-all font-mono text-[10px] text-app-text"
                     title={host.fingerprint}
                   >
                     {host.fingerprint}

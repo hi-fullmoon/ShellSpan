@@ -34,7 +34,7 @@ export const TerminalTabBar: React.FC = () => {
               : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',
           )}
         >
-          <span className="truncate">{session.title}</span>
+          <span className="flex-1 truncate text-center">{session.title}</span>
           {session.status === 'error' && (
             <span className="h-1.5 w-1.5 rounded-full bg-app-error" />
           )}

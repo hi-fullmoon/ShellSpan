@@ -26,7 +26,7 @@ export const SftpTabBar: React.FC = () => {
               : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',
           )}
         >
-          <span className="truncate">{conn.title}</span>
+          <span className="flex-1 truncate text-center">{conn.title}</span>
           <span
             onClick={(e) => {
               e.stopPropagation();
