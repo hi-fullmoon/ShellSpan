@@ -33,6 +33,7 @@ export interface TerminalController {
 }
 
 class TerminalControllerImpl implements TerminalController {
+  private readonly removeFromRegistry: () => void;
   sessionId: string;
   terminal: Terminal;
   fitAddon: FitAddon;
@@ -50,10 +51,12 @@ class TerminalControllerImpl implements TerminalController {
     sessionId: string,
     setStatus: StatusCallback,
     setClosed: ClosedCallback,
+    removeFromRegistry: () => void,
   ) {
     this.sessionId = sessionId;
     this.setStatus = setStatus;
     this.setClosed = setClosed;
+    this.removeFromRegistry = removeFromRegistry;
 
     this.terminal = new Terminal({
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
@@ -180,6 +183,7 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
     this.detach();
     this.unlisten.data?.();
@@ -187,6 +191,7 @@ class TerminalControllerImpl implements TerminalController {
     this.unlisten.closed?.();
     this.unlisten = { data: undefined, status: undefined, closed: undefined };
     this.terminal.dispose();
+    this.removeFromRegistry();
   }
 }
 
@@ -210,6 +215,7 @@ export const terminalRegistry: TerminalRegistry = (() => {
         sessionId,
         setStatus,
         setClosed,
+        () => controllers.delete(sessionId),
       );
       controllers.set(sessionId, controller);
       return controller;
