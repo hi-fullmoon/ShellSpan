@@ -42,6 +42,7 @@ class TerminalControllerImpl implements TerminalController {
   resizeObserver: ResizeObserver | null = null;
   unlisten: TerminalController['unlisten'];
   private opened = false;
+  private disposed = false;
   private readonly setStatus: StatusCallback;
   private readonly setClosed: ClosedCallback;
 
@@ -87,18 +88,39 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   private async setupListeners(): Promise<void> {
-    this.unlisten.data = await listenToSshData(this.sessionId, (event) => {
+    const dataUnlisten = await listenToSshData(this.sessionId, (event) => {
       this.terminal.write(event.payload.chunk);
     });
-    this.unlisten.status = await listenToSshStatus(this.sessionId, (event) => {
+    if (this.disposed) {
+      dataUnlisten();
+      return;
+    }
+    this.unlisten.data = dataUnlisten;
+
+    const statusUnlisten = await listenToSshStatus(this.sessionId, (event) => {
       this.setStatus(this.sessionId, event.payload);
     });
-    this.unlisten.closed = await listenToSshClosed(this.sessionId, (event) => {
+    if (this.disposed) {
+      statusUnlisten();
+      return;
+    }
+    this.unlisten.status = statusUnlisten;
+
+    const closedUnlisten = await listenToSshClosed(this.sessionId, (event) => {
       this.setClosed(this.sessionId, event.payload);
     });
+    if (this.disposed) {
+      closedUnlisten();
+      return;
+    }
+    this.unlisten.closed = closedUnlisten;
   }
 
   attach(host: HTMLElement): void {
+    if (this.host !== null && this.host !== host) {
+      this.detach();
+    }
+
     host.appendChild(this.container);
 
     if (!this.opened) {
@@ -148,6 +170,7 @@ class TerminalControllerImpl implements TerminalController {
 
   detach(): void {
     this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.container.remove();
     this.host = null;
   }
@@ -157,10 +180,12 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.detach();
     this.unlisten.data?.();
     this.unlisten.status?.();
     this.unlisten.closed?.();
+    this.unlisten = { data: undefined, status: undefined, closed: undefined };
     this.terminal.dispose();
   }
 }

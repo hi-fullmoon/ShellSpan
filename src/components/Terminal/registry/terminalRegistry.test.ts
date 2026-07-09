@@ -56,4 +56,36 @@ describe('terminalRegistry', () => {
     expect(terminalRegistry.get('s1')).toBeUndefined();
     expect(host.firstChild).toBeNull();
   });
+
+  it('detach nulls resizeObserver; reattach creates a fresh observer', () => {
+    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const host1 = document.createElement('div');
+    controller.attach(host1);
+    expect(controller.resizeObserver).not.toBeNull();
+    const firstObserver = controller.resizeObserver;
+    controller.detach();
+    expect(controller.resizeObserver).toBeNull();
+    const host2 = document.createElement('div');
+    controller.attach(host2);
+    expect(controller.resizeObserver).not.toBeNull();
+    expect(controller.resizeObserver).not.toBe(firstObserver);
+  });
+
+  it('attach to a different host without detach replaces the observer', () => {
+    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const host1 = document.createElement('div');
+    controller.attach(host1);
+    const firstObserver = controller.resizeObserver;
+    const host2 = document.createElement('div');
+    controller.attach(host2);
+    expect(controller.resizeObserver).not.toBe(firstObserver);
+  });
+
+  it('double dispose is a no-op', () => {
+    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    expect(() => {
+      controller.dispose();
+      controller.dispose();
+    }).not.toThrow();
+  });
 });
