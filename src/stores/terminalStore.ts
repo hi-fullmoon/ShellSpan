@@ -10,13 +10,15 @@ export interface TerminalSession {
   status: SessionStatus;
   statusMessage?: string;
   closed?: ClosedEvent;
+  profileId?: string;
 }
 
 interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
-  addSession: (summary: SessionSummary) => void;
+  addSession: (summary: SessionSummary, profileId?: string) => void;
   removeSession: (sessionId: string) => void;
+  reorderSessions: (activeId: string, overId: string) => void;
   setActiveSession: (sessionId: string | null) => void;
   appendData: (sessionId: string, chunk: string) => void;
   setStatus: (sessionId: string, event: StatusEvent) => void;
@@ -27,7 +29,7 @@ interface TerminalState {
 export const useTerminalStore = create<TerminalState>()((set) => ({
   sessions: [],
   activeSessionId: null,
-  addSession: (summary) =>
+  addSession: (summary, profileId) =>
     set((state) => {
       const exists = state.sessions.some(
         (session) => session.sessionId === summary.sessionId,
@@ -43,6 +45,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
             port: summary.port,
             username: summary.username,
             status: 'connecting',
+            profileId,
           },
         ],
         activeSessionId: summary.sessionId,
@@ -60,6 +63,21 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       return { sessions, activeSessionId };
     }),
   setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+  reorderSessions: (activeId, overId) =>
+    set((state) => {
+      if (activeId === overId) return state;
+      const fromIndex = state.sessions.findIndex(
+        (session) => session.sessionId === activeId,
+      );
+      const toIndex = state.sessions.findIndex(
+        (session) => session.sessionId === overId,
+      );
+      if (fromIndex === -1 || toIndex === -1) return state;
+      const sessions = [...state.sessions];
+      const [moved] = sessions.splice(fromIndex, 1);
+      sessions.splice(toIndex, 0, moved);
+      return { sessions };
+    }),
   appendData: () => {
     // Terminal component handles data directly via xterm.
   },
