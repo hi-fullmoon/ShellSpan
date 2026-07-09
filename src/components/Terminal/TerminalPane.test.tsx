@@ -1,8 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalPane } from './TerminalPane';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
+
+vi.mock('@/hooks/useI18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => key,
+    ready: true,
+    locale: 'en-US',
+    setLocale: () => {},
+  }),
+}));
 
 function makeSession(
   overrides: Partial<TerminalSessionState> = {},
@@ -20,8 +29,9 @@ function makeSession(
 
 describe('TerminalPane', () => {
   it('renders the pane host and search toggle button', () => {
-    render(<TerminalPane activeSession={makeSession()} />);
+    const { container } = render(<TerminalPane activeSession={makeSession()} />);
     expect(screen.getByTitle('Search')).toBeInTheDocument();
+    expect(container.querySelector('div.h-full.w-full.p-2')).toBeInTheDocument();
   });
 
   it('opens and closes the search bar via the toggle button', async () => {
@@ -38,6 +48,7 @@ describe('TerminalPane', () => {
     const overlay = document.querySelector('div.absolute.inset-0.z-10');
     expect(overlay).not.toBeNull();
     expect(overlay?.querySelector('span')?.textContent ?? '').toMatch(/\.\.\.$/);
+    expect(overlay?.querySelector('svg.animate-spin')).not.toBeNull();
   });
 
   it('hides the connecting overlay when status is not connecting', () => {
