@@ -35,7 +35,7 @@ const Terminal: React.FC = () => {
           setContextMenu({ session, x, y })
         }
       />
-      <div className="relative min-h-0 flex-1 p-2">
+      <div className="relative min-h-0 flex-1">
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <EmptyState title={t('terminal.empty')} />

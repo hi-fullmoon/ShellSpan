@@ -49,8 +49,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   if (!open || !session) return null;
 
-  const left = Math.min(x, window.innerWidth - MENU_WIDTH);
-  const top = Math.min(y, window.innerHeight - MENU_HEIGHT);
+  const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
+  const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
 
   const closeSession = (sessionId: string): void => {
     removeSession(sessionId);
@@ -90,6 +90,10 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   const handleCloseToRight = (): void => {
     const idx = sessions.findIndex((s) => s.sessionId === session.sessionId);
+    if (idx === -1) {
+      onClose();
+      return;
+    }
     sessions.slice(idx + 1).forEach((s) => {
       closeSession(s.sessionId);
     });
