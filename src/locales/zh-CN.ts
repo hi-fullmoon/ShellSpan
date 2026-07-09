@@ -93,6 +93,7 @@ export default {
   'connection.form.validation.privateKeyRequired': '请选择私钥文件',
 
   'terminal.newTab': '新终端',
+  'terminal.tab.noProfiles': '暂无已保存连接，请到工作台添加。',
   'terminal.empty': '暂无终端会话',
   'terminal.openFromWorkbench': '从工作台选择一个连接打开终端',
   'terminal.status.connecting': '连接中',

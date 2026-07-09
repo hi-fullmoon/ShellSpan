@@ -93,6 +93,7 @@ export default {
   'connection.form.validation.privateKeyRequired': 'Please select a private key file',
 
   'terminal.newTab': 'New Terminal',
+  'terminal.tab.noProfiles': 'No saved connections. Add one in the Workbench.',
   'terminal.empty': 'No terminal sessions',
   'terminal.openFromWorkbench': 'Select a connection from the workbench to open a terminal',
   'terminal.status.connecting': 'Connecting',
