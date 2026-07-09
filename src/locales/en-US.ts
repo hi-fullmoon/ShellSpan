@@ -94,6 +94,9 @@ export default {
 
   'terminal.newTab': 'New Terminal',
   'terminal.tab.noProfiles': 'No saved connections. Add one in the Workbench.',
+  'terminal.tab.copyInfo': 'Copy Connection Info',
+  'terminal.tab.closeOthers': 'Close Others',
+  'terminal.tab.closeToRight': 'Close to the Right',
   'terminal.empty': 'No terminal sessions',
   'terminal.openFromWorkbench': 'Select a connection from the workbench to open a terminal',
   'terminal.status.connecting': 'Connecting',
