@@ -9,7 +9,12 @@ const mockConnect = vi.fn();
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, variables?: Record<string, string | number>) => {
+      if (variables && key === 'terminal.newTabMenu.connectionCount') {
+        return `${variables.count} connections`;
+      }
+      return key;
+    },
     ready: true,
     locale: 'en-US',
     setLocale: () => {},
@@ -80,14 +85,30 @@ describe('NewTabMenu', () => {
 
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
-    expect(screen.getByText('user1@host1.io')).toBeInTheDocument();
-    expect(screen.getByText('user2@host2.io')).toBeInTheDocument();
+    expect(screen.getByText('user1@host1.io:22')).toBeInTheDocument();
+    expect(screen.getByText('user2@host2.io:22')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Alpha'));
 
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(mockConnect).toHaveBeenCalledWith(p1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters profiles by search query', () => {
+    const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
+    const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
+    useProfileStore.setState({ profiles: [p1, p2] });
+
+    render(<NewTabMenu open onClose={vi.fn()} />);
+
+    const searchInput = screen.getByPlaceholderText(
+      'terminal.newTabMenu.searchPlaceholder',
+    );
+    fireEvent.change(searchInput, { target: { value: 'beta' } });
+
+    expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
   });
 
   it('shows the empty hint and a go-to-workbench button when no profiles', () => {
@@ -122,7 +143,7 @@ describe('NewTabMenu', () => {
     const onClose = vi.fn();
     const { container } = render(<NewTabMenu open onClose={onClose} />);
 
-    const backdrop = container.querySelector('.fixed.inset-0') as HTMLElement;
+    const backdrop = container.querySelector('[role="presentation"]') as HTMLElement;
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop);
 

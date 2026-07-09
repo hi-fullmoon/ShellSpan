@@ -27,7 +27,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   };
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[4px] border border-app-border bg-app-surface">
+    <div className="relative flex h-full w-full flex-col overflow-hidden">
       {searchOpen && (
         <div className="flex h-9 items-center gap-2 border-b border-app-border bg-app-surface-muted px-2">
           <Input

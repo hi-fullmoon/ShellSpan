@@ -2,7 +2,6 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
-import { useTerminalStore } from '@/stores/terminalStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import type { AppSection } from '@/types';
 
@@ -40,13 +39,12 @@ const NavItem: React.FC<NavItemProps> = ({ section, label, badge }) => {
 
 export const SectionNav: React.FC = () => {
   const { t } = useI18n();
-  const terminalCount = useTerminalStore((state) => state.sessions.length);
   const sftpCount = useSftpStore((state) => state.connections.length);
 
   return (
     <div className="flex h-full items-center gap-1" data-tauri-drag-region="false">
       <NavItem section="workbench" label={t('section.workbench')} />
-      <NavItem section="terminal" label={t('section.terminal')} badge={terminalCount} />
+      <NavItem section="terminal" label={t('section.terminal')} />
       <NavItem section="sftp" label={t('section.sftp')} badge={sftpCount} />
     </div>
   );
