@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
-import { Button } from '@/components/ui/Button';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
 import { ConnectionForm } from './ConnectionForm';
@@ -8,15 +7,11 @@ import { ConnectionList } from './ConnectionList';
 import { KnownHostsPanel } from './KnownHostsPanel';
 import { LogPanel } from './LogPanel';
 import { WorkbenchSidebar, type WorkbenchTab } from './WorkbenchSidebar';
-import { ConfirmDialog, Dialog } from '@/components/ui/Dialog';
+import { ConfirmDialog } from '@/components/ui/Dialog';
+import { HostKeyDialog } from '@/components/Terminal/HostKeyDialog';
 import type { ConnectionProfile } from '@/types';
-import {
-  buildRemoteConnectionRequest,
-  buildSessionCreateRequest,
-  invokeCreateSession,
-  invokeTrustHost,
-} from '@/lib/tauri';
-import { useTerminalStore } from '@/stores/terminalStore';
+import { buildRemoteConnectionRequest } from '@/lib/tauri';
+import { useConnectSession } from '@/hooks/useConnectSession';
 import { useSftpStore } from '@/stores/sftpStore';
 
 const Workbench: React.FC = () => {
@@ -25,20 +20,7 @@ const Workbench: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ConnectionProfile | undefined>();
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
-  const [hostKeyDialog, setHostKeyDialog] = useState<{
-    open: boolean;
-    host: string;
-    port: number;
-    fingerprint?: string;
-    mismatch: boolean;
-    onTrust: () => void;
-  }>({
-    open: false,
-    host: '',
-    port: 22,
-    mismatch: false,
-    onTrust: () => {},
-  });
+  const { connect, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
 
   const profiles = useProfileStore((state) => state.profiles);
   const addProfile = useProfileStore((state) => state.addProfile);
@@ -48,7 +30,6 @@ const Workbench: React.FC = () => {
   const ensurePassword = useProfileStore((state) => state.ensurePassword);
 
   const setActiveSection = useAppStore((state) => state.setActiveSection);
-  const addTerminalSession = useTerminalStore((state) => state.addSession);
   const addSftpConnection = useSftpStore((state) => state.addConnection);
 
   const handleAdd = (): void => {
@@ -81,21 +62,6 @@ const Workbench: React.FC = () => {
     await duplicateProfile(profile.id);
   };
 
-  const connectTerminal = async (
-    profile: ConnectionProfile,
-  ): Promise<void> => {
-    const profileWithPassword = await ensurePassword(profile);
-    try {
-      const summary = await invokeCreateSession(
-        buildSessionCreateRequest(profileWithPassword, 120, 30),
-      );
-      addTerminalSession(summary);
-      setActiveSection('terminal');
-    } catch (error) {
-      handleConnectionError(error, () => connectTerminal(profileWithPassword));
-    }
-  };
-
   const connectSftp = async (profile: ConnectionProfile): Promise<void> => {
     const profileWithPassword = await ensurePassword(profile);
     const connection = buildRemoteConnectionRequest(profileWithPassword);
@@ -110,56 +76,6 @@ const Workbench: React.FC = () => {
     setActiveSection('sftp');
   };
 
-  const handleConnectionError = (
-    error: unknown,
-    retry: () => void,
-  ): void => {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'type' in error
-    ) {
-      const typed = error as { type: string; payload?: Record<string, unknown> };
-      if (typed.type === 'HostKeyUnknown') {
-        const payload = typed.payload ?? {};
-        setHostKeyDialog({
-          open: true,
-          host: String(payload.host ?? ''),
-          port: Number(payload.port ?? 22),
-          fingerprint: payload.fingerprint
-            ? String(payload.fingerprint)
-            : undefined,
-          mismatch: false,
-          onTrust: () => {
-            invokeTrustHost(String(payload.host ?? ''), Number(payload.port ?? 22)).then(() => {
-              setHostKeyDialog((prev) => ({ ...prev, open: false }));
-              retry();
-            });
-          },
-        });
-        return;
-      }
-      if (typed.type === 'HostKeyMismatch') {
-        const payload = typed.payload ?? {};
-        setHostKeyDialog({
-          open: true,
-          host: String(payload.host ?? ''),
-          port: Number(payload.port ?? 22),
-          mismatch: true,
-          onTrust: () => {
-            invokeTrustHost(String(payload.host ?? ''), Number(payload.port ?? 22)).then(() => {
-              setHostKeyDialog((prev) => ({ ...prev, open: false }));
-              retry();
-            });
-          },
-        });
-        return;
-      }
-    }
-    // eslint-disable-next-line no-alert
-    alert(error instanceof Error ? error.message : String(error));
-  };
-
   return (
     <div className="flex h-full w-full">
       <WorkbenchSidebar activeTab={activeTab} onTabChange={setActiveTab} />
@@ -172,7 +88,7 @@ const Workbench: React.FC = () => {
               onAdd={handleAdd}
               onEdit={handleEdit}
               onDelete={setDeleting}
-              onConnectTerminal={connectTerminal}
+              onConnectTerminal={connect}
               onConnectSftp={connectSftp}
               onDuplicate={handleDuplicate}
             />
@@ -201,7 +117,7 @@ const Workbench: React.FC = () => {
 
       <HostKeyDialog
         open={hostKeyDialog.open}
-        onClose={() => setHostKeyDialog((prev) => ({ ...prev, open: false }))}
+        onClose={closeHostKeyDialog}
         host={hostKeyDialog.host}
         port={hostKeyDialog.port}
         fingerprint={hostKeyDialog.fingerprint}
@@ -209,62 +125,6 @@ const Workbench: React.FC = () => {
         onTrust={hostKeyDialog.onTrust}
       />
     </div>
-  );
-};
-
-interface HostKeyDialogProps {
-  open: boolean;
-  onClose: () => void;
-  host: string;
-  port: number;
-  fingerprint?: string;
-  mismatch: boolean;
-  onTrust: () => void;
-}
-
-const HostKeyDialog: React.FC<HostKeyDialogProps> = ({
-  open,
-  onClose,
-  host,
-  port,
-  fingerprint,
-  mismatch,
-  onTrust,
-}) => {
-  const { t } = useI18n();
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={
-        mismatch
-          ? t('dialog.hostKeyMismatch.title')
-          : t('dialog.hostKeyUnknown.title')
-      }
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button variant="primary" onClick={onTrust}>
-            {t('dialog.hostKey.trustAndConnect')}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-app-text">
-          {mismatch
-            ? t('dialog.hostKeyMismatch.message', { host, port })
-            : t('dialog.hostKeyUnknown.message', { host, port })}
-        </p>
-        {fingerprint && (
-          <div className="rounded-[4px] bg-app-surface-muted p-2 font-mono text-xs text-app-text">
-            {fingerprint}
-          </div>
-        )}
-      </div>
-    </Dialog>
   );
 };
 
