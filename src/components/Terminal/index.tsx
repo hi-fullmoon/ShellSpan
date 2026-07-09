@@ -1,30 +1,66 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
-import { useTerminalStore } from '@/stores/terminalStore';
+import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { useConnectSession } from '@/hooks/useConnectSession';
+import { TerminalControllerLayer } from './TerminalControllerLayer';
 import { TerminalTabBar } from './TerminalTabBar';
-import { TerminalSession } from './TerminalSession';
+import { TerminalPane } from './TerminalPane';
+import { NewTabMenu } from './NewTabMenu';
+import { TerminalContextMenu } from './TerminalContextMenu';
+import { HostKeyDialog } from './HostKeyDialog';
 
 const Terminal: React.FC = () => {
   const { t } = useI18n();
-  const sessions = useTerminalStore((state) => state.sessions);
-  const activeSessionId = useTerminalStore((state) => state.activeSessionId);
-  const activeSession = sessions.find(
-    (session) => session.sessionId === activeSessionId,
-  );
+  const sessions = useTerminalStore((s) => s.sessions);
+  const activeSessionId = useTerminalStore((s) => s.activeSessionId);
+  const activeSession =
+    sessions.find((s) => s.sessionId === activeSessionId) ?? null;
+
+  const { hostKeyDialog, closeHostKeyDialog } = useConnectSession();
+
+  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    session: TerminalSession;
+    x: number;
+    y: number;
+  } | null>(null);
 
   return (
     <div className="flex h-full flex-col">
-      <TerminalTabBar />
-      <div className="flex-1 min-h-0 p-2">
-        {sessions.length === 0 && (
-          <div className="flex h-full items-center justify-center"
-          >
+      <TerminalControllerLayer />
+      <TerminalTabBar
+        onNewTabClick={() => setNewTabMenuOpen(true)}
+        onTabContextMenu={(session, x, y) =>
+          setContextMenu({ session, x, y })
+        }
+      />
+      <div className="relative min-h-0 flex-1 p-2">
+        {sessions.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
             <EmptyState title={t('terminal.empty')} />
           </div>
+        ) : (
+          <TerminalPane activeSession={activeSession} />
         )}
-        {activeSession && <TerminalSession session={activeSession} />}
+        <NewTabMenu open={newTabMenuOpen} onClose={() => setNewTabMenuOpen(false)} />
       </div>
+      <TerminalContextMenu
+        open={!!contextMenu}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        session={contextMenu?.session ?? null}
+        onClose={() => setContextMenu(null)}
+      />
+      <HostKeyDialog
+        open={hostKeyDialog.open}
+        onClose={closeHostKeyDialog}
+        host={hostKeyDialog.host}
+        port={hostKeyDialog.port}
+        fingerprint={hostKeyDialog.fingerprint}
+        mismatch={hostKeyDialog.mismatch}
+        onTrust={hostKeyDialog.onTrust}
+      />
     </div>
   );
 };
