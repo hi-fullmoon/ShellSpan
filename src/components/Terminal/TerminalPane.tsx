@@ -1,29 +1,27 @@
 import React, { useRef, useState } from 'react';
-import { useTerminalSession } from '@/hooks/useTerminalSession';
 import { Spinner } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { useActiveController } from '@/components/Terminal/hooks/useActiveController';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 
-export interface TerminalSessionProps {
-  session: TerminalSessionState;
+export interface TerminalPaneProps {
+  activeSession: TerminalSessionState | null;
 }
 
-export const TerminalSession: React.FC<TerminalSessionProps> = ({
-  session,
-}) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => {
+  const paneRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const { findNext, findPrevious, closeSearch } = useTerminalSession(
-    session,
-    containerRef,
+  const { searchNext, searchPrevious, clearSearch } = useActiveController(
+    paneRef,
+    activeSession?.sessionId ?? null,
   );
 
   const handleCloseSearch = (): void => {
-    closeSearch();
+    clearSearch();
     setSearchOpen(false);
     setQuery('');
   };
@@ -40,7 +38,7 @@ export const TerminalSession: React.FC<TerminalSessionProps> = ({
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                e.shiftKey ? findPrevious(query) : findNext(query);
+                e.shiftKey ? searchPrevious(query) : searchNext(query);
               }
               if (e.key === 'Escape') {
                 handleCloseSearch();
@@ -50,14 +48,14 @@ export const TerminalSession: React.FC<TerminalSessionProps> = ({
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => findPrevious(query)}
+            onClick={() => searchPrevious(query)}
           >
             ↑
           </Button>
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => findNext(query)}
+            onClick={() => searchNext(query)}
           >
             ↓
           </Button>
@@ -85,7 +83,7 @@ export const TerminalSession: React.FC<TerminalSessionProps> = ({
           </svg>
         </Button>
       </div>
-      {session.status === 'connecting' && (
+      {activeSession?.status === 'connecting' && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface/90">
           <Spinner />
           <span className="text-xs text-app-text-soft">
@@ -93,7 +91,7 @@ export const TerminalSession: React.FC<TerminalSessionProps> = ({
           </span>
         </div>
       )}
-      <div ref={containerRef} className="h-full w-full p-2" />
+      <div ref={paneRef} className="h-full w-full p-2" />
     </div>
   );
 };

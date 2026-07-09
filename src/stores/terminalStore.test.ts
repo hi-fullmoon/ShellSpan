@@ -58,4 +58,29 @@ describe('terminalStore', () => {
     });
     expect(useTerminalStore.getState().sessions[0]?.status).toBe('connected');
   });
+
+  it('reorderSessions moves active before over', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' });
+    store.addSession({ sessionId: 's2', title: 'B', host: 'h', port: 22, username: 'u' });
+    store.addSession({ sessionId: 's3', title: 'C', host: 'h', port: 22, username: 'u' });
+    store.reorderSessions('s3', 's1');
+    const ids = useTerminalStore.getState().sessions.map((s) => s.sessionId);
+    expect(ids).toEqual(['s3', 's1', 's2']);
+  });
+
+  it('addSession persists profileId when provided', () => {
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' },
+      'profile-1',
+    );
+    expect(useTerminalStore.getState().sessions[0]?.profileId).toBe('profile-1');
+  });
+
+  it('addSession without profileId leaves it undefined', () => {
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' },
+    );
+    expect(useTerminalStore.getState().sessions[0]?.profileId).toBeUndefined();
+  });
 });

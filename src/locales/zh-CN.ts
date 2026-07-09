@@ -93,6 +93,13 @@ export default {
   'connection.form.validation.privateKeyRequired': '请选择私钥文件',
 
   'terminal.newTab': '新终端',
+  'terminal.tab.noProfiles': '暂无已保存连接，请到工作台添加。',
+  'terminal.tab.copyInfo': '复制连接信息',
+  'terminal.tab.closeOthers': '关闭其他',
+  'terminal.tab.closeToRight': '关闭右侧',
+  'terminal.tab.rename': '重命名',
+  'terminal.tab.search': '搜索',
+  'terminal.tab.split': '拆分终端',
   'terminal.empty': '暂无终端会话',
   'terminal.openFromWorkbench': '从工作台选择一个连接打开终端',
   'terminal.status.connecting': '连接中',

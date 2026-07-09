@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from './Button';
+import { Input } from './Input';
 
 export interface DialogProps {
   open: boolean;
@@ -92,6 +93,69 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       }
     >
       <p className="text-sm text-app-text">{message}</p>
+    </Dialog>
+  );
+};
+
+export interface PromptDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: (value: string) => void;
+  title: string;
+  label: string;
+  confirmText: string;
+  cancelText: string;
+  defaultValue?: string;
+}
+
+export const PromptDialog: React.FC<PromptDialogProps> = ({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  label,
+  confirmText,
+  cancelText,
+  defaultValue = '',
+}) => {
+  const [value, setValue] = useState(defaultValue);
+
+  useEffect(() => {
+    if (open) {
+      setValue(defaultValue ?? '');
+    }
+  }, [open, defaultValue]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={title}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {cancelText}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => {
+              onConfirm(value);
+              onClose();
+            }}
+          >
+            {confirmText}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        <label className="text-xs text-app-text-soft">{label}</label>
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          autoFocus
+        />
+      </div>
     </Dialog>
   );
 };
