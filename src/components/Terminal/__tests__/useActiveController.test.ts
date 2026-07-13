@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useRef } from 'react';
 import { terminalRegistry } from '@/components/Terminal/registry/terminalRegistry';
-import { useActiveController } from './useActiveController';
+import { useActiveController } from '../hooks/useActiveController';
 
 class RO {
   observe() {}
@@ -38,6 +38,16 @@ function renderControllerHook(
   );
 }
 
+function createController(sessionId: string) {
+  return terminalRegistry.create(
+    sessionId,
+    vi.fn(),
+    vi.fn(),
+    () => 'connected',
+    vi.fn(),
+  );
+}
+
 describe('useActiveController', () => {
   beforeEach(() => {
     terminalRegistry.disposeAll();
@@ -50,15 +60,15 @@ describe('useActiveController', () => {
 
   it('attaches the active controller container to the pane', () => {
     const host = setupPane();
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     renderControllerHook(host, 's1');
     expect(host.firstChild).toBe(controller.container);
   });
 
   it('detaches previous controller on active-id change', () => {
     const host = setupPane();
-    const c1 = terminalRegistry.create('s1', vi.fn(), vi.fn());
-    const c2 = terminalRegistry.create('s2', vi.fn(), vi.fn());
+    const c1 = createController('s1');
+    const c2 = createController('s2');
     const { rerender } = renderControllerHook(host, 's1');
     expect(host.firstChild).toBe(c1.container);
     rerender({ sid: 's2' });
@@ -68,7 +78,7 @@ describe('useActiveController', () => {
 
   it('detaches on unmount', () => {
     const host = setupPane();
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const { unmount } = renderControllerHook(host, 's1');
     expect(host.firstChild).toBe(controller.container);
     unmount();
@@ -78,44 +88,49 @@ describe('useActiveController', () => {
 
   it('routes searchNext to the active controller searchAddon', () => {
     const host = setupPane();
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const spy = vi.spyOn(controller.searchAddon, 'findNext');
     const { result } = renderControllerHook(host, 's1');
     result.current.searchNext('foo');
-    expect(spy).toHaveBeenCalledWith('foo');
+    expect(spy).toHaveBeenCalledWith('foo', undefined);
   });
 
   it('routes searchPrevious to the active controller searchAddon', () => {
     const host = setupPane();
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const spy = vi.spyOn(controller.searchAddon, 'findPrevious');
     const { result } = renderControllerHook(host, 's1');
     result.current.searchPrevious('bar');
-    expect(spy).toHaveBeenCalledWith('bar');
+    expect(spy).toHaveBeenCalledWith('bar', undefined);
   });
 
   it('routes clearSearch to clearDecorations', () => {
     const host = setupPane();
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const spy = vi.spyOn(controller.searchAddon, 'clearDecorations');
     const { result } = renderControllerHook(host, 's1');
     result.current.clearSearch();
     expect(spy).toHaveBeenCalled();
   });
 
-  it('search controls are no-op when activeSessionId is null', () => {
+  it('focus calls the active controller focus method', () => {
+    const host = setupPane();
+    const controller = createController('s1');
+    const spy = vi.spyOn(controller, 'focus');
+    const { result } = renderControllerHook(host, 's1');
+    result.current.focus();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('focus is no-op when activeSessionId is null', () => {
     const host = setupPane();
     const { result } = renderControllerHook(host, null);
-    expect(() => {
-      result.current.searchNext('foo');
-      result.current.searchPrevious('bar');
-      result.current.clearSearch();
-    }).not.toThrow();
+    expect(() => result.current.focus()).not.toThrow();
   });
 
   it('search controls are stable across rerenders with same active id', () => {
     const host = setupPane();
-    terminalRegistry.create('s1', vi.fn(), vi.fn());
+    createController('s1');
     const { result, rerender } = renderControllerHook(host, 's1');
     const first = result.current;
     rerender({ sid: 's1' });

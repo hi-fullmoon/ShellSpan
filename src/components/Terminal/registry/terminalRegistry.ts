@@ -9,10 +9,18 @@ import {
   listenToSshData,
   listenToSshStatus,
 } from '@/lib/tauri';
-import type { ClosedEvent, StatusEvent } from '@/types';
+import {
+  formatTerminalNoticeLine,
+  formatTerminalStatusLine,
+  shouldReconnectFromInput,
+} from '@/lib/terminal';
+import { t } from '@/locales';
+import type { ClosedEvent, SessionStatus, StatusEvent } from '@/types';
 
 export type StatusCallback = (sessionId: string, payload: StatusEvent) => void;
 export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
+export type GetStatusCallback = () => SessionStatus;
+export type RequestReconnectCallback = () => void;
 
 export interface TerminalController {
   sessionId: string;
@@ -29,6 +37,8 @@ export interface TerminalController {
   };
   attach(host: HTMLElement): void;
   detach(): void;
+  focus(): void;
+  simulateInput(data: string): void;
   write(chunk: string): void;
   dispose(): void;
 }
@@ -47,16 +57,24 @@ class TerminalControllerImpl implements TerminalController {
   private disposed = false;
   private readonly setStatus: StatusCallback;
   private readonly setClosed: ClosedCallback;
+  private readonly getStatus: GetStatusCallback;
+  private readonly requestReconnect: RequestReconnectCallback;
+  private inputBlockedNoticeRef = false;
+  private reconnectRequestedRef = false;
 
   constructor(
     sessionId: string,
     setStatus: StatusCallback,
     setClosed: ClosedCallback,
+    getStatus: GetStatusCallback,
+    requestReconnect: RequestReconnectCallback,
     removeFromRegistry: () => void,
   ) {
     this.sessionId = sessionId;
     this.setStatus = setStatus;
     this.setClosed = setClosed;
+    this.getStatus = getStatus;
+    this.requestReconnect = requestReconnect;
     this.removeFromRegistry = removeFromRegistry;
 
     this.terminal = new Terminal({
@@ -76,7 +94,8 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.loadAddon(this.searchAddon);
 
     this.container = document.createElement('div');
-    this.container.className = 'h-full w-full';
+    this.container.className =
+      'h-full w-full [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
 
     this.unlisten = {
       data: undefined,
@@ -85,10 +104,62 @@ class TerminalControllerImpl implements TerminalController {
     };
 
     this.terminal.onData((data) => {
-      invokeWriteSession(this.sessionId, data).catch(() => {});
+      this.handleInput(data);
     });
 
     void this.setupListeners();
+  }
+
+  private handleInput(data: string): void {
+    const status = this.getStatus();
+
+    if (status === 'connected') {
+      void invokeWriteSession(this.sessionId, data).catch(() => {
+        this.writeSystemLine(
+          formatTerminalNoticeLine(
+            t('terminal.notice.writeFailedLabel'),
+            t('terminal.notice.writeFailedMessage'),
+            '31',
+          ),
+        );
+      });
+      return;
+    }
+
+    if (shouldReconnectFromInput(status, data)) {
+      if (!this.reconnectRequestedRef) {
+        this.reconnectRequestedRef = true;
+        this.writeSystemLine(
+          formatTerminalNoticeLine(
+            t('terminal.notice.reconnectingLabel'),
+            t('terminal.notice.reconnectingMessage'),
+            '36',
+          ),
+        );
+        this.requestReconnect();
+      }
+      return;
+    }
+
+    if (!this.inputBlockedNoticeRef) {
+      this.writeSystemLine(
+        formatTerminalNoticeLine(
+          t('terminal.notice.hintLabel'),
+          t('terminal.notice.disconnectedHint'),
+        ),
+      );
+      this.inputBlockedNoticeRef = true;
+    }
+  }
+
+  private writeSystemLine(line: string): void {
+    if (this.disposed) return;
+    this.terminal.writeln(line);
+  }
+
+  private resetNoticeState(): void {
+    this.inputBlockedNoticeRef = false;
+    this.reconnectRequestedRef = false;
   }
 
   private async setupListeners(): Promise<void> {
@@ -103,6 +174,12 @@ class TerminalControllerImpl implements TerminalController {
 
     const statusUnlisten = await listenToSshStatus(this.sessionId, (event) => {
       this.setStatus(this.sessionId, event.payload);
+      this.writeSystemLine(
+        formatTerminalStatusLine(event.payload.status, event.payload.message),
+      );
+      if (event.payload.status === 'connected' || event.payload.status === 'error') {
+        this.resetNoticeState();
+      }
     });
     if (this.disposed) {
       statusUnlisten();
@@ -112,6 +189,22 @@ class TerminalControllerImpl implements TerminalController {
 
     const closedUnlisten = await listenToSshClosed(this.sessionId, (event) => {
       this.setClosed(this.sessionId, event.payload);
+      this.writeSystemLine(
+        formatTerminalNoticeLine(
+          t('terminal.notice.closedLabel'),
+          event.payload.reason
+            ? `: ${event.payload.reason}`
+            : undefined,
+          '31',
+        ),
+      );
+      this.writeSystemLine(
+        formatTerminalNoticeLine(
+          t('terminal.notice.hintLabel'),
+          t('terminal.notice.pressEnterReconnect'),
+        ),
+      );
+      this.inputBlockedNoticeRef = true;
     });
     if (this.disposed) {
       closedUnlisten();
@@ -179,6 +272,19 @@ class TerminalControllerImpl implements TerminalController {
     this.host = null;
   }
 
+  focus(): void {
+    if (this.disposed) return;
+    try {
+      this.terminal.focus();
+    } catch {
+      // Ignore focus failures on disposed or hidden terminals.
+    }
+  }
+
+  simulateInput(data: string): void {
+    this.handleInput(data);
+  }
+
   write(chunk: string): void {
     this.terminal.write(chunk);
   }
@@ -197,7 +303,13 @@ class TerminalControllerImpl implements TerminalController {
 }
 
 interface TerminalRegistry {
-  create(sessionId: string, setStatus: StatusCallback, setClosed: ClosedCallback): TerminalController;
+  create(
+    sessionId: string,
+    setStatus: StatusCallback,
+    setClosed: ClosedCallback,
+    getStatus: GetStatusCallback,
+    requestReconnect: RequestReconnectCallback,
+  ): TerminalController;
   get(sessionId: string): TerminalController | undefined;
   dispose(sessionId: string): void;
   disposeAll(): void;
@@ -207,7 +319,7 @@ export const terminalRegistry: TerminalRegistry = (() => {
   const controllers = new Map<string, TerminalController>();
 
   return {
-    create(sessionId, setStatus, setClosed) {
+    create(sessionId, setStatus, setClosed, getStatus, requestReconnect) {
       const existing = controllers.get(sessionId);
       if (existing) {
         existing.dispose();
@@ -216,6 +328,8 @@ export const terminalRegistry: TerminalRegistry = (() => {
         sessionId,
         setStatus,
         setClosed,
+        getStatus,
+        requestReconnect,
         () => controllers.delete(sessionId),
       );
       controllers.set(sessionId, controller);

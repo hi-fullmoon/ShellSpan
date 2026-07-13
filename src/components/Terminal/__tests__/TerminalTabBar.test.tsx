@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { TerminalTabBar } from './TerminalTabBar';
+import { TerminalTabBar } from '../TerminalTabBar';
 import { useTerminalStore } from '@/stores/terminalStore';
 
 vi.mock('@/lib/tauri', () => ({
@@ -97,6 +97,55 @@ describe('TerminalTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalledTimes(1);
   });
 
+  it('does not render the + button when there are no sessions', () => {
+    const onNewTabClick = vi.fn();
+    render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
+
+    expect(screen.queryByTitle('terminal.newTab')).not.toBeInTheDocument();
+  });
+
+  it('starts renaming on double-click and commits on Enter', () => {
+    addSession('s1', 'A');
+    const updateTitleSpy = vi.spyOn(
+      useTerminalStore.getState(),
+      'updateTitle',
+    );
+
+    render(<TerminalTabBar />);
+
+    const tab = screen.getByRole('tab');
+    fireEvent.doubleClick(tab);
+
+    const input = screen.getByDisplayValue('A');
+    expect(input).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'Renamed' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(updateTitleSpy).toHaveBeenCalledWith('s1', 'Renamed');
+    expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument();
+  });
+
+  it('cancels renaming on Escape', () => {
+    addSession('s1', 'A');
+    const updateTitleSpy = vi.spyOn(
+      useTerminalStore.getState(),
+      'updateTitle',
+    );
+
+    render(<TerminalTabBar />);
+
+    const tab = screen.getByRole('tab');
+    fireEvent.doubleClick(tab);
+
+    const input = screen.getByDisplayValue('A');
+    fireEvent.change(input, { target: { value: 'Renamed' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(updateTitleSpy).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument();
+  });
+
   it('reorders sessions via drag-to-reorder (s3 onto s1 -> [s3,s1,s2])', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
@@ -144,7 +193,7 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerUp(document, { clientX: 50, clientY: 10 });
     });
 
-    expect(reorderSpy).toHaveBeenCalledWith('s3', 's1');
+    expect(reorderSpy).toHaveBeenCalledWith('s3', 0);
     expect(useTerminalStore.getState().sessions.map((s) => s.sessionId)).toEqual([
       's3',
       's1',
@@ -167,5 +216,46 @@ describe('TerminalTabBar', () => {
     const state = useTerminalStore.getState();
     expect(state.sessions.some((s) => s.sessionId === 's1')).toBe(false);
     expect(state.sessions.map((s) => s.sessionId)).toEqual(['s2']);
+  });
+
+  it('shows a pin icon for pinned tabs and toggles pin on click', () => {
+    addSession('s1', 'A');
+    useTerminalStore.getState().togglePin('s1');
+
+    const togglePinSpy = vi.spyOn(
+      useTerminalStore.getState(),
+      'togglePin',
+    );
+
+    render(<TerminalTabBar />);
+
+    const pinButton = screen.getByLabelText('unpin');
+    expect(pinButton).toBeInTheDocument();
+
+    fireEvent.click(pinButton);
+    expect(togglePinSpy).toHaveBeenCalledWith('s1');
+  });
+
+  it('shows a close button for unpinned tabs', () => {
+    addSession('s1', 'A');
+
+    render(<TerminalTabBar />);
+
+    expect(screen.getByLabelText('close')).toBeInTheDocument();
+    expect(screen.queryByLabelText('unpin')).not.toBeInTheDocument();
+  });
+
+  it('renders a colored bottom border on the active tab when the session has a color', () => {
+    addSession('s1', 'A');
+    useTerminalStore.getState().setTabColor('s1', '#ef4444');
+    useTerminalStore.getState().setActiveSession('s1');
+
+    render(<TerminalTabBar />);
+
+    const tab = screen.getByRole('tab');
+    expect(tab).not.toHaveStyle({ borderLeftColor: '#ef4444' });
+
+    const indicator = screen.getByTestId('tab-active-indicator');
+    expect(indicator).toHaveStyle({ backgroundColor: '#ef4444' });
   });
 });

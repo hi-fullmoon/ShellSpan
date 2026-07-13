@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Button } from '@/components/ui/Button';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { TerminalControllerLayer } from './TerminalControllerLayer';
 import { TerminalTabBar } from './TerminalTabBar';
@@ -29,16 +30,30 @@ const Terminal: React.FC = () => {
   return (
     <div className="flex h-full flex-col">
       <TerminalControllerLayer />
-      <TerminalTabBar
-        onNewTabClick={() => setNewTabMenuOpen(true)}
-        onTabContextMenu={(session, x, y) =>
-          setContextMenu({ session, x, y })
-        }
-      />
+      {sessions.length > 0 && (
+        <TerminalTabBar
+          onNewTabClick={() => setNewTabMenuOpen(true)}
+          onTabContextMenu={(session, x, y) =>
+            setContextMenu({ session, x, y })
+          }
+        />
+      )}
       <div className="relative min-h-0 flex-1">
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
-            <EmptyState title={t('terminal.empty')} />
+            <EmptyState
+              title={t('terminal.empty')}
+              description={t('terminal.openFromWorkbench')}
+              action={
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setNewTabMenuOpen(true)}
+                >
+                  {t('terminal.empty.newConnection')}
+                </Button>
+              }
+            />
           </div>
         ) : (
           <TerminalPane activeSession={activeSession} />

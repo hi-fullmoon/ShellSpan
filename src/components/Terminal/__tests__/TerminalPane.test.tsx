@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TerminalPane } from './TerminalPane';
+import { TerminalPane } from '../TerminalPane';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -30,17 +30,17 @@ function makeSession(
 describe('TerminalPane', () => {
   it('renders the pane host and search toggle button', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
-    expect(screen.getByTitle('Search')).toBeInTheDocument();
-    expect(container.querySelector('div.h-full.w-full.p-2')).toBeInTheDocument();
+    expect(screen.getByTitle('terminal.tab.search')).toBeInTheDocument();
+    expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
   });
 
   it('opens and closes the search bar via the toggle button', async () => {
     render(<TerminalPane activeSession={makeSession()} />);
-    expect(screen.queryByPlaceholderText('Search...')).toBeNull();
-    await userEvent.click(screen.getByTitle('Search'));
-    expect(screen.getByPlaceholderText('Search...')).toBeInTheDocument();
-    await userEvent.click(screen.getByTitle('Search'));
-    expect(screen.queryByPlaceholderText('Search...')).toBeNull();
+    expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
+    await userEvent.click(screen.getByTitle('terminal.tab.search'));
+    expect(screen.getByPlaceholderText('terminal.search.placeholder')).toBeInTheDocument();
+    await userEvent.click(screen.getByTitle('terminal.tab.search'));
+    expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
   });
 
   it('shows the connecting overlay when status is connecting', () => {
@@ -58,6 +58,6 @@ describe('TerminalPane', () => {
 
   it('renders without an active session', () => {
     render(<TerminalPane activeSession={null} />);
-    expect(screen.getByTitle('Search')).toBeInTheDocument();
+    expect(screen.getByTitle('terminal.tab.search')).toBeInTheDocument();
   });
 });

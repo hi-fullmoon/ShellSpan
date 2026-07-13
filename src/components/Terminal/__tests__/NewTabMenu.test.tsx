@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { NewTabMenu } from './NewTabMenu';
+import { NewTabMenu } from '../NewTabMenu';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
 import type { ConnectionProfile } from '@/types';

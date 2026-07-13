@@ -148,13 +148,8 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         true,
         None::<&str>,
     )?;
-    let open_settings_item = MenuItem::with_id(
-        app,
-        TRAY_OPEN_SETTINGS_ID,
-        "Settings",
-        true,
-        None::<&str>,
-    )?;
+    let open_settings_item =
+        MenuItem::with_id(app, TRAY_OPEN_SETTINGS_ID, "Settings", true, None::<&str>)?;
     let check_update_item = MenuItem::with_id(
         app,
         TRAY_CHECK_UPDATE_ID,
@@ -194,7 +189,7 @@ fn show_main_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
 
@@ -204,7 +199,6 @@ mod tests {
         assert!(!is_check_update_menu_id("tray.quit"));
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
     fn open_settings_menu_id_is_recognized() {
         assert!(is_open_settings_menu_id("tray.open_settings"));

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { terminalRegistry } from './terminalRegistry';
+import { terminalRegistry } from '../registry/terminalRegistry';
 
 // xterm + addons work in jsdom for write/buffer; fit yields 0x0 (harmless).
 // Polyfill ResizeObserver if undefined.
@@ -18,15 +18,32 @@ vi.mock('@/lib/tauri', () => ({
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
 }));
 
+function createController(sessionId: string) {
+  return terminalRegistry.create(
+    sessionId,
+    vi.fn(),
+    vi.fn(),
+    () => 'connected',
+    vi.fn(),
+  );
+}
+
 describe('terminalRegistry', () => {
   beforeEach(() => {
     terminalRegistry.disposeAll();
+    vi.clearAllMocks();
   });
 
   it('create attaches container to a host and write appends to buffer', () => {
     const setStatus = vi.fn();
     const setClosed = vi.fn();
-    const controller = terminalRegistry.create('s1', setStatus, setClosed);
+    const controller = terminalRegistry.create(
+      's1',
+      setStatus,
+      setClosed,
+      () => 'connected',
+      vi.fn(),
+    );
     const host = document.createElement('div');
     controller.attach(host);
     expect(host.firstChild).toBe(controller.container);
@@ -35,7 +52,7 @@ describe('terminalRegistry', () => {
   });
 
   it('detach keeps buffer intact; reattach to a different host preserves buffer', () => {
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const host1 = document.createElement('div');
     const host2 = document.createElement('div');
     controller.attach(host1);
@@ -49,7 +66,7 @@ describe('terminalRegistry', () => {
   });
 
   it('dispose removes the controller and container from host', () => {
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const host = document.createElement('div');
     controller.attach(host);
     terminalRegistry.dispose('s1');
@@ -58,7 +75,7 @@ describe('terminalRegistry', () => {
   });
 
   it('detach nulls resizeObserver; reattach creates a fresh observer', () => {
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const host1 = document.createElement('div');
     controller.attach(host1);
     expect(controller.resizeObserver).not.toBeNull();
@@ -72,7 +89,7 @@ describe('terminalRegistry', () => {
   });
 
   it('attach to a different host without detach replaces the observer', () => {
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     const host1 = document.createElement('div');
     controller.attach(host1);
     const firstObserver = controller.resizeObserver;
@@ -82,10 +99,48 @@ describe('terminalRegistry', () => {
   });
 
   it('double dispose is a no-op', () => {
-    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn());
+    const controller = createController('s1');
     expect(() => {
       controller.dispose();
       controller.dispose();
     }).not.toThrow();
+  });
+
+  it('writes connected input to the session', async () => {
+    const { invokeWriteSession } = await import('@/lib/tauri');
+    const getStatus = vi.fn().mockReturnValue('connected');
+    const controller = terminalRegistry.create(
+      's1',
+      vi.fn(),
+      vi.fn(),
+      getStatus,
+      vi.fn(),
+    );
+    controller.attach(document.createElement('div'));
+
+    controller.simulateInput('hello');
+
+    expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'hello');
+  });
+
+  it('shows disconnected hint and triggers reconnect on Enter', async () => {
+    const { invokeWriteSession } = await import('@/lib/tauri');
+    const requestReconnect = vi.fn();
+    const getStatus = vi.fn().mockReturnValue('disconnected');
+    const controller = terminalRegistry.create(
+      's1',
+      vi.fn(),
+      vi.fn(),
+      getStatus,
+      requestReconnect,
+    );
+    controller.attach(document.createElement('div'));
+
+    controller.simulateInput('a');
+    expect(invokeWriteSession).not.toHaveBeenCalled();
+    expect(requestReconnect).not.toHaveBeenCalled();
+
+    controller.simulateInput('\r');
+    expect(requestReconnect).toHaveBeenCalledTimes(1);
   });
 });

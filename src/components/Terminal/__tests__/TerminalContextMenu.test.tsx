@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { TerminalContextMenu } from './TerminalContextMenu';
+import { TerminalContextMenu } from '../TerminalContextMenu';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import type { TerminalSession } from '@/stores/terminalStore';
@@ -96,6 +96,7 @@ describe('TerminalContextMenu', () => {
       />,
     );
 
+    expect(screen.getByText('terminal.tab.pin')).toBeInTheDocument();
     expect(screen.getByText('common.rename')).toBeInTheDocument();
     expect(screen.getByText('common.duplicate')).toBeInTheDocument();
     expect(screen.getByText('terminal.tab.copyInfo')).toBeInTheDocument();
@@ -106,6 +107,7 @@ describe('TerminalContextMenu', () => {
     expect(
       screen.getByText('terminal.tab.closeToRight'),
     ).toBeInTheDocument();
+    expect(screen.getByText('terminal.tab.color')).toBeInTheDocument();
   });
 
   it('renders nothing when open is false', () => {
@@ -187,6 +189,32 @@ describe('TerminalContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('close others skips pinned sessions', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    useTerminalStore.getState().togglePin('s1');
+    const session = makeSession('s2', 'B');
+
+    const onClose = vi.fn();
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.closeOthers'));
+
+    expect(
+      useTerminalStore.getState().sessions.map((s) => s.sessionId),
+    ).toEqual(['s1', 's2']);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('close to the right removes sessions after the target', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
@@ -210,6 +238,106 @@ describe('TerminalContextMenu', () => {
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
     ).toEqual(['s1']);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('close to the right skips pinned sessions', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    useTerminalStore.getState().togglePin('s3');
+    const session = makeSession('s1', 'A');
+
+    const onClose = vi.fn();
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.closeToRight'));
+
+    expect(
+      useTerminalStore.getState().sessions.map((s) => s.sessionId),
+    ).toEqual(['s3', 's1']);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('toggle pin pins and unpins the target session', () => {
+    addSession('s1', 'A');
+    const session = makeSession('s1', 'A');
+
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.pin'));
+    expect(
+      useTerminalStore.getState().sessions.find((s) => s.sessionId === 's1')
+        ?.pinned,
+    ).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={{
+          ...session,
+          pinned: true,
+        }}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.click(screen.getByText('terminal.tab.unpin'));
+    expect(
+      useTerminalStore.getState().sessions.find((s) => s.sessionId === 's1')
+        ?.pinned,
+    ).toBe(false);
+  });
+
+  it('sets and clears tab color from the color picker', () => {
+    addSession('s1', 'A');
+    const session = makeSession('s1', 'A');
+    const onClose = vi.fn();
+
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    const colorButton = screen.getByTitle('#ef4444');
+    fireEvent.click(colorButton);
+
+    expect(
+      useTerminalStore.getState().sessions.find((s) => s.sessionId === 's1')
+        ?.color,
+    ).toBe('#ef4444');
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    const clearButton = screen.getByTitle('terminal.tab.clearColor');
+    fireEvent.click(clearButton);
+
+    expect(
+      useTerminalStore.getState().sessions.find((s) => s.sessionId === 's1')
+        ?.color,
+    ).toBeUndefined();
   });
 
   it('duplicate is disabled when session has no profileId', () => {

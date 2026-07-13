@@ -6,10 +6,24 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { invokeCloseSession } from '@/lib/tauri';
 import { PromptDialog } from '@/components/ui/Dialog';
+import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
 
-const MENU_WIDTH = 200;
-const MENU_HEIGHT = 220;
+const MENU_WIDTH = 256;
+const MENU_HEIGHT = 320;
+
+const TAB_COLORS = [
+  '#ef4444',
+  '#f97316',
+  '#f59e0b',
+  '#84cc16',
+  '#10b981',
+  '#06b6d4',
+  '#3b82f6',
+  '#8b5cf6',
+  '#d946ef',
+  '#f43f5e',
+];
 
 export interface TerminalContextMenuProps {
   open: boolean;
@@ -30,6 +44,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const sessions = useTerminalStore((state) => state.sessions);
   const removeSession = useTerminalStore((state) => state.removeSession);
   const updateTitle = useTerminalStore((state) => state.updateTitle);
+  const togglePin = useTerminalStore((state) => state.togglePin);
+  const setTabColor = useTerminalStore((state) => state.setTabColor);
   const getProfile = useProfileStore((state) => state.getProfile);
   const { connect } = useConnectSession();
   const [renameOpen, setRenameOpen] = useState(false);
@@ -81,7 +97,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   const handleCloseOthers = (): void => {
     sessions.forEach((s) => {
-      if (s.sessionId !== session.sessionId) {
+      if (s.sessionId !== session.sessionId && !s.pinned) {
         closeSession(s.sessionId);
       }
     });
@@ -95,7 +111,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
       return;
     }
     sessions.slice(idx + 1).forEach((s) => {
-      closeSession(s.sessionId);
+      if (!s.pinned) {
+        closeSession(s.sessionId);
+      }
     });
     onClose();
   };
@@ -103,6 +121,16 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const handleRenameConfirm = (value: string): void => {
     updateTitle(session.sessionId, value);
     setRenameOpen(false);
+    onClose();
+  };
+
+  const handleTogglePin = (): void => {
+    togglePin(session.sessionId);
+    onClose();
+  };
+
+  const handleColor = (color?: string): void => {
+    setTabColor(session.sessionId, color);
     onClose();
   };
 
@@ -118,9 +146,17 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         }}
       />
       <div
-        className="fixed z-[1700] w-48 overflow-hidden rounded-lg border border-app-border bg-app-surface py-1 shadow-[var(--shadow-dialog)]"
+        className="fixed z-[1700] w-fit min-w-48 overflow-hidden rounded-lg border border-app-border bg-app-surface py-1 shadow-[var(--shadow-dialog)]"
         style={{ left, top }}
       >
+        <button
+          type="button"
+          onClick={handleTogglePin}
+          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
+        >
+          {session.pinned ? t('terminal.tab.unpin') : t('terminal.tab.pin')}
+        </button>
+        <div className="my-1 h-px bg-app-border" />
         <button
           type="button"
           onClick={() => setRenameOpen(true)}
@@ -165,6 +201,39 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         >
           {t('terminal.tab.closeToRight')}
         </button>
+        <div className="my-1 h-px bg-app-border" />
+        <div className="px-3 py-1.5">
+          <span className="text-xs text-app-text-soft">
+            {t('terminal.tab.color')}
+          </span>
+          <div className="mt-1.5 flex flex-nowrap items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleColor(undefined)}
+              className={cn(
+                'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-app-border bg-transparent transition-transform hover:scale-110',
+                !session.color && 'ring-1 ring-app-primary ring-offset-1 ring-offset-app-surface',
+              )}
+              title={t('terminal.tab.clearColor')}
+            >
+              <span className="absolute block h-px w-2.5 rotate-45 bg-app-text-soft/50" />
+            </button>
+            {TAB_COLORS.map((color) => (
+              <button
+                key={color}
+                type="button"
+                onClick={() => handleColor(color)}
+                style={{ backgroundColor: color }}
+                className={cn(
+                  'h-4 w-4 shrink-0 rounded-full transition-transform hover:scale-110',
+                  session.color === color &&
+                    'ring-1 ring-app-primary ring-offset-1 ring-offset-app-surface',
+                )}
+                title={color}
+              />
+            ))}
+          </div>
+        </div>
       </div>
       <PromptDialog
         open={renameOpen}

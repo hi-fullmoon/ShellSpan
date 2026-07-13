@@ -49,7 +49,41 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   if (profiles.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
-        <EmptyState title={t('workbench.connections.empty')} />
+        <EmptyState
+          title={t('workbench.connections.empty')}
+          description={t('workbench.connections.emptyDescription')}
+          icon={
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              className="h-6 w-6"
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+              <line x1="6" y1="8" x2="6.01" y2="8" />
+              <line x1="10" y1="8" x2="10.01" y2="8" />
+              <line x1="14" y1="8" x2="14.01" y2="8" />
+            </svg>
+          }
+          action={
+            <Button variant="primary" size="md" onClick={onAdd}>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-3.5 w-3.5"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              {t('workbench.connections.new')}
+            </Button>
+          }
+        />
       </div>
     );
   }

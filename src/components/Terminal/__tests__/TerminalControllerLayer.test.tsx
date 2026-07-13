@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, act } from '@testing-library/react';
-import { TerminalControllerLayer } from './TerminalControllerLayer';
-import { terminalRegistry } from './registry/terminalRegistry';
+import { TerminalControllerLayer } from '../TerminalControllerLayer';
+import { terminalRegistry } from '../registry/terminalRegistry';
 import { useTerminalStore } from '@/stores/terminalStore';
 
 class RO {
