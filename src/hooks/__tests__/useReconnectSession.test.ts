@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useReconnectSession } from './useReconnectSession';
+import { useReconnectSession } from '../useReconnectSession';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 

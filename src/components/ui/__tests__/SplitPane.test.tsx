@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { SplitPane } from './SplitPane';
+import { SplitPane } from '../SplitPane';
 
 describe('SplitPane', () => {
   it('renders left and right content', () => {

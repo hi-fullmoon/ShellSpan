@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { useSftpStore } from './sftpStore';
+import { useSftpStore } from '../sftpStore';
 
 const initialState = useSftpStore.getState();
 

@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ResponsiveCardGrid } from './ResponsiveCardGrid';
+import { ResponsiveCardGrid } from '../ResponsiveCardGrid';
 
 describe('ResponsiveCardGrid', () => {
   let resizeObserverCallback: ResizeObserverCallback | undefined;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cn, formatBytes, generateId } from './utils';
+import { cn, formatBytes, generateId } from '../utils';
 
 describe('utils', () => {
   describe('cn', () => {

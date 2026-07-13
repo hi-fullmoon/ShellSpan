@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { useTerminalStore } from './terminalStore';
+import { useTerminalStore } from '../terminalStore';
 
 const initialState = useTerminalStore.getState();
 

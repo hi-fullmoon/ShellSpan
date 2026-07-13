@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useConnectSession } from './useConnectSession';
+import { useConnectSession } from '../useConnectSession';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
