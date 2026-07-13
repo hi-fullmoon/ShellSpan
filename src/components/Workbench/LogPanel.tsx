@@ -125,7 +125,7 @@ interface LogLineProps {
   originalIndex: number;
   selected: boolean;
   selectHint: string;
-  onToggle: () => void;
+  onSelect: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
 const LogLine: React.FC<LogLineProps> = ({
@@ -133,7 +133,7 @@ const LogLine: React.FC<LogLineProps> = ({
   originalIndex,
   selected,
   selectHint,
-  onToggle,
+  onSelect,
 }) => {
   if (!line.level || !line.message) {
     return (
@@ -141,10 +141,10 @@ const LogLine: React.FC<LogLineProps> = ({
         type="button"
         aria-pressed={selected}
         title={selectHint}
-        onClick={onToggle}
+        onClick={onSelect}
         className={cn(
-          'w-full cursor-pointer rounded px-1 py-0.5 text-left text-app-text-soft transition-colors hover:bg-app-surface-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50',
-          selected && 'bg-app-primary/10 ring-1 ring-inset ring-app-primary/30',
+          'w-full cursor-pointer px-1 py-0.5 text-left text-app-text-soft transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50',
+          selected && 'bg-app-primary/10',
         )}
       >
         {line.raw}
@@ -163,10 +163,10 @@ const LogLine: React.FC<LogLineProps> = ({
       type="button"
       aria-pressed={selected}
       title={selectHint}
-      onClick={onToggle}
+      onClick={onSelect}
       className={cn(
-        'grid w-full cursor-pointer grid-cols-[120px_2.75rem_1fr] items-start gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-app-surface-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[120px_2.75rem_4.5rem_1fr]',
-        selected && 'bg-app-primary/10 ring-1 ring-inset ring-app-primary/30',
+        'grid w-full cursor-pointer grid-cols-[120px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[120px_2.75rem_4.5rem_1fr]',
+        selected && 'bg-app-primary/10',
       )}
     >
       <span className="shrink-0 text-[10px] text-app-text-soft">
@@ -238,6 +238,7 @@ export const LogPanel: React.FC = () => {
   );
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
+  const selectionAnchorRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const parsedLines = useMemo(() => parseLogContent(content), [content]);
@@ -296,27 +297,61 @@ export const LogPanel: React.FC = () => {
 
     if (selectedLogs.length === 0) return;
 
-      if (!navigator.clipboard?.writeText) {
-        showCopyFeedback('failed');
-        return;
-      }
-      void navigator.clipboard
-        .writeText(selectedLogs.join('\n'))
-        .then(() => showCopyFeedback('copied'))
-        .catch(() => showCopyFeedback('failed'));
+    if (!navigator.clipboard?.writeText) {
+      showCopyFeedback('failed');
+      return;
+    }
+    void navigator.clipboard
+      .writeText(selectedLogs.join('\n'))
+      .then(() => showCopyFeedback('copied'))
+      .catch(() => showCopyFeedback('failed'));
   }, [parsedLines, selectedLineKeys, showCopyFeedback]);
 
-  const handleToggleLine = useCallback((selectionKey: string): void => {
-    setSelectedLineKeys((current) => {
-      const next = new Set(current);
-      if (next.has(selectionKey)) {
-        next.delete(selectionKey);
-      } else {
-        next.add(selectionKey);
+  const handleSelectLine = useCallback(
+    (
+      selectionKey: string,
+      filteredIndex: number,
+      shiftKey: boolean,
+      additiveKey: boolean,
+    ): void => {
+      const anchorIndex = selectionAnchorRef.current
+        ? filteredLines.findIndex(
+            (item) => item.selectionKey === selectionAnchorRef.current,
+          )
+        : -1;
+
+      if (shiftKey && anchorIndex >= 0) {
+        const start = Math.min(anchorIndex, filteredIndex);
+        const end = Math.max(anchorIndex, filteredIndex);
+        setSelectedLineKeys(
+          new Set(
+            filteredLines
+              .slice(start, end + 1)
+              .filter(({ line }) => Boolean(line.raw))
+              .map((item) => item.selectionKey),
+          ),
+        );
+        return;
       }
-      return next;
-    });
-  }, []);
+
+      selectionAnchorRef.current = selectionKey;
+      if (additiveKey) {
+        setSelectedLineKeys((current) => {
+          const next = new Set(current);
+          if (next.has(selectionKey)) {
+            next.delete(selectionKey);
+          } else {
+            next.add(selectionKey);
+          }
+          return next;
+        });
+        return;
+      }
+
+      setSelectedLineKeys(new Set([selectionKey]));
+    },
+    [filteredLines],
+  );
 
   const handleSelectAll = useCallback((): void => {
     setSelectedLineKeys((current) => {
@@ -329,8 +364,22 @@ export const LogPanel: React.FC = () => {
   }, [filteredLines]);
 
   const handleClearSelection = useCallback((): void => {
+    selectionAnchorRef.current = null;
     setSelectedLineKeys(new Set());
   }, []);
+
+  useEffect(() => {
+    if (selectedLineKeys.size === 0) return;
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        handleClearSelection();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleClearSelection, selectedLineKeys.size]);
 
   useEffect(() => {
     return () => {
@@ -341,6 +390,7 @@ export const LogPanel: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    selectionAnchorRef.current = null;
     setSelectedLineKeys(new Set());
   }, [activeFileName]);
 
@@ -348,6 +398,12 @@ export const LogPanel: React.FC = () => {
     const availableLineKeys = new Set(
       parsedLines.map((line, index) => `${index}\u0000${line.raw}`),
     );
+    if (
+      selectionAnchorRef.current &&
+      !availableLineKeys.has(selectionAnchorRef.current)
+    ) {
+      selectionAnchorRef.current = null;
+    }
     setSelectedLineKeys((current) => {
       const next = new Set(
         [...current].filter((selectionKey) =>
@@ -532,7 +588,14 @@ export const LogPanel: React.FC = () => {
                       originalIndex={originalIndex}
                       selected={selectedLineKeys.has(selectionKey)}
                       selectHint={t('workbench.logs.selectHint')}
-                      onToggle={() => handleToggleLine(selectionKey)}
+                      onSelect={(event) =>
+                        handleSelectLine(
+                          selectionKey,
+                          virtualItem.index,
+                          event.shiftKey,
+                          event.ctrlKey || event.metaKey,
+                        )
+                      }
                     />
                   </div>
                 );

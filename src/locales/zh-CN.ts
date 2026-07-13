@@ -79,7 +79,7 @@ export default {
   'workbench.logs.last30days': '近一个月',
   'workbench.logs.all': '全部',
   'workbench.logs.level': '级别',
-  'workbench.logs.selectHint': '点击选择日志',
+  'workbench.logs.selectHint': '点击选择；Shift + 点击连续多选；Ctrl/Command + 点击任意多选',
   'workbench.logs.selectedCount': '已选择 {count} 行',
   'workbench.logs.selectAll': '全选',
   'workbench.logs.copied': '已复制所选日志',

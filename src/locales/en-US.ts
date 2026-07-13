@@ -79,7 +79,7 @@ export default {
   'workbench.logs.last30days': 'Last 30 Days',
   'workbench.logs.all': 'All',
   'workbench.logs.level': 'Level',
-  'workbench.logs.selectHint': 'Click to select this log entry',
+  'workbench.logs.selectHint': 'Click to select; Shift-click for a range; Ctrl/Command-click to toggle',
   'workbench.logs.selectedCount': '{count} selected',
   'workbench.logs.selectAll': 'Select all',
   'workbench.logs.copied': 'Selected log entries copied',

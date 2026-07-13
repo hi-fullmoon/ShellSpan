@@ -17,7 +17,8 @@ vi.mock('@/stores/logStore', () => ({
   useLogStore: () => ({
     files: [],
     activeFileName: 'termbridge.log',
-    content: 'first complete log line\nsecond complete log line',
+    content:
+      'first complete log line\nsecond complete log line\nthird complete log line',
     loading: false,
     loadFiles,
     loadFile,
@@ -54,10 +55,12 @@ describe('LogPanel', () => {
     render(<LogPanel />);
 
     fireEvent.click(screen.getByText('first complete log line'));
-    fireEvent.click(screen.getByText('second complete log line'));
+    fireEvent.click(screen.getByText('third complete log line'), {
+      shiftKey: true,
+    });
 
     expect(
-      screen.getByText('workbench.logs.selectedCount:2'),
+      screen.getByText('workbench.logs.selectedCount:3'),
     ).toBeInTheDocument();
 
     fireEvent.click(
@@ -66,9 +69,64 @@ describe('LogPanel', () => {
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(
-        'first complete log line\nsecond complete log line',
+        'first complete log line\nsecond complete log line\nthird complete log line',
       );
     });
     expect(screen.getByText('workbench.logs.copied')).toBeInTheDocument();
+  });
+
+  it('selects all visible rows and clears the selection', () => {
+    render(<LogPanel />);
+
+    fireEvent.click(screen.getByText('first complete log line'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'workbench.logs.selectAll' }),
+    );
+
+    expect(
+      screen.getByText('workbench.logs.selectedCount:3'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'common.cancel' }),
+    );
+    expect(
+      screen.queryByText('workbench.logs.selectedCount:3'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('toggles arbitrary rows with Ctrl-click', () => {
+    render(<LogPanel />);
+
+    fireEvent.click(screen.getByText('first complete log line'), {
+      ctrlKey: true,
+    });
+    fireEvent.click(screen.getByText('third complete log line'), {
+      ctrlKey: true,
+    });
+    expect(
+      screen.getByText('workbench.logs.selectedCount:2'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('first complete log line'), {
+      ctrlKey: true,
+    });
+    expect(
+      screen.getByText('workbench.logs.selectedCount:1'),
+    ).toBeInTheDocument();
+  });
+
+  it('clears the selection when Escape is pressed', () => {
+    render(<LogPanel />);
+
+    fireEvent.click(screen.getByText('first complete log line'));
+    expect(
+      screen.getByText('workbench.logs.selectedCount:1'),
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(
+      screen.queryByText('workbench.logs.selectedCount:1'),
+    ).not.toBeInTheDocument();
   });
 });
