@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import {
+  invokeCopyRemotePath,
   invokeCreateRemoteEntry,
   invokeDeleteRemotePath,
   invokeDownloadRemotePaths,
@@ -16,6 +17,7 @@ export function useSftpConnection(connection: SftpConnection): {
   loadRemoteDirectory: (path?: string) => Promise<void>;
   createRemoteEntry: (parentPath: string, name: string, kind: 'file' | 'directory') => Promise<void>;
   renameRemotePath: (path: string, newName: string) => Promise<void>;
+  copyRemotePath: (sourcePath: string, destinationDirectory: string) => Promise<void>;
   deleteRemotePaths: (paths: string[]) => Promise<void>;
   updateRemotePermissions: (path: string, permissions: number) => Promise<void>;
   uploadLocalPaths: (localPaths: string[], destinationDirectory: string, operationId?: string) => Promise<void>;
@@ -70,6 +72,18 @@ export function useSftpConnection(connection: SftpConnection): {
         ...connection.connection,
         path,
         newName,
+      });
+      await loadRemoteDirectory(connection.remotePath);
+    },
+    [connection.connection, connection.remotePath, loadRemoteDirectory],
+  );
+
+  const copyRemotePath = useCallback(
+    async (sourcePath: string, destinationDirectory: string) => {
+      await invokeCopyRemotePath({
+        ...connection.connection,
+        sourcePath,
+        destinationDirectory,
       });
       await loadRemoteDirectory(connection.remotePath);
     },
@@ -160,6 +174,7 @@ export function useSftpConnection(connection: SftpConnection): {
     loadRemoteDirectory,
     createRemoteEntry,
     renameRemotePath,
+    copyRemotePath,
     deleteRemotePaths,
     updateRemotePermissions,
     uploadLocalPaths,

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogPanel } from '../LogPanel';
 
 const loadFiles = vi.fn().mockResolvedValue(undefined);
@@ -51,10 +51,48 @@ describe('LogPanel', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('copies one complete raw log line on a single click', async () => {
+    vi.useFakeTimers();
+    render(<LogPanel />);
+
+    fireEvent.click(screen.getByText('second complete log line'));
+    expect(writeText).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith('second complete log line');
+  });
+
+  it('cancels pending single-click copying when a row is double-clicked', async () => {
+    vi.useFakeTimers();
+    render(<LogPanel />);
+
+    const firstLine = screen.getByText('first complete log line');
+    fireEvent.click(firstLine);
+    fireEvent.doubleClick(firstLine);
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+
+    expect(writeText).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('workbench.logs.selectedCount:1'),
+    ).toBeInTheDocument();
+  });
+
   it('selects log rows and copies their complete raw content in order', async () => {
     render(<LogPanel />);
 
-    fireEvent.click(screen.getByText('first complete log line'));
+    fireEvent.doubleClick(screen.getByText('first complete log line'));
     fireEvent.click(screen.getByText('third complete log line'), {
       shiftKey: true,
     });
@@ -78,7 +116,7 @@ describe('LogPanel', () => {
   it('selects all visible rows and clears the selection', () => {
     render(<LogPanel />);
 
-    fireEvent.click(screen.getByText('first complete log line'));
+    fireEvent.doubleClick(screen.getByText('first complete log line'));
     fireEvent.click(
       screen.getByRole('button', { name: 'workbench.logs.selectAll' }),
     );
@@ -98,9 +136,7 @@ describe('LogPanel', () => {
   it('toggles arbitrary rows with Ctrl-click', () => {
     render(<LogPanel />);
 
-    fireEvent.click(screen.getByText('first complete log line'), {
-      ctrlKey: true,
-    });
+    fireEvent.doubleClick(screen.getByText('first complete log line'));
     fireEvent.click(screen.getByText('third complete log line'), {
       ctrlKey: true,
     });
@@ -119,7 +155,7 @@ describe('LogPanel', () => {
   it('clears the selection when Escape is pressed', () => {
     render(<LogPanel />);
 
-    fireEvent.click(screen.getByText('first complete log line'));
+    fireEvent.doubleClick(screen.getByText('first complete log line'));
     expect(
       screen.getByText('workbench.logs.selectedCount:1'),
     ).toBeInTheDocument();

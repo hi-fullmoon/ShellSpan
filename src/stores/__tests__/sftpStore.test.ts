@@ -38,7 +38,9 @@ describe('sftpStore', () => {
     );
     const state = useSftpStore.getState();
     expect(state.connections).toHaveLength(1);
-    expect(state.activeConnectionId).toBe('c1');
+    expect(state.connections[0]?.sessionId).toBe('c1');
+    expect(state.connections[0]?.title).toBe('Test');
+    expect(state.activeConnectionId).toBe(state.connections[0]?.id);
   });
 
   it('sets path and entries', () => {
@@ -52,8 +54,9 @@ describe('sftpStore', () => {
       },
       baseConnection.connection,
     );
-    useSftpStore.getState().setPath('c1', 'remote', '/home');
-    useSftpStore.getState().setEntries('c1', 'remote', [
+    const id = useSftpStore.getState().connections[0]?.id ?? '';
+    useSftpStore.getState().setPath(id, 'remote', '/home');
+    useSftpStore.getState().setEntries(id, 'remote', [
       {
         path: '/home/file.txt',
         name: 'file.txt',

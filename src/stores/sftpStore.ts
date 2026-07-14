@@ -1,19 +1,36 @@
 import { create } from 'zustand';
+import { generateId } from '@/lib/utils';
 import type {
   LocalDirectoryListing,
   LocalFileEntry,
   RemoteConnectionRequest,
   RemoteDirectoryListing,
   RemoteFileEntry,
+  RemoteFileKind,
   SessionSummary,
 } from '@/types';
 
 export type SftpSide = 'local' | 'remote';
 
+export interface SftpPaneState {
+  pathInput: string;
+  filterQuery: string;
+  selectedPaths: string[];
+  batchMode: boolean;
+}
+
+export interface SftpRemoteClipboard {
+  sourcePath: string;
+  sourceName: string;
+  kind: RemoteFileKind;
+}
+
 export interface SftpConnection {
   id: string;
   sessionId?: string;
+  profileId?: string;
   title: string;
+  pinned?: boolean;
   connection: RemoteConnectionRequest;
   localPath: string;
   remotePath: string;
@@ -23,14 +40,65 @@ export interface SftpConnection {
   remoteLoading: boolean;
   localError?: string;
   remoteError?: string;
+  localPane: SftpPaneState;
+  remotePane: SftpPaneState;
+  remoteBookmarks: string[];
+  remoteClipboard?: SftpRemoteClipboard;
+}
+
+export interface SftpDirectoryListing {
+  path: string;
+  parentPath?: string;
+  entries: (LocalFileEntry | RemoteFileEntry)[];
+}
+
+function createDefaultPaneState(): SftpPaneState {
+  return {
+    pathInput: '',
+    filterQuery: '',
+    selectedPaths: [],
+    batchMode: false,
+  };
+}
+
+function createDefaultConnection(
+  id: string,
+  summary: SessionSummary,
+  connection: RemoteConnectionRequest,
+  profileId?: string,
+): SftpConnection {
+  return {
+    id,
+    sessionId: summary.sessionId,
+    profileId,
+    title: summary.title,
+    pinned: false,
+    connection,
+    localPath: '',
+    remotePath: '',
+    localEntries: [],
+    remoteEntries: [],
+    localLoading: false,
+    remoteLoading: false,
+    localPane: createDefaultPaneState(),
+    remotePane: createDefaultPaneState(),
+    remoteBookmarks: [],
+  };
 }
 
 interface SftpState {
   connections: SftpConnection[];
   activeConnectionId: string | null;
-  addConnection: (summary: SessionSummary, connection: RemoteConnectionRequest) => void;
+  addConnection: (
+    summary: SessionSummary,
+    connection: RemoteConnectionRequest,
+    profileId?: string,
+  ) => void;
   removeConnection: (id: string) => void;
   setActiveConnection: (id: string | null) => void;
+  updateTitle: (id: string, title: string) => void;
+  togglePin: (id: string) => void;
+  reorderConnections: (activeId: string, insertIndex: number) => void;
   setPath: (id: string, side: SftpSide, path: string) => void;
   setEntries: (
     id: string,
@@ -39,33 +107,67 @@ interface SftpState {
   ) => void;
   setLoading: (id: string, side: SftpSide, loading: boolean) => void;
   setError: (id: string, side: SftpSide, error?: string) => void;
+  setPaneState: (
+    id: string,
+    side: SftpSide,
+    patch:
+      | Partial<SftpPaneState>
+      | ((prev: SftpPaneState) => Partial<SftpPaneState>),
+  ) => void;
+  setRemoteClipboard: (
+    id: string,
+    clipboard?: SftpRemoteClipboard,
+  ) => void;
+  addRemoteBookmark: (id: string, path: string) => void;
+  removeRemoteBookmark: (id: string, path: string) => void;
+}
+
+function updateConnection(
+  state: SftpState,
+  id: string,
+  updater: (connection: SftpConnection) => SftpConnection,
+): SftpConnection[] {
+  return state.connections.map((connection) =>
+    connection.id === id ? updater(connection) : connection,
+  );
+}
+
+function getPaneKey(side: SftpSide): 'localPane' | 'remotePane' {
+  return side === 'local' ? 'localPane' : 'remotePane';
+}
+
+function getPathKey(side: SftpSide): 'localPath' | 'remotePath' {
+  return side === 'local' ? 'localPath' : 'remotePath';
+}
+
+function getEntriesKey(
+  side: SftpSide,
+): 'localEntries' | 'remoteEntries' {
+  return side === 'local' ? 'localEntries' : 'remoteEntries';
+}
+
+function getLoadingKey(side: SftpSide): 'localLoading' | 'remoteLoading' {
+  return side === 'local' ? 'localLoading' : 'remoteLoading';
+}
+
+function getErrorKey(side: SftpSide): 'localError' | 'remoteError' {
+  return side === 'local' ? 'localError' : 'remoteError';
 }
 
 export const useSftpStore = create<SftpState>()((set) => ({
   connections: [],
   activeConnectionId: null,
-  addConnection: (summary, connection) =>
+
+  addConnection: (summary, connection, profileId) =>
     set((state) => {
-      const id = summary.sessionId;
-      const exists = state.connections.some((conn) => conn.id === id);
-      if (exists) return state;
-      const conn: SftpConnection = {
-        id,
-        sessionId: id,
-        title: summary.title,
-        connection,
-        localPath: '',
-        remotePath: '',
-        localEntries: [],
-        remoteEntries: [],
-        localLoading: false,
-        remoteLoading: false,
-      };
+      const id = generateId();
+      const conn = createDefaultConnection(id, summary, connection, profileId);
       return {
         connections: [...state.connections, conn],
         activeConnectionId: id,
       };
     }),
+
   removeConnection: (id) =>
     set((state) => {
       const connections = state.connections.filter((conn) => conn.id !== id);
@@ -75,46 +177,125 @@ export const useSftpStore = create<SftpState>()((set) => ({
           : state.activeConnectionId;
       return { connections, activeConnectionId };
     }),
+
   setActiveConnection: (id) => set({ activeConnectionId: id }),
+
+  updateTitle: (id, title) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        title,
+      })),
+    })),
+
+  togglePin: (id) =>
+    set((state) => {
+      const pinnedConnections = state.connections.filter((c) => c.pinned);
+      const unpinnedConnections = state.connections.filter((c) => !c.pinned);
+      const target = state.connections.find((c) => c.id === id);
+      if (!target) return state;
+
+      const nextPinned = !target.pinned;
+      const updated = { ...target, pinned: nextPinned };
+
+      if (nextPinned) {
+        return {
+          connections: [...pinnedConnections, updated, ...unpinnedConnections],
+        };
+      }
+
+      return {
+        connections: [
+          ...pinnedConnections.filter((c) => c.id !== id),
+          updated,
+          ...unpinnedConnections.filter((c) => c.id !== id),
+        ],
+      };
+    }),
+
+  reorderConnections: (activeId, insertIndex) =>
+    set((state) => {
+      const active = state.connections.find((c) => c.id === activeId);
+      if (!active) return state;
+
+      const pinnedCount = state.connections.filter((c) => c.pinned).length;
+      const minIndex = active.pinned ? 0 : pinnedCount;
+      const targetIndex = Math.max(minIndex, insertIndex);
+
+      const others = state.connections.filter((c) => c.id !== activeId);
+      others.splice(targetIndex, 0, active);
+
+      return { connections: others };
+    }),
+
   setPath: (id, side, path) =>
     set((state) => ({
-      connections: state.connections.map((conn) =>
-        conn.id === id
-          ? { ...conn, [side === 'local' ? 'localPath' : 'remotePath']: path }
-          : conn,
-      ),
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        [getPathKey(side)]: path,
+      })),
     })),
+
   setEntries: (id, side, entries) =>
     set((state) => ({
-      connections: state.connections.map((conn) =>
-        conn.id === id
-          ? {
-              ...conn,
-              [side === 'local' ? 'localEntries' : 'remoteEntries']: entries,
-            }
-          : conn,
-      ),
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        [getEntriesKey(side)]: entries,
+      })),
     })),
+
   setLoading: (id, side, loading) =>
     set((state) => ({
-      connections: state.connections.map((conn) =>
-        conn.id === id
-          ? {
-              ...conn,
-              [side === 'local' ? 'localLoading' : 'remoteLoading']: loading,
-            }
-          : conn,
-      ),
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        [getLoadingKey(side)]: loading,
+      })),
     })),
+
   setError: (id, side, error) =>
     set((state) => ({
-      connections: state.connections.map((conn) =>
-        conn.id === id
-          ? {
-              ...conn,
-              [side === 'local' ? 'localError' : 'remoteError']: error,
-            }
-          : conn,
-      ),
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        [getErrorKey(side)]: error,
+      })),
+    })),
+
+  setPaneState: (id, side, patch) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (connection) => {
+        const paneKey = getPaneKey(side);
+        const current = connection[paneKey];
+        const nextPatch = typeof patch === 'function' ? patch(current) : patch;
+        return {
+          ...connection,
+          [paneKey]: { ...current, ...nextPatch },
+        };
+      }),
+    })),
+
+  setRemoteClipboard: (id, clipboard) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        remoteClipboard: clipboard,
+      })),
+    })),
+
+  addRemoteBookmark: (id, path) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        remoteBookmarks: connection.remoteBookmarks.includes(path)
+          ? connection.remoteBookmarks
+          : [...connection.remoteBookmarks, path],
+      })),
+    })),
+
+  removeRemoteBookmark: (id, path) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        remoteBookmarks: connection.remoteBookmarks.filter((p) => p !== path),
+      })),
     })),
 }));

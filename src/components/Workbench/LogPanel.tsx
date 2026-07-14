@@ -124,24 +124,24 @@ interface LogLineProps {
   line: ParsedLogLine;
   originalIndex: number;
   selected: boolean;
-  selectHint: string;
-  onSelect: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onDoubleClick: () => void;
 }
 
 const LogLine: React.FC<LogLineProps> = ({
   line,
   originalIndex,
   selected,
-  selectHint,
-  onSelect,
+  onClick,
+  onDoubleClick,
 }) => {
   if (!line.level || !line.message) {
     return (
       <button
         type="button"
         aria-pressed={selected}
-        title={selectHint}
-        onClick={onSelect}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
         className={cn(
           'w-full cursor-pointer px-1 py-0.5 text-left text-app-text-soft transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50',
           selected && 'bg-app-primary/10',
@@ -162,8 +162,8 @@ const LogLine: React.FC<LogLineProps> = ({
     <button
       type="button"
       aria-pressed={selected}
-      title={selectHint}
-      onClick={onSelect}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
       className={cn(
         'grid w-full cursor-pointer grid-cols-[120px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[120px_2.75rem_4.5rem_1fr]',
         selected && 'bg-app-primary/10',
@@ -233,11 +233,13 @@ export const LogPanel: React.FC = () => {
   const [autoScroll, setAutoScroll] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
+  const [selectionMode, setSelectionMode] = useState(false);
   const [selectedLineKeys, setSelectedLineKeys] = useState<Set<string>>(
     () => new Set(),
   );
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
+  const singleClickTimerRef = useRef<number | null>(null);
   const selectionAnchorRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -307,6 +309,27 @@ export const LogPanel: React.FC = () => {
       .catch(() => showCopyFeedback('failed'));
   }, [parsedLines, selectedLineKeys, showCopyFeedback]);
 
+  const copyLogContent = useCallback(
+    (contentToCopy: string): void => {
+      if (!navigator.clipboard?.writeText) {
+        showCopyFeedback('failed');
+        return;
+      }
+      void navigator.clipboard
+        .writeText(contentToCopy)
+        .then(() => showCopyFeedback('copied'))
+        .catch(() => showCopyFeedback('failed'));
+    },
+    [showCopyFeedback],
+  );
+
+  const clearPendingSingleClick = useCallback((): void => {
+    if (singleClickTimerRef.current !== null) {
+      window.clearTimeout(singleClickTimerRef.current);
+      singleClickTimerRef.current = null;
+    }
+  }, []);
+
   const handleSelectLine = useCallback(
     (
       selectionKey: string,
@@ -364,12 +387,14 @@ export const LogPanel: React.FC = () => {
   }, [filteredLines]);
 
   const handleClearSelection = useCallback((): void => {
+    clearPendingSingleClick();
     selectionAnchorRef.current = null;
     setSelectedLineKeys(new Set());
-  }, []);
+    setSelectionMode(false);
+  }, [clearPendingSingleClick]);
 
   useEffect(() => {
-    if (selectedLineKeys.size === 0) return;
+    if (!selectionMode) return;
 
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
@@ -379,19 +404,21 @@ export const LogPanel: React.FC = () => {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleClearSelection, selectedLineKeys.size]);
+  }, [handleClearSelection, selectionMode]);
 
   useEffect(() => {
     return () => {
       if (copyFeedbackTimerRef.current !== null) {
         window.clearTimeout(copyFeedbackTimerRef.current);
       }
+      clearPendingSingleClick();
     };
-  }, []);
+  }, [clearPendingSingleClick]);
 
   useEffect(() => {
     selectionAnchorRef.current = null;
     setSelectedLineKeys(new Set());
+    setSelectionMode(false);
   }, [activeFileName]);
 
   useEffect(() => {
@@ -529,7 +556,7 @@ export const LogPanel: React.FC = () => {
             <Spinner />
           </div>
         )}
-        {selectedLineKeys.size > 0 && (
+        {selectionMode && (
           <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-app-border bg-app-surface px-2 py-1.5 shadow-[var(--shadow-dialog)]">
             <span className="whitespace-nowrap px-1 text-xs font-medium text-app-text">
               {t('workbench.logs.selectedCount', {
@@ -547,6 +574,7 @@ export const LogPanel: React.FC = () => {
               variant="primary"
               size="sm"
               onClick={handleCopySelectedLogs}
+              disabled={selectedLineKeys.size === 0}
             >
               {t('common.copy')}
             </Button>
@@ -556,7 +584,7 @@ export const LogPanel: React.FC = () => {
           ref={scrollRef}
           className={cn(
             'flex-1 overflow-auto p-3 font-mono text-xs',
-            selectedLineKeys.size > 0 && 'pb-14',
+            selectionMode && 'pb-14',
           )}
         >
           {content ? (
@@ -587,15 +615,28 @@ export const LogPanel: React.FC = () => {
                       line={line}
                       originalIndex={originalIndex}
                       selected={selectedLineKeys.has(selectionKey)}
-                      selectHint={t('workbench.logs.selectHint')}
-                      onSelect={(event) =>
-                        handleSelectLine(
-                          selectionKey,
-                          virtualItem.index,
-                          event.shiftKey,
-                          event.ctrlKey || event.metaKey,
-                        )
-                      }
+                      onClick={(event) => {
+                        if (selectionMode) {
+                          handleSelectLine(
+                            selectionKey,
+                            virtualItem.index,
+                            event.shiftKey,
+                            event.ctrlKey || event.metaKey,
+                          );
+                          return;
+                        }
+                        clearPendingSingleClick();
+                        singleClickTimerRef.current = window.setTimeout(() => {
+                          singleClickTimerRef.current = null;
+                          copyLogContent(line.raw);
+                        }, 250);
+                      }}
+                      onDoubleClick={() => {
+                        clearPendingSingleClick();
+                        selectionAnchorRef.current = selectionKey;
+                        setSelectedLineKeys(new Set([selectionKey]));
+                        setSelectionMode(true);
+                      }}
                     />
                   </div>
                 );

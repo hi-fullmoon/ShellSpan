@@ -96,6 +96,10 @@ export async function invokeCancelUpload(operationId: string): Promise<void> {
   return invoke('cancel_upload', { operationId });
 }
 
+export async function invokeCancelDelete(operationId: string): Promise<void> {
+  return invoke('cancel_delete', { operationId });
+}
+
 export async function invokeDownloadRemotePaths(
   request: DownloadRemotePathsRequest,
 ): Promise<void> {

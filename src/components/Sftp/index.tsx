@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useSftpStore } from '@/stores/sftpStore';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Button } from '@/components/ui/Button';
 import { SplitPane } from '@/components/ui/SplitPane';
 import { SftpPane } from './SftpPane';
 import { SftpToolbar } from './SftpToolbar';
 import { SftpTabBar } from './SftpTabBar';
+import { SftpTabContextMenu } from './SftpTabContextMenu';
+import { SftpNewConnectionMenu } from './SftpNewConnectionMenu';
 import { PromptDialog, PermissionsDialog } from './SftpDialogs';
 import { SftpDndContext, type SftpDndPayload } from './SftpDndContext';
 import { TransferProgress } from './TransferProgress';
@@ -25,14 +28,48 @@ const Sftp: React.FC = () => {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [newConnectionMenuOpen, setNewConnectionMenuOpen] = useState(false);
+  const [tabContextMenu, setTabContextMenu] = useState<{
+    connection: ReturnType<typeof useSftpStore.getState>['connections'][number];
+    x: number;
+    y: number;
+  } | null>(null);
 
   if (!connection) {
     return (
       <div className="flex h-full flex-col">
-        <SftpTabBar />
-        <div className="flex h-full items-center justify-center">
-          <EmptyState title={t('sftp.empty')} />
+        <SftpTabBar
+          onNewTabClick={() => setNewConnectionMenuOpen(true)}
+          onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}
+        />
+        <div className="relative min-h-0 flex-1">
+          <div className="flex h-full items-center justify-center">
+            <EmptyState
+              title={t('sftp.empty')}
+              description={t('sftp.empty.openFromWorkbench')}
+              action={
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setNewConnectionMenuOpen(true)}
+                >
+                  {t('sftp.empty.newConnection')}
+                </Button>
+              }
+            />
+          </div>
+          <SftpNewConnectionMenu
+            open={newConnectionMenuOpen}
+            onClose={() => setNewConnectionMenuOpen(false)}
+          />
         </div>
+        <SftpTabContextMenu
+          open={!!tabContextMenu}
+          x={tabContextMenu?.x ?? 0}
+          y={tabContextMenu?.y ?? 0}
+          connection={tabContextMenu?.connection ?? null}
+          onClose={() => setTabContextMenu(null)}
+        />
       </div>
     );
   }
@@ -46,6 +83,10 @@ const Sftp: React.FC = () => {
       setRenameOpen={setRenameOpen}
       permissionsOpen={permissionsOpen}
       setPermissionsOpen={setPermissionsOpen}
+      newConnectionMenuOpen={newConnectionMenuOpen}
+      setNewConnectionMenuOpen={setNewConnectionMenuOpen}
+      tabContextMenu={tabContextMenu}
+      setTabContextMenu={setTabContextMenu}
     />
   );
 };
@@ -58,6 +99,20 @@ interface SftpContentProps {
   setRenameOpen: (v: boolean) => void;
   permissionsOpen: boolean;
   setPermissionsOpen: (v: boolean) => void;
+  newConnectionMenuOpen: boolean;
+  setNewConnectionMenuOpen: (v: boolean) => void;
+  tabContextMenu: {
+    connection: ReturnType<typeof useSftpStore.getState>['connections'][number];
+    x: number;
+    y: number;
+  } | null;
+  setTabContextMenu: (
+    value: {
+      connection: ReturnType<typeof useSftpStore.getState>['connections'][number];
+      x: number;
+      y: number;
+    } | null,
+  ) => void;
 }
 
 const SftpContent: React.FC<SftpContentProps> = ({
@@ -68,6 +123,10 @@ const SftpContent: React.FC<SftpContentProps> = ({
   setRenameOpen,
   permissionsOpen,
   setPermissionsOpen,
+  newConnectionMenuOpen,
+  setNewConnectionMenuOpen,
+  tabContextMenu,
+  setTabContextMenu,
 }) => {
   const { t } = useI18n();
   const {
@@ -81,12 +140,10 @@ const SftpContent: React.FC<SftpContentProps> = ({
   } = useSftpConnection(connection);
   const { loadLocalDirectory } = useLocalDirectory(connection);
 
-  const [selectedRemotePaths, setSelectedRemotePaths] = useState<Set<string>>(
-    new Set(),
-  );
-  const [selectedLocalPaths, setSelectedLocalPaths] = useState<Set<string>>(
-    new Set(),
-  );
+  const setPaneState = useSftpStore((state) => state.setPaneState);
+
+  const selectedRemotePaths = new Set(connection.remotePane.selectedPaths);
+  const selectedLocalPaths = new Set(connection.localPane.selectedPaths);
 
   const selectedRemote = Array.from(selectedRemotePaths);
   const selectedLocal = Array.from(selectedLocalPaths);
@@ -109,13 +166,13 @@ const SftpContent: React.FC<SftpContentProps> = ({
   const handleDelete = async (): Promise<void> => {
     if (selectedRemote.length === 0) return;
     await deleteRemotePaths(selectedRemote);
-    setSelectedRemotePaths(new Set());
+    setPaneState(connection.id, 'remote', { selectedPaths: [] });
   };
 
   const handleRename = async (newName: string): Promise<void> => {
     if (selectedRemote.length !== 1) return;
     await renameRemotePath(selectedRemote[0], newName);
-    setSelectedRemotePaths(new Set());
+    setPaneState(connection.id, 'remote', { selectedPaths: [] });
   };
 
   const handleCreateFolder = async (name: string): Promise<void> => {
@@ -125,7 +182,7 @@ const SftpContent: React.FC<SftpContentProps> = ({
   const handlePermissions = async (permissions: number): Promise<void> => {
     if (selectedRemote.length !== 1) return;
     await updateRemotePermissions(selectedRemote[0], permissions);
-    setSelectedRemotePaths(new Set());
+    setPaneState(connection.id, 'remote', { selectedPaths: [] });
   };
 
   const handleDragEnd = async (
@@ -136,20 +193,23 @@ const SftpContent: React.FC<SftpContentProps> = ({
     if (payload.side === 'local' && targetSide === 'remote') {
       await uploadLocalPaths(paths, connection.remotePath);
       await loadRemoteDirectory(connection.remotePath);
-      setSelectedLocalPaths(new Set());
+      setPaneState(connection.id, 'local', { selectedPaths: [] });
     } else if (payload.side === 'remote' && targetSide === 'local') {
       const folders = await invokePickLocalFolder();
       if (folders.length === 0) return;
       await downloadRemotePaths(paths, folders[0]);
       await loadLocalDirectory(connection.localPath);
-      setSelectedRemotePaths(new Set());
+      setPaneState(connection.id, 'remote', { selectedPaths: [] });
     }
   };
 
   return (
     <SftpDndContext onDragEnd={handleDragEnd}>
       <div className="flex h-full flex-col">
-        <SftpTabBar />
+        <SftpTabBar
+          onNewTabClick={() => setNewConnectionMenuOpen(true)}
+          onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}
+        />
         <SftpToolbar
           onNewFolder={() => setNewFolderOpen(true)}
           onUpload={handleUpload}
@@ -165,7 +225,9 @@ const SftpContent: React.FC<SftpContentProps> = ({
                 connection={connection}
                 side="local"
                 selectedPaths={selectedLocalPaths}
-                onSelectedPathsChange={setSelectedLocalPaths}
+                onSelectedPathsChange={(paths) =>
+                  setPaneState(connection.id, 'local', { selectedPaths: Array.from(paths) })
+                }
               />
             }
             right={
@@ -173,7 +235,9 @@ const SftpContent: React.FC<SftpContentProps> = ({
                 connection={connection}
                 side="remote"
                 selectedPaths={selectedRemotePaths}
-                onSelectedPathsChange={setSelectedRemotePaths}
+                onSelectedPathsChange={(paths) =>
+                  setPaneState(connection.id, 'remote', { selectedPaths: Array.from(paths) })
+                }
               />
             }
           />
@@ -209,6 +273,17 @@ const SftpContent: React.FC<SftpContentProps> = ({
         />
         <TransferProgress />
       </div>
+      <SftpNewConnectionMenu
+        open={newConnectionMenuOpen}
+        onClose={() => setNewConnectionMenuOpen(false)}
+      />
+      <SftpTabContextMenu
+        open={!!tabContextMenu}
+        x={tabContextMenu?.x ?? 0}
+        y={tabContextMenu?.y ?? 0}
+        connection={tabContextMenu?.connection ?? null}
+        onClose={() => setTabContextMenu(null)}
+      />
     </SftpDndContext>
   );
 };

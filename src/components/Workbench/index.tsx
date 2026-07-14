@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
-import { useAppStore } from '@/stores/appStore';
 import { ConnectionForm } from './ConnectionForm';
 import { ConnectionList } from './ConnectionList';
 import { KnownHostsPanel } from './KnownHostsPanel';
 import { LogPanel } from './LogPanel';
 import { WorkbenchSidebar, type WorkbenchTab } from './WorkbenchSidebar';
-import { ConfirmDialog } from '@/components/ui/Dialog';
+import { AlertDialog } from '@/components/ui/AlertDialog';
 import { HostKeyDialog } from '@/components/Terminal/HostKeyDialog';
 import type { ConnectionProfile } from '@/types';
-import { buildRemoteConnectionRequest } from '@/lib/tauri';
 import { useConnectSession } from '@/hooks/useConnectSession';
-import { useSftpStore } from '@/stores/sftpStore';
+import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 
 const Workbench: React.FC = () => {
   const { t } = useI18n();
@@ -21,16 +19,13 @@ const Workbench: React.FC = () => {
   const [editing, setEditing] = useState<ConnectionProfile | undefined>();
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
   const { connect, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
+  const { open: openSftpConnection } = useSftpConnectionOpener();
 
   const profiles = useProfileStore((state) => state.profiles);
   const addProfile = useProfileStore((state) => state.addProfile);
   const updateProfile = useProfileStore((state) => state.updateProfile);
   const removeProfile = useProfileStore((state) => state.removeProfile);
   const duplicateProfile = useProfileStore((state) => state.duplicateProfile);
-  const ensurePassword = useProfileStore((state) => state.ensurePassword);
-
-  const setActiveSection = useAppStore((state) => state.setActiveSection);
-  const addSftpConnection = useSftpStore((state) => state.addConnection);
 
   const handleAdd = (): void => {
     setEditing(undefined);
@@ -63,17 +58,7 @@ const Workbench: React.FC = () => {
   };
 
   const connectSftp = async (profile: ConnectionProfile): Promise<void> => {
-    const profileWithPassword = await ensurePassword(profile);
-    const connection = buildRemoteConnectionRequest(profileWithPassword);
-    const summary = {
-      sessionId: profile.id,
-      title: profile.name,
-      host: profile.host,
-      port: profile.port,
-      username: profile.username,
-    };
-    addSftpConnection(summary, connection);
-    setActiveSection('sftp');
+    await openSftpConnection(profile);
   };
 
   return (
@@ -105,14 +90,15 @@ const Workbench: React.FC = () => {
         initial={editing}
       />
 
-      <ConfirmDialog
+      <AlertDialog
         open={!!deleting}
         onClose={() => setDeleting(undefined)}
         onConfirm={handleDelete}
         title={t('common.delete')}
-        message={deleting ? `${deleting.name}` : ''}
+        description={deleting ? deleting.name : ''}
         confirmText={t('common.delete')}
         cancelText={t('common.cancel')}
+        variant="danger"
       />
 
       <HostKeyDialog
