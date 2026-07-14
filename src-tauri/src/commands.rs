@@ -892,10 +892,17 @@ pub(crate) fn read_log_file(app: AppHandle, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub(crate) fn list_local_directory(path: String) -> Result<LocalDirectoryListing, String> {
+pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<LocalDirectoryListing, String> {
     use std::fs;
+    use std::path::PathBuf;
 
-    let canonical = fs::canonicalize(&path).map_err(|error| format!("failed to resolve path: {error}"))?;
+    let target = if path.is_empty() {
+        app.path().home_dir().map_err(|error| format!("failed to resolve home directory: {error}"))?
+    } else {
+        PathBuf::from(&path)
+    };
+
+    let canonical = fs::canonicalize(&target).map_err(|error| format!("failed to resolve path: {error}"))?;
     if !canonical.is_dir() {
         return Err(format!("path is not a directory: {}", canonical.display()));
     }

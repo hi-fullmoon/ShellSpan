@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import Terminal from '../index';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useAppStore } from '@/stores/appStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -80,6 +81,8 @@ describe('Terminal', () => {
   });
 
   it('toggles the new tab menu with Ctrl/Cmd+K keyboard shortcut', () => {
+    useAppStore.setState({ activeSection: 'terminal' });
+
     render(<Terminal />);
 
     expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();

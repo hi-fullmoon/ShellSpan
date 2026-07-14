@@ -412,6 +412,10 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
 
+  if (connections.length === 0) {
+    return null;
+  }
+
   return (
     <div className="flex h-9 items-center gap-0 border-b border-app-border bg-app-surface-muted px-0">
       <DndContext

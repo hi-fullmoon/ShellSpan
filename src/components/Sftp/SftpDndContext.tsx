@@ -8,7 +8,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { FileEntry } from './SftpFileGrid';
+import type { FileEntry } from './fileEntryFormatters';
 
 export interface SftpDndPayload {
   side: 'local' | 'remote';

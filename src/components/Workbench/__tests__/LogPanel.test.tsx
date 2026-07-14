@@ -16,6 +16,9 @@ vi.mock('@/hooks/useToast', () => ({
 const loadFiles = vi.fn().mockResolvedValue(undefined);
 const loadFile = vi.fn().mockResolvedValue(undefined);
 const refreshActiveFile = vi.fn().mockResolvedValue(undefined);
+const defaultContent =
+  'first complete log line\nsecond complete log line\nthird complete log line';
+let mockContent = defaultContent;
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -28,8 +31,7 @@ vi.mock('@/stores/logStore', () => ({
   useLogStore: () => ({
     files: [],
     activeFileName: 'termbridge.log',
-    content:
-      'first complete log line\nsecond complete log line\nthird complete log line',
+    content: mockContent,
     loading: false,
     loadFiles,
     loadFile,
@@ -57,6 +59,7 @@ describe('LogPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAddToast.mockClear();
+    mockContent = defaultContent;
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText },
@@ -65,6 +68,30 @@ describe('LogPanel', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('shows dated log entries from older sessions by default', () => {
+    mockContent =
+      '[2000-01-01][12:34:56][INFO][termbridge] persisted log entry';
+
+    render(<LogPanel />);
+
+    expect(screen.getByText('persisted log entry')).toBeInTheDocument();
+  });
+
+  it('shows an empty-filter message when no log entries match', () => {
+    mockContent =
+      '[2000-01-01][12:34:56][INFO][termbridge] persisted log entry\n';
+
+    render(<LogPanel />);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'workbench.logs.today' }),
+    );
+
+    expect(
+      screen.getByText('workbench.logs.noMatches'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('persisted log entry')).not.toBeInTheDocument();
   });
 
   it('copies one complete raw log line on a single click', async () => {

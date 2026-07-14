@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { useAppStore } from '@/stores/appStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
 import { SplitPane } from '@/components/ui/SplitPane';
 import { SftpPane } from './SftpPane';
-import { SftpToolbar } from './SftpToolbar';
 import { SftpTabBar } from './SftpTabBar';
 import { SftpTabContextMenu } from './SftpTabContextMenu';
 import { SftpNewConnectionMenu } from './SftpNewConnectionMenu';
@@ -15,7 +15,6 @@ import { TransferProgress } from './TransferProgress';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import {
-  invokePickLocalFiles,
   invokePickLocalFolder,
 } from '@/lib/tauri';
 
@@ -34,6 +33,22 @@ const Sftp: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
+
+  const activeSection = useAppStore((state) => state.activeSection);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        if (activeSection !== 'sftp') return;
+        event.preventDefault();
+        setNewConnectionMenuOpen((prev) => !prev);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeSection]);
 
   if (!connection) {
     return (
@@ -146,22 +161,6 @@ const SftpContent: React.FC<SftpContentProps> = ({
   const selectedLocalPaths = new Set(connection.localPane.selectedPaths);
 
   const selectedRemote = Array.from(selectedRemotePaths);
-  const selectedLocal = Array.from(selectedLocalPaths);
-
-  const handleUpload = async (): Promise<void> => {
-    const paths = await invokePickLocalFiles();
-    if (paths.length === 0) return;
-    await uploadLocalPaths(paths, connection.remotePath);
-    await loadRemoteDirectory(connection.remotePath);
-  };
-
-  const handleDownload = async (): Promise<void> => {
-    if (selectedRemote.length === 0) return;
-    const folders = await invokePickLocalFolder();
-    if (folders.length === 0) return;
-    await downloadRemotePaths(selectedRemote, folders[0]);
-    await loadLocalDirectory(connection.localPath);
-  };
 
   const handleDelete = async (): Promise<void> => {
     if (selectedRemote.length === 0) return;
@@ -210,14 +209,6 @@ const SftpContent: React.FC<SftpContentProps> = ({
           onNewTabClick={() => setNewConnectionMenuOpen(true)}
           onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}
         />
-        <SftpToolbar
-          onNewFolder={() => setNewFolderOpen(true)}
-          onUpload={handleUpload}
-          onDownload={handleDownload}
-          onDelete={handleDelete}
-          onRename={() => setRenameOpen(true)}
-          onPermissions={() => setPermissionsOpen(true)}
-        />
         <div className="flex-1 min-h-0 p-2">
           <SplitPane
             left={
@@ -228,6 +219,16 @@ const SftpContent: React.FC<SftpContentProps> = ({
                 onSelectedPathsChange={(paths) =>
                   setPaneState(connection.id, 'local', { selectedPaths: Array.from(paths) })
                 }
+                onFileAction={(action) => {
+                  if (action === 'open') {
+                    const target = Array.from(selectedLocalPaths)[0];
+                    const entry = connection.localEntries.find((e) => e.path === target);
+                    if (entry?.kind === 'directory') {
+                      loadLocalDirectory(entry.path);
+                      setPaneState(connection.id, 'local', { selectedPaths: [] });
+                    }
+                  }
+                }}
               />
             }
             right={
@@ -238,6 +239,29 @@ const SftpContent: React.FC<SftpContentProps> = ({
                 onSelectedPathsChange={(paths) =>
                   setPaneState(connection.id, 'remote', { selectedPaths: Array.from(paths) })
                 }
+                onNewFolder={() => setNewFolderOpen(true)}
+                onFileAction={(action) => {
+                  switch (action) {
+                    case 'open': {
+                      const target = Array.from(selectedRemotePaths)[0];
+                      const entry = connection.remoteEntries.find((e) => e.path === target);
+                      if (entry?.kind === 'directory') {
+                        loadRemoteDirectory(entry.path);
+                        setPaneState(connection.id, 'remote', { selectedPaths: [] });
+                      }
+                      break;
+                    }
+                    case 'rename':
+                      setRenameOpen(true);
+                      break;
+                    case 'delete':
+                      handleDelete();
+                      break;
+                    case 'permissions':
+                      setPermissionsOpen(true);
+                      break;
+                  }
+                }}
               />
             }
           />

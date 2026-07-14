@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
@@ -27,9 +28,12 @@ const Terminal: React.FC = () => {
     y: number;
   } | null>(null);
 
+  const activeSection = useAppStore((s) => s.activeSection);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        if (activeSection !== 'terminal') return;
         event.preventDefault();
         setNewTabMenuOpen((prev) => !prev);
       }
@@ -38,7 +42,7 @@ const Terminal: React.FC = () => {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [activeSection]);
 
   return (
     <div className="flex h-full flex-col">

@@ -44,12 +44,6 @@ importers:
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
-      ag-grid-community:
-        specifier: ^35.3.1
-        version: 35.3.1
-      ag-grid-react:
-        specifier: ^35.3.1
-        version: 35.3.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -1073,18 +1067,6 @@ packages:
   '@zag-js/utils@1.41.2':
     resolution: {integrity: sha512-Yj8FSrR7vGA6ahUhjrThfHAF+PM2Y1Yv2lkXkqZZd60mPBhixcot1+SHOfEMV63JimQcWrmQ8QbeYYMmF+ZpLQ==}
 
-  ag-charts-types@13.3.1:
-    resolution: {integrity: sha512-m37eUe4g//swvGh8PWMlYQH3gknjSsPeW4sQwBhM3/auGAHmN0wvxEWlrdAn98pBPg4HoKbtOy+yf7gPCYsnvQ==}
-
-  ag-grid-community@35.3.1:
-    resolution: {integrity: sha512-Wmkd/xYTCbAApcZZO74nBggZCnd/oX753NY3MJ4zYARVpfBHRWWhIBJ2sFTFKbDWwHZOWsx3YT9+kkyeuyLKlw==}
-
-  ag-grid-react@35.3.1:
-    resolution: {integrity: sha512-M3ljCQyGL+qzoyPN0BYrn4eAlgZr6Ailcjd8+a7OcneSiVsMNSJb/gTkIMUwmYivkPLIA8EEJ4hTxxKSaya6mQ==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   ansi-regex@5.0.1:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
     engines: {node: '>=8'}
@@ -1489,10 +1471,6 @@ packages:
     resolution: {integrity: sha512-wRNIrw4DmVLKQlbgOMdkMx27Wrpzes2hh5Jtbi2bjPd+4wJstWIqP5A+lscnqbm0xxmT5Bpg8Lec5ItEBwx6BQ==}
     engines: {node: '>=18'}
 
-  object-assign@4.1.1:
-    resolution: {integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==}
-    engines: {node: '>=0.10.0'}
-
   obug@2.1.3:
     resolution: {integrity: sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg==}
     engines: {node: '>=12.20.0'}
@@ -1553,9 +1531,6 @@ packages:
     resolution: {integrity: sha512-mXKbbBPnYTG7Yra9qFBtqj+IXcsvxsvOBco3QHxtxTl+hHKq6QdzMZ+q0CtL4ORHZgwGImRr2XZUX2EWzORxig==}
     engines: {node: ^10.13.0 || ^12.13.0 || ^14.15.0 || >=15.0.0}
 
-  prop-types@15.8.1:
-    resolution: {integrity: sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==}
-
   proxy-compare@3.0.1:
     resolution: {integrity: sha512-V9plBAt3qjMlS1+nC8771KNf6oJ12gExvaxnNzN/9yVRLdTv/lc+oJlnSzrdYDAvBfTStPCoiaCOTmTs0adv7Q==}
 
@@ -1575,9 +1550,6 @@ packages:
     resolution: {integrity: sha512-38dBr1w9GjsIsSJheVGS2svlHiCd5H2RMR4Vz9rVbTM/35S717uhRuU1P+Tsk68rVkcMmGwtjHMu/3dfyRlg3Q==}
     peerDependencies:
       react: '*'
-
-  react-is@16.13.1:
-    resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
 
   react-is@16.7.0:
     resolution: {integrity: sha512-Z0VRQdF4NPDoI0tsXVMLkJLiwEBa+RP66g0xDHxgxysxSoCUccSten4RTF/UFvZF1dZvZ9Zu1sx+MDXwcOR34g==}
@@ -3178,19 +3150,6 @@ snapshots:
 
   '@zag-js/utils@1.41.2': {}
 
-  ag-charts-types@13.3.1: {}
-
-  ag-grid-community@35.3.1:
-    dependencies:
-      ag-charts-types: 13.3.1
-
-  ag-grid-react@35.3.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
-    dependencies:
-      ag-grid-community: 35.3.1
-      prop-types: 15.8.1
-      react: 19.2.7
-      react-dom: 19.2.7(react@19.2.7)
-
   ansi-regex@5.0.1: {}
 
   ansi-styles@4.3.0:
@@ -3531,8 +3490,6 @@ snapshots:
 
   node-releases@2.0.51: {}
 
-  object-assign@4.1.1: {}
-
   obug@2.1.3: {}
 
   parent-module@1.0.1:
@@ -3592,12 +3549,6 @@ snapshots:
       ansi-styles: 5.2.0
       react-is: 17.0.1
 
-  prop-types@15.8.1:
-    dependencies:
-      loose-envify: 1.4.0
-      object-assign: 4.1.1
-      react-is: 16.13.1
-
   proxy-compare@3.0.1: {}
 
   proxy-memoize@3.0.1:
@@ -3618,8 +3569,6 @@ snapshots:
       invariant: 2.2.4
       lodash.merge: 4.6.2
       react: 19.2.7
-
-  react-is@16.13.1: {}
 
   react-is@16.7.0: {}
 

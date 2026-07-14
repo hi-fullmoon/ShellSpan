@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import "ag-grid-community/styles/ag-grid.css";
-@import "ag-grid-community/styles/ag-theme-quartz.css";
 
 @theme {
   --color-app-bg: var(--app-bg);
@@ -83,29 +81,4 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--app-text-soft);
-}
-
-.ag-theme-quartz {
-  --ag-background-color: var(--app-surface);
-  --ag-foreground-color: var(--app-text);
-  --ag-border-color: var(--app-border);
-  --ag-header-background-color: var(--app-surface-muted);
-  --ag-header-foreground-color: var(--app-text);
-  --ag-row-hover-color: color-mix(in srgb, var(--app-primary) 8%, transparent);
-  --ag-selected-row-background-color: color-mix(in srgb, var(--app-primary) 12%, transparent);
-  --ag-active-color: var(--app-primary);
-  --ag-checkbox-checked-color: var(--app-primary);
-  --ag-input-focus-border-color: var(--app-primary);
-  --ag-input-focus-box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-primary) 20%, transparent);
-  --ag-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --ag-font-size: 12px;
-}
-
-[data-theme="dark"] .ag-theme-quartz {
-  --ag-background-color: var(--app-surface);
-  --ag-foreground-color: var(--app-text);
-  --ag-border-color: var(--app-border);
-  --ag-header-background-color: var(--app-surface-muted);
-  --ag-row-hover-color: color-mix(in srgb, var(--app-primary) 12%, transparent);
-  --ag-selected-row-background-color: color-mix(in srgb, var(--app-primary) 18%, transparent);
 }

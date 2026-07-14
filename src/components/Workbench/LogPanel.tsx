@@ -9,7 +9,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/useI18n';
 import { useLogStore } from '@/stores/logStore';
 import { Button } from '@/components/ui/Button';
-import { EmptyState, Spinner } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/EmptyState';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
@@ -56,15 +56,13 @@ function parseLogLine(line: string): ParsedLogLine {
 }
 
 function parseLogContent(content: string): ParsedLogLine[] {
-  return content.split('\n').map(parseLogLine);
-}
+  if (!content) return [];
 
-function getTodayString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const lines = content.split(/\r?\n/);
+  if (lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines.map(parseLogLine);
 }
 
 function getDaysDifference(dateString: string, today: Date): number {
@@ -231,7 +229,7 @@ export const LogPanel: React.FC = () => {
     refreshActiveFile,
   } = useLogStore();
   const [autoScroll, setAutoScroll] = useState(true);
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
+  const [dateFilter, setDateFilter] = useState<DateFilterOption>('all');
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedLineKeys, setSelectedLineKeys] = useState<Set<string>>(
@@ -553,11 +551,11 @@ export const LogPanel: React.FC = () => {
         <div
           ref={scrollRef}
           className={cn(
-            'flex-1 overflow-auto p-3 font-mono text-xs',
+            'min-h-0 flex-1 overflow-auto p-3 font-mono text-xs',
             selectionMode && 'pb-14',
           )}
         >
-          {content ? (
+          {filteredLines.length > 0 ? (
             <div
               style={{
                 height: `${virtualizer.getTotalSize()}px`,
@@ -613,7 +611,9 @@ export const LogPanel: React.FC = () => {
               })}
             </div>
           ) : (
-            <span className="text-app-text-soft">{t('workbench.logs.empty')}</span>
+            <span className="text-app-text-soft">
+              {t(content ? 'workbench.logs.noMatches' : 'workbench.logs.empty')}
+            </span>
           )}
         </div>
       </div>

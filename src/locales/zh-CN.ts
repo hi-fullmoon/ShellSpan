@@ -71,6 +71,7 @@ export default {
 
   'workbench.logs.title': '日志',
   'workbench.logs.empty': '暂无日志文件',
+  'workbench.logs.noMatches': '没有符合当前筛选条件的日志',
   'workbench.logs.autoScroll': '自动滚动',
   'workbench.logs.date': '日期',
   'workbench.logs.today': '今天',
@@ -167,8 +168,14 @@ export default {
   'sftp.remotePath': '远程路径',
   'sftp.path.home': '主目录',
   'sftp.parentDirectory': '上级目录',
-  'sftp.filter': '筛选...',
+  'sftp.filter': '筛选',
   'sftp.dropHint': '拖拽文件到此处',
+  'sftp.actions': '操作',
+  'sftp.showFilter': '显示筛选',
+  'sftp.hideFilter': '隐藏筛选',
+  'sftp.batchMode': '批量选择',
+  'sftp.emptyFolder': '此文件夹为空',
+  'sftp.filteredEmpty': '没有匹配的文件',
   'sftp.transfer.uploading': '正在上传',
   'sftp.transfer.downloading': '正在下载',
   'sftp.transfer.deleting': '正在删除',
@@ -176,8 +183,8 @@ export default {
   'sftp.transfer.failed': '失败',
 
   'sftp.columns.name': '名称',
-  'sftp.columns.time': '修改时间',
-  'sftp.columns.type': '类型',
+  'sftp.columns.dateModified': '修改日期',
+  'sftp.columns.type': '种类',
   'sftp.columns.size': '大小',
   'sftp.columns.permissions': '权限',
   'sftp.columns.owner': '所有者',
@@ -187,6 +194,8 @@ export default {
   'sftp.kind.file': '文件',
   'sftp.kind.symlink': '符号链接',
   'sftp.kind.other': '其他',
+
+  'sftp.contextMenu.open': '打开',
 
   'sftp.newConnectionMenu.title': '快速打开 SFTP',
   'sftp.newConnectionMenu.searchPlaceholder': '搜索连接...',

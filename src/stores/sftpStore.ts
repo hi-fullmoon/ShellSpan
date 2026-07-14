@@ -200,7 +200,11 @@ export const useSftpStore = create<SftpState>()((set) => ({
 
       if (nextPinned) {
         return {
-          connections: [...pinnedConnections, updated, ...unpinnedConnections],
+          connections: [
+            ...pinnedConnections,
+            updated,
+            ...unpinnedConnections.filter((c) => c.id !== id),
+          ],
         };
       }
 
