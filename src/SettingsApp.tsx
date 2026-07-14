@@ -3,7 +3,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { useAppStore } from '@/stores/appStore';
-import { Select } from '@/components/ui/Select';
+import { Select } from '@/components/ui/select';
 import type { Locale, ThemeMode } from '@/types';
 
 export const SettingsApp: React.FC = () => {

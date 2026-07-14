@@ -1,16 +1,16 @@
 import React, { Suspense } from 'react';
 import { cn } from '@/lib/utils';
-import { AppShell, MainContent } from '@/components/layout/AppShell';
+import { AppShell, MainContent } from '@/components/layout/app-shell';
 import { useAppStore } from '@/stores/appStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
-import { Spinner } from '@/components/ui/EmptyState';
-import { Toaster } from '@/components/ui/Toast';
+import { Spinner } from '@/components/ui/empty-state';
+import { Toaster } from '@/components/ui/sonner';
 
-const Workbench = React.lazy(() => import('@/components/Workbench'));
-const Terminal = React.lazy(() => import('@/components/Terminal'));
-const Sftp = React.lazy(() => import('@/components/Sftp'));
+const Workbench = React.lazy(() => import('@/components/workbench'));
+const Terminal = React.lazy(() => import('@/components/terminal'));
+const Sftp = React.lazy(() => import('@/components/sftp'));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { openSettingsWindow } from '@/lib/window';
