@@ -79,6 +79,20 @@ describe('Terminal', () => {
     expect(screen.getByTestId('new-tab-menu')).toBeInTheDocument();
   });
 
+  it('toggles the new tab menu with Ctrl/Cmd+K keyboard shortcut', () => {
+    render(<Terminal />);
+
+    expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+
+    expect(screen.getByTestId('new-tab-menu')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+
+    expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
+  });
+
   it('renders the terminal pane when there is an active session', () => {
     useTerminalStore.getState().addSession({
       sessionId: 's1',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -26,6 +26,19 @@ const Terminal: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setNewTabMenuOpen((prev) => !prev);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   return (
     <div className="flex h-full flex-col">

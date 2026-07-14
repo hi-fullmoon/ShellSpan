@@ -11,6 +11,7 @@ import { useLogStore } from '@/stores/logStore';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Spinner } from '@/components/ui/EmptyState';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 
 interface ParsedLogLine {
@@ -21,8 +22,6 @@ interface ParsedLogLine {
   target?: string;
   message?: string;
 }
-
-type CopyFeedback = 'copied' | 'failed';
 
 const DATE_FILTER_OPTIONS = [
   { key: 'today', labelKey: 'workbench.logs.today' },
@@ -221,6 +220,7 @@ const FilterButton: React.FC<FilterButtonProps> = ({
 
 export const LogPanel: React.FC = () => {
   const { t } = useI18n();
+  const { success, error: showError } = useToast();
   const {
     files,
     activeFileName,
@@ -237,8 +237,6 @@ export const LogPanel: React.FC = () => {
   const [selectedLineKeys, setSelectedLineKeys] = useState<Set<string>>(
     () => new Set(),
   );
-  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
-  const copyFeedbackTimerRef = useRef<number | null>(null);
   const singleClickTimerRef = useRef<number | null>(null);
   const selectionAnchorRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -277,17 +275,6 @@ export const LogPanel: React.FC = () => {
     loadFiles();
   }, [loadFiles]);
 
-  const showCopyFeedback = useCallback((feedback: CopyFeedback): void => {
-    if (copyFeedbackTimerRef.current !== null) {
-      window.clearTimeout(copyFeedbackTimerRef.current);
-    }
-    setCopyFeedback(feedback);
-    copyFeedbackTimerRef.current = window.setTimeout(() => {
-      copyFeedbackTimerRef.current = null;
-      setCopyFeedback(null);
-    }, 1000);
-  }, []);
-
   const handleCopySelectedLogs = useCallback((): void => {
     const selectedLogs = parsedLines
       .map((line, index) => ({
@@ -300,27 +287,27 @@ export const LogPanel: React.FC = () => {
     if (selectedLogs.length === 0) return;
 
     if (!navigator.clipboard?.writeText) {
-      showCopyFeedback('failed');
+      showError(t('workbench.logs.copyFailed'));
       return;
     }
     void navigator.clipboard
       .writeText(selectedLogs.join('\n'))
-      .then(() => showCopyFeedback('copied'))
-      .catch(() => showCopyFeedback('failed'));
-  }, [parsedLines, selectedLineKeys, showCopyFeedback]);
+      .then(() => success(t('workbench.logs.copied')))
+      .catch(() => showError(t('workbench.logs.copyFailed')));
+  }, [parsedLines, selectedLineKeys, success, showError, t]);
 
   const copyLogContent = useCallback(
     (contentToCopy: string): void => {
       if (!navigator.clipboard?.writeText) {
-        showCopyFeedback('failed');
+        showError(t('workbench.logs.copyFailed'));
         return;
       }
       void navigator.clipboard
         .writeText(contentToCopy)
-        .then(() => showCopyFeedback('copied'))
-        .catch(() => showCopyFeedback('failed'));
+        .then(() => success(t('workbench.logs.copied')))
+        .catch(() => showError(t('workbench.logs.copyFailed')));
     },
-    [showCopyFeedback],
+    [success, showError, t],
   );
 
   const clearPendingSingleClick = useCallback((): void => {
@@ -408,9 +395,6 @@ export const LogPanel: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      if (copyFeedbackTimerRef.current !== null) {
-        window.clearTimeout(copyFeedbackTimerRef.current);
-      }
       clearPendingSingleClick();
     };
   }, [clearPendingSingleClick]);
@@ -537,20 +521,6 @@ export const LogPanel: React.FC = () => {
         </div>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
-        {copyFeedback && (
-          <div
-            role="status"
-            aria-live="polite"
-            className={cn(
-              'absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-md border border-app-border bg-app-surface px-2 py-1 text-xs shadow-[var(--shadow-dialog)]',
-              copyFeedback === 'failed' && 'text-app-error',
-            )}
-          >
-            {copyFeedback === 'copied'
-              ? t('workbench.logs.copied')
-              : t('workbench.logs.copyFailed')}
-          </div>
-        )}
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-app-bg/80">
             <Spinner />

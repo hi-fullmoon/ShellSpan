@@ -9,6 +9,8 @@ interface TooltipProps {
   placement?: 'top' | 'bottom';
 }
 
+const ARROW_SIZE = 6;
+
 export const Tooltip: React.FC<TooltipProps> = ({
   content,
   children,
@@ -34,8 +36,8 @@ export const Tooltip: React.FC<TooltipProps> = ({
 
     const top =
       placement === 'top'
-        ? triggerRect.top - 6
-        : triggerRect.bottom + 6;
+        ? triggerRect.top - ARROW_SIZE - 2
+        : triggerRect.bottom + ARROW_SIZE + 2;
 
     const left = triggerRect.left + triggerRect.width / 2;
     const halfWidth = tooltipWidth / 2;
@@ -92,12 +94,19 @@ export const Tooltip: React.FC<TooltipProps> = ({
           <div
             ref={tooltipRef}
             className={cn(
-              'fixed z-[100] -translate-x-1/2 rounded-md border border-app-border bg-app-surface px-2 py-1 text-xs text-app-text shadow-[var(--shadow-dialog)]',
+              'fixed z-[100] -translate-x-1/2 rounded-lg border border-app-border bg-app-surface px-2.5 py-1 text-xs text-app-text shadow-lg backdrop-blur-sm transition-opacity',
               placement === 'top' && '-translate-y-full',
             )}
             style={style}
           >
             {content}
+            <span
+              className={cn(
+                'absolute left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border border-app-border bg-app-surface',
+                placement === 'top' && 'bottom-[-5px] border-l-0 border-t-0',
+                placement === 'bottom' && 'top-[-5px] border-r-0 border-b-0',
+              )}
+            />
           </div>,
           document.body,
         )}

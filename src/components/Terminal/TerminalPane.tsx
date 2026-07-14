@@ -7,22 +7,20 @@ import { useActiveController } from '@/components/Terminal/hooks/useActiveContro
 import { terminalRegistry } from '@/components/Terminal/registry/terminalRegistry';
 import { TerminalPaneContextMenu } from './TerminalPaneContextMenu';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
+import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 
 export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
 }
 
-type CopyFeedback = 'copied' | 'failed';
-
 export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => {
   const paneRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  const { success, error: showError } = useToast();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
-  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
-  const copyFeedbackTimerRef = useRef<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -33,26 +31,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
 
   const controller = activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId);
   const terminal = controller?.terminal ?? null;
-
-  const showCopyFeedback = useCallback((feedback: CopyFeedback) => {
-    if (copyFeedbackTimerRef.current !== null) {
-      window.clearTimeout(copyFeedbackTimerRef.current);
-    }
-    setCopyFeedback(feedback);
-    copyFeedbackTimerRef.current = window.setTimeout(() => {
-      copyFeedbackTimerRef.current = null;
-      setCopyFeedback(null);
-    }, 1000);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (copyFeedbackTimerRef.current !== null) {
-        window.clearTimeout(copyFeedbackTimerRef.current);
-        copyFeedbackTimerRef.current = null;
-      }
-    };
-  }, []);
 
   const handleOpenSearch = useCallback((): void => {
     setSearchOpen(true);
@@ -100,8 +78,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
       if (!selection) return;
       void navigator.clipboard
         .writeText(selection)
-        .then(() => showCopyFeedback('copied'))
-        .catch(() => showCopyFeedback('failed'));
+        .then(() => success(t('terminal.feedback.copied')))
+        .catch(() => showError(t('terminal.feedback.copyFailed')));
     });
 
     terminal.attachCustomKeyEventHandler((event) => {
@@ -138,17 +116,21 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [terminal, searchOpen, handleOpenSearch, handleCloseSearch, showCopyFeedback]);
+  }, [terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t]);
 
   const handleContextMenuClose = useCallback((): void => {
     setContextMenu(null);
   }, []);
 
   const handleContextMenuCopyFeedback = useCallback(
-    (feedback: CopyFeedback) => {
-      showCopyFeedback(feedback);
+    (feedback: 'copied' | 'failed') => {
+      if (feedback === 'copied') {
+        success(t('terminal.feedback.copied'));
+      } else {
+        showError(t('terminal.feedback.copyFailed'));
+      }
     },
-    [showCopyFeedback],
+    [success, showError, t],
   );
 
   return (
@@ -219,18 +201,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
         </div>
       )}
       <div ref={paneRef} className="h-full w-full p-0" />
-      {copyFeedback && (
-        <div
-          aria-live="polite"
-          className={cn(
-            'absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-md border border-app-border bg-app-surface px-2 py-1 text-xs shadow-[var(--shadow-dialog)]',
-            copyFeedback === 'failed' && 'text-app-error',
-          )}
-          role="status"
-        >
-          {copyFeedback === 'copied' ? t('terminal.feedback.copied') : t('terminal.feedback.copyFailed')}
-        </div>
-      )}
       <TerminalPaneContextMenu
         open={!!contextMenu}
         x={contextMenu?.x ?? 0}

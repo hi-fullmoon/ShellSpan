@@ -1,11 +1,13 @@
 import React from 'react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
+import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { useAppStore } from '@/stores/appStore';
 import { Select } from '@/components/ui/Select';
 import type { Locale, ThemeMode } from '@/types';
 
 export const SettingsApp: React.FC = () => {
+  useDisableContextMenu();
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
 

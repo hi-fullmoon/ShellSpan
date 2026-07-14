@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
 
 const MENU_WIDTH = 256;
-const MENU_HEIGHT = 320;
+const MENU_HEIGHT = 360;
 
 const TAB_COLORS = [
   '#ef4444',
@@ -24,6 +24,151 @@ const TAB_COLORS = [
   '#d946ef',
   '#f43f5e',
 ];
+
+const PinIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <path d="M5 17h14" />
+    <path d="M12 2v10" />
+    <path d="M7 2h10" />
+  </svg>
+);
+
+const PencilIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  </svg>
+);
+
+const DuplicateIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+const InfoClipboardIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
+const CloseIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+const CloseOthersIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <line x1="9" y1="9" x2="15" y2="15" />
+    <line x1="15" y1="9" x2="9" y2="15" />
+  </svg>
+);
+
+const CloseRightIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <path d="M9 18l6-6-6-6" />
+    <line x1="15" y1="6" x2="15" y2="18" />
+  </svg>
+);
+
+const PaletteIcon: React.FC = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-3.5 w-3.5"
+  >
+    <circle cx="13.5" cy="6.5" r="2.5" />
+    <circle cx="17.5" cy="10.5" r="2.5" />
+    <circle cx="8.5" cy="7.5" r="2.5" />
+    <circle cx="6.5" cy="12.5" r="2.5" />
+    <path d="M12 22c4.418 0 8-3.582 8-8 0-4.418-3.582-8-8-8-4.418 0-8 3.582-8 8 0 4.418 3.582 8 8 8z" />
+  </svg>
+);
+
+interface MenuItemProps {
+  onClick: () => void;
+  disabled?: boolean;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}
+
+const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
+  >
+    <span className="text-app-text-soft">{icon}</span>
+    <span>{children}</span>
+  </button>
+);
 
 export interface TerminalContextMenuProps {
   open: boolean;
@@ -146,67 +291,43 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         }}
       />
       <div
-        className="fixed z-[1700] w-fit min-w-48 overflow-hidden rounded-lg border border-app-border bg-app-surface py-1 shadow-[var(--shadow-dialog)]"
+        className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
         style={{ left, top }}
       >
-        <button
-          type="button"
-          onClick={handleTogglePin}
-          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
-        >
+        <MenuItem onClick={handleTogglePin} icon={<PinIcon />}>
           {session.pinned ? t('terminal.tab.unpin') : t('terminal.tab.pin')}
-        </button>
+        </MenuItem>
         <div className="my-1 h-px bg-app-border" />
-        <button
-          type="button"
-          onClick={() => setRenameOpen(true)}
-          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
-        >
+        <MenuItem onClick={() => setRenameOpen(true)} icon={<PencilIcon />}>
           {t('common.rename')}
-        </button>
-        <button
-          type="button"
-          disabled={!session.profileId}
+        </MenuItem>
+        <MenuItem
           onClick={handleDuplicate}
-          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
+          disabled={!session.profileId}
+          icon={<DuplicateIcon />}
         >
           {t('common.duplicate')}
-        </button>
-        <button
-          type="button"
-          onClick={handleCopyInfo}
-          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
-        >
+        </MenuItem>
+        <MenuItem onClick={handleCopyInfo} icon={<InfoClipboardIcon />}>
           {t('terminal.tab.copyInfo')}
-        </button>
+        </MenuItem>
         <div className="my-1 h-px bg-app-border" />
-        <button
-          type="button"
-          onClick={handleClose}
-          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
-        >
+        <MenuItem onClick={handleClose} icon={<CloseIcon />}>
           {t('common.close')}
-        </button>
-        <button
-          type="button"
-          onClick={handleCloseOthers}
-          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
-        >
+        </MenuItem>
+        <MenuItem onClick={handleCloseOthers} icon={<CloseOthersIcon />}>
           {t('terminal.tab.closeOthers')}
-        </button>
-        <button
-          type="button"
-          onClick={handleCloseToRight}
-          className="flex w-full items-center px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
-        >
+        </MenuItem>
+        <MenuItem onClick={handleCloseToRight} icon={<CloseRightIcon />}>
           {t('terminal.tab.closeToRight')}
-        </button>
+        </MenuItem>
         <div className="my-1 h-px bg-app-border" />
-        <div className="px-3 py-1.5">
-          <span className="text-xs text-app-text-soft">
-            {t('terminal.tab.color')}
-          </span>
-          <div className="mt-1.5 flex flex-nowrap items-center gap-1">
+        <div className="px-3 py-2">
+          <div className="mb-1.5 flex items-center gap-2 text-xs text-app-text-soft">
+            <PaletteIcon />
+            <span>{t('terminal.tab.color')}</span>
+          </div>
+          <div className="flex flex-nowrap items-center gap-1">
             <button
               type="button"
               onClick={() => handleColor(undefined)}

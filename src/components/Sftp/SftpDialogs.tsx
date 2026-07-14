@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Dialog } from '@/components/ui/Dialog';
+import { Dialog, PromptDialog as BasePromptDialog } from '@/components/ui/Dialog';
 
 export interface PromptDialogProps {
   open: boolean;
@@ -23,39 +23,18 @@ export const PromptDialog: React.FC<PromptDialogProps> = ({
   confirmText,
   defaultValue = '',
 }) => {
-  const [value, setValue] = useState(defaultValue);
-
+  const { t } = useI18n();
   return (
-    <Dialog
+    <BasePromptDialog
       open={open}
       onClose={onClose}
+      onConfirm={onConfirm}
       title={title}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              onConfirm(value);
-              onClose();
-            }}
-          >
-            {confirmText}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-2">
-        <label className="text-xs text-app-text-soft">{label}</label>
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          autoFocus
-        />
-      </div>
-    </Dialog>
+      label={label}
+      confirmText={confirmText}
+      cancelText={t('common.cancel')}
+      defaultValue={defaultValue}
+    />
   );
 };
 
@@ -73,7 +52,21 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
   defaultValue = 0o644,
 }) => {
   const { t } = useI18n();
-  const [value, setValue] = useState(defaultValue.toString(8));
+  const [value, setValue] = React.useState(defaultValue.toString(8));
+
+  React.useEffect(() => {
+    if (open) {
+      setValue(defaultValue.toString(8));
+    }
+  }, [open, defaultValue]);
+
+  const handleConfirm = (): void => {
+    const parsed = parseInt(value, 8);
+    if (!Number.isNaN(parsed)) {
+      onConfirm(parsed);
+    }
+    onClose();
+  };
 
   return (
     <Dialog
@@ -85,16 +78,7 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
           <Button variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              const parsed = parseInt(value, 8);
-              if (!Number.isNaN(parsed)) {
-                onConfirm(parsed);
-              }
-              onClose();
-            }}
-          >
+          <Button variant="primary" onClick={handleConfirm}>
             {t('common.save')}
           </Button>
         </>
@@ -105,6 +89,11 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
         <Input
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              handleConfirm();
+            }
+          }}
           autoFocus
         />
       </div>

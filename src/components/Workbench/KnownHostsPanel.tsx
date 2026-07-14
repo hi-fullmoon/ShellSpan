@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState, Spinner } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { ResponsiveCardGrid } from '@/components/ui/ResponsiveCardGrid';
-import { ConfirmDialog } from '@/components/ui/Dialog';
+import { AlertDialog } from '@/components/ui/AlertDialog';
 
 export const KnownHostsPanel: React.FC = () => {
   const { t } = useI18n();
@@ -53,7 +53,7 @@ export const KnownHostsPanel: React.FC = () => {
             })}
           </div>
         </div>
-        <div className="flex w-full gap-2 sm:w-auto">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <div className="min-w-0 flex-1 sm:w-64">
             <Input
               value={query}
@@ -158,12 +158,12 @@ export const KnownHostsPanel: React.FC = () => {
           </ResponsiveCardGrid>
         )}
       </div>
-      <ConfirmDialog
+      <AlertDialog
         open={!!removing}
         onClose={() => setRemoving(null)}
         onConfirm={handleRemove}
         title={t('common.delete')}
-        message={
+        description={
           removing
             ? t('workbench.knownHosts.removeConfirm', {
                 host: removing.host,
@@ -173,6 +173,7 @@ export const KnownHostsPanel: React.FC = () => {
         }
         confirmText={t('common.delete')}
         cancelText={t('common.cancel')}
+        variant="danger"
       />
     </div>
   );

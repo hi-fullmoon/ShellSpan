@@ -3,18 +3,14 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { NewTabMenu } from '../NewTabMenu';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
+import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import type { ConnectionProfile } from '@/types';
 
 const mockConnect = vi.fn();
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string, variables?: Record<string, string | number>) => {
-      if (variables && key === 'terminal.newTabMenu.connectionCount') {
-        return `${variables.count} connections`;
-      }
-      return key;
-    },
+    t: (key: string) => key,
     ready: true,
     locale: 'en-US',
     setLocale: () => {},
@@ -43,6 +39,7 @@ vi.mock('@/lib/tauri', () => ({
 
 const initialProfile = useProfileStore.getState();
 const initialApp = useAppStore.getState();
+const initialRecent = useRecentProfilesStore.getState();
 
 function makeProfile(
   id: string,
@@ -66,6 +63,7 @@ describe('NewTabMenu', () => {
   beforeEach(() => {
     useProfileStore.setState(initialProfile, true);
     useAppStore.setState(initialApp, true);
+    useRecentProfilesStore.setState(initialRecent, true);
     mockConnect.mockReset();
   });
 
@@ -73,6 +71,7 @@ describe('NewTabMenu', () => {
     cleanup();
     useProfileStore.setState(initialProfile, true);
     useAppStore.setState(initialApp, true);
+    useRecentProfilesStore.setState(initialRecent, true);
   });
 
   it('renders saved profiles and connects on row click then closes', () => {
@@ -86,13 +85,30 @@ describe('NewTabMenu', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
     expect(screen.getByText('user1@host1.io:22')).toBeInTheDocument();
-    expect(screen.getByText('user2@host2.io:22')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Alpha'));
 
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(mockConnect).toHaveBeenCalledWith(p1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows recent profiles first when recentIds exist', () => {
+    const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
+    const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
+    const p3 = makeProfile('p3', 'Gamma', 'host3.io', 'user3');
+    useProfileStore.setState({ profiles: [p1, p2, p3] });
+    useRecentProfilesStore.setState({ recentIds: ['p3', 'p2'] });
+
+    render(<NewTabMenu open onClose={vi.fn()} />);
+
+    const section = screen.getByText('terminal.newTabMenu.recentConnections');
+    expect(section).toBeInTheDocument();
+
+    const buttons = screen.getAllByRole('button', { name: /^(Alpha|Beta|Gamma)$/ });
+    expect(buttons[0]).toHaveTextContent('Gamma');
+    expect(buttons[1]).toHaveTextContent('Beta');
+    expect(buttons[2]).toHaveTextContent('Alpha');
   });
 
   it('filters profiles by search query', () => {
@@ -111,15 +127,48 @@ describe('NewTabMenu', () => {
     expect(screen.getByText('Beta')).toBeInTheDocument();
   });
 
-  it('shows the empty hint and a go-to-workbench button when no profiles', () => {
+  it('navigates with arrow keys and connects on enter', () => {
+    const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
+    const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
+    useProfileStore.setState({ profiles: [p1, p2] });
+
+    const onClose = vi.fn();
+    render(<NewTabMenu open onClose={onClose} />);
+
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(mockConnect).toHaveBeenCalledWith(p2);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('cycles selection with arrow keys', () => {
+    const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
+    const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
+    useProfileStore.setState({ profiles: [p1, p2] });
+
+    render(<NewTabMenu open onClose={vi.fn()} />);
+
+    fireEvent.keyDown(document, { key: 'ArrowUp' });
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    expect(mockConnect).toHaveBeenCalledWith(p2);
+  });
+
+  it('shows the empty hint and opens workbench from footer when no profiles', () => {
     useProfileStore.setState({ profiles: [] });
 
     const onClose = vi.fn();
     render(<NewTabMenu open onClose={onClose} />);
 
     expect(screen.getByText('terminal.tab.noProfiles')).toBeInTheDocument();
+    expect(
+      screen.getByText('terminal.newTabMenu.openWorkbenchHint'),
+    ).toBeInTheDocument();
+
     const workbenchButton = screen.getByRole('button', {
-      name: 'section.workbench',
+      name: 'terminal.newTabMenu.openWorkbench',
     });
     expect(workbenchButton).toBeInTheDocument();
 
@@ -141,9 +190,9 @@ describe('NewTabMenu', () => {
     });
 
     const onClose = vi.fn();
-    const { container } = render(<NewTabMenu open onClose={onClose} />);
+    render(<NewTabMenu open onClose={onClose} />);
 
-    const backdrop = container.querySelector('[role="presentation"]') as HTMLElement;
+    const backdrop = document.body.querySelector('[role="presentation"]') as HTMLElement;
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop);
 

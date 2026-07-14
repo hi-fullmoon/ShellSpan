@@ -2,12 +2,14 @@ import { useRef, useState } from 'react';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
+import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import type { ConnectionProfile } from '@/types';
 import {
   buildSessionCreateRequest,
   invokeCreateSession,
   invokeTrustHost,
 } from '@/lib/tauri';
+import { useToastStore } from '@/stores/toastStore';
 
 interface HostKeyDialogState {
   open: boolean;
@@ -46,6 +48,7 @@ export function useConnectSession(): {
         buildSessionCreateRequest(profileWithPassword, 120, 30),
       );
       addSession(summary, profile.id);
+      useRecentProfilesStore.getState().touchProfile(profile.id);
       setActiveSection('terminal');
     } catch (error) {
       handleConnectionError(error, () => {
@@ -107,8 +110,9 @@ export function useConnectSession(): {
         return;
       }
     }
-    // eslint-disable-next-line no-alert
-    alert(error instanceof Error ? error.message : String(error));
+    useToastStore
+      .getState()
+      .addToast(error instanceof Error ? error.message : String(error), 'error');
   };
 
   const closeHostKeyDialog = (): void => {

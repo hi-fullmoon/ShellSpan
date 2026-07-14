@@ -4,6 +4,7 @@ import { useConnectSession } from '../useConnectSession';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
+import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import type { ConnectionProfile } from '@/types';
 
 vi.mock('@/lib/tauri', () => ({
@@ -45,12 +46,14 @@ const profile: ConnectionProfile = {
 const initialTerminal = useTerminalStore.getState();
 const initialApp = useAppStore.getState();
 const initialProfile = useProfileStore.getState();
+const initialRecent = useRecentProfilesStore.getState();
 
 describe('useConnectSession', () => {
   beforeEach(() => {
     useTerminalStore.setState(initialTerminal, true);
     useAppStore.setState(initialApp, true);
     useProfileStore.setState(initialProfile, true);
+    useRecentProfilesStore.setState(initialRecent, true);
     vi.mocked(invokeCreateSession).mockReset();
     vi.mocked(invokeTrustHost).mockReset();
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
@@ -74,6 +77,7 @@ describe('useConnectSession', () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toMatchObject({ sessionId: 's1', profileId: 'p1' });
     expect(useAppStore.getState().activeSection).toBe('terminal');
+    expect(useRecentProfilesStore.getState().recentIds).toEqual(['p1']);
     expect(result.current.hostKeyDialog.open).toBe(false);
   });
 
@@ -135,8 +139,16 @@ describe('useConnectSession', () => {
     expect(result.current.hostKeyDialog.fingerprint).toBeUndefined();
   });
 
-  it('alerts and keeps dialog closed on other errors', async () => {
-    const alertSpy = vi.spyOn(globalThis, 'alert').mockImplementation(() => {});
+  it('shows a toast and keeps dialog closed on other errors', async () => {
+    const addToast = vi.fn();
+    vi.spyOn(
+      (await import('@/stores/toastStore')).useToastStore,
+      'getState',
+    ).mockReturnValue({
+      toasts: [],
+      addToast,
+      removeToast: vi.fn(),
+    });
     vi.mocked(invokeCreateSession).mockRejectedValueOnce(new Error('boom'));
 
     const { result } = renderHook(() => useConnectSession());
@@ -145,7 +157,7 @@ describe('useConnectSession', () => {
       await result.current.connect(profile);
     });
 
-    expect(alertSpy).toHaveBeenCalledWith('boom');
+    expect(addToast).toHaveBeenCalledWith('boom', 'error');
     expect(result.current.hostKeyDialog.open).toBe(false);
   });
 

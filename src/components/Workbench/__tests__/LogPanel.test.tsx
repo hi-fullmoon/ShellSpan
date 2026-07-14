@@ -2,6 +2,17 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogPanel } from '../LogPanel';
 
+const mockAddToast = vi.fn();
+
+vi.mock('@/hooks/useToast', () => ({
+  useToast: () => ({
+    toast: mockAddToast,
+    info: mockAddToast,
+    success: mockAddToast,
+    error: mockAddToast,
+  }),
+}));
+
 const loadFiles = vi.fn().mockResolvedValue(undefined);
 const loadFile = vi.fn().mockResolvedValue(undefined);
 const refreshActiveFile = vi.fn().mockResolvedValue(undefined);
@@ -45,6 +56,7 @@ describe('LogPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAddToast.mockClear();
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText },
@@ -110,7 +122,7 @@ describe('LogPanel', () => {
         'first complete log line\nsecond complete log line\nthird complete log line',
       );
     });
-    expect(screen.getByText('workbench.logs.copied')).toBeInTheDocument();
+    expect(mockAddToast).toHaveBeenCalledWith('workbench.logs.copied');
   });
 
   it('selects all visible rows and clears the selection', () => {

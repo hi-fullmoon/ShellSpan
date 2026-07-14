@@ -7,6 +7,7 @@ import {
   invokeStorePassword,
 } from '@/lib/tauri';
 import { generateId } from '@/lib/utils';
+import { useRecentProfilesStore } from './recentProfilesStore';
 
 interface ProfileState {
   profiles: ConnectionProfile[];
@@ -79,6 +80,7 @@ export const useProfileStore = create<ProfileState>()(
           profiles: state.profiles.filter((p) => p.id !== id),
         }));
         await invokeRemovePassword(id);
+        useRecentProfilesStore.getState().removeProfile(id);
       },
       duplicateProfile: async (id) => {
         const original = get().profiles.find((p) => p.id === id);
