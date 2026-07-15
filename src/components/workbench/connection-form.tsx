@@ -272,8 +272,8 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         </Label>
 
         {form.useJumpHost && (
-          <div className="flex flex-col gap-4 rounded-lg border border-app-border bg-app-bg p-4">
-            <span className="text-xs font-medium text-app-text-soft">
+          <div className="flex flex-col gap-4 rounded-lg border border-app-border bg-muted p-4">
+            <span className="text-xs font-medium text-muted-foreground">
               {t('connection.form.jumpHost')}
             </span>
             <FormRow label={t('common.host')}>
@@ -383,7 +383,7 @@ const FormRow: React.FC<FormRowProps> = ({
 }) => {
   return (
     <div className={cn('flex flex-col gap-1', className)}>
-      <Label className="text-xs text-app-text-soft">{label}</Label>
+      <Label className="text-xs text-muted-foreground">{label}</Label>
       {children}
       {error && (
         <span className="text-xs text-app-error">{error}</span>

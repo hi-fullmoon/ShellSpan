@@ -47,7 +47,7 @@ export const KnownHostsPanel: React.FC = () => {
           <div className="text-sm font-medium text-app-text">
             {t('workbench.knownHosts.title')}
           </div>
-          <div className="text-[11px] text-app-text-soft">
+          <div className="text-[11px] text-muted-foreground">
             {t('workbench.knownHosts.count', {
               count: filteredHosts.length,
               total: hosts.length,
@@ -100,7 +100,7 @@ export const KnownHostsPanel: React.FC = () => {
             {filteredHosts.map((host) => (
               <div
                 key={`${host.host}:${host.port}`}
-                className="group flex flex-col gap-2 rounded-lg border border-app-border bg-app-surface p-2 shadow-[var(--shadow-card)] transition-colors hover:border-app-primary/50"
+                className="group flex flex-col gap-2 rounded-[10px] border border-app-border bg-app-surface p-2 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
@@ -111,7 +111,7 @@ export const KnownHostsPanel: React.FC = () => {
                       <span className="truncate text-xs font-medium text-app-text">
                         {host.host}:{host.port}
                       </span>
-                      <span className="truncate text-[11px] text-app-text-soft">
+                      <span className="truncate text-[11px] text-muted-foreground">
                         {t('workbench.knownHosts.keyType')}: {host.keyType}
                       </span>
                     </div>
@@ -125,8 +125,8 @@ export const KnownHostsPanel: React.FC = () => {
                     <Trash2Icon className="text-app-error" />
                   </Button>
                 </div>
-                <div className="rounded-md border border-app-border/80 bg-app-background/40 px-2 py-1.5">
-                  <div className="text-[10px] uppercase tracking-[0.08em] text-app-text-soft">
+                <div className="rounded-md border border-app-border bg-muted px-2 py-1.5">
+                  <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
                     {t('workbench.knownHosts.fingerprint')}
                   </div>
                   <div

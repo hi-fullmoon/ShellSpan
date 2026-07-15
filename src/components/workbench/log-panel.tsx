@@ -210,7 +210,7 @@ const FilterButton: React.FC<FilterButtonProps> = ({
         'rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors',
         active
           ? 'bg-app-surface text-app-primary shadow-sm'
-          : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',
+          : 'text-muted-foreground hover:bg-app-surface/50 hover:text-app-text',
       )}
     >
       {children}
@@ -465,11 +465,11 @@ export const LogPanel: React.FC = () => {
               {t('workbench.logs.title')}
             </span>
             {activeFileName && (
-              <span className="text-xs text-app-text-soft">{activeFileName}</span>
+              <span className="text-xs text-muted-foreground">{activeFileName}</span>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Label className="flex items-center gap-1 text-xs text-app-text-soft">
+            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
               <Checkbox
                 checked={autoScroll}
                 onCheckedChange={(checked) => setAutoScroll(checked === true)}
@@ -483,7 +483,7 @@ export const LogPanel: React.FC = () => {
         </div>
         <div className="flex h-8 items-center gap-4 border-t border-app-border px-3">
           <div className="flex items-center gap-1">
-            <span className="text-[11px] text-app-text-soft">
+            <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.date')}
             </span>
             {DATE_FILTER_OPTIONS.map((option) => (
@@ -497,7 +497,7 @@ export const LogPanel: React.FC = () => {
             ))}
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-[11px] text-app-text-soft">
+            <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.level')}
             </span>
             <FilterButton
@@ -520,7 +520,7 @@ export const LogPanel: React.FC = () => {
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
         {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-app-bg/80">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
             <Spinner />
           </div>
         )}
@@ -611,7 +611,7 @@ export const LogPanel: React.FC = () => {
               })}
             </div>
           ) : (
-            <span className="text-app-text-soft">
+            <span className="text-muted-foreground">
               {t(content ? 'workbench.logs.noMatches' : 'workbench.logs.empty')}
             </span>
           )}

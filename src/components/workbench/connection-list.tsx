@@ -74,7 +74,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           <div className="text-sm font-medium text-app-text">
             {t('workbench.connections.title')}
           </div>
-          <div className="text-[11px] text-app-text-soft">
+          <div className="text-[11px] text-muted-foreground">
             {t('workbench.connections.count', {
               count: filteredProfiles.length,
               total: profiles.length,
@@ -146,17 +146,17 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   const { t } = useI18n();
 
   return (
-    <div className="group flex flex-col gap-3 rounded-xl border border-app-border bg-app-surface p-3 shadow-[var(--shadow-card)] transition-colors hover:border-app-primary/50">
+    <div className="group flex flex-col gap-3 rounded-[10px] border border-app-border bg-app-surface p-4 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">
             <MonitorIcon className="h-4 w-4" />
           </div>
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-medium text-app-text">
               {profile.name}
             </span>
-            <span className="truncate text-xs text-app-text-soft">
+            <span className="truncate text-xs text-muted-foreground">
               {profile.username}@{profile.host}:{profile.port}
             </span>
           </div>
@@ -168,15 +168,15 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
               : t('connection.form.auth.key')}
           </span>
           {profile.jumpHost && (
-            <span className="rounded-md bg-app-border/60 px-2 py-1 text-[10px] text-app-text-soft">
+            <span className="rounded-md bg-app-surface-muted px-2 py-1 text-[10px] text-muted-foreground">
               {t('connection.form.jumpHost')}
             </span>
           )}
         </div>
       </div>
       {profile.jumpHost && (
-        <div className="rounded-lg border border-app-border/80 bg-app-background/40 px-2.5 py-2">
-          <div className="text-[10px] uppercase tracking-[0.08em] text-app-text-soft">
+        <div className="rounded-lg border border-app-border bg-muted px-2.5 py-2">
+          <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
             {t('connection.form.jumpHost')}
           </div>
           <div className="truncate text-xs text-app-text">
