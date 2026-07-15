@@ -45,7 +45,19 @@ describe('ConnectionForm', () => {
     render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
 
     const authSelect = document.body.querySelector('[data-slot="select-trigger"]');
-    expect(authSelect).toHaveTextContent(/^connection\.form\.auth\.password/);
+    expect(authSelect).toHaveTextContent(/^connection\.form\.auth\.password$/);
+  });
+
+  it('renders the translated jump-host auth method label when enabled', () => {
+    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+
+    const jumpHostCheckbox = document.body.querySelector('[data-slot="checkbox"]');
+    expect(jumpHostCheckbox).toBeInTheDocument();
+    fireEvent.click(jumpHostCheckbox!);
+
+    const authSelects = document.body.querySelectorAll('[data-slot="select-trigger"]');
+    expect(authSelects).toHaveLength(2);
+    expect(authSelects[1]).toHaveTextContent(/^connection\.form\.auth\.password$/);
   });
 
   it('resets form values when opening with a new profile', () => {

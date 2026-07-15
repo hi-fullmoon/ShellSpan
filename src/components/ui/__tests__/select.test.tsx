@@ -1,15 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../select';
-
-vi.mock('@/hooks/useI18n', () => ({
-  useI18n: () => ({
-    t: (key: string) => key,
-    ready: true,
-    locale: 'en-US',
-    setLocale: () => {},
-  }),
-}));
 
 describe('SelectTrigger', () => {
   it('matches input height and fills its container', () => {
