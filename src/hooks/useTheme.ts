@@ -22,8 +22,7 @@ export function useTheme(): {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', resolvedTheme);
-    document.documentElement.style.backgroundColor =
-      resolvedTheme === 'light' ? '#edf4fb' : '#020617';
+    document.documentElement.style.backgroundColor = 'var(--app-bg)';
   }, [resolvedTheme]);
 
   useEffect(() => {
@@ -32,8 +31,7 @@ export function useTheme(): {
     const handler = (): void => {
       const next = media.matches ? 'dark' : 'light';
       document.documentElement.setAttribute('data-theme', next);
-      document.documentElement.style.backgroundColor =
-        next === 'light' ? '#edf4fb' : '#020617';
+      document.documentElement.style.backgroundColor = 'var(--app-bg)';
     };
     media.addEventListener('change', handler);
     return () => media.removeEventListener('change', handler);

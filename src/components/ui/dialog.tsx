@@ -146,6 +146,73 @@ function DialogDescription({
   )
 }
 
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { useState } from "react"
+
+function PromptDialog({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  label,
+  confirmText,
+  cancelText,
+  defaultValue = "",
+}: {
+  open: boolean
+  onClose: () => void
+  onConfirm: (value: string) => void
+  title: React.ReactNode
+  label: string
+  confirmText: string
+  cancelText: string
+  defaultValue?: string
+}) {
+  const [value, setValue] = useState(defaultValue)
+
+  React.useEffect(() => {
+    if (open) {
+      setValue(defaultValue)
+    }
+  }, [open, defaultValue])
+
+  const handleConfirm = () => {
+    onConfirm(value)
+    onClose()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="prompt-input">{label}</Label>
+          <Input
+            id="prompt-input"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleConfirm()
+            }}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>
+            {cancelText}
+          </Button>
+          <Button variant="default" onClick={handleConfirm}>
+            {confirmText}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export {
   Dialog,
   DialogClose,
@@ -157,4 +224,5 @@ export {
   DialogPortal,
   DialogTitle,
   DialogTrigger,
+  PromptDialog,
 }

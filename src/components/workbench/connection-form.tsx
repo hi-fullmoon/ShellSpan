@@ -3,8 +3,10 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
-import { Dialog } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { invokePickPrivateKeyFile } from '@/lib/tauri';
 import type {
   AuthMethod,
@@ -162,27 +164,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   };
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={
-        initial
-          ? t('connection.form.title.edit')
-          : t('connection.form.title.new')
-      }
-      className="max-w-lg"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button variant="primary" onClick={handleSubmit}>
-            {t('common.save')}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
+    <Drawer open={open} onOpenChange={(open) => { if (!open) onClose(); }} swipeDirection="right">
+      <DrawerContent className="data-[swipe-direction=right]:w-lg">
+        <DrawerHeader>
+          <DrawerTitle>
+            {initial
+              ? t('connection.form.title.edit')
+              : t('connection.form.title.new')}
+          </DrawerTitle>
+        </DrawerHeader>
+        <div className="flex flex-col gap-4 overflow-y-auto p-4 pt-0">
         <FormRow label={t('common.name')} error={errors.name}>
           <Input
             value={form.name}
@@ -217,17 +208,15 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         </FormRow>
 
         <FormRow label={t('common.authMethod')}>
-          <Select
-            value={form.authMethod}
-            options={[
-              {
-                value: 'password',
-                label: t('connection.form.auth.password'),
-              },
-              { value: 'key', label: t('connection.form.auth.key') },
-            ]}
-            onChange={(e) => updateField('authMethod', e.target.value as AuthMethod)}
-          />
+          <Select value={form.authMethod} onValueChange={(value) => updateField('authMethod', value as AuthMethod)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="password">{t('connection.form.auth.password')}</SelectItem>
+              <SelectItem value="key">{t('connection.form.auth.key')}</SelectItem>
+            </SelectContent>
+          </Select>
         </FormRow>
 
         {form.authMethod === 'password' && (
@@ -274,15 +263,13 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
           </>
         )}
 
-        <label className="flex items-center gap-2 text-xs text-app-text">
-          <input
-            type="checkbox"
+        <Label className="flex items-center gap-2 text-xs text-app-text">
+          <Checkbox
             checked={form.useJumpHost}
-            onChange={(e) => updateField('useJumpHost', e.target.checked)}
-            className="rounded border-app-border"
+            onCheckedChange={(checked) => updateField('useJumpHost', checked === true)}
           />
           {t('connection.form.useJumpHost')}
-        </label>
+        </Label>
 
         {form.useJumpHost && (
           <div className="flex flex-col gap-4 rounded-lg border border-app-border bg-app-bg p-4">
@@ -314,25 +301,15 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
               </FormRow>
             </div>
             <FormRow label={t('common.authMethod')}>
-              <Select
-                value={form.jumpHost.authMethod}
-                options={[
-                  {
-                    value: 'password',
-                    label: t('connection.form.auth.password'),
-                  },
-                  {
-                    value: 'key',
-                    label: t('connection.form.auth.key'),
-                  },
-                ]}
-                onChange={(e) =>
-                  updateJumpHost(
-                    'authMethod',
-                    e.target.value as AuthMethod,
-                  )
-                }
-              />
+              <Select value={form.jumpHost.authMethod} onValueChange={(value) => updateJumpHost('authMethod', value as AuthMethod)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="password">{t('connection.form.auth.password')}</SelectItem>
+                  <SelectItem value="key">{t('connection.form.auth.key')}</SelectItem>
+                </SelectContent>
+              </Select>
             </FormRow>
             {form.jumpHost.authMethod === 'password' && (
               <FormRow label={t('common.password')}>
@@ -378,7 +355,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
           </div>
         )}
       </div>
-    </Dialog>
+        <DrawerFooter className="flex flex-row justify-end">
+          <Button variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="default" onClick={handleSubmit}>
+            {t('common.save')}
+          </Button>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   );
 };
 
@@ -397,7 +383,7 @@ const FormRow: React.FC<FormRowProps> = ({
 }) => {
   return (
     <div className={cn('flex flex-col gap-1', className)}>
-      <label className="text-xs text-app-text-soft">{label}</label>
+      <Label className="text-xs text-app-text-soft">{label}</Label>
       {children}
       {error && (
         <span className="text-xs text-app-error">{error}</span>

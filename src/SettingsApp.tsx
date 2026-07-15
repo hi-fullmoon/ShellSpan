@@ -3,7 +3,8 @@ import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { useAppStore } from '@/stores/appStore';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import type { Locale, ThemeMode } from '@/types';
 
 export const SettingsApp: React.FC = () => {
@@ -26,31 +27,33 @@ export const SettingsApp: React.FC = () => {
           </h2>
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-app-text-soft">
+              <Label className="text-xs text-app-text-soft">
                 {t('settings.appearance.theme')}
-              </label>
-              <Select
-                value={theme}
-                options={[
-                  { value: 'light', label: t('theme.light') },
-                  { value: 'dark', label: t('theme.dark') },
-                  { value: 'system', label: t('theme.system') },
-                ]}
-                onChange={(e) => setTheme(e.target.value as ThemeMode)}
-              />
+              </Label>
+              <Select value={theme} onValueChange={(value) => setTheme(value as ThemeMode)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="light">{t('theme.light')}</SelectItem>
+                  <SelectItem value="dark">{t('theme.dark')}</SelectItem>
+                  <SelectItem value="system">{t('theme.system')}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-app-text-soft">
+              <Label className="text-xs text-app-text-soft">
                 {t('settings.appearance.language')}
-              </label>
-              <Select
-                value={locale}
-                options={[
-                  { value: 'zh-CN', label: t('locale.zh-CN') },
-                  { value: 'en-US', label: t('locale.en-US') },
-                ]}
-                onChange={(e) => setLocale(e.target.value as Locale)}
-              />
+              </Label>
+              <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="zh-CN">{t('locale.zh-CN')}</SelectItem>
+                  <SelectItem value="en-US">{t('locale.en-US')}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </section>

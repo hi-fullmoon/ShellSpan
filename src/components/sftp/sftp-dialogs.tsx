@@ -2,7 +2,8 @@ import React from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, PromptDialog as BasePromptDialog } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, PromptDialog as BasePromptDialog } from '@/components/ui/dialog';
 
 export interface PromptDialogProps {
   open: boolean;
@@ -69,34 +70,33 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
   };
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={t('common.permissions')}
-      footer={
-        <>
+    <Dialog open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('common.permissions')}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-2">
+          <Label className="text-xs text-app-text-soft">Octal (e.g. 644)</Label>
+          <Input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleConfirm();
+              }
+            }}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
           <Button variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button variant="primary" onClick={handleConfirm}>
+          <Button variant="default" onClick={handleConfirm}>
             {t('common.save')}
           </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-2">
-        <label className="text-xs text-app-text-soft">Octal (e.g. 644)</label>
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              handleConfirm();
-            }
-          }}
-          autoFocus
-        />
-      </div>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 };

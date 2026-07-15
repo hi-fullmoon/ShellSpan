@@ -34,7 +34,7 @@ vi.mock('../terminal-pane', () => ({
   TerminalPane: () => <div data-testid="terminal-pane" />,
 }));
 
-vi.mock('../NewTabMenu', () => ({
+vi.mock('../new-tab-menu', () => ({
   NewTabMenu: ({ open }: { open: boolean }) =>
     open ? <div data-testid="new-tab-menu">NewTabMenu</div> : null,
 }));

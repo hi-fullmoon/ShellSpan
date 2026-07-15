@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
-import { AlertDialog } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
+import { ShieldCheckIcon, Trash2Icon } from 'lucide-react';
 
 export const KnownHostsPanel: React.FC = () => {
   const { t } = useI18n();
@@ -104,16 +105,7 @@ export const KnownHostsPanel: React.FC = () => {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-app-primary/10 text-app-primary">
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        className="h-3.5 w-3.5"
-                      >
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                        <path d="M9 12l2 2 4-4" />
-                      </svg>
+                      <ShieldCheckIcon className="h-3.5 w-3.5" />
                     </div>
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate text-xs font-medium text-app-text">
@@ -130,16 +122,7 @@ export const KnownHostsPanel: React.FC = () => {
                     onClick={() => confirmRemove(host.host, host.port)}
                     title={t('common.delete')}
                   >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="h-3.5 w-3.5 text-app-error"
-                    >
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
+                    <Trash2Icon className="text-app-error" />
                   </Button>
                 </div>
                 <div className="rounded-md border border-app-border/80 bg-app-background/40 px-2 py-1.5">
@@ -158,23 +141,29 @@ export const KnownHostsPanel: React.FC = () => {
           </ResponsiveCardGrid>
         )}
       </div>
-      <AlertDialog
-        open={!!removing}
-        onClose={() => setRemoving(null)}
-        onConfirm={handleRemove}
-        title={t('common.delete')}
-        description={
-          removing
-            ? t('workbench.knownHosts.removeConfirm', {
-                host: removing.host,
-                port: removing.port,
-              })
-            : ''
-        }
-        confirmText={t('common.delete')}
-        cancelText={t('common.cancel')}
-        variant="danger"
-      />
+      <AlertDialog open={!!removing} onOpenChange={(open) => { if (!open) setRemoving(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('common.delete')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removing
+                ? t('workbench.knownHosts.removeConfirm', {
+                    host: removing.host,
+                    port: removing.port,
+                  })
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setRemoving(null)}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleRemove}>
+              {t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

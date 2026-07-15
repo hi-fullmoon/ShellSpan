@@ -64,7 +64,7 @@ const Sftp: React.FC = () => {
               description={t('sftp.empty.openFromWorkbench')}
               action={
                 <Button
-                  variant="primary"
+                  variant="default"
                   size="sm"
                   onClick={() => setNewConnectionMenuOpen(true)}
                 >

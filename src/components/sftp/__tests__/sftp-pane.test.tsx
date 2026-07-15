@@ -10,7 +10,7 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
-vi.mock('../SftpFileList', () => ({
+vi.mock('../sftp-file-list', () => ({
   SftpFileList: ({
     entries,
     onDoubleClick,

@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { SessionStatus } from '@/types';
@@ -40,28 +41,7 @@ const sessionStatusDotClass = (status: SessionStatus): string => {
   }
 };
 
-const PlusIcon: React.FC = () => (
-  <svg
-    width="14"
-    height="14"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <line x1="12" y1="5" x2="12" y2="19" />
-    <line x1="5" y1="12" x2="19" y2="12" />
-  </svg>
-);
-
-const PinIcon: React.FC = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M16 12V4H17V2H7V4H8V12L6 14V16H11.2V22H12.8V16H18V14L16 12Z" />
-  </svg>
-);
+// Icons replaced with lucide-react imports
 
 interface SessionTabProps {
   session: TerminalSession;
@@ -205,7 +185,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
                 active ? 'flex' : 'hidden group-hover:flex',
               )}
             >
-              ×
+              <XIcon className="h-3 w-3" />
             </button>
           )}
         </>

@@ -9,6 +9,7 @@ import { TerminalPaneContextMenu } from './terminal-pane-context-menu';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
+import { SearchIcon, ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 
 export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
@@ -161,10 +162,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
             }}
           />
           <Button variant="secondary" size="sm" onClick={() => performSearch('previous', query)} title={t('terminal.search.previous')}>
-            ↑
+            <ChevronUpIcon className="h-4 w-4" />
           </Button>
           <Button variant="secondary" size="sm" onClick={() => performSearch('next', query)} title={t('terminal.search.next')}>
-            ↓
+            <ChevronDownIcon className="h-4 w-4" />
           </Button>
           <Button
             variant={caseSensitive ? 'secondary' : 'ghost'}
@@ -182,16 +183,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
             Aa
           </Button>
           <Button variant="ghost" size="icon" onClick={handleCloseSearch}>
-            ×
+            <XIcon className="h-4 w-4" />
           </Button>
         </div>
       )}
       <div className="absolute right-0 top-0 z-10">
         <Button variant="ghost" size="icon" onClick={() => setSearchOpen((prev) => !prev)} title={t('terminal.tab.search')}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
+          <SearchIcon className="h-4 w-4" />
         </Button>
       </div>
       {activeSession?.status === 'connecting' && (

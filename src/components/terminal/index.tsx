@@ -63,7 +63,7 @@ const Terminal: React.FC = () => {
               description={t('terminal.openFromWorkbench')}
               action={
                 <Button
-                  variant="primary"
+                  variant="default"
                   size="sm"
                   onClick={() => setNewTabMenuOpen(true)}
                 >

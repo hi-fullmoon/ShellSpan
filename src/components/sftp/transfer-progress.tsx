@@ -1,4 +1,5 @@
 import React from 'react';
+import { XIcon } from 'lucide-react';
 import { cn, formatBytes } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -58,9 +59,10 @@ export const TransferProgress: React.FC = () => {
             <Button
               variant="ghost"
               size="icon"
+              data-icon
               onClick={() => removeOperation(op.operationId)}
             >
-              ×
+              <XIcon className="h-3 w-3" />
             </Button>
           </div>
         ))}

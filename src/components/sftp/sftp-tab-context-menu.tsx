@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { PinIcon, PencilIcon, CopyIcon, XIcon, ChevronRightIcon } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { PromptDialog } from '@/components/ui/dialog';
@@ -26,98 +28,6 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }
     <span className="text-app-text-soft">{icon}</span>
     <span>{children}</span>
   </button>
-);
-
-const PinIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="h-3.5 w-3.5"
-  >
-    <line x1="12" y1="17" x2="12" y2="22" />
-    <path d="M5 17h14" />
-    <path d="M12 2v10" />
-    <path d="M7 2h10" />
-  </svg>
-);
-
-const PencilIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="h-3.5 w-3.5"
-  >
-    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-  </svg>
-);
-
-const DuplicateIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="h-3.5 w-3.5"
-  >
-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-  </svg>
-);
-
-const CloseIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="h-3.5 w-3.5"
-  >
-    <line x1="18" y1="6" x2="6" y2="18" />
-    <line x1="6" y1="6" x2="18" y2="18" />
-  </svg>
-);
-
-const CloseOthersIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="h-3.5 w-3.5"
-  >
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-    <line x1="9" y1="9" x2="15" y2="15" />
-    <line x1="15" y1="9" x2="9" y2="15" />
-  </svg>
-);
-
-const CloseRightIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="h-3.5 w-3.5"
-  >
-    <path d="M9 18l6-6-6-6" />
-    <line x1="15" y1="6" x2="15" y2="18" />
-  </svg>
 );
 
 export interface SftpTabContextMenuProps {
@@ -238,28 +148,28 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
         style={{ left, top }}
       >
-        <MenuItem onClick={handleTogglePin} icon={<PinIcon />}>
+        <MenuItem onClick={handleTogglePin} icon={<PinIcon className="h-3.5 w-3.5" />}>
           {connection.pinned ? t('sftp.tab.unpin') : t('sftp.tab.pin')}
         </MenuItem>
-        <div className="my-1 h-px bg-app-border" />
-        <MenuItem onClick={() => setRenameOpen(true)} icon={<PencilIcon />}>
+        <Separator className="my-1" />
+        <MenuItem onClick={() => setRenameOpen(true)} icon={<PencilIcon className="h-3.5 w-3.5" />}>
           {t('common.rename')}
         </MenuItem>
         <MenuItem
           onClick={handleDuplicate}
           disabled={!connection.profileId}
-          icon={<DuplicateIcon />}
+          icon={<CopyIcon className="h-3.5 w-3.5" />}
         >
           {t('common.duplicate')}
         </MenuItem>
-        <div className="my-1 h-px bg-app-border" />
-        <MenuItem onClick={handleClose} icon={<CloseIcon />}>
+        <Separator className="my-1" />
+        <MenuItem onClick={handleClose} icon={<XIcon className="h-3.5 w-3.5" />}>
           {t('common.close')}
         </MenuItem>
-        <MenuItem onClick={handleCloseOthers} icon={<CloseOthersIcon />}>
+        <MenuItem onClick={handleCloseOthers} icon={<XIcon className="h-3.5 w-3.5" />}>
           {t('sftp.tab.closeOthers')}
         </MenuItem>
-        <MenuItem onClick={handleCloseToRight} icon={<CloseRightIcon />}>
+        <MenuItem onClick={handleCloseToRight} icon={<ChevronRightIcon className="h-3.5 w-3.5" />}>
           {t('sftp.tab.closeToRight')}
         </MenuItem>
       </div>

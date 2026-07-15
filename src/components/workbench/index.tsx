@@ -6,7 +6,7 @@ import { ConnectionList } from './connection-list';
 import { KnownHostsPanel } from './known-hosts-panel';
 import { LogPanel } from './log-panel';
 import { WorkbenchSidebar, type WorkbenchTab } from './workbench-sidebar';
-import { AlertDialog } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useConnectSession } from '@/hooks/useConnectSession';
@@ -90,16 +90,24 @@ const Workbench: React.FC = () => {
         initial={editing}
       />
 
-      <AlertDialog
-        open={!!deleting}
-        onClose={() => setDeleting(undefined)}
-        onConfirm={handleDelete}
-        title={t('common.delete')}
-        description={deleting ? deleting.name : ''}
-        confirmText={t('common.delete')}
-        cancelText={t('common.cancel')}
-        variant="danger"
-      />
+      <AlertDialog open={!!deleting} onOpenChange={(open) => { if (!open) setDeleting(undefined); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('common.delete')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleting ? deleting.name : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleting(undefined)}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete}>
+              {t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <HostKeyDialog
         open={hostKeyDialog.open}

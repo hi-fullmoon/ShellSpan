@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { ExternalLinkIcon, PencilIcon, LockIcon, Trash2Icon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import type { SftpSide } from '@/stores/sftpStore';
 import type { FileEntry } from './file-entry-formatters';
@@ -46,56 +48,6 @@ const MenuItem: React.FC<MenuItemProps> = ({
     <span className="text-app-text-soft">{icon}</span>
     <span>{children}</span>
   </button>
-);
-
-const OpenIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <path d="M5 12h14M12 5l7 7-7 7" />
-  </svg>
-);
-
-const RenameIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-  </svg>
-);
-
-const PermissionsIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-  </svg>
-);
-
-const DeleteIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <polyline points="3 6 5 6 21 6" />
-    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-  </svg>
 );
 
 export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
@@ -152,29 +104,29 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
         <MenuItem
           onClick={() => handleAction('open')}
           disabled={!canOpen}
-          icon={<OpenIcon />}
+          icon={<ExternalLinkIcon className="h-3.5 w-3.5" />}
         >
           {t('sftp.contextMenu.open')}
         </MenuItem>
         <MenuItem
           onClick={() => handleAction('rename')}
           disabled={!canRename}
-          icon={<RenameIcon />}
+          icon={<PencilIcon className="h-3.5 w-3.5" />}
         >
           {t('common.rename')}
         </MenuItem>
         <MenuItem
           onClick={() => handleAction('permissions')}
           disabled={!canPermissions}
-          icon={<PermissionsIcon />}
+          icon={<LockIcon className="h-3.5 w-3.5" />}
         >
           {t('common.permissions')}
         </MenuItem>
-        <div className="my-1 h-px bg-app-border" />
+        <Separator className="my-1" />
         <MenuItem
           onClick={() => handleAction('delete')}
           disabled={!canDelete}
-          icon={<DeleteIcon />}
+          icon={<Trash2Icon className="h-3.5 w-3.5" />}
           danger
         >
           {t('common.delete')}

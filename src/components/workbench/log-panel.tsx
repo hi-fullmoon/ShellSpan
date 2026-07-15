@@ -9,8 +9,10 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/useI18n';
 import { useLogStore } from '@/stores/logStore';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/empty-state';
-import { Tooltip } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 
@@ -177,11 +179,11 @@ const LogLine: React.FC<LogLineProps> = ({
       >
         {line.level}
       </span>
-      <Tooltip
-        content={tooltip}
-        className="hidden truncate text-[10px] text-app-text-soft md:block"
-      >
-        {line.target ? line.target.split('::').pop() : ''}
+      <Tooltip>
+        <TooltipTrigger className="hidden truncate text-[10px] text-app-text-soft md:block">
+          {line.target ? line.target.split('::').pop() : ''}
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
       <span className="min-w-0 whitespace-pre-wrap break-all text-app-text">
         {line.message}
@@ -467,15 +469,13 @@ export const LogPanel: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1 text-xs text-app-text-soft">
-              <input
-                type="checkbox"
+            <Label className="flex items-center gap-1 text-xs text-app-text-soft">
+              <Checkbox
                 checked={autoScroll}
-                onChange={(e) => setAutoScroll(e.target.checked)}
-                className="rounded border-app-border"
+                onCheckedChange={(checked) => setAutoScroll(checked === true)}
               />
               {t('workbench.logs.autoScroll')}
-            </label>
+            </Label>
             <Button variant="secondary" size="sm" onClick={handleRefresh}>
               {t('common.refresh')}
             </Button>
@@ -539,7 +539,7 @@ export const LogPanel: React.FC = () => {
               {t('common.cancel')}
             </Button>
             <Button
-              variant="primary"
+              variant="default"
               size="sm"
               onClick={handleCopySelectedLogs}
               disabled={selectedLineKeys.size === 0}

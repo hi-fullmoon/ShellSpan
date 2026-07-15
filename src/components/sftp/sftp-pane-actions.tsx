@@ -1,5 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  RefreshCwIcon,
+  ArrowLeftIcon,
+  FilterIcon,
+  Grid3X3Icon,
+  FolderPlusIcon,
+  CheckIcon,
+  ChevronDownIcon,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 
@@ -35,83 +44,9 @@ const MenuItem: React.FC<MenuItemProps> = ({
     <span className="text-app-text-soft">{icon}</span>
     <span className="flex-1">{children}</span>
     {checked && (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-3.5 w-3.5 text-app-primary"
-      >
-        <polyline points="20 6 9 17 4 12" />
-      </svg>
+      <CheckIcon className="h-3.5 w-3.5 text-app-primary" />
     )}
   </button>
-);
-
-const RefreshIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <polyline points="23 4 23 10 17 10" />
-    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-  </svg>
-);
-
-const ParentIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <path d="M19 12H5M12 19l-7-7 7-7" />
-  </svg>
-);
-
-const FilterIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-  </svg>
-);
-
-const BatchIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <rect x="3" y="3" width="7" height="7" rx="1" />
-    <rect x="14" y="3" width="7" height="7" rx="1" />
-    <rect x="14" y="14" width="7" height="7" rx="1" />
-    <rect x="3" y="14" width="7" height="7" rx="1" />
-  </svg>
-);
-
-const NewFolderIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    <line x1="12" y1="11" x2="12" y2="17" />
-    <line x1="9" y1="14" x2="15" y2="14" />
-  </svg>
 );
 
 export const SftpPaneActions: React.FC<SftpPaneActionsProps> = ({
@@ -159,15 +94,7 @@ export const SftpPaneActions: React.FC<SftpPaneActionsProps> = ({
         )}
       >
         <span>{t('sftp.actions')}</span>
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          className={cn('h-3 w-3 transition-transform', open && 'rotate-180')}
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
+        <ChevronDownIcon className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
       </button>
 
       {open &&
@@ -193,20 +120,20 @@ export const SftpPaneActions: React.FC<SftpPaneActionsProps> = ({
             >
               <MenuItem
                 onClick={() => handleAction(onRefresh)}
-                icon={<RefreshIcon />}
+                icon={<RefreshCwIcon className="h-3.5 w-3.5" />}
               >
                 {t('common.refresh')}
               </MenuItem>
               <MenuItem
                 onClick={() => handleAction(onParentDirectory)}
-                icon={<ParentIcon />}
+                icon={<ArrowLeftIcon className="h-3.5 w-3.5" />}
               >
                 {t('sftp.parentDirectory')}
               </MenuItem>
               {side === 'remote' && onNewFolder && (
                 <MenuItem
                   onClick={() => handleAction(onNewFolder)}
-                  icon={<NewFolderIcon />}
+                  icon={<FolderPlusIcon className="h-3.5 w-3.5" />}
                 >
                   {t('common.newFolder')}
                 </MenuItem>
@@ -214,14 +141,14 @@ export const SftpPaneActions: React.FC<SftpPaneActionsProps> = ({
               <div className="my-1 h-px bg-app-border" />
               <MenuItem
                 onClick={() => handleAction(onToggleFilter)}
-                icon={<FilterIcon />}
+                icon={<FilterIcon className="h-3.5 w-3.5" />}
                 checked={filterVisible}
               >
                 {filterVisible ? t('sftp.hideFilter') : t('sftp.showFilter')}
               </MenuItem>
               <MenuItem
                 onClick={() => handleAction(onToggleBatchMode)}
-                icon={<BatchIcon />}
+                icon={<Grid3X3Icon className="h-3.5 w-3.5" />}
                 checked={batchMode}
               >
                 {t('sftp.batchMode')}

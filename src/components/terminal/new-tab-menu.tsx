@@ -7,44 +7,12 @@ import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { ServerIcon, LayoutGridIcon } from 'lucide-react';
 import type { ConnectionProfile } from '@/types';
 
 const ANIMATION_DURATION = 150;
 
-const ServerIcon: React.FC = () => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-    <line x1="6" y1="6" x2="6.01" y2="6" />
-    <line x1="6" y1="18" x2="6.01" y2="18" />
-  </svg>
-);
-
-const WorkbenchIcon: React.FC = () => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-    <line x1="3" y1="9" x2="21" y2="9" />
-    <line x1="9" y1="21" x2="9" y2="9" />
-  </svg>
-);
+// Icons replaced with lucide-react imports
 
 interface NewTabMenuProps {
   open: boolean;
@@ -296,7 +264,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose }) => {
             onClick={handleOpenWorkbench}
             className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs text-app-text-soft transition-colors hover:bg-app-surface-muted hover:text-app-text"
           >
-            <WorkbenchIcon />
+            <LayoutGridIcon />
             {t('terminal.newTabMenu.openWorkbench')}
           </button>
           <div className="flex items-center gap-3 text-xs text-app-text-soft">

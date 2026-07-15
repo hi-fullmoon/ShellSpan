@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
+import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Input } from '@/components/ui/input';
@@ -31,43 +32,6 @@ interface HistoryState {
   stack: string[];
   index: number;
 }
-
-const BackIcon: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className={cn('h-4 w-4', disabled && 'opacity-30')}
-  >
-    <path d="M19 12H5M12 19l-7-7 7-7" />
-  </svg>
-);
-
-const ForwardIcon: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className={cn('h-4 w-4', disabled && 'opacity-30')}
-  >
-    <path d="M5 12h14M12 5l7 7-7 7" />
-  </svg>
-);
-
-const SearchIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3.5 w-3.5"
-  >
-    <circle cx="11" cy="11" r="8" />
-    <path d="M21 21l-4.35-4.35" />
-  </svg>
-);
 
 export const SftpPane: React.FC<SftpPaneProps> = ({
   connection,
@@ -261,7 +225,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
                 : 'bg-app-surface-muted text-app-text hover:bg-app-border',
             )}
           >
-            <SearchIcon />
+            <SearchIcon className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">{t('sftp.filter')}</span>
           </button>
           <SftpPaneActions
@@ -285,14 +249,14 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
             disabled={!canGoBack}
             className="flex h-6 w-6 items-center justify-center rounded-md text-app-text-soft hover:bg-app-border hover:text-app-text disabled:pointer-events-none"
           >
-            <BackIcon disabled={!canGoBack} />
+            <ChevronLeftIcon className={cn('h-4 w-4', !canGoBack && 'opacity-30')} />
           </button>
           <button
             onClick={goForward}
             disabled={!canGoForward}
             className="flex h-6 w-6 items-center justify-center rounded-md text-app-text-soft hover:bg-app-border hover:text-app-text disabled:pointer-events-none"
           >
-            <ForwardIcon disabled={!canGoForward} />
+            <ChevronRightIcon className={cn('h-4 w-4', !canGoForward && 'opacity-30')} />
           </button>
         </div>
 
@@ -316,7 +280,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       {filterVisible && (
         <div className="flex h-8 shrink-0 items-center border-b border-app-border px-2">
           <div className="flex flex-1 items-center gap-1.5 rounded-md bg-app-surface-muted px-2">
-            <SearchIcon />
+            <SearchIcon className="h-3.5 w-3.5" />
             <Input
               value={pane.filterQuery}
               onChange={(e) => handleFilterChange(e.target.value)}

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { ServerIcon, LayoutGridIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
@@ -10,41 +11,6 @@ import { cn } from '@/lib/utils';
 import type { ConnectionProfile } from '@/types';
 
 const ANIMATION_DURATION = 150;
-
-const ServerIcon: React.FC = () => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-    <line x1="6" y1="6" x2="6.01" y2="6" />
-    <line x1="6" y1="18" x2="6.01" y2="18" />
-  </svg>
-);
-
-const WorkbenchIcon: React.FC = () => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-    <line x1="3" y1="9" x2="21" y2="9" />
-    <line x1="9" y1="21" x2="9" y2="9" />
-  </svg>
-);
 
 interface SftpNewConnectionMenuProps {
   open: boolean;
@@ -260,7 +226,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
                               : 'bg-app-primary/10 text-app-primary',
                           )}
                         >
-                          <ServerIcon />
+                          <ServerIcon className="h-4 w-4" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-app-text">
@@ -299,7 +265,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
             onClick={handleOpenWorkbench}
             className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs text-app-text-soft transition-colors hover:bg-app-surface-muted hover:text-app-text"
           >
-            <WorkbenchIcon />
+            <LayoutGridIcon className="h-4 w-4" />
             {t('terminal.newTabMenu.openWorkbench')}
           </button>
           <div className="flex items-center gap-3 text-xs text-app-text-soft">

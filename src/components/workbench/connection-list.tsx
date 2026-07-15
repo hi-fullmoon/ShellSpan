@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import type { ConnectionProfile } from '@/types';
+import { MonitorIcon, PlusIcon, TerminalIcon, FolderIcon, PencilIcon, CopyIcon, Trash2Icon } from 'lucide-react';
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];
@@ -53,33 +54,11 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           title={t('workbench.connections.empty')}
           description={t('workbench.connections.emptyDescription')}
           icon={
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              className="h-6 w-6"
-            >
-              <rect x="2" y="3" width="20" height="14" rx="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-              <line x1="6" y1="8" x2="6.01" y2="8" />
-              <line x1="10" y1="8" x2="10.01" y2="8" />
-              <line x1="14" y1="8" x2="14.01" y2="8" />
-            </svg>
+            <MonitorIcon className="h-6 w-6" />
           }
           action={
-            <Button variant="primary" size="md" onClick={onAdd}>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-3.5 w-3.5"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
+            <Button variant="default" size="default" onClick={onAdd} data-icon="inline-start">
+              <PlusIcon />
               {t('workbench.connections.new')}
             </Button>
           }
@@ -110,7 +89,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
               placeholder={t('workbench.connections.searchPlaceholder')}
             />
           </div>
-          <Button variant="primary" size="sm" onClick={onAdd}>
+          <Button variant="default" size="sm" onClick={onAdd}>
             {t('workbench.connections.new')}
           </Button>
         </div>
@@ -171,17 +150,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="h-4 w-4"
-            >
-              <rect x="2" y="3" width="20" height="14" rx="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
+            <MonitorIcon className="h-4 w-4" />
           </div>
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-medium text-app-text">
@@ -223,16 +192,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             onClick={onConnectTerminal}
             title={t('workbench.connections.connectTerminal')}
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="h-4 w-4"
-            >
-              <polyline points="4 17 10 11 4 5" />
-              <line x1="12" y1="19" x2="20" y2="19" />
-            </svg>
+            <TerminalIcon />
           </Button>
           <Button
             variant="ghost"
@@ -240,15 +200,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             onClick={onConnectSftp}
             title={t('workbench.connections.connectSftp')}
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="h-4 w-4"
-            >
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
+            <FolderIcon />
           </Button>
           <Button
             variant="ghost"
@@ -256,15 +208,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             onClick={onEdit}
             title={t('common.edit')}
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="h-4 w-4"
-            >
-              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-            </svg>
+            <PencilIcon />
           </Button>
           <Button
             variant="ghost"
@@ -272,16 +216,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             onClick={onDuplicate}
             title={t('common.duplicate')}
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="h-4 w-4"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
+            <CopyIcon />
           </Button>
           <Button
             variant="ghost"
@@ -289,16 +224,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             onClick={onDelete}
             title={t('common.delete')}
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="h-4 w-4 text-app-error"
-            >
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
+            <Trash2Icon className="text-app-error" />
           </Button>
         </div>
       </div>

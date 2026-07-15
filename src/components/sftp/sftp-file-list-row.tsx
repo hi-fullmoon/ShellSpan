@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
+import { FolderIcon, LinkIcon, FileIcon as LucideFileIcon } from 'lucide-react';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
+import { Checkbox } from '@/components/ui/checkbox';
 import type { RemoteFileKind } from '@/types';
 import type { SftpSide } from '@/stores/sftpStore';
 import type { FileEntry } from './file-entry-formatters';
@@ -26,42 +28,12 @@ export interface SftpFileListRowProps {
 
 export const FileIcon: React.FC<{ kind: RemoteFileKind }> = ({ kind }) => {
   if (kind === 'directory') {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        className="h-4 w-4 shrink-0 text-app-primary"
-      >
-        <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" />
-      </svg>
-    );
+    return <FolderIcon className="h-4 w-4 shrink-0 text-app-primary" />;
   }
   if (kind === 'symlink') {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-4 w-4 shrink-0 text-app-primary"
-      >
-        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-      </svg>
-    );
+    return <LinkIcon className="h-4 w-4 shrink-0 text-app-primary" />;
   }
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      className="h-4 w-4 shrink-0 text-app-text-soft"
-    >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
+  return <LucideFileIcon className="h-4 w-4 shrink-0 text-app-text-soft" />;
 };
 
 function getKindLabel(
@@ -149,12 +121,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
     >
       <div className="flex h-[34px] min-w-0 items-center gap-1.5 pr-2">
         {batchMode && (
-          <input
-            type="checkbox"
-            readOnly
-            checked={selected}
-            className="h-3.5 w-3.5 shrink-0 accent-app-primary"
-          />
+          <Checkbox checked={selected} className="h-3.5 w-3.5 shrink-0" />
         )}
         <FileIcon kind={entry.kind} />
         <div className="flex min-w-0 flex-col justify-center leading-tight">
