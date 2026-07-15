@@ -45,7 +45,7 @@ const Terminal: React.FC = () => {
   }, [activeSection]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-app-bg">
       <TerminalControllerLayer />
       {sessions.length > 0 && (
         <TerminalTabBar

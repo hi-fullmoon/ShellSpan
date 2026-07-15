@@ -1,7 +1,7 @@
 import React from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ShieldAlertIcon, ShieldCheckIcon } from 'lucide-react';
 
 // ShieldIcon replaced with lucide-react imports
@@ -32,7 +32,7 @@ export const HostKeyDialog: React.FC<HostKeyDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent>
+      <DialogContent className="bg-app-surface border-app-border">
         <DialogHeader>
           <DialogTitle>
             <div className="flex items-center gap-2">
@@ -42,11 +42,11 @@ export const HostKeyDialog: React.FC<HostKeyDialogProps> = ({
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-app-text">
+          <DialogDescription className="text-app-text">
             {mismatch
               ? t('dialog.hostKeyMismatch.message', { host, port })
               : t('dialog.hostKeyUnknown.message', { host, port })}
-          </p>
+          </DialogDescription>
           {fingerprint && (
             <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium uppercase tracking-wider text-app-text-soft">

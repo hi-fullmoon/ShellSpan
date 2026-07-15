@@ -211,9 +211,9 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose }) => {
                         onClick={() => handleConnect(profile)}
                         onMouseEnter={() => setSelectedIndex(index)}
                         className={cn(
-                          'flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors',
+                          'flex w-full items-center gap-3 rounded-xl p-3 text-left text-app-text transition-colors',
                           isSelected
-                            ? 'bg-app-primary/10 text-app-text'
+                            ? 'bg-app-surface-muted'
                             : 'hover:bg-app-surface-muted',
                         )}
                       >
