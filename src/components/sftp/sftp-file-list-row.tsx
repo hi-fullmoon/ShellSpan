@@ -26,14 +26,14 @@ export interface SftpFileListRowProps {
   onContextMenu: (entry: FileEntry, e: React.MouseEvent) => void;
 }
 
-export const FileIcon: React.FC<{ kind: RemoteFileKind }> = ({ kind }) => {
+export const FileIcon: React.FC<{ kind: RemoteFileKind; selected?: boolean }> = ({ kind, selected }) => {
   if (kind === 'directory') {
     return <FolderIcon className="h-4 w-4 shrink-0 text-app-primary" />;
   }
   if (kind === 'symlink') {
     return <LinkIcon className="h-4 w-4 shrink-0 text-app-primary" />;
   }
-  return <LucideFileIcon className="h-4 w-4 shrink-0 text-app-text-soft" />;
+  return <LucideFileIcon className={cn('h-4 w-4 shrink-0', selected ? 'text-app-primary' : 'text-app-text-soft')} />;
 };
 
 function getKindLabel(
@@ -96,6 +96,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
   const permissionText = remote
     ? formatPermissionSymbolic(entry.permissions, entry.kind)
     : undefined;
+  const mutedTextClass = selected ? 'text-app-primary' : 'text-app-text-soft';
 
   return (
     <div
@@ -108,8 +109,8 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
       className={cn(
         'grid cursor-default select-none items-center border-b border-app-border/50 px-2 text-xs transition-colors',
         selected
-          ? 'bg-app-primary/[0.12] text-app-text'
-          : 'hover:bg-app-primary/[0.08] text-app-text',
+          ? 'bg-app-primary/10 text-app-primary'
+          : 'hover:bg-app-surface-muted text-app-text',
         isDragging && 'opacity-50',
       )}
       style={{
@@ -123,33 +124,33 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
         {batchMode && (
           <Checkbox checked={selected} className="h-3.5 w-3.5 shrink-0" />
         )}
-        <FileIcon kind={entry.kind} />
+        <FileIcon kind={entry.kind} selected={selected} />
         <div className="flex min-w-0 flex-col justify-center leading-tight">
           <span className="truncate text-[13px] font-medium">{entry.name}</span>
           {permissionText && (
-            <span className="truncate font-mono text-[11px] text-app-text-soft">
+            <span className={cn('truncate font-mono text-[11px]', mutedTextClass)}>
               {permissionText}
             </span>
           )}
         </div>
       </div>
 
-      <div className="truncate pr-2 tabular-nums text-app-text-soft">
+      <div className={cn('truncate pr-2 tabular-nums', mutedTextClass)}>
         {entry.modifiedAt ? formatDate(entry.modifiedAt) : '--'}
       </div>
 
-      <div className="truncate pr-2 tabular-nums text-app-text-soft">
+      <div className={cn('truncate pr-2 tabular-nums', mutedTextClass)}>
         {entry.kind === 'directory' ? '--' : formatBytes(entry.size)}
       </div>
 
-      <div className="truncate pr-2 text-app-text-soft">{getKindLabel(entry.kind, t)}</div>
+      <div className={cn('truncate pr-2', mutedTextClass)}>{getKindLabel(entry.kind, t)}</div>
 
       {side === 'remote' && remote && (
         <>
-          <div className="truncate pr-2 font-mono text-app-text-soft">
+          <div className={cn('truncate pr-2 font-mono', mutedTextClass)}>
             {formatOwner(entry)}
           </div>
-          <div className="truncate pr-2 font-mono text-app-text-soft">
+          <div className={cn('truncate pr-2 font-mono', mutedTextClass)}>
             {formatGroup(entry)}
           </div>
         </>

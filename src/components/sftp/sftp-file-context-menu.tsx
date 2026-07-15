@@ -42,10 +42,10 @@ const MenuItem: React.FC<MenuItemProps> = ({
       'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
       danger
         ? 'text-app-error hover:bg-app-error/10'
-        : 'text-app-text hover:bg-app-primary/[0.1] hover:text-app-primary',
+        : 'text-app-text hover:bg-app-primary/10 hover:text-app-primary',
     )}
   >
-    <span className="text-app-text-soft">{icon}</span>
+    <span className="text-muted-foreground">{icon}</span>
     <span>{children}</span>
   </button>
 );

@@ -72,7 +72,7 @@ export const SftpFileListHeader: React.FC<SftpFileListHeaderProps> = ({
 
   return (
     <div
-      className="grid h-8 shrink-0 items-center border-b border-app-border bg-app-surface-muted px-2 text-[11px] font-semibold uppercase tracking-wide text-app-text-soft"
+      className="grid h-8 shrink-0 items-center border-b border-app-border bg-app-surface-muted px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
       style={{ gridTemplateColumns }}
     >
       {columns.map((column) => {

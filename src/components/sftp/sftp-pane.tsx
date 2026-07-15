@@ -4,6 +4,7 @@ import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/empty-state';
 import { PathBreadcrumb } from './path-breadcrumb';
 import { SftpFileList } from './sftp-file-list';
@@ -211,23 +212,20 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       )}
     >
       {/* Title bar */}
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-app-border px-3">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-semibold text-app-text">{paneTitle}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <button
+          <Button
+            variant={filterVisible ? 'default' : 'secondary'}
+            size="sm"
             onClick={() => setFilterVisible((prev) => !prev)}
-            className={cn(
-              'inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors',
-              filterVisible
-                ? 'bg-app-primary text-app-primary-text'
-                : 'bg-app-surface-muted text-app-text hover:bg-app-border',
-            )}
+            className="gap-1.5 px-2"
           >
             <SearchIcon className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">{t('sftp.filter')}</span>
-          </button>
+          </Button>
           <SftpPaneActions
             side={side}
             batchMode={pane.batchMode}
@@ -244,20 +242,24 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       {/* Navigation row */}
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border bg-app-surface-muted px-2">
         <div className="flex items-center">
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={goBack}
             disabled={!canGoBack}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-app-text-soft hover:bg-app-border hover:text-app-text disabled:pointer-events-none"
+            className="h-6 w-6"
           >
             <ChevronLeftIcon className={cn('h-4 w-4', !canGoBack && 'opacity-30')} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={goForward}
             disabled={!canGoForward}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-app-text-soft hover:bg-app-border hover:text-app-text disabled:pointer-events-none"
+            className="h-6 w-6"
           >
             <ChevronRightIcon className={cn('h-4 w-4', !canGoForward && 'opacity-30')} />
-          </button>
+          </Button>
         </div>
 
         <PathBreadcrumb

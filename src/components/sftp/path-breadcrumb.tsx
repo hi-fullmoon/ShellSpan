@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export interface PathBreadcrumbProps {
@@ -46,30 +47,34 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   return (
     <div
       className={cn(
-        'flex h-7 items-center gap-1 overflow-hidden rounded-[4px] border border-app-border bg-app-surface px-2 text-xs',
+        'flex h-7 items-center gap-1 overflow-hidden rounded-md border border-app-border bg-app-surface px-2 text-xs',
         className,
       )}
     >
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => onNavigate('')}
-        className="flex items-center gap-1 text-app-text-soft hover:text-app-text"
+        className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
         title={homeLabel}
       >
         <FolderIcon />
         <span className="truncate max-w-[80px]">{homeLabel}</span>
-      </button>
+      </Button>
 
       {parts.map((part, index) => (
         <React.Fragment key={index}>
           <ChevronIcon />
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigateToIndex(index)}
-            className="flex items-center gap-1 hover:text-app-text"
+            className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
             title={part}
           >
             <FolderIcon />
             <span className="truncate max-w-[120px]">{part}</span>
-          </button>
+          </Button>
         </React.Fragment>
       ))}
     </div>

@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { ConnectionProfile } from '@/types';
 
@@ -260,14 +261,16 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
         </div>
 
         <div className="flex items-center justify-between border-t border-app-border px-4 py-3">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={handleOpenWorkbench}
-            className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs text-app-text-soft transition-colors hover:bg-app-surface-muted hover:text-app-text"
+            className="gap-2 px-2 text-muted-foreground hover:text-app-text"
           >
             <LayoutGridIcon className="h-4 w-4" />
             {t('terminal.newTabMenu.openWorkbench')}
-          </button>
+          </Button>
           <div className="flex items-center gap-3 text-xs text-app-text-soft">
             <span>↑↓ {t('terminal.newTabMenu.navigate')}</span>
             <span>↵ {t('sftp.newConnectionMenu.connect')}</span>

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
+import { Button } from '@/components/ui/button';
 
 export interface SftpPaneActionsProps {
   side: 'local' | 'remote';
@@ -83,19 +84,16 @@ export const SftpPaneActions: React.FC<SftpPaneActionsProps> = ({
 
   return (
     <>
-      <button
+      <Button
         ref={buttonRef}
+        variant={open ? 'default' : 'secondary'}
+        size="sm"
         onClick={handleToggle}
-        className={cn(
-          'inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors',
-          open
-            ? 'bg-app-primary text-app-primary-text'
-            : 'bg-app-surface-muted text-app-text hover:bg-app-border',
-        )}
+        className="gap-1 px-2"
       >
         <span>{t('sftp.actions')}</span>
         <ChevronDownIcon className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
-      </button>
+      </Button>
 
       {open &&
         createPortal(

@@ -25,7 +25,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }
     disabled={disabled}
     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
   >
-    <span className="text-app-text-soft">{icon}</span>
+    <span className="text-muted-foreground">{icon}</span>
     <span>{children}</span>
   </button>
 );

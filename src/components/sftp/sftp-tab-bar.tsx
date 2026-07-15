@@ -79,8 +79,10 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-[36px] w-48 shrink-0 items-center gap-1.5 border-r border-app-border px-2 text-left text-xs transition-colors select-none',
-        active ? 'bg-app-surface text-app-text' : 'bg-transparent text-app-text-soft hover:bg-app-surface/60 hover:text-app-text',
+        'group relative flex h-8 w-48 shrink-0 items-center gap-1.5 rounded-md px-2 text-left text-xs font-medium transition-colors select-none',
+        active
+          ? 'bg-app-surface text-app-text shadow-sm'
+          : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
@@ -465,7 +467,6 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({
         <Button
           variant="ghost"
           size="icon"
-          data-icon
           onClick={onNewTabClick}
           title={t('sftp.newTab')}
           className="h-[36px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"

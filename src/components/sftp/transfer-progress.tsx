@@ -28,44 +28,58 @@ export const TransferProgress: React.FC = () => {
         </Button>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {operations.map((op) => (
-          <div
-            key={op.operationId}
-            className="flex items-center gap-2 border-b border-app-border px-2 py-1 text-xs"
-          >
-            <span className="w-16 font-medium text-app-text">
-              {op.kind === 'upload' && t('sftp.transfer.uploading')}
-              {op.kind === 'download' && t('sftp.transfer.downloading')}
-              {op.kind === 'delete' && t('sftp.transfer.deleting')}
-            </span>
-            <span className="flex-1 truncate text-app-text-soft">
-              {op.currentPath ?? op.operationId}
-            </span>
-            <span className="w-16 text-right text-app-text-soft">
-              {op.totalBytes > 0 && (
-                <>
-                  {formatBytes(op.processedBytes)} / {formatBytes(op.totalBytes)}
-                </>
-              )}
-            </span>
-            <span
-              className={cn(
-                'w-12 text-right',
-                isTransferComplete(op) ? 'text-app-success' : 'text-app-primary',
-              )}
+        {operations.map((op) => {
+          const progress =
+            op.totalBytes > 0
+              ? Math.min(100, (op.processedBytes / op.totalBytes) * 100)
+              : 0;
+          return (
+            <div
+              key={op.operationId}
+              className="border-b border-app-border px-2 py-1 text-xs"
             >
-              {formatTransferProgress(op)}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              data-icon
-              onClick={() => removeOperation(op.operationId)}
-            >
-              <XIcon className="h-3 w-3" />
-            </Button>
-          </div>
-        ))}
+              <div className="flex items-center gap-2">
+                <span className="w-16 font-medium text-app-text">
+                  {op.kind === 'upload' && t('sftp.transfer.uploading')}
+                  {op.kind === 'download' && t('sftp.transfer.downloading')}
+                  {op.kind === 'delete' && t('sftp.transfer.deleting')}
+                </span>
+                <span className="flex-1 truncate text-muted-foreground">
+                  {op.currentPath ?? op.operationId}
+                </span>
+                <span className="w-16 text-right text-muted-foreground">
+                  {op.totalBytes > 0 && (
+                    <>
+                      {formatBytes(op.processedBytes)} / {formatBytes(op.totalBytes)}
+                    </>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    'w-12 text-right',
+                    isTransferComplete(op) ? 'text-app-success' : 'text-app-primary',
+                  )}
+                >
+                  {formatTransferProgress(op)}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  data-icon
+                  onClick={() => removeOperation(op.operationId)}
+                >
+                  <XIcon className="h-3 w-3" />
+                </Button>
+              </div>
+              <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-app-surface-muted">
+                <div
+                  className="h-full bg-app-primary transition-all"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

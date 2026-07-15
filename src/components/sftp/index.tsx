@@ -52,12 +52,12 @@ const Sftp: React.FC = () => {
 
   if (!connection) {
     return (
-      <div className="flex h-full flex-col">
-        <SftpTabBar
-          onNewTabClick={() => setNewConnectionMenuOpen(true)}
-          onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}
-        />
-        <div className="relative min-h-0 flex-1">
+    <div className="flex h-full flex-col bg-app-bg">
+      <SftpTabBar
+        onNewTabClick={() => setNewConnectionMenuOpen(true)}
+        onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}
+      />
+      <div className="relative min-h-0 flex-1">
           <div className="flex h-full items-center justify-center">
             <EmptyState
               title={t('sftp.empty')}
@@ -204,7 +204,7 @@ const SftpContent: React.FC<SftpContentProps> = ({
 
   return (
     <SftpDndContext onDragEnd={handleDragEnd}>
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col bg-app-bg">
         <SftpTabBar
           onNewTabClick={() => setNewConnectionMenuOpen(true)}
           onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}

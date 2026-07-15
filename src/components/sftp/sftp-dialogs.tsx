@@ -70,13 +70,13 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={open} onOpenChange={(open: boolean) => { if (!open) onClose(); }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t('common.permissions')}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          <Label className="text-xs text-app-text-soft">Octal (e.g. 644)</Label>
+          <Label className="text-xs text-muted-foreground">Octal (e.g. 644)</Label>
           <Input
             value={value}
             onChange={(e) => setValue(e.target.value)}
