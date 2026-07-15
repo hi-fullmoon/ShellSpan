@@ -4,7 +4,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { invokePickPrivateKeyFile } from '@/lib/tauri';
@@ -164,15 +164,15 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   };
 
   return (
-    <Drawer open={open} onOpenChange={(open) => { if (!open) onClose(); }} swipeDirection="right">
-      <DrawerContent className="data-[swipe-direction=right]:w-lg">
-        <DrawerHeader>
-          <DrawerTitle>
+    <Dialog open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
             {initial
               ? t('connection.form.title.edit')
               : t('connection.form.title.new')}
-          </DrawerTitle>
-        </DrawerHeader>
+          </DialogTitle>
+        </DialogHeader>
         <div className="flex flex-col gap-4 overflow-y-auto p-4 pt-0">
         <FormRow label={t('common.name')} error={errors.name}>
           <Input
@@ -355,16 +355,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
           </div>
         )}
       </div>
-        <DrawerFooter className="flex flex-row justify-end">
+        <DialogFooter className="flex flex-row justify-end">
           <Button variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </Button>
           <Button variant="default" onClick={handleSubmit}>
             {t('common.save')}
           </Button>
-        </DrawerFooter>
-      </DrawerContent>
-    </Drawer>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

@@ -21,10 +21,10 @@ export const TransferProgress: React.FC = () => {
     <div className="flex h-28 flex-col border-t border-app-border bg-app-surface">
       <div className="flex h-7 items-center justify-between border-b border-app-border px-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-app-text-soft">
-          Transfers
+          {t('sftp.transfers.title')}
         </span>
         <Button variant="ghost" size="sm" onClick={clearCompleted}>
-          Clear completed
+          {t('sftp.transfers.clearCompleted')}
         </Button>
       </div>
       <div className="flex-1 overflow-y-auto">

@@ -182,6 +182,9 @@ export default {
   'sftp.transfer.completed': 'Completed',
   'sftp.transfer.failed': 'Failed',
 
+  'sftp.transfers.title': 'Transfers',
+  'sftp.transfers.clearCompleted': 'Clear completed',
+
   'sftp.columns.name': 'Name',
   'sftp.columns.dateModified': 'Date Modified',
   'sftp.columns.type': 'Kind',

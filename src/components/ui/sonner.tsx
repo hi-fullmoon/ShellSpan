@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react"
-import { useTheme } from "next-themes"
+import { useTheme } from "@/hooks/useTheme"
 import { Toaster as Sonner, type ToasterProps, toast } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 import { useToastStore } from "@/stores/toastStore"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  const { resolvedTheme = "light" } = useTheme()
   const toasts = useToastStore((s) => s.toasts)
   const removeToast = useToastStore((s) => s.removeToast)
   const shownRef = useRef<Set<string>>(new Set())
@@ -47,7 +47,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={resolvedTheme as ToasterProps["theme"]}
       className="toaster group"
       icons={{
         success: (

@@ -182,6 +182,9 @@ export default {
   'sftp.transfer.completed': '已完成',
   'sftp.transfer.failed': '失败',
 
+  'sftp.transfers.title': '传输',
+  'sftp.transfers.clearCompleted': '清除已完成',
+
   'sftp.columns.name': '名称',
   'sftp.columns.dateModified': '修改日期',
   'sftp.columns.type': '种类',

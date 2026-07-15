@@ -43,7 +43,7 @@ vi.mock('../terminal-context-menu', () => ({
   TerminalContextMenu: () => null,
 }));
 
-vi.mock('../HostKeyDialog', () => ({
+vi.mock('../host-key-dialog', () => ({
   HostKeyDialog: () => null,
 }));
 
