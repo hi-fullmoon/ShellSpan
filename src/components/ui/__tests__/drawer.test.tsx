@@ -45,4 +45,16 @@ describe('Drawer', () => {
     expect(content).toHaveClass('p-4');
     expect(content).toHaveClass('gap-2');
   });
+
+  it('uses a drawer shadow that casts leftward', () => {
+    render(
+      <Drawer open={true}>
+        <DrawerContent>Content</DrawerContent>
+      </Drawer>,
+    );
+
+    const content = document.body.querySelector('[data-slot="drawer-content"]');
+    expect(content).toHaveClass('shadow-[var(--shadow-drawer)]');
+    expect(content).not.toHaveClass('shadow-[var(--shadow-dialog)]');
+  });
 });
