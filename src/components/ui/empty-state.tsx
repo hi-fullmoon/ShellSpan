@@ -19,18 +19,18 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center gap-3 p-4 text-app-text-soft',
+        'flex flex-col items-center justify-center gap-4 p-4 text-muted-foreground',
         className,
       )}
     >
       {icon && (
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-app-surface-muted text-app-text-soft">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
           {icon}
         </div>
       )}
       <span className="text-xs">{title}</span>
       {description && (
-        <span className="max-w-xs text-center text-xs text-app-text-soft/80">
+        <span className="max-w-xs text-center text-xs text-muted-foreground/80">
           {description}
         </span>
       )}
@@ -45,7 +45,7 @@ export const Spinner: React.FC<{ className?: string; size?: number }> = ({
 }) => {
   return (
     <svg
-      className={cn('animate-spin text-app-text-soft', className)}
+      className={cn('animate-spin text-muted-foreground', className)}
       width={size}
       height={size}
       viewBox="0 0 24 24"

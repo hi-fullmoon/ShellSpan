@@ -76,7 +76,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }
       toastOptions={{
         classNames: {
-          toast: "cn-toast",
+          toast: 'cn-toast shadow-[var(--shadow-toast)]',
         },
       }}
       {...props}
