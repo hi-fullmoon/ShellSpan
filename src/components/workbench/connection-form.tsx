@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
+import { type LocaleKey } from '@/locales';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { invokePickPrivateKeyFile } from '@/lib/tauri';
@@ -55,6 +56,11 @@ const EMPTY_FORM: FormState = {
   },
 };
 
+const authMethodLabels: Record<AuthMethod, LocaleKey> = {
+  password: 'connection.form.auth.password',
+  key: 'connection.form.auth.key',
+};
+
 function profileToForm(profile: ConnectionProfile): FormState {
   return {
     name: profile.name,
@@ -81,8 +87,10 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    setForm(initial ? profileToForm(initial) : EMPTY_FORM);
-    setErrors({});
+    if (open) {
+      setForm(initial ? profileToForm(initial) : EMPTY_FORM);
+      setErrors({});
+    }
   }, [initial, open]);
 
   const updateField = <K extends keyof FormState>(
@@ -164,16 +172,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
+    <Drawer open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>
             {initial
               ? t('connection.form.title.edit')
               : t('connection.form.title.new')}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-4 overflow-y-auto p-4 pt-0">
+          </DrawerTitle>
+        </DrawerHeader>
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
         <FormRow label={t('common.name')} error={errors.name}>
           <Input
             value={form.name}
@@ -210,7 +218,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         <FormRow label={t('common.authMethod')}>
           <Select value={form.authMethod} onValueChange={(value) => updateField('authMethod', value as AuthMethod)}>
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue>{t(authMethodLabels[form.authMethod])}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="password">{t('connection.form.auth.password')}</SelectItem>
@@ -272,7 +280,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         </Label>
 
         {form.useJumpHost && (
-          <div className="flex flex-col gap-4 rounded-lg border border-app-border bg-muted p-4">
+          <div className="flex flex-col gap-2 rounded-lg border border-app-border bg-muted p-2.5">
             <span className="text-xs font-medium text-muted-foreground">
               {t('connection.form.jumpHost')}
             </span>
@@ -303,7 +311,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
             <FormRow label={t('common.authMethod')}>
               <Select value={form.jumpHost.authMethod} onValueChange={(value) => updateJumpHost('authMethod', value as AuthMethod)}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue>{t(authMethodLabels[form.jumpHost.authMethod])}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="password">{t('connection.form.auth.password')}</SelectItem>
@@ -355,16 +363,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
           </div>
         )}
       </div>
-        <DialogFooter className="flex flex-row justify-end">
+        <DrawerFooter>
           <Button variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </Button>
           <Button variant="default" onClick={handleSubmit}>
             {t('common.save')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   );
 };
 
@@ -382,7 +390,7 @@ const FormRow: React.FC<FormRowProps> = ({
   className,
 }) => {
   return (
-    <div className={cn('flex flex-col gap-1', className)}>
+    <div className={cn('flex flex-col gap-0.5', className)}>
       <Label className="text-xs text-muted-foreground">{label}</Label>
       {children}
       {error && (
