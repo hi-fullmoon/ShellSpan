@@ -17,10 +17,10 @@ const NavItem: React.FC<NavItemProps> = ({ section, label }) => {
     <button
       onClick={() => setActiveSection(section)}
       className={cn(
-        'flex items-center justify-center rounded-md px-3 py-1 text-xs font-medium transition-colors',
+        'flex items-center justify-center rounded-full px-3 py-1 text-xs font-medium transition-colors',
         active
-          ? 'bg-app-surface text-app-primary shadow-sm'
-          : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',
+          ? 'bg-app-primary/10 text-app-primary'
+          : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
       )}
       title={label}
       data-tauri-drag-region="false"

@@ -24,7 +24,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ children, className }) => {
   return (
     <div
       className={cn(
-        'flex h-full w-56 shrink-0 flex-col border-r border-app-border bg-app-surface-muted',
+        'flex h-full w-56 shrink-0 flex-col bg-app-surface-muted',
         className,
       )}
     >
