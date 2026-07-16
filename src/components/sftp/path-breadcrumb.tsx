@@ -64,16 +64,18 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
     if (!containerRef.current) return;
     const total = containerRef.current.scrollWidth;
     const available = containerRef.current.clientWidth;
-    if (total <= available || segments.length <= 2) {
+    if (total <= available || segments.length <= 1) {
       setVisibleCount(segments.length);
     } else {
       const chevron = 12;
       const rootWidth = 32;
-      const lastWidth = 32 + Math.min(200, estimateWidth(segments[segments.length - 1].name));
-      let remaining = available - rootWidth - lastWidth - chevron;
+      const lastWidth = chevron + 32 + Math.min(200, estimateWidth(segments[segments.length - 1].name));
+      const ellipsisWidth = chevron + 32;
+      const minimumWidth = rootWidth + ellipsisWidth + lastWidth;
+      let remaining = available - minimumWidth;
       let count = 0;
-      for (let i = 1; i < segments.length - 1; i++) {
-        const width = 32 + Math.min(200, estimateWidth(segments[i].name)) + chevron;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const width = chevron + 32 + Math.min(200, estimateWidth(segments[i].name));
         if (remaining >= width) {
           remaining -= width;
           count++;
@@ -81,7 +83,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
           break;
         }
       }
-      setVisibleCount(count + 2);
+      setVisibleCount(count);
     }
   }, [containerWidth, segments]);
 
@@ -161,7 +163,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
                 segments.map(renderSegment)
               ) : (
                 <>
-                  {segments.slice(0, Math.max(1, visibleCount - 1)).map(renderSegment)}
+                  {segments.slice(0, visibleCount).map(renderSegment)}
                   <ChevronIcon />
                   <Button
                     variant="ghost"

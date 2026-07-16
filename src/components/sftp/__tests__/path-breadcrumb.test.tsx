@@ -58,7 +58,7 @@ describe('PathBreadcrumb', () => {
     });
   });
 
-  it('keeps first and last segments visible when overflow collapses middle segments', () => {
+  it('collapses to root, ellipsis, and last segment in a narrow container', () => {
     const path = '/a/b/c/d/e/f/g/h/i/j';
     const { container } = render(<PathBreadcrumb path={path} onNavigate={vi.fn()} />);
     const div = container.firstChild as HTMLDivElement;
@@ -73,9 +73,11 @@ describe('PathBreadcrumb', () => {
       );
     });
 
-    expect(screen.getByRole('button', { name: '...' })).toBeInTheDocument();
     const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(3);
     expect(buttons[0]).toHaveTextContent('/');
-    expect(buttons[buttons.length - 1]).toHaveTextContent('j');
+    expect(buttons[1]).toHaveTextContent('...');
+    expect(buttons[2]).toHaveTextContent('j');
+    expect(screen.queryByRole('button', { name: 'a' })).not.toBeInTheDocument();
   });
 });
