@@ -54,7 +54,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs transition-colors',
+      'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',
       disabled
         ? 'pointer-events-none text-app-text-soft opacity-40'
         : 'text-app-text hover:bg-app-primary/10 hover:text-app-primary',
@@ -117,7 +117,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
+      className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
       style={position}
     >
         {!isLocal && (
@@ -146,7 +146,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
             >
               {t('sftp.contextMenu.uploadFolder')}
             </MenuItem>
-            <Separator className="my-1" />
+            <Separator className="my-0.5" />
           </>
         )}
         {!isLocal && (
@@ -165,7 +165,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
         >
           {t('sftp.contextMenu.copyCurrentDirectoryPath')}
         </MenuItem>
-        <Separator className="my-1" />
+        <Separator className="my-0.5" />
 
         <MenuItem
           onClick={() => handleAction('batchMode')}

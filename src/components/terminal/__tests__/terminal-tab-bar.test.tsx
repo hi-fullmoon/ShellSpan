@@ -93,7 +93,7 @@ describe('TerminalTabBar', () => {
     const onNewTabClick = vi.fn();
     render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
 
-    fireEvent.click(screen.getByTitle('terminal.newTab'));
+    fireEvent.click(screen.getByRole('button', { name: 'terminal.newTab' }));
     expect(onNewTabClick).toHaveBeenCalledTimes(1);
   });
 
@@ -101,7 +101,7 @@ describe('TerminalTabBar', () => {
     const onNewTabClick = vi.fn();
     render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
 
-    expect(screen.queryByTitle('terminal.newTab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
   });
 
   it('starts renaming on double-click and commits on Enter', () => {

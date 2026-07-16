@@ -71,27 +71,17 @@ interface MenuItemProps {
   danger?: boolean;
 }
 
-const MenuItem: React.FC<MenuItemProps> = ({
-  onClick,
-  disabled,
-  icon,
-  children,
-  danger,
-}) => (
+const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children, danger }) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
-      danger
-        ? 'text-app-error hover:bg-app-error/10'
-        : 'text-app-text hover:bg-app-primary/10 hover:text-app-primary',
+      'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
+      danger ? 'text-app-error hover:bg-app-error/10' : 'text-app-text hover:bg-app-primary/10 hover:text-app-primary',
     )}
   >
-    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-      {icon}
-    </span>
+    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
     <span className="leading-4">{children}</span>
   </button>
 );
@@ -109,8 +99,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   onAction,
 }) => {
   const { t } = useI18n();
-  const { menuRef, position } =
-    useViewportConstrainedPosition<HTMLDivElement>(open, x, y);
+  const { menuRef, position } = useViewportConstrainedPosition<HTMLDivElement>(open, x, y);
 
   useEffect(() => {
     if (!open) return;
@@ -118,10 +107,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
       if (event.key === 'Escape') onClose();
     };
     const handlePointerDown = (event: PointerEvent): void => {
-      if (
-        event.target instanceof Node &&
-        menuRef.current?.contains(event.target)
-      ) {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) {
         return;
       }
       onClose();
@@ -161,174 +147,109 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
+      className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
       style={position}
     >
-        {!isLocal && (
-          <>
-            <MenuItem
-              onClick={() => handleAction('newFile')}
-              icon={<FilePlusIcon className="h-3.5 w-3.5" />}
-            >
-              {t('sftp.contextMenu.newFile')}
-            </MenuItem>
-            <MenuItem
-              onClick={() => handleAction('newFolder')}
-              icon={<FolderPlusIcon className="h-3.5 w-3.5" />}
-            >
-              {t('common.newFolder')}
-            </MenuItem>
-            <MenuItem
-              onClick={() => handleAction('uploadFile')}
-              icon={<UploadIcon className="h-3.5 w-3.5" />}
-            >
-              {t('sftp.contextMenu.uploadFile')}
-            </MenuItem>
-            <MenuItem
-              onClick={() => handleAction('uploadFolder')}
-              icon={<FolderUpIcon className="h-3.5 w-3.5" />}
-            >
-              {t('sftp.contextMenu.uploadFolder')}
-            </MenuItem>
-            <Separator className="my-1" />
-          </>
-        )}
-
-        <MenuItem
-          onClick={() => handleAction('open')}
-          disabled={!canOpen}
-          icon={<ExternalLinkIcon className="h-3.5 w-3.5" />}
-        >
-          {t('sftp.contextMenu.open')}
-        </MenuItem>
-
-        {!isLocal && (
-          <MenuItem
-            onClick={() => handleAction('download')}
-            disabled={!canDownload}
-            icon={<DownloadIcon className="h-3.5 w-3.5" />}
-          >
-            {t('common.download')}
+      {!isLocal && (
+        <>
+          <MenuItem onClick={() => handleAction('newFile')} icon={<FilePlusIcon className="h-3.5 w-3.5" />}>
+            {t('sftp.contextMenu.newFile')}
           </MenuItem>
-        )}
+          <MenuItem onClick={() => handleAction('newFolder')} icon={<FolderPlusIcon className="h-3.5 w-3.5" />}>
+            {t('common.newFolder')}
+          </MenuItem>
+          <MenuItem onClick={() => handleAction('uploadFile')} icon={<UploadIcon className="h-3.5 w-3.5" />}>
+            {t('sftp.contextMenu.uploadFile')}
+          </MenuItem>
+          <MenuItem onClick={() => handleAction('uploadFolder')} icon={<FolderUpIcon className="h-3.5 w-3.5" />}>
+            {t('sftp.contextMenu.uploadFolder')}
+          </MenuItem>
+          <Separator className="my-0.5" />
+        </>
+      )}
 
-        {!isLocal && (
-          <>
-            <MenuItem
-              onClick={() => handleAction('openWithDefaultEditor')}
-              disabled={!canOpenWithDefaultEditor}
-              icon={<FileTextIcon className="h-3.5 w-3.5" />}
-            >
-              {t('sftp.contextMenu.openWithDefaultEditor')}
-            </MenuItem>
-            <MenuItem
-              onClick={() => handleAction('preview')}
-              disabled={!canPreview}
-              icon={<EyeIcon className="h-3.5 w-3.5" />}
-            >
-              {t('sftp.contextMenu.preview')}
-            </MenuItem>
-          </>
-        )}
+      <MenuItem onClick={() => handleAction('open')} disabled={!canOpen} icon={<ExternalLinkIcon className="h-3.5 w-3.5" />}>
+        {t('sftp.contextMenu.open')}
+      </MenuItem>
 
-        <MenuItem
-          onClick={() => handleAction('batchMode')}
-          icon={<Grid3X3Icon className="h-3.5 w-3.5" />}
-        >
-          {batchMode ? t('sftp.contextMenu.batch.exit') : t('sftp.contextMenu.batch.enter')}
+      {!isLocal && (
+        <MenuItem onClick={() => handleAction('download')} disabled={!canDownload} icon={<DownloadIcon className="h-3.5 w-3.5" />}>
+          {t('common.download')}
         </MenuItem>
+      )}
 
-        <Separator className="my-1" />
+      {!isLocal && (
+        <>
+          <MenuItem
+            onClick={() => handleAction('openWithDefaultEditor')}
+            disabled={!canOpenWithDefaultEditor}
+            icon={<FileTextIcon className="h-3.5 w-3.5" />}
+          >
+            {t('sftp.contextMenu.openWithDefaultEditor')}
+          </MenuItem>
+          <MenuItem onClick={() => handleAction('preview')} disabled={!canPreview} icon={<EyeIcon className="h-3.5 w-3.5" />}>
+            {t('sftp.contextMenu.preview')}
+          </MenuItem>
+        </>
+      )}
 
-        <MenuItem
-          onClick={() => handleAction('rename')}
-          disabled={!canRename}
-          icon={<PencilIcon className="h-3.5 w-3.5" />}
-        >
-          {t('common.rename')}
-        </MenuItem>
+      <MenuItem onClick={() => handleAction('batchMode')} icon={<Grid3X3Icon className="h-3.5 w-3.5" />}>
+        {batchMode ? t('sftp.contextMenu.batch.exit') : t('sftp.contextMenu.batch.enter')}
+      </MenuItem>
 
-        <MenuItem
-          onClick={() => handleAction('copy')}
-          disabled={!canCopy}
-          icon={<CopyIcon className="h-3.5 w-3.5" />}
-        >
-          {t('sftp.contextMenu.copy')}
-        </MenuItem>
+      <Separator className="my-0.5" />
 
-        <MenuItem
-          onClick={() => handleAction('delete')}
-          disabled={!canDelete}
-          icon={<Trash2Icon className="h-3.5 w-3.5" />}
-          danger
-        >
-          {t('common.delete')}
-        </MenuItem>
+      <MenuItem onClick={() => handleAction('rename')} disabled={!canRename} icon={<PencilIcon className="h-3.5 w-3.5" />}>
+        {t('common.rename')}
+      </MenuItem>
 
-        <Separator className="my-1" />
+      <MenuItem onClick={() => handleAction('copy')} disabled={!canCopy} icon={<CopyIcon className="h-3.5 w-3.5" />}>
+        {t('sftp.contextMenu.copy')}
+      </MenuItem>
 
-        <MenuItem
-          onClick={() => handleAction('copyName')}
-          disabled={!canCopyName}
-          icon={<TextIcon className="h-3.5 w-3.5" />}
-        >
-          {t('sftp.contextMenu.copyName')}
-        </MenuItem>
+      <MenuItem onClick={() => handleAction('delete')} disabled={!canDelete} icon={<Trash2Icon className="h-3.5 w-3.5" />} danger>
+        {t('common.delete')}
+      </MenuItem>
 
-        <MenuItem
-          onClick={() => handleAction('copyPath')}
-          disabled={!canCopyPath}
-          icon={<LinkIcon className="h-3.5 w-3.5" />}
-        >
-          {t('sftp.contextMenu.copyPath')}
-        </MenuItem>
+      <Separator className="my-0.5" />
 
-        <MenuItem
-          onClick={() => handleAction('copyContainingDirectory')}
-          disabled={!canCopyContainingDirectory}
-          icon={<FolderIcon className="h-3.5 w-3.5" />}
-        >
-          {t('sftp.contextMenu.copyContainingDirectory')}
-        </MenuItem>
+      <MenuItem onClick={() => handleAction('copyName')} disabled={!canCopyName} icon={<TextIcon className="h-3.5 w-3.5" />}>
+        {t('sftp.contextMenu.copyName')}
+      </MenuItem>
 
-        <Separator className="my-1" />
+      <MenuItem onClick={() => handleAction('copyPath')} disabled={!canCopyPath} icon={<LinkIcon className="h-3.5 w-3.5" />}>
+        {t('sftp.contextMenu.copyPath')}
+      </MenuItem>
 
-        <MenuItem
-          onClick={() => handleAction('refresh')}
-          icon={<RefreshCwIcon className="h-3.5 w-3.5" />}
-        >
-          {t('common.refresh')}
-        </MenuItem>
+      <MenuItem
+        onClick={() => handleAction('copyContainingDirectory')}
+        disabled={!canCopyContainingDirectory}
+        icon={<FolderIcon className="h-3.5 w-3.5" />}
+      >
+        {t('sftp.contextMenu.copyContainingDirectory')}
+      </MenuItem>
 
-        {!isLocal && (
-          <>
-            <MenuItem
-              onClick={() => handleAction('editPermissions')}
-              disabled={!canEditPermissions}
-              icon={<LockIcon className="h-3.5 w-3.5" />}
-            >
-              {t('sftp.contextMenu.editPermissions')}
-            </MenuItem>
+      <Separator className="my-0.5 scale-y-[-1]" />
 
-            <MenuItem
-              onClick={() => handleAction('bookmark')}
-              disabled={!canBookmark}
-              icon={<BookmarkIcon className="h-3.5 w-3.5" />}
-            >
-              {isBookmarked
-                ? t('sftp.contextMenu.bookmark.remove')
-                : t('sftp.contextMenu.bookmark.add')}
-            </MenuItem>
-          </>
-        )}
+      <MenuItem onClick={() => handleAction('refresh')} icon={<RefreshCwIcon className="h-3.5 w-3.5" />}>
+        {t('common.refresh')}
+      </MenuItem>
 
-        <MenuItem
-          onClick={() => handleAction('properties')}
-          disabled={!canProperties}
-          icon={<InfoIcon className="h-3.5 w-3.5" />}
-        >
-          {t('common.properties')}
-        </MenuItem>
+      {!isLocal && (
+        <>
+          <MenuItem onClick={() => handleAction('editPermissions')} disabled={!canEditPermissions} icon={<LockIcon className="h-3.5 w-3.5" />}>
+            {t('sftp.contextMenu.editPermissions')}
+          </MenuItem>
+
+          <MenuItem onClick={() => handleAction('bookmark')} disabled={!canBookmark} icon={<BookmarkIcon className="h-3.5 w-3.5" />}>
+            {isBookmarked ? t('sftp.contextMenu.bookmark.remove') : t('sftp.contextMenu.bookmark.add')}
+          </MenuItem>
+        </>
+      )}
+
+      <MenuItem onClick={() => handleAction('properties')} disabled={!canProperties} icon={<InfoIcon className="h-3.5 w-3.5" />}>
+        {t('common.properties')}
+      </MenuItem>
     </div>,
     document.body,
   );

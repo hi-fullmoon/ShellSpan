@@ -121,7 +121,7 @@ export const KnownHostsPanel: React.FC = () => {
                     variant="ghost"
                     size="icon"
                     onClick={() => confirmRemove(host.host, host.port)}
-                    title={t('common.delete')}
+                    aria-label={t('common.delete')}
                   >
                     <Trash2Icon className="text-app-error" />
                   </Button>
@@ -132,7 +132,6 @@ export const KnownHostsPanel: React.FC = () => {
                   </div>
                   <div
                     className="break-all font-mono text-[10px] text-app-text"
-                    title={host.fingerprint}
                   >
                     {host.fingerprint}
                   </div>

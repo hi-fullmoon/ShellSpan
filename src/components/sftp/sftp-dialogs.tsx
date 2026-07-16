@@ -3,7 +3,13 @@ import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, PromptDialog as BasePromptDialog } from '@/components/ui/dialog';
+import { Dialog } from '@/components/ui/dialog';
+import {
+  SftpDialogBody,
+  SftpDialogContent,
+  SftpDialogFooter,
+  SftpDialogHeader,
+} from './sftp-dialog-layout';
 
 export interface PromptDialogProps {
   open: boolean;
@@ -25,17 +31,50 @@ export const PromptDialog: React.FC<PromptDialogProps> = ({
   defaultValue = '',
 }) => {
   const { t } = useI18n();
+  const [value, setValue] = React.useState(defaultValue);
+
+  React.useEffect(() => {
+    if (open) {
+      setValue(defaultValue);
+    }
+  }, [open, defaultValue]);
+
+  const handleConfirm = (): void => {
+    if (!value.trim()) return;
+    onConfirm(value);
+    onClose();
+  };
+
   return (
-    <BasePromptDialog
-      open={open}
-      onClose={onClose}
-      onConfirm={onConfirm}
-      title={title}
-      label={label}
-      confirmText={confirmText}
-      cancelText={t('common.cancel')}
-      defaultValue={defaultValue}
-    />
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <SftpDialogContent className="max-w-sm" showCloseButton={false}>
+        <SftpDialogHeader title={title} />
+        <SftpDialogBody>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="sftp-prompt-input" className="text-xs text-muted-foreground">
+              {label}
+            </Label>
+            <Input
+              id="sftp-prompt-input"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleConfirm();
+              }}
+              autoFocus
+            />
+          </div>
+        </SftpDialogBody>
+        <SftpDialogFooter>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button size="sm" onClick={handleConfirm} disabled={!value.trim()}>
+            {confirmText}
+          </Button>
+        </SftpDialogFooter>
+      </SftpDialogContent>
+    </Dialog>
   );
 };
 
@@ -71,32 +110,35 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(open: boolean) => { if (!open) onClose(); }}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('common.permissions')}</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-2">
-          <Label className="text-xs text-muted-foreground">Octal (e.g. 644)</Label>
-          <Input
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                handleConfirm();
-              }
-            }}
-            autoFocus
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>
+      <SftpDialogContent className="max-w-xs" showCloseButton={false}>
+        <SftpDialogHeader title={t('common.permissions')} />
+        <SftpDialogBody>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="sftp-permissions-input" className="text-xs text-muted-foreground">
+              Octal (e.g. 644)
+            </Label>
+            <Input
+              id="sftp-permissions-input"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleConfirm();
+                }
+              }}
+              autoFocus
+            />
+          </div>
+        </SftpDialogBody>
+        <SftpDialogFooter>
+          <Button variant="outline" size="sm" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button variant="default" onClick={handleConfirm}>
+          <Button size="sm" onClick={handleConfirm}>
             {t('common.save')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
+        </SftpDialogFooter>
+      </SftpDialogContent>
     </Dialog>
   );
 };

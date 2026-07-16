@@ -51,7 +51,6 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
                   ? 'bg-app-primary/10 text-app-primary'
                   : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',
               )}
-              title={item.label}
             >
               {item.label}
             </button>

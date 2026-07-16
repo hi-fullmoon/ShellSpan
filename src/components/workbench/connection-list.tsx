@@ -191,7 +191,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             variant="ghost"
             size="icon"
             onClick={onConnectTerminal}
-            title={t('workbench.connections.connectTerminal')}
+            aria-label={t('workbench.connections.connectTerminal')}
           >
             <TerminalIcon />
           </Button>
@@ -199,7 +199,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             variant="ghost"
             size="icon"
             onClick={onConnectSftp}
-            title={t('workbench.connections.connectSftp')}
+            aria-label={t('workbench.connections.connectSftp')}
           >
             <FolderIcon />
           </Button>
@@ -207,7 +207,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             variant="ghost"
             size="icon"
             onClick={onEdit}
-            title={t('common.edit')}
+            aria-label={t('common.edit')}
           >
             <PencilIcon />
           </Button>
@@ -215,7 +215,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             variant="ghost"
             size="icon"
             onClick={onDuplicate}
-            title={t('common.duplicate')}
+            aria-label={t('common.duplicate')}
           >
             <CopyIcon />
           </Button>
@@ -223,7 +223,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             variant="ghost"
             size="icon"
             onClick={onDelete}
-            title={t('common.delete')}
+            aria-label={t('common.delete')}
           >
             <Trash2Icon className="text-app-error" />
           </Button>

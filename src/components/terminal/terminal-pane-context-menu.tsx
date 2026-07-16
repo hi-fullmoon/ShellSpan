@@ -4,31 +4,25 @@ import { Terminal } from '@xterm/xterm';
 import { useI18n } from '@/hooks/useI18n';
 import { invokeWriteSession } from '@/lib/tauri';
 import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib/utils';
-import { CopyIcon, ClipboardPasteIcon, CheckSquareIcon, Trash2Icon, SearchIcon } from 'lucide-react';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { SessionStatus } from '@/types';
 
 const MENU_WIDTH = 184;
 
-// Icons replaced with lucide-react imports
-
 interface MenuItemProps {
   onClick: () => void;
   disabled?: boolean;
-  icon: React.ReactNode;
   children: React.ReactNode;
 }
 
-const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }) => (
+const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
-    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
   >
-    <span>{icon}</span>
-    <span>{children}</span>
+    <span className="leading-4">{children}</span>
   </button>
 );
 
@@ -146,24 +140,24 @@ export const TerminalPaneContextMenu: React.FC<TerminalPaneContextMenuProps> = (
       />
       <div
         ref={menuRef}
-        className="fixed z-[1700] w-fit min-w-48 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
+        className="fixed z-[1700] w-fit min-w-48 overflow-hidden rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
         style={{ left, top }}
       >
-        <MenuItem onClick={handleCopy} disabled={!hasSelection} icon={<CopyIcon />}>
+        <MenuItem onClick={handleCopy} disabled={!hasSelection}>
           {t('terminal.contextMenu.copy')}
         </MenuItem>
-        <MenuItem onClick={handlePaste} icon={<ClipboardPasteIcon />}>
+        <MenuItem onClick={handlePaste}>
           {t('terminal.contextMenu.paste')}
         </MenuItem>
-        <Separator className="my-1" />
-        <MenuItem onClick={handleSelectAll} icon={<CheckSquareIcon />}>
+        <Separator className="my-0.5" />
+        <MenuItem onClick={handleSelectAll}>
           {t('terminal.contextMenu.selectAll')}
         </MenuItem>
-        <MenuItem onClick={handleClear} icon={<Trash2Icon />}>
+        <MenuItem onClick={handleClear}>
           {t('terminal.contextMenu.clear')}
         </MenuItem>
-        <Separator className="my-1" />
-        <MenuItem onClick={handleFind} icon={<SearchIcon />}>
+        <Separator className="my-0.5" />
+        <MenuItem onClick={handleFind}>
           {t('terminal.contextMenu.find')}
         </MenuItem>
       </div>

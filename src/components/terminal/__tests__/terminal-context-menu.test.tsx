@@ -322,7 +322,7 @@ describe('TerminalContextMenu', () => {
       />,
     );
 
-    const colorButton = screen.getByTitle('#ef4444');
+    const colorButton = screen.getByRole('button', { name: '#ef4444' });
     fireEvent.click(colorButton);
 
     expect(
@@ -331,7 +331,7 @@ describe('TerminalContextMenu', () => {
     ).toBe('#ef4444');
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    const clearButton = screen.getByTitle('terminal.tab.clearColor');
+    const clearButton = screen.getByRole('button', { name: 'terminal.tab.clearColor' });
     fireEvent.click(clearButton);
 
     expect(
@@ -431,6 +431,48 @@ describe('TerminalContextMenu', () => {
     fireEvent.click(screen.getByText('common.rename'));
 
     expect(screen.getByDisplayValue('My Tab')).toBeInTheDocument();
+  });
+
+  it('clears the rename dialog state before the context menu is reopened', () => {
+    const session = makeSession('s1', 'My Tab', 'p1');
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('common.rename'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByDisplayValue('My Tab')).toBeInTheDocument();
+
+    rerender(
+      <TerminalContextMenu
+        open={false}
+        x={0}
+        y={0}
+        session={null}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.click(screen.getByText('common.cancel'));
+
+    rerender(
+      <TerminalContextMenu
+        open
+        x={20}
+        y={20}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.queryByDisplayValue('My Tab')).not.toBeInTheDocument();
+    expect(screen.getByText('common.rename')).toBeInTheDocument();
   });
 
   it('closes on Escape key when open', () => {

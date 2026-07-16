@@ -51,7 +51,7 @@ describe('TerminalPaneContextMenu', () => {
   });
 
   it('renders all menu items when open', () => {
-    render(
+    const { container } = render(
       <TerminalPaneContextMenu
         open
         x={10}
@@ -69,6 +69,7 @@ describe('TerminalPaneContextMenu', () => {
     expect(screen.getByText('terminal.contextMenu.selectAll')).toBeInTheDocument();
     expect(screen.getByText('terminal.contextMenu.clear')).toBeInTheDocument();
     expect(screen.getByText('terminal.contextMenu.find')).toBeInTheDocument();
+    expect(container.querySelector('svg')).toBeNull();
   });
 
   it('renders nothing when closed', () => {

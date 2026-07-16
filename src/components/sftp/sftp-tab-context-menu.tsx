@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
-import { PromptDialog } from '@/components/ui/dialog';
+import { PromptDialog } from './sftp-dialogs';
 import type { ConnectionProfile } from '@/types';
 import { useProfileStore } from '@/stores/profileStore';
 
@@ -21,7 +21,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
     type="button"
     onClick={onClick}
     disabled={disabled}
-    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
   >
     <span className="leading-4">{children}</span>
   </button>
@@ -49,7 +49,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const togglePin = useSftpStore((state) => state.togglePin);
   const addConnection = useSftpStore((state) => state.addConnection);
   const getProfile = useProfileStore((state) => state.getProfile);
-  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<SftpConnection | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -64,19 +64,20 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
     };
   }, [open, onClose]);
 
-  if (!open || !connection) return null;
+  const target = connection ?? renameTarget;
+  if (!target) return null;
 
   const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
   const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
 
   const handleClose = (): void => {
-    removeConnection(connection.id);
+    removeConnection(target.id);
     onClose();
   };
 
   const handleCloseOthers = (): void => {
     connections.forEach((conn) => {
-      if (conn.id !== connection.id && !conn.pinned) {
+      if (conn.id !== target.id && !conn.pinned) {
         removeConnection(conn.id);
       }
     });
@@ -84,7 +85,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   };
 
   const handleCloseToRight = (): void => {
-    const idx = connections.findIndex((conn) => conn.id === connection.id);
+    const idx = connections.findIndex((conn) => conn.id === target.id);
     if (idx === -1) {
       onClose();
       return;
@@ -100,62 +101,68 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const handleRenameConfirm = (value: string): void => {
     const trimmed = value.trim();
     if (trimmed) {
-      updateTitle(connection.id, trimmed);
+      if (renameTarget) updateTitle(renameTarget.id, trimmed);
     }
-    setRenameOpen(false);
-    onClose();
+    setRenameTarget(null);
   };
 
   const handleTogglePin = (): void => {
-    togglePin(connection.id);
+    togglePin(target.id);
     onClose();
   };
 
   const handleDuplicate = (): void => {
-    if (!connection.profileId) {
+    if (!target.profileId) {
       onClose();
       return;
     }
-    const profile = getProfile(connection.profileId) as ConnectionProfile | undefined;
+    const profile = getProfile(target.profileId) as ConnectionProfile | undefined;
     if (profile) {
       const summary = {
-        sessionId: connection.sessionId ?? profile.id,
+        sessionId: target.sessionId ?? profile.id,
         title: profile.name,
         host: profile.host,
         port: profile.port,
         username: profile.username,
       };
-      addConnection(summary, connection.connection, profile.id);
+      addConnection(summary, target.connection, profile.id);
     }
     onClose();
   };
 
   return createPortal(
     <>
-      <div
-        className="fixed inset-0 z-[1600]"
-        role="presentation"
-        onClick={onClose}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onClose();
-        }}
-      />
-      <div
-        className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
-        style={{ left, top }}
-      >
+      {open && connection && (
+        <>
+          <div
+            className="fixed inset-0 z-[1600]"
+            role="presentation"
+            onClick={onClose}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onClose();
+            }}
+          />
+          <div
+            className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
+            style={{ left, top }}
+          >
         <MenuItem onClick={handleTogglePin}>
-          {connection.pinned ? t('sftp.tab.unpin') : t('sftp.tab.pin')}
+          {target.pinned ? t('sftp.tab.unpin') : t('sftp.tab.pin')}
         </MenuItem>
-        <Separator className="my-1" />
-        <MenuItem onClick={() => setRenameOpen(true)}>
+        <Separator className="my-0.5" />
+        <MenuItem
+          onClick={() => {
+            setRenameTarget(target);
+            onClose();
+          }}
+        >
           {t('common.rename')}
         </MenuItem>
-        <MenuItem onClick={handleDuplicate} disabled={!connection.profileId}>
+        <MenuItem onClick={handleDuplicate} disabled={!target.profileId}>
           {t('common.duplicate')}
         </MenuItem>
-        <Separator className="my-1" />
+        <Separator className="my-0.5" />
         <MenuItem onClick={handleClose}>
           {t('common.close')}
         </MenuItem>
@@ -165,16 +172,17 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         <MenuItem onClick={handleCloseToRight}>
           {t('sftp.tab.closeToRight')}
         </MenuItem>
-      </div>
+          </div>
+        </>
+      )}
       <PromptDialog
-        open={renameOpen}
-        onClose={() => setRenameOpen(false)}
+        open={!!renameTarget}
+        onClose={() => setRenameTarget(null)}
         onConfirm={handleRenameConfirm}
         title={t('common.rename')}
         label={t('common.name')}
         confirmText={t('common.save')}
-        cancelText={t('common.cancel')}
-        defaultValue={connection.title}
+        defaultValue={renameTarget?.title ?? ''}
       />
     </>,
     document.body,

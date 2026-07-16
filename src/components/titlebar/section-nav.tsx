@@ -22,7 +22,6 @@ const NavItem: React.FC<NavItemProps> = ({ section, label }) => {
           ? 'bg-app-primary/10 text-app-primary'
           : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
       )}
-      title={label}
       data-tauri-drag-region="false"
     >
       <span className="text-center">{label}</span>

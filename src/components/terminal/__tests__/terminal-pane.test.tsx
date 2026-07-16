@@ -91,7 +91,7 @@ function makeMockTerminal(selection = '') {
 describe('TerminalPane', () => {
   it('renders the pane host without a search toggle button', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
-    expect(screen.queryByTitle('terminal.tab.search')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'terminal.tab.search' })).not.toBeInTheDocument();
     expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
   });
 
@@ -99,8 +99,10 @@ describe('TerminalPane', () => {
     render(<TerminalPane activeSession={makeSession()} />);
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
     fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
-    expect(screen.getByPlaceholderText('terminal.search.placeholder')).toBeInTheDocument();
-    await userEvent.click(screen.getByTitle('terminal.search.close'));
+    const searchInput = screen.getByPlaceholderText('terminal.search.placeholder');
+    expect(searchInput).toBeInTheDocument();
+    expect(searchInput.parentElement).toHaveClass('border-t-0');
+    await userEvent.click(screen.getByRole('button', { name: 'terminal.search.close' }));
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
   });
 
@@ -120,7 +122,7 @@ describe('TerminalPane', () => {
 
   it('renders without an active session', () => {
     const { container } = render(<TerminalPane activeSession={null} />);
-    expect(screen.queryByTitle('terminal.tab.search')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'terminal.tab.search' })).not.toBeInTheDocument();
     expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
   });
 

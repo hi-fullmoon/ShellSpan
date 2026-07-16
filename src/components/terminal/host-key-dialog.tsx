@@ -1,10 +1,13 @@
 import React from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { ShieldAlertIcon, ShieldCheckIcon } from 'lucide-react';
-
-// ShieldIcon replaced with lucide-react imports
+import { Dialog, DialogDescription } from '@/components/ui/dialog';
+import {
+  CompactDialogBody,
+  CompactDialogContent,
+  CompactDialogFooter,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
 
 export interface HostKeyDialogProps {
   open: boolean;
@@ -32,16 +35,9 @@ export const HostKeyDialog: React.FC<HostKeyDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="bg-app-surface border-app-border">
-        <DialogHeader>
-          <DialogTitle>
-            <div className="flex items-center gap-2">
-              {mismatch ? <ShieldAlertIcon className="h-5 w-5 text-app-error" /> : <ShieldCheckIcon className="h-5 w-5 text-app-primary" />}
-              <span>{title}</span>
-            </div>
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
+      <CompactDialogContent className="max-w-sm" showCloseButton={false}>
+        <CompactDialogHeader title={title} />
+        <CompactDialogBody>
           <DialogDescription className="text-app-text">
             {mismatch
               ? t('dialog.hostKeyMismatch.message', { host, port })
@@ -52,23 +48,23 @@ export const HostKeyDialog: React.FC<HostKeyDialogProps> = ({
               <span className="text-[11px] font-medium uppercase tracking-wider text-app-text-soft">
                 {t('dialog.hostKey.fingerprint')}
               </span>
-              <div className="rounded-lg border border-app-border bg-app-surface-muted/50 p-3">
+              <div className="rounded-md border border-app-border bg-app-surface-muted/50 p-2.5">
                 <code className="break-all font-mono text-[11px] leading-relaxed text-app-text">
                   {fingerprint}
                 </code>
               </div>
             </div>
           )}
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>
+        </CompactDialogBody>
+        <CompactDialogFooter>
+          <Button variant="outline" size="sm" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button variant="default" onClick={onTrust}>
+          <Button size="sm" onClick={onTrust}>
             {t('dialog.hostKey.trustAndConnect')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
+        </CompactDialogFooter>
+      </CompactDialogContent>
     </Dialog>
   );
 };

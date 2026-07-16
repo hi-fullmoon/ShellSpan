@@ -330,7 +330,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
               size="sm"
               onClick={handleBookmarkButtonClick}
               className="gap-1.5 px-2"
-              title={t('sftp.contextMenu.bookmark.add')}
+              aria-label={t('sftp.contextMenu.bookmark.add')}
             >
               <BookmarkIcon className="h-3.5 w-3.5" />
             </Button>

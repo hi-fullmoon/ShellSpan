@@ -1,11 +1,11 @@
 import React from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog } from '@/components/ui/dialog';
 import { useI18n } from '@/hooks/useI18n';
+import {
+  SftpDialogBody,
+  SftpDialogContent,
+  SftpDialogHeader,
+} from './sftp-dialog-layout';
 import type { FileEntry } from '@/components/sftp/file-entry-formatters';
 import { isRemoteEntry } from '@/components/sftp/file-entry-formatters';
 import {
@@ -30,9 +30,9 @@ interface PropertyRowProps {
 }
 
 const PropertyRow: React.FC<PropertyRowProps> = ({ label, value }) => (
-  <div className="grid grid-cols-[100px_minmax(0,1fr)] gap-2 px-1 py-2 text-sm">
-    <span className="text-app-text-soft">{label}</span>
-    <span className="break-all font-mono text-app-text">{value}</span>
+  <div className="grid grid-cols-[104px_minmax(0,1fr)] gap-3 px-3 py-2.5 text-sm">
+    <span className="text-xs text-app-text-soft">{label}</span>
+    <span className="break-all text-right font-mono text-xs leading-5 text-app-text">{value}</span>
   </div>
 );
 
@@ -52,11 +52,10 @@ export const SftpPropertiesDialog: React.FC<SftpPropertiesDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{t('sftp.properties.title')}</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col py-2">
+      <SftpDialogContent className="max-w-sm">
+        <SftpDialogHeader title={t('sftp.properties.title')} />
+        <SftpDialogBody>
+          <div className="flex flex-col overflow-hidden rounded-lg border border-app-border bg-app-surface-muted/30">
           <PropertyRow label={t('sftp.properties.name')} value={entry.name} />
           <PropertyRow label={t('sftp.properties.path')} value={entry.path} />
           <PropertyRow label={t('sftp.properties.kind')} value={kindLabel(entry.kind, t)} />
@@ -83,8 +82,9 @@ export const SftpPropertiesDialog: React.FC<SftpPropertiesDialogProps> = ({
               value={formatGroup(entry)}
             />
           )}
-        </div>
-      </DialogContent>
+          </div>
+        </SftpDialogBody>
+      </SftpDialogContent>
     </Dialog>
   );
 };

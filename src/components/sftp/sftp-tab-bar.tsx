@@ -121,7 +121,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <strong className="block flex-1 truncate text-left text-xs font-medium leading-none" title={connection.title}>
+            <strong className="block flex-1 truncate text-left text-xs font-medium leading-none">
               {connection.title}
             </strong>
           </div>
@@ -451,7 +451,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           variant="ghost"
           size="icon"
           onClick={onNewTabClick}
-          title={t('sftp.newTab')}
+          aria-label={t('sftp.newTab')}
           className="h-[36px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
         >
           <PlusIcon />

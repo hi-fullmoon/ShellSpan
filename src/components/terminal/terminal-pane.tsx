@@ -146,7 +146,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
       {searchOpen && (
-        <div className="absolute right-0 top-0 z-20 flex h-10 w-80 items-center gap-1.5 rounded-bl-md border border-app-border bg-app-surface p-1.5 shadow-md">
+        <div className="absolute right-0 top-0 z-20 flex h-10 w-96 items-center gap-1.5 rounded-bl-sm border border-t-0 border-app-border bg-app-surface p-1.5 shadow-md">
           <Input
             value={query}
             onChange={(e) => {
@@ -170,10 +170,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
               }
             }}
           />
-          <Button variant="secondary" size="icon" className="h-7 w-7 shrink-0" onClick={() => performSearch('previous', query)} title={t('terminal.search.previous')}>
+          <Button variant="secondary" size="icon" className="h-7 w-7 shrink-0" onClick={() => performSearch('previous', query)} aria-label={t('terminal.search.previous')}>
             <ChevronUpIcon className="h-4 w-4" />
           </Button>
-          <Button variant="secondary" size="icon" className="h-7 w-7 shrink-0" onClick={() => performSearch('next', query)} title={t('terminal.search.next')}>
+          <Button variant="secondary" size="icon" className="h-7 w-7 shrink-0" onClick={() => performSearch('next', query)} aria-label={t('terminal.search.next')}>
             <ChevronDownIcon className="h-4 w-4" />
           </Button>
           <Button
@@ -186,12 +186,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
                 searchNext(query, { caseSensitive: next });
               }
             }}
-            title={t('terminal.search.caseSensitive')}
+            aria-label={t('terminal.search.caseSensitive')}
             className={cn('h-7 px-1.5 font-mono text-xs', caseSensitive && 'text-app-primary')}
           >
             Aa
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleCloseSearch} title={t('terminal.search.close')}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleCloseSearch} aria-label={t('terminal.search.close')}>
             <XIcon className="h-4 w-4" />
           </Button>
         </div>

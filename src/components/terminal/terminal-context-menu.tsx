@@ -5,7 +5,7 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { invokeCloseSession } from '@/lib/tauri';
-import { PromptDialog } from '@/components/ui/dialog';
+import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
@@ -37,7 +37,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
     type="button"
     onClick={onClick}
     disabled={disabled}
-    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
   >
     <span className="leading-4">{children}</span>
   </button>
@@ -66,7 +66,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const setTabColor = useTerminalStore((state) => state.setTabColor);
   const getProfile = useProfileStore((state) => state.getProfile);
   const { connect } = useConnectSession();
-  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<TerminalSession | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -81,7 +81,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     };
   }, [open, onClose]);
 
-  if (!open || !session) return null;
+  const target = session ?? renameTarget;
+  if (!target) return null;
 
   const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
   const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
@@ -92,7 +93,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   };
 
   const handleDuplicate = (): void => {
-    const profile = session.profileId ? getProfile(session.profileId) : undefined;
+    const profile = target.profileId ? getProfile(target.profileId) : undefined;
     if (profile) {
       void connect(profile);
     }
@@ -102,20 +103,20 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const handleCopyInfo = (): void => {
     if (navigator.clipboard) {
       void navigator.clipboard.writeText(
-        `${session.username}@${session.host}:${session.port}`,
+        `${target.username}@${target.host}:${target.port}`,
       );
     }
     onClose();
   };
 
   const handleClose = (): void => {
-    closeSession(session.sessionId);
+    closeSession(target.sessionId);
     onClose();
   };
 
   const handleCloseOthers = (): void => {
     sessions.forEach((s) => {
-      if (s.sessionId !== session.sessionId && !s.pinned) {
+      if (s.sessionId !== target.sessionId && !s.pinned) {
         closeSession(s.sessionId);
       }
     });
@@ -123,7 +124,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   };
 
   const handleCloseToRight = (): void => {
-    const idx = sessions.findIndex((s) => s.sessionId === session.sessionId);
+    const idx = sessions.findIndex((s) => s.sessionId === target.sessionId);
     if (idx === -1) {
       onClose();
       return;
@@ -137,53 +138,60 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   };
 
   const handleRenameConfirm = (value: string): void => {
-    updateTitle(session.sessionId, value);
-    setRenameOpen(false);
-    onClose();
+    if (!renameTarget) return;
+    updateTitle(renameTarget.sessionId, value);
+    setRenameTarget(null);
   };
 
   const handleTogglePin = (): void => {
-    togglePin(session.sessionId);
+    togglePin(target.sessionId);
     onClose();
   };
 
   const handleColor = (color?: string): void => {
-    setTabColor(session.sessionId, color);
+    setTabColor(target.sessionId, color);
     onClose();
   };
 
   return createPortal(
     <>
-      <div
-        className="fixed inset-0 z-[1600]"
-        role="presentation"
-        onClick={onClose}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onClose();
-        }}
-      />
-      <div
-        className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
-        style={{ left, top }}
-      >
+      {open && session && (
+        <>
+          <div
+            className="fixed inset-0 z-[1600]"
+            role="presentation"
+            onClick={onClose}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onClose();
+            }}
+          />
+          <div
+            className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
+            style={{ left, top }}
+          >
         <MenuItem onClick={handleTogglePin}>
-          {session.pinned ? t('terminal.tab.unpin') : t('terminal.tab.pin')}
+          {target.pinned ? t('terminal.tab.unpin') : t('terminal.tab.pin')}
         </MenuItem>
-        <Separator className="my-1" />
-        <MenuItem onClick={() => setRenameOpen(true)}>
+        <Separator className="my-0.5" />
+        <MenuItem
+          onClick={() => {
+            setRenameTarget(target);
+            onClose();
+          }}
+        >
           {t('common.rename')}
         </MenuItem>
         <MenuItem
           onClick={handleDuplicate}
-          disabled={!session.profileId}
+          disabled={!target.profileId}
         >
           {t('common.duplicate')}
         </MenuItem>
         <MenuItem onClick={handleCopyInfo}>
           {t('terminal.tab.copyInfo')}
         </MenuItem>
-        <Separator className="my-1" />
+        <Separator className="my-0.5" />
         <MenuItem onClick={handleClose}>
           {t('common.close')}
         </MenuItem>
@@ -193,8 +201,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         <MenuItem onClick={handleCloseToRight}>
           {t('terminal.tab.closeToRight')}
         </MenuItem>
-        <Separator className="my-1" />
-        <div className="px-3 py-2">
+        <Separator className="my-0.5" />
+        <div className="px-2.5 py-1.5">
           <div className="mb-1.5 text-xs text-app-text-soft">{t('terminal.tab.color')}</div>
           <div className="flex flex-nowrap items-center gap-1">
             <button
@@ -202,9 +210,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
               onClick={() => handleColor(undefined)}
               className={cn(
                 'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-app-border bg-transparent transition-transform hover:scale-110',
-                !session.color && 'ring-1 ring-app-primary ring-offset-1 ring-offset-app-surface',
+                !target.color && 'ring-1 ring-app-primary ring-offset-1 ring-offset-app-surface',
               )}
-              title={t('terminal.tab.clearColor')}
+              aria-label={t('terminal.tab.clearColor')}
             >
               <span className="absolute block h-px w-2.5 rotate-45 bg-app-text-soft/50" />
             </button>
@@ -216,24 +224,26 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
                 style={{ backgroundColor: color }}
                 className={cn(
                   'h-4 w-4 shrink-0 rounded-full transition-transform hover:scale-110',
-                  session.color === color &&
+                  target.color === color &&
                     'ring-1 ring-app-primary ring-offset-1 ring-offset-app-surface',
                 )}
-                title={color}
+                aria-label={color}
               />
             ))}
           </div>
         </div>
-      </div>
-      <PromptDialog
-        open={renameOpen}
-        onClose={() => setRenameOpen(false)}
+          </div>
+        </>
+      )}
+      <CompactPromptDialog
+        open={!!renameTarget}
+        onClose={() => setRenameTarget(null)}
         onConfirm={handleRenameConfirm}
         title={t('common.rename')}
         label={t('common.name')}
         confirmText={t('common.save')}
         cancelText={t('common.cancel')}
-        defaultValue={session.title}
+        defaultValue={renameTarget?.title ?? ''}
       />
     </>,
     document.body,
