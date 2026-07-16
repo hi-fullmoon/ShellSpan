@@ -7,14 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/empty-state';
 import { PathBreadcrumb } from './path-breadcrumb';
 import { SftpFileList } from './sftp-file-list';
-import {
-  SftpFileContextMenu,
-  type SftpFileContextMenuAction,
-} from './sftp-file-context-menu';
-import {
-  SftpBlankContextMenu,
-  type SftpBlankContextMenuAction,
-} from './sftp-blank-context-menu';
+import { SftpFileContextMenu, type SftpFileContextMenuAction } from './sftp-file-context-menu';
+import { SftpBlankContextMenu, type SftpBlankContextMenuAction } from './sftp-blank-context-menu';
 import { SftpBookmarkMenu } from './sftp-bookmark-menu';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
@@ -36,13 +30,7 @@ interface HistoryState {
   index: number;
 }
 
-export const SftpPane: React.FC<SftpPaneProps> = ({
-  connection,
-  side,
-  actions,
-  selectedPaths,
-  onSelectedPathsChange,
-}) => {
+export const SftpPane: React.FC<SftpPaneProps> = ({ connection, side, actions, selectedPaths, onSelectedPathsChange }) => {
   const { t } = useI18n();
   const { active } = useDndContext();
   const { setNodeRef, isOver } = useDroppable({
@@ -132,9 +120,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     const parts = normalized.split('/').filter(Boolean);
     if (parts.length === 0) return;
     parts.pop();
-    const parent = normalized.startsWith('/')
-      ? `/${parts.join('/')}`
-      : parts.join('/');
+    const parent = normalized.startsWith('/') ? `/${parts.join('/')}` : parts.join('/');
     navigateTo(parent || '/');
   }, [path, navigateTo]);
 
@@ -159,11 +145,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       e.preventDefault();
       e.stopPropagation();
       if (!selectedPaths.has(entry.path)) {
-        onSelectedPathsChange(
-          pane.batchMode
-            ? new Set([...selectedPaths, entry.path])
-            : new Set([entry.path]),
-        );
+        onSelectedPathsChange(pane.batchMode ? new Set([...selectedPaths, entry.path]) : new Set([entry.path]));
       }
       setBlankContextMenu(null);
       setBookmarkMenu(null);
@@ -172,23 +154,17 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     [onSelectedPathsChange, pane.batchMode, selectedPaths],
   );
 
-  const handleBlankContextMenu = useCallback(
-    (e: React.MouseEvent): void => {
-      e.preventDefault();
-      e.stopPropagation();
-      setFileContextMenu(null);
-      setBookmarkMenu(null);
-      setBlankContextMenu({ x: e.clientX, y: e.clientY });
-    },
-    [],
-  );
+  const handleBlankContextMenu = useCallback((e: React.MouseEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFileContextMenu(null);
+    setBookmarkMenu(null);
+    setBlankContextMenu({ x: e.clientX, y: e.clientY });
+  }, []);
 
   const paneTitle = isLocal ? t('sftp.local') : connection.title;
 
-  const selectedEntries = useMemo(
-    () => entries.filter((entry) => selectedPaths.has(entry.path)),
-    [entries, selectedPaths],
-  );
+  const selectedEntries = useMemo(() => entries.filter((entry) => selectedPaths.has(entry.path)), [entries, selectedPaths]);
   const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
   const isCurrentPathBookmarked = path ? remoteBookmarks.includes(path) : false;
 
@@ -201,12 +177,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   }, [actions]);
 
   useEffect(() => {
-    if (
-      !pane.batchMode ||
-      fileContextMenu ||
-      blankContextMenu ||
-      bookmarkMenu
-    ) {
+    if (!pane.batchMode || fileContextMenu || blankContextMenu || bookmarkMenu) {
       return;
     }
 
@@ -217,13 +188,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [
-    blankContextMenu,
-    bookmarkMenu,
-    fileContextMenu,
-    handleExitBatchMode,
-    pane.batchMode,
-  ]);
+  }, [blankContextMenu, bookmarkMenu, fileContextMenu, handleExitBatchMode, pane.batchMode]);
 
   const handleFileContextMenuAction = useCallback(
     (action: SftpFileContextMenuAction): void => {
@@ -325,15 +290,12 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     [actions, path],
   );
 
-  const handleBookmarkButtonClick = useCallback(
-    (e: React.MouseEvent<HTMLButtonElement>): void => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      setFileContextMenu(null);
-      setBlankContextMenu(null);
-      setBookmarkMenu({ x: rect.left, y: rect.bottom + 4 });
-    },
-    [],
-  );
+  const handleBookmarkButtonClick = useCallback((e: React.MouseEvent<HTMLButtonElement>): void => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setFileContextMenu(null);
+    setBlankContextMenu(null);
+    setBookmarkMenu({ x: rect.left, y: rect.bottom + 4 });
+  }, []);
 
   const handleBookmarkNavigate = useCallback(
     (target: string) => {
@@ -346,10 +308,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   const canGoForward = history.index < history.stack.length - 1;
 
   return (
-    <div
-      ref={setNodeRef}
-      className="flex h-full flex-col overflow-hidden bg-app-surface"
-    >
+    <div ref={setNodeRef} className="flex h-full flex-col overflow-hidden bg-app-surface">
       {/* Title bar */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -371,41 +330,23 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       </div>
 
       {/* Navigation row */}
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border bg-app-surface-muted px-2">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border bg-app-surface-muted px-1">
         <div className="flex items-center">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={goBack}
-            disabled={!canGoBack}
-            className="h-6 w-6"
-          >
+          <Button variant="ghost" size="icon" onClick={goBack} disabled={!canGoBack} className="h-6 w-6">
             <ChevronLeftIcon className={cn('h-4 w-4', !canGoBack && 'opacity-30')} />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={goForward}
-            disabled={!canGoForward}
-            className="h-6 w-6"
-          >
+          <Button variant="ghost" size="icon" onClick={goForward} disabled={!canGoForward} className="h-6 w-6">
             <ChevronRightIcon className={cn('h-4 w-4', !canGoForward && 'opacity-30')} />
           </Button>
         </div>
 
-        <PathBreadcrumb
-          path={path}
-          onNavigate={navigateTo}
-          className="flex-1"
-        />
+        <PathBreadcrumb path={path} onNavigate={navigateTo} className="flex-1" />
       </div>
 
       {/* File list */}
       <div className="relative flex-1 min-h-0">
         {canAcceptActiveDrag && isOver && (
-          <div
-            className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-app-primary/70 bg-app-surface/70 p-6"
-          >
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-app-primary/70 bg-app-surface/70 p-6">
             <div className="flex flex-col items-center gap-2 px-5 py-4 text-center text-app-text">
               <MoveDownIcon aria-hidden="true" className="size-8 text-app-primary" />
               <span className="text-sm font-semibold">{t('sftp.dropHint')}</span>
@@ -444,12 +385,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
             </Button>
             {!isLocal && (
               <>
-                <Button
-                  variant="default"
-                  size="xs"
-                  onClick={() => void actions.onBatchDownload()}
-                  disabled={selectedEntries.length === 0}
-                >
+                <Button variant="default" size="xs" onClick={() => void actions.onBatchDownload()} disabled={selectedEntries.length === 0}>
                   {t('common.download')}
                 </Button>
                 <Button
