@@ -19,7 +19,7 @@ interface HeaderColumn {
   sortable?: SftpFileListSortColumn;
 }
 
-const SortIcon: React.FC<{ direction: SftpFileListSortDirection }> = ({
+const SortIcon: React.FC<{ direction: 'asc' | 'desc' }> = ({
   direction,
 }) => (
   <svg
@@ -90,7 +90,11 @@ export const SftpFileListHeader: React.FC<SftpFileListHeaderProps> = ({
             )}
           >
             <span className="truncate">{column.label}</span>
-            {isSorted && <SortIcon direction={sortDirection} />}
+            {isSorted && sortDirection !== 'default' && column.sortable && (
+              <span data-testid={`sort-icon-${column.sortable}`}>
+                <SortIcon direction={sortDirection} />
+              </span>
+            )}
           </button>
         );
       })}
