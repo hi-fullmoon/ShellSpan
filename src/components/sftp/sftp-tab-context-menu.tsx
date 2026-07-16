@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PinIcon, PencilIcon, CopyIcon, XIcon, ChevronRightIcon } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
@@ -14,20 +13,16 @@ const MENU_HEIGHT = 320;
 interface MenuItemProps {
   onClick: () => void;
   disabled?: boolean;
-  icon: React.ReactNode;
   children: React.ReactNode;
 }
 
-const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }) => (
+const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
-    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
   >
-    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-      {icon}
-    </span>
     <span className="leading-4">{children}</span>
   </button>
 );
@@ -150,28 +145,24 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
         style={{ left, top }}
       >
-        <MenuItem onClick={handleTogglePin} icon={<PinIcon className="h-3.5 w-3.5" />}>
+        <MenuItem onClick={handleTogglePin}>
           {connection.pinned ? t('sftp.tab.unpin') : t('sftp.tab.pin')}
         </MenuItem>
         <Separator className="my-1" />
-        <MenuItem onClick={() => setRenameOpen(true)} icon={<PencilIcon className="h-3.5 w-3.5" />}>
+        <MenuItem onClick={() => setRenameOpen(true)}>
           {t('common.rename')}
         </MenuItem>
-        <MenuItem
-          onClick={handleDuplicate}
-          disabled={!connection.profileId}
-          icon={<CopyIcon className="h-3.5 w-3.5" />}
-        >
+        <MenuItem onClick={handleDuplicate} disabled={!connection.profileId}>
           {t('common.duplicate')}
         </MenuItem>
         <Separator className="my-1" />
-        <MenuItem onClick={handleClose} icon={<XIcon className="h-3.5 w-3.5" />}>
+        <MenuItem onClick={handleClose}>
           {t('common.close')}
         </MenuItem>
-        <MenuItem onClick={handleCloseOthers} icon={<XIcon className="h-3.5 w-3.5" />}>
+        <MenuItem onClick={handleCloseOthers}>
           {t('sftp.tab.closeOthers')}
         </MenuItem>
-        <MenuItem onClick={handleCloseToRight} icon={<ChevronRightIcon className="h-3.5 w-3.5" />}>
+        <MenuItem onClick={handleCloseToRight}>
           {t('sftp.tab.closeToRight')}
         </MenuItem>
       </div>

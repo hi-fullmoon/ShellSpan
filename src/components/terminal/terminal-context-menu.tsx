@@ -8,7 +8,6 @@ import { invokeCloseSession } from '@/lib/tauri';
 import { PromptDialog } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { PinIcon, PencilIcon, CopyIcon, InfoIcon, XIcon, ChevronRightIcon, PaletteIcon } from 'lucide-react';
 import type { TerminalSession } from '@/stores/terminalStore';
 
 const MENU_WIDTH = 256;
@@ -27,24 +26,20 @@ const TAB_COLORS = [
   '#f43f5e',
 ];
 
-// Icons replaced with lucide-react imports
-
 interface MenuItemProps {
   onClick: () => void;
   disabled?: boolean;
-  icon: React.ReactNode;
   children: React.ReactNode;
 }
 
-const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }) => (
+const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
-    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-surface-muted disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
   >
-    <span>{icon}</span>
-    <span>{children}</span>
+    <span className="leading-4">{children}</span>
   </button>
 );
 
@@ -172,39 +167,35 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
         style={{ left, top }}
       >
-        <MenuItem onClick={handleTogglePin} icon={<PinIcon />}>
+        <MenuItem onClick={handleTogglePin}>
           {session.pinned ? t('terminal.tab.unpin') : t('terminal.tab.pin')}
         </MenuItem>
         <Separator className="my-1" />
-        <MenuItem onClick={() => setRenameOpen(true)} icon={<PencilIcon />}>
+        <MenuItem onClick={() => setRenameOpen(true)}>
           {t('common.rename')}
         </MenuItem>
         <MenuItem
           onClick={handleDuplicate}
           disabled={!session.profileId}
-          icon={<CopyIcon />}
         >
           {t('common.duplicate')}
         </MenuItem>
-        <MenuItem onClick={handleCopyInfo} icon={<InfoIcon />}>
+        <MenuItem onClick={handleCopyInfo}>
           {t('terminal.tab.copyInfo')}
         </MenuItem>
         <Separator className="my-1" />
-        <MenuItem onClick={handleClose} icon={<XIcon />}>
+        <MenuItem onClick={handleClose}>
           {t('common.close')}
         </MenuItem>
-        <MenuItem onClick={handleCloseOthers} icon={<XIcon />}>
+        <MenuItem onClick={handleCloseOthers}>
           {t('terminal.tab.closeOthers')}
         </MenuItem>
-        <MenuItem onClick={handleCloseToRight} icon={<ChevronRightIcon />}>
+        <MenuItem onClick={handleCloseToRight}>
           {t('terminal.tab.closeToRight')}
         </MenuItem>
         <Separator className="my-1" />
         <div className="px-3 py-2">
-          <div className="mb-1.5 flex items-center gap-2 text-xs text-app-text-soft">
-            <PaletteIcon />
-            <span>{t('terminal.tab.color')}</span>
-          </div>
+          <div className="mb-1.5 text-xs text-app-text-soft">{t('terminal.tab.color')}</div>
           <div className="flex flex-nowrap items-center gap-1">
             <button
               type="button"
