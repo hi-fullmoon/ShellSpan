@@ -18,7 +18,6 @@ import { TransferProgress } from './transfer-progress';
 import { useSftpPaneActions, type PendingUploadConflict, type UploadConflictAction } from '@/hooks/useSftpPaneActions';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
-import { invokePickLocalFolder } from '@/lib/tauri';
 import type { RemoteFileEntry, UploadConflictPolicy } from '@/types';
 
 const Sftp: React.FC = () => {
@@ -255,9 +254,7 @@ const SftpContent: React.FC<SftpContentProps> = ({
       await loadRemoteDirectory(connection.remotePath);
       setPaneState(connection.id, 'local', { selectedPaths: [] });
     } else if (payload.side === 'remote' && targetSide === 'local') {
-      const folders = await invokePickLocalFolder();
-      if (folders.length === 0) return;
-      await downloadRemotePaths(paths, folders[0]);
+      await downloadRemotePaths(paths, connection.localPath);
       await loadLocalDirectory(connection.localPath);
       setPaneState(connection.id, 'remote', { selectedPaths: [] });
     }
