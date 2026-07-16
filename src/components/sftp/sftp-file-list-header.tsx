@@ -48,7 +48,7 @@ export const SftpFileListHeader: React.FC<SftpFileListHeaderProps> = ({
     {
       key: 'name',
       label: t('sftp.columns.name'),
-      width: 'minmax(120px, 1fr)',
+      width: 'minmax(300px, 1fr)',
       sortable: 'name',
     },
     {

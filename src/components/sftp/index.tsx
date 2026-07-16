@@ -15,16 +15,24 @@ import { SftpPreviewDialog } from './sftp-preview-dialog';
 import { SftpUploadConflictDialog } from './sftp-upload-conflict-dialog';
 import { SftpDndContext, type SftpDndPayload } from './sftp-dnd-context';
 import { TransferProgress } from './transfer-progress';
+import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
 import { useSftpPaneActions, type PendingUploadConflict, type UploadConflictAction } from '@/hooks/useSftpPaneActions';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
-import type { RemoteFileEntry, UploadConflictPolicy } from '@/types';
+import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
+import type { ConnectionProfile, RemoteFileEntry, UploadConflictPolicy } from '@/types';
 
 const Sftp: React.FC = () => {
   const { t } = useI18n();
   const connections = useSftpStore((state) => state.connections);
   const activeConnectionId = useSftpStore((state) => state.activeConnectionId);
   const connection = connections.find((c) => c.id === activeConnectionId);
+  const {
+    open: openSftpConnection,
+    verifyHostKey,
+    hostKeyDialog,
+    closeHostKeyDialog,
+  } = useSftpConnectionOpener();
 
   const [newConnectionMenuOpen, setNewConnectionMenuOpen] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<{
@@ -75,6 +83,7 @@ const Sftp: React.FC = () => {
           <SftpNewConnectionMenu
             open={newConnectionMenuOpen}
             onClose={() => setNewConnectionMenuOpen(false)}
+            onConnect={openSftpConnection}
           />
         </div>
         <SftpTabContextMenu
@@ -84,18 +93,40 @@ const Sftp: React.FC = () => {
           connection={tabContextMenu?.connection ?? null}
           onClose={() => setTabContextMenu(null)}
         />
+        <HostKeyDialog
+          open={hostKeyDialog.open}
+          onClose={closeHostKeyDialog}
+          host={hostKeyDialog.host}
+          port={hostKeyDialog.port}
+          fingerprint={hostKeyDialog.fingerprint}
+          mismatch={hostKeyDialog.mismatch}
+          onTrust={hostKeyDialog.onTrust}
+        />
       </div>
     );
   }
 
   return (
-    <SftpContent
-      connection={connection}
-      newConnectionMenuOpen={newConnectionMenuOpen}
-      setNewConnectionMenuOpen={setNewConnectionMenuOpen}
-      tabContextMenu={tabContextMenu}
-      setTabContextMenu={setTabContextMenu}
-    />
+    <>
+      <SftpContent
+        connection={connection}
+        newConnectionMenuOpen={newConnectionMenuOpen}
+        setNewConnectionMenuOpen={setNewConnectionMenuOpen}
+        tabContextMenu={tabContextMenu}
+        setTabContextMenu={setTabContextMenu}
+        openSftpConnection={openSftpConnection}
+        verifyHostKey={verifyHostKey}
+      />
+      <HostKeyDialog
+        open={hostKeyDialog.open}
+        onClose={closeHostKeyDialog}
+        host={hostKeyDialog.host}
+        port={hostKeyDialog.port}
+        fingerprint={hostKeyDialog.fingerprint}
+        mismatch={hostKeyDialog.mismatch}
+        onTrust={hostKeyDialog.onTrust}
+      />
+    </>
   );
 };
 
@@ -115,6 +146,8 @@ interface SftpContentProps {
       y: number;
     } | null,
   ) => void;
+  openSftpConnection: (profile: ConnectionProfile) => Promise<void>;
+  verifyHostKey: (host: string, port: number, onVerified: () => void) => Promise<void>;
 }
 
 interface UploadQueue {
@@ -132,6 +165,8 @@ const SftpContent: React.FC<SftpContentProps> = ({
   setNewConnectionMenuOpen,
   tabContextMenu,
   setTabContextMenu,
+  openSftpConnection,
+  verifyHostKey,
 }) => {
   const { t } = useI18n();
   const localActions = useSftpPaneActions(connection, 'local');
@@ -289,6 +324,13 @@ const SftpContent: React.FC<SftpContentProps> = ({
                 onSelectedPathsChange={(paths) =>
                   setPaneState(connection.id, 'remote', { selectedPaths: Array.from(paths) })
                 }
+                onVerifyHostKey={() => {
+                  void verifyHostKey(
+                    connection.connection.host,
+                    connection.connection.port,
+                    () => void loadRemoteDirectory(connection.remotePath),
+                  );
+                }}
               />
             }
           />
@@ -393,6 +435,7 @@ const SftpContent: React.FC<SftpContentProps> = ({
       <SftpNewConnectionMenu
         open={newConnectionMenuOpen}
         onClose={() => setNewConnectionMenuOpen(false)}
+        onConnect={openSftpConnection}
       />
       <SftpTabContextMenu
         open={!!tabContextMenu}

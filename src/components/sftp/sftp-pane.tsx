@@ -16,6 +16,7 @@ import { type SftpConnection, type SftpSide } from '@/stores/sftpStore';
 import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './file-entry-formatters';
 import type { SftpDndPayload } from './sftp-dnd-context';
+import { parentPortablePath } from '@/lib/path-utils';
 
 export interface SftpPaneProps {
   connection: SftpConnection;
@@ -23,6 +24,7 @@ export interface SftpPaneProps {
   actions: UseSftpPaneActionsResult;
   selectedPaths: Set<string>;
   onSelectedPathsChange: (paths: Set<string>) => void;
+  onVerifyHostKey?: () => void;
 }
 
 interface HistoryState {
@@ -30,7 +32,14 @@ interface HistoryState {
   index: number;
 }
 
-export const SftpPane: React.FC<SftpPaneProps> = ({ connection, side, actions, selectedPaths, onSelectedPathsChange }) => {
+export const SftpPane: React.FC<SftpPaneProps> = ({
+  connection,
+  side,
+  actions,
+  selectedPaths,
+  onSelectedPathsChange,
+  onVerifyHostKey,
+}) => {
   const { t } = useI18n();
   const { active } = useDndContext();
   const { setNodeRef, isOver } = useDroppable({
@@ -45,6 +54,11 @@ export const SftpPane: React.FC<SftpPaneProps> = ({ connection, side, actions, s
   const entries = isLocal ? connection.localEntries : connection.remoteEntries;
   const loading = isLocal ? connection.localLoading : connection.remoteLoading;
   const error = isLocal ? connection.localError : connection.remoteError;
+  const isHostKeyError =
+    !isLocal &&
+    !!error &&
+    (error.toLowerCase().includes('host key') ||
+      error.toLowerCase().includes('trust this host'));
   const pane = isLocal ? connection.localPane : connection.remotePane;
   const remoteBookmarks = connection.remoteBookmarks;
 
@@ -116,12 +130,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({ connection, side, actions, s
   }, [navigateTo]);
 
   const handleParentDirectory = useCallback((): void => {
-    const normalized = path.replace(/\\/g, '/');
-    const parts = normalized.split('/').filter(Boolean);
-    if (parts.length === 0) return;
-    parts.pop();
-    const parent = normalized.startsWith('/') ? `/${parts.join('/')}` : parts.join('/');
-    navigateTo(parent || '/');
+    navigateTo(parentPortablePath(path));
   }, [path, navigateTo]);
 
   const handleSelect = useCallback(
@@ -340,7 +349,12 @@ export const SftpPane: React.FC<SftpPaneProps> = ({ connection, side, actions, s
           </Button>
         </div>
 
-        <PathBreadcrumb path={path} onNavigate={navigateTo} className="flex-1" />
+        <PathBreadcrumb
+          path={path}
+          onNavigate={navigateTo}
+          normalizeInputPath={isLocal}
+          className="flex-1"
+        />
       </div>
 
       {/* File list */}
@@ -361,12 +375,19 @@ export const SftpPane: React.FC<SftpPaneProps> = ({ connection, side, actions, s
         {error && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface p-4 text-center text-xs text-app-error">
             <span>{error}</span>
-            <button
-              onClick={() => navigateTo(path)}
-              className="rounded-lg bg-app-surface-muted px-3 py-1.5 text-xs font-medium text-app-text hover:bg-app-border"
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={
+                isHostKeyError && onVerifyHostKey
+                  ? onVerifyHostKey
+                  : () => navigateTo(path)
+              }
             >
-              {t('common.retry')}
-            </button>
+              {isHostKeyError
+                ? t('sftp.hostKey.verify')
+                : t('common.retry')}
+            </Button>
           </div>
         )}
         {pane.batchMode && (

@@ -2,37 +2,24 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { FolderIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { normalizePortablePath, parsePortablePath, type PortablePathSegment } from '@/lib/path-utils';
 
 export interface PathBreadcrumbProps {
   path: string;
   onNavigate: (path: string) => void;
+  normalizeInputPath?: boolean;
   className?: string;
 }
 
 const ChevronIcon: React.FC = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    className="h-3 w-3 shrink-0 text-app-text-soft"
-  >
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3 shrink-0 text-app-text-soft">
     <path d="M9 18l6-6-6-6" />
   </svg>
 );
 
-interface Segment {
-  name: string;
-  path: string;
-  index: number;
-}
-
-export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
-  path,
-  onNavigate,
-  className,
-}) => {
+export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate, normalizeInputPath = false, className }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(path);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -41,17 +28,9 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const measurementRef = useRef<HTMLDivElement>(null);
 
-  const normalized = path.replace(/\\/g, '/');
-  const isRoot = normalized === '' || normalized === '/';
-  const segments: Segment[] = useMemo(() => {
-    if (isRoot) return [];
-    const parts = normalized.split('/').filter(Boolean);
-    return parts.map((part, index) => ({
-      name: part,
-      path: '/' + parts.slice(0, index + 1).join('/'),
-      index,
-    }));
-  }, [isRoot, normalized]);
+  const parsedPath = useMemo(() => parsePortablePath(path), [path]);
+  const { rootLabel, rootPath, segments } = parsedPath;
+  const isRoot = segments.length === 0;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -63,15 +42,11 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
       entries.forEach((entry) => {
         const nextWidth = Math.round(entry.contentRect.width);
         if (entry.target === measurement) {
-          setMeasurementWidth((currentWidth) =>
-            currentWidth === nextWidth ? currentWidth : nextWidth,
-          );
+          setMeasurementWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
           return;
         }
         if (entry.target === container || !entry.target) {
-          setContainerWidth((currentWidth) =>
-            currentWidth === nextWidth ? currentWidth : nextWidth,
-          );
+          setContainerWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
         }
       });
     });
@@ -81,14 +56,10 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   }, []);
 
   useLayoutEffect(() => {
-    const available =
-      containerWidth ||
-      Math.max(0, (containerRef.current?.clientWidth ?? 0) - 16);
+    const available = containerWidth || Math.max(0, (containerRef.current?.clientWidth ?? 0) - 16);
     const metrics = readBreadcrumbMetrics(measurementRef.current, segments.length);
     const nextVisibleCount = calculateVisibleCount(segments, available, metrics);
-    setVisibleCount((currentCount) =>
-      currentCount === nextVisibleCount ? currentCount : nextVisibleCount,
-    );
+    setVisibleCount((currentCount) => (currentCount === nextVisibleCount ? currentCount : nextVisibleCount));
   }, [containerWidth, measurementWidth, segments]);
 
   const startEditing = (): void => {
@@ -100,7 +71,8 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
     if (e.key === 'Enter') {
       e.preventDefault();
       setIsEditing(false);
-      onNavigate(editValue.trim());
+      const target = editValue.trim();
+      onNavigate(normalizeInputPath ? normalizePortablePath(target) : target);
     } else if (e.key === 'Escape') {
       setIsEditing(false);
       setEditValue(path);
@@ -113,19 +85,26 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   };
 
   const renderSegment = useCallback(
-    (segment: Segment) => (
-      <React.Fragment key={segment.index}>
+    (segment: (typeof segments)[number]) => (
+      <React.Fragment key={segment.path}>
         <ChevronIcon />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onNavigate(segment.path)}
-          className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
-          title={segment.name}
-        >
-          <FolderIcon className="text-app-primary" />
-          <span className="truncate max-w-[200px] leading-none">{segment.name}</span>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            delay={0}
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavigate(segment.path)}
+                className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
+              />
+            }
+          >
+            <FolderIcon className="text-app-primary" />
+            <span className="truncate max-w-[200px] leading-none">{segment.name}</span>
+          </TooltipTrigger>
+          <TooltipContent>{segment.name}</TooltipContent>
+        </Tooltip>
       </React.Fragment>
     ),
     [onNavigate],
@@ -146,39 +125,18 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
         aria-hidden="true"
         className="pointer-events-none invisible absolute left-0 top-0 flex w-max items-center gap-1"
       >
-        <Button
-          data-breadcrumb-root
-          tabIndex={-1}
-          variant="ghost"
-          size="sm"
-          className="h-5 gap-1 px-1"
-        >
-          <span className="truncate max-w-[200px] leading-none">/</span>
+        <Button data-breadcrumb-root tabIndex={-1} variant="ghost" size="sm" className="h-5 gap-1 px-1">
+          <span className="truncate max-w-[200px] leading-none">{rootLabel}</span>
         </Button>
-        <Button
-          data-breadcrumb-ellipsis
-          tabIndex={-1}
-          variant="ghost"
-          size="sm"
-          disabled
-          className="h-5 px-1"
-        >
+        <Button data-breadcrumb-ellipsis tabIndex={-1} variant="ghost" size="sm" disabled className="h-5 px-1">
           <span className="leading-none">...</span>
         </Button>
         {segments.map((segment) => (
-          <React.Fragment key={segment.index}>
+          <React.Fragment key={segment.path}>
             <ChevronIcon />
-            <Button
-              data-breadcrumb-segment
-              tabIndex={-1}
-              variant="ghost"
-              size="sm"
-              className="h-5 gap-1 px-1 [&_svg]:size-3"
-            >
+            <Button data-breadcrumb-segment tabIndex={-1} variant="ghost" size="sm" className="h-5 gap-1 px-1 [&_svg]:size-3">
               <FolderIcon />
-              <span className="truncate max-w-[200px] leading-none">
-                {segment.name}
-              </span>
+              <span className="truncate max-w-[200px] leading-none">{segment.name}</span>
             </Button>
           </React.Fragment>
         ))}
@@ -191,19 +149,26 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
           onBlur={handleBlur}
           autoFocus
           onFocus={(e) => e.target.select()}
-          className="h-5 w-full rounded-none border-0 bg-transparent px-0 py-0 text-xs shadow-none focus-visible:ring-0"
+          className="h-5 w-full rounded-none border-0 bg-transparent px-0 py-0 text-xs leading-none shadow-none focus-visible:ring-0"
         />
       ) : (
         <>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onNavigate('/')}
-            className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
-            title="/"
-          >
-            <span className="truncate max-w-[200px] leading-none">/</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              delay={0}
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onNavigate(rootPath)}
+                  className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
+                />
+              }
+            >
+              <span className="truncate max-w-[200px] leading-none">{rootLabel}</span>
+            </TooltipTrigger>
+            <TooltipContent>{rootLabel}</TooltipContent>
+          </Tooltip>
           {!isRoot && (
             <>
               {visibleCount >= segments.length ? (
@@ -212,12 +177,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
                 <>
                   {segments.slice(0, visibleCount).map(renderSegment)}
                   <ChevronIcon />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled
-                    className="h-5 px-1 text-muted-foreground"
-                  >
+                  <Button variant="ghost" size="sm" disabled className="h-5 px-1 text-muted-foreground">
                     <span className="leading-none">...</span>
                   </Button>
                   {renderSegment(segments[segments.length - 1])}
@@ -244,20 +204,13 @@ interface BreadcrumbMetrics {
   segmentWidths: number[];
 }
 
-function readBreadcrumbMetrics(
-  measurement: HTMLDivElement | null,
-  segmentCount: number,
-): BreadcrumbMetrics | undefined {
+function readBreadcrumbMetrics(measurement: HTMLDivElement | null, segmentCount: number): BreadcrumbMetrics | undefined {
   if (!measurement) return undefined;
 
   const root = measurement.querySelector<HTMLElement>('[data-breadcrumb-root]');
-  const ellipsis = measurement.querySelector<HTMLElement>(
-    '[data-breadcrumb-ellipsis]',
-  );
+  const ellipsis = measurement.querySelector<HTMLElement>('[data-breadcrumb-ellipsis]');
   const chevron = measurement.querySelector<SVGElement>('svg');
-  const segmentButtons = Array.from(
-    measurement.querySelectorAll<HTMLElement>('[data-breadcrumb-segment]'),
-  );
+  const segmentButtons = Array.from(measurement.querySelectorAll<HTMLElement>('[data-breadcrumb-segment]'));
   if (!root || !ellipsis || !chevron || segmentButtons.length !== segmentCount) {
     return undefined;
   }
@@ -265,21 +218,12 @@ function readBreadcrumbMetrics(
   const rootWidth = root.getBoundingClientRect().width;
   const ellipsisWidth = ellipsis.getBoundingClientRect().width;
   const chevronWidth = chevron.getBoundingClientRect().width;
-  const segmentWidths = segmentButtons.map(
-    (button) => button.getBoundingClientRect().width,
-  );
-  if (
-    rootWidth <= 0 ||
-    ellipsisWidth <= 0 ||
-    chevronWidth <= 0 ||
-    segmentWidths.some((width) => width <= 0)
-  ) {
+  const segmentWidths = segmentButtons.map((button) => button.getBoundingClientRect().width);
+  if (rootWidth <= 0 || ellipsisWidth <= 0 || chevronWidth <= 0 || segmentWidths.some((width) => width <= 0)) {
     return undefined;
   }
 
-  const measuredGap = Number.parseFloat(
-    window.getComputedStyle(measurement).columnGap,
-  );
+  const measuredGap = Number.parseFloat(window.getComputedStyle(measurement).columnGap);
   return {
     rootWidth,
     ellipsisWidth,
@@ -289,39 +233,23 @@ function readBreadcrumbMetrics(
   };
 }
 
-function calculateVisibleCount(
-  segments: Segment[],
-  available: number,
-  metrics?: BreadcrumbMetrics,
-): number {
+function calculateVisibleCount(segments: PortablePathSegment[], available: number, metrics?: BreadcrumbMetrics): number {
   if (available <= 0 || segments.length <= 1) {
     return segments.length;
   }
 
   if (metrics) {
     const fullWidth =
-      metrics.rootWidth +
-      metrics.segmentWidths.reduce(
-        (total, width) => total + metrics.chevronWidth + width,
-        0,
-      ) +
-      metrics.gap * segments.length * 2;
+      metrics.rootWidth + metrics.segmentWidths.reduce((total, width) => total + metrics.chevronWidth + width, 0) + metrics.gap * segments.length * 2;
     if (fullWidth <= available) {
       return segments.length;
     }
 
     const lastWidth = metrics.segmentWidths[metrics.segmentWidths.length - 1];
-    let remaining =
-      available -
-      metrics.rootWidth -
-      metrics.ellipsisWidth -
-      lastWidth -
-      metrics.chevronWidth * 2 -
-      metrics.gap * 4;
+    let remaining = available - metrics.rootWidth - metrics.ellipsisWidth - lastWidth - metrics.chevronWidth * 2 - metrics.gap * 4;
     let count = 0;
     for (let index = 0; index < metrics.segmentWidths.length - 1; index += 1) {
-      const width =
-        metrics.chevronWidth + metrics.segmentWidths[index] + metrics.gap * 2;
+      const width = metrics.chevronWidth + metrics.segmentWidths[index] + metrics.gap * 2;
       if (remaining < width) break;
       remaining -= width;
       count += 1;
@@ -329,12 +257,8 @@ function calculateVisibleCount(
     return count;
   }
 
-  const segmentWidth = (segment: Segment): number =>
-    CHEVRON_WIDTH +
-    SEGMENT_CHROME_WIDTH +
-    Math.min(200, estimateWidth(segment.name));
-  const fullWidth =
-    ROOT_WIDTH + segments.reduce((total, segment) => total + segmentWidth(segment), 0);
+  const segmentWidth = (segment: PortablePathSegment): number => CHEVRON_WIDTH + SEGMENT_CHROME_WIDTH + Math.min(200, estimateWidth(segment.name));
+  const fullWidth = ROOT_WIDTH + segments.reduce((total, segment) => total + segmentWidth(segment), 0);
 
   if (fullWidth <= available) {
     return segments.length;

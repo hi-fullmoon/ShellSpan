@@ -161,6 +161,7 @@ export default {
   'sftp.empty': '暂无 SFTP 连接',
   'sftp.empty.openFromWorkbench': '从工作台选择一个连接打开 SFTP',
   'sftp.empty.newConnection': '新建连接',
+  'sftp.hostKey.verify': '校验主机密钥',
   'sftp.openFromWorkbench': '从工作台选择一个连接打开 SFTP',
   'sftp.local': '本地',
   'sftp.remote': '远程',

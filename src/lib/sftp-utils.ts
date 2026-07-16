@@ -1,5 +1,6 @@
 import type { LocaleKey } from '@/locales';
 import type { RemoteFileKind } from '@/types';
+import { parentPortablePath } from '@/lib/path-utils';
 
 export function formatSize(size?: number): string {
   if (size === undefined) return '--';
@@ -42,16 +43,7 @@ export function kindLabel(
 }
 
 export function parentDirectoryPath(path: string): string {
-  const normalized = path.replace(/\\/g, '/');
-  const parts = normalized.split('/').filter(Boolean);
-  if (!parts.length) {
-    return normalized.startsWith('/') ? '/' : '.';
-  }
-  parts.pop();
-  if (!parts.length) {
-    return normalized.startsWith('/') ? '/' : '.';
-  }
-  return `${normalized.startsWith('/') ? '/' : ''}${parts.join('/')}`;
+  return parentPortablePath(path);
 }
 
 export function permissionTypePrefix(kind: RemoteFileKind): string {

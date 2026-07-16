@@ -5,7 +5,6 @@ import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
-import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -16,6 +15,7 @@ const ANIMATION_DURATION = 150;
 interface SftpNewConnectionMenuProps {
   open: boolean;
   onClose: () => void;
+  onConnect: (profile: ConnectionProfile) => Promise<void>;
 }
 
 interface ProfileListItem {
@@ -26,11 +26,11 @@ interface ProfileListItem {
 export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   open,
   onClose,
+  onConnect,
 }) => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
-  const { open: openSftpConnection } = useSftpConnectionOpener();
   const setActiveSection = useAppStore((state) => state.setActiveSection);
 
   const [query, setQuery] = useState('');
@@ -131,7 +131,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
         event.preventDefault();
         const selected = filteredItems[selectedIndex];
         if (selected) {
-          void openSftpConnection(selected.profile);
+          void onConnect(selected.profile);
           onClose();
         }
       }
@@ -140,7 +140,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mounted, onClose, filteredItems, hasResults, selectedIndex, openSftpConnection]);
+  }, [mounted, onClose, filteredItems, hasResults, selectedIndex, onConnect]);
 
   const handleOpenWorkbench = (): void => {
     setActiveSection('workbench');
@@ -148,7 +148,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   };
 
   const handleConnect = (profile: ConnectionProfile): void => {
-    void openSftpConnection(profile);
+    void onConnect(profile);
     onClose();
   };
 

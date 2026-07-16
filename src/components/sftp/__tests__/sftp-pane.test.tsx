@@ -155,6 +155,30 @@ describe('SftpPane', () => {
     expect(screen.getByTestId('mock-file-list')).toBeInTheDocument();
   });
 
+  it('shows a host-key verification entry for an unknown remote host', () => {
+    const connection = createConnection();
+    connection.remoteError =
+      'host key for 175.178.66.45:22 is not known — trust this host before connecting';
+    const onVerifyHostKey = vi.fn();
+
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+        onVerifyHostKey={onVerifyHostKey}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'sftp.hostKey.verify' }),
+    );
+    expect(onVerifyHostKey).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('common.retry')).not.toBeInTheDocument();
+  });
+
   it('renders a log-style toolbar in remote batch selection mode', () => {
     const connection = createConnection();
     const entry = {

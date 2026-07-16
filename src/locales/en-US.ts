@@ -161,6 +161,7 @@ export default {
   'sftp.empty': 'No SFTP connections',
   'sftp.empty.openFromWorkbench': 'Select a connection from the workbench to open SFTP',
   'sftp.empty.newConnection': 'New Connection',
+  'sftp.hostKey.verify': 'Verify host key',
   'sftp.openFromWorkbench': 'Select a connection from the workbench to open SFTP',
   'sftp.local': 'Local',
   'sftp.remote': 'Remote',

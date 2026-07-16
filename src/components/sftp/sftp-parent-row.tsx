@@ -35,8 +35,8 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
       style={{
         gridTemplateColumns:
           side === 'remote'
-            ? 'minmax(120px, 1fr) 148px 88px 96px 88px 88px'
-            : 'minmax(120px, 1fr) 148px 88px 96px',
+            ? 'minmax(300px, 1fr) 148px 88px 96px 88px 88px'
+            : 'minmax(300px, 1fr) 148px 88px 96px',
       }}
       data-testid="sftp-parent-row"
     >

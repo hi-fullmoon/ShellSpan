@@ -428,8 +428,9 @@ pub(crate) fn open_path(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
+        let explorer_path = std::path::PathBuf::from(portable_local_path(&canonical));
         std::process::Command::new("explorer")
-            .arg(&canonical)
+            .arg(explorer_path)
             .spawn()
             .map_err(|error| format!("failed to open path: {error}"))?;
     }
@@ -451,7 +452,7 @@ pub(crate) async fn pick_local_files() -> Result<Vec<String>, String> {
             .pick_files()
             .unwrap_or_default()
             .into_iter()
-            .map(|path| path.to_string_lossy().to_string())
+            .map(|path| portable_local_path(&path))
             .collect::<Vec<_>>();
         Ok(paths)
     })
@@ -465,7 +466,7 @@ pub(crate) async fn pick_local_folder(title: Option<String>) -> Result<Vec<Strin
         let path = rfd::FileDialog::new()
             .set_title(&title.unwrap_or_else(|| "选择文件夹".to_string()))
             .pick_folder()
-            .map(|path| path.to_string_lossy().to_string());
+            .map(|path| portable_local_path(&path));
         Ok(path.into_iter().collect())
     })
     .await
@@ -478,7 +479,7 @@ pub(crate) async fn pick_private_key_file() -> Result<Option<String>, String> {
         let path = rfd::FileDialog::new()
             .set_title("选择私钥文件")
             .pick_file()
-            .map(|path| path.to_string_lossy().to_string());
+            .map(|path| portable_local_path(&path));
         Ok(path)
     })
     .await
@@ -909,13 +910,13 @@ pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<Local
 
     let parent_path = canonical
         .parent()
-        .map(|parent| parent.to_string_lossy().to_string());
+        .map(portable_local_path);
 
     let mut entries = Vec::new();
     for entry in fs::read_dir(&canonical).map_err(|error| format!("failed to read directory: {error}"))? {
         let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
         let metadata = entry.metadata().map_err(|error| format!("failed to read entry metadata: {error}"))?;
-        let path = entry.path().to_string_lossy().to_string();
+        let path = portable_local_path(&entry.path());
         let name = entry.file_name().to_string_lossy().to_string();
 
         let kind = if metadata.is_dir() {
@@ -951,7 +952,7 @@ pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<Local
     });
 
     Ok(LocalDirectoryListing {
-        path: canonical.to_string_lossy().to_string(),
+        path: portable_local_path(&canonical),
         parent_path,
         entries,
     })

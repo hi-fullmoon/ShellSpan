@@ -139,8 +139,8 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
       style={{
         gridTemplateColumns:
           side === 'remote'
-            ? 'minmax(120px, 1fr) 148px 88px 96px 88px 88px'
-            : 'minmax(120px, 1fr) 148px 88px 96px',
+            ? 'minmax(300px, 1fr) 148px 88px 96px 88px 88px'
+            : 'minmax(300px, 1fr) 148px 88px 96px',
       }}
     >
       <div className="flex h-[34px] min-w-0 items-center gap-1.5 pr-2">

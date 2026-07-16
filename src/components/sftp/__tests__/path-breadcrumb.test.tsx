@@ -50,6 +50,48 @@ describe('PathBreadcrumb', () => {
     expect(onNavigate).toHaveBeenCalledWith('/');
   });
 
+  it('normalizes a Windows path entered for local navigation', () => {
+    const onNavigate = vi.fn();
+    const { container } = render(
+      <PathBreadcrumb
+        path="C:/Users/tester"
+        onNavigate={onNavigate}
+        normalizeInputPath
+      />,
+    );
+
+    fireEvent.doubleClick(container.firstChild as HTMLElement);
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'D:\\Games\\Warcraft3_1.24E' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onNavigate).toHaveBeenCalledWith('D:/Games/Warcraft3_1.24E');
+  });
+
+  it('preserves backslashes entered for remote navigation', () => {
+    const onNavigate = vi.fn();
+    const { container } = render(
+      <PathBreadcrumb path="/home/tester" onNavigate={onNavigate} />,
+    );
+
+    fireEvent.doubleClick(container.firstChild as HTMLElement);
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '/home/name\\with\\slashes' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onNavigate).toHaveBeenCalledWith('/home/name\\with\\slashes');
+  });
+
+  it('matches the input line height to the displayed breadcrumb text', () => {
+    const { container } = render(
+      <PathBreadcrumb path="/home/tester" onNavigate={vi.fn()} />,
+    );
+
+    fireEvent.doubleClick(container.firstChild as HTMLElement);
+
+    expect(screen.getByRole('textbox')).toHaveClass('leading-none');
+  });
+
   it('limits each segment width to 200px', () => {
     render(<PathBreadcrumb path="/very/long/segment/name" onNavigate={vi.fn()} />);
     const spans = screen.getAllByText(/very|long|segment|name/);

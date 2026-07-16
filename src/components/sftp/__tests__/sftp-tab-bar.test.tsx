@@ -91,4 +91,18 @@ describe('SftpTabBar', () => {
     await userEvent.click(plusButton);
     expect(onNewTabClick).toHaveBeenCalled();
   });
+
+  it('removes input padding while renaming a tab', async () => {
+    addConnection('Conn A');
+    render(
+      <SftpTabBar
+        onNewTabClick={vi.fn()}
+        onTabContextMenu={vi.fn()}
+      />,
+    );
+
+    await userEvent.dblClick(screen.getByText('Conn A'));
+
+    expect(screen.getByRole('textbox')).toHaveClass('p-0');
+  });
 });

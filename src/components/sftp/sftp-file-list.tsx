@@ -12,6 +12,7 @@ import {
 } from './sftp-file-list-header';
 import { SftpParentRow } from './sftp-parent-row';
 import { SftpFileListRow } from './sftp-file-list-row';
+import { isPortableRootPath } from '@/lib/path-utils';
 
 export interface SftpFileListProps {
   entries: FileEntry[];
@@ -28,13 +29,7 @@ export interface SftpFileListProps {
 }
 
 function isRootPath(currentPath?: string): boolean {
-  if (!currentPath) return true;
-  if (currentPath === '/') return true;
-  const normalized = currentPath.replace(/\\/g, '/');
-  const parts = normalized.split('/').filter(Boolean);
-  if (parts.length === 0) return true;
-  if (parts.length === 1 && /^[A-Za-z]:$/.test(parts[0])) return true;
-  return false;
+  return isPortableRootPath(currentPath);
 }
 
 function compareEntries(

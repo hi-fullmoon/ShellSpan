@@ -132,7 +132,15 @@ export async function invokeCheckHostKey(
   host: string,
   port: number,
 ): Promise<HostKeyCheckResult> {
-  return invoke('check_host_key', { request: { host, port } });
+  const result = await invoke<HostKeyCheckResult>('check_host_key', {
+    request: { host, port },
+  });
+
+  // Older backends serialized NotFound with rename_all = "lowercase".
+  if ((result.status as string) === 'notfound') {
+    return { ...result, status: 'notFound' };
+  }
+  return result;
 }
 
 export async function invokeTrustHost(host: string, port: number): Promise<void> {

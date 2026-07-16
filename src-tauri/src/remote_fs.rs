@@ -1,6 +1,7 @@
 use crate::connection::connect_sftp;
 use crate::identity_cache::RemoteIdentityCache;
 use crate::sftp_pool::SftpPool;
+use crate::portable_local_path;
 use crate::models::{
     CopyRemotePathRequest, CreateRemoteEntryKind, CreateRemoteEntryRequest, DeleteProgressTracker,
     DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
@@ -1498,7 +1499,7 @@ fn kind_from_permissions(permissions: Option<u32>) -> RemoteFileKind {
 }
 
 fn path_to_string(path: &Path) -> String {
-    path.to_string_lossy().to_string()
+    portable_local_path(path)
 }
 
 fn open_path_with_default_app(path: &Path) -> Result<(), String> {

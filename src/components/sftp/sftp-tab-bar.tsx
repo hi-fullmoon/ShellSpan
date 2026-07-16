@@ -79,10 +79,8 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-8 w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
-        active
-          ? 'bg-app-surface text-app-text shadow-sm'
-          : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        'group relative flex h-9 w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
+        active ? 'bg-app-surface text-app-text shadow-sm' : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
@@ -92,12 +90,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       {showDropIndicatorRight && (
         <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
       )}
-      {active && (
-        <div
-          data-testid="tab-active-indicator"
-          className="absolute bottom-0 left-0 right-0 h-0.5 bg-app-primary"
-        />
-      )}
+      {active && <div data-testid="tab-active-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-app-primary" />}
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="min-w-0 flex-1">
@@ -121,7 +114,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
                   onRenameCancel?.();
                 }
               }}
-              className="h-5 border-0 bg-transparent px-1 py-0 text-xs font-medium shadow-none focus-visible:ring-0"
+              className="h-5 border-0 bg-transparent p-0 text-xs font-medium shadow-none focus-visible:ring-0"
             />
           </span>
         </div>
@@ -201,11 +194,10 @@ const SortableTab: React.FC<SortableTabProps> = ({
   showDropIndicatorLeft,
   showDropIndicatorRight,
 }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({
-      id: connection.id,
-      disabled: renaming || connection.pinned,
-    });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: connection.id,
+    disabled: renaming || connection.pinned,
+  });
 
   return (
     <div
@@ -239,10 +231,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   );
 };
 
-export const SftpTabBar: React.FC<SftpTabBarProps> = ({
-  onNewTabClick,
-  onTabContextMenu,
-}) => {
+export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabContextMenu }) => {
   const { t } = useI18n();
   const connections = useSftpStore((state) => state.connections);
   const activeConnectionId = useSftpStore((state) => state.activeConnectionId);
@@ -386,9 +375,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({
     setRenameValue('');
   };
 
-  const draggingConnection = draggingConnectionId
-    ? (connections.find((c) => c.id === draggingConnectionId) ?? null)
-    : null;
+  const draggingConnection = draggingConnectionId ? (connections.find((c) => c.id === draggingConnectionId) ?? null) : null;
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
 
@@ -414,12 +401,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({
           >
             {connections.map((connection, index) => {
               const isDragging = draggingConnectionId === connection.id;
-              const draggedIndex = draggingConnectionId
-                ? connections.findIndex((c) => c.id === draggingConnectionId)
-                : -1;
-              const visibleIndex = isDragging
-                ? -1
-                : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
+              const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
+              const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
               const isLastVisible = visibleIndex === visibleTabCount - 1;
 
               return (

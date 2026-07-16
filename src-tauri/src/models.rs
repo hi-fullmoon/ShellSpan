@@ -202,12 +202,25 @@ pub(crate) struct HostKeyCheckResult {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum HostKeyCheckStatus {
     Match,
     Mismatch,
     NotFound,
     Failure,
+}
+
+#[cfg(test)]
+mod host_key_check_status_tests {
+    use super::HostKeyCheckStatus;
+
+    #[test]
+    fn not_found_serializes_as_frontend_camel_case_status() {
+        assert_eq!(
+            serde_json::to_string(&HostKeyCheckStatus::NotFound).unwrap(),
+            "\"notFound\""
+        );
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

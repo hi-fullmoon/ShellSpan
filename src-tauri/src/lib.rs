@@ -5,6 +5,7 @@ mod keychain;
 mod known_hosts;
 mod menu;
 mod models;
+mod path_utils;
 mod port_forward;
 mod remote_fs;
 mod session;
@@ -23,6 +24,7 @@ pub(crate) use connection::{
     summarize_remote_connection_request, summarize_session_request, validate_connection_fields,
 };
 pub(crate) use identity_cache::RemoteIdentityCache;
+pub(crate) use path_utils::portable_local_path;
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
     download_remote_paths_blocking, list_remote_directory_blocking, open_remote_file_blocking,

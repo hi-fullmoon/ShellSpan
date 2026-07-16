@@ -4,6 +4,7 @@ import {
   invokePickLocalFolder,
 } from '@/lib/tauri';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
+import { parentPortablePath } from '@/lib/path-utils';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useToast } from '@/hooks/useToast';
 import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
@@ -62,16 +63,7 @@ export interface UseSftpPaneActionsResult {
 }
 
 export function parentDirectoryPath(path: string): string {
-  const normalized = path.replace(/\\/g, '/');
-  const parts = normalized.split('/').filter(Boolean);
-  if (!parts.length) {
-    return normalized.startsWith('/') ? '/' : '.';
-  }
-  parts.pop();
-  if (!parts.length) {
-    return normalized.startsWith('/') ? '/' : '.';
-  }
-  return `${normalized.startsWith('/') ? '/' : ''}${parts.join('/')}`;
+  return parentPortablePath(path);
 }
 
 function writeClipboardText(value: string): Promise<void> {
