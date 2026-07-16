@@ -379,10 +379,12 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
             selectedPaths={Array.from(selectedPaths)}
             filterQuery=""
             batchMode={pane.batchMode}
+            currentPath={path}
             onSelect={handleSelect}
             onDoubleClick={handleDoubleClick}
             onContextMenu={handleFileContextMenu}
             onBlankContextMenu={handleBlankContextMenu}
+            onParentDirectory={handleParentDirectory}
           />
         )}
       </div>
