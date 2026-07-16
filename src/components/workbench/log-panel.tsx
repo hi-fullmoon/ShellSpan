@@ -159,7 +159,7 @@ const LogLine: React.FC<LogLineProps> = ({ line, originalIndex, onDoubleClick })
       onDoubleClick={onDoubleClick}
       className="grid w-full cursor-pointer grid-cols-[110px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[110px_2.75rem_4.5rem_1fr]"
     >
-      <span className="shrink-0 text-[10px] text-app-text-soft">
+      <span className="shrink-0 whitespace-nowrap text-[10px] text-app-text-soft">
         {line.date} {shortTime}
       </span>
       <span
