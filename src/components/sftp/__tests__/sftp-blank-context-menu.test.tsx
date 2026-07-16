@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { SftpBlankContextMenu, type SftpBlankContextMenuAction } from '../sftp-blank-context-menu';
@@ -84,5 +85,44 @@ describe('SftpBlankContextMenu', () => {
     const { onAction } = renderMenu();
     fireEvent.click(screen.getByText('sftp.contextMenu.newFile'));
     expect(onAction).toHaveBeenCalledWith('newFile');
+  });
+
+  it('reopens on the second consecutive right click', () => {
+    const Harness = () => {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <div
+            data-testid="context-target"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setOpen(true);
+            }}
+          />
+          <SftpBlankContextMenu
+            open={open}
+            x={100}
+            y={100}
+            side="remote"
+            currentPath="/home"
+            hasClipboard={false}
+            isBookmarked={false}
+            batchMode={false}
+            onClose={() => setOpen(false)}
+            onAction={vi.fn()}
+          />
+        </>
+      );
+    };
+
+    render(<Harness />);
+    const target = screen.getByTestId('context-target');
+
+    fireEvent.contextMenu(target);
+    expect(screen.getByText('sftp.contextMenu.newFile')).toBeInTheDocument();
+
+    fireEvent.pointerDown(target);
+    fireEvent.contextMenu(target);
+    expect(screen.getByText('sftp.contextMenu.newFile')).toBeInTheDocument();
   });
 });

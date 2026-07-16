@@ -104,4 +104,16 @@ describe('SftpFileContextMenu', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('closes on pointer down outside without blocking the page', () => {
+    const { onClose } = renderMenu();
+    fireEvent.pointerDown(document.body);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays open on pointer down inside the menu', () => {
+    const { onClose } = renderMenu();
+    fireEvent.pointerDown(screen.getByText('sftp.contextMenu.preview'));
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
