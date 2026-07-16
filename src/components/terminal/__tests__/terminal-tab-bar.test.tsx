@@ -254,6 +254,9 @@ describe('TerminalTabBar', () => {
 
     const tab = screen.getByRole('tab');
     expect(tab).not.toHaveStyle({ borderLeftColor: '#ef4444' });
+    expect(tab).toHaveStyle({
+      backgroundColor: expect.stringContaining('#ef4444'),
+    });
 
     const indicator = screen.getByTestId('tab-active-indicator');
     expect(indicator).toHaveStyle({ backgroundColor: '#ef4444' });

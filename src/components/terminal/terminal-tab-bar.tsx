@@ -97,12 +97,11 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-8 w-48 shrink-0 items-center gap-1.5 rounded-md px-2 text-left text-xs font-medium transition-colors select-none',
-        active
-          ? 'bg-app-surface text-app-text shadow-sm'
-          : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        'group relative flex h-9 w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
+        active ? 'bg-app-surface text-app-text shadow-sm' : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80' : 'cursor-pointer',
       )}
+      style={active && session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} 15%, transparent)` } : undefined}
     >
       {showDropIndicatorLeft && (
         <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />

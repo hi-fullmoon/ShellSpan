@@ -8,6 +8,7 @@ import { terminalRegistry } from '@/components/terminal/registry/terminal-regist
 import { TerminalPaneContextMenu } from './terminal-pane-context-menu';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
+import { getPlatform } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 import { SearchIcon, ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 
@@ -74,17 +75,26 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   useEffect(() => {
     if (!terminal) return;
 
-    const disposable = terminal.onSelectionChange(() => {
-      const selection = terminal.getSelection();
-      if (!selection) return;
-      void navigator.clipboard
-        .writeText(selection)
-        .then(() => success(t('terminal.feedback.copied')))
-        .catch(() => showError(t('terminal.feedback.copyFailed')));
-    });
-
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true;
+
+      const platform = getPlatform();
+      const isCopyShortcut =
+        (platform === 'macos' && event.metaKey && event.key.toLowerCase() === 'c') ||
+        (platform !== 'macos' && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c');
+
+      if (isCopyShortcut) {
+        const selection = terminal.getSelection();
+        if (selection) {
+          event.preventDefault();
+          void navigator.clipboard
+            .writeText(selection)
+            .then(() => success(t('terminal.feedback.copied')))
+            .catch(() => showError(t('terminal.feedback.copyFailed')));
+          return false;
+        }
+      }
+
       const isCtrlOrMeta = event.ctrlKey || event.metaKey;
 
       if (isCtrlOrMeta && event.key === 'f') {
@@ -112,7 +122,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
     element?.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
-      disposable.dispose();
       element?.removeEventListener('contextmenu', handleContextMenu);
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
@@ -137,7 +146,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
       {searchOpen && (
-        <div className="flex h-9 items-center gap-2 border-b border-app-border bg-app-surface-muted px-2">
+        <div className="absolute right-0 top-0 z-20 flex h-10 w-80 items-center gap-1.5 rounded-bl-md border border-app-border bg-app-surface p-1.5 shadow-md">
           <Input
             value={query}
             onChange={(e) => {
@@ -149,7 +158,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
               }
             }}
             placeholder={t('terminal.search.placeholder')}
-            className="h-6 flex-1"
+            className="h-7 flex-1"
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -161,10 +170,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
               }
             }}
           />
-          <Button variant="secondary" size="sm" onClick={() => performSearch('previous', query)} title={t('terminal.search.previous')}>
+          <Button variant="secondary" size="icon" className="h-7 w-7 shrink-0" onClick={() => performSearch('previous', query)} title={t('terminal.search.previous')}>
             <ChevronUpIcon className="h-4 w-4" />
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => performSearch('next', query)} title={t('terminal.search.next')}>
+          <Button variant="secondary" size="icon" className="h-7 w-7 shrink-0" onClick={() => performSearch('next', query)} title={t('terminal.search.next')}>
             <ChevronDownIcon className="h-4 w-4" />
           </Button>
           <Button
@@ -178,20 +187,22 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
               }
             }}
             title={t('terminal.search.caseSensitive')}
-            className={cn('px-1.5 font-mono text-xs', caseSensitive && 'text-app-primary')}
+            className={cn('h-7 px-1.5 font-mono text-xs', caseSensitive && 'text-app-primary')}
           >
             Aa
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleCloseSearch}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleCloseSearch} title={t('terminal.search.close')}>
             <XIcon className="h-4 w-4" />
           </Button>
         </div>
       )}
-      <div className="absolute right-0 top-0 z-10">
-        <Button variant="ghost" size="icon" onClick={() => setSearchOpen((prev) => !prev)} title={t('terminal.tab.search')}>
-          <SearchIcon className="h-4 w-4" />
-        </Button>
-      </div>
+      {!searchOpen && (
+        <div className="absolute right-0 top-0 z-10">
+          <Button variant="ghost" size="icon" onClick={() => setSearchOpen(true)} title={t('terminal.tab.search')}>
+            <SearchIcon className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
       {activeSession?.status === 'connecting' && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface/90">
           <Spinner />
