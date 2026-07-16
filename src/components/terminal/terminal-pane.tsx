@@ -10,7 +10,7 @@ import type { TerminalSession as TerminalSessionState } from '@/stores/terminalS
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
 import { cn } from '@/lib/utils';
-import { SearchIcon, ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
+import { ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 
 export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
@@ -196,15 +196,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
           </Button>
         </div>
       )}
-      {!searchOpen && (
-        <div className="absolute right-0 top-0 z-10">
-          <Button variant="ghost" size="icon" onClick={() => setSearchOpen(true)} title={t('terminal.tab.search')}>
-            <SearchIcon className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
       {activeSession?.status === 'connecting' && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface/90">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
           <Spinner />
           <span className="text-xs text-app-text-soft">{t('terminal.status.connecting')}...</span>
         </div>

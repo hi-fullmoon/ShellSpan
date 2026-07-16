@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalPane } from '../terminal-pane';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
@@ -89,16 +89,16 @@ function makeMockTerminal(selection = '') {
 }
 
 describe('TerminalPane', () => {
-  it('renders the pane host and search toggle button', () => {
+  it('renders the pane host without a search toggle button', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
-    expect(screen.getByTitle('terminal.tab.search')).toBeInTheDocument();
+    expect(screen.queryByTitle('terminal.tab.search')).not.toBeInTheDocument();
     expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
   });
 
-  it('opens and closes the search bar via the toggle button', async () => {
+  it('opens the search bar via the keyboard shortcut and closes it', async () => {
     render(<TerminalPane activeSession={makeSession()} />);
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
-    await userEvent.click(screen.getByTitle('terminal.tab.search'));
+    fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
     expect(screen.getByPlaceholderText('terminal.search.placeholder')).toBeInTheDocument();
     await userEvent.click(screen.getByTitle('terminal.search.close'));
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
@@ -108,6 +108,7 @@ describe('TerminalPane', () => {
     render(<TerminalPane activeSession={makeSession({ status: 'connecting' })} />);
     const overlay = document.querySelector('div.absolute.inset-0.z-10');
     expect(overlay).not.toBeNull();
+    expect(overlay).toHaveClass('bg-app-surface');
     expect(overlay?.querySelector('span')?.textContent ?? '').toMatch(/\.\.\.$/);
     expect(overlay?.querySelector('svg.animate-spin')).not.toBeNull();
   });
@@ -118,8 +119,9 @@ describe('TerminalPane', () => {
   });
 
   it('renders without an active session', () => {
-    render(<TerminalPane activeSession={null} />);
-    expect(screen.getByTitle('terminal.tab.search')).toBeInTheDocument();
+    const { container } = render(<TerminalPane activeSession={null} />);
+    expect(screen.queryByTitle('terminal.tab.search')).not.toBeInTheDocument();
+    expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
   });
 
   it('does not copy on selection change', () => {
