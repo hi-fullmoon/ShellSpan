@@ -14,14 +14,20 @@ const Sftp = React.lazy(() => import('@/components/sftp'));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { openSettingsWindow } from '@/lib/window';
-import { useToastStore } from '@/stores/toastStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { AboutDialog } from '@/components/about-dialog';
+import { UpdateRestartDialog } from '@/components/update-restart-dialog';
+import { useUpdateFlow } from '@/hooks/useUpdateFlow';
 
 export const App: React.FC = () => {
   useDisableContextMenu();
   useTheme();
   useTransferListeners();
+
+  const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
+
   React.useEffect(() => {
     const listeners: Promise<() => void>[] = [];
 
@@ -34,11 +40,8 @@ export const App: React.FC = () => {
         }),
       );
       listeners.push(
-        listen('system-check-update', () => {
-          useToastStore.getState().addToast('Checking for updates...', 'info');
-        }),
         listen('system-about', () => {
-          useToastStore.getState().addToast('TermBridge\n\nA clean and elegant SSH workbench.', 'info');
+          setAboutDialogOpen(true);
         }),
       );
       listeners.push(
@@ -58,8 +61,21 @@ export const App: React.FC = () => {
       });
     };
   }, []);
+
   const { ready } = useI18n();
   const activeSection = useAppStore((state) => state.activeSection);
+  const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
+  const connectedSessions = useTerminalStore(
+    (state) => state.sessions.filter((session) => session.status === 'connected').length,
+  );
+
+  const {
+    updateState,
+    updateDownloadProgress,
+    restartDialogOpen,
+    handleInstallUpdateNow,
+    handleInstallUpdateLater,
+  } = useUpdateFlow({ startupUpdateCheck });
 
   if (!ready) {
     return (
@@ -105,6 +121,22 @@ export const App: React.FC = () => {
           </div>
         </Suspense>
       </MainContent>
+
+      <AboutDialog open={aboutDialogOpen} onClose={() => setAboutDialogOpen(false)} />
+
+      <UpdateRestartDialog
+        downloadProgress={updateDownloadProgress}
+        hasActiveSessions={connectedSessions > 0}
+        onInstallNow={handleInstallUpdateNow}
+        onLater={handleInstallUpdateLater}
+        open={restartDialogOpen}
+        version={
+          updateState.version.downloadedVersion ??
+          updateState.version.latestVersion ??
+          ''
+        }
+      />
+
       <Toaster />
     </AppShell>
   );

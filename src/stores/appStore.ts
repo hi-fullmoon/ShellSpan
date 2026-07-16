@@ -5,6 +5,7 @@ import type { AppSection, Locale, ThemeMode } from '@/types';
 interface AppPreferences {
   theme: ThemeMode;
   locale: Locale;
+  startupUpdateCheck: boolean;
 }
 
 interface AppState extends AppPreferences {
@@ -12,6 +13,7 @@ interface AppState extends AppPreferences {
   setActiveSection: (section: AppSection) => void;
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
+  setStartupUpdateCheck: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = 'termbridge.preferences';
@@ -24,6 +26,7 @@ function readInitialPreferences(): AppPreferences {
       return {
         theme: parsed.theme ?? 'system',
         locale: parsed.locale ?? 'zh-CN',
+        startupUpdateCheck: parsed.startupUpdateCheck ?? true,
       };
     }
   } catch {
@@ -32,6 +35,7 @@ function readInitialPreferences(): AppPreferences {
   return {
     theme: 'system',
     locale: 'zh-CN',
+    startupUpdateCheck: true,
   };
 }
 
@@ -45,12 +49,14 @@ export const useAppStore = create<AppState>()(
       setActiveSection: (section) => set({ activeSection: section }),
       setTheme: (theme) => set({ theme }),
       setLocale: (locale) => set({ locale }),
+      setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
     }),
     {
       name: STORAGE_KEY,
       partialize: (state) => ({
         theme: state.theme,
         locale: state.locale,
+        startupUpdateCheck: state.startupUpdateCheck,
       }),
     },
   ),

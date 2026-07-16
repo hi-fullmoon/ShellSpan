@@ -17,7 +17,7 @@ use std::sync::{
     Arc, mpsc,
 };
 use std::thread;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 #[tauri::command]

@@ -5,12 +5,15 @@ import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { useAppStore } from '@/stores/appStore';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import type { Locale, ThemeMode } from '@/types';
 
 export const SettingsApp: React.FC = () => {
   useDisableContextMenu();
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
+  const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
+  const setStartupUpdateCheck = useAppStore((state) => state.setStartupUpdateCheck);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-app-surface">
@@ -20,7 +23,7 @@ export const SettingsApp: React.FC = () => {
         </span>
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3">
+      <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-3">
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-app-text">
             {t('settings.appearance.title')}
@@ -55,6 +58,21 @@ export const SettingsApp: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-app-text">
+            {t('settings.general.title')}
+          </h2>
+          <div className="flex items-center justify-between rounded-md border border-app-border bg-app-surface-muted px-3 py-2">
+            <Label className="text-xs text-app-text-soft">
+              {t('settings.general.startupUpdateCheck')}
+            </Label>
+            <Switch
+              checked={startupUpdateCheck}
+              onCheckedChange={setStartupUpdateCheck}
+            />
           </div>
         </section>
       </div>

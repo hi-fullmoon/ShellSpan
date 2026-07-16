@@ -302,13 +302,10 @@ export async function listenToDownloadProgress(
   });
 }
 
-export async function listenToDeleteProgress(
-  operationId: string,
-  callback: EventCallback<DeleteProgressEvent>,
-): Promise<UnlistenFn> {
-  return listen<DeleteProgressEvent>('delete-progress', (event) => {
-    if (event.payload.operationId === operationId) {
-      callback(event);
-    }
-  });
+export function isTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+export async function invokeRequestAppRestart(): Promise<void> {
+  return invoke('request_app_restart');
 }

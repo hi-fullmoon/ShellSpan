@@ -254,3 +254,17 @@ export interface UploadLocalPathsRequest extends RemoteConnectionRequest {
 }
 
 export type UploadConflictPolicy = 'overwrite' | 'skip' | 'fail';
+
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'no_update'
+  | 'update_available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateVersionInfo {
+  latestVersion?: string;
+  downloadedVersion?: string;
+}

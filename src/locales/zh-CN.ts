@@ -263,4 +263,28 @@ export default {
   'settings.appearance.theme': '主题',
   'settings.appearance.language': '语言',
   'settings.general.title': '通用',
+
+  'about.title': '关于 TermBridge',
+  'about.description': '一款简洁的桌面 SSH 客户端。',
+  'about.version': '版本',
+  'about.author': '作者',
+  'about.license': '许可证',
+  'about.source': '源码仓库',
+  'about.ok': '确定',
+
+  'update.checking': '正在检查更新...',
+  'update.latest': '当前已是最新版本。',
+  'update.downloading': '正在下载更新...',
+  'update.downloaded': '更新已下载完成。',
+  'update.progress': '下载进度：{progress}%',
+  'update.failed': '更新失败：{error}',
+  'update.manualUnavailable': '更新检查仅在桌面应用中可用。',
+
+  'update.restartDialog.title': '新版本已下载完成',
+  'update.restartDialog.description': '版本 {version} 已准备就绪，重启应用后即可完成安装。',
+  'update.restartDialog.activeSessionWarning': '重启会中断当前 SSH 会话，请先确认远程任务可以安全中断。',
+  'update.restartDialog.later': '稍后',
+  'update.restartDialog.installNow': '立即重启安装',
+
+  'settings.general.startupUpdateCheck': '启动时检查更新',
 } as const;

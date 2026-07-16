@@ -263,4 +263,28 @@ export default {
   'settings.appearance.theme': 'Theme',
   'settings.appearance.language': 'Language',
   'settings.general.title': 'General',
+
+  'about.title': 'About TermBridge',
+  'about.description': 'A clean desktop SSH client.',
+  'about.version': 'Version',
+  'about.author': 'Author',
+  'about.license': 'License',
+  'about.source': 'Source',
+  'about.ok': 'OK',
+
+  'update.checking': 'Checking for updates...',
+  'update.latest': 'You already have the latest version.',
+  'update.downloading': 'Downloading update...',
+  'update.downloaded': 'Update downloaded.',
+  'update.progress': 'Download progress: {progress}%',
+  'update.failed': 'Update failed: {error}',
+  'update.manualUnavailable': 'Update checks are only available in the desktop app.',
+
+  'update.restartDialog.title': 'New version downloaded',
+  'update.restartDialog.description': 'Version {version} is ready. Restart the app to finish installation.',
+  'update.restartDialog.activeSessionWarning': 'Restarting will interrupt the current SSH sessions. Make sure any remote work can be safely interrupted first.',
+  'update.restartDialog.later': 'Later',
+  'update.restartDialog.installNow': 'Restart and Install',
+
+  'settings.general.startupUpdateCheck': 'Check for updates on startup',
 } as const;
