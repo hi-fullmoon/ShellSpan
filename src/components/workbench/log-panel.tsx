@@ -180,7 +180,11 @@ const LogLine: React.FC<LogLineProps> = ({
         {line.level}
       </span>
       <Tooltip>
-        <TooltipTrigger className="hidden truncate text-[10px] text-app-text-soft md:block">
+        <TooltipTrigger
+          render={
+            <span className="hidden truncate text-[10px] text-app-text-soft md:block" />
+          }
+        >
           {line.target ? line.target.split('::').pop() : ''}
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
