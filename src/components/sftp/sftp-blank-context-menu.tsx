@@ -60,8 +60,10 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }
         : 'text-app-text hover:bg-app-primary/10 hover:text-app-primary',
     )}
   >
-    <span className="text-muted-foreground">{icon}</span>
-    <span>{children}</span>
+    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+      {icon}
+    </span>
+    <span className="leading-4">{children}</span>
   </button>
 );
 
