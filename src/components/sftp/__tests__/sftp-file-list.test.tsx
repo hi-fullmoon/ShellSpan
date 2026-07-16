@@ -68,6 +68,28 @@ function renderFileList(options: RenderOptions = {}) {
 }
 
 describe('SftpFileList', () => {
+  it('keeps the header aligned with horizontal content scrolling', () => {
+    const { container } = renderFileList({ side: 'remote' });
+    const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    const headerViewport = screen.getByTestId('sftp-file-list-header-viewport');
+
+    expect(viewport).not.toBeNull();
+    viewport!.scrollLeft = 180;
+    fireEvent.scroll(viewport!);
+
+    expect(headerViewport.scrollLeft).toBe(180);
+  });
+
+  it('places the scrolling header background on each column cell', () => {
+    renderFileList({ side: 'remote' });
+    const headerViewport = screen.getByTestId('sftp-file-list-header-viewport');
+    const headerCells = headerViewport.querySelectorAll('button');
+
+    expect(headerViewport).not.toHaveClass('bg-app-surface-muted');
+    expect(headerCells).toHaveLength(6);
+    headerCells.forEach((cell) => expect(cell).toHaveClass('bg-app-surface-muted'));
+  });
+
   it('cycles sort direction through asc, desc, default on name column', async () => {
     renderFileList({ entries: sampleEntries });
     const nameHeader = screen.getByText('sftp.columns.name');
@@ -220,15 +242,19 @@ describe('SftpFileList', () => {
     render(<Harness />);
     const firstRow = screen.getByText('a.txt').closest('.grid');
     const secondRow = screen.getByText('z.txt').closest('.grid');
+    const firstRowCells = firstRow?.querySelectorAll('[data-sftp-file-cell]') ?? [];
+    const secondRowCells = secondRow?.querySelectorAll('[data-sftp-file-cell]') ?? [];
 
     fireEvent.click(screen.getByText('a.txt'));
     fireEvent.click(screen.getByText('z.txt'));
 
-    expect(firstRow).toHaveClass('bg-app-primary/10');
-    expect(secondRow).toHaveClass('bg-app-primary/10');
+    expect(firstRow).not.toHaveClass('bg-app-primary/10', 'border-b');
+    expect(secondRow).not.toHaveClass('bg-app-primary/10', 'border-b');
+    firstRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10', 'border-b'));
+    secondRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10', 'border-b'));
 
     fireEvent.click(screen.getByText('a.txt'));
-    expect(firstRow).not.toHaveClass('bg-app-primary/10');
-    expect(secondRow).toHaveClass('bg-app-primary/10');
+    firstRowCells.forEach((cell) => expect(cell).not.toHaveClass('bg-app-primary/10'));
+    secondRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10'));
   });
 });

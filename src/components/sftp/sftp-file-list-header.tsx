@@ -72,21 +72,24 @@ export const SftpFileListHeader: React.FC<SftpFileListHeaderProps> = ({
 
   return (
     <div
-      className="grid h-8 shrink-0 items-center border-b border-app-border bg-app-surface-muted px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+      className="grid h-8 shrink-0 items-center px-2 text-[11px] font-semibold uppercase tracking-wide"
       style={{ gridTemplateColumns }}
     >
       {columns.map((column) => {
         const isSorted = column.sortable === sortColumn;
+        const isActiveSort = isSorted && sortDirection !== 'default';
         return (
           <button
             key={column.key}
             onClick={() => column.sortable && onSort(column.sortable)}
             disabled={!column.sortable}
+            aria-pressed={column.sortable ? isActiveSort : undefined}
             className={cn(
-              'flex h-full items-center gap-1 truncate pr-2 text-left',
+              'flex h-full items-center gap-1 truncate border-b border-app-border bg-app-surface-muted pr-2 text-left text-muted-foreground first:-ml-2 first:pl-2 last:-mr-2',
               column.sortable
                 ? 'cursor-pointer hover:text-app-text'
                 : 'cursor-default',
+              isActiveSort && 'text-app-text',
             )}
           >
             <span className="truncate">{column.label}</span>

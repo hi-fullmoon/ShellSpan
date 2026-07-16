@@ -103,6 +103,6 @@ describe('SftpTabBar', () => {
 
     await userEvent.dblClick(screen.getByText('Conn A'));
 
-    expect(screen.getByRole('textbox')).toHaveClass('p-0');
+    expect(screen.getByRole('textbox')).toHaveClass('p-0', 'leading-none');
   });
 });

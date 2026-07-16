@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
@@ -85,6 +85,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
 }) => {
   const { t } = useI18n();
   const parentRef = useRef<HTMLDivElement>(null);
+  const headerViewportRef = useRef<HTMLDivElement>(null);
   const [sortColumn, setSortColumn] = useState<SftpFileListSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<SftpFileListSortDirection>('default');
   const lastSelectedIndexRef = useRef<number | undefined>(undefined);
@@ -114,6 +115,20 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     estimateSize: () => 36,
     overscan: 8,
   });
+
+  useEffect(() => {
+    const contentViewport = parentRef.current;
+    const headerViewport = headerViewportRef.current;
+    if (!contentViewport || !headerViewport) return;
+
+    const syncHeaderScroll = (): void => {
+      headerViewport.scrollLeft = contentViewport.scrollLeft;
+    };
+
+    syncHeaderScroll();
+    contentViewport.addEventListener('scroll', syncHeaderScroll, { passive: true });
+    return () => contentViewport.removeEventListener('scroll', syncHeaderScroll);
+  }, []);
 
   const selectedEntries = useMemo(
     () => sortedEntries.filter((entry) => selectedSet.has(entry.path)),
@@ -176,12 +191,18 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <SftpFileListHeader
-        side={side}
-        sortColumn={sortColumn}
-        sortDirection={sortDirection}
-        onSort={handleSort}
-      />
+      <div
+        ref={headerViewportRef}
+        data-testid="sftp-file-list-header-viewport"
+        className="shrink-0 overflow-hidden"
+      >
+        <SftpFileListHeader
+          side={side}
+          sortColumn={sortColumn}
+          sortDirection={sortDirection}
+          onSort={handleSort}
+        />
+      </div>
       <ScrollArea
         className="relative flex-1"
         viewportRef={parentRef}

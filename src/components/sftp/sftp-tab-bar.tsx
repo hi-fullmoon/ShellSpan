@@ -114,14 +114,14 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
                   onRenameCancel?.();
                 }
               }}
-              className="h-5 border-0 bg-transparent p-0 text-xs font-medium shadow-none focus-visible:ring-0"
+              className="h-5 border-0 bg-transparent p-0 text-xs font-medium leading-none shadow-none focus-visible:ring-0"
             />
           </span>
         </div>
       ) : (
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <strong className="block flex-1 truncate text-left text-xs font-medium" title={connection.title}>
+            <strong className="block flex-1 truncate text-left text-xs font-medium leading-none" title={connection.title}>
               {connection.title}
             </strong>
           </div>

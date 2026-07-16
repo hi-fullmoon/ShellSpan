@@ -120,6 +120,10 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
     ? formatPermissionSymbolic(entry.permissions, entry.kind)
     : undefined;
   const mutedTextClass = selected ? 'text-app-primary' : 'text-app-text-soft';
+  const cellStateClass = cn(
+    'border-b border-app-border/50 transition-colors',
+    selected ? 'bg-app-primary/10' : 'group-hover:bg-app-surface-muted',
+  );
 
   return (
     <div
@@ -130,10 +134,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
       className={cn(
-        'grid h-full cursor-default select-none items-center border-b border-app-border/50 px-2 text-xs transition-colors',
-        selected
-          ? 'bg-app-primary/10 text-app-primary'
-          : 'hover:bg-app-surface-muted text-app-text',
+        'group grid h-full cursor-default select-none items-center px-2 text-xs',
         isDragging && 'opacity-50',
       )}
       style={{
@@ -143,7 +144,14 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
             : 'minmax(300px, 1fr) 148px 88px 96px',
       }}
     >
-      <div className="flex h-[34px] min-w-0 items-center gap-1.5 pr-2">
+      <div
+        data-sftp-file-cell
+        className={cn(
+          'flex h-full min-w-0 items-center gap-1.5 -ml-2 pr-2 pl-2',
+          cellStateClass,
+          selected ? 'text-app-primary' : 'text-app-text',
+        )}
+      >
         {batchMode && (
           <Checkbox checked={selected} className="h-3.5 w-3.5 shrink-0" />
         )}
@@ -172,22 +180,32 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
         </div>
       </div>
 
-      <div className={cn('truncate pr-2 tabular-nums', mutedTextClass)}>
+      <div data-sftp-file-cell className={cn('flex h-full items-center truncate pr-2 tabular-nums', cellStateClass, mutedTextClass)}>
         {entry.modifiedAt ? formatDate(entry.modifiedAt) : '--'}
       </div>
 
-      <div className={cn('truncate pr-2 tabular-nums', mutedTextClass)}>
+      <div data-sftp-file-cell className={cn('flex h-full items-center truncate pr-2 tabular-nums', cellStateClass, mutedTextClass)}>
         {entry.kind === 'directory' ? '--' : formatBytes(entry.size)}
       </div>
 
-      <div className={cn('truncate pr-2', mutedTextClass)}>{getKindLabel(entry.kind, t)}</div>
+      <div
+        data-sftp-file-cell
+        className={cn(
+          'flex h-full items-center truncate pr-2',
+          side === 'local' && '-mr-2',
+          cellStateClass,
+          mutedTextClass,
+        )}
+      >
+        {getKindLabel(entry.kind, t)}
+      </div>
 
       {side === 'remote' && remote && (
         <>
-          <div className={cn('truncate pr-2 font-mono', mutedTextClass)}>
+          <div data-sftp-file-cell className={cn('flex h-full items-center truncate pr-2 font-mono', cellStateClass, mutedTextClass)}>
             {formatOwner(entry)}
           </div>
-          <div className={cn('truncate pr-2 font-mono', mutedTextClass)}>
+          <div data-sftp-file-cell className={cn('flex h-full items-center truncate -mr-2 pr-2 font-mono', cellStateClass, mutedTextClass)}>
             {formatGroup(entry)}
           </div>
         </>

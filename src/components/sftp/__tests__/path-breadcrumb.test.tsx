@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeAll, afterAll, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { act } from 'react';
 import { PathBreadcrumb } from '../path-breadcrumb';
 
@@ -118,9 +118,35 @@ describe('PathBreadcrumb', () => {
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(3);
     expect(buttons[0]).toHaveTextContent('/');
+    expect(buttons[1]).toHaveAccessibleName('显示隐藏的路径');
     expect(buttons[1]).toHaveTextContent('...');
     expect(buttons[2]).toHaveTextContent('j');
     expect(screen.queryByRole('button', { name: 'a' })).not.toBeInTheDocument();
+  });
+
+  it('shows collapsed path segments on hover and lets users navigate to them', async () => {
+    const onNavigate = vi.fn();
+    const { container } = render(<PathBreadcrumb path="/a/b/c/d" onNavigate={onNavigate} />);
+    const div = container.firstChild as HTMLDivElement;
+
+    Object.defineProperty(div, 'clientWidth', { value: 100, configurable: true });
+    act(() => {
+      resizeCallback?.(
+        [{ contentRect: { width: 100 } } as unknown as ResizeObserverEntry],
+        new ResizeObserverMock(resizeCallback),
+      );
+    });
+
+    const ellipsis = screen.getByRole('button', { name: '显示隐藏的路径' });
+    fireEvent.mouseEnter(ellipsis);
+
+    const hiddenSegment = await screen.findByRole('button', { name: 'b' });
+    expect(hiddenSegment).not.toHaveAttribute('title');
+    expect(screen.getByRole('button', { name: 'a' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'c' })).toBeInTheDocument();
+
+    fireEvent.click(hiddenSegment);
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/a/b'));
   });
 
   it('does not oscillate between collapsed and expanded content', () => {

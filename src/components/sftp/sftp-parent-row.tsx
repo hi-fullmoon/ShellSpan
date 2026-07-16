@@ -1,5 +1,6 @@
 import React from 'react';
 import { FolderUpIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { SftpSide } from '@/stores/sftpStore';
 
 export interface SftpParentRowProps {
@@ -27,11 +28,13 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
     onBlankContextMenu?.(e);
   };
 
+  const cellClass = 'flex h-full items-center border-b border-app-border/50 transition-colors group-hover:bg-app-surface-muted';
+
   return (
     <div
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
-      className="grid h-full cursor-default select-none items-center border-b border-app-border/50 px-2 text-xs text-app-text transition-colors hover:bg-app-surface-muted"
+      className="group grid h-full cursor-default select-none items-center px-2 text-xs"
       style={{
         gridTemplateColumns:
           side === 'remote'
@@ -40,18 +43,18 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
       }}
       data-testid="sftp-parent-row"
     >
-      <div className="flex h-[34px] min-w-0 items-center gap-1.5 pr-2">
+      <div data-sftp-file-cell className={cn(cellClass, 'min-w-0 gap-1.5 -ml-2 pr-2 pl-2 text-app-text')}>
         {batchMode && <div className="h-3.5 w-3.5 shrink-0" />}
         <FolderUpIcon className="h-4 w-4 shrink-0 text-app-primary" />
         <span className="truncate text-[13px] font-medium">..</span>
       </div>
-      <div />
-      <div />
-      <div />
+      <div data-sftp-file-cell className={cellClass} />
+      <div data-sftp-file-cell className={cellClass} />
+      <div data-sftp-file-cell className={cn(cellClass, side === 'local' && '-mr-2')} />
       {side === 'remote' && (
         <>
-          <div />
-          <div />
+          <div data-sftp-file-cell className={cellClass} />
+          <div data-sftp-file-cell className={cn(cellClass, '-mr-2')} />
         </>
       )}
     </div>

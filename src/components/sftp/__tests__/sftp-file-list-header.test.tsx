@@ -23,6 +23,19 @@ function renderHeader(props: Partial<SftpFileListHeaderProps> = {}) {
 }
 
 describe('SftpFileListHeader', () => {
+  it('places the bottom border and text colors on each header cell', () => {
+    const { container } = renderHeader({ sortColumn: 'name', sortDirection: 'asc' });
+    const header = container.firstElementChild;
+    const cells = screen.getAllByRole('button');
+
+    expect(header).not.toHaveClass('border-b', 'text-muted-foreground');
+    cells.forEach((cell) => {
+      expect(cell).toHaveClass('border-b', 'border-app-border');
+    });
+    expect(screen.getByRole('button', { name: 'sftp.columns.name' })).toHaveClass('text-app-text');
+    expect(screen.getByRole('button', { name: 'sftp.columns.dateModified' })).toHaveClass('text-muted-foreground');
+  });
+
   it('does not show a sort icon when sortDirection is default', () => {
     renderHeader({ sortColumn: 'name', sortDirection: 'default' });
 

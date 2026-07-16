@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FolderIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -31,6 +32,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
   const parsedPath = useMemo(() => parsePortablePath(path), [path]);
   const { rootLabel, rootPath, segments } = parsedPath;
   const isRoot = segments.length === 0;
+  const hiddenSegments = segments.slice(visibleCount, -1);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -177,9 +179,38 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
                 <>
                   {segments.slice(0, visibleCount).map(renderSegment)}
                   <ChevronIcon />
-                  <Button variant="ghost" size="sm" disabled className="h-5 px-1 text-muted-foreground">
-                    <span className="leading-none">...</span>
-                  </Button>
+                  <HoverCard>
+                    <HoverCardTrigger
+                      delay={0}
+                      closeDelay={150}
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label="显示隐藏的路径"
+                          className="h-5 px-1 text-muted-foreground hover:text-app-text"
+                        />
+                      }
+                    >
+                      <span className="leading-none">...</span>
+                    </HoverCardTrigger>
+                    <HoverCardContent side="bottom" align="start" className="w-auto min-w-40 max-w-80 p-1">
+                      <div className="flex flex-col gap-0.5" aria-label="隐藏的路径">
+                        {hiddenSegments.map((segment) => (
+                          <Button
+                            key={segment.path}
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onNavigate(segment.path)}
+                            className="w-full justify-start px-2 text-muted-foreground hover:text-app-text"
+                          >
+                            <FolderIcon className="text-app-primary" />
+                            <span className="truncate">{segment.name}</span>
+                          </Button>
+                        ))}
+                      </div>
+                    </HoverCardContent>
+                  </HoverCard>
                   {renderSegment(segments[segments.length - 1])}
                 </>
               )}
