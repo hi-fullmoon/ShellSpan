@@ -140,7 +140,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
                   onRenameCancel?.();
                 }
               }}
-              className="h-5 border-0 bg-transparent px-1 py-0 text-xs font-medium shadow-none focus-visible:ring-0"
+              className="h-5 border-0 bg-transparent p-0 text-xs font-medium leading-none shadow-none focus-visible:ring-0"
             />
           </span>
         </div>
@@ -148,7 +148,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
-            <strong className="block flex-1 truncate text-left text-xs font-medium" title={session.title}>
+            <strong className="block flex-1 truncate text-left text-xs font-medium leading-none" title={session.title}>
               {session.title}
             </strong>
           </div>

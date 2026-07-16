@@ -118,6 +118,7 @@ describe('TerminalTabBar', () => {
 
     const input = screen.getByDisplayValue('A');
     expect(input).toBeInTheDocument();
+    expect(input).toHaveClass('p-0', 'leading-none');
 
     fireEvent.change(input, { target: { value: 'Renamed' } });
     fireEvent.keyDown(input, { key: 'Enter' });
