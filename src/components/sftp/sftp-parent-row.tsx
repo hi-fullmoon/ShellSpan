@@ -29,6 +29,7 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
 
   const handleContextMenu = (e: React.MouseEvent): void => {
     e.preventDefault();
+    e.stopPropagation();
     onBlankContextMenu?.(e);
   };
 

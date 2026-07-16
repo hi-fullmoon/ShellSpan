@@ -180,6 +180,10 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     [batchMode, onSelect, selectedPaths, sortedEntries],
   );
 
+  const handleParentDirectory = useCallback(() => {
+    onParentDirectory?.();
+  }, [onParentDirectory]);
+
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
@@ -230,7 +234,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
                     <SftpParentRow
                       side={side}
                       batchMode={batchMode}
-                      onParentDirectory={() => onParentDirectory?.()}
+                      onParentDirectory={handleParentDirectory}
                       onBlankContextMenu={onBlankContextMenu}
                     />
                   ) : (

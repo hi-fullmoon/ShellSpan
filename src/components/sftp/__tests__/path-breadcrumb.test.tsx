@@ -1,9 +1,10 @@
-import { describe, expect, it, vi, beforeAll } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { act } from 'react';
 import { PathBreadcrumb } from '../path-breadcrumb';
 
 let resizeCallback: ResizeObserverCallback | null = null;
+let originalResizeObserver: typeof window.ResizeObserver | undefined;
 
 class ResizeObserverMock {
   constructor(callback: ResizeObserverCallback) {
@@ -16,10 +17,22 @@ class ResizeObserverMock {
 }
 
 beforeAll(() => {
+  originalResizeObserver = window.ResizeObserver;
   Object.defineProperty(window, 'ResizeObserver', {
     writable: true,
     value: ResizeObserverMock,
   });
+});
+
+afterAll(() => {
+  Object.defineProperty(window, 'ResizeObserver', {
+    writable: true,
+    value: originalResizeObserver,
+  });
+});
+
+afterEach(() => {
+  resizeCallback = null;
 });
 
 describe('PathBreadcrumb', () => {

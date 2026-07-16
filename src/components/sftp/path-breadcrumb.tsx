@@ -41,16 +41,15 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
 
   const normalized = path.replace(/\\/g, '/');
   const isRoot = normalized === '' || normalized === '/';
-  const rawParts = normalized.split('/').filter(Boolean);
-
   const segments: Segment[] = useMemo(() => {
     if (isRoot) return [];
-    return rawParts.map((part, index) => ({
+    const parts = normalized.split('/').filter(Boolean);
+    return parts.map((part, index) => ({
       name: part,
-      path: '/' + rawParts.slice(0, index + 1).join('/'),
+      path: '/' + parts.slice(0, index + 1).join('/'),
       index,
     }));
-  }, [isRoot, rawParts]);
+  }, [isRoot, normalized]);
 
   useEffect(() => {
     if (!containerRef.current || typeof ResizeObserver === 'undefined') return;
@@ -108,7 +107,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   };
 
   const renderSegment = useCallback(
-    (segment: Segment, isLast: boolean) => (
+    (segment: Segment) => (
       <React.Fragment key={segment.index}>
         <ChevronIcon />
         <Button
@@ -159,24 +158,10 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
           {!isRoot && (
             <>
               {visibleCount >= segments.length ? (
-                segments.map((segment, index) => renderSegment(segment, index === segments.length - 1))
+                segments.map(renderSegment)
               ) : (
                 <>
-                  {segments.slice(0, Math.max(1, visibleCount - 1)).map((segment) => (
-                    <React.Fragment key={segment.index}>
-                      <ChevronIcon />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onNavigate(segment.path)}
-                        className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
-                        title={segment.name}
-                      >
-                        <FolderIcon className="text-app-primary" />
-                        <span className="truncate max-w-[200px] leading-none">{segment.name}</span>
-                      </Button>
-                    </React.Fragment>
-                  ))}
+                  {segments.slice(0, Math.max(1, visibleCount - 1)).map(renderSegment)}
                   <ChevronIcon />
                   <Button
                     variant="ghost"
@@ -186,7 +171,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
                   >
                     <span className="leading-none">...</span>
                   </Button>
-                  {renderSegment(segments[segments.length - 1], true)}
+                  {renderSegment(segments[segments.length - 1])}
                 </>
               )}
             </>

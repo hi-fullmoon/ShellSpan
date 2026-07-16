@@ -90,7 +90,7 @@ export const SftpFileListHeader: React.FC<SftpFileListHeaderProps> = ({
             )}
           >
             <span className="truncate">{column.label}</span>
-            {isSorted && sortDirection !== 'default' && column.sortable && (
+            {isSorted && sortDirection !== 'default' && (
               <span data-testid={`sort-icon-${column.sortable}`}>
                 <SortIcon direction={sortDirection} />
               </span>

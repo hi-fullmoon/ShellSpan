@@ -100,4 +100,46 @@ describe('SftpFileList', () => {
     expect(rows[0]).toHaveTextContent('..');
     expect(rows.length).toBeGreaterThan(1);
   });
+
+  it('navigates to parent directory when parent row is clicked', () => {
+    const onParentDirectory = vi.fn();
+    render(
+      <SftpFileList
+        entries={sampleEntries}
+        side="local"
+        selectedPaths={[]}
+        filterQuery=""
+        batchMode={false}
+        currentPath="/home/user"
+        onSelect={vi.fn()}
+        onDoubleClick={vi.fn()}
+        onContextMenu={vi.fn()}
+        onBlankContextMenu={vi.fn()}
+        onParentDirectory={onParentDirectory}
+      />,
+    );
+    fireEvent.click(screen.getByText('..'));
+    expect(onParentDirectory).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls blank context menu exactly once when right-clicking parent row', () => {
+    const onBlankContextMenu = vi.fn();
+    render(
+      <SftpFileList
+        entries={sampleEntries}
+        side="local"
+        selectedPaths={[]}
+        filterQuery=""
+        batchMode={false}
+        currentPath="/home/user"
+        onSelect={vi.fn()}
+        onDoubleClick={vi.fn()}
+        onContextMenu={vi.fn()}
+        onBlankContextMenu={onBlankContextMenu}
+        onParentDirectory={vi.fn()}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByText('..'));
+    expect(onBlankContextMenu).toHaveBeenCalledTimes(1);
+  });
 });
