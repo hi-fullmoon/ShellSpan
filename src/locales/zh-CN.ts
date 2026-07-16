@@ -240,6 +240,9 @@ export default {
   'sftp.conflict.skip': '跳过',
   'sftp.conflict.cancel': '取消',
   'sftp.conflict.applyToRemaining': '应用到剩余项目',
+  'sftp.deleteConfirm.title': '确认删除',
+  'sftp.deleteConfirm.single': '确定要删除“{name}”吗？此操作无法撤销。',
+  'sftp.deleteConfirm.multiple': '确定要删除选中的 {count} 个项目吗？此操作无法撤销。',
 
   'sftp.newConnectionMenu.title': '快速打开 SFTP',
   'sftp.newConnectionMenu.searchPlaceholder': '搜索连接...',

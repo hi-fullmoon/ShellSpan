@@ -240,6 +240,9 @@ export default {
   'sftp.conflict.skip': 'Skip',
   'sftp.conflict.cancel': 'Cancel',
   'sftp.conflict.applyToRemaining': 'Apply to remaining',
+  'sftp.deleteConfirm.title': 'Confirm deletion',
+  'sftp.deleteConfirm.single': 'Delete “{name}”? This action cannot be undone.',
+  'sftp.deleteConfirm.multiple': 'Delete the selected {count} items? This action cannot be undone.',
 
   'sftp.newConnectionMenu.title': 'Quick Open SFTP',
   'sftp.newConnectionMenu.searchPlaceholder': 'Search connections...',

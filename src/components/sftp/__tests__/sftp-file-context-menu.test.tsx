@@ -92,6 +92,54 @@ describe('SftpFileContextMenu', () => {
     expect(onAction).toHaveBeenCalledWith('preview');
   });
 
+  it('does not delete until the confirmation is accepted', () => {
+    const { onAction, onClose } = renderMenu();
+
+    fireEvent.click(screen.getByText('common.delete'));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onAction).not.toHaveBeenCalled();
+    expect(screen.getByText('sftp.deleteConfirm.title')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('common.cancel'));
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it('deletes only after the destructive confirmation is accepted', () => {
+    const { onAction } = renderMenu();
+
+    fireEvent.click(screen.getByText('common.delete'));
+    fireEvent.click(screen.getByText('common.delete'));
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onAction).toHaveBeenCalledWith('delete');
+  });
+
+  it('uses the multi-item confirmation for a batch selection', () => {
+    renderMenu({
+      selectedEntries: [
+        createRemoteFileEntry('first.txt'),
+        createRemoteFileEntry('second.txt'),
+      ],
+    });
+
+    fireEvent.click(screen.getByText('common.delete'));
+
+    expect(screen.getByText('sftp.deleteConfirm.multiple')).toBeInTheDocument();
+  });
+
+  it('wraps a long file name inside the confirmation dialog', () => {
+    renderMenu({
+      selectedEntries: [
+        createRemoteFileEntry('a-very-long-file-name-without-any-natural-break-points.txt'),
+      ],
+    });
+
+    fireEvent.click(screen.getByText('common.delete'));
+
+    expect(screen.getByText('sftp.deleteConfirm.single')).toHaveClass('break-all');
+  });
+
   it('hides remote-only items for local side', () => {
     renderMenu({ side: 'local', selectedEntries: [createRemoteFileEntry('local.txt')] });
     expect(screen.queryByText('sftp.contextMenu.newFile')).not.toBeInTheDocument();

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ExternalLinkIcon,
@@ -24,6 +24,16 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
@@ -100,6 +110,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
 }) => {
   const { t } = useI18n();
   const { menuRef, position } = useViewportConstrainedPosition<HTMLDivElement>(open, x, y);
+  const [deleteTargets, setDeleteTargets] = useState<FileEntry[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -120,7 +131,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
     };
   }, [menuRef, open, onClose]);
 
-  if (!open) return null;
+  if (!open && deleteTargets.length === 0) return null;
 
   const isLocal = side === 'local';
   const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
@@ -144,12 +155,28 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
     onClose();
   };
 
+  const requestDelete = (): void => {
+    setDeleteTargets([...selectedEntries]);
+    onClose();
+  };
+
+  const confirmDelete = (): void => {
+    onAction('delete');
+    setDeleteTargets([]);
+  };
+
+  const deleteDescription = deleteTargets.length === 1
+    ? t('sftp.deleteConfirm.single', { name: deleteTargets[0].name })
+    : t('sftp.deleteConfirm.multiple', { count: deleteTargets.length });
+
   return createPortal(
-    <div
-      ref={menuRef}
-      className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
-      style={position}
-    >
+    <>
+      {open && deleteTargets.length === 0 && (
+      <div
+        ref={menuRef}
+        className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
+        style={position}
+      >
       {!isLocal && (
         <>
           <MenuItem onClick={() => handleAction('newFile')} icon={<FilePlusIcon className="h-3.5 w-3.5" />}>
@@ -207,7 +234,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
         {t('sftp.contextMenu.copy')}
       </MenuItem>
 
-      <MenuItem onClick={() => handleAction('delete')} disabled={!canDelete} icon={<Trash2Icon className="h-3.5 w-3.5" />} danger>
+      <MenuItem onClick={requestDelete} disabled={!canDelete} icon={<Trash2Icon className="h-3.5 w-3.5" />} danger>
         {t('common.delete')}
       </MenuItem>
 
@@ -250,7 +277,36 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
       <MenuItem onClick={() => handleAction('properties')} disabled={!canProperties} icon={<InfoIcon className="h-3.5 w-3.5" />}>
         {t('common.properties')}
       </MenuItem>
-    </div>,
+      </div>
+      )}
+      <AlertDialog
+        open={deleteTargets.length > 0}
+        onOpenChange={(next) => {
+          if (!next) setDeleteTargets([]);
+        }}
+      >
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('sftp.deleteConfirm.title')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {deleteDescription}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmDelete}>
+              {t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>,
     document.body,
   );
 };
