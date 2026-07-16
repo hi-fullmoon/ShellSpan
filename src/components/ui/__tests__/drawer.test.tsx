@@ -42,7 +42,9 @@ describe('Drawer', () => {
 
     const content = document.body.querySelector('[data-slot="drawer-content"]');
     expect(content).toHaveClass('w-[360px]');
-    expect(content).toHaveClass('p-4');
+    expect(content).toHaveClass('pr-0');
+    expect(content).toHaveClass('pl-4');
+    expect(content).toHaveClass('py-4');
     expect(content).toHaveClass('gap-2');
   });
 

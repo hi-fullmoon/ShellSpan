@@ -181,7 +181,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
               : t('connection.form.title.new')}
           </DrawerTitle>
         </DrawerHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto -mr-4 pr-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-4">
         <FormRow label={t('common.name')} error={errors.name}>
           <Input
             value={form.name}
