@@ -13,8 +13,8 @@ describe('SplitPane', () => {
     expect(screen.getByTestId('left')).toBeInTheDocument();
     expect(screen.getByTestId('right')).toBeInTheDocument();
     expect(container.querySelector('[data-slot="split-pane-divider"]')).toHaveClass(
-      'w-px',
-      'bg-app-border',
+      'border-l',
+      'border-app-border',
       'shadow-none',
     );
     expect(container.querySelector('[data-slot="split-pane-handle"]')).toHaveClass(
@@ -22,5 +22,8 @@ describe('SplitPane', () => {
       'bg-transparent',
       'shadow-none',
     );
+    expect(
+      container.querySelector('[data-slot="split-pane-indicator"]'),
+    ).toHaveClass('w-px', 'bg-transparent', 'shadow-none');
   });
 });

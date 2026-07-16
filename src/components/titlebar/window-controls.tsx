@@ -13,7 +13,7 @@ const ControlButton: React.FC<{
       onClick={onClick}
       aria-label={ariaLabel}
       className={cn(
-        'flex h-8 w-10 items-center justify-center text-app-text-soft transition-colors hover:text-app-text',
+        'flex h-full w-10 items-center justify-center text-app-text-soft transition-colors hover:bg-app-surface-muted hover:text-app-text',
         className,
       )}
       data-tauri-drag-region="false"

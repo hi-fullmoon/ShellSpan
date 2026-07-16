@@ -12,7 +12,7 @@ export const TitleBar: React.FC = () => {
     <div
       className={cn(
         'flex h-10 w-full shrink-0 items-center justify-between bg-app-surface/90 backdrop-blur-sm',
-        isMacOS && 'pl-[76px]',
+        isMacOS ? 'pl-[76px]' : 'pl-2',
       )}
       data-tauri-drag-region
     >

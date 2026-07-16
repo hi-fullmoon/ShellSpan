@@ -9,61 +9,22 @@ export interface EmptyStateProps {
   className?: string;
 }
 
-export const EmptyState: React.FC<EmptyStateProps> = ({
-  title,
-  description,
-  icon,
-  action,
-  className,
-}) => {
+export const EmptyState: React.FC<EmptyStateProps> = ({ title, description, icon, action, className }) => {
   return (
-    <div
-      className={cn(
-        'flex flex-col items-center justify-center gap-4 p-4 text-muted-foreground',
-        className,
-      )}
-    >
-      {icon && (
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-          {icon}
-        </div>
-      )}
+    <div className={cn('flex flex-col items-center justify-center gap-4 p-4 text-muted-foreground', className)}>
+      {icon && <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">{icon}</div>}
       <span className="text-xs">{title}</span>
-      {description && (
-        <span className="max-w-xs text-center text-xs text-muted-foreground/80">
-          {description}
-        </span>
-      )}
+      {description && <span className="text-center text-xs text-muted-foreground/80">{description}</span>}
       {action}
     </div>
   );
 };
 
-export const Spinner: React.FC<{ className?: string; size?: number }> = ({
-  className,
-  size = 16,
-}) => {
+export const Spinner: React.FC<{ className?: string; size?: number }> = ({ className, size = 16 }) => {
   return (
-    <svg
-      className={cn('animate-spin text-muted-foreground', className)}
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-      />
+    <svg className={cn('animate-spin text-muted-foreground', className)} width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
   );
 };

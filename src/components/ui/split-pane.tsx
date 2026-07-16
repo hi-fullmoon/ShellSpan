@@ -9,13 +9,7 @@ export interface SplitPaneProps {
   className?: string;
 }
 
-export const SplitPane: React.FC<SplitPaneProps> = ({
-  left,
-  right,
-  minWidth = 240,
-  defaultSplit = 0.5,
-  className,
-}) => {
+export const SplitPane: React.FC<SplitPaneProps> = ({ left, right, minWidth = 240, defaultSplit = 0.5, className }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [split, setSplit] = useState(defaultSplit);
   const [dragging, setDragging] = useState(false);
@@ -45,10 +39,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
       const rect = containerRef.current.getBoundingClientRect();
       const width = rect.width;
       const x = e.clientX - rect.left;
-      const nextSplit = Math.min(
-        Math.max(x / width, minWidth / width),
-        1 - minWidth / width,
-      );
+      const nextSplit = Math.min(Math.max(x / width, minWidth / width), 1 - minWidth / width);
       setSplit(nextSplit);
     },
     [minWidth],
@@ -64,15 +55,11 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
   }, [handleMouseUp, handleMouseMove]);
 
   return (
-    <div
-      ref={containerRef}
-      className={cn('flex h-full w-full overflow-hidden', className)}
-    >
-      <div style={{ width: `${split * 100}%` }} className="min-w-0">{left}</div>
-      <div
-        data-slot="split-pane-divider"
-        className="relative z-10 w-px shrink-0 bg-app-border shadow-none"
-      >
+    <div ref={containerRef} className={cn('flex h-full w-full overflow-hidden', className)}>
+      <div style={{ width: `${split * 100}%` }} className="min-w-0">
+        {left}
+      </div>
+      <div data-slot="split-pane-divider" className="relative z-10 shrink-0 border-l border-app-border shadow-none scale-[-1]">
         <div
           data-slot="split-pane-handle"
           onMouseDown={handleMouseDown}
@@ -83,16 +70,19 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
           )}
         >
           <div
+            data-slot="split-pane-indicator"
             className={cn(
               'h-full transition-all duration-150 shadow-none',
               dragging
                 ? 'w-[3px] bg-app-primary'
-                : 'w-px bg-app-border delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200',
+                : 'w-px bg-transparent delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200',
             )}
           />
         </div>
       </div>
-      <div style={{ width: `${(1 - split) * 100}%` }} className="min-w-0">{right}</div>
+      <div style={{ width: `${(1 - split) * 100}%` }} className="min-w-0">
+        {right}
+      </div>
     </div>
   );
 };
