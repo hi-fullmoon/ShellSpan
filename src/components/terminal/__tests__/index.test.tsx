@@ -4,6 +4,8 @@ import Terminal from '../index';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 
+const mockConnect = vi.fn();
+
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
@@ -15,6 +17,7 @@ vi.mock('@/hooks/useI18n', () => ({
 
 vi.mock('@/hooks/useConnectSession', () => ({
   useConnectSession: () => ({
+    connect: mockConnect,
     hostKeyDialog: {
       open: false,
       host: '',
@@ -35,8 +38,22 @@ vi.mock('../terminal-pane', () => ({
 }));
 
 vi.mock('../new-tab-menu', () => ({
-  NewTabMenu: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="new-tab-menu">NewTabMenu</div> : null,
+  NewTabMenu: ({
+    open,
+    onConnect,
+  }: {
+    open: boolean;
+    onConnect: (profile: unknown) => Promise<void>;
+  }) =>
+    open ? (
+      <button
+        type="button"
+        data-testid="new-tab-menu"
+        onClick={() => void onConnect({ id: 'p1' })}
+      >
+        NewTabMenu
+      </button>
+    ) : null,
 }));
 
 vi.mock('../terminal-context-menu', () => ({
@@ -52,6 +69,7 @@ const initialState = useTerminalStore.getState();
 describe('Terminal', () => {
   beforeEach(() => {
     useTerminalStore.setState(initialState, true);
+    mockConnect.mockReset();
   });
 
   afterEach(async () => {
@@ -78,6 +96,17 @@ describe('Terminal', () => {
     );
 
     expect(screen.getByTestId('new-tab-menu')).toBeInTheDocument();
+  });
+
+  it('passes the dialog-owning connection callback to the new tab menu', () => {
+    render(<Terminal />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'terminal.empty.newConnection' }),
+    );
+    fireEvent.click(screen.getByTestId('new-tab-menu'));
+
+    expect(mockConnect).toHaveBeenCalledWith({ id: 'p1' });
   });
 
   it('toggles the new tab menu with Ctrl/Cmd+K keyboard shortcut', () => {

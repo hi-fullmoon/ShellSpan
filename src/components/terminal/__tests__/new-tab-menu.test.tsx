@@ -17,20 +17,6 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useConnectSession', () => ({
-  useConnectSession: () => ({
-    connect: mockConnect,
-    hostKeyDialog: {
-      open: false,
-      host: '',
-      port: 22,
-      mismatch: false,
-      onTrust: () => {},
-    },
-    closeHostKeyDialog: vi.fn(),
-  }),
-}));
-
 vi.mock('@/lib/tauri', () => ({
   invokeRetrievePassword: vi.fn().mockResolvedValue(null),
   invokeStorePassword: vi.fn().mockResolvedValue(undefined),
@@ -80,7 +66,7 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [p1, p2] });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} />);
+    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
 
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
@@ -100,7 +86,7 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [p1, p2, p3] });
     useRecentProfilesStore.setState({ recentIds: ['p3', 'p2'] });
 
-    render(<NewTabMenu open onClose={vi.fn()} />);
+    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
 
     const section = screen.getByText('terminal.newTabMenu.recentConnections');
     expect(section).toBeInTheDocument();
@@ -116,7 +102,7 @@ describe('NewTabMenu', () => {
     const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
     useProfileStore.setState({ profiles: [p1, p2] });
 
-    render(<NewTabMenu open onClose={vi.fn()} />);
+    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
 
     const searchInput = screen.getByPlaceholderText(
       'terminal.newTabMenu.searchPlaceholder',
@@ -133,7 +119,7 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [p1, p2] });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} />);
+    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
 
     fireEvent.keyDown(document, { key: 'ArrowDown' });
     fireEvent.keyDown(document, { key: 'Enter' });
@@ -148,7 +134,7 @@ describe('NewTabMenu', () => {
     const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
     useProfileStore.setState({ profiles: [p1, p2] });
 
-    render(<NewTabMenu open onClose={vi.fn()} />);
+    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
 
     fireEvent.keyDown(document, { key: 'ArrowUp' });
     fireEvent.keyDown(document, { key: 'Enter' });
@@ -160,7 +146,7 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [] });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} />);
+    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
 
     expect(screen.getByText('terminal.tab.noProfiles')).toBeInTheDocument();
     expect(
@@ -180,7 +166,9 @@ describe('NewTabMenu', () => {
   });
 
   it('renders nothing when open is false', () => {
-    const { container } = render(<NewTabMenu open={false} onClose={vi.fn()} />);
+    const { container } = render(
+      <NewTabMenu open={false} onClose={vi.fn()} onConnect={mockConnect} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 
@@ -190,7 +178,7 @@ describe('NewTabMenu', () => {
     });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} />);
+    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
 
     const backdrop = document.body.querySelector('[role="presentation"]') as HTMLElement;
     expect(backdrop).not.toBeNull();
@@ -206,7 +194,7 @@ describe('NewTabMenu', () => {
     });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} />);
+    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
 
     fireEvent.keyDown(document, { key: 'Escape' });
 

@@ -4,7 +4,6 @@ import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
-import { useConnectSession } from '@/hooks/useConnectSession';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { ServerIcon, LayoutGridIcon } from 'lucide-react';
@@ -17,6 +16,7 @@ const ANIMATION_DURATION = 150;
 interface NewTabMenuProps {
   open: boolean;
   onClose: () => void;
+  onConnect: (profile: ConnectionProfile) => Promise<void>;
 }
 
 interface ProfileListItem {
@@ -24,11 +24,10 @@ interface ProfileListItem {
   isRecent: boolean;
 }
 
-export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose }) => {
+export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect }) => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
-  const { connect } = useConnectSession();
   const setActiveSection = useAppStore((state) => state.setActiveSection);
 
   const [query, setQuery] = useState('');
@@ -129,7 +128,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose }) => {
         event.preventDefault();
         const selected = filteredItems[selectedIndex];
         if (selected) {
-          void connect(selected.profile);
+          void onConnect(selected.profile);
           onClose();
         }
       }
@@ -138,7 +137,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose }) => {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mounted, onClose, filteredItems, hasResults, selectedIndex, connect]);
+  }, [mounted, onClose, filteredItems, hasResults, selectedIndex, onConnect]);
 
   const handleOpenWorkbench = (): void => {
     setActiveSection('workbench');
@@ -146,7 +145,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose }) => {
   };
 
   const handleConnect = (profile: ConnectionProfile): void => {
-    void connect(profile);
+    void onConnect(profile);
     onClose();
   };
 

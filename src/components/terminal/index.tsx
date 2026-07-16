@@ -19,7 +19,7 @@ const Terminal: React.FC = () => {
   const activeSession =
     sessions.find((s) => s.sessionId === activeSessionId) ?? null;
 
-  const { hostKeyDialog, closeHostKeyDialog } = useConnectSession();
+  const { connect, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
 
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
@@ -75,7 +75,11 @@ const Terminal: React.FC = () => {
         ) : (
           <TerminalPane activeSession={activeSession} />
         )}
-        <NewTabMenu open={newTabMenuOpen} onClose={() => setNewTabMenuOpen(false)} />
+        <NewTabMenu
+          open={newTabMenuOpen}
+          onClose={() => setNewTabMenuOpen(false)}
+          onConnect={connect}
+        />
       </div>
       <TerminalContextMenu
         open={!!contextMenu}
