@@ -157,7 +157,7 @@ const LogLine: React.FC<LogLineProps> = ({ line, originalIndex, onDoubleClick })
     <button
       type="button"
       onDoubleClick={onDoubleClick}
-      className="grid w-full cursor-pointer grid-cols-[120px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[120px_2.75rem_4.5rem_1fr]"
+      className="grid w-full cursor-pointer grid-cols-[110px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[110px_2.75rem_4.5rem_1fr]"
     >
       <span className="shrink-0 text-[10px] text-app-text-soft">
         {line.date} {shortTime}
@@ -200,7 +200,7 @@ export const LogPanel: React.FC = () => {
     refreshActiveFile,
   } = useLogStore();
   const [autoScroll, setAutoScroll] = useState(true);
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>('last3days');
+  const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -336,8 +336,15 @@ export const LogPanel: React.FC = () => {
               value={dateFilter}
               onValueChange={(value) => setDateFilter(value as DateFilterOption)}
             >
-              <SelectTrigger size="sm" className="w-32">
-                <SelectValue />
+              <SelectTrigger size="sm" className="w-32" data-testid="date-filter-trigger">
+                <SelectValue>
+                  {(value: unknown) => {
+                    const option = DATE_FILTER_OPTIONS.find(
+                      (opt) => opt.key === value,
+                    );
+                    return option ? t(option.labelKey) : String(value ?? '');
+                  }}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {DATE_FILTER_OPTIONS.map((option) => (
@@ -356,8 +363,14 @@ export const LogPanel: React.FC = () => {
               value={levelFilter}
               onValueChange={(value) => setLevelFilter(value as LogLevel | 'all')}
             >
-              <SelectTrigger size="sm" className="w-24">
-                <SelectValue />
+              <SelectTrigger size="sm" className="w-24" data-testid="level-filter-trigger">
+                <SelectValue>
+                  {(value: unknown) =>
+                    value === 'all'
+                      ? t('workbench.logs.all')
+                      : String(value ?? '')
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">{t('workbench.logs.all')}</SelectItem>

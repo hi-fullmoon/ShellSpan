@@ -69,7 +69,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-sm font-medium text-app-text">
             {t('workbench.connections.title')}
@@ -87,9 +87,10 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('workbench.connections.searchPlaceholder')}
+              className="h-8"
             />
           </div>
-          <Button variant="default" size="default" onClick={onAdd}>
+          <Button variant="default" size="sm" onClick={onAdd}>
             {t('workbench.connections.new')}
           </Button>
         </div>

@@ -102,4 +102,18 @@ describe('LogPanel', () => {
     });
     expect(mockAddToast).toHaveBeenCalledWith('workbench.logs.copied');
   });
+
+  it('displays the selected date filter label in the trigger', () => {
+    render(<LogPanel />);
+
+    const trigger = screen.getByTestId('date-filter-trigger');
+    expect(trigger).toHaveTextContent(/^workbench\.logs\.today$/);
+  });
+
+  it('displays the selected level filter label in the trigger', () => {
+    render(<LogPanel />);
+
+    const trigger = screen.getByTestId('level-filter-trigger');
+    expect(trigger).toHaveTextContent(/^workbench\.logs\.all$/);
+  });
 });
