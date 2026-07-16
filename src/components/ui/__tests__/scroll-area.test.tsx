@@ -28,7 +28,9 @@ describe('ScrollArea', () => {
       </ScrollArea>,
     );
 
+    const scrollbar = container.querySelector('[data-slot="scroll-area-scrollbar"]');
     const thumb = container.querySelector('[data-slot="scroll-area-thumb"]');
+    expect(scrollbar).not.toHaveClass('p-px');
     expect(thumb).toHaveClass('bg-border', 'hover:bg-muted-foreground');
     expect(thumb).not.toHaveClass('rounded-full');
   });
