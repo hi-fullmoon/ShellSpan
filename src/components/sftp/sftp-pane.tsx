@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useDroppable } from '@dnd-kit/core';
-import { ChevronLeftIcon, ChevronRightIcon, BookmarkIcon } from 'lucide-react';
+import { useDndContext, useDroppable } from '@dnd-kit/core';
+import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, MoveDownIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { type SftpConnection, type SftpSide } from '@/stores/sftpStore';
 import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './file-entry-formatters';
+import type { SftpDndPayload } from './sftp-dnd-context';
 
 export interface SftpPaneProps {
   connection: SftpConnection;
@@ -43,12 +44,15 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   onSelectedPathsChange,
 }) => {
   const { t } = useI18n();
+  const { active } = useDndContext();
   const { setNodeRef, isOver } = useDroppable({
     id: `sftp-pane-${side}-${connection.id}`,
     data: { side },
   });
 
   const isLocal = side === 'local';
+  const activeDrag = active?.data.current as SftpDndPayload | undefined;
+  const canAcceptActiveDrag = !!activeDrag && activeDrag.side !== side;
   const path = isLocal ? connection.localPath : connection.remotePath;
   const entries = isLocal ? connection.localEntries : connection.remoteEntries;
   const loading = isLocal ? connection.localLoading : connection.remoteLoading;
@@ -344,10 +348,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className={cn(
-        'flex h-full flex-col overflow-hidden bg-app-surface',
-        isOver && 'ring-2 ring-inset ring-app-primary',
-      )}
+      className="flex h-full flex-col overflow-hidden bg-app-surface"
     >
       {/* Title bar */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-3">
@@ -401,6 +402,16 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
 
       {/* File list */}
       <div className="relative flex-1 min-h-0">
+        {canAcceptActiveDrag && isOver && (
+          <div
+            className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-app-primary/70 bg-app-surface/70 p-6"
+          >
+            <div className="flex flex-col items-center gap-2 px-5 py-4 text-center text-app-text">
+              <MoveDownIcon aria-hidden="true" className="size-8 text-app-primary" />
+              <span className="text-sm font-semibold">{t('sftp.dropHint')}</span>
+            </div>
+          </div>
+        )}
         {loading && entries.length === 0 && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-app-surface">
             <Spinner />
