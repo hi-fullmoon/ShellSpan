@@ -136,7 +136,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
               }}
               className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
             >
-              <PinIcon />
+              <PinIcon className="size-3" />
             </button>
           ) : (
             <button

@@ -232,6 +232,7 @@ describe('TerminalTabBar', () => {
 
     const pinButton = screen.getByLabelText('unpin');
     expect(pinButton).toBeInTheDocument();
+    expect(pinButton.querySelector('svg')).toHaveClass('size-3');
 
     fireEvent.click(pinButton);
     expect(togglePinSpy).toHaveBeenCalledWith('s1');

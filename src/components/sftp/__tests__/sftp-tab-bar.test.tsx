@@ -78,6 +78,22 @@ describe('SftpTabBar', () => {
     expect(useSftpStore.getState().connections).toHaveLength(0);
   });
 
+  it('renders a compact pin icon for pinned tabs', () => {
+    const connectionId = addConnection('Conn A');
+    useSftpStore.getState().togglePin(connectionId);
+
+    render(
+      <SftpTabBar
+        onNewTabClick={vi.fn()}
+        onTabContextMenu={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'unpin' }).querySelector('svg')).toHaveClass(
+      'size-3',
+    );
+  });
+
   it('calls onNewTabClick when plus button is clicked', async () => {
     addConnection('Conn A');
     const onNewTabClick = vi.fn();
