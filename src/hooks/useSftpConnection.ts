@@ -5,6 +5,8 @@ import {
   invokeDeleteRemotePath,
   invokeDownloadRemotePaths,
   invokeListRemoteDirectory,
+  invokeOpenRemoteFile,
+  invokePreviewRemoteFile,
   invokeRenameRemotePath,
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
@@ -12,6 +14,7 @@ import {
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import type { SftpSide } from '@/stores/sftpStore';
+import type { ReadRemoteFileResponse, UploadConflictPolicy } from '@/types';
 
 export function useSftpConnection(connection: SftpConnection): {
   loadRemoteDirectory: (path?: string) => Promise<void>;
@@ -20,8 +23,10 @@ export function useSftpConnection(connection: SftpConnection): {
   copyRemotePath: (sourcePath: string, destinationDirectory: string) => Promise<void>;
   deleteRemotePaths: (paths: string[]) => Promise<void>;
   updateRemotePermissions: (path: string, permissions: number) => Promise<void>;
-  uploadLocalPaths: (localPaths: string[], destinationDirectory: string, operationId?: string) => Promise<void>;
+  uploadLocalPaths: (localPaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[]) => Promise<void>;
   downloadRemotePaths: (remotePaths: string[], destinationDirectory: string, operationId?: string) => Promise<void>;
+  openRemoteFile: (path: string) => Promise<void>;
+  previewRemoteFile: (path: string) => Promise<ReadRemoteFileResponse>;
 } {
   const setPath = useSftpStore((state) => state.setPath);
   const setEntries = useSftpStore((state) => state.setEntries);
@@ -127,7 +132,7 @@ export function useSftpConnection(connection: SftpConnection): {
   );
 
   const uploadLocalPaths = useCallback(
-    async (localPaths: string[], destinationDirectory: string, operationId = `${connection.id}-upload-${Date.now()}`) => {
+    async (localPaths: string[], destinationDirectory: string, operationId = `${connection.id}-upload-${Date.now()}`, conflictPolicies: UploadConflictPolicy[] = []) => {
       addOperation({
         operationId,
         kind: 'upload',
@@ -141,7 +146,7 @@ export function useSftpConnection(connection: SftpConnection): {
         ...connection.connection,
         destinationDirectory,
         localPaths,
-        conflictPolicies: [],
+        conflictPolicies,
         operationId,
       });
       await loadRemoteDirectory(connection.remotePath);
@@ -170,6 +175,26 @@ export function useSftpConnection(connection: SftpConnection): {
     [connection.connection, connection.id, addOperation],
   );
 
+  const openRemoteFile = useCallback(
+    async (path: string) => {
+      await invokeOpenRemoteFile({
+        ...connection.connection,
+        path,
+      });
+    },
+    [connection.connection],
+  );
+
+  const previewRemoteFile = useCallback(
+    async (path: string): Promise<ReadRemoteFileResponse> => {
+      return invokePreviewRemoteFile({
+        ...connection.connection,
+        path,
+      });
+    },
+    [connection.connection],
+  );
+
   return {
     loadRemoteDirectory,
     createRemoteEntry,
@@ -179,5 +204,7 @@ export function useSftpConnection(connection: SftpConnection): {
     updateRemotePermissions,
     uploadLocalPaths,
     downloadRemotePaths,
+    openRemoteFile,
+    previewRemoteFile,
   };
 }

@@ -6,6 +6,8 @@ import {
   FilterIcon,
   Grid3X3Icon,
   FolderPlusIcon,
+  FilePlusIcon,
+  BookmarkIcon,
   CheckIcon,
   ChevronDownIcon,
 } from 'lucide-react';
@@ -17,11 +19,14 @@ export interface SftpPaneActionsProps {
   side: 'local' | 'remote';
   batchMode: boolean;
   filterVisible: boolean;
+  isBookmarked: boolean;
   onRefresh: () => void;
   onParentDirectory: () => void;
   onToggleFilter: () => void;
   onToggleBatchMode: () => void;
+  onNewFile?: () => void;
   onNewFolder?: () => void;
+  onBookmark?: () => void;
 }
 
 interface MenuItemProps {
@@ -54,11 +59,14 @@ export const SftpPaneActions: React.FC<SftpPaneActionsProps> = ({
   side,
   batchMode,
   filterVisible,
+  isBookmarked,
   onRefresh,
   onParentDirectory,
   onToggleFilter,
   onToggleBatchMode,
+  onNewFile,
   onNewFolder,
+  onBookmark,
 }) => {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -128,12 +136,30 @@ export const SftpPaneActions: React.FC<SftpPaneActionsProps> = ({
               >
                 {t('sftp.parentDirectory')}
               </MenuItem>
+              {side === 'remote' && onNewFile && (
+                <MenuItem
+                  onClick={() => handleAction(onNewFile)}
+                  icon={<FilePlusIcon className="h-3.5 w-3.5" />}
+                >
+                  {t('sftp.contextMenu.newFile')}
+                </MenuItem>
+              )}
               {side === 'remote' && onNewFolder && (
                 <MenuItem
                   onClick={() => handleAction(onNewFolder)}
                   icon={<FolderPlusIcon className="h-3.5 w-3.5" />}
                 >
                   {t('common.newFolder')}
+                </MenuItem>
+              )}
+              {side === 'remote' && onBookmark && (
+                <MenuItem
+                  onClick={() => handleAction(onBookmark)}
+                  icon={<BookmarkIcon className="h-3.5 w-3.5" />}
+                >
+                  {isBookmarked
+                    ? t('sftp.contextMenu.bookmark.remove')
+                    : t('sftp.contextMenu.bookmark.add')}
                 </MenuItem>
               )}
               <div className="my-1 h-px bg-app-border" />

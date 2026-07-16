@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { FolderIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 export interface PathBreadcrumbProps {
@@ -8,16 +10,6 @@ export interface PathBreadcrumbProps {
   homeLabel?: string;
   className?: string;
 }
-
-const FolderIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    className={cn('h-3.5 w-3.5 shrink-0 text-app-primary', className)}
-  >
-    <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" />
-  </svg>
-);
 
 const ChevronIcon: React.FC = () => (
   <svg
@@ -37,11 +29,35 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   homeLabel = '~',
   className,
 }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(path);
+
   const parts = path.split('/').filter(Boolean);
 
   const navigateToIndex = (index: number): void => {
     const target = '/' + parts.slice(0, index + 1).join('/');
     onNavigate(target);
+  };
+
+  const startEditing = (): void => {
+    setEditValue(path);
+    setIsEditing(true);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      setIsEditing(false);
+      onNavigate(editValue.trim());
+    } else if (e.key === 'Escape') {
+      setIsEditing(false);
+      setEditValue(path);
+    }
+  };
+
+  const handleBlur = (): void => {
+    setIsEditing(false);
+    setEditValue(path);
   };
 
   return (
@@ -50,33 +66,48 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
         'flex h-7 items-center gap-1 overflow-hidden rounded-md border border-app-border bg-app-surface px-2 text-xs',
         className,
       )}
+      onDoubleClick={startEditing}
     >
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => onNavigate('')}
-        className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
-        title={homeLabel}
-      >
-        <FolderIcon />
-        <span className="truncate max-w-[80px]">{homeLabel}</span>
-      </Button>
-
-      {parts.map((part, index) => (
-        <React.Fragment key={index}>
-          <ChevronIcon />
+      {isEditing ? (
+        <Input
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          autoFocus
+          onFocus={(e) => e.target.select()}
+          className="h-5 w-full rounded-none border-0 bg-transparent px-0 py-0 text-xs shadow-none focus-visible:ring-0"
+        />
+      ) : (
+        <>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigateToIndex(index)}
-            className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
-            title={part}
+            onClick={() => onNavigate('')}
+            className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
+            title={homeLabel}
           >
-            <FolderIcon />
-            <span className="truncate max-w-[120px]">{part}</span>
+            <FolderIcon className="text-app-primary" />
+            <span className="truncate max-w-[80px] leading-none">{homeLabel}</span>
           </Button>
-        </React.Fragment>
-      ))}
+
+          {parts.map((part, index) => (
+            <React.Fragment key={index}>
+              <ChevronIcon />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigateToIndex(index)}
+                className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
+                title={part}
+              >
+                <FolderIcon className="text-app-primary" />
+                <span className="truncate max-w-[120px] leading-none">{part}</span>
+              </Button>
+            </React.Fragment>
+          ))}
+        </>
+      )}
     </div>
   );
 };

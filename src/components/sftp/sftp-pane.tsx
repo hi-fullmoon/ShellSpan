@@ -1,32 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, BookmarkIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/empty-state';
 import { PathBreadcrumb } from './path-breadcrumb';
 import { SftpFileList } from './sftp-file-list';
-import { SftpPaneActions } from './sftp-pane-actions';
 import {
   SftpFileContextMenu,
   type SftpFileContextMenuAction,
 } from './sftp-file-context-menu';
+import {
+  SftpBlankContextMenu,
+  type SftpBlankContextMenuAction,
+} from './sftp-blank-context-menu';
+import { SftpBookmarkMenu } from './sftp-bookmark-menu';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
-import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
+import { type SftpConnection, type SftpSide } from '@/stores/sftpStore';
+import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './file-entry-formatters';
-
-export type SftpPaneFileAction = 'open' | 'rename' | 'delete' | 'permissions';
 
 export interface SftpPaneProps {
   connection: SftpConnection;
   side: SftpSide;
+  actions: UseSftpPaneActionsResult;
   selectedPaths: Set<string>;
   onSelectedPathsChange: (paths: Set<string>) => void;
-  onNewFolder?: () => void;
-  onFileAction?: (action: SftpPaneFileAction) => void;
 }
 
 interface HistoryState {
@@ -37,10 +38,9 @@ interface HistoryState {
 export const SftpPane: React.FC<SftpPaneProps> = ({
   connection,
   side,
+  actions,
   selectedPaths,
   onSelectedPathsChange,
-  onNewFolder,
-  onFileAction,
 }) => {
   const { t } = useI18n();
   const { setNodeRef, isOver } = useDroppable({
@@ -54,8 +54,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   const loading = isLocal ? connection.localLoading : connection.remoteLoading;
   const error = isLocal ? connection.localError : connection.remoteError;
   const pane = isLocal ? connection.localPane : connection.remotePane;
-
-  const setPaneState = useSftpStore((state) => state.setPaneState);
+  const remoteBookmarks = connection.remoteBookmarks;
 
   const { loadLocalDirectory } = useLocalDirectory(connection);
   const { loadRemoteDirectory } = useSftpConnection(connection);
@@ -64,11 +63,18 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     stack: [path],
     index: 0,
   });
-  const [filterVisible, setFilterVisible] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{
+  const [fileContextMenu, setFileContextMenu] = useState<{
     x: number;
     y: number;
     entry: FileEntry;
+  } | null>(null);
+  const [blankContextMenu, setBlankContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [bookmarkMenu, setBookmarkMenu] = useState<{
+    x: number;
+    y: number;
   } | null>(null);
 
   useEffect(() => {
@@ -78,10 +84,6 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       loadRemoteDirectory('');
     }
   }, [isLocal, loadLocalDirectory, loadRemoteDirectory]);
-
-  useEffect(() => {
-    setPaneState(connection.id, side, { pathInput: path });
-  }, [connection.id, side, path, setPaneState]);
 
   const navigateTo = useCallback(
     (target: string, pushHistory = true): void => {
@@ -121,16 +123,6 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     });
   }, [navigateTo]);
 
-  const handlePathInputChange = (value: string): void => {
-    setPaneState(connection.id, side, { pathInput: value });
-  };
-
-  const handlePathInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter') {
-      navigateTo(pane.pathInput);
-    }
-  };
-
   const handleParentDirectory = useCallback((): void => {
     const normalized = path.replace(/\\/g, '/');
     const parts = normalized.split('/').filter(Boolean);
@@ -141,10 +133,6 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       : parts.join('/');
     navigateTo(parent || '/');
   }, [path, navigateTo]);
-
-  const handleFilterChange = (value: string): void => {
-    setPaneState(connection.id, side, { filterQuery: value });
-  };
 
   const handleSelect = useCallback(
     (paths: string[]): void => {
@@ -162,42 +150,147 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     [navigateTo],
   );
 
-  const handleContextMenu = useCallback(
+  const handleFileContextMenu = useCallback(
     (entry: FileEntry, e: React.MouseEvent): void => {
       e.preventDefault();
       if (!selectedPaths.has(entry.path)) {
         onSelectedPathsChange(new Set([entry.path]));
       }
-      setContextMenu({ x: e.clientX, y: e.clientY, entry });
+      setFileContextMenu({ x: e.clientX, y: e.clientY, entry });
     },
     [selectedPaths, onSelectedPathsChange],
   );
 
-  const handleContextMenuAction = useCallback(
-    (action: SftpFileContextMenuAction): void => {
-      if (action === 'open') {
-        const target = Array.from(selectedPaths)[0];
-        const entry = entries.find((e) => e.path === target);
-        if (entry?.kind === 'directory') {
-          navigateTo(entry.path);
-        }
-        return;
-      }
-      onFileAction?.(action);
+  const handleBlankContextMenu = useCallback(
+    (e: React.MouseEvent): void => {
+      e.preventDefault();
+      setBlankContextMenu({ x: e.clientX, y: e.clientY });
     },
-    [entries, navigateTo, onFileAction, selectedPaths],
+    [],
   );
-
-  const handleToggleBatchMode = useCallback((): void => {
-    setPaneState(connection.id, side, { batchMode: !pane.batchMode });
-    onSelectedPathsChange(new Set());
-  }, [connection.id, pane.batchMode, setPaneState, side, onSelectedPathsChange]);
 
   const paneTitle = isLocal ? t('sftp.local') : connection.title;
 
   const selectedEntries = useMemo(
     () => entries.filter((entry) => selectedPaths.has(entry.path)),
     [entries, selectedPaths],
+  );
+  const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
+  const isCurrentPathBookmarked = path ? remoteBookmarks.includes(path) : false;
+
+  const handleFileContextMenuAction = useCallback(
+    (action: SftpFileContextMenuAction): void => {
+      switch (action) {
+        case 'open':
+          actions.onOpen(selectedEntries[0]!);
+          break;
+        case 'openWithDefaultEditor':
+          void actions.onOpenWithDefaultEditor(singleSelection);
+          break;
+        case 'preview':
+          void actions.onPreview(singleSelection);
+          break;
+        case 'download':
+          void actions.onDownload(singleSelection);
+          break;
+        case 'batchMode':
+          actions.onToggleBatchMode();
+          break;
+        case 'rename':
+          actions.onRename(singleSelection);
+          break;
+        case 'copy':
+          actions.onCopy(singleSelection);
+          break;
+        case 'delete':
+          void actions.onDelete(selectedEntries);
+          break;
+        case 'copyName':
+          void actions.onCopyName(singleSelection);
+          break;
+        case 'copyPath':
+          void actions.onCopyPath(singleSelection);
+          break;
+        case 'copyContainingDirectory':
+          void actions.onCopyContainingDirectory(singleSelection);
+          break;
+        case 'newFile':
+          actions.onNewFile();
+          break;
+        case 'newFolder':
+          actions.onNewFolder();
+          break;
+        case 'uploadFile':
+          void actions.onUploadFiles();
+          break;
+        case 'uploadFolder':
+          void actions.onUploadFolders();
+          break;
+        case 'editPermissions':
+          actions.onEditPermissions(singleSelection);
+          break;
+        case 'properties':
+          actions.onProperties(singleSelection);
+          break;
+        case 'bookmark':
+          actions.onToggleBookmark(singleSelection?.path);
+          break;
+        case 'refresh':
+          void actions.onRefresh();
+          break;
+      }
+    },
+    [actions, selectedEntries, singleSelection],
+  );
+
+  const handleBlankContextMenuAction = useCallback(
+    (action: SftpBlankContextMenuAction): void => {
+      switch (action) {
+        case 'newFile':
+          actions.onNewFile();
+          break;
+        case 'newFolder':
+          actions.onNewFolder();
+          break;
+        case 'uploadFile':
+          void actions.onUploadFiles();
+          break;
+        case 'uploadFolder':
+          void actions.onUploadFolders();
+          break;
+        case 'paste':
+          void actions.onPaste();
+          break;
+        case 'copyCurrentDirectoryPath':
+          void actions.onCopyCurrentDirectoryPath();
+          break;
+        case 'batchMode':
+          actions.onToggleBatchMode();
+          break;
+        case 'refresh':
+          void actions.onRefresh();
+          break;
+        case 'bookmark':
+          actions.onToggleBookmark(path);
+          break;
+      }
+    },
+    [actions, path],
+  );
+
+  const handleBookmarkButtonClick = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>): void => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setBookmarkMenu({ x: rect.left, y: rect.bottom + 4 });
+    },
+    [],
+  );
+
+  const handleBookmarkNavigate = useCallback(
+    (target: string) => {
+      navigateTo(target);
+    },
+    [navigateTo],
   );
 
   const canGoBack = history.index > 0;
@@ -207,7 +300,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
     <div
       ref={setNodeRef}
       className={cn(
-        'flex h-full flex-col overflow-hidden border border-app-border bg-app-surface',
+        'flex h-full flex-col overflow-hidden bg-app-surface',
         isOver && 'ring-2 ring-inset ring-app-primary',
       )}
     >
@@ -217,25 +310,17 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
           <span className="truncate text-sm font-semibold text-app-text">{paneTitle}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <Button
-            variant={filterVisible ? 'default' : 'secondary'}
-            size="sm"
-            onClick={() => setFilterVisible((prev) => !prev)}
-            className="gap-1.5 px-2"
-          >
-            <SearchIcon className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{t('sftp.filter')}</span>
-          </Button>
-          <SftpPaneActions
-            side={side}
-            batchMode={pane.batchMode}
-            filterVisible={filterVisible}
-            onRefresh={() => navigateTo(path)}
-            onParentDirectory={handleParentDirectory}
-            onToggleFilter={() => setFilterVisible((prev) => !prev)}
-            onToggleBatchMode={handleToggleBatchMode}
-            onNewFolder={onNewFolder}
-          />
+          {!isLocal && remoteBookmarks.length > 0 && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleBookmarkButtonClick}
+              className="gap-1.5 px-2"
+              title={t('sftp.contextMenu.bookmark.add')}
+            >
+              <BookmarkIcon className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -265,34 +350,10 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
         <PathBreadcrumb
           path={path}
           onNavigate={navigateTo}
-          homeLabel={t('sftp.path.home')}
+          homeLabel={t('sftp.path.root')}
           className="flex-1"
         />
-
-        <Input
-          value={pane.pathInput}
-          onChange={(e) => handlePathInputChange(e.target.value)}
-          onKeyDown={handlePathInputKeyDown}
-          className="hidden h-6 w-40 border-0 bg-transparent px-1 py-0 text-xs shadow-none focus-visible:ring-0 sm:block"
-          aria-label={isLocal ? t('sftp.localPath') : t('sftp.remotePath')}
-        />
       </div>
-
-      {/* Filter input */}
-      {filterVisible && (
-        <div className="flex h-8 shrink-0 items-center border-b border-app-border px-2">
-          <div className="flex flex-1 items-center gap-1.5 rounded-md bg-app-surface-muted px-2">
-            <SearchIcon className="h-3.5 w-3.5" />
-            <Input
-              value={pane.filterQuery}
-              onChange={(e) => handleFilterChange(e.target.value)}
-              placeholder={t('sftp.filter')}
-              className="h-7 flex-1 border-0 bg-transparent px-0 py-0 text-xs shadow-none focus-visible:ring-0"
-              autoFocus
-            />
-          </div>
-        </div>
-      )}
 
       {/* File list */}
       <div className="relative flex-1 min-h-0">
@@ -317,38 +378,50 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
             entries={entries}
             side={side}
             selectedPaths={Array.from(selectedPaths)}
-            filterQuery={pane.filterQuery}
+            filterQuery=""
             batchMode={pane.batchMode}
             onSelect={handleSelect}
             onDoubleClick={handleDoubleClick}
-            onContextMenu={handleContextMenu}
+            onContextMenu={handleFileContextMenu}
+            onBlankContextMenu={handleBlankContextMenu}
           />
         )}
       </div>
 
       <SftpFileContextMenu
-        open={!!contextMenu}
-        x={contextMenu?.x ?? 0}
-        y={contextMenu?.y ?? 0}
+        open={!!fileContextMenu}
+        x={fileContextMenu?.x ?? 0}
+        y={fileContextMenu?.y ?? 0}
         side={side}
+        currentPath={path}
         selectedEntries={selectedEntries}
-        onClose={() => setContextMenu(null)}
-        onAction={handleContextMenuAction}
+        isBookmarked={singleSelection ? remoteBookmarks.includes(singleSelection.path) : false}
+        batchMode={pane.batchMode}
+        onClose={() => setFileContextMenu(null)}
+        onAction={handleFileContextMenuAction}
+      />
+
+      <SftpBlankContextMenu
+        open={!!blankContextMenu}
+        x={blankContextMenu?.x ?? 0}
+        y={blankContextMenu?.y ?? 0}
+        side={side}
+        currentPath={path}
+        hasClipboard={!!connection.remoteClipboard}
+        isBookmarked={isCurrentPathBookmarked}
+        batchMode={pane.batchMode}
+        onClose={() => setBlankContextMenu(null)}
+        onAction={handleBlankContextMenuAction}
+      />
+
+      <SftpBookmarkMenu
+        open={!!bookmarkMenu}
+        x={bookmarkMenu?.x ?? 0}
+        y={bookmarkMenu?.y ?? 0}
+        bookmarks={remoteBookmarks}
+        onNavigate={handleBookmarkNavigate}
+        onClose={() => setBookmarkMenu(null)}
       />
     </div>
   );
 };
-
-export function isRemoteEntry(
-  entry: FileEntry,
-  side: SftpSide,
-): entry is import('@/types').RemoteFileEntry {
-  return side === 'remote';
-}
-
-export function isLocalEntry(
-  entry: FileEntry,
-  side: SftpSide,
-): entry is import('@/types').LocalFileEntry {
-  return side === 'local';
-}

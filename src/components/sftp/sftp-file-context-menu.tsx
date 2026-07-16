@@ -1,20 +1,63 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLinkIcon, PencilIcon, LockIcon, Trash2Icon } from 'lucide-react';
+import {
+  ExternalLinkIcon,
+  PencilIcon,
+  LockIcon,
+  Trash2Icon,
+  FilePlusIcon,
+  FolderPlusIcon,
+  UploadIcon,
+  FolderUpIcon,
+  FileTextIcon,
+  EyeIcon,
+  DownloadIcon,
+  Grid3X3Icon,
+  CopyIcon,
+  ClipboardPasteIcon,
+  TextIcon,
+  LinkIcon,
+  FolderIcon,
+  RefreshCwIcon,
+  InfoIcon,
+  BookmarkIcon,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import type { SftpSide } from '@/stores/sftpStore';
 import type { FileEntry } from './file-entry-formatters';
 
-export type SftpFileContextMenuAction = 'open' | 'rename' | 'delete' | 'permissions';
+export type SftpFileContextMenuAction =
+  | 'open'
+  | 'openWithDefaultEditor'
+  | 'preview'
+  | 'download'
+  | 'batchMode'
+  | 'rename'
+  | 'copy'
+  | 'delete'
+  | 'copyName'
+  | 'copyPath'
+  | 'copyContainingDirectory'
+  | 'newFile'
+  | 'newFolder'
+  | 'uploadFile'
+  | 'uploadFolder'
+  | 'editPermissions'
+  | 'properties'
+  | 'bookmark'
+  | 'refresh';
 
 export interface SftpFileContextMenuProps {
   open: boolean;
   x: number;
   y: number;
   side: SftpSide;
+  currentPath?: string;
   selectedEntries: FileEntry[];
+  isBookmarked: boolean;
+  batchMode: boolean;
   onClose: () => void;
   onAction: (action: SftpFileContextMenuAction) => void;
 }
@@ -55,7 +98,10 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   x,
   y,
   side,
+  currentPath,
   selectedEntries,
+  isBookmarked,
+  batchMode,
   onClose,
   onAction,
 }) => {
@@ -72,19 +118,30 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
 
   if (!open) return null;
 
+  const isLocal = side === 'local';
   const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
+  const hasSelection = selectedEntries.length > 0;
   const canOpen = singleSelection?.kind === 'directory';
-  const canRename = singleSelection !== undefined;
-  const canPermissions = side === 'remote' && singleSelection !== undefined;
-  const canDelete = selectedEntries.length > 0;
+  const canOpenWithDefaultEditor = !isLocal && singleSelection?.kind === 'file';
+  const canPreview = !isLocal && singleSelection?.kind === 'file';
+  const canDownload = !isLocal && singleSelection !== undefined;
+  const canRename = !isLocal && singleSelection !== undefined;
+  const canCopy = !isLocal && singleSelection !== undefined;
+  const canDelete = !isLocal && hasSelection;
+  const canEditPermissions = !isLocal && singleSelection !== undefined;
+  const canProperties = singleSelection !== undefined;
+  const canBookmark = !isLocal && singleSelection?.kind === 'directory';
+  const canCopyName = singleSelection !== undefined;
+  const canCopyPath = singleSelection !== undefined;
+  const canCopyContainingDirectory = singleSelection !== undefined;
 
   const handleAction = (action: SftpFileContextMenuAction): void => {
     onAction(action);
     onClose();
   };
 
-  const left = Math.min(x, window.innerWidth - 192);
-  const top = Math.min(y, window.innerHeight - 220);
+  const left = Math.min(x, window.innerWidth - 200);
+  const top = Math.min(y, window.innerHeight - 420);
 
   return createPortal(
     <>
@@ -98,9 +155,39 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
         }}
       />
       <div
-        className="fixed z-[1700] w-48 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
+        className="fixed z-[1700] w-56 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
         style={{ left, top }}
       >
+        {!isLocal && (
+          <>
+            <MenuItem
+              onClick={() => handleAction('newFile')}
+              icon={<FilePlusIcon className="h-3.5 w-3.5" />}
+            >
+              {t('sftp.contextMenu.newFile')}
+            </MenuItem>
+            <MenuItem
+              onClick={() => handleAction('newFolder')}
+              icon={<FolderPlusIcon className="h-3.5 w-3.5" />}
+            >
+              {t('common.newFolder')}
+            </MenuItem>
+            <MenuItem
+              onClick={() => handleAction('uploadFile')}
+              icon={<UploadIcon className="h-3.5 w-3.5" />}
+            >
+              {t('sftp.contextMenu.uploadFile')}
+            </MenuItem>
+            <MenuItem
+              onClick={() => handleAction('uploadFolder')}
+              icon={<FolderUpIcon className="h-3.5 w-3.5" />}
+            >
+              {t('sftp.contextMenu.uploadFolder')}
+            </MenuItem>
+            <Separator className="my-1" />
+          </>
+        )}
+
         <MenuItem
           onClick={() => handleAction('open')}
           disabled={!canOpen}
@@ -108,6 +195,45 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
         >
           {t('sftp.contextMenu.open')}
         </MenuItem>
+
+        {!isLocal && (
+          <MenuItem
+            onClick={() => handleAction('download')}
+            disabled={!canDownload}
+            icon={<DownloadIcon className="h-3.5 w-3.5" />}
+          >
+            {t('common.download')}
+          </MenuItem>
+        )}
+
+        {!isLocal && (
+          <>
+            <MenuItem
+              onClick={() => handleAction('openWithDefaultEditor')}
+              disabled={!canOpenWithDefaultEditor}
+              icon={<FileTextIcon className="h-3.5 w-3.5" />}
+            >
+              {t('sftp.contextMenu.openWithDefaultEditor')}
+            </MenuItem>
+            <MenuItem
+              onClick={() => handleAction('preview')}
+              disabled={!canPreview}
+              icon={<EyeIcon className="h-3.5 w-3.5" />}
+            >
+              {t('sftp.contextMenu.preview')}
+            </MenuItem>
+          </>
+        )}
+
+        <MenuItem
+          onClick={() => handleAction('batchMode')}
+          icon={<Grid3X3Icon className="h-3.5 w-3.5" />}
+        >
+          {batchMode ? t('sftp.contextMenu.batch.exit') : t('sftp.contextMenu.batch.enter')}
+        </MenuItem>
+
+        <Separator className="my-1" />
+
         <MenuItem
           onClick={() => handleAction('rename')}
           disabled={!canRename}
@@ -115,14 +241,15 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
         >
           {t('common.rename')}
         </MenuItem>
+
         <MenuItem
-          onClick={() => handleAction('permissions')}
-          disabled={!canPermissions}
-          icon={<LockIcon className="h-3.5 w-3.5" />}
+          onClick={() => handleAction('copy')}
+          disabled={!canCopy}
+          icon={<CopyIcon className="h-3.5 w-3.5" />}
         >
-          {t('common.permissions')}
+          {t('sftp.contextMenu.copy')}
         </MenuItem>
-        <Separator className="my-1" />
+
         <MenuItem
           onClick={() => handleAction('delete')}
           disabled={!canDelete}
@@ -130,6 +257,71 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
           danger
         >
           {t('common.delete')}
+        </MenuItem>
+
+        <Separator className="my-1" />
+
+        <MenuItem
+          onClick={() => handleAction('copyName')}
+          disabled={!canCopyName}
+          icon={<TextIcon className="h-3.5 w-3.5" />}
+        >
+          {t('sftp.contextMenu.copyName')}
+        </MenuItem>
+
+        <MenuItem
+          onClick={() => handleAction('copyPath')}
+          disabled={!canCopyPath}
+          icon={<LinkIcon className="h-3.5 w-3.5" />}
+        >
+          {t('sftp.contextMenu.copyPath')}
+        </MenuItem>
+
+        <MenuItem
+          onClick={() => handleAction('copyContainingDirectory')}
+          disabled={!canCopyContainingDirectory}
+          icon={<FolderIcon className="h-3.5 w-3.5" />}
+        >
+          {t('sftp.contextMenu.copyContainingDirectory')}
+        </MenuItem>
+
+        <Separator className="my-1" />
+
+        <MenuItem
+          onClick={() => handleAction('refresh')}
+          icon={<RefreshCwIcon className="h-3.5 w-3.5" />}
+        >
+          {t('common.refresh')}
+        </MenuItem>
+
+        {!isLocal && (
+          <>
+            <MenuItem
+              onClick={() => handleAction('editPermissions')}
+              disabled={!canEditPermissions}
+              icon={<LockIcon className="h-3.5 w-3.5" />}
+            >
+              {t('sftp.contextMenu.editPermissions')}
+            </MenuItem>
+
+            <MenuItem
+              onClick={() => handleAction('bookmark')}
+              disabled={!canBookmark}
+              icon={<BookmarkIcon className="h-3.5 w-3.5" />}
+            >
+              {isBookmarked
+                ? t('sftp.contextMenu.bookmark.remove')
+                : t('sftp.contextMenu.bookmark.add')}
+            </MenuItem>
+          </>
+        )}
+
+        <MenuItem
+          onClick={() => handleAction('properties')}
+          disabled={!canProperties}
+          icon={<InfoIcon className="h-3.5 w-3.5" />}
+        >
+          {t('common.properties')}
         </MenuItem>
       </div>
     </>,

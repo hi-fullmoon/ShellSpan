@@ -79,7 +79,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-8 w-48 shrink-0 items-center gap-1.5 rounded-md px-2 text-left text-xs font-medium transition-colors select-none',
+        'group relative flex h-8 w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
         active
           ? 'bg-app-surface text-app-text shadow-sm'
           : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',

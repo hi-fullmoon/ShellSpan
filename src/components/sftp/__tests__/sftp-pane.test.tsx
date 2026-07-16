@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { SftpPane } from '../sftp-pane';
 import { useSftpStore } from '@/stores/sftpStore';
+import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -45,6 +46,49 @@ vi.mock('@/lib/tauri', () => ({
 
 const initialState = useSftpStore.getState();
 
+function createMockActions(): UseSftpPaneActionsResult {
+  return {
+    createMode: null,
+    renameTarget: undefined,
+    permissionsTarget: undefined,
+    propertiesTarget: undefined,
+    previewContent: undefined,
+    uploadConflict: undefined,
+    onOpen: vi.fn(),
+    onOpenWithDefaultEditor: vi.fn().mockResolvedValue(undefined),
+    onPreview: vi.fn().mockResolvedValue(undefined),
+    onDownload: vi.fn().mockResolvedValue(undefined),
+    onBatchDownload: vi.fn().mockResolvedValue(undefined),
+    uploadWithPolicies: vi.fn().mockResolvedValue(undefined),
+    onCopy: vi.fn(),
+    onPaste: vi.fn().mockResolvedValue(undefined),
+    onRename: vi.fn(),
+    onDelete: vi.fn().mockResolvedValue(undefined),
+    onCopyName: vi.fn().mockResolvedValue(undefined),
+    onCopyPath: vi.fn().mockResolvedValue(undefined),
+    onCopyContainingDirectory: vi.fn().mockResolvedValue(undefined),
+    onNewFile: vi.fn(),
+    onNewFolder: vi.fn(),
+    onUploadFiles: vi.fn().mockResolvedValue(undefined),
+    onUploadFolders: vi.fn().mockResolvedValue(undefined),
+    onEditPermissions: vi.fn(),
+    onProperties: vi.fn(),
+    onToggleBookmark: vi.fn(),
+    onRefresh: vi.fn().mockResolvedValue(undefined),
+    onToggleBatchMode: vi.fn(),
+    onCopyCurrentDirectoryPath: vi.fn().mockResolvedValue(undefined),
+    setCreateMode: vi.fn(),
+    setRenameTarget: vi.fn(),
+    setPermissionsTarget: vi.fn(),
+    setPropertiesTarget: vi.fn(),
+    setPreviewContent: vi.fn(),
+    setUploadConflict: vi.fn(),
+    handleCreate: vi.fn().mockResolvedValue(undefined),
+    handleRename: vi.fn().mockResolvedValue(undefined),
+    handlePermissions: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('SftpPane', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
@@ -75,6 +119,7 @@ describe('SftpPane', () => {
       <SftpPane
         connection={connection}
         side="local"
+        actions={createMockActions()}
         selectedPaths={new Set()}
         onSelectedPathsChange={vi.fn()}
       />,
@@ -88,6 +133,7 @@ describe('SftpPane', () => {
       <SftpPane
         connection={connection}
         side="remote"
+        actions={createMockActions()}
         selectedPaths={new Set()}
         onSelectedPathsChange={vi.fn()}
       />,
@@ -101,41 +147,11 @@ describe('SftpPane', () => {
       <SftpPane
         connection={connection}
         side="local"
+        actions={createMockActions()}
         selectedPaths={new Set()}
         onSelectedPathsChange={vi.fn()}
       />,
     );
     expect(screen.getByTestId('mock-file-list')).toBeInTheDocument();
-  });
-
-  it('toggles filter input visibility', () => {
-    const connection = createConnection();
-    render(
-      <SftpPane
-        connection={connection}
-        side="local"
-        selectedPaths={new Set()}
-        onSelectedPathsChange={vi.fn()}
-      />,
-    );
-    expect(screen.queryByPlaceholderText('sftp.filter')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('sftp.filter'));
-    expect(screen.getByPlaceholderText('sftp.filter')).toBeInTheDocument();
-  });
-
-  it('updates filter query', () => {
-    const connection = createConnection();
-    render(
-      <SftpPane
-        connection={connection}
-        side="local"
-        selectedPaths={new Set()}
-        onSelectedPathsChange={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByText('sftp.filter'));
-    const input = screen.getByPlaceholderText('sftp.filter');
-    fireEvent.change(input, { target: { value: 'txt' } });
-    expect(useSftpStore.getState().connections[0]?.localPane.filterQuery).toBe('txt');
   });
 });

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import type { SftpSide } from '@/stores/sftpStore';
 import type { FileEntry } from './file-entry-formatters';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   SftpFileListHeader,
   type SftpFileListSortColumn,
@@ -20,6 +21,7 @@ export interface SftpFileListProps {
   onSelect: (paths: string[]) => void;
   onDoubleClick: (entry: FileEntry) => void;
   onContextMenu: (entry: FileEntry, e: React.MouseEvent) => void;
+  onBlankContextMenu?: (e: React.MouseEvent) => void;
 }
 
 function compareEntries(
@@ -68,6 +70,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   onSelect,
   onDoubleClick,
   onContextMenu,
+  onBlankContextMenu,
 }) => {
   const { t } = useI18n();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -164,10 +167,14 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
         sortDirection={sortDirection}
         onSort={handleSort}
       />
-      <div
-        ref={parentRef}
-        className="relative flex-1 overflow-auto"
-        onContextMenu={(e) => e.preventDefault()}
+      <ScrollArea
+        className="relative flex-1"
+        viewportRef={parentRef}
+        horizontal
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onBlankContextMenu?.(e);
+        }}
       >
         {sortedEntries.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-app-text-soft">
@@ -207,7 +214,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
             })}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 };
