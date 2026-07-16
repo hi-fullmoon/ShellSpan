@@ -10,6 +10,7 @@ import {
   type SftpFileListSortColumn,
   type SftpFileListSortDirection,
 } from './sftp-file-list-header';
+import { SftpParentRow } from './sftp-parent-row';
 import { SftpFileListRow } from './sftp-file-list-row';
 
 export interface SftpFileListProps {
@@ -18,17 +19,29 @@ export interface SftpFileListProps {
   selectedPaths: string[];
   filterQuery: string;
   batchMode: boolean;
+  currentPath?: string;
   onSelect: (paths: string[]) => void;
   onDoubleClick: (entry: FileEntry) => void;
   onContextMenu: (entry: FileEntry, e: React.MouseEvent) => void;
   onBlankContextMenu?: (e: React.MouseEvent) => void;
+  onParentDirectory?: () => void;
+}
+
+function isRootPath(currentPath?: string): boolean {
+  if (!currentPath) return true;
+  if (currentPath === '/') return true;
+  const normalized = currentPath.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length === 0) return true;
+  if (parts.length === 1 && /^[A-Za-z]:$/.test(parts[0])) return true;
+  return false;
 }
 
 function compareEntries(
   a: FileEntry,
   b: FileEntry,
   column: SftpFileListSortColumn,
-  direction: SftpFileListSortDirection,
+  direction: 'asc' | 'desc',
 ): number {
   // Directories always sort before files when sorting by name or kind.
   if (column === 'name' || column === 'kind') {
@@ -67,15 +80,17 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   selectedPaths,
   filterQuery,
   batchMode,
+  currentPath,
   onSelect,
   onDoubleClick,
   onContextMenu,
   onBlankContextMenu,
+  onParentDirectory,
 }) => {
   const { t } = useI18n();
   const parentRef = useRef<HTMLDivElement>(null);
   const [sortColumn, setSortColumn] = useState<SftpFileListSortColumn>('name');
-  const [sortDirection, setSortDirection] = useState<SftpFileListSortDirection>('asc');
+  const [sortDirection, setSortDirection] = useState<SftpFileListSortDirection>('default');
   const lastSelectedIndexRef = useRef<number | undefined>(undefined);
 
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
@@ -88,13 +103,17 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   }, [entries, filterQuery]);
 
   const sortedEntries = useMemo(() => {
-    return [...filteredEntries].sort((a, b) =>
-      compareEntries(a, b, sortColumn, sortDirection),
-    );
+    if (sortDirection === 'default') {
+      return [...filteredEntries].sort((a, b) => compareEntries(a, b, 'name', 'asc'));
+    }
+    return [...filteredEntries].sort((a, b) => compareEntries(a, b, sortColumn, sortDirection));
   }, [filteredEntries, sortColumn, sortDirection]);
 
+  const showParent = useMemo(() => !isRootPath(currentPath), [currentPath]);
+  const displayCount = showParent ? sortedEntries.length + 1 : sortedEntries.length;
+
   const virtualizer = useVirtualizer({
-    count: sortedEntries.length,
+    count: displayCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 36,
     overscan: 8,
@@ -108,7 +127,11 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   const handleSort = useCallback((column: SftpFileListSortColumn): void => {
     setSortColumn((current) => {
       if (current === column) {
-        setSortDirection((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+        setSortDirection((dir) => {
+          if (dir === 'asc') return 'desc';
+          if (dir === 'desc') return 'default';
+          return 'asc';
+        });
         return current;
       }
       setSortDirection('asc');
@@ -176,7 +199,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
           onBlankContextMenu?.(e);
         }}
       >
-        {sortedEntries.length === 0 ? (
+        {displayCount === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-app-text-soft">
             {filterQuery.trim()
               ? t('sftp.filteredEmpty')
@@ -188,27 +211,40 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
             style={{ height: `${virtualizer.getTotalSize()}px` }}
           >
             {virtualItems.map((virtualItem) => {
-              const entry = sortedEntries[virtualItem.index];
-              const selected = selectedSet.has(entry.path);
+              const isParent = showParent && virtualItem.index === 0;
+              const entry = isParent
+                ? null
+                : sortedEntries[virtualItem.index - (showParent ? 1 : 0)];
+
               return (
                 <div
-                  key={entry.path}
+                  key={isParent ? '..' : entry!.path}
                   className="absolute left-0 w-full"
                   style={{
                     top: `${virtualItem.start}px`,
                     height: `${virtualItem.size}px`,
                   }}
+                  data-testid={isParent ? 'sftp-parent-row' : 'sftp-row'}
                 >
-                  <SftpFileListRow
-                    entry={entry}
-                    side={side}
-                    selected={selected}
-                    batchMode={batchMode}
-                    selectedEntries={selectedEntries}
-                    onSelect={handleSelect}
-                    onDoubleClick={onDoubleClick}
-                    onContextMenu={onContextMenu}
-                  />
+                  {isParent ? (
+                    <SftpParentRow
+                      side={side}
+                      batchMode={batchMode}
+                      onParentDirectory={() => onParentDirectory?.()}
+                      onBlankContextMenu={onBlankContextMenu}
+                    />
+                  ) : (
+                    <SftpFileListRow
+                      entry={entry!}
+                      side={side}
+                      selected={selectedSet.has(entry!.path)}
+                      batchMode={batchMode}
+                      selectedEntries={selectedEntries}
+                      onSelect={handleSelect}
+                      onDoubleClick={onDoubleClick}
+                      onContextMenu={onContextMenu}
+                    />
+                  )}
                 </div>
               );
             })}

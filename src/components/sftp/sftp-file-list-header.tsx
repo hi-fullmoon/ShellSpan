@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 
 export type SftpFileListSortColumn = 'name' | 'modifiedAt' | 'size' | 'kind';
-export type SftpFileListSortDirection = 'asc' | 'desc';
+export type SftpFileListSortDirection = 'asc' | 'desc' | 'default';
 
 export interface SftpFileListHeaderProps {
   side: 'local' | 'remote';
