@@ -43,8 +43,9 @@ function compareEntries(
   column: SftpFileListSortColumn,
   direction: 'asc' | 'desc',
 ): number {
-  // Directories always sort before files when sorting by name or kind.
-  if (column === 'name' || column === 'kind') {
+  // Keep directories first for name sorting. Kind sorting must honor the
+  // selected direction so ascending and descending produce distinct orders.
+  if (column === 'name') {
     if (a.kind === 'directory' && b.kind !== 'directory') return -1;
     if (a.kind !== 'directory' && b.kind === 'directory') return 1;
   }

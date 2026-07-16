@@ -82,6 +82,33 @@ describe('SftpFileList', () => {
     expect(screen.getAllByTestId('sftp-row')[0]).toHaveTextContent('a.txt');
   });
 
+  it('sorts the kind column in both ascending and descending directions', async () => {
+    const mixedEntries: FileEntry[] = [
+      { path: '/home/user/file.txt', name: 'file.txt', kind: 'file' },
+      { path: '/home/user/folder', name: 'folder', kind: 'directory' },
+      { path: '/home/user/link', name: 'link', kind: 'symlink' },
+      { path: '/home/user/device', name: 'device', kind: 'other' },
+    ];
+    renderFileList({ entries: mixedEntries });
+    const kindHeader = screen.getByText('sftp.columns.type');
+
+    await userEvent.click(kindHeader);
+    expect(screen.getAllByTestId('sftp-row').map((row) => row.textContent)).toEqual([
+      expect.stringContaining('folder'),
+      expect.stringContaining('file.txt'),
+      expect.stringContaining('device'),
+      expect.stringContaining('link'),
+    ]);
+
+    await userEvent.click(kindHeader);
+    expect(screen.getAllByTestId('sftp-row').map((row) => row.textContent)).toEqual([
+      expect.stringContaining('link'),
+      expect.stringContaining('device'),
+      expect.stringContaining('file.txt'),
+      expect.stringContaining('folder'),
+    ]);
+  });
+
   it('keeps parent row at top after sorting', () => {
     renderFileList({ entries: sampleEntries, currentPath: '/home/user' });
     expect(screen.getAllByTestId('sftp-parent-row')[0]).toHaveTextContent('..');
