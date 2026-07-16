@@ -36,8 +36,10 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(path);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [measurementWidth, setMeasurementWidth] = useState(0);
   const [visibleCount, setVisibleCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const measurementRef = useRef<HTMLDivElement>(null);
 
   const normalized = path.replace(/\\/g, '/');
   const isRoot = normalized === '' || normalized === '/';
@@ -52,40 +54,42 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   }, [isRoot, normalized]);
 
   useEffect(() => {
-    if (!containerRef.current || typeof ResizeObserver === 'undefined') return;
+    const container = containerRef.current;
+    const measurement = measurementRef.current;
+    if (!container || !measurement || typeof ResizeObserver === 'undefined') {
+      return;
+    }
     const observer = new ResizeObserver((entries) => {
-      setContainerWidth(entries[0].contentRect.width);
+      entries.forEach((entry) => {
+        const nextWidth = Math.round(entry.contentRect.width);
+        if (entry.target === measurement) {
+          setMeasurementWidth((currentWidth) =>
+            currentWidth === nextWidth ? currentWidth : nextWidth,
+          );
+          return;
+        }
+        if (entry.target === container || !entry.target) {
+          setContainerWidth((currentWidth) =>
+            currentWidth === nextWidth ? currentWidth : nextWidth,
+          );
+        }
+      });
     });
-    observer.observe(containerRef.current);
+    observer.observe(container);
+    observer.observe(measurement);
     return () => observer.disconnect();
   }, []);
 
   useLayoutEffect(() => {
-    if (!containerRef.current) return;
-    const total = containerRef.current.scrollWidth;
-    const available = containerRef.current.clientWidth;
-    if (total <= available || segments.length <= 1) {
-      setVisibleCount(segments.length);
-    } else {
-      const chevron = 12;
-      const rootWidth = 32;
-      const lastWidth = chevron + 32 + Math.min(200, estimateWidth(segments[segments.length - 1].name));
-      const ellipsisWidth = chevron + 32;
-      const minimumWidth = rootWidth + ellipsisWidth + lastWidth;
-      let remaining = available - minimumWidth;
-      let count = 0;
-      for (let i = 0; i < segments.length - 1; i++) {
-        const width = chevron + 32 + Math.min(200, estimateWidth(segments[i].name));
-        if (remaining >= width) {
-          remaining -= width;
-          count++;
-        } else {
-          break;
-        }
-      }
-      setVisibleCount(count);
-    }
-  }, [containerWidth, segments]);
+    const available =
+      containerWidth ||
+      Math.max(0, (containerRef.current?.clientWidth ?? 0) - 16);
+    const metrics = readBreadcrumbMetrics(measurementRef.current, segments.length);
+    const nextVisibleCount = calculateVisibleCount(segments, available, metrics);
+    setVisibleCount((currentCount) =>
+      currentCount === nextVisibleCount ? currentCount : nextVisibleCount,
+    );
+  }, [containerWidth, measurementWidth, segments]);
 
   const startEditing = (): void => {
     setEditValue(path);
@@ -131,11 +135,54 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
     <div
       ref={containerRef}
       className={cn(
-        'flex h-7 items-center gap-1 overflow-hidden rounded-md border border-app-border bg-app-surface px-2 text-xs',
+        'relative flex h-7 min-w-0 items-center gap-1 overflow-hidden rounded-md border border-app-border bg-app-surface px-2 text-xs',
         className,
       )}
       onDoubleClick={startEditing}
     >
+      <div
+        ref={measurementRef}
+        data-breadcrumb-measurement
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute left-0 top-0 flex w-max items-center gap-1"
+      >
+        <Button
+          data-breadcrumb-root
+          tabIndex={-1}
+          variant="ghost"
+          size="sm"
+          className="h-5 gap-1 px-1"
+        >
+          <span className="truncate max-w-[200px] leading-none">/</span>
+        </Button>
+        <Button
+          data-breadcrumb-ellipsis
+          tabIndex={-1}
+          variant="ghost"
+          size="sm"
+          disabled
+          className="h-5 px-1"
+        >
+          <span className="leading-none">...</span>
+        </Button>
+        {segments.map((segment) => (
+          <React.Fragment key={segment.index}>
+            <ChevronIcon />
+            <Button
+              data-breadcrumb-segment
+              tabIndex={-1}
+              variant="ghost"
+              size="sm"
+              className="h-5 gap-1 px-1 [&_svg]:size-3"
+            >
+              <FolderIcon />
+              <span className="truncate max-w-[200px] leading-none">
+                {segment.name}
+              </span>
+            </Button>
+          </React.Fragment>
+        ))}
+      </div>
       {isEditing ? (
         <Input
           value={editValue}
@@ -183,6 +230,130 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
     </div>
   );
 };
+
+const CHEVRON_WIDTH = 12;
+const ROOT_WIDTH = 32;
+const SEGMENT_CHROME_WIDTH = 32;
+const ELLIPSIS_WIDTH = CHEVRON_WIDTH + 32;
+
+interface BreadcrumbMetrics {
+  rootWidth: number;
+  ellipsisWidth: number;
+  chevronWidth: number;
+  gap: number;
+  segmentWidths: number[];
+}
+
+function readBreadcrumbMetrics(
+  measurement: HTMLDivElement | null,
+  segmentCount: number,
+): BreadcrumbMetrics | undefined {
+  if (!measurement) return undefined;
+
+  const root = measurement.querySelector<HTMLElement>('[data-breadcrumb-root]');
+  const ellipsis = measurement.querySelector<HTMLElement>(
+    '[data-breadcrumb-ellipsis]',
+  );
+  const chevron = measurement.querySelector<SVGElement>('svg');
+  const segmentButtons = Array.from(
+    measurement.querySelectorAll<HTMLElement>('[data-breadcrumb-segment]'),
+  );
+  if (!root || !ellipsis || !chevron || segmentButtons.length !== segmentCount) {
+    return undefined;
+  }
+
+  const rootWidth = root.getBoundingClientRect().width;
+  const ellipsisWidth = ellipsis.getBoundingClientRect().width;
+  const chevronWidth = chevron.getBoundingClientRect().width;
+  const segmentWidths = segmentButtons.map(
+    (button) => button.getBoundingClientRect().width,
+  );
+  if (
+    rootWidth <= 0 ||
+    ellipsisWidth <= 0 ||
+    chevronWidth <= 0 ||
+    segmentWidths.some((width) => width <= 0)
+  ) {
+    return undefined;
+  }
+
+  const measuredGap = Number.parseFloat(
+    window.getComputedStyle(measurement).columnGap,
+  );
+  return {
+    rootWidth,
+    ellipsisWidth,
+    chevronWidth,
+    gap: Number.isFinite(measuredGap) && measuredGap > 0 ? measuredGap : 4,
+    segmentWidths,
+  };
+}
+
+function calculateVisibleCount(
+  segments: Segment[],
+  available: number,
+  metrics?: BreadcrumbMetrics,
+): number {
+  if (available <= 0 || segments.length <= 1) {
+    return segments.length;
+  }
+
+  if (metrics) {
+    const fullWidth =
+      metrics.rootWidth +
+      metrics.segmentWidths.reduce(
+        (total, width) => total + metrics.chevronWidth + width,
+        0,
+      ) +
+      metrics.gap * segments.length * 2;
+    if (fullWidth <= available) {
+      return segments.length;
+    }
+
+    const lastWidth = metrics.segmentWidths[metrics.segmentWidths.length - 1];
+    let remaining =
+      available -
+      metrics.rootWidth -
+      metrics.ellipsisWidth -
+      lastWidth -
+      metrics.chevronWidth * 2 -
+      metrics.gap * 4;
+    let count = 0;
+    for (let index = 0; index < metrics.segmentWidths.length - 1; index += 1) {
+      const width =
+        metrics.chevronWidth + metrics.segmentWidths[index] + metrics.gap * 2;
+      if (remaining < width) break;
+      remaining -= width;
+      count += 1;
+    }
+    return count;
+  }
+
+  const segmentWidth = (segment: Segment): number =>
+    CHEVRON_WIDTH +
+    SEGMENT_CHROME_WIDTH +
+    Math.min(200, estimateWidth(segment.name));
+  const fullWidth =
+    ROOT_WIDTH + segments.reduce((total, segment) => total + segmentWidth(segment), 0);
+
+  if (fullWidth <= available) {
+    return segments.length;
+  }
+
+  const lastWidth = segmentWidth(segments[segments.length - 1]);
+  let remaining = available - ROOT_WIDTH - ELLIPSIS_WIDTH - lastWidth;
+  let count = 0;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const width = segmentWidth(segments[index]);
+    if (remaining < width) {
+      break;
+    }
+    remaining -= width;
+    count += 1;
+  }
+
+  return count;
+}
 
 function estimateWidth(text: string): number {
   return text.length * 8 + 24;

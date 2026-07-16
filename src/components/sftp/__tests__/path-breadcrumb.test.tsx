@@ -80,4 +80,63 @@ describe('PathBreadcrumb', () => {
     expect(buttons[2]).toHaveTextContent('j');
     expect(screen.queryByRole('button', { name: 'a' })).not.toBeInTheDocument();
   });
+
+  it('does not oscillate between collapsed and expanded content', () => {
+    const path = '/a/b/c/d/e/f/g/h/i/j';
+    const { container } = render(<PathBreadcrumb path={path} onNavigate={vi.fn()} />);
+    const div = container.firstChild as HTMLDivElement;
+
+    Object.defineProperty(div, 'scrollWidth', {
+      configurable: true,
+      get: () => (screen.getAllByRole('button').length > 3 ? 1000 : 100),
+    });
+    Object.defineProperty(div, 'clientWidth', { value: 160, configurable: true });
+
+    const buttonCounts: number[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      act(() => {
+        resizeCallback?.(
+          [{ contentRect: { width: 160 } } as unknown as ResizeObserverEntry],
+          new ResizeObserverMock(resizeCallback),
+        );
+      });
+      buttonCounts.push(screen.getAllByRole('button').length);
+    }
+
+    expect(new Set(buttonCounts).size).toBe(1);
+    expect(buttonCounts[0]).toBe(3);
+  });
+
+  it('uses measured button widths before collapsing', () => {
+    const path = '/a/b/c/d';
+    const { container } = render(<PathBreadcrumb path={path} onNavigate={vi.fn()} />);
+    const measurement = container.querySelector<HTMLElement>(
+      '[data-breadcrumb-measurement]',
+    )!;
+    const root = measurement.querySelector<HTMLElement>('[data-breadcrumb-root]')!;
+    const ellipsis = measurement.querySelector<HTMLElement>(
+      '[data-breadcrumb-ellipsis]',
+    )!;
+    const chevron = measurement.querySelector<SVGElement>('svg')!;
+    const segments = measurement.querySelectorAll<HTMLElement>(
+      '[data-breadcrumb-segment]',
+    );
+
+    root.getBoundingClientRect = () => ({ width: 24 }) as DOMRect;
+    ellipsis.getBoundingClientRect = () => ({ width: 24 }) as DOMRect;
+    chevron.getBoundingClientRect = () => ({ width: 12 }) as DOMRect;
+    segments.forEach((segment) => {
+      segment.getBoundingClientRect = () => ({ width: 32 }) as DOMRect;
+    });
+
+    act(() => {
+      resizeCallback?.(
+        [{ contentRect: { width: 250 } } as unknown as ResizeObserverEntry],
+        new ResizeObserverMock(resizeCallback),
+      );
+    });
+
+    expect(screen.getAllByRole('button')).toHaveLength(5);
+    expect(screen.queryByRole('button', { name: '...' })).not.toBeInTheDocument();
+  });
 });
