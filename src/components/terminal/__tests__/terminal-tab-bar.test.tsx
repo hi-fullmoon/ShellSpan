@@ -255,11 +255,24 @@ describe('TerminalTabBar', () => {
 
     const tab = screen.getByRole('tab');
     expect(tab).not.toHaveStyle({ borderLeftColor: '#ef4444' });
-    expect(tab).toHaveStyle({
-      backgroundColor: expect.stringContaining('#ef4444'),
-    });
+    expect(tab.style.backgroundColor).toBe(
+      'color-mix(in srgb, rgb(239, 68, 68) 15%, transparent)',
+    );
 
     const indicator = screen.getByTestId('tab-active-indicator');
     expect(indicator).toHaveStyle({ backgroundColor: '#ef4444' });
+  });
+
+  it('renders the session color as the background on an inactive tab', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setTabColor('s1', '#ef4444');
+    useTerminalStore.getState().setActiveSession('s2');
+
+    render(<TerminalTabBar />);
+
+    expect(screen.getAllByRole('tab')[0].style.backgroundColor).toBe(
+      'color-mix(in srgb, rgb(239, 68, 68) 8%, transparent)',
+    );
   });
 });
