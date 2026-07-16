@@ -146,7 +146,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   const { t } = useI18n();
 
   return (
-    <div className="group flex flex-col gap-3 rounded-[10px] border border-app-border bg-app-surface p-4 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]">
+    <div className="group flex flex-col gap-3 rounded-[10px] border border-app-border bg-app-surface p-3 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">

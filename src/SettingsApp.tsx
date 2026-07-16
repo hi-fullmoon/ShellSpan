@@ -20,7 +20,7 @@ export const SettingsApp: React.FC = () => {
         </span>
       </div>
 
-      <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-4">
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3">
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-app-text">
             {t('settings.appearance.title')}

@@ -18,16 +18,25 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [split, setSplit] = useState(defaultSplit);
+  const [dragging, setDragging] = useState(false);
+  const [suppressGroup, setSuppressGroup] = useState(false);
   const draggingRef = useRef(false);
 
   const handleMouseDown = useCallback(() => {
     draggingRef.current = true;
+    setDragging(true);
     document.body.style.cursor = 'col-resize';
   }, []);
 
   const handleMouseUp = useCallback(() => {
     draggingRef.current = false;
+    setDragging(false);
+    setSuppressGroup(true);
     document.body.style.cursor = '';
+  }, []);
+
+  const handleMouseEnter = useCallback(() => {
+    setSuppressGroup(false);
   }, []);
 
   const handleMouseMove = useCallback(
@@ -62,9 +71,20 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
       <div style={{ width: `${split * 100}%` }} className="min-w-0">{left}</div>
       <div
         onMouseDown={handleMouseDown}
-        className="flex w-1 cursor-col-resize items-center justify-center bg-app-border hover:bg-app-primary"
+        onMouseEnter={handleMouseEnter}
+        className={cn(
+          'relative z-10 flex w-px shrink-0 cursor-col-resize items-center justify-center bg-transparent',
+          !suppressGroup && 'group',
+        )}
       >
-        <div className="h-8 w-0.5 rounded-full bg-app-text-soft/50" />
+        <div
+          className={cn(
+            'absolute left-1/2 top-0 h-full -translate-x-1/2 transition-all duration-150',
+            dragging
+              ? 'w-[3px] bg-app-primary'
+              : 'w-px bg-app-border delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200',
+          )}
+        />
       </div>
       <div style={{ width: `${(1 - split) * 100}%` }} className="min-w-0">{right}</div>
     </div>
