@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FolderIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 export interface PathBreadcrumbProps {
   path: string;
   onNavigate: (path: string) => void;
-  homeLabel?: string;
   className?: string;
 }
 
@@ -23,21 +22,69 @@ const ChevronIcon: React.FC = () => (
   </svg>
 );
 
+interface Segment {
+  name: string;
+  path: string;
+  index: number;
+}
+
 export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   path,
   onNavigate,
-  homeLabel = '~',
   className,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(path);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const parts = path.split('/').filter(Boolean);
+  const normalized = path.replace(/\\/g, '/');
+  const isRoot = normalized === '' || normalized === '/';
+  const rawParts = normalized.split('/').filter(Boolean);
 
-  const navigateToIndex = (index: number): void => {
-    const target = '/' + parts.slice(0, index + 1).join('/');
-    onNavigate(target);
-  };
+  const segments: Segment[] = useMemo(() => {
+    if (isRoot) return [];
+    return rawParts.map((part, index) => ({
+      name: part,
+      path: '/' + rawParts.slice(0, index + 1).join('/'),
+      index,
+    }));
+  }, [isRoot, rawParts]);
+
+  useEffect(() => {
+    if (!containerRef.current || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      setContainerWidth(entries[0].contentRect.width);
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const total = containerRef.current.scrollWidth;
+    const available = containerRef.current.clientWidth;
+    if (total <= available || segments.length <= 2) {
+      setVisibleCount(segments.length);
+    } else {
+      const chevron = 12;
+      const rootWidth = 32;
+      const lastWidth = 32 + Math.min(200, estimateWidth(segments[segments.length - 1].name));
+      let remaining = available - rootWidth - lastWidth - chevron;
+      let count = 0;
+      for (let i = 1; i < segments.length - 1; i++) {
+        const width = 32 + Math.min(200, estimateWidth(segments[i].name)) + chevron;
+        if (remaining >= width) {
+          remaining -= width;
+          count++;
+        } else {
+          break;
+        }
+      }
+      setVisibleCount(count + 2);
+    }
+  }, [containerWidth, segments]);
 
   const startEditing = (): void => {
     setEditValue(path);
@@ -60,8 +107,28 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
     setEditValue(path);
   };
 
+  const renderSegment = useCallback(
+    (segment: Segment, isLast: boolean) => (
+      <React.Fragment key={segment.index}>
+        <ChevronIcon />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onNavigate(segment.path)}
+          className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
+          title={segment.name}
+        >
+          <FolderIcon className="text-app-primary" />
+          <span className="truncate max-w-[200px] leading-none">{segment.name}</span>
+        </Button>
+      </React.Fragment>
+    ),
+    [onNavigate],
+  );
+
   return (
     <div
+      ref={containerRef}
       className={cn(
         'flex h-7 items-center gap-1 overflow-hidden rounded-md border border-app-border bg-app-surface px-2 text-xs',
         className,
@@ -83,31 +150,53 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onNavigate('')}
-            className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
-            title={homeLabel}
+            onClick={() => onNavigate('/')}
+            className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
+            title="/"
           >
-            <FolderIcon className="text-app-primary" />
-            <span className="truncate max-w-[80px] leading-none">{homeLabel}</span>
+            <span className="truncate max-w-[200px] leading-none">/</span>
           </Button>
-
-          {parts.map((part, index) => (
-            <React.Fragment key={index}>
-              <ChevronIcon />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigateToIndex(index)}
-                className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
-                title={part}
-              >
-                <FolderIcon className="text-app-primary" />
-                <span className="truncate max-w-[120px] leading-none">{part}</span>
-              </Button>
-            </React.Fragment>
-          ))}
+          {!isRoot && (
+            <>
+              {visibleCount >= segments.length ? (
+                segments.map((segment, index) => renderSegment(segment, index === segments.length - 1))
+              ) : (
+                <>
+                  {segments.slice(0, Math.max(1, visibleCount - 1)).map((segment) => (
+                    <React.Fragment key={segment.index}>
+                      <ChevronIcon />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onNavigate(segment.path)}
+                        className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
+                        title={segment.name}
+                      >
+                        <FolderIcon className="text-app-primary" />
+                        <span className="truncate max-w-[200px] leading-none">{segment.name}</span>
+                      </Button>
+                    </React.Fragment>
+                  ))}
+                  <ChevronIcon />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled
+                    className="h-5 px-1 text-muted-foreground"
+                  >
+                    <span className="leading-none">...</span>
+                  </Button>
+                  {renderSegment(segments[segments.length - 1], true)}
+                </>
+              )}
+            </>
+          )}
         </>
       )}
     </div>
   );
 };
+
+function estimateWidth(text: string): number {
+  return text.length * 8 + 24;
+}

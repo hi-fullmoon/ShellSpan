@@ -350,7 +350,6 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
         <PathBreadcrumb
           path={path}
           onNavigate={navigateTo}
-          homeLabel={t('sftp.path.root')}
           className="flex-1"
         />
       </div>
