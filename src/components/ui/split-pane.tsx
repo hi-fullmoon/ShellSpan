@@ -73,7 +73,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
         onMouseDown={handleMouseDown}
         onMouseEnter={handleMouseEnter}
         className={cn(
-          'relative z-10 flex w-px shrink-0 cursor-col-resize items-center justify-center bg-transparent',
+          'relative z-10 flex w-[3px] shrink-0 cursor-col-resize items-center justify-center bg-transparent',
           !suppressGroup && 'group',
         )}
       >
