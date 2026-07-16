@@ -166,6 +166,13 @@ export async function invokeReadLogFile(name: string): Promise<string> {
   return invoke('read_log_file', { name });
 }
 
+export async function invokeExportLogFile(
+  name: string,
+  content: string,
+): Promise<string | null> {
+  return invoke('export_log_file', { name, content });
+}
+
 export async function invokeListLocalDirectory(
   path: string,
 ): Promise<LocalDirectoryListing> {

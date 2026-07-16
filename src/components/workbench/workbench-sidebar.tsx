@@ -46,7 +46,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
               key={item.key}
               onClick={() => onTabChange(item.key)}
               className={cn(
-                'flex w-full items-center justify-start gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
+                'flex min-h-8 w-full items-center justify-start gap-2 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
                 active
                   ? 'bg-app-primary/10 text-app-primary'
                   : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',

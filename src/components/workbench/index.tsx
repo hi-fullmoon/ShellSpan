@@ -19,7 +19,11 @@ const Workbench: React.FC = () => {
   const [editing, setEditing] = useState<ConnectionProfile | undefined>();
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
   const { connect, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
-  const { open: openSftpConnection } = useSftpConnectionOpener();
+  const {
+    open: openSftpConnection,
+    hostKeyDialog: sftpHostKeyDialog,
+    closeHostKeyDialog: closeSftpHostKeyDialog,
+  } = useSftpConnectionOpener();
 
   const profiles = useProfileStore((state) => state.profiles);
   const addProfile = useProfileStore((state) => state.addProfile);
@@ -117,6 +121,15 @@ const Workbench: React.FC = () => {
         fingerprint={hostKeyDialog.fingerprint}
         mismatch={hostKeyDialog.mismatch}
         onTrust={hostKeyDialog.onTrust}
+      />
+      <HostKeyDialog
+        open={sftpHostKeyDialog.open}
+        onClose={closeSftpHostKeyDialog}
+        host={sftpHostKeyDialog.host}
+        port={sftpHostKeyDialog.port}
+        fingerprint={sftpHostKeyDialog.fingerprint}
+        mismatch={sftpHostKeyDialog.mismatch}
+        onTrust={sftpHostKeyDialog.onTrust}
       />
     </div>
   );

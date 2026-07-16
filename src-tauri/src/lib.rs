@@ -167,6 +167,7 @@ pub fn run() {
             commands::remove_known_host,
             commands::list_log_files,
             commands::read_log_file,
+            commands::export_log_file,
             commands::list_local_directory,
             commands::store_password,
             commands::retrieve_password,

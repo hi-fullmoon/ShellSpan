@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogPanel } from '../log-panel';
 
@@ -70,9 +70,10 @@ describe('LogPanel', () => {
     vi.useRealTimers();
   });
 
-  it('shows dated log entries from older sessions by default', () => {
+  it('shows recent log entries by default', () => {
+    const today = new Date().toISOString().split('T')[0];
     mockContent =
-      '[2000-01-01][12:34:56][INFO][termbridge] persisted log entry';
+      `[${today}][12:34:56][INFO][termbridge] persisted log entry`;
 
     render(<LogPanel />);
 
@@ -84,9 +85,6 @@ describe('LogPanel', () => {
       '[2000-01-01][12:34:56][INFO][termbridge] persisted log entry\n';
 
     render(<LogPanel />);
-    fireEvent.click(
-      screen.getByRole('button', { name: 'workbench.logs.today' }),
-    );
 
     expect(
       screen.getByText('workbench.logs.noMatches'),
@@ -94,114 +92,14 @@ describe('LogPanel', () => {
     expect(screen.queryByText('persisted log entry')).not.toBeInTheDocument();
   });
 
-  it('copies one complete raw log line on a single click', async () => {
-    vi.useFakeTimers();
+  it('copies one complete raw log line on a double click', async () => {
     render(<LogPanel />);
 
-    fireEvent.click(screen.getByText('second complete log line'));
-    expect(writeText).not.toHaveBeenCalled();
-
-    await act(async () => {
-      vi.advanceTimersByTime(250);
-      await Promise.resolve();
-    });
-
-    expect(writeText).toHaveBeenCalledWith('second complete log line');
-  });
-
-  it('cancels pending single-click copying when a row is double-clicked', async () => {
-    vi.useFakeTimers();
-    render(<LogPanel />);
-
-    const firstLine = screen.getByText('first complete log line');
-    fireEvent.click(firstLine);
-    fireEvent.doubleClick(firstLine);
-
-    await act(async () => {
-      vi.advanceTimersByTime(250);
-      await Promise.resolve();
-    });
-
-    expect(writeText).not.toHaveBeenCalled();
-    expect(
-      screen.getByText('workbench.logs.selectedCount:1'),
-    ).toBeInTheDocument();
-  });
-
-  it('selects log rows and copies their complete raw content in order', async () => {
-    render(<LogPanel />);
-
-    fireEvent.doubleClick(screen.getByText('first complete log line'));
-    fireEvent.click(screen.getByText('third complete log line'), {
-      shiftKey: true,
-    });
-
-    expect(
-      screen.getByText('workbench.logs.selectedCount:3'),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'common.copy' }),
-    );
+    fireEvent.doubleClick(screen.getByText('second complete log line'));
 
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(
-        'first complete log line\nsecond complete log line\nthird complete log line',
-      );
+      expect(writeText).toHaveBeenCalledWith('second complete log line');
     });
     expect(mockAddToast).toHaveBeenCalledWith('workbench.logs.copied');
-  });
-
-  it('selects all visible rows and clears the selection', () => {
-    render(<LogPanel />);
-
-    fireEvent.doubleClick(screen.getByText('first complete log line'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'workbench.logs.selectAll' }),
-    );
-
-    expect(
-      screen.getByText('workbench.logs.selectedCount:3'),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'common.cancel' }),
-    );
-    expect(
-      screen.queryByText('workbench.logs.selectedCount:3'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('toggles arbitrary rows with Ctrl-click', () => {
-    render(<LogPanel />);
-
-    fireEvent.doubleClick(screen.getByText('first complete log line'));
-    fireEvent.click(screen.getByText('third complete log line'), {
-      ctrlKey: true,
-    });
-    expect(
-      screen.getByText('workbench.logs.selectedCount:2'),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('first complete log line'), {
-      ctrlKey: true,
-    });
-    expect(
-      screen.getByText('workbench.logs.selectedCount:1'),
-    ).toBeInTheDocument();
-  });
-
-  it('clears the selection when Escape is pressed', () => {
-    render(<LogPanel />);
-
-    fireEvent.doubleClick(screen.getByText('first complete log line'));
-    expect(
-      screen.getByText('workbench.logs.selectedCount:1'),
-    ).toBeInTheDocument();
-
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(
-      screen.queryByText('workbench.logs.selectedCount:1'),
-    ).not.toBeInTheDocument();
   });
 });

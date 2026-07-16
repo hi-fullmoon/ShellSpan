@@ -80,10 +80,11 @@ export default {
   'workbench.logs.last30days': '近一个月',
   'workbench.logs.all': '全部',
   'workbench.logs.level': '级别',
-  'workbench.logs.selectedCount': '已选择 {count} 行',
-  'workbench.logs.selectAll': '全选',
   'workbench.logs.copied': '已复制日志',
   'workbench.logs.copyFailed': '日志复制失败',
+  'workbench.logs.export': '导出',
+  'workbench.logs.exported': '日志已导出到 {path}',
+  'workbench.logs.exportFailed': '日志导出失败',
 
   'connection.form.title.new': '新建连接',
   'connection.form.title.edit': '编辑连接',

@@ -62,7 +62,7 @@ export const KnownHostsPanel: React.FC = () => {
               placeholder={t('workbench.knownHosts.searchPlaceholder')}
             />
           </div>
-          <Button variant="secondary" size="sm" onClick={loadHosts}>
+          <Button variant="secondary" size="default" onClick={loadHosts}>
             {t('common.refresh')}
           </Button>
         </div>

@@ -14,6 +14,15 @@ import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/empty-state';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/useToast';
+import { invokeExportLogFile } from '@/lib/tauri';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 interface ParsedLogLine {
@@ -122,29 +131,16 @@ function getLevelClasses(level: string): string {
 interface LogLineProps {
   line: ParsedLogLine;
   originalIndex: number;
-  selected: boolean;
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onDoubleClick: () => void;
 }
 
-const LogLine: React.FC<LogLineProps> = ({
-  line,
-  originalIndex,
-  selected,
-  onClick,
-  onDoubleClick,
-}) => {
+const LogLine: React.FC<LogLineProps> = ({ line, originalIndex, onDoubleClick }) => {
   if (!line.level || !line.message) {
     return (
       <button
         type="button"
-        aria-pressed={selected}
-        onClick={onClick}
         onDoubleClick={onDoubleClick}
-        className={cn(
-          'w-full cursor-pointer px-1 py-0.5 text-left text-app-text-soft transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50',
-          selected && 'bg-app-primary/10',
-        )}
+        className="w-full cursor-pointer px-1 py-0.5 text-left text-app-text-soft transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
       >
         {line.raw}
       </button>
@@ -160,13 +156,8 @@ const LogLine: React.FC<LogLineProps> = ({
   return (
     <button
       type="button"
-      aria-pressed={selected}
-      onClick={onClick}
       onDoubleClick={onDoubleClick}
-      className={cn(
-        'grid w-full cursor-pointer grid-cols-[120px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[120px_2.75rem_4.5rem_1fr]',
-        selected && 'bg-app-primary/10',
-      )}
+      className="grid w-full cursor-pointer grid-cols-[120px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[120px_2.75rem_4.5rem_1fr]"
     >
       <span className="shrink-0 text-[10px] text-app-text-soft">
         {line.date} {shortTime}
@@ -196,32 +187,6 @@ const LogLine: React.FC<LogLineProps> = ({
   );
 };
 
-interface FilterButtonProps {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-
-const FilterButton: React.FC<FilterButtonProps> = ({
-  active,
-  onClick,
-  children,
-}) => {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors',
-        active
-          ? 'bg-app-surface text-app-primary shadow-sm'
-          : 'text-muted-foreground hover:bg-app-surface/50 hover:text-app-text',
-      )}
-    >
-      {children}
-    </button>
-  );
-};
-
 export const LogPanel: React.FC = () => {
   const { t } = useI18n();
   const { success, error: showError } = useToast();
@@ -235,14 +200,8 @@ export const LogPanel: React.FC = () => {
     refreshActiveFile,
   } = useLogStore();
   const [autoScroll, setAutoScroll] = useState(true);
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>('all');
+  const [dateFilter, setDateFilter] = useState<DateFilterOption>('last3days');
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedLineKeys, setSelectedLineKeys] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const singleClickTimerRef = useRef<number | null>(null);
-  const selectionAnchorRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const parsedLines = useMemo(() => parseLogContent(content), [content]);
@@ -254,7 +213,6 @@ export const LogPanel: React.FC = () => {
       .map((line, index) => ({
         line,
         originalIndex: index,
-        selectionKey: `${index}\u0000${line.raw}`,
       }))
       .filter(({ line }) => {
         if (!matchesDateFilter(line.date, dateFilter, today)) {
@@ -279,27 +237,6 @@ export const LogPanel: React.FC = () => {
     loadFiles();
   }, [loadFiles]);
 
-  const handleCopySelectedLogs = useCallback((): void => {
-    const selectedLogs = parsedLines
-      .map((line, index) => ({
-        raw: line.raw,
-        selectionKey: `${index}\u0000${line.raw}`,
-      }))
-      .filter(({ selectionKey }) => selectedLineKeys.has(selectionKey))
-      .map(({ raw }) => raw);
-
-    if (selectedLogs.length === 0) return;
-
-    if (!navigator.clipboard?.writeText) {
-      showError(t('workbench.logs.copyFailed'));
-      return;
-    }
-    void navigator.clipboard
-      .writeText(selectedLogs.join('\n'))
-      .then(() => success(t('workbench.logs.copied')))
-      .catch(() => showError(t('workbench.logs.copyFailed')));
-  }, [parsedLines, selectedLineKeys, success, showError, t]);
-
   const copyLogContent = useCallback(
     (contentToCopy: string): void => {
       if (!navigator.clipboard?.writeText) {
@@ -313,122 +250,6 @@ export const LogPanel: React.FC = () => {
     },
     [success, showError, t],
   );
-
-  const clearPendingSingleClick = useCallback((): void => {
-    if (singleClickTimerRef.current !== null) {
-      window.clearTimeout(singleClickTimerRef.current);
-      singleClickTimerRef.current = null;
-    }
-  }, []);
-
-  const handleSelectLine = useCallback(
-    (
-      selectionKey: string,
-      filteredIndex: number,
-      shiftKey: boolean,
-      additiveKey: boolean,
-    ): void => {
-      const anchorIndex = selectionAnchorRef.current
-        ? filteredLines.findIndex(
-            (item) => item.selectionKey === selectionAnchorRef.current,
-          )
-        : -1;
-
-      if (shiftKey && anchorIndex >= 0) {
-        const start = Math.min(anchorIndex, filteredIndex);
-        const end = Math.max(anchorIndex, filteredIndex);
-        setSelectedLineKeys(
-          new Set(
-            filteredLines
-              .slice(start, end + 1)
-              .filter(({ line }) => Boolean(line.raw))
-              .map((item) => item.selectionKey),
-          ),
-        );
-        return;
-      }
-
-      selectionAnchorRef.current = selectionKey;
-      if (additiveKey) {
-        setSelectedLineKeys((current) => {
-          const next = new Set(current);
-          if (next.has(selectionKey)) {
-            next.delete(selectionKey);
-          } else {
-            next.add(selectionKey);
-          }
-          return next;
-        });
-        return;
-      }
-
-      setSelectedLineKeys(new Set([selectionKey]));
-    },
-    [filteredLines],
-  );
-
-  const handleSelectAll = useCallback((): void => {
-    setSelectedLineKeys((current) => {
-      const next = new Set(current);
-      filteredLines.forEach(({ line, selectionKey }) => {
-        if (line.raw) next.add(selectionKey);
-      });
-      return next;
-    });
-  }, [filteredLines]);
-
-  const handleClearSelection = useCallback((): void => {
-    clearPendingSingleClick();
-    selectionAnchorRef.current = null;
-    setSelectedLineKeys(new Set());
-    setSelectionMode(false);
-  }, [clearPendingSingleClick]);
-
-  useEffect(() => {
-    if (!selectionMode) return;
-
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        handleClearSelection();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleClearSelection, selectionMode]);
-
-  useEffect(() => {
-    return () => {
-      clearPendingSingleClick();
-    };
-  }, [clearPendingSingleClick]);
-
-  useEffect(() => {
-    selectionAnchorRef.current = null;
-    setSelectedLineKeys(new Set());
-    setSelectionMode(false);
-  }, [activeFileName]);
-
-  useEffect(() => {
-    const availableLineKeys = new Set(
-      parsedLines.map((line, index) => `${index}\u0000${line.raw}`),
-    );
-    if (
-      selectionAnchorRef.current &&
-      !availableLineKeys.has(selectionAnchorRef.current)
-    ) {
-      selectionAnchorRef.current = null;
-    }
-    setSelectedLineKeys((current) => {
-      const next = new Set(
-        [...current].filter((selectionKey) =>
-          availableLineKeys.has(selectionKey),
-        ),
-      );
-      if (next.size === current.size) return current;
-      return next;
-    });
-  }, [parsedLines]);
 
   useEffect(() => {
     if (files.length > 0 && !activeFileName) {
@@ -458,6 +279,19 @@ export const LogPanel: React.FC = () => {
     });
   };
 
+  const handleExport = useCallback(async (): Promise<void> => {
+    if (!content) return;
+    const defaultName = activeFileName ?? 'termbridge-logs.txt';
+    try {
+      const savedPath = await invokeExportLogFile(defaultName, content);
+      if (savedPath) {
+        success(t('workbench.logs.exported', { path: savedPath }));
+      }
+    } catch {
+      showError(t('workbench.logs.exportFailed'));
+    }
+  }, [content, activeFileName, success, showError, t]);
+
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
@@ -483,42 +317,57 @@ export const LogPanel: React.FC = () => {
             <Button variant="secondary" size="sm" onClick={handleRefresh}>
               {t('common.refresh')}
             </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleExport}
+              disabled={!content}
+            >
+              {t('workbench.logs.export')}
+            </Button>
           </div>
         </div>
-        <div className="flex h-8 items-center gap-4 border-t border-app-border px-3">
-          <div className="flex items-center gap-1">
+        <div className="flex h-9 items-center gap-4 border-t border-app-border px-3">
+          <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.date')}
             </span>
-            {DATE_FILTER_OPTIONS.map((option) => (
-              <FilterButton
-                key={option.key}
-                active={dateFilter === option.key}
-                onClick={() => setDateFilter(option.key)}
-              >
-                {t(option.labelKey)}
-              </FilterButton>
-            ))}
+            <Select
+              value={dateFilter}
+              onValueChange={(value) => setDateFilter(value as DateFilterOption)}
+            >
+              <SelectTrigger size="sm" className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DATE_FILTER_OPTIONS.map((option) => (
+                  <SelectItem key={option.key} value={option.key}>
+                    {t(option.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.level')}
             </span>
-            <FilterButton
-              active={levelFilter === 'all'}
-              onClick={() => setLevelFilter('all')}
+            <Select
+              value={levelFilter}
+              onValueChange={(value) => setLevelFilter(value as LogLevel | 'all')}
             >
-              {t('workbench.logs.all')}
-            </FilterButton>
-            {LOG_LEVELS.map((level) => (
-              <FilterButton
-                key={level}
-                active={levelFilter === level}
-                onClick={() => setLevelFilter(level)}
-              >
-                {level}
-              </FilterButton>
-            ))}
+              <SelectTrigger size="sm" className="w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('workbench.logs.all')}</SelectItem>
+                {LOG_LEVELS.map((level) => (
+                  <SelectItem key={level} value={level}>
+                    {level}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </div>
@@ -528,98 +377,50 @@ export const LogPanel: React.FC = () => {
             <Spinner />
           </div>
         )}
-        {selectionMode && (
-          <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-app-border bg-app-surface px-2 py-1.5 shadow-[var(--shadow-dialog)]">
-            <span className="whitespace-nowrap px-1 text-xs font-medium text-app-text">
-              {t('workbench.logs.selectedCount', {
-                count: selectedLineKeys.size,
-              })}
-            </span>
-            <span className="mx-1 h-4 w-px bg-app-border" />
-            <Button variant="ghost" size="sm" onClick={handleSelectAll}>
-              {t('workbench.logs.selectAll')}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handleClearSelection}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleCopySelectedLogs}
-              disabled={selectedLineKeys.size === 0}
-            >
-              {t('common.copy')}
-            </Button>
-          </div>
-        )}
-        <div
-          ref={scrollRef}
-          className={cn(
-            'min-h-0 flex-1 overflow-auto p-3 font-mono text-xs',
-            selectionMode && 'pb-14',
-          )}
+        <ScrollArea
+          className="min-h-0 flex-1 font-mono text-xs"
+          viewportRef={scrollRef}
         >
-          {filteredLines.length > 0 ? (
-            <div
-              style={{
-                height: `${virtualizer.getTotalSize()}px`,
-                width: '100%',
-                position: 'relative',
-              }}
-            >
-              {virtualItems.map((virtualItem) => {
-                const { line, originalIndex, selectionKey } =
-                  filteredLines[virtualItem.index];
-                return (
-                  <div
-                    key={virtualItem.key}
-                    data-index={virtualItem.index}
-                    ref={virtualizer.measureElement}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      transform: `translateY(${virtualItem.start}px)`,
-                    }}
-                  >
-                    <LogLine
-                      line={line}
-                      originalIndex={originalIndex}
-                      selected={selectedLineKeys.has(selectionKey)}
-                      onClick={(event) => {
-                        if (selectionMode) {
-                          handleSelectLine(
-                            selectionKey,
-                            virtualItem.index,
-                            event.shiftKey,
-                            event.ctrlKey || event.metaKey,
-                          );
-                          return;
-                        }
-                        clearPendingSingleClick();
-                        singleClickTimerRef.current = window.setTimeout(() => {
-                          singleClickTimerRef.current = null;
-                          copyLogContent(line.raw);
-                        }, 250);
+          <div className="p-3">
+            {filteredLines.length > 0 ? (
+              <div
+                style={{
+                  height: `${virtualizer.getTotalSize()}px`,
+                  width: '100%',
+                  position: 'relative',
+                }}
+              >
+                {virtualItems.map((virtualItem) => {
+                  const { line, originalIndex } = filteredLines[virtualItem.index];
+                  return (
+                    <div
+                      key={virtualItem.key}
+                      data-index={virtualItem.index}
+                      ref={virtualizer.measureElement}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${virtualItem.start}px)`,
                       }}
-                      onDoubleClick={() => {
-                        clearPendingSingleClick();
-                        selectionAnchorRef.current = selectionKey;
-                        setSelectedLineKeys(new Set([selectionKey]));
-                        setSelectionMode(true);
-                      }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <span className="text-muted-foreground">
-              {t(content ? 'workbench.logs.noMatches' : 'workbench.logs.empty')}
-            </span>
-          )}
-        </div>
+                    >
+                      <LogLine
+                        line={line}
+                        originalIndex={originalIndex}
+                        onDoubleClick={() => copyLogContent(line.raw)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <span className="text-muted-foreground">
+                {t(content ? 'workbench.logs.noMatches' : 'workbench.logs.empty')}
+              </span>
+            )}
+          </div>
+        </ScrollArea>
       </div>
     </div>
   );

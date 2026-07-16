@@ -80,10 +80,11 @@ export default {
   'workbench.logs.last30days': 'Last 30 Days',
   'workbench.logs.all': 'All',
   'workbench.logs.level': 'Level',
-  'workbench.logs.selectedCount': '{count} selected',
-  'workbench.logs.selectAll': 'Select all',
   'workbench.logs.copied': 'Log copied',
   'workbench.logs.copyFailed': 'Failed to copy log entry',
+  'workbench.logs.export': 'Export',
+  'workbench.logs.exported': 'Log exported to {path}',
+  'workbench.logs.exportFailed': 'Failed to export log',
 
   'connection.form.title.new': 'New Connection',
   'connection.form.title.edit': 'Edit Connection',

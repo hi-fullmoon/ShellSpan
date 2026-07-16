@@ -893,6 +893,26 @@ pub(crate) fn read_log_file(app: AppHandle, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
+pub(crate) async fn export_log_file(name: String, content: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = rfd::FileDialog::new()
+            .set_title("导出日志")
+            .set_file_name(&name)
+            .save_file();
+        match path {
+            Some(path) => {
+                std::fs::write(&path, content)
+                    .map_err(|error| format!("failed to write log file: {error}"))?;
+                Ok(Some(portable_local_path(&path)))
+            }
+            None => Ok(None),
+        }
+    })
+    .await
+    .map_err(|error| format!("failed to run save dialog: {error}"))?
+}
+
+#[tauri::command]
 pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<LocalDirectoryListing, String> {
     use std::fs;
     use std::path::PathBuf;

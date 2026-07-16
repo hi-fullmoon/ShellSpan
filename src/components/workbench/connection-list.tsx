@@ -89,7 +89,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
               placeholder={t('workbench.connections.searchPlaceholder')}
             />
           </div>
-          <Button variant="default" size="sm" onClick={onAdd}>
+          <Button variant="default" size="default" onClick={onAdd}>
             {t('workbench.connections.new')}
           </Button>
         </div>
