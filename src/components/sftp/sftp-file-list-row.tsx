@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { FolderIcon, LinkIcon, FileIcon as LucideFileIcon } from 'lucide-react';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { RemoteFileKind } from '@/types';
 import type { SftpSide } from '@/stores/sftpStore';
 import type { FileEntry } from './file-entry-formatters';
@@ -64,6 +65,27 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
   onContextMenu,
 }) => {
   const { t } = useI18n();
+  const fileNameRef = useRef<HTMLSpanElement>(null);
+  const [isFileNameTruncated, setIsFileNameTruncated] = useState(false);
+
+  const updateFileNameTruncation = useCallback(() => {
+    const element = fileNameRef.current;
+    if (!element) return;
+    const nextIsTruncated = element.scrollWidth > element.clientWidth;
+    setIsFileNameTruncated((current) =>
+      current === nextIsTruncated ? current : nextIsTruncated,
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    updateFileNameTruncation();
+    const element = fileNameRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(updateFileNameTruncation);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [entry.name, updateFileNameTruncation]);
 
   const dragPayload: SftpDndPayload = useMemo(() => {
     const entries = selected ? selectedEntries : [entry];
@@ -127,7 +149,21 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
         )}
         <FileIcon kind={entry.kind} selected={selected} />
         <div className="flex min-w-0 flex-col justify-center leading-tight">
-          <span className="truncate text-[13px] font-medium">{entry.name}</span>
+          <Tooltip disabled={!isFileNameTruncated}>
+            <TooltipTrigger
+              delay={0}
+              render={
+                <span
+                  ref={fileNameRef}
+                  className="truncate text-[13px] font-medium"
+                  onMouseEnter={updateFileNameTruncation}
+                />
+              }
+            >
+              {entry.name}
+            </TooltipTrigger>
+            <TooltipContent className="break-all">{entry.name}</TooltipContent>
+          </Tooltip>
           {permissionText && (
             <span className={cn('truncate font-mono text-[11px]', mutedTextClass)}>
               {permissionText}
