@@ -1,6 +1,5 @@
 import React from 'react';
 import { FolderUpIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import type { SftpSide } from '@/stores/sftpStore';
 
 export interface SftpParentRowProps {
@@ -16,11 +15,6 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
   onParentDirectory,
   onBlankContextMenu,
 }) => {
-  const handleClick = (e: React.MouseEvent): void => {
-    e.preventDefault();
-    onParentDirectory();
-  };
-
   const handleDoubleClick = (e: React.MouseEvent): void => {
     e.preventDefault();
     e.stopPropagation();
@@ -35,12 +29,9 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
 
   return (
     <div
-      onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
-      className={cn(
-        'grid cursor-default select-none items-center border-b border-app-border/50 px-2 text-xs transition-colors hover:bg-app-surface-muted text-app-text',
-      )}
+      className="grid h-full cursor-default select-none items-center border-b border-app-border/50 px-2 text-xs text-app-text transition-colors hover:bg-app-surface-muted"
       style={{
         gridTemplateColumns:
           side === 'remote'
@@ -51,16 +42,16 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
     >
       <div className="flex h-[34px] min-w-0 items-center gap-1.5 pr-2">
         {batchMode && <div className="h-3.5 w-3.5 shrink-0" />}
-        <FolderUpIcon className="h-4 w-4 shrink-0 text-app-text-soft" />
+        <FolderUpIcon className="h-4 w-4 shrink-0 text-app-primary" />
         <span className="truncate text-[13px] font-medium">..</span>
       </div>
-      <div className="truncate pr-2 text-app-text-soft">--</div>
-      <div className="truncate pr-2 text-app-text-soft">--</div>
-      <div className="truncate pr-2 text-app-text-soft">--</div>
+      <div />
+      <div />
+      <div />
       {side === 'remote' && (
         <>
-          <div className="truncate pr-2 text-app-text-soft">--</div>
-          <div className="truncate pr-2 text-app-text-soft">--</div>
+          <div />
+          <div />
         </>
       )}
     </div>

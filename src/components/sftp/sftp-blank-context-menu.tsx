@@ -14,6 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
+import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
 
 export type SftpBlankContextMenuAction =
@@ -77,21 +78,34 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
   onAction,
 }) => {
   const { t } = useI18n();
+  const { menuRef, position } =
+    useViewportConstrainedPosition<HTMLDivElement>(open, x, y);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose();
     };
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (
+        event.target instanceof Node &&
+        menuRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+      onClose();
+    };
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [menuRef, open, onClose]);
 
   if (!open) return null;
 
   const isLocal = side === 'local';
-  const left = Math.min(x, window.innerWidth - 192);
-  const top = Math.min(y, window.innerHeight - 280);
 
   const handleAction = (action: SftpBlankContextMenuAction): void => {
     onAction(action);
@@ -99,20 +113,11 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
   };
 
   return createPortal(
-    <>
-      <div
-        className="fixed inset-0 z-[1600]"
-        role="presentation"
-        onClick={onClose}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onClose();
-        }}
-      />
-      <div
-        className="fixed z-[1700] w-56 overflow-hidden rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
-        style={{ left, top }}
-      >
+    <div
+      ref={menuRef}
+      className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-xl border border-app-border bg-app-surface p-1.5 shadow-[var(--shadow-dialog)]"
+      style={position}
+    >
         {!isLocal && (
           <>
             <MenuItem
@@ -183,8 +188,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
               : t('sftp.contextMenu.bookmark.add')}
           </MenuItem>
         )}
-      </div>
-    </>,
+    </div>,
     document.body,
   );
 };

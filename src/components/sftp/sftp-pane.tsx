@@ -153,9 +153,12 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   const handleFileContextMenu = useCallback(
     (entry: FileEntry, e: React.MouseEvent): void => {
       e.preventDefault();
+      e.stopPropagation();
       if (!selectedPaths.has(entry.path)) {
         onSelectedPathsChange(new Set([entry.path]));
       }
+      setBlankContextMenu(null);
+      setBookmarkMenu(null);
       setFileContextMenu({ x: e.clientX, y: e.clientY, entry });
     },
     [selectedPaths, onSelectedPathsChange],
@@ -164,6 +167,9 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   const handleBlankContextMenu = useCallback(
     (e: React.MouseEvent): void => {
       e.preventDefault();
+      e.stopPropagation();
+      setFileContextMenu(null);
+      setBookmarkMenu(null);
       setBlankContextMenu({ x: e.clientX, y: e.clientY });
     },
     [],
@@ -281,6 +287,8 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   const handleBookmarkButtonClick = useCallback(
     (e: React.MouseEvent<HTMLButtonElement>): void => {
       const rect = e.currentTarget.getBoundingClientRect();
+      setFileContextMenu(null);
+      setBlankContextMenu(null);
       setBookmarkMenu({ x: rect.left, y: rect.bottom + 4 });
     },
     [],

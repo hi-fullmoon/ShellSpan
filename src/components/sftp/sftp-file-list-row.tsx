@@ -89,6 +89,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
 
   const handleContextMenu = (e: React.MouseEvent): void => {
     e.preventDefault();
+    e.stopPropagation();
     onContextMenu(entry, e);
   };
 
@@ -107,7 +108,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
       className={cn(
-        'grid cursor-default select-none items-center border-b border-app-border/50 px-2 text-xs transition-colors',
+        'grid h-full cursor-default select-none items-center border-b border-app-border/50 px-2 text-xs transition-colors',
         selected
           ? 'bg-app-primary/10 text-app-primary'
           : 'hover:bg-app-surface-muted text-app-text',

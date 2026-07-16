@@ -101,7 +101,7 @@ describe('SftpFileList', () => {
     expect(rows.length).toBeGreaterThan(1);
   });
 
-  it('navigates to parent directory when parent row is clicked', () => {
+  it('navigates to parent directory only when parent row is double-clicked', () => {
     const onParentDirectory = vi.fn();
     render(
       <SftpFileList
@@ -119,6 +119,9 @@ describe('SftpFileList', () => {
       />,
     );
     fireEvent.click(screen.getByText('..'));
+    expect(onParentDirectory).not.toHaveBeenCalled();
+
+    fireEvent.doubleClick(screen.getByText('..'));
     expect(onParentDirectory).toHaveBeenCalledTimes(1);
   });
 
@@ -141,5 +144,29 @@ describe('SftpFileList', () => {
     );
     fireEvent.contextMenu(screen.getByText('..'));
     expect(onBlankContextMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it('only opens the file context menu when right-clicking a file row', () => {
+    const onContextMenu = vi.fn();
+    const onBlankContextMenu = vi.fn();
+    render(
+      <SftpFileList
+        entries={sampleEntries}
+        side="local"
+        selectedPaths={[]}
+        filterQuery=""
+        batchMode={false}
+        onSelect={vi.fn()}
+        onDoubleClick={vi.fn()}
+        onContextMenu={onContextMenu}
+        onBlankContextMenu={onBlankContextMenu}
+        onParentDirectory={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText('a.txt'));
+
+    expect(onContextMenu).toHaveBeenCalledTimes(1);
+    expect(onBlankContextMenu).not.toHaveBeenCalled();
   });
 });
