@@ -70,21 +70,27 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
     >
       <div style={{ width: `${split * 100}%` }} className="min-w-0">{left}</div>
       <div
-        onMouseDown={handleMouseDown}
-        onMouseEnter={handleMouseEnter}
-        className={cn(
-          'relative z-10 flex w-[3px] shrink-0 cursor-col-resize items-center justify-center bg-transparent',
-          !suppressGroup && 'group',
-        )}
+        data-slot="split-pane-divider"
+        className="relative z-10 w-px shrink-0 bg-app-border shadow-none"
       >
         <div
+          data-slot="split-pane-handle"
+          onMouseDown={handleMouseDown}
+          onMouseEnter={handleMouseEnter}
           className={cn(
-            'absolute left-1/2 top-0 h-full -translate-x-1/2 transition-all duration-150',
-            dragging
-              ? 'w-[3px] bg-app-primary'
-              : 'w-px bg-app-border delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200',
+            'absolute left-1/2 top-0 flex h-full w-[3px] -translate-x-1/2 cursor-col-resize items-center justify-center bg-transparent shadow-none',
+            !suppressGroup && 'group',
           )}
-        />
+        >
+          <div
+            className={cn(
+              'h-full transition-all duration-150 shadow-none',
+              dragging
+                ? 'w-[3px] bg-app-primary'
+                : 'w-px bg-app-border delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200',
+            )}
+          />
+        </div>
       </div>
       <div style={{ width: `${(1 - split) * 100}%` }} className="min-w-0">{right}</div>
     </div>
