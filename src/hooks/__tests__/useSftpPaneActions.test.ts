@@ -99,11 +99,12 @@ describe('useSftpPaneActions', () => {
     expect(result.current.createMode).toBe('file');
   });
 
-  it('toggles batch mode and clears selection', () => {
+  it('preserves the current selection when entering batch mode', () => {
     const connection = addConnection();
     useSftpStore.getState().setPaneState(connection.id, 'remote', { selectedPaths: ['/home/a'] });
+    const updatedConnection = useSftpStore.getState().connections[0]!;
 
-    const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
+    const { result } = renderHook(() => useSftpPaneActions(updatedConnection, 'remote'));
 
     act(() => {
       result.current.onToggleBatchMode();
@@ -111,6 +112,26 @@ describe('useSftpPaneActions', () => {
 
     const pane = useSftpStore.getState().connections[0]?.remotePane;
     expect(pane?.batchMode).toBe(true);
+    expect(pane?.selectedPaths).toEqual(['/home/a']);
+  });
+
+  it('clears the selection when exiting batch mode', () => {
+    const connection = addConnection();
+    useSftpStore.getState().setPaneState(connection.id, 'remote', {
+      batchMode: true,
+      selectedPaths: ['/home/a'],
+    });
+    const updatedConnection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() =>
+      useSftpPaneActions(updatedConnection, 'remote'),
+    );
+
+    act(() => {
+      result.current.onToggleBatchMode();
+    });
+
+    const pane = useSftpStore.getState().connections[0]?.remotePane;
+    expect(pane?.batchMode).toBe(false);
     expect(pane?.selectedPaths).toEqual([]);
   });
 

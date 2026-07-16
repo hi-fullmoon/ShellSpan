@@ -175,6 +175,8 @@ export default {
   'sftp.showFilter': '显示筛选',
   'sftp.hideFilter': '隐藏筛选',
   'sftp.batchMode': '批量选择',
+  'sftp.selection.selectedCount': '已选择 {count} 项',
+  'sftp.selection.selectAll': '全选',
   'sftp.emptyFolder': '此文件夹为空',
   'sftp.filteredEmpty': '没有匹配的文件',
   'sftp.transfer.uploading': '正在上传',

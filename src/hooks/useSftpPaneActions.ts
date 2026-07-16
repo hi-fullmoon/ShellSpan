@@ -519,11 +519,12 @@ export function useSftpPaneActions(
   }, [reload, error]);
 
   const onToggleBatchMode = useCallback(() => {
+    const nextBatchMode = !pane.batchMode;
     setPaneState(connection.id, side, {
-      batchMode: !pane.batchMode,
-      selectedPaths: [],
+      batchMode: nextBatchMode,
+      selectedPaths: nextBatchMode ? pane.selectedPaths : [],
     });
-  }, [connection.id, pane.batchMode, setPaneState, side]);
+  }, [connection.id, pane.batchMode, pane.selectedPaths, setPaneState, side]);
 
   return {
     createMode,

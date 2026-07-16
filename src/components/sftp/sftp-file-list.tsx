@@ -142,7 +142,6 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   const handleSelect = useCallback(
     (entry: FileEntry, e: React.MouseEvent): void => {
       const index = sortedEntries.findIndex((item) => item.path === entry.path);
-      const isMeta = e.ctrlKey || e.metaKey;
       const isShift = e.shiftKey;
 
       if (batchMode) {
@@ -156,20 +155,13 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
           return;
         }
 
-        if (isMeta) {
-          const next = new Set(selectedPaths);
-          if (next.has(entry.path)) {
-            next.delete(entry.path);
-          } else {
-            next.add(entry.path);
-          }
-          onSelect(Array.from(next));
-          lastSelectedIndexRef.current = index;
-          return;
+        const next = new Set(selectedPaths);
+        if (next.has(entry.path)) {
+          next.delete(entry.path);
+        } else {
+          next.add(entry.path);
         }
-
-        // Plain click in batch mode replaces selection with the single item.
-        onSelect([entry.path]);
+        onSelect(Array.from(next));
         lastSelectedIndexRef.current = index;
         return;
       }
@@ -212,7 +204,9 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
         ) : (
           <div
             className="relative w-full"
-            style={{ height: `${virtualizer.getTotalSize()}px` }}
+            style={{
+              height: `${virtualizer.getTotalSize() + (batchMode ? 56 : 0)}px`,
+            }}
           >
             {virtualItems.map((virtualItem) => {
               const isParent = showParent && virtualItem.index === 0;

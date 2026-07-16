@@ -155,13 +155,17 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       e.preventDefault();
       e.stopPropagation();
       if (!selectedPaths.has(entry.path)) {
-        onSelectedPathsChange(new Set([entry.path]));
+        onSelectedPathsChange(
+          pane.batchMode
+            ? new Set([...selectedPaths, entry.path])
+            : new Set([entry.path]),
+        );
       }
       setBlankContextMenu(null);
       setBookmarkMenu(null);
       setFileContextMenu({ x: e.clientX, y: e.clientY, entry });
     },
-    [selectedPaths, onSelectedPathsChange],
+    [onSelectedPathsChange, pane.batchMode, selectedPaths],
   );
 
   const handleBlankContextMenu = useCallback(
@@ -183,6 +187,39 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   );
   const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
   const isCurrentPathBookmarked = path ? remoteBookmarks.includes(path) : false;
+
+  const handleSelectAll = useCallback((): void => {
+    onSelectedPathsChange(new Set(entries.map((entry) => entry.path)));
+  }, [entries, onSelectedPathsChange]);
+
+  const handleExitBatchMode = useCallback((): void => {
+    actions.onToggleBatchMode();
+  }, [actions]);
+
+  useEffect(() => {
+    if (
+      !pane.batchMode ||
+      fileContextMenu ||
+      blankContextMenu ||
+      bookmarkMenu
+    ) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        handleExitBatchMode();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [
+    blankContextMenu,
+    bookmarkMenu,
+    fileContextMenu,
+    handleExitBatchMode,
+    pane.batchMode,
+  ]);
 
   const handleFileContextMenuAction = useCallback(
     (action: SftpFileContextMenuAction): void => {
@@ -378,6 +415,42 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
             >
               {t('common.retry')}
             </button>
+          </div>
+        )}
+        {pane.batchMode && (
+          <div className="absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-lg border border-app-border bg-app-surface px-2 py-1.5 shadow-[var(--shadow-dialog)]">
+            <span className="whitespace-nowrap px-1 text-xs font-medium text-app-text">
+              {t('sftp.selection.selectedCount', {
+                count: selectedEntries.length,
+              })}
+            </span>
+            <span className="mx-1 h-4 w-px shrink-0 bg-app-border" />
+            <Button variant="ghost" size="xs" onClick={handleSelectAll}>
+              {t('sftp.selection.selectAll')}
+            </Button>
+            <Button variant="ghost" size="xs" onClick={handleExitBatchMode}>
+              {t('common.cancel')}
+            </Button>
+            {!isLocal && (
+              <>
+                <Button
+                  variant="default"
+                  size="xs"
+                  onClick={() => void actions.onBatchDownload()}
+                  disabled={selectedEntries.length === 0}
+                >
+                  {t('common.download')}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="xs"
+                  onClick={() => void actions.onDelete(selectedEntries)}
+                  disabled={selectedEntries.length === 0}
+                >
+                  {t('common.delete')}
+                </Button>
+              </>
+            )}
           </div>
         )}
         {!error && (

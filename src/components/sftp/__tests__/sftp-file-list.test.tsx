@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -168,5 +169,39 @@ describe('SftpFileList', () => {
 
     expect(onContextMenu).toHaveBeenCalledTimes(1);
     expect(onBlankContextMenu).not.toHaveBeenCalled();
+  });
+
+  it('toggles multiple rows with plain clicks in batch mode', () => {
+    const Harness = () => {
+      const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+      return (
+        <SftpFileList
+          entries={sampleEntries}
+          side="local"
+          selectedPaths={selectedPaths}
+          filterQuery=""
+          batchMode
+          onSelect={setSelectedPaths}
+          onDoubleClick={vi.fn()}
+          onContextMenu={vi.fn()}
+          onBlankContextMenu={vi.fn()}
+          onParentDirectory={vi.fn()}
+        />
+      );
+    };
+
+    render(<Harness />);
+    const firstRow = screen.getByText('a.txt').closest('.grid');
+    const secondRow = screen.getByText('z.txt').closest('.grid');
+
+    fireEvent.click(screen.getByText('a.txt'));
+    fireEvent.click(screen.getByText('z.txt'));
+
+    expect(firstRow).toHaveClass('bg-app-primary/10');
+    expect(secondRow).toHaveClass('bg-app-primary/10');
+
+    fireEvent.click(screen.getByText('a.txt'));
+    expect(firstRow).not.toHaveClass('bg-app-primary/10');
+    expect(secondRow).toHaveClass('bg-app-primary/10');
   });
 });

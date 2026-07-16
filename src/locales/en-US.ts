@@ -175,6 +175,8 @@ export default {
   'sftp.showFilter': 'Show Filter',
   'sftp.hideFilter': 'Hide Filter',
   'sftp.batchMode': 'Batch Selection',
+  'sftp.selection.selectedCount': '{count} selected',
+  'sftp.selection.selectAll': 'Select all',
   'sftp.emptyFolder': 'This folder is empty',
   'sftp.filteredEmpty': 'No matching files',
   'sftp.transfer.uploading': 'Uploading',

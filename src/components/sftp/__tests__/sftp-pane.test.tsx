@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { SftpPane } from '../sftp-pane';
 import { useSftpStore } from '@/stores/sftpStore';
 import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
@@ -153,5 +153,64 @@ describe('SftpPane', () => {
       />,
     );
     expect(screen.getByTestId('mock-file-list')).toBeInTheDocument();
+  });
+
+  it('renders a log-style toolbar in remote batch selection mode', () => {
+    const connection = createConnection();
+    const entry = {
+      path: '/remote/test.txt',
+      name: 'test.txt',
+      kind: 'file' as const,
+      size: 100,
+    };
+    connection.remoteEntries = [entry];
+    connection.remotePane.batchMode = true;
+    connection.remotePane.selectedPaths = [entry.path];
+    const actions = createMockActions();
+    const onSelectedPathsChange = vi.fn();
+
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        actions={actions}
+        selectedPaths={new Set([entry.path])}
+        onSelectedPathsChange={onSelectedPathsChange}
+      />,
+    );
+
+    expect(screen.getByText('sftp.selection.selectedCount')).toBeInTheDocument();
+    expect(screen.getByText('common.cancel').closest('button')).toHaveClass('h-6');
+
+    fireEvent.click(screen.getByText('sftp.selection.selectAll'));
+    expect(onSelectedPathsChange).toHaveBeenCalledWith(new Set([entry.path]));
+
+    fireEvent.click(screen.getByText('common.download'));
+    expect(actions.onBatchDownload).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByText('common.delete'));
+    expect(actions.onDelete).toHaveBeenCalledWith([entry]);
+
+    fireEvent.click(screen.getByText('common.cancel'));
+    expect(actions.onToggleBatchMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('exits batch selection mode with Escape', () => {
+    const connection = createConnection();
+    connection.localPane.batchMode = true;
+    const actions = createMockActions();
+
+    render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={actions}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(actions.onToggleBatchMode).toHaveBeenCalledTimes(1);
   });
 });
