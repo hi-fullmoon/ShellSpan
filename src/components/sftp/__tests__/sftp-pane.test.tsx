@@ -60,6 +60,7 @@ function createMockActions(): UseSftpPaneActionsResult {
     onDownload: vi.fn().mockResolvedValue(undefined),
     onBatchDownload: vi.fn().mockResolvedValue(undefined),
     uploadWithPolicies: vi.fn().mockResolvedValue(undefined),
+    copyWithPolicies: vi.fn().mockResolvedValue(undefined),
     onCopy: vi.fn(),
     onPaste: vi.fn().mockResolvedValue(undefined),
     onRename: vi.fn(),

@@ -45,6 +45,7 @@ vi.mock('@/hooks/useTransferListeners', () => ({
 }));
 
 vi.mock('@/lib/tauri', () => ({
+  invokeCopyLocalPaths: vi.fn().mockResolvedValue(undefined),
   invokePickLocalFiles: vi.fn().mockResolvedValue([]),
   invokePickLocalFolder: vi.fn().mockResolvedValue([]),
 }));

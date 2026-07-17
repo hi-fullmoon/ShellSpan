@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
+  invokeCopyLocalPaths,
   invokePickLocalFiles,
   invokePickLocalFolder,
 } from '@/lib/tauri';
@@ -34,6 +35,7 @@ export interface UseSftpPaneActionsResult {
   onDownload: (entry?: FileEntry) => Promise<void>;
   onBatchDownload: () => Promise<void>;
   uploadWithPolicies: (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => Promise<void>;
+  copyWithPolicies: (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => Promise<void>;
   onCopy: (entry?: FileEntry) => void;
   onPaste: () => Promise<void>;
   onRename: (entry?: FileEntry) => void;
@@ -453,6 +455,35 @@ export function useSftpPaneActions(
     [addOperation, connection.id, clearSelection, isLocal, reload, uploadLocalPaths, error],
   );
 
+  const copyWithPolicies = useCallback(
+    async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
+      if (!isLocal) return;
+      try {
+        const operationId = `${connection.id}-copy-${Date.now()}`;
+        addOperation({
+          operationId,
+          kind: 'upload',
+          currentPath: sourcePaths[0],
+          totalBytes: 0,
+          processedBytes: 0,
+          totalSteps: sourcePaths.length,
+          completedSteps: 0,
+        });
+        await invokeCopyLocalPaths({
+          sourcePaths,
+          destinationDirectory,
+          conflictPolicies: policies,
+          operationId,
+        });
+        await reload();
+        clearSelection();
+      } catch (err) {
+        error(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [addOperation, connection.id, clearSelection, isLocal, reload, error],
+  );
+
   const onEditPermissions = useCallback(
     (entry?: FileEntry) => {
       if (isLocal) return;
@@ -531,6 +562,7 @@ export function useSftpPaneActions(
     onDownload,
     onBatchDownload,
     uploadWithPolicies,
+    copyWithPolicies,
     onCopy,
     onPaste,
     onRename,
