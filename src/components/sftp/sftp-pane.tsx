@@ -25,6 +25,8 @@ export interface SftpPaneProps {
   selectedPaths: Set<string>;
   onSelectedPathsChange: (paths: Set<string>) => void;
   onVerifyHostKey?: () => void;
+  systemDropActive?: boolean;
+  systemDropHovered?: boolean;
 }
 
 interface HistoryState {
@@ -32,20 +34,37 @@ interface HistoryState {
   index: number;
 }
 
-export const SftpPane: React.FC<SftpPaneProps> = ({
-  connection,
-  side,
-  actions,
-  selectedPaths,
-  onSelectedPathsChange,
-  onVerifyHostKey,
-}) => {
+export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
+  {
+    connection,
+    side,
+    actions,
+    selectedPaths,
+    onSelectedPathsChange,
+    onVerifyHostKey,
+    systemDropActive,
+    systemDropHovered,
+  },
+  ref,
+) => {
   const { t } = useI18n();
   const { active } = useDndContext();
   const { setNodeRef, isOver } = useDroppable({
     id: `sftp-pane-${side}-${connection.id}`,
     data: { side },
   });
+
+  const mergedRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      setNodeRef(node);
+      if (typeof ref === 'function') {
+        ref(node);
+      } else if (ref) {
+        ref.current = node;
+      }
+    },
+    [setNodeRef, ref],
+  );
 
   const isLocal = side === 'local';
   const activeDrag = active?.data.current as SftpDndPayload | undefined;
@@ -317,7 +336,7 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
   const canGoForward = history.index < history.stack.length - 1;
 
   return (
-    <div ref={setNodeRef} className="flex h-full flex-col overflow-hidden bg-app-surface">
+    <div ref={mergedRef} className="flex h-full flex-col overflow-hidden bg-app-surface">
       {/* Title bar */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -361,6 +380,14 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       <div className="relative flex-1 min-h-0">
         {canAcceptActiveDrag && isOver && (
           <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-app-primary/70 bg-app-surface/70 p-6">
+            <div className="flex flex-col items-center gap-2 px-5 py-4 text-center text-app-text">
+              <MoveDownIcon aria-hidden="true" className="size-8 text-app-primary" />
+              <span className="text-sm font-semibold">{t('sftp.dropHint')}</span>
+            </div>
+          </div>
+        )}
+        {systemDropActive && systemDropHovered && (
+          <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-app-primary/70 bg-app-surface/70 p-6">
             <div className="flex flex-col items-center gap-2 px-5 py-4 text-center text-app-text">
               <MoveDownIcon aria-hidden="true" className="size-8 text-app-primary" />
               <span className="text-sm font-semibold">{t('sftp.dropHint')}</span>
@@ -474,4 +501,4 @@ export const SftpPane: React.FC<SftpPaneProps> = ({
       />
     </div>
   );
-};
+});
