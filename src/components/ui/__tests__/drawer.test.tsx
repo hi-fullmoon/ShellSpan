@@ -27,10 +27,15 @@ describe('Drawer', () => {
     expect(overlay).toHaveClass('data-starting-style:opacity-0');
     expect(overlay).toHaveClass('data-ending-style:opacity-0');
 
-    expect(content).toHaveClass('transition-transform');
-    expect(content).toHaveClass('duration-200');
-    expect(content).toHaveClass('data-starting-style:translate-x-full');
-    expect(content).toHaveClass('data-ending-style:translate-x-full');
+    expect(content).toHaveClass('transition-opacity');
+    expect(content).toHaveClass('duration-150');
+    expect(content).toHaveClass('data-starting-style:opacity-0');
+    expect(content).toHaveClass('data-ending-style:opacity-0');
+    expect(content).not.toHaveClass(
+      'transition-transform',
+      'data-starting-style:translate-x-full',
+      'data-ending-style:translate-x-full',
+    );
   });
 
   it('uses a compact width and padding', () => {

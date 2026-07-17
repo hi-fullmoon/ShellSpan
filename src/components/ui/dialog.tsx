@@ -47,11 +47,9 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
-  motion = "fade",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
-  motion?: "default" | "fade"
 }) {
   const { t } = useI18n()
   return (
@@ -60,10 +58,7 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          'fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-[var(--shadow-dialog)] duration-150 outline-none sm:rounded-lg',
-          motion === "fade"
-            ? 'data-open:animate-[dialog-fade-in_150ms_ease-out] data-closed:animate-[dialog-fade-out_150ms_ease-in]'
-            : 'data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0',
+          'fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-[var(--shadow-dialog)] duration-150 outline-none data-open:animate-[dialog-fade-in_150ms_ease-out] data-closed:animate-[dialog-fade-out_150ms_ease-in] sm:rounded-lg',
           className
         )}
         {...props}

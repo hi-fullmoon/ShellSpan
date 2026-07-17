@@ -17,12 +17,9 @@ import { useToast } from '@/hooks/useToast';
 import { invokeExportLogFile } from '@/lib/tauri';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  ToggleGroup,
+  ToggleGroupItem,
+} from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 
 interface ParsedLogLine {
@@ -318,7 +315,7 @@ export const LogPanel: React.FC = () => {
               {t('common.refresh')}
             </Button>
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               onClick={handleExport}
               disabled={!content}
@@ -327,60 +324,53 @@ export const LogPanel: React.FC = () => {
             </Button>
           </div>
         </div>
-        <div className="flex h-9 items-center gap-4 border-t border-app-border px-3">
+        <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-app-border px-3 py-1.5">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.date')}
             </span>
-            <Select
-              value={dateFilter}
-              onValueChange={(value) => setDateFilter(value as DateFilterOption)}
+            <ToggleGroup
+              value={[dateFilter]}
+              onValueChange={(value) => {
+                const nextValue = value[0] as DateFilterOption | undefined;
+                if (nextValue) setDateFilter(nextValue);
+              }}
+              variant="outline"
+              size="sm"
+              spacing={0}
+              aria-label={t('workbench.logs.date')}
             >
-              <SelectTrigger size="sm" className="w-32" data-testid="date-filter-trigger">
-                <SelectValue>
-                  {(value: unknown) => {
-                    const option = DATE_FILTER_OPTIONS.find(
-                      (opt) => opt.key === value,
-                    );
-                    return option ? t(option.labelKey) : String(value ?? '');
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {DATE_FILTER_OPTIONS.map((option) => (
-                  <SelectItem key={option.key} value={option.key}>
-                    {t(option.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {DATE_FILTER_OPTIONS.map((option) => (
+                <ToggleGroupItem key={option.key} value={option.key}>
+                  {t(option.labelKey)}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.level')}
             </span>
-            <Select
-              value={levelFilter}
-              onValueChange={(value) => setLevelFilter(value as LogLevel | 'all')}
+            <ToggleGroup
+              value={[levelFilter]}
+              onValueChange={(value) => {
+                const nextValue = value[0] as LogLevel | 'all' | undefined;
+                if (nextValue) setLevelFilter(nextValue);
+              }}
+              variant="outline"
+              size="sm"
+              spacing={0}
+              aria-label={t('workbench.logs.level')}
             >
-              <SelectTrigger size="sm" className="w-24" data-testid="level-filter-trigger">
-                <SelectValue>
-                  {(value: unknown) =>
-                    value === 'all'
-                      ? t('workbench.logs.all')
-                      : String(value ?? '')
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('workbench.logs.all')}</SelectItem>
-                {LOG_LEVELS.map((level) => (
-                  <SelectItem key={level} value={level}>
-                    {level}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <ToggleGroupItem value="all">
+                {t('workbench.logs.all')}
+              </ToggleGroupItem>
+              {LOG_LEVELS.map((level) => (
+                <ToggleGroupItem key={level} value={level}>
+                  {level}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </div>
         </div>
       </div>

@@ -103,17 +103,31 @@ describe('LogPanel', () => {
     expect(mockAddToast).toHaveBeenCalledWith('workbench.logs.copied');
   });
 
-  it('displays the selected date filter label in the trigger', () => {
+  it('displays all date filter options and marks today as selected', () => {
     render(<LogPanel />);
 
-    const trigger = screen.getByTestId('date-filter-trigger');
-    expect(trigger).toHaveTextContent(/^workbench\.logs\.today$/);
+    for (const label of [
+      'workbench.logs.today',
+      'workbench.logs.last3days',
+      'workbench.logs.last7days',
+      'workbench.logs.last30days',
+      'workbench.logs.all',
+    ]) {
+      expect(screen.getAllByRole('button', { name: label }).length).toBeGreaterThan(0);
+    }
+    expect(
+      screen.getByRole('button', { name: 'workbench.logs.today' }),
+    ).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('displays the selected level filter label in the trigger', () => {
+  it('displays all level filter options and marks all as selected', () => {
     render(<LogPanel />);
 
-    const trigger = screen.getByTestId('level-filter-trigger');
-    expect(trigger).toHaveTextContent(/^workbench\.logs\.all$/);
+    for (const level of ['INFO', 'WARN', 'ERROR', 'DEBUG']) {
+      expect(screen.getByRole('button', { name: level })).toBeInTheDocument();
+    }
+    expect(
+      screen.getAllByRole('button', { name: 'workbench.logs.all' })[1],
+    ).toHaveAttribute('aria-pressed', 'true');
   });
 });

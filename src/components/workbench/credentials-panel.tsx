@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   KeyRoundIcon,
   PencilIcon,
-  RefreshCwIcon,
   Trash2Icon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
@@ -140,7 +139,6 @@ export const CredentialsPanel: React.FC<CredentialsPanelProps> = ({ onEdit }) =>
             onClick={loadCacheStatus}
             aria-label={t('common.refresh')}
           >
-            <RefreshCwIcon data-icon="inline-start" />
             {t('common.refresh')}
           </Button>
           <Button

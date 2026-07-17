@@ -49,7 +49,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({ open, onClose }) => {
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <CompactDialogContent className="max-w-md" motion="fade">
+      <CompactDialogContent className="max-w-md">
         <CompactDialogHeader
           title={t('about.title')}
           description={t('app.tagline')}

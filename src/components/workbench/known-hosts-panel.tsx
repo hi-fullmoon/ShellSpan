@@ -123,7 +123,7 @@ export const KnownHostsPanel: React.FC = () => {
                     onClick={() => confirmRemove(host.host, host.port)}
                     aria-label={t('common.delete')}
                   >
-                    <Trash2Icon className="text-app-error" />
+                    <Trash2Icon className="text-destructive" />
                   </Button>
                 </div>
                 <div className="rounded-md border border-app-border bg-muted px-2 py-1.5">
