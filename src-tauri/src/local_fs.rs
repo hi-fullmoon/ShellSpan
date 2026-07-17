@@ -45,6 +45,10 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
             None => continue,
         };
         let destination_path = destination_directory.join(&destination_name);
+        if conflict_policy == UploadConflictPolicy::Replace && destination_path.is_dir() {
+            fs::remove_dir_all(&destination_path)
+                .map_err(|error| format!("failed to replace directory {}: {error}", destination_path.display()))?;
+        }
         copy_local_entry_to_path(source_path, &destination_path)?;
         existing_names.insert(destination_name);
     }
@@ -207,5 +211,30 @@ mod tests {
         let result = copy_local_paths_blocking(request);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("file.txt"));
+    }
+
+    #[test]
+    fn replace_replaces_existing_directory_contents() {
+        let temp = TempDir::new().unwrap();
+        let src_dir = temp.path().join("src");
+        let src_nested = src_dir.join("nested");
+        fs::create_dir_all(&src_nested).unwrap();
+        fs::write(src_nested.join("new.txt"), "new").unwrap();
+
+        let dest_dir = temp.path().join("dest");
+        let dest_existing = dest_dir.join("src");
+        let dest_existing_nested = dest_existing.join("nested");
+        fs::create_dir_all(&dest_existing_nested).unwrap();
+        fs::write(dest_existing_nested.join("old.txt"), "old").unwrap();
+
+        let request = make_request(
+            vec![src_dir.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![UploadConflictPolicy::Replace],
+        );
+        copy_local_paths_blocking(request).unwrap();
+
+        assert!(dest_existing.join("nested/new.txt").exists());
+        assert!(!dest_existing_nested.join("old.txt").exists());
     }
 }

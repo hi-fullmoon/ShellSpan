@@ -21,6 +21,7 @@ import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { useSystemFileDrop } from '@/hooks/useSystemFileDrop';
+import { useToast } from '@/hooks/useToast';
 import type { ConnectionProfile, RemoteFileEntry, UploadConflictPolicy } from '@/types';
 
 const Sftp: React.FC = () => {
@@ -175,6 +176,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   const remoteActions = useSftpPaneActions(connection, 'remote');
   const { loadLocalDirectory } = useLocalDirectory(connection);
   const { loadRemoteDirectory, downloadRemotePaths } = useSftpConnection(connection);
+  const { error } = useToast();
   const setPaneState = useSftpStore((state) => state.setPaneState);
 
   const selectedRemotePaths = new Set(connection.remotePane.selectedPaths);
@@ -320,7 +322,6 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         remembered: undefined,
       };
       await processUploadQueue();
-      await loadRemoteDirectory(connection.remotePath);
       setPaneState(connection.id, 'local', { selectedPaths: [] });
     } else if (payload.side === 'remote' && targetSide === 'local') {
       await downloadRemotePaths(paths, connection.localPath);
@@ -357,10 +358,19 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     [connection.id, connection.localPath, connection.remotePath, loadLocalDirectory, loadRemoteDirectory, refreshAfterQueue, setPaneState, processUploadQueue],
   );
 
+  const handleSystemDropRejected = useCallback(
+    (side: 'local' | 'remote') => {
+      const label = side === 'local' ? t('sftp.local') : t('sftp.remote');
+      error(t('sftp.drop.rejected', { side: label }));
+    },
+    [error, t],
+  );
+
   const { dragActive: systemDragActive, hoveredSide: systemHoveredSide } = useSystemFileDrop({
     leftPaneRef,
     rightPaneRef,
     onDrop: handleSystemDrop,
+    onDropRejected: handleSystemDropRejected,
     canDrop: canSystemDrop,
   });
 

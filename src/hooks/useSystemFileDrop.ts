@@ -7,6 +7,7 @@ export interface UseSystemFileDropOptions {
   leftPaneRef: React.RefObject<HTMLElement | null>;
   rightPaneRef: React.RefObject<HTMLElement | null>;
   onDrop: (paths: string[], side: 'local' | 'remote') => void;
+  onDropRejected?: (side: 'local' | 'remote') => void;
   canDrop?: (side: 'local' | 'remote') => boolean;
 }
 
@@ -55,8 +56,12 @@ export function useSystemFileDrop(options: UseSystemFileDropOptions): UseSystemF
               optionsRef.current.leftPaneRef.current,
               optionsRef.current.rightPaneRef.current,
             );
-            if (side && (!optionsRef.current.canDrop || optionsRef.current.canDrop(side))) {
-              optionsRef.current.onDrop(payload.paths, side);
+            if (side) {
+              if (!optionsRef.current.canDrop || optionsRef.current.canDrop(side)) {
+                optionsRef.current.onDrop(payload.paths, side);
+              } else {
+                optionsRef.current.onDropRejected?.(side);
+              }
             }
             break;
           }

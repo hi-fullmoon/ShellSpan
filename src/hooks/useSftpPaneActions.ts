@@ -109,7 +109,7 @@ export function useSftpPaneActions(
     openRemoteFile,
     previewRemoteFile,
   } = useSftpConnection(connection);
-  const { addOperation } = useTransferStore();
+  const { addOperation, removeOperation } = useTransferStore();
   const { error, success } = useToast();
 
   const setPaneState = useSftpStore((state) => state.setPaneState);
@@ -458,8 +458,8 @@ export function useSftpPaneActions(
   const copyWithPolicies = useCallback(
     async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
       if (!isLocal) return;
+      const operationId = `${connection.id}-copy-${Date.now()}`;
       try {
-        const operationId = `${connection.id}-copy-${Date.now()}`;
         addOperation({
           operationId,
           kind: 'upload',
@@ -479,9 +479,11 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         error(err instanceof Error ? err.message : String(err));
+      } finally {
+        removeOperation(operationId);
       }
     },
-    [addOperation, connection.id, clearSelection, isLocal, reload, error],
+    [addOperation, connection.id, clearSelection, isLocal, reload, error, removeOperation],
   );
 
   const onEditPermissions = useCallback(
