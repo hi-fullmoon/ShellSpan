@@ -232,7 +232,6 @@ export function useSftpConnection(connection: SftpConnection): {
             conflictPolicies,
             operationId,
           });
-          await loadRemoteDirectory(connection.remotePath);
         } catch (error) {
           markOperationFailed(
             operationId,
@@ -259,7 +258,6 @@ export function useSftpConnection(connection: SftpConnection): {
       connection.connection,
       connection.id,
       connection.remotePath,
-      loadRemoteDirectory,
       addOperation,
       markOperationFailed,
       markOperationRunning,

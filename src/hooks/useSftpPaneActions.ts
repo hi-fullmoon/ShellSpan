@@ -109,7 +109,7 @@ export function useSftpPaneActions(
     openRemoteFile,
     previewRemoteFile,
   } = useSftpConnection(connection);
-  const { addOperation, removeOperation } = useTransferStore();
+  const { addOperation, markOperationFailed, markOperationRunning, removeOperation } = useTransferStore();
   const { error, success } = useToast();
 
   const setPaneState = useSftpStore((state) => state.setPaneState);
@@ -446,44 +446,53 @@ export function useSftpPaneActions(
           completedSteps: 0,
         });
         await uploadLocalPaths(localPaths, destinationDirectory, operationId, policies);
-        await reload();
-        clearSelection();
       } catch (err) {
         error(err instanceof Error ? err.message : String(err));
       }
     },
-    [addOperation, connection.id, clearSelection, isLocal, reload, uploadLocalPaths, error],
+    [addOperation, connection.id, isLocal, uploadLocalPaths, error],
   );
 
   const copyWithPolicies = useCallback(
     async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
       if (!isLocal) return;
       const operationId = `${connection.id}-copy-${Date.now()}`;
+      const runCopy = async () => {
+        markOperationRunning(operationId);
+        try {
+          await invokeCopyLocalPaths({
+            sourcePaths,
+            destinationDirectory,
+            conflictPolicies: policies,
+            operationId,
+          });
+          removeOperation(operationId);
+        } catch (err) {
+          markOperationFailed(
+            operationId,
+            err instanceof Error ? err.message : String(err),
+          );
+          throw err;
+        }
+      };
+      addOperation({
+        operationId,
+        kind: 'upload',
+        currentPath: sourcePaths[0],
+        totalBytes: 0,
+        processedBytes: 0,
+        totalSteps: sourcePaths.length,
+        completedSteps: 0,
+        status: 'running',
+        retry: runCopy,
+      });
       try {
-        addOperation({
-          operationId,
-          kind: 'upload',
-          currentPath: sourcePaths[0],
-          totalBytes: 0,
-          processedBytes: 0,
-          totalSteps: sourcePaths.length,
-          completedSteps: 0,
-        });
-        await invokeCopyLocalPaths({
-          sourcePaths,
-          destinationDirectory,
-          conflictPolicies: policies,
-          operationId,
-        });
-        await reload();
-        clearSelection();
+        await runCopy();
       } catch (err) {
         error(err instanceof Error ? err.message : String(err));
-      } finally {
-        removeOperation(operationId);
       }
     },
-    [addOperation, connection.id, clearSelection, isLocal, reload, error, removeOperation],
+    [addOperation, connection.id, error, isLocal, markOperationFailed, markOperationRunning, removeOperation],
   );
 
   const onEditPermissions = useCallback(

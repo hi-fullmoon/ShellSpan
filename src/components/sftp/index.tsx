@@ -323,6 +323,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
       };
       await processUploadQueue();
       setPaneState(connection.id, 'local', { selectedPaths: [] });
+      if (!uploadQueueRef.current) {
+        await refreshAfterQueue('remote');
+      }
     } else if (payload.side === 'remote' && targetSide === 'local') {
       await downloadRemotePaths(paths, connection.localPath);
       await loadLocalDirectory(connection.localPath);
