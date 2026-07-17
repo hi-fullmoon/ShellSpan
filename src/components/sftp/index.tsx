@@ -161,7 +161,7 @@ interface UploadQueue {
   remembered: UploadConflictAction | undefined;
 }
 
-const SftpContent: React.FC<SftpContentProps> = ({
+export const SftpContent: React.FC<SftpContentProps> = ({
   connection,
   newConnectionMenuOpen,
   setNewConnectionMenuOpen,
@@ -242,17 +242,18 @@ const SftpContent: React.FC<SftpContentProps> = ({
     }
 
     if (queue.accepted.length > 0) {
+      const policies = queue.policies.some((p) => p !== 'fail') ? queue.policies : [];
       if (queue.side === 'local') {
         await localActions.copyWithPolicies(
           queue.accepted,
           queue.destination,
-          queue.policies,
+          policies,
         );
       } else {
         await remoteActions.uploadWithPolicies(
           queue.accepted,
           queue.destination,
-          queue.policies,
+          policies,
         );
       }
     }
