@@ -62,6 +62,29 @@ describe('TerminalControllerLayer', () => {
     expect(terminalRegistry.get('s1')).toBeUndefined();
   });
 
+  it('keeps a rebound controller when reconnect replaces the session id', () => {
+    render(<TerminalControllerLayer />);
+    act(() => {
+      addSession('s1');
+    });
+    const controller = terminalRegistry.get('s1');
+    expect(controller).toBeDefined();
+
+    act(() => {
+      terminalRegistry.rebindSession('s1', 's2');
+      useTerminalStore.getState().reconnectSession('s1', {
+        sessionId: 's2',
+        title: 's2',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      });
+    });
+
+    expect(terminalRegistry.get('s2')).toBe(controller);
+    expect(terminalRegistry.get('s1')).toBeUndefined();
+  });
+
   it('renders null', () => {
     const { container } = render(<TerminalControllerLayer />);
     expect(container.firstChild).toBeNull();

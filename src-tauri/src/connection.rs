@@ -15,6 +15,7 @@ use std::{
 
 const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
+const SSH_SESSION_IO_TIMEOUT_MS: u32 = 15_000;
 pub(crate) const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 
 pub(crate) fn connect_sftp(
@@ -248,6 +249,7 @@ pub(crate) fn open_authenticated_session(
     );
     let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
     session.set_tcp_stream(tcp);
+    session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
     session
         .handshake()
         .map_err(|error| format!("ssh handshake failed: {error}"))?;
@@ -270,7 +272,7 @@ pub(crate) fn open_authenticated_session(
         username,
         auth_method.as_str()
     );
-    session.set_keepalive(false, SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
+    session.set_keepalive(true, SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
     Ok(session)
 }
 
@@ -279,6 +281,7 @@ pub(crate) fn open_session_for_host_key(host: &str, port: u16) -> Result<Session
     let tcp = connect_tcp_stream(host, port)?;
     let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
     session.set_tcp_stream(tcp);
+    session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
     session
         .handshake()
         .map_err(|error| format!("ssh handshake failed: {error}"))?;

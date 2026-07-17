@@ -30,7 +30,8 @@ pub(crate) use path_utils::portable_local_path;
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
     download_remote_paths_blocking, list_remote_directory_blocking, open_remote_file_blocking,
-    read_remote_file_blocking, rename_remote_path_blocking, update_remote_permissions_blocking,
+    read_remote_file_blocking, rename_remote_path_blocking, restore_remote_path_blocking,
+    trash_remote_path_blocking, update_remote_permissions_blocking,
     upload_local_paths_blocking,
 };
 pub(crate) use session::{
@@ -139,6 +140,7 @@ pub fn run() {
         .manage(port_forward::PortForwardManager::default())
         .manage(SftpPool::default())
         .manage(RemoteIdentityCache::default())
+        .manage(keychain::CredentialManager::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::write_session,
@@ -149,6 +151,8 @@ pub fn run() {
             commands::list_remote_directory,
             commands::create_remote_entry,
             commands::rename_remote_path,
+            commands::trash_remote_path,
+            commands::restore_remote_path,
             commands::delete_remote_path,
             commands::copy_remote_path,
             commands::upload_local_paths,
@@ -175,6 +179,8 @@ pub fn run() {
             commands::store_password,
             commands::retrieve_password,
             commands::remove_password,
+            commands::list_cached_credential_profile_ids,
+            commands::clear_credential_cache,
             commands::migrate_passwords,
             commands::start_port_forwards,
             commands::stop_port_forwards,

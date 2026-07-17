@@ -1,10 +1,12 @@
 use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SFTP_POOL_IDLE_TTL: Duration = Duration::from_secs(300);
+const SFTP_POOL_HEALTH_CHECK_IDLE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(crate) struct ConnectionKey {
@@ -45,17 +47,27 @@ impl SftpPool {
         request: &RemoteConnectionRequest,
     ) -> Option<Arc<Mutex<ConnectedSftp>>> {
         let key = connection_key(request);
-        let mut sessions = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let entry = sessions.get_mut(&key)?;
-        if entry.last_used.elapsed() > SFTP_POOL_IDLE_TTL {
-            sessions.remove(&key);
+        let (connection, idle_for) = {
+            let mut sessions = self
+                .sessions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let entry = sessions.get_mut(&key)?;
+            let idle_for = entry.last_used.elapsed();
+            if idle_for > SFTP_POOL_IDLE_TTL {
+                sessions.remove(&key);
+                return None;
+            }
+            entry.last_used = Instant::now();
+            (entry.connection.clone(), idle_for)
+        };
+
+        if should_health_check(idle_for) && !connection_is_healthy(&connection) {
+            self.remove_if_same(&key, &connection);
             return None;
         }
-        entry.last_used = Instant::now();
-        Some(entry.connection.clone())
+
+        Some(connection)
     }
 
     pub(crate) fn get_or_insert(
@@ -82,6 +94,30 @@ impl SftpPool {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&key);
     }
+
+    fn remove_if_same(&self, key: &ConnectionKey, expected: &Arc<Mutex<ConnectedSftp>>) {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if sessions
+            .get(key)
+            .is_some_and(|entry| Arc::ptr_eq(&entry.connection, expected))
+        {
+            sessions.remove(key);
+        }
+    }
+}
+
+fn should_health_check(idle_for: Duration) -> bool {
+    idle_for >= SFTP_POOL_HEALTH_CHECK_IDLE
+}
+
+fn connection_is_healthy(connection: &Arc<Mutex<ConnectedSftp>>) -> bool {
+    let connected = connection
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    connected.session.authenticated() && connected.sftp.realpath(Path::new(".")).is_ok()
 }
 
 impl ConnectionKey {
@@ -145,6 +181,12 @@ mod tests {
 
         pool.invalidate(&request);
         assert!(pool.get(&request).is_none());
+    }
+
+    #[test]
+    fn health_check_is_only_required_after_idle_threshold() {
+        assert!(!should_health_check(Duration::from_secs(29)));
+        assert!(should_health_check(Duration::from_secs(30)));
     }
 
     #[test]

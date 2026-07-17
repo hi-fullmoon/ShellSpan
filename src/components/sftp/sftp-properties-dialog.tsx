@@ -55,7 +55,10 @@ export const SftpPropertiesDialog: React.FC<SftpPropertiesDialogProps> = ({
       <SftpDialogContent className="max-w-sm">
         <SftpDialogHeader title={t('sftp.properties.title')} />
         <SftpDialogBody>
-          <div className="flex flex-col overflow-hidden rounded-lg border border-app-border bg-app-surface-muted/30">
+          <div
+            data-slot="properties-content"
+            className="flex flex-col overflow-hidden rounded-md border border-app-border bg-app-surface-muted/30"
+          >
           <PropertyRow label={t('sftp.properties.name')} value={entry.name} />
           <PropertyRow label={t('sftp.properties.path')} value={entry.path} />
           <PropertyRow label={t('sftp.properties.kind')} value={kindLabel(entry.kind, t)} />

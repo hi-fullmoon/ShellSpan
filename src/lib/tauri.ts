@@ -4,6 +4,7 @@ import type {
   AuthMethod,
   ClosedEvent,
   ConnectionProfile,
+  CopyRemotePathRequest,
   CreateRemoteEntryRequest,
   CreateSessionError,
   DataEvent,
@@ -19,7 +20,9 @@ import type {
   RemoteDirectoryRequest,
   RenameRemotePathRequest,
   DeleteRemotePathRequest,
-  CopyRemotePathRequest,
+  RestoreRemotePathRequest,
+  TrashRemotePathRequest,
+  TrashedRemotePath,
   OpenRemoteFileRequest,
   ReadRemoteFileRequest,
   ReadRemoteFileResponse,
@@ -79,6 +82,18 @@ export async function invokeDeleteRemotePath(
   request: DeleteRemotePathRequest,
 ): Promise<void> {
   return invoke('delete_remote_path', { request });
+}
+
+export async function invokeTrashRemotePath(
+  request: TrashRemotePathRequest,
+): Promise<TrashedRemotePath> {
+  return invoke('trash_remote_path', { request });
+}
+
+export async function invokeRestoreRemotePath(
+  request: RestoreRemotePathRequest,
+): Promise<void> {
+  return invoke('restore_remote_path', { request });
 }
 
 export async function invokeCopyRemotePath(
@@ -217,6 +232,14 @@ export async function invokeRetrievePassword(
 
 export async function invokeRemovePassword(profileId: string): Promise<void> {
   return invoke('remove_password', { profileId });
+}
+
+export async function invokeListCachedCredentialProfileIds(): Promise<string[]> {
+  return invoke('list_cached_credential_profile_ids');
+}
+
+export async function invokeClearCredentialCache(): Promise<void> {
+  return invoke('clear_credential_cache');
 }
 
 export function buildRemoteConnectionRequest(

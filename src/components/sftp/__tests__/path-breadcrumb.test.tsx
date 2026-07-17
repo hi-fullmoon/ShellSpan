@@ -36,6 +36,17 @@ afterEach(() => {
 });
 
 describe('PathBreadcrumb', () => {
+  it('uses a taller container and matching controls', () => {
+    const { container } = render(
+      <PathBreadcrumb path="/home/user" onNavigate={vi.fn()} />,
+    );
+
+    expect(container.firstChild).toHaveClass('h-8');
+    screen.getAllByRole('button').forEach((button) => {
+      expect(button).toHaveClass('h-6');
+    });
+  });
+
   it('renders / for root path', () => {
     render(<PathBreadcrumb path="/" onNavigate={vi.fn()} />);
     expect(screen.getByRole('button', { name: '/' })).toBeInTheDocument();

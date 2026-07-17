@@ -8,13 +8,21 @@ import {
   invokeOpenRemoteFile,
   invokePreviewRemoteFile,
   invokeRenameRemotePath,
+  invokeRestoreRemotePath,
+  invokeTrashRemotePath,
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
 } from '@/lib/tauri';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import type { SftpSide } from '@/stores/sftpStore';
-import type { ReadRemoteFileResponse, UploadConflictPolicy } from '@/types';
+import type {
+  ReadRemoteFileResponse,
+  TrashedRemotePath,
+  UploadConflictPolicy,
+} from '@/types';
+
+const DELETE_UNDO_WINDOW_MS = 30_000;
 
 export function useSftpConnection(connection: SftpConnection): {
   loadRemoteDirectory: (path?: string) => Promise<void>;
@@ -39,6 +47,8 @@ export function useSftpConnection(connection: SftpConnection): {
   const markOperationFailed = useTransferStore(
     (state) => state.markOperationFailed,
   );
+  const updateDelete = useTransferStore((state) => state.updateDelete);
+  const setOperationUndo = useTransferStore((state) => state.setOperationUndo);
 
   const loadRemoteDirectory = useCallback(
     async (path?: string) => {
@@ -112,17 +122,90 @@ export function useSftpConnection(connection: SftpConnection): {
         processedBytes: 0,
         totalSteps: paths.length,
         completedSteps: 0,
+        status: 'running',
       });
-      for (const path of paths) {
-        await invokeDeleteRemotePath({
-          ...connection.connection,
-          path,
-          operationId,
+      const trashedPaths: TrashedRemotePath[] = [];
+
+      try {
+        for (const [index, path] of paths.entries()) {
+          const trashedPath = await invokeTrashRemotePath({
+            ...connection.connection,
+            path,
+          });
+          trashedPaths.push(trashedPath);
+          updateDelete({
+            operationId,
+            currentPath: path,
+            totalSteps: paths.length,
+            completedSteps: index + 1,
+          });
+        }
+
+        const pendingRestorePaths = [...trashedPaths].reverse();
+        setOperationUndo(operationId, async () => {
+          while (pendingRestorePaths.length > 0) {
+            const trashedPath = pendingRestorePaths[0];
+            await invokeRestoreRemotePath({
+              ...connection.connection,
+              ...trashedPath,
+            });
+            pendingRestorePaths.shift();
+          }
+          await loadRemoteDirectory(connection.remotePath);
         });
+        setTimeout(() => {
+          const operation = useTransferStore
+            .getState()
+            .operations.find((item) => item.operationId === operationId);
+
+          if (operation?.status === 'restored' || operation?.status === 'restoring') {
+            return;
+          }
+          if (operation?.status === 'failed' && operation.undo) {
+            return;
+          }
+
+          useTransferStore.getState().removeOperation(operationId);
+          void Promise.allSettled(
+            trashedPaths.map((trashedPath, index) =>
+              invokeDeleteRemotePath({
+                ...connection.connection,
+                path: trashedPath.trashPath,
+                operationId: `${operationId}-cleanup-${index}`,
+              }),
+            ),
+          );
+        }, DELETE_UNDO_WINDOW_MS);
+        await loadRemoteDirectory(connection.remotePath);
+      } catch (error) {
+        for (const trashedPath of [...trashedPaths].reverse()) {
+          try {
+            await invokeRestoreRemotePath({
+              ...connection.connection,
+              ...trashedPath,
+            });
+          } catch {
+            // Keep the original failure visible; any item already in trash remains recoverable.
+          }
+        }
+        markOperationFailed(
+          operationId,
+          error instanceof Error ? error.message : String(error),
+        );
+        await loadRemoteDirectory(connection.remotePath);
+        throw error;
       }
-      await loadRemoteDirectory(connection.remotePath);
     },
-    [connection.connection, connection.id, connection.remotePath, loadRemoteDirectory, addOperation],
+    [
+      addOperation,
+      connection.connection,
+      connection.id,
+      connection.remotePath,
+      loadRemoteDirectory,
+      markOperationFailed,
+      setOperationUndo,
+      updateDelete,
+    ],
   );
 
   const updateRemotePermissions = useCallback(

@@ -65,6 +65,26 @@ describe('terminalRegistry', () => {
     expect(controller.terminal.buffer.active.length).toBe(lenAfterWrite);
   });
 
+  it('rebinds a reconnected session without replacing its terminal or buffer', async () => {
+    const { invokeWriteSession, listenToSshData } = await import('@/lib/tauri');
+    const controller = createController('s1');
+    controller.write('history-before-reconnect\r\n');
+    const terminal = controller.terminal;
+    const bufferLength = terminal.buffer.active.length;
+
+    terminalRegistry.rebindSession('s1', 's2');
+
+    expect(terminalRegistry.get('s1')).toBeUndefined();
+    expect(terminalRegistry.get('s2')).toBe(controller);
+    expect(controller.sessionId).toBe('s2');
+    expect(controller.terminal).toBe(terminal);
+    expect(controller.terminal.buffer.active.length).toBe(bufferLength);
+    expect(listenToSshData).toHaveBeenCalledWith('s2', expect.any(Function));
+
+    controller.simulateInput('after');
+    expect(invokeWriteSession).toHaveBeenCalledWith('s2', 'after');
+  });
+
   it('dispose removes the controller and container from host', () => {
     const controller = createController('s1');
     const host = document.createElement('div');

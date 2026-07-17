@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { useReconnectSession } from '../useReconnectSession';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
+import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 
 vi.mock('@/lib/tauri', () => ({
   invokeCreateSession: vi.fn().mockResolvedValue({
@@ -13,7 +14,12 @@ vi.mock('@/lib/tauri', () => ({
     username: 'u',
   }),
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
+  invokeResizeSession: vi.fn().mockResolvedValue(undefined),
+  invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeRetrievePassword: vi.fn().mockResolvedValue(null),
+  listenToSshData: vi.fn().mockResolvedValue(() => {}),
+  listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
+  listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
   buildSessionCreateRequest: vi.fn((_profile, cols, rows) => ({
     terminalCols: cols,
     terminalRows: rows,
@@ -27,9 +33,11 @@ describe('useReconnectSession', () => {
   beforeEach(() => {
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
+    terminalRegistry.disposeAll();
   });
 
   afterEach(() => {
+    terminalRegistry.disposeAll();
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
   });
@@ -69,6 +77,15 @@ describe('useReconnectSession', () => {
       { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' },
       'p1',
     );
+    const controller = terminalRegistry.create(
+      's1',
+      vi.fn(),
+      vi.fn(),
+      () => 'disconnected',
+      vi.fn(),
+    );
+    controller.write('existing history\r\n');
+    const terminal = controller.terminal;
 
     const { invokeCreateSession, invokeCloseSession } = await import('@/lib/tauri');
     const { result } = renderHook(() => useReconnectSession());
@@ -78,6 +95,7 @@ describe('useReconnectSession', () => {
     expect(invokeCloseSession).toHaveBeenCalledWith('s1');
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+    expect(terminalRegistry.get('s2')?.terminal).toBe(terminal);
   });
 
   it('sets status to error when create session fails', async () => {

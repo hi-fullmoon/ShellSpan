@@ -502,3 +502,4 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
     </div>
   );
 });
+SftpPane.displayName = 'SftpPane';

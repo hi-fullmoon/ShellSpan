@@ -15,7 +15,7 @@ export interface PathBreadcrumbProps {
 }
 
 const ChevronIcon: React.FC = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3 shrink-0 text-app-text-soft">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3 shrink-0 text-app-text-soft">
     <path d="M9 18l6-6-6-6" />
   </svg>
 );
@@ -98,7 +98,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
                 variant="ghost"
                 size="sm"
                 onClick={() => onNavigate(segment.path)}
-                className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
+                className="h-6 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
               />
             }
           >
@@ -116,7 +116,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
     <div
       ref={containerRef}
       className={cn(
-        'relative flex h-7 min-w-0 items-center gap-1 overflow-hidden rounded-md border border-app-border bg-app-surface px-2 text-xs',
+        'relative flex h-8 min-w-0 items-center gap-1 overflow-hidden rounded-md border border-app-border bg-app-surface px-2 text-xs',
         className,
       )}
       onDoubleClick={startEditing}
@@ -127,16 +127,16 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
         aria-hidden="true"
         className="pointer-events-none invisible absolute left-0 top-0 flex w-max items-center gap-1"
       >
-        <Button data-breadcrumb-root tabIndex={-1} variant="ghost" size="sm" className="h-5 gap-1 px-1">
+        <Button data-breadcrumb-root tabIndex={-1} variant="ghost" size="sm" className="h-6 gap-1 px-1">
           <span className="truncate max-w-[200px] leading-none">{rootLabel}</span>
         </Button>
-        <Button data-breadcrumb-ellipsis tabIndex={-1} variant="ghost" size="sm" disabled className="h-5 px-1">
+        <Button data-breadcrumb-ellipsis tabIndex={-1} variant="ghost" size="sm" disabled className="h-6 px-1">
           <span className="leading-none">...</span>
         </Button>
         {segments.map((segment) => (
           <React.Fragment key={segment.path}>
             <ChevronIcon />
-            <Button data-breadcrumb-segment tabIndex={-1} variant="ghost" size="sm" className="h-5 gap-1 px-1 [&_svg]:size-3">
+            <Button data-breadcrumb-segment tabIndex={-1} variant="ghost" size="sm" className="h-6 gap-1 px-1 [&_svg]:size-3">
               <FolderIcon />
               <span className="truncate max-w-[200px] leading-none">{segment.name}</span>
             </Button>
@@ -151,7 +151,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
           onBlur={handleBlur}
           autoFocus
           onFocus={(e) => e.target.select()}
-          className="h-5 w-full rounded-none border-0 bg-transparent px-0 py-0 text-xs leading-none shadow-none focus-visible:ring-0"
+          className="h-6 w-full rounded-none border-0 bg-transparent px-0 py-0 text-xs leading-none shadow-none focus-visible:ring-0"
         />
       ) : (
         <>
@@ -163,7 +163,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
                   variant="ghost"
                   size="sm"
                   onClick={() => onNavigate(rootPath)}
-                  className="h-5 gap-1 px-1 text-muted-foreground hover:text-app-text"
+                  className="h-6 gap-1 px-1 text-muted-foreground hover:text-app-text"
                 />
               }
             >
@@ -188,7 +188,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
                           variant="ghost"
                           size="sm"
                           aria-label="显示隐藏的路径"
-                          className="h-5 px-1 text-muted-foreground hover:text-app-text"
+                          className="h-6 px-1 text-muted-foreground hover:text-app-text"
                         />
                       }
                     >

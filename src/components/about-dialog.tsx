@@ -1,14 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Dialog } from '@/components/ui/dialog';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+  CompactDialogBody,
+  CompactDialogContent,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { isTauriRuntime } from '@/lib/tauri';
 
@@ -52,43 +49,41 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({ open, onClose }) => {
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent className="max-w-sm bg-app-surface border-app-border">
-        <DialogHeader>
-          <DialogTitle>{t('about.title')}</DialogTitle>
-          <DialogDescription>{t('app.tagline')}</DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-2 py-2 text-sm">
-          {version ? (
-            <div className="flex justify-between">
-              <span className="text-app-text-soft">{t('about.version')}</span>
-              <span className="text-app-text">{version}</span>
+      <CompactDialogContent className="max-w-md" motion="fade">
+        <CompactDialogHeader
+          title={t('about.title')}
+          description={t('app.tagline')}
+        />
+        <CompactDialogBody>
+          <div
+            data-slot="about-content"
+            className="flex flex-col gap-2 rounded-md border border-app-border bg-app-surface-muted/30 px-3 py-2.5 text-sm"
+          >
+            <div data-slot="about-version-row" className="flex justify-between gap-4">
+              <span className="shrink-0 text-app-text-soft">{t('about.version')}</span>
+              <span className="text-app-text">{version || '--'}</span>
             </div>
-          ) : null}
-          <div className="flex justify-between">
-            <span className="text-app-text-soft">{t('about.author')}</span>
-            <span className="text-app-text">hi-fullmoon</span>
+            <div className="flex justify-between gap-4">
+              <span className="shrink-0 text-app-text-soft">{t('about.author')}</span>
+              <span className="text-app-text">hi-fullmoon</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="shrink-0 text-app-text-soft">{t('about.license')}</span>
+              <span className="text-app-text">MIT</span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="shrink-0 text-app-text-soft">{t('about.source')}</span>
+              <button
+                className="min-w-0 truncate text-left text-primary hover:underline"
+                onClick={handleOpenGitHub}
+                type="button"
+              >
+                {GITHUB_URL}
+              </button>
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span className="text-app-text-soft">{t('about.license')}</span>
-            <span className="text-app-text">MIT</span>
-          </div>
-          <div className="flex justify-between items-center gap-4">
-            <span className="text-app-text-soft shrink-0">{t('about.source')}</span>
-            <button
-              className="truncate text-left text-primary hover:underline"
-              onClick={handleOpenGitHub}
-              type="button"
-            >
-              {GITHUB_URL}
-            </button>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button onClick={onClose}>{t('about.ok')}</Button>
-        </DialogFooter>
-      </DialogContent>
+        </CompactDialogBody>
+      </CompactDialogContent>
     </Dialog>
   );
 };

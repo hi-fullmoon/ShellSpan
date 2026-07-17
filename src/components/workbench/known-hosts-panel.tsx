@@ -141,11 +141,20 @@ export const KnownHostsPanel: React.FC = () => {
           </ResponsiveCardGrid>
         )}
       </div>
-      <AlertDialog open={!!removing} onOpenChange={(open) => { if (!open) setRemoving(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('common.delete')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      <AlertDialog
+        open={!!removing}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(null);
+        }}
+      >
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('workbench.knownHosts.removeTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
               {removing
                 ? t('workbench.knownHosts.removeConfirm', {
                     host: removing.host,
@@ -153,12 +162,16 @@ export const KnownHostsPanel: React.FC = () => {
                   })
                 : ''}
             </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setRemoving(null)}>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">
               {t('common.cancel')}
             </AlertDialogCancel>
-            <AlertDialogAction onClick={handleRemove}>
+            <AlertDialogAction
+              variant="destructive"
+              size="sm"
+              onClick={handleRemove}
+            >
               {t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>

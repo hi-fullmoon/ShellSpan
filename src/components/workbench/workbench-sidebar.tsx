@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Sidebar } from '@/components/layout/app-shell';
 
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'logs';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'credentials' | 'logs';
 
 interface WorkbenchSidebarProps {
   activeTab: WorkbenchTab;
@@ -29,6 +29,10 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
     {
       key: 'knownHosts',
       label: t('workbench.knownHosts.title'),
+    },
+    {
+      key: 'credentials',
+      label: t('workbench.credentials.title'),
     },
     {
       key: 'logs',

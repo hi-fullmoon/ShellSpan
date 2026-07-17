@@ -15,9 +15,18 @@ export interface TransferOperation {
   processedBytes: number;
   totalSteps: number;
   completedSteps: number;
-  status?: 'running' | 'failed';
+  status?:
+    | 'pending'
+    | 'running'
+    | 'failed'
+    | 'cancelling'
+    | 'cancelled'
+    | 'restoring'
+    | 'restored';
   error?: string;
   retry?: () => Promise<void>;
+  cancel?: () => Promise<void>;
+  undo?: () => Promise<void>;
 }
 
 interface TransferState {
@@ -30,6 +39,9 @@ interface TransferState {
   markOperationRunning: (operationId: string) => void;
   markOperationFailed: (operationId: string, error: string) => void;
   retryOperation: (operationId: string) => Promise<void>;
+  cancelOperation: (operationId: string) => Promise<void>;
+  setOperationUndo: (operationId: string, undo: () => Promise<void>) => void;
+  undoOperation: (operationId: string) => Promise<void>;
   clearCompleted: () => void;
 }
 
@@ -126,6 +138,72 @@ export const useTransferStore = create<TransferState>()((set) => ({
       );
     }
   },
+  cancelOperation: async (operationId) => {
+    const operation = useTransferStore
+      .getState()
+      .operations.find((item) => item.operationId === operationId);
+    if (!operation?.cancel) return;
+
+    set((state) => ({
+      operations: state.operations.map((item) =>
+        item.operationId === operationId
+          ? { ...item, status: 'cancelling', error: undefined }
+          : item,
+      ),
+    }));
+    try {
+      await operation.cancel();
+      set((state) => ({
+        operations: state.operations.map((item) =>
+          item.operationId === operationId
+            ? { ...item, status: 'cancelled' }
+            : item,
+        ),
+      }));
+    } catch (error) {
+      useTransferStore.getState().markOperationFailed(
+        operationId,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  },
+  setOperationUndo: (operationId, undo) =>
+    set((state) => ({
+      operations: state.operations.map((operation) =>
+        operation.operationId === operationId
+          ? { ...operation, undo }
+          : operation,
+      ),
+    })),
+  undoOperation: async (operationId) => {
+    const operation = useTransferStore
+      .getState()
+      .operations.find((item) => item.operationId === operationId);
+    if (!operation?.undo) return;
+
+    set((state) => ({
+      operations: state.operations.map((item) =>
+        item.operationId === operationId
+          ? { ...item, status: 'restoring', error: undefined }
+          : item,
+      ),
+    }));
+    try {
+      await operation.undo();
+      set((state) => ({
+        operations: state.operations.map((item) =>
+          item.operationId === operationId
+            ? { ...item, status: 'restored', undo: undefined }
+            : item,
+        ),
+      }));
+    } catch (error) {
+      useTransferStore.getState().markOperationFailed(
+        operationId,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  },
   clearCompleted: () =>
     set((state) => ({
       operations: state.operations.filter(
@@ -135,7 +213,16 @@ export const useTransferStore = create<TransferState>()((set) => ({
 }));
 
 export function isTransferComplete(operation: TransferOperation): boolean {
-  if (operation.status === 'failed') return false;
+  if (
+    operation.status === 'failed' ||
+    operation.status === 'pending' ||
+    operation.status === 'cancelling' ||
+    operation.status === 'cancelled' ||
+    operation.status === 'restoring' ||
+    operation.status === 'restored'
+  ) {
+    return false;
+  }
   if (operation.totalSteps === 0) return false;
   return operation.completedSteps >= operation.totalSteps;
 }

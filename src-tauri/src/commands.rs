@@ -7,7 +7,8 @@ use crate::models::{
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
     ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
     RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand,
-    SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
+    RestoreRemotePathRequest, SessionCreateRequest, SessionStatus, SessionSummary, TrashRemotePathRequest,
+    TrashedRemotePath, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use log::{debug, error, info, warn};
@@ -263,6 +264,47 @@ pub(crate) async fn rename_remote_path(
         info!("Renamed remote path successfully");
     }
     result
+}
+
+#[tauri::command]
+pub(crate) async fn trash_remote_path(
+    app: AppHandle,
+    request: TrashRemotePathRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<TrashedRemotePath, String> {
+    info!(
+        "Moving remote path to trash path={} {}",
+        request.path,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        trash_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
+    })
+    .await
+    .map_err(|error| format!("failed to join trash task: {error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn restore_remote_path(
+    app: AppHandle,
+    request: RestoreRemotePathRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), String> {
+    info!(
+        "Restoring remote path original_path={} trash_path={} {}",
+        request.original_path,
+        request.trash_path,
+        summarize_remote_connection_request(&request.connection)
+    );
+    let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        restore_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
+    })
+    .await
+    .map_err(|error| format!("failed to join restore task: {error}"))?
 }
 
 #[tauri::command]
@@ -587,25 +629,50 @@ pub(crate) async fn update_remote_permissions(
 }
 
 #[tauri::command]
-pub(crate) fn store_password(profile_id: String, password: String) -> Result<(), String> {
-    crate::keychain::set_password(&profile_id, &password)
+pub(crate) fn store_password(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+    password: String,
+) -> Result<(), String> {
+    credentials.set_password(&profile_id, &password)
 }
 
 #[tauri::command]
-pub(crate) fn retrieve_password(profile_id: String) -> Result<Option<String>, String> {
-    crate::keychain::get_password(&profile_id)
+pub(crate) fn retrieve_password(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+) -> Result<Option<String>, String> {
+    credentials.get_password(&profile_id)
 }
 
 #[tauri::command]
-pub(crate) fn remove_password(profile_id: String) -> Result<(), String> {
-    crate::keychain::delete_password(&profile_id)
+pub(crate) fn remove_password(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+) -> Result<(), String> {
+    credentials.delete_password(&profile_id)
+}
+
+#[tauri::command]
+pub(crate) fn list_cached_credential_profile_ids(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+) -> Result<Vec<String>, String> {
+    credentials.cached_profile_ids()
+}
+
+#[tauri::command]
+pub(crate) fn clear_credential_cache(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+) -> Result<(), String> {
+    credentials.clear_cache()
 }
 
 #[tauri::command]
 pub(crate) fn migrate_passwords(
+    credentials: State<'_, crate::keychain::CredentialManager>,
     profiles: Vec<(String, String)>,
 ) -> Result<Vec<(String, bool)>, String> {
-    Ok(crate::keychain::migrate_passwords(&profiles))
+    Ok(credentials.migrate_passwords(&profiles))
 }
 
 #[tauri::command]

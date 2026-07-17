@@ -13,15 +13,15 @@ export const TerminalControllerLayer: React.FC = () => {
   useEffect(() => {
     const currentIds = new Set(sessions.map((s) => s.sessionId));
     for (const sessionId of currentIds) {
-      if (!knownRef.current.has(sessionId)) {
+      if (!knownRef.current.has(sessionId) && !terminalRegistry.get(sessionId)) {
         terminalRegistry.create(
           sessionId,
           setStatus,
           setClosed,
-          () =>
-            useTerminalStore.getState().sessions.find((s) => s.sessionId === sessionId,
+          (currentSessionId) =>
+            useTerminalStore.getState().sessions.find((s) => s.sessionId === currentSessionId,
             )?.status ?? 'connecting',
-          () => reconnectSession(sessionId),
+          (currentSessionId) => reconnectSession(currentSessionId),
         );
       }
     }

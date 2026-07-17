@@ -19,8 +19,8 @@ import type { ClosedEvent, SessionStatus, StatusEvent } from '@/types';
 
 export type StatusCallback = (sessionId: string, payload: StatusEvent) => void;
 export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
-export type GetStatusCallback = () => SessionStatus;
-export type RequestReconnectCallback = () => void;
+export type GetStatusCallback = (sessionId: string) => SessionStatus;
+export type RequestReconnectCallback = (sessionId: string) => void;
 
 export interface TerminalController {
   sessionId: string;
@@ -40,11 +40,12 @@ export interface TerminalController {
   focus(): void;
   simulateInput(data: string): void;
   write(chunk: string): void;
+  rebindSession(sessionId: string): void;
   dispose(): void;
 }
 
 class TerminalControllerImpl implements TerminalController {
-  private readonly removeFromRegistry: () => void;
+  private readonly removeFromRegistry: (sessionId: string) => void;
   sessionId: string;
   terminal: Terminal;
   fitAddon: FitAddon;
@@ -61,6 +62,7 @@ class TerminalControllerImpl implements TerminalController {
   private readonly requestReconnect: RequestReconnectCallback;
   private inputBlockedNoticeRef = false;
   private reconnectRequestedRef = false;
+  private listenerGeneration = 0;
 
   constructor(
     sessionId: string,
@@ -68,7 +70,7 @@ class TerminalControllerImpl implements TerminalController {
     setClosed: ClosedCallback,
     getStatus: GetStatusCallback,
     requestReconnect: RequestReconnectCallback,
-    removeFromRegistry: () => void,
+    removeFromRegistry: (sessionId: string) => void,
   ) {
     this.sessionId = sessionId;
     this.setStatus = setStatus;
@@ -79,7 +81,7 @@ class TerminalControllerImpl implements TerminalController {
 
     this.terminal = new Terminal({
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 13,
+      fontSize: 14,
       theme: {
         background: 'var(--app-surface)',
         foreground: 'var(--app-text)',
@@ -111,7 +113,7 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   private handleInput(data: string): void {
-    const status = this.getStatus();
+    const status = this.getStatus(this.sessionId);
 
     if (status === 'connected') {
       void invokeWriteSession(this.sessionId, data).catch(() => {
@@ -136,7 +138,7 @@ class TerminalControllerImpl implements TerminalController {
             '36',
           ),
         );
-        this.requestReconnect();
+        this.requestReconnect(this.sessionId);
       }
       return;
     }
@@ -162,18 +164,29 @@ class TerminalControllerImpl implements TerminalController {
     this.reconnectRequestedRef = false;
   }
 
+  private clearListeners(): number {
+    this.listenerGeneration += 1;
+    this.unlisten.data?.();
+    this.unlisten.status?.();
+    this.unlisten.closed?.();
+    this.unlisten = { data: undefined, status: undefined, closed: undefined };
+    return this.listenerGeneration;
+  }
+
   private async setupListeners(): Promise<void> {
-    const dataUnlisten = await listenToSshData(this.sessionId, (event) => {
+    const generation = this.listenerGeneration;
+    const sessionId = this.sessionId;
+    const dataUnlisten = await listenToSshData(sessionId, (event) => {
       this.terminal.write(event.payload.chunk);
     });
-    if (this.disposed) {
+    if (this.disposed || generation !== this.listenerGeneration) {
       dataUnlisten();
       return;
     }
     this.unlisten.data = dataUnlisten;
 
-    const statusUnlisten = await listenToSshStatus(this.sessionId, (event) => {
-      this.setStatus(this.sessionId, event.payload);
+    const statusUnlisten = await listenToSshStatus(sessionId, (event) => {
+      this.setStatus(sessionId, event.payload);
       this.writeSystemLine(
         formatTerminalStatusLine(event.payload.status, event.payload.message),
       );
@@ -181,14 +194,14 @@ class TerminalControllerImpl implements TerminalController {
         this.resetNoticeState();
       }
     });
-    if (this.disposed) {
+    if (this.disposed || generation !== this.listenerGeneration) {
       statusUnlisten();
       return;
     }
     this.unlisten.status = statusUnlisten;
 
-    const closedUnlisten = await listenToSshClosed(this.sessionId, (event) => {
-      this.setClosed(this.sessionId, event.payload);
+    const closedUnlisten = await listenToSshClosed(sessionId, (event) => {
+      this.setClosed(sessionId, event.payload);
       this.writeSystemLine(
         formatTerminalNoticeLine(
           t('terminal.notice.closedLabel'),
@@ -206,7 +219,7 @@ class TerminalControllerImpl implements TerminalController {
       );
       this.inputBlockedNoticeRef = true;
     });
-    if (this.disposed) {
+    if (this.disposed || generation !== this.listenerGeneration) {
       closedUnlisten();
       return;
     }
@@ -289,16 +302,21 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.write(chunk);
   }
 
+  rebindSession(sessionId: string): void {
+    if (this.disposed || sessionId === this.sessionId) return;
+    this.clearListeners();
+    this.sessionId = sessionId;
+    this.resetNoticeState();
+    void this.setupListeners();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.detach();
-    this.unlisten.data?.();
-    this.unlisten.status?.();
-    this.unlisten.closed?.();
-    this.unlisten = { data: undefined, status: undefined, closed: undefined };
+    this.clearListeners();
     this.terminal.dispose();
-    this.removeFromRegistry();
+    this.removeFromRegistry(this.sessionId);
   }
 }
 
@@ -311,6 +329,7 @@ interface TerminalRegistry {
     requestReconnect: RequestReconnectCallback,
   ): TerminalController;
   get(sessionId: string): TerminalController | undefined;
+  rebindSession(oldSessionId: string, newSessionId: string): void;
   dispose(sessionId: string): void;
   disposeAll(): void;
 }
@@ -330,13 +349,22 @@ export const terminalRegistry: TerminalRegistry = (() => {
         setClosed,
         getStatus,
         requestReconnect,
-        () => controllers.delete(sessionId),
+        (currentSessionId) => controllers.delete(currentSessionId),
       );
       controllers.set(sessionId, controller);
       return controller;
     },
     get(sessionId) {
       return controllers.get(sessionId);
+    },
+    rebindSession(oldSessionId, newSessionId) {
+      if (oldSessionId === newSessionId) return;
+      const controller = controllers.get(oldSessionId);
+      if (!controller) return;
+      controllers.get(newSessionId)?.dispose();
+      controllers.delete(oldSessionId);
+      controller.rebindSession(newSessionId);
+      controllers.set(newSessionId, controller);
     },
     dispose(sessionId) {
       const controller = controllers.get(sessionId);

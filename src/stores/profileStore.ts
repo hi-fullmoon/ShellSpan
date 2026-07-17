@@ -18,6 +18,7 @@ interface ProfileState {
   ) => Promise<void>;
   removeProfile: (id: string) => Promise<void>;
   duplicateProfile: (id: string) => Promise<void>;
+  removeStoredPassword: (id: string) => Promise<void>;
   getProfile: (id: string) => ConnectionProfile | undefined;
   ensurePassword: (profile: ConnectionProfile) => Promise<ConnectionProfile>;
 }
@@ -44,14 +45,16 @@ export const useProfileStore = create<ProfileState>()(
           await invokeStorePassword(id, newProfile.password);
           set((state) => ({
             profiles: state.profiles.map((p) =>
-              p.id === id ? { ...p, password: undefined } : p,
+              p.id === id
+                ? { ...p, password: undefined, passwordStored: true }
+                : p,
             ),
           }));
         }
         return get().profiles.find((p) => p.id === id)!;
       },
       updateProfile: async (id, updates) => {
-        let password = updates.password;
+        const password = updates.password;
         set((state) => ({
           profiles: state.profiles.map((p) =>
             p.id === id
@@ -73,6 +76,11 @@ export const useProfileStore = create<ProfileState>()(
           } else {
             await invokeRemovePassword(id);
           }
+          set((state) => ({
+            profiles: state.profiles.map((p) =>
+              p.id === id ? { ...p, passwordStored: Boolean(password) } : p,
+            ),
+          }));
         }
       },
       removeProfile: async (id) => {
@@ -85,11 +93,19 @@ export const useProfileStore = create<ProfileState>()(
       duplicateProfile: async (id) => {
         const original = get().profiles.find((p) => p.id === id);
         if (!original) return;
-        const { id: _id, name, createdAt, updatedAt, ...rest } = original;
+        const {
+          id: _id,
+          name,
+          createdAt,
+          updatedAt,
+          passwordStored: _passwordStored,
+          ...rest
+        } = original;
         const duplicate: ConnectionProfile = {
           ...rest,
           id: generateId(),
           name: `${name} (copy)`,
+          passwordStored: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -99,15 +115,40 @@ export const useProfileStore = create<ProfileState>()(
         const password = await invokeRetrievePassword(id);
         if (password) {
           await invokeStorePassword(duplicate.id, password);
+          set((state) => ({
+            profiles: state.profiles.map((p) =>
+              p.id === duplicate.id ? { ...p, passwordStored: true } : p,
+            ),
+          }));
         }
+      },
+      removeStoredPassword: async (id) => {
+        await invokeRemovePassword(id);
+        set((state) => ({
+          profiles: state.profiles.map((p) =>
+            p.id === id
+              ? { ...p, password: undefined, passwordStored: false }
+              : p,
+          ),
+        }));
       },
       getProfile: (id) => get().profiles.find((p) => p.id === id),
       ensurePassword: async (profile) => {
         if (profile.authMethod === 'password' && !profile.password) {
           const password = await invokeRetrievePassword(profile.id);
           if (password) {
+            set((state) => ({
+              profiles: state.profiles.map((p) =>
+                p.id === profile.id ? { ...p, passwordStored: true } : p,
+              ),
+            }));
             return { ...profile, password };
           }
+          set((state) => ({
+            profiles: state.profiles.map((p) =>
+              p.id === profile.id ? { ...p, passwordStored: false } : p,
+            ),
+          }));
         }
         return profile;
       },

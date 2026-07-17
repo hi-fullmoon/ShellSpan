@@ -7,6 +7,7 @@ use crate::models::{
     DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
     OpenRemoteFileRequest, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteDirectoryListing,
     RemoteDirectoryRequest, RemoteFileEntry, RemoteFileKind, RenameRemotePathRequest,
+    RestoreRemotePathRequest, TrashRemotePathRequest, TrashedRemotePath,
     UpdateRemotePermissionsRequest, UploadConflictPolicy, UploadLocalPathsRequest,
     UploadProgressTracker, UploadScanStats,
 };
@@ -20,12 +21,16 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{atomic::{AtomicBool, Ordering as AtomicOrdering}, Arc},
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::AppHandle;
 use uuid::Uuid;
 
 const OPEN_TEMP_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
+const TERM_BRIDGE_TRASH_DIRECTORY: &str = ".termbridge-trash";
+const TERM_BRIDGE_TRASH_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
+const TERM_BRIDGE_UPLOAD_PREFIX: &str = ".termbridge-upload-";
+const TERM_BRIDGE_UPLOAD_SUFFIX: &str = ".part";
 
 pub(crate) fn is_connection_error(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
@@ -40,6 +45,12 @@ pub(crate) fn is_connection_error(message: &str) -> bool {
         || lower.contains("socket closed")
         || lower.contains("socket disconnect")
         || lower.contains("socket disconnected")
+        || lower.contains("socket send failure")
+        || lower.contains("error receiving on socket")
+        || lower.contains("bad socket")
+        || lower.contains("connection lost")
+        || lower.contains("no connection")
+        || lower.contains("timed out")
 }
 
 pub(crate) fn list_remote_directory_blocking(
@@ -192,6 +203,119 @@ fn rename_remote_path_inner(
             Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
         )
         .map_err(|error| format!("failed to rename remote path: {error}"))
+}
+
+pub(crate) fn trash_remote_path_blocking(
+    request: TrashRemotePathRequest,
+    pool: Option<&SftpPool>,
+    known_hosts: Option<&Path>,
+) -> Result<TrashedRemotePath, String> {
+    let connection = request.connection.clone();
+    let result = trash_remote_path_inner(request, pool, known_hosts);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn trash_remote_path_inner(
+    request: TrashRemotePathRequest,
+    pool: Option<&SftpPool>,
+    known_hosts: Option<&Path>,
+) -> Result<TrashedRemotePath, String> {
+    let connected = connect_sftp(&request.connection, pool, known_hosts)?;
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let source_path = Path::new(&request.path);
+    let parent_path = source_path
+        .parent()
+        .ok_or_else(|| "unable to resolve parent path for trash".to_string())?;
+    let file_name = source_path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "unable to resolve file name for trash".to_string())?;
+
+    connected
+        .sftp
+        .lstat(source_path)
+        .map_err(|error| format!("failed to inspect remote path before trashing: {error}"))?;
+
+    let trash_directory = parent_path.join(TERM_BRIDGE_TRASH_DIRECTORY);
+    ensure_remote_directory(&connected.sftp, &trash_directory)?;
+    let trashed_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let trash_path = trash_directory.join(format!(
+        "tb-{trashed_at}-{}-{file_name}",
+        Uuid::new_v4()
+    ));
+
+    connected
+        .sftp
+        .rename(
+            source_path,
+            &trash_path,
+            Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+        )
+        .map_err(|error| format!("failed to move remote path to trash: {error}"))?;
+
+    Ok(TrashedRemotePath {
+        original_path: request.path,
+        trash_path: path_to_string(&trash_path),
+    })
+}
+
+pub(crate) fn restore_remote_path_blocking(
+    request: RestoreRemotePathRequest,
+    pool: Option<&SftpPool>,
+    known_hosts: Option<&Path>,
+) -> Result<(), String> {
+    let connection = request.connection.clone();
+    let result = restore_remote_path_inner(request, pool, known_hosts);
+    if let Err(ref error) = result {
+        if let Some(pool) = pool {
+            if is_connection_error(error) {
+                pool.invalidate(&connection);
+            }
+        }
+    }
+    result
+}
+
+fn restore_remote_path_inner(
+    request: RestoreRemotePathRequest,
+    pool: Option<&SftpPool>,
+    known_hosts: Option<&Path>,
+) -> Result<(), String> {
+    let connected = connect_sftp(&request.connection, pool, known_hosts)?;
+    let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let original_path = Path::new(&request.original_path);
+    let trash_path = Path::new(&request.trash_path);
+
+    if remote_path_exists(&connected.sftp, original_path) {
+        return Err(format!(
+            "restore target already exists: {}",
+            path_to_string(original_path)
+        ));
+    }
+    connected
+        .sftp
+        .lstat(trash_path)
+        .map_err(|error| format!("trashed remote path is unavailable: {error}"))?;
+
+    connected
+        .sftp
+        .rename(
+            trash_path,
+            original_path,
+            Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+        )
+        .map_err(|error| format!("failed to restore remote path: {error}"))
 }
 
 pub(crate) fn update_remote_permissions_blocking(
@@ -387,6 +511,7 @@ fn upload_local_paths_inner(
         let destination_path = destination_directory.join(&destination_name);
         if conflict_policy == UploadConflictPolicy::Replace
             && remote_path_exists(&connected.sftp, &destination_path)
+            && upload_requires_pre_removal(&connected.sftp, local_path, &destination_path)?
         {
             remove_remote_path_for_upload(&connected.sftp, &destination_path, &progress)?;
         }
@@ -394,6 +519,10 @@ fn upload_local_paths_inner(
             &connected.sftp,
             local_path,
             &destination_path,
+            matches!(
+                conflict_policy,
+                UploadConflictPolicy::Overwrite | UploadConflictPolicy::Replace
+            ),
             &mut progress,
         )?;
         existing_names.insert(destination_name);
@@ -836,11 +965,22 @@ fn list_remote_directory_from_sftp(
         .realpath(Path::new(requested_path))
         .map_err(|error| format!("failed to resolve remote path {requested_path}: {error}"))?;
 
+    if let Err(error) = cleanup_expired_remote_trash(sftp, &resolved_path, SystemTime::now()) {
+        warn!(
+            "failed to clean expired remote trash path={}: {error}",
+            resolved_path.display()
+        );
+    }
+
     let mut entries = sftp
         .readdir(&resolved_path)
         .map_err(|error| format!("failed to list remote directory: {error}"))?
         .into_iter()
         .map(|(path, stat)| map_remote_file(path, stat))
+        .filter(|entry| {
+            entry.name != TERM_BRIDGE_TRASH_DIRECTORY
+                && !is_termbridge_partial_upload_name(&entry.name)
+        })
         .collect::<Vec<_>>();
 
     enrich_remote_entry_owners(scope, session, &mut entries, cache);
@@ -1147,6 +1287,78 @@ fn delete_remote_path_recursive(
     }
 }
 
+fn cleanup_expired_remote_trash(
+    sftp: &Sftp,
+    parent_path: &Path,
+    now: SystemTime,
+) -> Result<(), String> {
+    let trash_directory = parent_path.join(TERM_BRIDGE_TRASH_DIRECTORY);
+    let entries = match sftp.readdir(&trash_directory) {
+        Ok(entries) => entries,
+        Err(_) if !remote_path_exists(sftp, &trash_directory) => return Ok(()),
+        Err(error) => return Err(format!("failed to list remote trash: {error}")),
+    };
+    let cutoff = now
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .saturating_sub(TERM_BRIDGE_TRASH_RETENTION)
+        .as_secs();
+
+    for (path, stat) in entries {
+        if should_skip_remote_child(&path)
+            || remote_trash_created_at(&path, &stat).is_none_or(|created_at| created_at > cutoff)
+        {
+            continue;
+        }
+        if let Err(error) = remove_remote_path_without_progress(sftp, &path) {
+            warn!(
+                "failed to remove expired remote trash path={}: {error}",
+                path.display()
+            );
+        }
+    }
+
+    match sftp.readdir(&trash_directory) {
+        Ok(entries) if entries.is_empty() => {
+            let _ = sftp.rmdir(&trash_directory);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn remote_trash_created_at(path: &Path, stat: &FileStat) -> Option<u64> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix("tb-"))
+        .and_then(|name| name.split_once('-'))
+        .and_then(|(timestamp, _)| timestamp.parse().ok())
+        .or(stat.mtime)
+}
+
+fn remove_remote_path_without_progress(sftp: &Sftp, path: &Path) -> Result<(), String> {
+    let stat = sftp
+        .lstat(path)
+        .map_err(|error| format!("failed to inspect remote trash path: {error}"))?;
+
+    if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
+        let entries = sftp
+            .readdir(path)
+            .map_err(|error| format!("failed to list remote trash directory: {error}"))?;
+        for (child_path, _) in entries {
+            if should_skip_remote_child(&child_path) {
+                continue;
+            }
+            remove_remote_path_without_progress(sftp, &child_path)?;
+        }
+        sftp.rmdir(path)
+            .map_err(|error| format!("failed to remove remote trash directory: {error}"))
+    } else {
+        sftp.unlink(path)
+            .map_err(|error| format!("failed to remove remote trash file: {error}"))
+    }
+}
+
 fn remove_remote_path_for_upload(
     sftp: &Sftp,
     path: &Path,
@@ -1174,6 +1386,21 @@ fn remove_remote_path_for_upload(
         sftp.unlink(path)
             .map_err(|error| format!("failed to replace remote file: {error}"))
     }
+}
+
+fn upload_requires_pre_removal(
+    sftp: &Sftp,
+    local_path: &Path,
+    remote_path: &Path,
+) -> Result<bool, String> {
+    let local_metadata = fs::symlink_metadata(local_path)
+        .map_err(|error| format!("failed to inspect local replacement source: {error}"))?;
+    let remote_stat = sftp
+        .lstat(remote_path)
+        .map_err(|error| format!("failed to inspect remote replacement target: {error}"))?;
+
+    Ok(!(local_metadata.is_file()
+        && kind_from_permissions(remote_stat.perm) == RemoteFileKind::File))
 }
 
 fn should_skip_remote_child(path: &Path) -> bool {
@@ -1389,6 +1616,7 @@ fn upload_local_entry_to_path(
     sftp: &Sftp,
     local_path: &Path,
     remote_path: &Path,
+    allow_overwrite: bool,
     progress: &mut UploadProgressTracker,
 ) -> Result<(), String> {
     progress.ensure_not_cancelled()?;
@@ -1415,6 +1643,7 @@ fn upload_local_entry_to_path(
                 sftp,
                 &entry.path(),
                 &remote_path.join(entry.file_name()),
+                allow_overwrite,
                 progress,
             )?;
         }
@@ -1426,27 +1655,54 @@ fn upload_local_entry_to_path(
         if let Some(parent) = remote_path.parent() {
             ensure_remote_directory(sftp, parent)?;
         }
-
-        let mut local_file = fs::File::open(local_path)
-            .map_err(|error| format!("failed to open local file: {error}"))?;
         let upload_mode = if is_private_key_file(remote_path) {
             0o600
         } else {
             0o644
         };
+        upload_regular_file_atomically(
+            sftp,
+            local_path,
+            remote_path,
+            metadata.len(),
+            upload_mode,
+            allow_overwrite,
+            progress,
+        )?;
+        progress.finish_step()?;
+        return Ok(());
+    }
+
+    Err(format!(
+        "unsupported local path type for upload: {}",
+        local_path.display()
+    ))
+}
+
+fn upload_regular_file_atomically(
+    sftp: &Sftp,
+    local_path: &Path,
+    remote_path: &Path,
+    expected_size: u64,
+    upload_mode: i32,
+    allow_overwrite: bool,
+    progress: &mut UploadProgressTracker,
+) -> Result<(), String> {
+    let temporary_path = temporary_upload_path(remote_path)?;
+    let upload_result = (|| {
+        let mut local_file = fs::File::open(local_path)
+            .map_err(|error| format!("failed to open local file: {error}"))?;
         let mut remote_file = sftp
             .open_mode(
-                remote_path,
-                OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
+                &temporary_path,
+                OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE | OpenFlags::EXCLUSIVE,
                 upload_mode,
                 OpenType::File,
             )
-            .map_err(|error| format!("failed to create remote upload target: {error}"))?;
+            .map_err(|error| format!("failed to create remote upload temporary file: {error}"))?;
         let mut buffer = [0u8; 64 * 1024];
         loop {
-            progress.ensure_not_cancelled().inspect_err(|_| {
-                let _ = sftp.unlink(remote_path);
-            })?;
+            progress.ensure_not_cancelled()?;
             let read = local_file
                 .read(&mut buffer)
                 .map_err(|error| format!("failed to read local file for upload: {error}"))?;
@@ -1461,14 +1717,46 @@ fn upload_local_entry_to_path(
         remote_file
             .flush()
             .map_err(|error| format!("failed to flush remote upload: {error}"))?;
-        progress.finish_step()?;
-        return Ok(());
-    }
+        drop(remote_file);
 
-    Err(format!(
-        "unsupported local path type for upload: {}",
-        local_path.display()
-    ))
+        let uploaded_size = sftp
+            .stat(&temporary_path)
+            .map_err(|error| format!("failed to verify remote upload: {error}"))?
+            .size
+            .ok_or_else(|| "remote server did not report uploaded file size".to_string())?;
+        if uploaded_size != expected_size {
+            return Err(format!(
+                "remote upload size mismatch: expected {expected_size} bytes, got {uploaded_size}"
+            ));
+        }
+
+        let rename_flags = if allow_overwrite {
+            RenameFlags::OVERWRITE | RenameFlags::ATOMIC | RenameFlags::NATIVE
+        } else {
+            RenameFlags::ATOMIC | RenameFlags::NATIVE
+        };
+        sftp.rename(&temporary_path, remote_path, Some(rename_flags))
+            .map_err(|error| format!("failed to finalize remote upload: {error}"))
+    })();
+
+    if upload_result.is_err() {
+        let _ = sftp.unlink(&temporary_path);
+    }
+    upload_result
+}
+
+fn temporary_upload_path(remote_path: &Path) -> Result<PathBuf, String> {
+    let parent = remote_path
+        .parent()
+        .ok_or_else(|| "unable to resolve remote upload parent directory".to_string())?;
+    Ok(parent.join(format!(
+        "{TERM_BRIDGE_UPLOAD_PREFIX}{}{TERM_BRIDGE_UPLOAD_SUFFIX}",
+        Uuid::new_v4()
+    )))
+}
+
+fn is_termbridge_partial_upload_name(name: &str) -> bool {
+    name.starts_with(TERM_BRIDGE_UPLOAD_PREFIX) && name.ends_with(TERM_BRIDGE_UPLOAD_SUFFIX)
 }
 
 fn map_remote_file(path: PathBuf, stat: FileStat) -> RemoteFileEntry {
@@ -1673,9 +1961,83 @@ mod tests {
     }
 
     #[test]
+    fn detects_libssh2_transport_messages_as_connection_errors() {
+        assert!(is_connection_error("[Session(-7)] socket send failure"));
+        assert!(is_connection_error(
+            "[Session(-43)] error receiving on socket"
+        ));
+        assert!(is_connection_error("[SFTP(7)] no connection"));
+        assert!(is_connection_error("[SFTP(8)] connection lost"));
+        assert!(is_connection_error("[Session(-9)] timed out"));
+    }
+
+    #[test]
+    fn termbridge_partial_upload_names_are_detected_precisely() {
+        assert!(is_termbridge_partial_upload_name(
+            ".termbridge-upload-id.part"
+        ));
+        assert!(!is_termbridge_partial_upload_name("report.part"));
+        assert!(!is_termbridge_partial_upload_name(
+            ".termbridge-upload-id.txt"
+        ));
+    }
+
+    #[test]
+    fn temporary_upload_path_stays_in_destination_directory() {
+        let temporary = temporary_upload_path(Path::new("/srv/files/report.txt"))
+            .expect("temporary upload path");
+
+        assert_eq!(temporary.parent(), Some(Path::new("/srv/files")));
+        assert!(is_termbridge_partial_upload_name(
+            temporary.file_name().unwrap().to_str().unwrap()
+        ));
+        assert_ne!(temporary, Path::new("/srv/files/report.txt"));
+    }
+
+    #[test]
     fn does_not_treat_generic_socket_substring_as_connection_error() {
         assert!(!is_connection_error("invalid socket path"));
         assert!(!is_connection_error("socket"));
+    }
+
+    #[test]
+    fn remote_trash_timestamp_prefers_termbridge_name_metadata() {
+        let stat = FileStat {
+            size: None,
+            uid: None,
+            gid: None,
+            perm: None,
+            atime: None,
+            mtime: Some(10),
+        };
+
+        assert_eq!(
+            remote_trash_created_at(
+                Path::new("/tmp/.termbridge-trash/tb-1234-id-report.txt"),
+                &stat,
+            ),
+            Some(1234),
+        );
+    }
+
+    #[test]
+    fn remote_trash_timestamp_uses_mtime_for_legacy_entries() {
+        let stat = FileStat {
+            size: None,
+            uid: None,
+            gid: None,
+            perm: None,
+            atime: None,
+            mtime: Some(5678),
+        };
+
+        assert_eq!(
+            remote_trash_created_at(
+                Path::new("/tmp/.termbridge-trash/uuid-report.txt"),
+                &stat,
+            ),
+            Some(5678),
+        );
     }
 
     #[test]

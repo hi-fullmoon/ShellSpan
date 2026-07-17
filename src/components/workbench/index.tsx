@@ -4,6 +4,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { ConnectionForm } from './connection-form';
 import { ConnectionList } from './connection-list';
 import { KnownHostsPanel } from './known-hosts-panel';
+import { CredentialsPanel } from './credentials-panel';
 import { LogPanel } from './log-panel';
 import { WorkbenchSidebar, type WorkbenchTab } from './workbench-sidebar';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
@@ -83,6 +84,9 @@ const Workbench: React.FC = () => {
             />
           )}
           {activeTab === 'knownHosts' && <KnownHostsPanel />}
+          {activeTab === 'credentials' && (
+            <CredentialsPanel onEdit={handleEdit} />
+          )}
           {activeTab === 'logs' && <LogPanel />}
         </div>
       </div>
