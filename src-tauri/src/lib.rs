@@ -2,6 +2,7 @@ mod commands;
 mod connection;
 mod identity_cache;
 mod keychain;
+mod local_fs;
 mod known_hosts;
 mod menu;
 mod models;
@@ -24,6 +25,7 @@ pub(crate) use connection::{
     summarize_remote_connection_request, summarize_session_request, validate_connection_fields,
 };
 pub(crate) use identity_cache::RemoteIdentityCache;
+pub(crate) use local_fs::copy_local_paths_blocking;
 pub(crate) use path_utils::portable_local_path;
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
@@ -150,6 +152,7 @@ pub fn run() {
             commands::delete_remote_path,
             commands::copy_remote_path,
             commands::upload_local_paths,
+            commands::copy_local_paths,
             commands::cancel_upload,
             commands::cancel_delete,
             commands::download_remote_paths,

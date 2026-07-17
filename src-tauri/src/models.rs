@@ -188,6 +188,16 @@ pub(crate) struct UploadLocalPathsRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct CopyLocalPathsRequest {
+    pub(crate) source_paths: Vec<String>,
+    pub(crate) destination_directory: String,
+    #[serde(default)]
+    pub(crate) conflict_policies: Vec<UploadConflictPolicy>,
+    pub(crate) operation_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HostKeyCheckRequest {
     pub(crate) host: String,
     pub(crate) port: u16,

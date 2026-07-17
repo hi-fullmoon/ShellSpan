@@ -1,7 +1,7 @@
 use super::*;
 use crate::sftp_pool::SftpPool;
 use crate::models::{
-    AuthMethod, ClosedReasonKind, CopyRemotePathRequest, CreateRemoteEntryRequest,
+    AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CreateRemoteEntryRequest,
     CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest,
     HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KnownHostEntry, LocalDirectoryListing,
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
@@ -347,6 +347,30 @@ pub(crate) async fn upload_local_paths(
         warn!("Upload failed operation_id={operation_id}: {error}");
     } else {
         info!("Upload completed operation_id={operation_id}");
+    }
+    result
+}
+
+#[tauri::command]
+pub(crate) async fn copy_local_paths(
+    request: CopyLocalPathsRequest,
+) -> Result<(), String> {
+    info!(
+        "Copying local paths operation_id={} count={} destination_directory={}",
+        request.operation_id,
+        request.source_paths.len(),
+        request.destination_directory,
+    );
+    let operation_id = request.operation_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::copy_local_paths_blocking(request)
+    })
+    .await
+    .map_err(|error| format!("failed to join copy local paths task: {error}"))?;
+    if let Err(error) = &result {
+        warn!("Copy local paths failed operation_id={operation_id}: {error}");
+    } else {
+        info!("Copy local paths completed operation_id={operation_id}");
     }
     result
 }
