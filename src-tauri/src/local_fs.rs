@@ -1,4 +1,5 @@
 use crate::models::{CopyLocalPathsRequest, UploadConflictPolicy};
+use crate::path_utils::portable_local_path;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -8,7 +9,14 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
         return Err("no source paths were provided for copy".to_string());
     }
 
-    let destination_directory = Path::new(&request.destination_directory);
+    let destination_directory = portable_local_path(Path::new(&request.destination_directory));
+    let source_paths: Vec<String> = request
+        .source_paths
+        .iter()
+        .map(|p| portable_local_path(Path::new(p)))
+        .collect();
+
+    let destination_directory = Path::new(&destination_directory);
     fs::create_dir_all(destination_directory)
         .map_err(|error| format!("failed to create destination directory: {error}"))?;
 
@@ -20,7 +28,7 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
         return Err("copy conflict policy count does not match source paths".to_string());
     }
 
-    for (index, source_path) in request.source_paths.iter().enumerate() {
+    for (index, source_path) in source_paths.iter().enumerate() {
         let source_path = Path::new(source_path);
         let file_name = source_path
             .file_name()
