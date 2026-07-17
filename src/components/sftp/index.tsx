@@ -261,6 +261,19 @@ const SftpContent: React.FC<SftpContentProps> = ({
     setUploadConflict(undefined);
   }, [connection.localEntries, connection.remoteEntries, localActions, remoteActions]);
 
+  const refreshAfterQueue = useCallback(
+    async (side: 'local' | 'remote') => {
+      if (side === 'local') {
+        await loadLocalDirectory(connection.localPath);
+        setPaneState(connection.id, 'local', { selectedPaths: [] });
+      } else {
+        await loadRemoteDirectory(connection.remotePath);
+        setPaneState(connection.id, 'remote', { selectedPaths: [] });
+      }
+    },
+    [connection.id, connection.localPath, connection.remotePath, loadLocalDirectory, loadRemoteDirectory, setPaneState],
+  );
+
   const handleUploadConflictResolution = async (
     action: UploadConflictAction,
     applyToRemaining: boolean,
@@ -286,6 +299,9 @@ const SftpContent: React.FC<SftpContentProps> = ({
     queue.index += 1;
     setUploadConflict(undefined);
     await processUploadQueue();
+    if (!uploadQueueRef.current) {
+      await refreshAfterQueue(queue.side);
+    }
   };
 
   const handleDragEnd = async (
@@ -334,15 +350,11 @@ const SftpContent: React.FC<SftpContentProps> = ({
         remembered: undefined,
       };
       await processUploadQueue();
-      if (side === 'local') {
-        await loadLocalDirectory(connection.localPath);
-        setPaneState(connection.id, 'local', { selectedPaths: [] });
-      } else {
-        await loadRemoteDirectory(connection.remotePath);
-        setPaneState(connection.id, 'remote', { selectedPaths: [] });
+      if (!uploadQueueRef.current) {
+        await refreshAfterQueue(side);
       }
     },
-    [connection.id, connection.localPath, connection.remotePath, loadLocalDirectory, loadRemoteDirectory, setPaneState],
+    [connection.id, connection.localPath, connection.remotePath, loadLocalDirectory, loadRemoteDirectory, refreshAfterQueue, setPaneState, processUploadQueue],
   );
 
   const { dragActive: systemDragActive, hoveredSide: systemHoveredSide } = useSystemFileDrop({
