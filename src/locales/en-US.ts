@@ -186,6 +186,8 @@ export default {
   'sftp.transfer.deleting': 'Deleting',
   'sftp.transfer.completed': 'Completed',
   'sftp.transfer.failed': 'Failed',
+  'sftp.transfer.uploadFailed': 'Upload failed',
+  'sftp.transfer.discard': 'Discard',
 
   'sftp.transfers.title': 'Transfers',
   'sftp.transfers.clearCompleted': 'Clear completed',
@@ -237,6 +239,7 @@ export default {
   'sftp.conflict.title': 'File Already Exists',
   'sftp.conflict.message': '{name} already exists. What would you like to do?',
   'sftp.conflict.overwrite': 'Overwrite',
+  'sftp.conflict.replace': 'Replace',
   'sftp.conflict.skip': 'Skip',
   'sftp.conflict.cancel': 'Cancel',
   'sftp.conflict.applyToRemaining': 'Apply to remaining',

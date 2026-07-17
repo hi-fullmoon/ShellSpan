@@ -33,6 +33,12 @@ export function useSftpConnection(connection: SftpConnection): {
   const setLoading = useSftpStore((state) => state.setLoading);
   const setError = useSftpStore((state) => state.setError);
   const addOperation = useTransferStore((state) => state.addOperation);
+  const markOperationRunning = useTransferStore(
+    (state) => state.markOperationRunning,
+  );
+  const markOperationFailed = useTransferStore(
+    (state) => state.markOperationFailed,
+  );
 
   const loadRemoteDirectory = useCallback(
     async (path?: string) => {
@@ -133,6 +139,26 @@ export function useSftpConnection(connection: SftpConnection): {
 
   const uploadLocalPaths = useCallback(
     async (localPaths: string[], destinationDirectory: string, operationId = `${connection.id}-upload-${Date.now()}`, conflictPolicies: UploadConflictPolicy[] = []) => {
+      const runUpload = async (): Promise<void> => {
+        markOperationRunning(operationId);
+        try {
+          await invokeUploadLocalPaths({
+            ...connection.connection,
+            destinationDirectory,
+            localPaths,
+            conflictPolicies,
+            operationId,
+          });
+          await loadRemoteDirectory(connection.remotePath);
+        } catch (error) {
+          markOperationFailed(
+            operationId,
+            error instanceof Error ? error.message : String(error),
+          );
+          throw error;
+        }
+      };
+
       addOperation({
         operationId,
         kind: 'upload',
@@ -141,17 +167,20 @@ export function useSftpConnection(connection: SftpConnection): {
         processedBytes: 0,
         totalSteps: localPaths.length,
         completedSteps: 0,
+        status: 'running',
+        retry: runUpload,
       });
-      await invokeUploadLocalPaths({
-        ...connection.connection,
-        destinationDirectory,
-        localPaths,
-        conflictPolicies,
-        operationId,
-      });
-      await loadRemoteDirectory(connection.remotePath);
+      await runUpload();
     },
-    [connection.connection, connection.id, connection.remotePath, loadRemoteDirectory, addOperation],
+    [
+      connection.connection,
+      connection.id,
+      connection.remotePath,
+      loadRemoteDirectory,
+      addOperation,
+      markOperationFailed,
+      markOperationRunning,
+    ],
   );
 
   const downloadRemotePaths = useCallback(

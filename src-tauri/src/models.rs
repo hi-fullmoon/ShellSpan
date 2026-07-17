@@ -267,6 +267,7 @@ impl AuthMethod {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum UploadConflictPolicy {
     Overwrite,
+    Replace,
     Skip,
     Fail,
 }
@@ -763,6 +764,5 @@ impl SessionManager {
         Ok(())
     }
 }
-
 
 

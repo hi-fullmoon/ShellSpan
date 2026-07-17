@@ -385,6 +385,11 @@ fn upload_local_paths_inner(
                 None => continue,
             };
         let destination_path = destination_directory.join(&destination_name);
+        if conflict_policy == UploadConflictPolicy::Replace
+            && remote_path_exists(&connected.sftp, &destination_path)
+        {
+            remove_remote_path_for_upload(&connected.sftp, &destination_path, &progress)?;
+        }
         upload_local_entry_to_path(
             &connected.sftp,
             local_path,
@@ -1142,6 +1147,35 @@ fn delete_remote_path_recursive(
     }
 }
 
+fn remove_remote_path_for_upload(
+    sftp: &Sftp,
+    path: &Path,
+    progress: &UploadProgressTracker,
+) -> Result<(), String> {
+    progress.ensure_not_cancelled()?;
+    let stat = sftp
+        .lstat(path)
+        .map_err(|error| format!("failed to inspect remote replacement target: {error}"))?;
+
+    if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
+        let entries = sftp
+            .readdir(path)
+            .map_err(|error| format!("failed to list remote replacement target: {error}"))?;
+        for (child_path, _) in entries {
+            if should_skip_remote_child(&child_path) {
+                continue;
+            }
+            remove_remote_path_for_upload(sftp, &child_path, progress)?;
+        }
+        progress.ensure_not_cancelled()?;
+        sftp.rmdir(path)
+            .map_err(|error| format!("failed to replace remote directory: {error}"))
+    } else {
+        sftp.unlink(path)
+            .map_err(|error| format!("failed to replace remote file: {error}"))
+    }
+}
+
 fn should_skip_remote_child(path: &Path) -> bool {
     matches!(
         path.file_name().and_then(|value| value.to_str()),
@@ -1248,7 +1282,9 @@ fn resolve_upload_target_name(
     }
 
     match policy {
-        UploadConflictPolicy::Overwrite => Ok(Some(base_name.to_string())),
+        UploadConflictPolicy::Overwrite | UploadConflictPolicy::Replace => {
+            Ok(Some(base_name.to_string()))
+        }
         UploadConflictPolicy::Skip => Ok(None),
         UploadConflictPolicy::Fail => Err(format!("remote path already exists: {base_name}")),
     }
@@ -1555,6 +1591,17 @@ mod tests {
         .expect("overwrite policy should allow replacing the existing target");
 
         assert_eq!(resolved, Some(String::from("report.txt")));
+    }
+
+    #[test]
+    fn upload_target_name_replaces_existing_entry_when_requested() {
+        let existing_names = HashSet::from([String::from("assets")]);
+
+        let resolved =
+            resolve_upload_target_name(&existing_names, "assets", UploadConflictPolicy::Replace)
+                .expect("replace policy should allow replacing the existing target");
+
+        assert_eq!(resolved, Some(String::from("assets")));
     }
 
     #[test]

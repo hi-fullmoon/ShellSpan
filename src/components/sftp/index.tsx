@@ -207,9 +207,12 @@ const SftpContent: React.FC<SftpContentProps> = ({
       }
 
       if (queue.remembered) {
-        if (queue.remembered === 'overwrite') {
+        if (
+          queue.remembered === 'overwrite' ||
+          queue.remembered === 'replace'
+        ) {
           queue.accepted.push(path);
-          queue.policies.push('overwrite');
+          queue.policies.push(queue.remembered);
         }
         queue.index += 1;
         continue;
@@ -261,9 +264,9 @@ const SftpContent: React.FC<SftpContentProps> = ({
       queue.remembered = action;
     }
 
-    if (action === 'overwrite') {
+    if (action === 'overwrite' || action === 'replace') {
       queue.accepted.push(queue.paths[queue.index]);
-      queue.policies.push('overwrite');
+      queue.policies.push(action);
     }
 
     queue.index += 1;

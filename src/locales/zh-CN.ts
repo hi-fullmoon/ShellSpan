@@ -186,6 +186,8 @@ export default {
   'sftp.transfer.deleting': '正在删除',
   'sftp.transfer.completed': '已完成',
   'sftp.transfer.failed': '失败',
+  'sftp.transfer.uploadFailed': '上传失败',
+  'sftp.transfer.discard': '丢弃',
 
   'sftp.transfers.title': '传输',
   'sftp.transfers.clearCompleted': '清除已完成',
@@ -237,6 +239,7 @@ export default {
   'sftp.conflict.title': '文件已存在',
   'sftp.conflict.message': '{name} 已存在。请选择操作：',
   'sftp.conflict.overwrite': '覆盖',
+  'sftp.conflict.replace': '替换',
   'sftp.conflict.skip': '跳过',
   'sftp.conflict.cancel': '取消',
   'sftp.conflict.applyToRemaining': '应用到剩余项目',

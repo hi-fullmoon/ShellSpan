@@ -14,7 +14,7 @@ import {
   SftpDialogHeader,
 } from './sftp-dialog-layout';
 
-export type UploadConflictAction = 'overwrite' | 'skip' | 'cancel';
+export type UploadConflictAction = 'overwrite' | 'replace' | 'skip' | 'cancel';
 
 export interface SftpUploadConflictDialogProps {
   conflict?: PendingUploadConflict;
@@ -45,13 +45,13 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
       <SftpDialogContent className="max-w-sm" showCloseButton={false}>
         <SftpDialogHeader title={t('sftp.conflict.title')} />
         <SftpDialogBody>
-          <DialogDescription className="text-app-text">
+          <DialogDescription className="min-w-0 break-words text-app-text">
             {t('sftp.conflict.message', { name: conflict.targetName })}
           </DialogDescription>
-          <div className="flex items-center gap-3 rounded-lg border border-app-border bg-app-surface-muted/45 p-3">
+          <div className="flex min-w-0 items-center gap-3 overflow-hidden rounded-lg border border-app-border bg-app-surface-muted/45 p-3">
             <FileWarningIcon className="size-5 shrink-0 text-app-text-soft" aria-hidden="true" />
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="truncate text-sm font-medium text-app-text" title={conflict.targetName}>
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="block w-full truncate text-sm font-medium text-app-text" title={conflict.targetName}>
                 {conflict.targetName}
               </span>
               <span className="text-xs text-app-text-soft">
@@ -79,9 +79,26 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
           <Button variant="secondary" size="sm" onClick={() => handleAction('skip')}>
             {t('sftp.conflict.skip')}
           </Button>
-          <Button variant="destructive" size="sm" onClick={() => handleAction('overwrite')}>
+          <Button
+            variant={
+              conflict.existingKind === 'directory'
+                ? 'secondary'
+                : 'destructive'
+            }
+            size="sm"
+            onClick={() => handleAction('overwrite')}
+          >
             {t('sftp.conflict.overwrite')}
           </Button>
+          {conflict.existingKind === 'directory' && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => handleAction('replace')}
+            >
+              {t('sftp.conflict.replace')}
+            </Button>
+          )}
         </SftpDialogFooter>
       </SftpDialogContent>
     </Dialog>

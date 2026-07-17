@@ -12,7 +12,7 @@ import { useTransferStore } from '@/stores/transferStore';
 import type { FileEntry } from '@/components/sftp/file-entry-formatters';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 
-export type UploadConflictAction = 'overwrite' | 'skip' | 'cancel';
+export type UploadConflictAction = 'overwrite' | 'replace' | 'skip' | 'cancel';
 
 export interface PendingUploadConflict {
   localPath: string;

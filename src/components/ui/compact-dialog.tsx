@@ -20,7 +20,7 @@ export const CompactDialogContent: React.FC<CompactDialogContentProps> = ({
 }) => (
   <DialogContent
     className={cn(
-      'gap-0 overflow-hidden border-app-border bg-app-surface p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-lg',
+      'w-[calc(100%-2rem)] min-w-0 gap-0 overflow-hidden border-app-border bg-app-surface p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-lg',
       className,
     )}
     {...props}
@@ -48,7 +48,10 @@ export const CompactDialogBody: React.FC<React.ComponentProps<'div'>> = ({
   className,
   ...props
 }) => (
-  <div className={cn('flex flex-col gap-3 px-4 py-3', className)} {...props} />
+  <div
+    className={cn('flex min-w-0 flex-col gap-3 px-4 py-3', className)}
+    {...props}
+  />
 );
 
 export const CompactDialogFooter: React.FC<React.ComponentProps<typeof DialogFooter>> = (
@@ -56,7 +59,7 @@ export const CompactDialogFooter: React.FC<React.ComponentProps<typeof DialogFoo
 ) => (
   <DialogFooter
     className={cn(
-      'mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5',
+      'mx-0 mb-0 min-w-0 flex-wrap rounded-none border-t-0 bg-app-surface px-4 py-2.5',
       className,
     )}
     {...props}

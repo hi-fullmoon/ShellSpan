@@ -15,6 +15,9 @@ export interface TransferOperation {
   processedBytes: number;
   totalSteps: number;
   completedSteps: number;
+  status?: 'running' | 'failed';
+  error?: string;
+  retry?: () => Promise<void>;
 }
 
 interface TransferState {
@@ -24,6 +27,9 @@ interface TransferState {
   updateDownload: (event: DownloadProgressEvent) => void;
   updateDelete: (event: DeleteProgressEvent) => void;
   removeOperation: (operationId: string) => void;
+  markOperationRunning: (operationId: string) => void;
+  markOperationFailed: (operationId: string, error: string) => void;
+  retryOperation: (operationId: string) => Promise<void>;
   clearCompleted: () => void;
 }
 
@@ -34,8 +40,10 @@ export const useTransferStore = create<TransferState>()((set) => ({
       operations: state.operations.some(
         (o) => o.operationId === operation.operationId,
       )
-        ? state.operations
-        : [...state.operations, operation],
+        ? state.operations.map((o) =>
+            o.operationId === operation.operationId ? { ...o, ...operation } : o,
+          )
+        : [operation, ...state.operations],
     })),
   updateUpload: (event) =>
     set((state) => ({
@@ -43,7 +51,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
         op.operationId === event.operationId
           ? {
               ...op,
-              currentPath: event.currentPath,
+              currentPath: event.currentPath || op.currentPath,
               totalBytes: event.totalBytes,
               processedBytes: event.uploadedBytes,
               totalSteps: event.totalSteps,
@@ -58,7 +66,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
         op.operationId === event.operationId
           ? {
               ...op,
-              currentPath: event.currentPath,
+              currentPath: event.currentPath || op.currentPath,
               totalBytes: event.totalBytes,
               processedBytes: event.downloadedBytes,
               totalSteps: event.totalSteps,
@@ -73,7 +81,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
         op.operationId === event.operationId
           ? {
               ...op,
-              currentPath: event.currentPath,
+              currentPath: event.currentPath || op.currentPath,
               totalSteps: event.totalSteps,
               completedSteps: event.completedSteps,
             }
@@ -86,6 +94,38 @@ export const useTransferStore = create<TransferState>()((set) => ({
         (o) => o.operationId !== operationId,
       ),
     })),
+  markOperationRunning: (operationId) =>
+    set((state) => ({
+      operations: state.operations.map((operation) =>
+        operation.operationId === operationId
+          ? { ...operation, status: 'running', error: undefined }
+          : operation,
+      ),
+    })),
+  markOperationFailed: (operationId, error) =>
+    set((state) => ({
+      operations: state.operations.map((operation) =>
+        operation.operationId === operationId
+          ? { ...operation, status: 'failed', error }
+          : operation,
+      ),
+    })),
+  retryOperation: async (operationId) => {
+    const operation = useTransferStore
+      .getState()
+      .operations.find((item) => item.operationId === operationId);
+    if (!operation?.retry) return;
+
+    useTransferStore.getState().markOperationRunning(operationId);
+    try {
+      await operation.retry();
+    } catch (error) {
+      useTransferStore.getState().markOperationFailed(
+        operationId,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  },
   clearCompleted: () =>
     set((state) => ({
       operations: state.operations.filter(
@@ -95,6 +135,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
 }));
 
 export function isTransferComplete(operation: TransferOperation): boolean {
+  if (operation.status === 'failed') return false;
   if (operation.totalSteps === 0) return false;
   return operation.completedSteps >= operation.totalSteps;
 }
