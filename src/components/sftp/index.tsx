@@ -242,18 +242,17 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     }
 
     if (queue.accepted.length > 0) {
-      const policies = queue.policies.some((p) => p !== 'fail') ? queue.policies : [];
       if (queue.side === 'local') {
         await localActions.copyWithPolicies(
           queue.accepted,
           queue.destination,
-          policies,
+          queue.policies,
         );
       } else {
         await remoteActions.uploadWithPolicies(
           queue.accepted,
           queue.destination,
-          policies,
+          queue.policies,
         );
       }
     }
