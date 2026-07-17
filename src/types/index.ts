@@ -253,6 +253,13 @@ export interface UploadLocalPathsRequest extends RemoteConnectionRequest {
   operationId: string;
 }
 
+export interface CopyLocalPathsRequest {
+  sourcePaths: string[];
+  destinationDirectory: string;
+  conflictPolicies: UploadConflictPolicy[];
+  operationId: string;
+}
+
 export type UploadConflictPolicy = 'overwrite' | 'replace' | 'skip' | 'fail';
 
 export type UpdateStatus =
