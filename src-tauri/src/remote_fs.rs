@@ -814,6 +814,13 @@ pub(crate) fn copy_remote_to_remote_blocking(
                 .file_name()
                 .ok_or_else(|| "remote source path has no file name".to_string())?;
             let destination_path = destination_directory.join(name);
+            let stat = connected.sftp.lstat(source_path)
+                .map_err(|error| format!("failed to inspect remote source: {error}"))?;
+            validate_same_connection_copy_destination(
+                source_path,
+                &destination_path,
+                kind_from_permissions(stat.perm) == RemoteFileKind::Directory,
+            )?;
             let policy = request.conflict_policies.get(index).copied().unwrap_or(UploadConflictPolicy::Fail);
             if connected.sftp.lstat(&destination_path).is_ok() {
                 match policy {
@@ -824,14 +831,24 @@ pub(crate) fn copy_remote_to_remote_blocking(
                     }
                 }
             }
-            let stat = connected.sftp.lstat(source_path)
-                .map_err(|error| format!("failed to inspect remote source: {error}"))?;
             copy_remote_entry_to_path(&connected.sftp, source_path, &destination_path, stat)?;
         }
         return Ok(());
     }
-    let source = source.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let destination = destination.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Always acquire pooled connections in a stable order. Without this, concurrent
+    // A -> B and B -> A copies can each hold one connection while waiting forever
+    // for the other one.
+    let source_address = Arc::as_ptr(&source) as usize;
+    let destination_address = Arc::as_ptr(&destination) as usize;
+    let (source, destination) = if source_address < destination_address {
+        let source_guard = source.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let destination_guard = destination.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        (source_guard, destination_guard)
+    } else {
+        let destination_guard = destination.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let source_guard = source.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        (source_guard, destination_guard)
+    };
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&destination.sftp, destination_directory)?;
 
@@ -863,6 +880,20 @@ pub(crate) fn copy_remote_to_remote_blocking(
             source_path,
             &destination_path,
         )?;
+    }
+    Ok(())
+}
+
+fn validate_same_connection_copy_destination(
+    source_path: &Path,
+    destination_path: &Path,
+    source_is_directory: bool,
+) -> Result<(), String> {
+    if destination_path == source_path {
+        return Err("cannot copy a remote entry onto itself".to_string());
+    }
+    if source_is_directory && destination_path.starts_with(source_path) {
+        return Err("cannot copy a directory into itself".to_string());
     }
     Ok(())
 }
@@ -2076,6 +2107,41 @@ fn contains_shell_metacharacters(input: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_connection_copy_rejects_copying_entry_onto_itself() {
+        let result = validate_same_connection_copy_destination(
+            Path::new("/srv/report.txt"),
+            Path::new("/srv/report.txt"),
+            false,
+        );
+
+        assert_eq!(
+            result,
+            Err("cannot copy a remote entry onto itself".to_string())
+        );
+    }
+
+    #[test]
+    fn same_connection_copy_rejects_directory_descendant() {
+        let result = validate_same_connection_copy_destination(
+            Path::new("/srv/assets"),
+            Path::new("/srv/assets/archive/assets"),
+            true,
+        );
+
+        assert_eq!(result, Err("cannot copy a directory into itself".to_string()));
+    }
+
+    #[test]
+    fn same_connection_copy_allows_sibling_destination() {
+        assert!(validate_same_connection_copy_destination(
+            Path::new("/srv/assets"),
+            Path::new("/backup/assets"),
+            true,
+        )
+        .is_ok());
+    }
 
     #[test]
     fn upload_target_name_overwrites_existing_entry_when_requested() {
