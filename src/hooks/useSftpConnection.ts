@@ -14,14 +14,22 @@ import {
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
 } from '@/lib/tauri';
-import { getSftpPaneConnection, useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import {
+  getSftpPaneConnection,
+  getSftpPaneConnectionKey,
+  useSftpStore,
+  type SftpConnection,
+} from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
+import { createLogger } from '@/lib/logger';
 import type { SftpSide } from '@/stores/sftpStore';
 import type {
   ReadRemoteFileResponse,
   TrashedRemotePath,
   UploadConflictPolicy,
 } from '@/types';
+
+const logger = createLogger('sftp');
 
 const DELETE_UNDO_WINDOW_MS = 30_000;
 
@@ -42,6 +50,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   previewRemoteFile: (path: string) => Promise<ReadRemoteFileResponse>;
 } {
   const remoteConnection = getSftpPaneConnection(connection, side);
+  const remoteConnectionKey = getSftpPaneConnectionKey(connection, side);
   const panePath = side === 'local' ? connection.localPath : connection.remotePath;
   const setPath = useSftpStore((state) => state.setPath);
   const setEntries = useSftpStore((state) => state.setEntries);
@@ -124,7 +133,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       addOperation({
         operationId,
         kind: 'delete',
-        connectionId: connection.id,
+        connectionId: remoteConnectionKey,
         paths,
         currentPath: paths[0],
         totalBytes: 0,
@@ -208,6 +217,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
     [
       addOperation,
       remoteConnection,
+      remoteConnectionKey,
       connection.id,
       panePath,
       loadRemoteDirectory,
@@ -253,6 +263,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       addOperation({
         operationId,
         kind: 'upload',
+        connectionId: remoteConnectionKey,
+        paths: [destinationDirectory],
         currentPath: localPaths[0],
         totalBytes: 0,
         processedBytes: 0,
@@ -265,6 +277,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
     },
     [
       remoteConnection,
+      remoteConnectionKey,
       connection.id,
       panePath,
       addOperation,
@@ -278,7 +291,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       addOperation({
         operationId,
         kind: 'download',
-        connectionId: connection.id,
+        connectionId: remoteConnectionKey,
         paths: remotePaths,
         currentPath: remotePaths[0],
         totalBytes: 0,
@@ -310,7 +323,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         throw error;
       }
     },
-    [remoteConnection, connection.id, addOperation, markOperationFailed],
+    [remoteConnection, remoteConnectionKey, connection.id, addOperation, markOperationFailed],
   );
 
   const openRemoteFile = useCallback(

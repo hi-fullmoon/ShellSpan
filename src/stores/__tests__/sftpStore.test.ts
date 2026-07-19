@@ -129,4 +129,26 @@ describe('sftpStore', () => {
     expect(dualRemote.leftTitle).toBe('Staging');
     expect(dualRemote.leftConnection?.host).toBe('staging.example.com');
   });
+
+  it('keeps bookmarks isolated between remote panes', () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c1',
+        title: 'Right',
+        host: 'right.example.com',
+        port: 22,
+        username: 'u',
+      },
+      { ...baseConnection.connection, host: 'right.example.com' },
+    );
+    const id = useSftpStore.getState().connections[0]!.id;
+
+    useSftpStore.getState().addRemoteBookmark(id, 'local', '/left-only');
+    useSftpStore.getState().addRemoteBookmark(id, 'remote', '/right-only');
+
+    expect(useSftpStore.getState().connections[0]?.remoteBookmarks).toEqual({
+      local: ['/left-only'],
+      remote: ['/right-only'],
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   invokeCopyLocalPaths,
+  invokeCopyRemoteToRemote,
   invokePickLocalFiles,
   invokePickLocalFolder,
 } from '@/lib/tauri';
@@ -9,10 +10,19 @@ import { parentPortablePath } from '@/lib/path-utils';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useToast } from '@/hooks/useToast';
 import { useI18n } from '@/hooks/useI18n';
-import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
+import {
+  getSftpPaneConnection,
+  getSftpPaneConnectionKey,
+  useSftpStore,
+  type SftpConnection,
+  type SftpSide,
+} from '@/stores/sftpStore';
 import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
+import { createLogger } from '@/lib/logger';
 import type { FileEntry } from '@/components/sftp/file-entry-formatters';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
+
+const logger = createLogger('sftp');
 
 export type UploadConflictAction = 'overwrite' | 'replace' | 'skip' | 'cancel';
 
@@ -96,7 +106,9 @@ export function useSftpPaneActions(
   const path = side === 'local' ? connection.localPath : connection.remotePath;
   const entries = side === 'local' ? connection.localEntries : connection.remoteEntries;
   const pane = side === 'local' ? connection.localPane : connection.remotePane;
-  const remoteBookmarks = connection.remoteBookmarks;
+  const remoteBookmarks = connection.remoteBookmarks[side];
+  const remoteConnection = getSftpPaneConnection(connection, side);
+  const remoteConnectionKey = getSftpPaneConnectionKey(connection, side);
 
   const { loadLocalDirectory } = useLocalDirectory(connection, side);
   const {
@@ -111,7 +123,13 @@ export function useSftpPaneActions(
     openRemoteFile,
     previewRemoteFile,
   } = useSftpConnection(connection, side);
-  const { addOperation, markOperationFailed, markOperationRunning, removeOperation } = useTransferStore();
+  const {
+    addOperation,
+    markOperationCompleted,
+    markOperationFailed,
+    markOperationRunning,
+    removeOperation,
+  } = useTransferStore();
   const { error, success } = useToast();
   const { t } = useI18n();
 
@@ -134,8 +152,8 @@ export function useSftpPaneActions(
   );
 
   const pathsAreBusy = useCallback(
-    (paths: string[]) => hasActivePathOperation(connection.id, paths),
-    [connection.id],
+    (paths: string[]) => hasActivePathOperation(remoteConnectionKey, paths),
+    [remoteConnectionKey],
   );
 
   const reportBusyPaths = useCallback(() => {
@@ -252,22 +270,72 @@ export function useSftpPaneActions(
         sourcePath: target.path,
         sourceName: target.name,
         kind: target.kind,
+        sourceSide: side,
+        sourceConnection: remoteConnection,
+        sourceConnectionKey: remoteConnectionKey,
       });
       success(`Copied ${target.name}`);
     },
-    [connection.id, isLocal, selectedEntries, setRemoteClipboard, success],
+    [connection.id, isLocal, remoteConnection, remoteConnectionKey, selectedEntries, setRemoteClipboard, side, success],
   );
 
   const onPaste = useCallback(async () => {
     if (isLocal || !connection.remoteClipboard) return;
     try {
-      await copyRemotePath(connection.remoteClipboard.sourcePath, path);
+      if (connection.remoteClipboard.sourceConnectionKey === remoteConnectionKey) {
+        await copyRemotePath(connection.remoteClipboard.sourcePath, path);
+      } else {
+        const request = {
+          sourceConnection: connection.remoteClipboard.sourceConnection,
+          destinationConnection: remoteConnection,
+          sourcePaths: [connection.remoteClipboard.sourcePath],
+          destinationDirectory: path,
+          conflictPolicies: ['fail'] as UploadConflictPolicy[],
+        };
+        const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
+        const destinationBase = path === '/' ? '' : path.replace(/\/+$/, '');
+        const destinationPath = `${destinationBase}/${connection.remoteClipboard.sourceName}`;
+        const runRemoteCopy = async (): Promise<void> => {
+          markOperationRunning(operationId);
+          try {
+            await invokeCopyRemoteToRemote(request);
+            markOperationCompleted(operationId);
+          } catch (copyError) {
+            markOperationFailed(
+              operationId,
+              copyError instanceof Error ? copyError.message : String(copyError),
+            );
+            throw copyError;
+          }
+        };
+        addOperation({
+          operationId,
+          kind: 'remote-copy',
+          connectionId: connection.remoteClipboard.sourceConnectionKey,
+          paths: [connection.remoteClipboard.sourcePath],
+          pathScopes: [
+            {
+              connectionId: connection.remoteClipboard.sourceConnectionKey,
+              paths: [connection.remoteClipboard.sourcePath],
+            },
+            { connectionId: remoteConnectionKey, paths: [destinationPath] },
+          ],
+          currentPath: connection.remoteClipboard.sourcePath,
+          totalBytes: 0,
+          processedBytes: 0,
+          totalSteps: 1,
+          completedSteps: 0,
+          status: 'running',
+          retry: runRemoteCopy,
+        });
+        await runRemoteCopy();
+      }
       await reload();
       clearSelection();
     } catch (err) {
       error(err instanceof Error ? err.message : String(err));
     }
-  }, [clearSelection, connection.remoteClipboard, copyRemotePath, isLocal, path, reload, error]);
+  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, markOperationCompleted, markOperationFailed, markOperationRunning, path, reload, remoteConnection, remoteConnectionKey, error]);
 
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
@@ -550,12 +618,12 @@ export function useSftpPaneActions(
       const targetPath = bookmarkPath ?? path;
       if (!targetPath) return;
       if (remoteBookmarks.includes(targetPath)) {
-        removeRemoteBookmark(connection.id, targetPath);
+        removeRemoteBookmark(connection.id, side, targetPath);
       } else {
-        addRemoteBookmark(connection.id, targetPath);
+        addRemoteBookmark(connection.id, side, targetPath);
       }
     },
-    [addRemoteBookmark, connection.id, isLocal, path, remoteBookmarks, removeRemoteBookmark],
+    [addRemoteBookmark, connection.id, isLocal, path, remoteBookmarks, removeRemoteBookmark, side],
   );
 
   const onRefresh = useCallback(async () => {

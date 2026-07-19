@@ -12,7 +12,11 @@ import { SftpBlankContextMenu, type SftpBlankContextMenuAction } from './sftp-bl
 import { SftpBookmarkMenu } from './sftp-bookmark-menu';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
-import { type SftpConnection, type SftpSide } from '@/stores/sftpStore';
+import {
+  getSftpPaneConnectionKey,
+  type SftpConnection,
+  type SftpSide,
+} from '@/stores/sftpStore';
 import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './file-entry-formatters';
 import type { SftpDndPayload } from './sftp-dnd-context';
@@ -84,7 +88,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
     (error.toLowerCase().includes('host key') ||
       error.toLowerCase().includes('trust this host'));
   const pane = side === 'local' ? connection.localPane : connection.remotePane;
-  const remoteBookmarks = connection.remoteBookmarks;
+  const remoteBookmarks = connection.remoteBookmarks[side];
 
   const { loadLocalDirectory } = useLocalDirectory(connection, side);
   const { loadRemoteDirectory } = useSftpConnection(connection, side);
@@ -204,7 +208,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
   const selectedEntries = useMemo(() => entries.filter((entry) => selectedPaths.has(entry.path)), [entries, selectedPaths]);
   const transferOperations = useTransferStore((state) => state.operations);
   const selectionBusy = !isLocal && hasActivePathOperation(
-    connection.id,
+    getSftpPaneConnectionKey(connection, side),
     selectedEntries.map((entry) => entry.path),
     transferOperations,
   );
