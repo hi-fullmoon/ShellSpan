@@ -147,7 +147,7 @@ export const TransferProgress: React.FC = () => {
                       : op.kind === 'delete' && isTransferComplete(op)
                         ? t('sftp.transfer.trashed')
                         : op.status === 'cancelling'
-                    ? t('sftp.transfer.cancellingDelete')
+                    ? t('sftp.transfer.cancelling')
                     : op.status === 'cancelled'
                       ? t('sftp.transfer.cancelled')
                       : formatTransferProgress(op)}

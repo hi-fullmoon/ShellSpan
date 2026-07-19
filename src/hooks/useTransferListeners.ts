@@ -4,6 +4,7 @@ import { useTransferStore } from '@/stores/transferStore';
 import type {
   DeleteProgressEvent,
   DownloadProgressEvent,
+  RemoteCopyProgressEvent,
   UploadProgressEvent,
 } from '@/types';
 
@@ -11,11 +12,13 @@ export function useTransferListeners(): void {
   const updateUpload = useTransferStore((state) => state.updateUpload);
   const updateDownload = useTransferStore((state) => state.updateDownload);
   const updateDelete = useTransferStore((state) => state.updateDelete);
+  const updateRemoteCopy = useTransferStore((state) => state.updateRemoteCopy);
 
   useEffect(() => {
     let unlistenUpload: (() => void) | undefined;
     let unlistenDownload: (() => void) | undefined;
     let unlistenDelete: (() => void) | undefined;
+    let unlistenRemoteCopy: (() => void) | undefined;
 
     const setup = async (): Promise<void> => {
       unlistenUpload = await listen<UploadProgressEvent>(
@@ -36,6 +39,12 @@ export function useTransferListeners(): void {
           updateDelete(event.payload);
         },
       );
+      unlistenRemoteCopy = await listen<RemoteCopyProgressEvent>(
+        'remote-copy-progress',
+        (event) => {
+          updateRemoteCopy(event.payload);
+        },
+      );
     };
 
     setup();
@@ -44,6 +53,7 @@ export function useTransferListeners(): void {
       unlistenUpload?.();
       unlistenDownload?.();
       unlistenDelete?.();
+      unlistenRemoteCopy?.();
     };
-  }, [updateUpload, updateDownload, updateDelete]);
+  }, [updateUpload, updateDownload, updateDelete, updateRemoteCopy]);
 }

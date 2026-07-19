@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+const TERM_BRIDGE_DIRECTORY: &str = ".termbridge";
+
 pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Result<(), String> {
     if request.source_paths.is_empty() {
         return Err("no source paths were provided for copy".to_string());
@@ -35,6 +37,9 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
             .ok_or_else(|| format!("invalid source path: {}", source_path.display()))?
             .to_string_lossy()
             .to_string();
+        if file_name == TERM_BRIDGE_DIRECTORY {
+            return Err("'.termbridge' is reserved for application data".to_string());
+        }
         let conflict_policy = request
             .conflict_policies
             .get(index)
@@ -61,6 +66,9 @@ fn local_entry_names(directory: &Path) -> Result<HashSet<String>, String> {
     for entry in fs::read_dir(directory).map_err(|error| format!("failed to read directory: {error}"))? {
         let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
+        if name == TERM_BRIDGE_DIRECTORY {
+            continue;
+        }
         names.insert(name);
     }
     Ok(names)
@@ -93,6 +101,9 @@ fn copy_local_entry_to_path(source: &Path, destination: &Path) -> Result<(), Str
             .map_err(|error| format!("failed to create directory {}: {error}", destination.display()))?;
         for entry in fs::read_dir(source).map_err(|error| format!("failed to read directory {}: {error}", source.display()))? {
             let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+            if entry.file_name() == TERM_BRIDGE_DIRECTORY {
+                continue;
+            }
             let entry_destination = destination.join(entry.file_name());
             copy_local_entry_to_path(&entry.path(), &entry_destination)?;
         }

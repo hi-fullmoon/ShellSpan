@@ -24,7 +24,7 @@ const tauri = vi.hoisted(() => ({
   invokeRestoreRemotePath: vi.fn().mockResolvedValue(undefined),
   invokeTrashRemotePath: vi.fn().mockResolvedValue({
     originalPath: '/remote/draft.txt',
-    trashPath: '/remote/.termbridge-trash/id-draft.txt',
+    trashPath: '/remote/.termbridge/trash/id-draft.txt',
   }),
   invokeUpdateRemotePermissions: vi.fn().mockResolvedValue(undefined),
   invokeUploadLocalPaths: vi.fn().mockResolvedValue(undefined),
@@ -116,7 +116,7 @@ describe('useSftpConnection delete undo window', () => {
     expect(tauri.invokeRestoreRemotePath).toHaveBeenCalledWith(
       expect.objectContaining({
         originalPath: file.path,
-        trashPath: '/remote/.termbridge-trash/id-draft.txt',
+        trashPath: '/remote/.termbridge/trash/id-draft.txt',
       }),
     );
     expect(useTransferStore.getState().operations[0]?.status).toBe('restored');
@@ -138,7 +138,7 @@ describe('useSftpConnection delete undo window', () => {
 
     expect(tauri.invokeDeleteRemotePath).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: '/remote/.termbridge-trash/id-draft.txt',
+        path: '/remote/.termbridge/trash/id-draft.txt',
         operationId: expect.stringContaining('-cleanup-0'),
       }),
     );

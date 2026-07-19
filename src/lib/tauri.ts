@@ -68,6 +68,10 @@ export async function invokeWriteSession(sessionId: string, data: string): Promi
   return invokeLogged('write_session', { sessionId, data });
 }
 
+export async function invokeGetSessionStatus(sessionId: string): Promise<StatusEvent> {
+  return invokeLogged<StatusEvent>('get_session_status', { sessionId });
+}
+
 export async function invokeResizeSession(
   sessionId: string,
   cols: number,
@@ -138,6 +142,10 @@ export async function invokeCopyRemoteToRemote(
   request: CopyRemoteToRemoteRequest,
 ): Promise<void> {
   return invokeLogged('copy_remote_to_remote', { request });
+}
+
+export async function invokeCancelRemoteCopy(operationId: string): Promise<void> {
+  return invokeLogged('cancel_remote_copy', { operationId });
 }
 
 export async function invokeCancelUpload(operationId: string): Promise<void> {

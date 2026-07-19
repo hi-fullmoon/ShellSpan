@@ -41,8 +41,12 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
 
       terminalRegistry.rebindSession(sessionId, summary.sessionId);
       reconnectSession(sessionId, summary, profile.id);
-      invokeCloseSession(sessionId).catch(() => {});
+      logger.info(`Reconnected session ${sessionId} as session ${summary.sessionId}`);
+      invokeCloseSession(sessionId).catch((error) => {
+        logger.warn(`Failed to close replaced session ${sessionId}`, error);
+      });
     } catch (error) {
+      logger.error(`Failed to reconnect session ${sessionId}`, error);
       setStatus(sessionId, {
         sessionId,
         status: 'error',

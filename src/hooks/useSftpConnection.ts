@@ -78,6 +78,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         setPath(connection.id, side, listing.path);
         setEntries(connection.id, side, listing.entries);
       } catch (error) {
+        logger.error(`Failed to list remote directory${path ? `: ${path}` : ''}`, error);
         setError(
           connection.id,
           side,

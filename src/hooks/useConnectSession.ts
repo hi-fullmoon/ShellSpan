@@ -46,6 +46,7 @@ export function useConnectSession(): {
   const pendingProfileRef = useRef<ConnectionProfile | null>(null);
 
   const connect = async (profile: ConnectionProfile): Promise<void> => {
+    logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
     const profileWithPassword = await ensurePassword(profile);
     pendingProfileRef.current = profileWithPassword;
     try {
@@ -53,6 +54,7 @@ export function useConnectSession(): {
         buildSessionCreateRequest(profileWithPassword, 120, 30),
       );
       addSession(summary, profile.id);
+      logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
       useRecentProfilesStore.getState().touchProfile(profile.id);
       setActiveSection('terminal');
     } catch (error) {
@@ -92,6 +94,7 @@ export function useConnectSession(): {
         const payload = typed.payload ?? {};
         const host = String(payload.host ?? '');
         const port = Number(payload.port ?? 22);
+        logger.warn(`Host key verification prompt (${typed.type}) for ${host}:${port}`);
         setHostKeyDialog({
           open: true,
           host,
@@ -113,6 +116,7 @@ export function useConnectSession(): {
         const payload = typed.payload ?? {};
         const host = String(payload.host ?? '');
         const port = Number(payload.port ?? 22);
+        logger.warn(`Host key verification prompt (${typed.type}) for ${host}:${port}`);
         setHostKeyDialog({
           open: true,
           host,
@@ -131,6 +135,7 @@ export function useConnectSession(): {
     useToastStore
       .getState()
       .addToast(error instanceof Error ? error.message : String(error), 'error');
+    logger.error('Connection failed', error);
   };
 
   const closeHostKeyDialog = (): void => {

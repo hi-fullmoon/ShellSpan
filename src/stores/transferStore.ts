@@ -3,6 +3,7 @@ import { createLogger } from '@/lib/logger';
 import type {
   DeleteProgressEvent,
   DownloadProgressEvent,
+  RemoteCopyProgressEvent,
   UploadProgressEvent,
 } from '@/types';
 
@@ -41,6 +42,7 @@ interface TransferState {
   updateUpload: (event: UploadProgressEvent) => void;
   updateDownload: (event: DownloadProgressEvent) => void;
   updateDelete: (event: DeleteProgressEvent) => void;
+  updateRemoteCopy: (event: RemoteCopyProgressEvent) => void;
   removeOperation: (operationId: string) => void;
   markOperationRunning: (operationId: string) => void;
   markOperationFailed: (operationId: string, error: string) => void;
@@ -55,7 +57,8 @@ interface TransferState {
 
 export const useTransferStore = create<TransferState>()((set) => ({
   operations: [],
-  addOperation: (operation) =>
+  addOperation: (operation) => {
+    logger.info(`Transfer started: ${operation.kind} (${operation.operationId})`);
     set((state) => ({
       operations: state.operations.some(
         (o) => o.operationId === operation.operationId,
@@ -64,7 +67,8 @@ export const useTransferStore = create<TransferState>()((set) => ({
             o.operationId === operation.operationId ? { ...o, ...operation } : o,
           )
         : [operation, ...state.operations],
-    })),
+    }));
+  },
   updateUpload: (event) =>
     set((state) => ({
       operations: state.operations.map((op) =>
@@ -122,15 +126,33 @@ export const useTransferStore = create<TransferState>()((set) => ({
           : operation,
       ),
     })),
-  markOperationFailed: (operationId, error) =>
+  markOperationFailed: (operationId, error) => {
+    logger.error(`Transfer failed: ${operationId}`, error);
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
           ? { ...operation, status: 'failed', error }
           : operation,
       ),
+    }));
+  },
+  updateRemoteCopy: (event) =>
+    set((state) => ({
+      operations: state.operations.map((op) =>
+        op.operationId === event.operationId
+          ? {
+              ...op,
+              currentPath: event.currentPath || op.currentPath,
+              totalBytes: event.totalBytes,
+              processedBytes: event.copiedBytes,
+              totalSteps: event.totalSteps,
+              completedSteps: event.completedSteps,
+            }
+          : op,
+      ),
     })),
-  markOperationCompleted: (operationId) =>
+  markOperationCompleted: (operationId) => {
+    logger.info(`Transfer completed: ${operationId}`);
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
@@ -143,15 +165,18 @@ export const useTransferStore = create<TransferState>()((set) => ({
             }
           : operation,
       ),
-    })),
-  markOperationCancelled: (operationId) =>
+    }));
+  },
+  markOperationCancelled: (operationId) => {
+    logger.info(`Transfer cancelled: ${operationId}`);
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
           ? { ...operation, status: 'cancelled', error: undefined }
           : operation,
       ),
-    })),
+    }));
+  },
   retryOperation: async (operationId) => {
     const operation = useTransferStore
       .getState()

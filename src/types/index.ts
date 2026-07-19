@@ -276,12 +276,22 @@ export interface CopyLocalPathsRequest {
   operationId: string;
 }
 
+export interface RemoteCopyProgressEvent {
+  operationId: string;
+  currentPath?: string;
+  totalBytes: number;
+  copiedBytes: number;
+  totalSteps: number;
+  completedSteps: number;
+}
+
 export interface CopyRemoteToRemoteRequest {
   sourceConnection: RemoteConnectionRequest;
   destinationConnection: RemoteConnectionRequest;
   sourcePaths: string[];
   destinationDirectory: string;
   conflictPolicies: UploadConflictPolicy[];
+  operationId: string;
 }
 
 export type UploadConflictPolicy = 'overwrite' | 'replace' | 'skip' | 'fail';

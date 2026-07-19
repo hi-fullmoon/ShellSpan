@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import {
+  invokeGetSessionStatus,
   invokeResizeSession,
   invokeWriteSession,
   listenToSshClosed,
@@ -190,6 +191,7 @@ class TerminalControllerImpl implements TerminalController {
     this.unlisten.data = dataUnlisten;
 
     const statusUnlisten = await listenToSshStatus(sessionId, (event) => {
+      logger.info(`Session ${sessionId} status: ${event.payload.status}`);
       this.setStatus(sessionId, event.payload);
       this.writeSystemLine(
         formatTerminalStatusLine(event.payload.status, event.payload.message),
@@ -205,6 +207,7 @@ class TerminalControllerImpl implements TerminalController {
     this.unlisten.status = statusUnlisten;
 
     const closedUnlisten = await listenToSshClosed(sessionId, (event) => {
+      logger.info(`Session ${sessionId} closed${event.payload.reason ? `: ${event.payload.reason}` : ''}`);
       this.setClosed(sessionId, event.payload);
       this.writeSystemLine(
         formatTerminalNoticeLine(
@@ -228,6 +231,28 @@ class TerminalControllerImpl implements TerminalController {
       return;
     }
     this.unlisten.closed = closedUnlisten;
+
+    try {
+      const snapshot = await invokeGetSessionStatus(sessionId);
+      if (
+        !this.disposed &&
+        generation === this.listenerGeneration &&
+        this.getStatus(sessionId) === 'connecting'
+      ) {
+        logger.info(`Session ${sessionId} reconciled status: ${snapshot.status}`);
+        this.setStatus(sessionId, snapshot);
+        this.writeSystemLine(
+          formatTerminalStatusLine(snapshot.status, snapshot.message),
+        );
+        if (snapshot.status === 'connected' || snapshot.status === 'error') {
+          this.resetNoticeState();
+        }
+      }
+    } catch (error) {
+      if (!this.disposed && generation === this.listenerGeneration) {
+        logger.warn(`Failed to reconcile session ${sessionId} status`, error);
+      }
+    }
   }
 
   attach(host: HTMLElement): void {
@@ -265,7 +290,9 @@ class TerminalControllerImpl implements TerminalController {
           this.sessionId,
           this.terminal.cols,
           this.terminal.rows,
-        ).catch(() => {});
+        ).catch((error) => {
+          logger.warn(`Failed to resize session ${this.sessionId}`, error);
+        });
       });
       this.resizeObserver.observe(this.container);
     }
@@ -276,7 +303,9 @@ class TerminalControllerImpl implements TerminalController {
         this.sessionId,
         this.terminal.cols,
         this.terminal.rows,
-      ).catch(() => {});
+      ).catch((error) => {
+        logger.warn(`Failed to resize session ${this.sessionId}`, error);
+      });
     }
 
     this.host = host;
@@ -317,6 +346,7 @@ class TerminalControllerImpl implements TerminalController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    logger.debug(`Terminal disposed for session ${this.sessionId}`);
     this.detach();
     this.clearListeners();
     this.terminal.dispose();

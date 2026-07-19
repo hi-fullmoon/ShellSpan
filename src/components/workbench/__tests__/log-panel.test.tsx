@@ -19,6 +19,8 @@ const refreshActiveFile = vi.fn().mockResolvedValue(undefined);
 const defaultContent =
   'first complete log line\nsecond complete log line\nthird complete log line';
 let mockContent = defaultContent;
+let mockFiles: { name: string; size: number; modifiedAt: number }[] = [];
+let mockActiveFileName: string | undefined = 'termbridge.log';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -29,8 +31,8 @@ vi.mock('@/hooks/useI18n', () => ({
 
 vi.mock('@/stores/logStore', () => ({
   useLogStore: () => ({
-    files: [],
-    activeFileName: 'termbridge.log',
+    files: mockFiles,
+    activeFileName: mockActiveFileName,
     content: mockContent,
     loading: false,
     loadFiles,
@@ -60,6 +62,8 @@ describe('LogPanel', () => {
     vi.clearAllMocks();
     mockAddToast.mockClear();
     mockContent = defaultContent;
+    mockFiles = [];
+    mockActiveFileName = 'termbridge.log';
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText },
@@ -71,9 +75,10 @@ describe('LogPanel', () => {
   });
 
   it('shows recent log entries by default', () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     mockContent =
-      `[${today}][12:34:56][INFO][termbridge] persisted log entry`;
+      `[${todayString}][12:34:56][INFO][termbridge] persisted log entry`;
 
     render(<LogPanel />);
 
@@ -129,5 +134,29 @@ describe('LogPanel', () => {
     expect(
       screen.getAllByRole('button', { name: 'workbench.logs.all' })[1],
     ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('lists log sources as tags and switches to the newest file of the clicked source', () => {
+    mockFiles = [
+      { name: 'frontend.log', size: 20, modifiedAt: 3 },
+      { name: 'frontend_2000-01-01.log', size: 10, modifiedAt: 2 },
+      { name: 'backend.log', size: 30, modifiedAt: 1 },
+    ];
+    mockActiveFileName = 'frontend.log';
+
+    render(<LogPanel />);
+
+    const frontendChip = screen.getByRole('button', {
+      name: 'workbench.logs.sourceFrontend',
+    });
+    const backendChip = screen.getByRole('button', {
+      name: 'workbench.logs.sourceBackend',
+    });
+    expect(frontendChip).toHaveAttribute('aria-pressed', 'true');
+    expect(backendChip).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(backendChip);
+
+    expect(loadFile).toHaveBeenCalledWith('backend.log');
   });
 });

@@ -6,6 +6,11 @@ import { useProfileStore } from '@/stores/profileStore';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 
 vi.mock('@/lib/tauri', () => ({
+  invokeGetSessionStatus: vi.fn().mockResolvedValue({
+    sessionId: 's1',
+    status: 'connected',
+    message: 'ready',
+  }),
   invokeCreateSession: vi.fn().mockResolvedValue({
     sessionId: 's2',
     title: 'New',

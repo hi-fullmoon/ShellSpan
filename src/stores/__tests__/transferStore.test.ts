@@ -128,4 +128,29 @@ describe('transferStore', () => {
     expect(hasActivePathOperation('destination', ['/shared/report.txt'])).toBe(true);
     expect(hasActivePathOperation('unrelated', ['/shared/report.txt'])).toBe(false);
   });
+
+  it('updates byte and step progress for remote copies', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'remote-copy',
+      operationId: 'remote-copy-progress',
+    });
+
+    useTransferStore.getState().updateRemoteCopy({
+      operationId: 'remote-copy-progress',
+      currentPath: '/source/report.txt',
+      totalBytes: 200,
+      copiedBytes: 80,
+      totalSteps: 2,
+      completedSteps: 1,
+    });
+
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      currentPath: '/source/report.txt',
+      totalBytes: 200,
+      processedBytes: 80,
+      totalSteps: 2,
+      completedSteps: 1,
+    });
+  });
 });
