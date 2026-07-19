@@ -10,6 +10,7 @@ import {
   updateFlowReducer,
   type UpdateState,
 } from '@/lib/update';
+import { createLogger } from '@/lib/logger';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface UseUpdateFlowOptions {
@@ -25,21 +26,7 @@ export interface UseUpdateFlowResult {
   handleInstallUpdateLater: () => void;
 }
 
-async function logUpdate(level: 'info' | 'error', message: string): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
-  try {
-    const { info, error } = await import('@tauri-apps/plugin-log');
-    if (level === 'info') {
-      await info(message);
-    } else {
-      await error(message);
-    }
-  } catch {
-    // ignore logging failures
-  }
-}
+const logger = createLogger('update');
 
 export function useUpdateFlow({
   startupUpdateCheck,
@@ -92,7 +79,7 @@ export function useUpdateFlow({
           if (mode === 'manual') {
             toast.info(t('update.latest'));
           }
-          await logUpdate('info', 'No update available');
+          logger.info('No update available');
           return;
         }
 
@@ -100,7 +87,7 @@ export function useUpdateFlow({
           type: 'updateFound',
           payload: { latestVersion: available.version },
         });
-        await logUpdate('info', `Update available: ${available.version}`);
+        logger.info(`Update available: ${available.version}`);
 
         dispatchUpdateState({ type: 'downloadStarted' });
         setUpdateDownloadProgress(0);
@@ -115,15 +102,12 @@ export function useUpdateFlow({
           payload: { downloadedVersion: available.version },
         });
         setRestartDialogDismissed(false);
-        await logUpdate('info', `Update downloaded: ${available.version}`);
+        logger.info(`Update downloaded: ${available.version}`);
       } catch (error) {
         const message = t('update.failed', {
           error: error instanceof Error ? error.message : String(error),
         });
-        await logUpdate(
-          'error',
-          `Update check/download failed (${mode}): ${message}`,
-        );
+        logger.error(`Update check/download failed (${mode}): ${message}`);
         dispatchUpdateState({
           type: 'downloadFailed',
           payload: { message },
