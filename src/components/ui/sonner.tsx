@@ -80,7 +80,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast:
-            'gap-2! px-4! py-[9px]! text-sm! shadow-[var(--shadow-toast)]!',
+            'w-auto! min-w-60! max-w-[var(--width)]! gap-2! px-4! py-[9px]! text-sm! shadow-[var(--shadow-toast)]!',
           title: 'font-normal!',
         },
       }}

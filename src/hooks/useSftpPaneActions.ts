@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   invokeCopyLocalPaths,
+  invokeCancelRemoteCopy,
   invokeCopyRemoteToRemote,
   invokePickLocalFiles,
   invokePickLocalFolder,
@@ -126,6 +127,7 @@ export function useSftpPaneActions(
   const {
     addOperation,
     markOperationCompleted,
+    markOperationCancelled,
     markOperationFailed,
     markOperationRunning,
     removeOperation,
@@ -193,6 +195,7 @@ export function useSftpPaneActions(
       try {
         await openRemoteFile(target.path);
       } catch (err) {
+        logger.warn(`Failed to open remote file: ${target.path}`, err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
@@ -208,6 +211,7 @@ export function useSftpPaneActions(
         const content = await previewRemoteFile(target.path);
         setPreviewContent(content);
       } catch (err) {
+        logger.warn(`Failed to preview remote file: ${target.path}`, err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
@@ -232,6 +236,7 @@ export function useSftpPaneActions(
         }
         await downloadRemotePaths([target.path], folders[0]);
       } catch (err) {
+        logger.warn(`Failed to download: ${target.path}`, err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
@@ -255,6 +260,7 @@ export function useSftpPaneActions(
         }
         await downloadRemotePaths(selectedRemotePaths, folders[0]);
       } catch (err) {
+        logger.warn('Batch download failed', err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
@@ -285,14 +291,15 @@ export function useSftpPaneActions(
       if (connection.remoteClipboard.sourceConnectionKey === remoteConnectionKey) {
         await copyRemotePath(connection.remoteClipboard.sourcePath, path);
       } else {
+        const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
         const request = {
           sourceConnection: connection.remoteClipboard.sourceConnection,
           destinationConnection: remoteConnection,
           sourcePaths: [connection.remoteClipboard.sourcePath],
           destinationDirectory: path,
           conflictPolicies: ['fail'] as UploadConflictPolicy[],
+          operationId,
         };
-        const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
         const destinationBase = path === '/' ? '' : path.replace(/\/+$/, '');
         const destinationPath = `${destinationBase}/${connection.remoteClipboard.sourceName}`;
         const runRemoteCopy = async (): Promise<void> => {
@@ -300,7 +307,15 @@ export function useSftpPaneActions(
           try {
             await invokeCopyRemoteToRemote(request);
             markOperationCompleted(operationId);
+            void reload();
           } catch (copyError) {
+            const operation = useTransferStore.getState().operations.find(
+              (item) => item.operationId === operationId,
+            );
+            if (operation?.status === 'cancelling') {
+              markOperationCancelled(operationId);
+              return;
+            }
             markOperationFailed(
               operationId,
               copyError instanceof Error ? copyError.message : String(copyError),
@@ -327,15 +342,17 @@ export function useSftpPaneActions(
           completedSteps: 0,
           status: 'running',
           retry: runRemoteCopy,
+          cancel: () => invokeCancelRemoteCopy(operationId),
         });
         await runRemoteCopy();
       }
       await reload();
       clearSelection();
     } catch (err) {
+      logger.warn('Paste failed', err);
       error(err instanceof Error ? err.message : String(err));
     }
-  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, markOperationCompleted, markOperationFailed, markOperationRunning, path, reload, remoteConnection, remoteConnectionKey, error]);
+  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, reload, remoteConnection, remoteConnectionKey, error]);
 
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
@@ -344,7 +361,8 @@ export function useSftpPaneActions(
       try {
         await writeClipboardText(target.name);
         success('Copied name');
-      } catch {
+      } catch (err) {
+        logger.warn('Failed to copy name', err);
         error('Failed to copy name');
       }
     },
@@ -358,7 +376,8 @@ export function useSftpPaneActions(
       try {
         await writeClipboardText(target.path);
         success('Copied path');
-      } catch {
+      } catch (err) {
+        logger.warn('Failed to copy path', err);
         error('Failed to copy path');
       }
     },
@@ -373,7 +392,8 @@ export function useSftpPaneActions(
       try {
         await writeClipboardText(dir);
         success('Copied directory path');
-      } catch {
+      } catch (err) {
+        logger.warn('Failed to copy directory path', err);
         error('Failed to copy directory path');
       }
     },
@@ -385,7 +405,8 @@ export function useSftpPaneActions(
     try {
       await writeClipboardText(path);
       success('Copied current directory path');
-    } catch {
+    } catch (err) {
+      logger.warn('Failed to copy current directory path', err);
       error('Failed to copy current directory path');
     }
   }, [path, error, success]);
@@ -408,6 +429,7 @@ export function useSftpPaneActions(
         await reload();
         clearSelection();
       } catch (err) {
+        logger.warn(`Failed to create ${kind}: ${name}`, err);
         error(err instanceof Error ? err.message : String(err));
       } finally {
         setCreateMode(null);
@@ -439,6 +461,7 @@ export function useSftpPaneActions(
         await reload();
         clearSelection();
       } catch (err) {
+        logger.warn(`Failed to rename: ${renameTarget.path}`, err);
         error(err instanceof Error ? err.message : String(err));
       } finally {
         setRenameTarget(undefined);
@@ -461,6 +484,7 @@ export function useSftpPaneActions(
         await reload();
         clearSelection();
       } catch (err) {
+        logger.warn('Failed to delete remote paths', err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
@@ -486,6 +510,7 @@ export function useSftpPaneActions(
       await reload();
       clearSelection();
     } catch (err) {
+      logger.warn('Failed to upload files', err);
       error(err instanceof Error ? err.message : String(err));
     }
   }, [addOperation, connection.id, clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
@@ -509,6 +534,7 @@ export function useSftpPaneActions(
       await reload();
       clearSelection();
     } catch (err) {
+      logger.warn('Failed to upload folders', err);
       error(err instanceof Error ? err.message : String(err));
     }
   }, [addOperation, connection.id, clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
@@ -529,6 +555,7 @@ export function useSftpPaneActions(
         });
         await uploadLocalPaths(localPaths, destinationDirectory, operationId, policies);
       } catch (err) {
+        logger.warn('Upload with conflict policies failed', err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
@@ -571,6 +598,7 @@ export function useSftpPaneActions(
       try {
         await runCopy();
       } catch (err) {
+        logger.warn('Copy with conflict policies failed', err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
@@ -595,6 +623,7 @@ export function useSftpPaneActions(
         await reload();
         clearSelection();
       } catch (err) {
+        logger.warn(`Failed to update permissions: ${permissionsTarget.path}`, err);
         error(err instanceof Error ? err.message : String(err));
       } finally {
         setPermissionsTarget(undefined);
@@ -630,6 +659,7 @@ export function useSftpPaneActions(
     try {
       await reload();
     } catch (err) {
+      logger.warn('Failed to refresh directory', err);
       error(err instanceof Error ? err.message : String(err));
     }
   }, [reload, error]);

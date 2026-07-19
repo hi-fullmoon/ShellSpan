@@ -124,7 +124,14 @@ pub(crate) async fn create_session(
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
-    state.insert(session_id.clone(), ManagedSession { sender: tx }).map_err(|message| {
+    state.insert(session_id.clone(), ManagedSession {
+        sender: tx,
+        status: StatusEvent {
+            session_id: session_id.clone(),
+            status: SessionStatus::Connecting,
+            message: Some("connecting".to_string()),
+        },
+    }).map_err(|message| {
         error!("Failed to register SSH session session_id={session_id}: {message}");
         CreateSessionError::Other { message }
     })?;
@@ -209,7 +216,14 @@ pub(crate) fn create_local_session(
     let master = pair.master;
     let (tx, rx) = mpsc::channel::<SessionCommand>();
     state
-        .insert(session_id.clone(), ManagedSession { sender: tx })
+        .insert(session_id.clone(), ManagedSession {
+            sender: tx,
+            status: StatusEvent {
+                session_id: session_id.clone(),
+                status: SessionStatus::Connected,
+                message: Some("local shell ready".to_string()),
+            },
+        })
         .map_err(|message| {
             error!("Failed to register local session session_id={session_id}: {message}");
             message
@@ -324,6 +338,14 @@ pub(crate) fn write_session(
         warn!("Failed to write SSH session input session_id={session_id}: {error}");
     }
     result
+}
+
+#[tauri::command]
+pub(crate) fn get_session_status(
+    state: State<'_, SessionManager>,
+    session_id: String,
+) -> Result<StatusEvent, String> {
+    state.status(&session_id)
 }
 
 #[tauri::command]
@@ -576,20 +598,33 @@ pub(crate) async fn copy_remote_path(
 #[tauri::command]
 pub(crate) async fn copy_remote_to_remote(
     app: AppHandle,
+    copies: State<'_, RemoteCopyCancellationRegistry>,
     request: CopyRemoteToRemoteRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    let cancel_flag = copies.register(request.operation_id.clone())?;
+    let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        copy_remote_to_remote_blocking(request, Some(&pool), known_hosts.as_deref())
+        copy_remote_to_remote_blocking(app, request, cancel_flag, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join remote transfer task: {error}"))?;
+    .unwrap_or_else(|error| Err(format!("failed to join remote transfer task: {error}")));
+    let _ = copies.remove(&operation_id);
     if let Err(error) = &result {
         error!("Copy remote to remote failed: {error}");
     }
     result
+}
+
+#[tauri::command]
+pub(crate) fn cancel_remote_copy(
+    copies: State<'_, RemoteCopyCancellationRegistry>,
+    operation_id: String,
+) -> Result<(), String> {
+    info!("Cancelling remote copy operation_id={operation_id}");
+    copies.cancel(&operation_id)
 }
 
 #[tauri::command]
@@ -1267,6 +1302,9 @@ pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<Local
     let mut entries = Vec::new();
     for entry in fs::read_dir(&canonical).map_err(|error| format!("failed to read directory: {error}"))? {
         let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+        if is_termbridge_application_entry(&entry.file_name()) {
+            continue;
+        }
         let metadata = entry.metadata().map_err(|error| format!("failed to read entry metadata: {error}"))?;
         let path = portable_local_path(&entry.path());
         let name = entry.file_name().to_string_lossy().to_string();
@@ -1308,6 +1346,10 @@ pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<Local
         parent_path,
         entries,
     })
+}
+
+fn is_termbridge_application_entry(name: &std::ffi::OsStr) -> bool {
+    name == std::ffi::OsStr::new(".termbridge")
 }
 
 fn contains_shell_metacharacters(input: &str) -> bool {
@@ -1391,4 +1433,16 @@ pub(crate) fn spawn_ssh_thread(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_termbridge_application_entry;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn local_listing_hides_only_termbridge_application_directory() {
+        assert!(is_termbridge_application_entry(OsStr::new(".termbridge")));
+        assert!(!is_termbridge_application_entry(OsStr::new("termbridge")));
+    }
 }

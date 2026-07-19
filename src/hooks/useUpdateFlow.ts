@@ -161,10 +161,7 @@ export function useUpdateFlow({
         }
         unlisten = nextUnlisten;
       } catch (error) {
-        await logUpdate(
-          'error',
-          `Failed to listen for system-check-update: ${String(error)}`,
-        );
+        logger.error(`Failed to listen for system-check-update: ${String(error)}`);
       }
     };
 
@@ -180,12 +177,12 @@ export function useUpdateFlow({
     setRestartDialogDismissed(true);
     void (async () => {
       try {
-        await logUpdate('info', 'Installing update now');
+        logger.info('Installing update now');
         await invokeRequestAppRestart();
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await logUpdate('error', `Failed to restart for update: ${message}`);
+        logger.error(`Failed to restart for update: ${message}`);
         toast.error(t('update.failed', { error: message }));
       }
 
@@ -195,7 +192,7 @@ export function useUpdateFlow({
 
   const handleInstallUpdateLater = useCallback(() => {
     setRestartDialogDismissed(true);
-    void logUpdate('info', 'Update installation postponed');
+    logger.info('Update installation postponed');
   }, []);
 
   const restartDialogOpen =

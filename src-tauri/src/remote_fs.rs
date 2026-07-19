@@ -5,8 +5,9 @@ use crate::portable_local_path;
 use crate::models::{
     CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryKind, CreateRemoteEntryRequest, DeleteProgressTracker,
     DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
-    OpenRemoteFileRequest, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RemoteFileEntry, RemoteFileKind, RenameRemotePathRequest,
+    OpenRemoteFileRequest, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteCopyProgressTracker,
+    RemoteCopyScanStats, RemoteDirectoryListing, RemoteDirectoryRequest, RemoteFileEntry,
+    RemoteFileKind, RenameRemotePathRequest,
     RestoreRemotePathRequest, TrashRemotePathRequest, TrashedRemotePath,
     UpdateRemotePermissionsRequest, UploadConflictPolicy, UploadLocalPathsRequest,
     UploadProgressTracker, UploadScanStats,
@@ -27,11 +28,15 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 const OPEN_TEMP_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
-const TERM_BRIDGE_TRASH_DIRECTORY: &str = ".termbridge-trash";
+const TERM_BRIDGE_DIRECTORY: &str = ".termbridge";
+const TERM_BRIDGE_TRASH_DIRECTORY: &str = "trash";
+const TERM_BRIDGE_UPLOAD_DIRECTORY: &str = "upload";
+const TERM_BRIDGE_DOWNLOAD_DIRECTORY: &str = "download";
+const TERM_BRIDGE_REMOTE_COPY_DIRECTORY: &str = "remote-copy";
 const TERM_BRIDGE_TRASH_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
+const TERM_BRIDGE_STAGING_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
 const TERM_BRIDGE_UPLOAD_PREFIX: &str = ".termbridge-upload-";
 const TERM_BRIDGE_UPLOAD_SUFFIX: &str = ".part";
-const TERM_BRIDGE_DOWNLOAD_PREFIX: &str = ".termbridge-download-";
 const TERM_BRIDGE_DOWNLOAD_SUFFIX: &str = ".part";
 
 pub(crate) fn is_connection_error(message: &str) -> bool {
@@ -240,13 +245,14 @@ fn trash_remote_path_inner(
         .map(|value| value.to_string_lossy().to_string())
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "unable to resolve file name for trash".to_string())?;
+    validate_not_termbridge_name(&file_name)?;
 
     connected
         .sftp
         .lstat(source_path)
         .map_err(|error| format!("failed to inspect remote path before trashing: {error}"))?;
 
-    let trash_directory = parent_path.join(TERM_BRIDGE_TRASH_DIRECTORY);
+    let trash_directory = termbridge_subdirectory(parent_path, TERM_BRIDGE_TRASH_DIRECTORY);
     ensure_remote_directory(&connected.sftp, &trash_directory)?;
     let trashed_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -428,6 +434,7 @@ fn copy_remote_path_inner(
         .ok_or_else(|| "source path has no file name".to_string())?
         .to_string_lossy()
         .to_string();
+    validate_not_termbridge_name(&source_name)?;
     let destination_path =
         unique_remote_destination(&connected.sftp, destination_directory, &source_name)?;
 
@@ -500,6 +507,7 @@ fn upload_local_paths_inner(
             .ok_or_else(|| format!("invalid local path: {}", local_path.display()))?
             .to_string_lossy()
             .to_string();
+        validate_not_termbridge_name(&file_name)?;
         let conflict_policy = request
             .conflict_policies
             .get(index)
@@ -749,6 +757,10 @@ fn download_remote_file(
     }
 
     let temporary_path = temporary_download_path(local_path)?;
+    if let Some(parent) = temporary_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create download staging directory: {error}"))?;
+    }
     let download_result = (|| {
         let mut remote_file = sftp
             .open(remote_path)
@@ -789,7 +801,9 @@ fn download_remote_file(
 }
 
 pub(crate) fn copy_remote_to_remote_blocking(
+    app: AppHandle,
     request: CopyRemoteToRemoteRequest,
+    cancel_flag: Arc<AtomicBool>,
     pool: Option<&SftpPool>,
     known_hosts: Option<&Path>,
 ) -> Result<(), String> {
@@ -806,34 +820,14 @@ pub(crate) fn copy_remote_to_remote_blocking(
     let destination = connect_sftp(&request.destination_connection, pool, known_hosts)?;
     if Arc::ptr_eq(&source, &destination) {
         let connected = source.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let destination_directory = Path::new(&request.destination_directory);
-        ensure_remote_directory(&connected.sftp, destination_directory)?;
-        for (index, source_path) in request.source_paths.iter().enumerate() {
-            let source_path = Path::new(source_path);
-            let name = source_path
-                .file_name()
-                .ok_or_else(|| "remote source path has no file name".to_string())?;
-            let destination_path = destination_directory.join(name);
-            let stat = connected.sftp.lstat(source_path)
-                .map_err(|error| format!("failed to inspect remote source: {error}"))?;
-            validate_same_connection_copy_destination(
-                source_path,
-                &destination_path,
-                kind_from_permissions(stat.perm) == RemoteFileKind::Directory,
-            )?;
-            let policy = request.conflict_policies.get(index).copied().unwrap_or(UploadConflictPolicy::Fail);
-            if connected.sftp.lstat(&destination_path).is_ok() {
-                match policy {
-                    UploadConflictPolicy::Skip => continue,
-                    UploadConflictPolicy::Fail => return Err(format!("remote destination already exists: {}", destination_path.display())),
-                    UploadConflictPolicy::Overwrite | UploadConflictPolicy::Replace => {
-                        remove_remote_entry_simple(&connected.sftp, &destination_path)?;
-                    }
-                }
-            }
-            copy_remote_entry_to_path(&connected.sftp, source_path, &destination_path, stat)?;
-        }
-        return Ok(());
+        return copy_remote_to_remote_with_sftp(
+            app,
+            request,
+            cancel_flag,
+            &connected.sftp,
+            &connected.sftp,
+            true,
+        );
     }
     // Always acquire pooled connections in a stable order. Without this, concurrent
     // A -> B and B -> A copies can each hold one connection while waiting forever
@@ -849,39 +843,232 @@ pub(crate) fn copy_remote_to_remote_blocking(
         let source_guard = source.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         (source_guard, destination_guard)
     };
-    let destination_directory = Path::new(&request.destination_directory);
-    ensure_remote_directory(&destination.sftp, destination_directory)?;
+    copy_remote_to_remote_with_sftp(
+        app,
+        request,
+        cancel_flag,
+        &source.sftp,
+        &destination.sftp,
+        false,
+    )
+}
 
+struct RemoteCopyTask {
+    source_path: PathBuf,
+    destination_path: PathBuf,
+}
+
+struct RemoteCopyCommit {
+    destination_path: PathBuf,
+    backup_path: Option<PathBuf>,
+}
+
+fn copy_remote_to_remote_with_sftp(
+    app: AppHandle,
+    request: CopyRemoteToRemoteRequest,
+    cancel_flag: Arc<AtomicBool>,
+    source: &Sftp,
+    destination: &Sftp,
+    same_connection: bool,
+) -> Result<(), String> {
+    let destination_directory = Path::new(&request.destination_directory);
+    ensure_remote_directory(destination, destination_directory)?;
+    let staging_directory =
+        termbridge_subdirectory(destination_directory, TERM_BRIDGE_REMOTE_COPY_DIRECTORY);
+    ensure_remote_directory(destination, &staging_directory)?;
+
+    let mut tasks = Vec::new();
+    let mut scan_stats = RemoteCopyScanStats::default();
     for (index, source_path) in request.source_paths.iter().enumerate() {
+        if cancel_flag.load(AtomicOrdering::SeqCst) {
+            return Err("remote copy cancelled".to_string());
+        }
         let source_path = Path::new(source_path);
         let name = source_path
             .file_name()
             .ok_or_else(|| "remote source path has no file name".to_string())?;
+        validate_not_termbridge_name(&name.to_string_lossy())?;
         let destination_path = destination_directory.join(name);
+        let stat = source
+            .lstat(source_path)
+            .map_err(|error| format!("failed to inspect remote source: {error}"))?;
+        if same_connection {
+            validate_same_connection_copy_destination(
+                source_path,
+                &destination_path,
+                kind_from_permissions(stat.perm) == RemoteFileKind::Directory,
+            )?;
+        }
         let policy = request
             .conflict_policies
             .get(index)
             .copied()
             .unwrap_or(UploadConflictPolicy::Fail);
-        if destination.sftp.lstat(&destination_path).is_ok() {
+        if remote_path_exists(destination, &destination_path) {
             match policy {
                 UploadConflictPolicy::Skip => continue,
                 UploadConflictPolicy::Fail => {
-                    return Err(format!("remote destination already exists: {}", destination_path.display()));
+                    return Err(format!(
+                        "remote destination already exists: {}",
+                        destination_path.display()
+                    ));
                 }
-                UploadConflictPolicy::Overwrite | UploadConflictPolicy::Replace => {
-                    remove_remote_entry_simple(&destination.sftp, &destination_path)?;
-                }
+                UploadConflictPolicy::Overwrite | UploadConflictPolicy::Replace => {}
             }
         }
-        copy_remote_entry_between(
-            &source.sftp,
-            &destination.sftp,
-            source_path,
-            &destination_path,
-        )?;
+        scan_stats.combine(scan_remote_copy_path(source, source_path, &cancel_flag)?);
+        tasks.push(RemoteCopyTask {
+            source_path: source_path.to_path_buf(),
+            destination_path,
+        });
     }
+
+    let mut progress = RemoteCopyProgressTracker::new(
+        app,
+        request.operation_id,
+        cancel_flag,
+        scan_stats,
+    );
+    progress.emit()?;
+    let mut commits = Vec::new();
+
+    for task in tasks {
+        let stage_path = staging_directory.join(format!("{}.part", Uuid::new_v4()));
+        let copy_result = copy_remote_entry_between(
+            source,
+            destination,
+            &task.source_path,
+            &stage_path,
+            &mut progress,
+        );
+        if let Err(error) = copy_result {
+            let _ = remove_remote_entry_if_exists(destination, &stage_path);
+            rollback_remote_copy_commits(destination, &commits);
+            return Err(error);
+        }
+        if let Err(error) = progress.ensure_not_cancelled() {
+            let _ = remove_remote_entry_if_exists(destination, &stage_path);
+            rollback_remote_copy_commits(destination, &commits);
+            return Err(error);
+        }
+
+        let backup_path = if remote_path_exists(destination, &task.destination_path) {
+            let destination_name = task
+                .destination_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("entry");
+            let backup = staging_directory.join(format!(
+                "backup-{}-{destination_name}",
+                Uuid::new_v4()
+            ));
+            if let Err(error) = destination.rename(
+                &task.destination_path,
+                &backup,
+                Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+            ) {
+                let _ = remove_remote_entry_if_exists(destination, &stage_path);
+                rollback_remote_copy_commits(destination, &commits);
+                return Err(format!("failed to preserve remote copy destination: {error}"));
+            }
+            Some(backup)
+        } else {
+            None
+        };
+
+        if let Err(error) = destination.rename(
+            &stage_path,
+            &task.destination_path,
+            Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+        ) {
+            if let Some(backup) = &backup_path {
+                let _ = destination.rename(
+                    backup,
+                    &task.destination_path,
+                    Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+                );
+            }
+            let _ = remove_remote_entry_if_exists(destination, &stage_path);
+            rollback_remote_copy_commits(destination, &commits);
+            return Err(format!("failed to commit remote copy: {error}"));
+        }
+        commits.push(RemoteCopyCommit {
+            destination_path: task.destination_path,
+            backup_path,
+        });
+    }
+
+    for commit in commits {
+        if let Some(backup_path) = commit.backup_path {
+            if let Err(error) = remove_remote_entry_if_exists(destination, &backup_path) {
+                warn!(
+                    "failed to clean remote copy backup path={}: {error}",
+                    backup_path.display()
+                );
+            }
+        }
+    }
+    progress.set_current_path(None)?;
     Ok(())
+}
+
+fn rollback_remote_copy_commits(destination: &Sftp, commits: &[RemoteCopyCommit]) {
+    for commit in commits.iter().rev() {
+        let _ = remove_remote_entry_if_exists(destination, &commit.destination_path);
+        if let Some(backup_path) = &commit.backup_path {
+            if let Err(error) = destination.rename(
+                backup_path,
+                &commit.destination_path,
+                Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+            ) {
+                warn!(
+                    "failed to restore remote copy backup path={}: {error}",
+                    backup_path.display()
+                );
+            }
+        }
+    }
+}
+
+fn remove_remote_entry_if_exists(sftp: &Sftp, path: &Path) -> Result<(), String> {
+    if !remote_path_exists(sftp, path) {
+        return Ok(());
+    }
+    remove_remote_entry_simple(sftp, path)
+}
+
+fn scan_remote_copy_path(
+    source: &Sftp,
+    source_path: &Path,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<RemoteCopyScanStats, String> {
+    if cancel_flag.load(AtomicOrdering::SeqCst) {
+        return Err("remote copy cancelled".to_string());
+    }
+    let stat = source
+        .lstat(source_path)
+        .map_err(|error| format!("failed to inspect remote source: {error}"))?;
+    let kind = kind_from_permissions(stat.perm);
+    let mut stats = RemoteCopyScanStats {
+        total_bytes: if kind == RemoteFileKind::File {
+            stat.size.unwrap_or(0)
+        } else {
+            0
+        },
+        total_steps: 1,
+    };
+    if kind == RemoteFileKind::Directory {
+        for (child_path, _) in source
+            .readdir(source_path)
+            .map_err(|error| format!("failed to list remote source directory: {error}"))?
+        {
+            if should_skip_remote_copy_child(&child_path) {
+                continue;
+            }
+            stats.combine(scan_remote_copy_path(source, &child_path, cancel_flag)?);
+        }
+    }
+    Ok(stats)
 }
 
 fn validate_same_connection_copy_destination(
@@ -903,43 +1090,112 @@ fn copy_remote_entry_between(
     destination: &Sftp,
     source_path: &Path,
     destination_path: &Path,
+    progress: &mut RemoteCopyProgressTracker,
 ) -> Result<(), String> {
+    progress.ensure_not_cancelled()?;
+    progress.set_current_path(Some(path_to_string(source_path)))?;
     let stat = source
         .lstat(source_path)
         .map_err(|error| format!("failed to inspect remote source: {error}"))?;
-    if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
-        destination
-            .mkdir(destination_path, stat.perm.unwrap_or(0o755) as i32)
-            .or_else(|_| ensure_remote_directory(destination, destination_path))?;
-        for (child_path, _) in source
-            .readdir(source_path)
-            .map_err(|error| format!("failed to list remote source directory: {error}"))?
-        {
-            if should_skip_remote_child(&child_path) {
-                continue;
+    match kind_from_permissions(stat.perm) {
+        RemoteFileKind::Directory => {
+            destination
+                .mkdir(destination_path, stat.perm.unwrap_or(0o755) as i32)
+                .map_err(|error| format!("failed to create remote copy directory: {error}"))?;
+            for (child_path, _) in source
+                .readdir(source_path)
+                .map_err(|error| format!("failed to list remote source directory: {error}"))?
+            {
+                if should_skip_remote_copy_child(&child_path) {
+                    continue;
+                }
+                let child_name = child_path
+                    .file_name()
+                    .ok_or_else(|| "remote child path has no file name".to_string())?;
+                copy_remote_entry_between(
+                    source,
+                    destination,
+                    &child_path,
+                    &destination_path.join(child_name),
+                    progress,
+                )?;
             }
-            let child_name = child_path
-                .file_name()
-                .ok_or_else(|| "remote child path has no file name".to_string())?;
-            copy_remote_entry_between(
-                source,
-                destination,
-                &child_path,
-                &destination_path.join(child_name),
-            )?;
+            let _ = destination.setstat(destination_path, FileStat {
+                size: None,
+                uid: None,
+                gid: None,
+                perm: stat.perm,
+                atime: stat.atime,
+                mtime: stat.mtime,
+            });
         }
-        return Ok(());
+        RemoteFileKind::Symlink => {
+            let target = source
+                .readlink(source_path)
+                .map_err(|error| format!("failed to read remote source symlink: {error}"))?;
+            destination
+                .symlink(&target, destination_path)
+                .map_err(|error| format!("failed to create remote destination symlink: {error}"))?;
+        }
+        _ => {
+            let mut reader = source
+                .open(source_path)
+                .map_err(|error| format!("failed to open remote source: {error}"))?;
+            let mut writer = destination
+                .open_mode(
+                    destination_path,
+                    OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE | OpenFlags::EXCLUSIVE,
+                    stat.perm.unwrap_or(0o644) as i32,
+                    OpenType::File,
+                )
+                .map_err(|error| format!("failed to create remote destination: {error}"))?;
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                progress.ensure_not_cancelled()?;
+                let read = reader
+                    .read(&mut buffer)
+                    .map_err(|error| format!("failed to read remote source: {error}"))?;
+                if read == 0 {
+                    break;
+                }
+                writer
+                    .write_all(&buffer[..read])
+                    .map_err(|error| format!("failed to copy between remote hosts: {error}"))?;
+                progress.advance_bytes(read as u64)?;
+            }
+            writer
+                .flush()
+                .map_err(|error| format!("failed to flush remote destination: {error}"))?;
+            drop(writer);
+            if let Err(error) = destination.setstat(destination_path, FileStat {
+                size: None,
+                uid: None,
+                gid: None,
+                perm: stat.perm,
+                atime: stat.atime,
+                mtime: stat.mtime,
+            }) {
+                warn!(
+                    "failed to preserve remote copy metadata path={}: {error}",
+                    destination_path.display()
+                );
+            }
+        }
     }
+    progress.set_current_path(Some(path_to_string(source_path)))?;
+    progress.finish_step()
+}
 
-    let mut reader = source
-        .open(source_path)
-        .map_err(|error| format!("failed to open remote source: {error}"))?;
-    let mut writer = destination
-        .create(destination_path)
-        .map_err(|error| format!("failed to create remote destination: {error}"))?;
-    std::io::copy(&mut reader, &mut writer)
-        .map_err(|error| format!("failed to copy between remote hosts: {error}"))?;
-    Ok(())
+fn should_skip_remote_copy_child(path: &Path) -> bool {
+    should_skip_remote_child(path)
+        || matches!(
+            path.file_name().and_then(|value| value.to_str()),
+            Some(TERM_BRIDGE_DIRECTORY)
+        )
+        || path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(is_termbridge_partial_upload_name)
 }
 
 fn remove_remote_entry_simple(sftp: &Sftp, path: &Path) -> Result<(), String> {
@@ -967,10 +1223,10 @@ fn temporary_download_path(local_path: &Path) -> Result<PathBuf, String> {
     let parent = local_path
         .parent()
         .ok_or_else(|| "unable to resolve local download parent directory".to_string())?;
-    Ok(parent.join(format!(
-        "{TERM_BRIDGE_DOWNLOAD_PREFIX}{}{TERM_BRIDGE_DOWNLOAD_SUFFIX}",
-        Uuid::new_v4()
-    )))
+    Ok(parent
+        .join(TERM_BRIDGE_DIRECTORY)
+        .join(TERM_BRIDGE_DOWNLOAD_DIRECTORY)
+        .join(format!("{}{TERM_BRIDGE_DOWNLOAD_SUFFIX}", Uuid::new_v4())))
 }
 
 fn commit_download_file(temporary_path: &Path, local_path: &Path) -> Result<(), String> {
@@ -989,13 +1245,10 @@ fn commit_download_file(temporary_path: &Path, local_path: &Path) -> Result<(), 
         ));
     }
 
-    let parent = local_path
+    let staging_directory = temporary_path
         .parent()
-        .ok_or_else(|| "unable to resolve local download parent directory".to_string())?;
-    let backup_path = parent.join(format!(
-        ".termbridge-download-backup-{}",
-        Uuid::new_v4()
-    ));
+        .ok_or_else(|| "unable to resolve local download staging directory".to_string())?;
+    let backup_path = staging_directory.join(format!("backup-{}", Uuid::new_v4()));
     fs::rename(local_path, &backup_path)
         .map_err(|error| format!("failed to preserve existing download target: {error}"))?;
 
@@ -1212,6 +1465,12 @@ fn list_remote_directory_from_sftp(
             resolved_path.display()
         );
     }
+    if let Err(error) = cleanup_expired_termbridge_staging(sftp, &resolved_path, SystemTime::now()) {
+        warn!(
+            "failed to clean expired TermBridge staging path={}: {error}",
+            resolved_path.display()
+        );
+    }
 
     let mut entries = sftp
         .readdir(&resolved_path)
@@ -1219,7 +1478,7 @@ fn list_remote_directory_from_sftp(
         .into_iter()
         .map(|(path, stat)| map_remote_file(path, stat))
         .filter(|entry| {
-            entry.name != TERM_BRIDGE_TRASH_DIRECTORY
+            entry.name != TERM_BRIDGE_DIRECTORY
                 && !is_termbridge_partial_upload_name(&entry.name)
         })
         .collect::<Vec<_>>();
@@ -1421,11 +1680,22 @@ fn validate_remote_name(name: &str) -> Result<(), String> {
     if trimmed.contains('/') || trimmed.contains('\\') {
         return Err("file name must not include path separators".to_string());
     }
+    validate_not_termbridge_name(trimmed)
+}
+
+fn validate_not_termbridge_name(name: &str) -> Result<(), String> {
+    if name == TERM_BRIDGE_DIRECTORY {
+        return Err("'.termbridge' is reserved for application data".to_string());
+    }
     Ok(())
 }
 
 fn remote_path_exists(sftp: &Sftp, path: &Path) -> bool {
     sftp.lstat(path).is_ok()
+}
+
+fn termbridge_subdirectory(parent: &Path, child: &str) -> PathBuf {
+    parent.join(TERM_BRIDGE_DIRECTORY).join(child)
 }
 
 fn ensure_remote_directory(sftp: &Sftp, path: &Path) -> Result<(), String> {
@@ -1533,7 +1803,7 @@ fn cleanup_expired_remote_trash(
     parent_path: &Path,
     now: SystemTime,
 ) -> Result<(), String> {
-    let trash_directory = parent_path.join(TERM_BRIDGE_TRASH_DIRECTORY);
+    let trash_directory = termbridge_subdirectory(parent_path, TERM_BRIDGE_TRASH_DIRECTORY);
     let entries = match sftp.readdir(&trash_directory) {
         Ok(entries) => entries,
         Err(_) if !remote_path_exists(sftp, &trash_directory) => return Ok(()),
@@ -1575,6 +1845,47 @@ fn remote_trash_created_at(path: &Path, stat: &FileStat) -> Option<u64> {
         .and_then(|name| name.split_once('-'))
         .and_then(|(timestamp, _)| timestamp.parse().ok())
         .or(stat.mtime)
+}
+
+fn cleanup_expired_termbridge_staging(
+    sftp: &Sftp,
+    parent_path: &Path,
+    now: SystemTime,
+) -> Result<(), String> {
+    let cutoff = now
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .saturating_sub(TERM_BRIDGE_STAGING_RETENTION)
+        .as_secs();
+    for child in [TERM_BRIDGE_UPLOAD_DIRECTORY, TERM_BRIDGE_REMOTE_COPY_DIRECTORY] {
+        let directory = termbridge_subdirectory(parent_path, child);
+        let entries = match sftp.readdir(&directory) {
+            Ok(entries) => entries,
+            Err(_) if !remote_path_exists(sftp, &directory) => continue,
+            Err(error) => {
+                return Err(format!("failed to list TermBridge staging directory: {error}"))
+            }
+        };
+        for (path, stat) in entries {
+            if should_skip_remote_child(&path) {
+                continue;
+            }
+            let is_partial = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".part"));
+            if !is_partial || stat.mtime.is_none_or(|mtime| mtime > cutoff) {
+                continue;
+            }
+            if let Err(error) = remove_remote_path_without_progress(sftp, &path) {
+                warn!(
+                    "failed to remove expired TermBridge staging path={}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn remove_remote_path_without_progress(sftp: &Sftp, path: &Path) -> Result<(), String> {
@@ -1820,6 +2131,9 @@ fn scan_local_upload_path(local_path: &Path) -> Result<UploadScanStats, String> 
         for entry in entries {
             let entry =
                 entry.map_err(|error| format!("failed to read local directory entry: {error}"))?;
+            if entry.file_name() == TERM_BRIDGE_DIRECTORY {
+                continue;
+            }
             stats.combine(scan_local_upload_path(&entry.path())?);
         }
         return Ok(stats);
@@ -1880,6 +2194,9 @@ fn upload_local_entry_to_path(
         for entry in entries {
             let entry =
                 entry.map_err(|error| format!("failed to read local directory entry: {error}"))?;
+            if entry.file_name() == TERM_BRIDGE_DIRECTORY {
+                continue;
+            }
             upload_local_entry_to_path(
                 sftp,
                 &entry.path(),
@@ -1930,6 +2247,9 @@ fn upload_regular_file_atomically(
     progress: &mut UploadProgressTracker,
 ) -> Result<(), String> {
     let temporary_path = temporary_upload_path(remote_path)?;
+    if let Some(parent) = temporary_path.parent() {
+        ensure_remote_directory(sftp, parent)?;
+    }
     let upload_result = (|| {
         let mut local_file = fs::File::open(local_path)
             .map_err(|error| format!("failed to open local file: {error}"))?;
@@ -1990,8 +2310,8 @@ fn temporary_upload_path(remote_path: &Path) -> Result<PathBuf, String> {
     let parent = remote_path
         .parent()
         .ok_or_else(|| "unable to resolve remote upload parent directory".to_string())?;
-    Ok(parent.join(format!(
-        "{TERM_BRIDGE_UPLOAD_PREFIX}{}{TERM_BRIDGE_UPLOAD_SUFFIX}",
+    Ok(termbridge_subdirectory(parent, TERM_BRIDGE_UPLOAD_DIRECTORY).join(format!(
+        "{}{TERM_BRIDGE_UPLOAD_SUFFIX}",
         Uuid::new_v4()
     )))
 }
@@ -2259,25 +2579,63 @@ mod tests {
     }
 
     #[test]
-    fn temporary_upload_path_stays_in_destination_directory() {
+    fn temporary_upload_path_uses_termbridge_upload_directory() {
         let temporary = temporary_upload_path(Path::new("/srv/files/report.txt"))
             .expect("temporary upload path");
 
-        assert_eq!(temporary.parent(), Some(Path::new("/srv/files")));
-        assert!(is_termbridge_partial_upload_name(
-            temporary.file_name().unwrap().to_str().unwrap()
-        ));
+        assert_eq!(
+            path_to_string(temporary.parent().unwrap()),
+            "/srv/files/.termbridge/upload"
+        );
+        assert!(temporary
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(TERM_BRIDGE_UPLOAD_SUFFIX));
         assert_ne!(temporary, Path::new("/srv/files/report.txt"));
     }
 
     #[test]
-    fn temporary_download_path_stays_in_destination_directory() {
+    fn termbridge_layout_groups_application_data() {
+        let parent = Path::new("/srv/files");
+
+        assert_eq!(
+            path_to_string(&termbridge_subdirectory(parent, TERM_BRIDGE_TRASH_DIRECTORY)),
+            "/srv/files/.termbridge/trash"
+        );
+        assert_eq!(
+            path_to_string(&termbridge_subdirectory(parent, TERM_BRIDGE_REMOTE_COPY_DIRECTORY)),
+            "/srv/files/.termbridge/remote-copy"
+        );
+    }
+
+    #[test]
+    fn remote_copy_excludes_termbridge_application_data() {
+        assert!(should_skip_remote_copy_child(Path::new(
+            "/srv/files/.termbridge"
+        )));
+        assert!(!should_skip_remote_copy_child(Path::new(
+            "/srv/files/report.txt"
+        )));
+    }
+
+    #[test]
+    fn termbridge_directory_name_is_reserved() {
+        assert!(validate_remote_name(TERM_BRIDGE_DIRECTORY).is_err());
+        assert!(validate_remote_name("reports").is_ok());
+    }
+
+    #[test]
+    fn temporary_download_path_uses_termbridge_download_directory() {
         let temporary = temporary_download_path(Path::new("/downloads/report.txt"))
             .expect("temporary download path");
 
-        assert_eq!(temporary.parent(), Some(Path::new("/downloads")));
+        assert_eq!(
+            path_to_string(temporary.parent().unwrap()),
+            "/downloads/.termbridge/download"
+        );
         let name = temporary.file_name().unwrap().to_str().unwrap();
-        assert!(name.starts_with(TERM_BRIDGE_DOWNLOAD_PREFIX));
         assert!(name.ends_with(TERM_BRIDGE_DOWNLOAD_SUFFIX));
         assert_ne!(temporary, Path::new("/downloads/report.txt"));
     }
@@ -2320,7 +2678,7 @@ mod tests {
 
         assert_eq!(
             remote_trash_created_at(
-                Path::new("/tmp/.termbridge-trash/tb-1234-id-report.txt"),
+                Path::new("/tmp/.termbridge/trash/tb-1234-id-report.txt"),
                 &stat,
             ),
             Some(1234),
@@ -2340,7 +2698,7 @@ mod tests {
 
         assert_eq!(
             remote_trash_created_at(
-                Path::new("/tmp/.termbridge-trash/uuid-report.txt"),
+                Path::new("/tmp/.termbridge/trash/uuid-report.txt"),
                 &stat,
             ),
             Some(5678),

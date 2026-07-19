@@ -87,6 +87,9 @@ export default {
   'workbench.settings.title': '设置',
 
   'workbench.logs.title': '日志',
+  'workbench.logs.source': '来源',
+  'workbench.logs.sourceBackend': '后端',
+  'workbench.logs.sourceFrontend': '前端',
   'workbench.logs.empty': '暂无日志文件',
   'workbench.logs.noMatches': '没有符合当前筛选条件的日志',
   'workbench.logs.autoScroll': '自动滚动',
@@ -216,6 +219,7 @@ export default {
   'sftp.transfer.discard': '丢弃',
   'sftp.transfer.undoDelete': '撤销',
   'sftp.transfer.cancellingDelete': '正在撤销',
+  'sftp.transfer.cancelling': '正在取消',
   'sftp.transfer.cancelled': '已撤销',
   'sftp.transfer.trashed': '已移入回收站',
   'sftp.transfer.restoring': '正在恢复',

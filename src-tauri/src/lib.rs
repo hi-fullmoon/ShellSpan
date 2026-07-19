@@ -13,13 +13,11 @@ mod session;
 mod sftp_pool;
 
 use log::LevelFilter;
-#[cfg(target_os = "macos")]
-use tauri::Manager;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
 
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
-use models::{DownloadCancellationRegistry, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
+use models::{DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
 use crate::sftp_pool::SftpPool;
 
 pub(crate) use connection::{
@@ -45,6 +43,7 @@ pub(crate) const SSH_CLOSED_EVENT: &str = "ssh-closed";
 pub(crate) const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 pub(crate) const DELETE_PROGRESS_EVENT: &str = "delete-progress";
 pub(crate) const DOWNLOAD_PROGRESS_EVENT: &str = "download-progress";
+pub(crate) const REMOTE_COPY_PROGRESS_EVENT: &str = "remote-copy-progress";
 
 pub(crate) fn emit_status(
     app: &AppHandle,
@@ -52,14 +51,15 @@ pub(crate) fn emit_status(
     status: SessionStatus,
     message: Option<String>,
 ) -> Result<(), String> {
-    app.emit(
-        SSH_STATUS_EVENT,
-        StatusEvent {
-            session_id: session_id.to_string(),
-            status,
-            message,
-        },
-    )
+    let event = StatusEvent {
+        session_id: session_id.to_string(),
+        status,
+        message,
+    };
+    if let Some(sessions) = app.try_state::<SessionManager>() {
+        let _ = sessions.set_status(session_id, event.clone());
+    }
+    app.emit(SSH_STATUS_EVENT, event)
     .map_err(|error| format!("failed to emit status event: {error}"))
 }
 
@@ -141,6 +141,7 @@ pub fn run() {
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
+        .manage(RemoteCopyCancellationRegistry::default())
         .manage(port_forward::PortForwardManager::default())
         .manage(SftpPool::default())
         .manage(RemoteIdentityCache::default())
@@ -149,6 +150,7 @@ pub fn run() {
             commands::create_session,
             commands::create_local_session,
             commands::write_session,
+            commands::get_session_status,
             commands::resize_session,
             commands::close_session,
             commands::request_app_restart,
@@ -161,6 +163,7 @@ pub fn run() {
             commands::delete_remote_path,
             commands::copy_remote_path,
             commands::copy_remote_to_remote,
+            commands::cancel_remote_copy,
             commands::upload_local_paths,
             commands::copy_local_paths,
             commands::cancel_upload,

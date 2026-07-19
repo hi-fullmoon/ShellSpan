@@ -12,6 +12,11 @@ class RO {
 globalThis.ResizeObserver = (globalThis.ResizeObserver ?? RO) as typeof ResizeObserver;
 
 vi.mock('@/lib/tauri', () => ({
+  invokeGetSessionStatus: vi.fn().mockResolvedValue({
+    sessionId: 's1',
+    status: 'connected',
+    message: 'ready',
+  }),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),

@@ -229,6 +229,7 @@ pub(crate) struct CopyRemoteToRemoteRequest {
     pub(crate) destination_directory: String,
     #[serde(default)]
     pub(crate) conflict_policies: Vec<UploadConflictPolicy>,
+    pub(crate) operation_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -384,6 +385,17 @@ pub(crate) struct DownloadProgressEvent {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteCopyProgressEvent {
+    pub(crate) operation_id: String,
+    pub(crate) current_path: Option<String>,
+    pub(crate) total_bytes: u64,
+    pub(crate) copied_bytes: u64,
+    pub(crate) total_steps: u64,
+    pub(crate) completed_steps: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RemoteDirectoryListing {
     pub(crate) path: String,
     pub(crate) parent_path: Option<String>,
@@ -405,7 +417,7 @@ pub(crate) struct RemoteFileEntry {
     pub(crate) group_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SessionStatus {
     Connecting,
@@ -465,6 +477,7 @@ pub(crate) enum SessionCommand {
 
 pub(crate) struct ManagedSession {
     pub(crate) sender: Sender<SessionCommand>,
+    pub(crate) status: StatusEvent,
 }
 
 #[derive(Default)]
@@ -635,6 +648,89 @@ impl DownloadProgressTracker {
 }
 
 cancellation_registry!(DownloadCancellationRegistry, "download");
+cancellation_registry!(RemoteCopyCancellationRegistry, "remote copy");
+
+#[derive(Default, Clone, Copy)]
+pub(crate) struct RemoteCopyScanStats {
+    pub(crate) total_bytes: u64,
+    pub(crate) total_steps: u64,
+}
+
+impl RemoteCopyScanStats {
+    pub(crate) fn combine(&mut self, other: RemoteCopyScanStats) {
+        self.total_bytes += other.total_bytes;
+        self.total_steps += other.total_steps;
+    }
+}
+
+pub(crate) struct RemoteCopyProgressTracker {
+    app: AppHandle,
+    operation_id: String,
+    cancel_flag: Arc<AtomicBool>,
+    current_path: Option<String>,
+    total_bytes: u64,
+    copied_bytes: u64,
+    total_steps: u64,
+    completed_steps: u64,
+}
+
+impl RemoteCopyProgressTracker {
+    pub(crate) fn new(
+        app: AppHandle,
+        operation_id: String,
+        cancel_flag: Arc<AtomicBool>,
+        stats: RemoteCopyScanStats,
+    ) -> Self {
+        Self {
+            app,
+            operation_id,
+            cancel_flag,
+            current_path: None,
+            total_bytes: stats.total_bytes,
+            copied_bytes: 0,
+            total_steps: stats.total_steps,
+            completed_steps: 0,
+        }
+    }
+
+    pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        self.current_path = path;
+        self.emit()
+    }
+
+    pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
+        self.copied_bytes += count;
+        self.emit()
+    }
+
+    pub(crate) fn finish_step(&mut self) -> Result<(), String> {
+        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
+        self.emit()
+    }
+
+    pub(crate) fn ensure_not_cancelled(&self) -> Result<(), String> {
+        if self.cancel_flag.load(AtomicOrdering::SeqCst) {
+            return Err("remote copy cancelled".to_string());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn emit(&self) -> Result<(), String> {
+        self.app
+            .emit(
+                super::REMOTE_COPY_PROGRESS_EVENT,
+                RemoteCopyProgressEvent {
+                    operation_id: self.operation_id.clone(),
+                    current_path: self.current_path.clone(),
+                    total_bytes: self.total_bytes,
+                    copied_bytes: self.copied_bytes,
+                    total_steps: self.total_steps,
+                    completed_steps: self.completed_steps,
+                },
+            )
+            .map_err(|error| format!("failed to emit remote copy progress event: {error}"))
+    }
+}
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct UploadScanStats {
@@ -800,6 +896,29 @@ impl SessionManager {
             .map_err(|_| format!("session {session_id} is not available"))
     }
 
+    pub(crate) fn status(&self, session_id: &str) -> Result<StatusEvent, String> {
+        let guard = self
+            .sessions
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        guard
+            .get(session_id)
+            .map(|managed| managed.status.clone())
+            .ok_or_else(|| format!("session {session_id} not found"))
+    }
+
+    pub(crate) fn set_status(&self, session_id: &str, status: StatusEvent) -> Result<(), String> {
+        let mut guard = self
+            .sessions
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        let managed = guard
+            .get_mut(session_id)
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        managed.status = status;
+        Ok(())
+    }
+
     pub(crate) fn remove(&self, session_id: &str) -> Result<(), String> {
         let mut guard = self
             .sessions
@@ -807,6 +926,46 @@ impl SessionManager {
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.remove(session_id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod session_manager_tests {
+    use super::{ManagedSession, SessionCommand, SessionManager, SessionStatus, StatusEvent};
+    use std::sync::mpsc;
+
+    #[test]
+    fn stores_and_updates_latest_session_status() {
+        let manager = SessionManager::default();
+        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        manager
+            .insert(
+                "local-1".to_string(),
+                ManagedSession {
+                    sender,
+                    status: StatusEvent {
+                        session_id: "local-1".to_string(),
+                        status: SessionStatus::Connecting,
+                        message: None,
+                    },
+                },
+            )
+            .unwrap();
+
+        manager
+            .set_status(
+                "local-1",
+                StatusEvent {
+                    session_id: "local-1".to_string(),
+                    status: SessionStatus::Connected,
+                    message: Some("ready".to_string()),
+                },
+            )
+            .unwrap();
+
+        let status = manager.status("local-1").unwrap();
+        assert_eq!(status.status, SessionStatus::Connected);
+        assert_eq!(status.message.as_deref(), Some("ready"));
     }
 }
 

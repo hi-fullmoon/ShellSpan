@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/useI18n';
+import type { LocaleKey } from '@/locales';
 import { useLogStore } from '@/stores/logStore';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -43,6 +44,19 @@ type DateFilterOption = (typeof DATE_FILTER_OPTIONS)[number]['key'];
 
 const LOG_LEVELS = ['INFO', 'WARN', 'ERROR', 'DEBUG'] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
+
+type LogSourceFamily = 'backend' | 'frontend';
+
+const LOG_SOURCE_LABEL_KEYS: Record<LogSourceFamily, LocaleKey> = {
+  backend: 'workbench.logs.sourceBackend',
+  frontend: 'workbench.logs.sourceFrontend',
+};
+
+function getLogFileFamily(fileName: string): LogSourceFamily | undefined {
+  if (fileName.startsWith('backend')) return 'backend';
+  if (fileName.startsWith('frontend')) return 'frontend';
+  return undefined;
+}
 
 const LOG_LINE_REGEX =
   /^\[(\d{4}-\d{2}-\d{2})\]\[(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]\[(DEBUG|INFO|WARN|ERROR)\](?:\[(.*?)\])?\s*(.*)$/;
@@ -201,6 +215,22 @@ export const LogPanel: React.FC = () => {
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Newest file per source family; `files` is sorted by modifiedAt desc.
+  const sourceFiles = useMemo(() => {
+    const map = new Map<LogSourceFamily, string>();
+    for (const file of files) {
+      const family = getLogFileFamily(file.name);
+      if (family && !map.has(family)) {
+        map.set(family, file.name);
+      }
+    }
+    return map;
+  }, [files]);
+
+  const activeFamily = activeFileName
+    ? getLogFileFamily(activeFileName)
+    : undefined;
+
   const parsedLines = useMemo(() => parseLogContent(content), [content]);
 
   const today = useMemo(() => new Date(), []);
@@ -325,6 +355,39 @@ export const LogPanel: React.FC = () => {
           </div>
         </div>
         <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-app-border px-3 py-1.5">
+          {sourceFiles.size > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                {t('workbench.logs.source')}
+              </span>
+              <ToggleGroup
+                value={activeFamily ? [activeFamily] : []}
+                onValueChange={(value) => {
+                  const nextValue = value[0] as LogSourceFamily | undefined;
+                  const nextFile = nextValue
+                    ? sourceFiles.get(nextValue)
+                    : undefined;
+                  if (nextFile && nextFile !== activeFileName) {
+                    void loadFile(nextFile);
+                  }
+                }}
+                variant="tag"
+                size="xs"
+                spacing={1.5}
+                aria-label={t('workbench.logs.source')}
+              >
+                {(
+                  Object.keys(LOG_SOURCE_LABEL_KEYS) as LogSourceFamily[]
+                )
+                  .filter((family) => sourceFiles.has(family))
+                  .map((family) => (
+                    <ToggleGroupItem key={family} value={family}>
+                      {t(LOG_SOURCE_LABEL_KEYS[family])}
+                    </ToggleGroupItem>
+                  ))}
+              </ToggleGroup>
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.date')}
@@ -335,9 +398,9 @@ export const LogPanel: React.FC = () => {
                 const nextValue = value[0] as DateFilterOption | undefined;
                 if (nextValue) setDateFilter(nextValue);
               }}
-              variant="outline"
-              size="sm"
-              spacing={0}
+              variant="tag"
+              size="xs"
+              spacing={1.5}
               aria-label={t('workbench.logs.date')}
             >
               {DATE_FILTER_OPTIONS.map((option) => (
@@ -357,9 +420,9 @@ export const LogPanel: React.FC = () => {
                 const nextValue = value[0] as LogLevel | 'all' | undefined;
                 if (nextValue) setLevelFilter(nextValue);
               }}
-              variant="outline"
-              size="sm"
-              spacing={0}
+              variant="tag"
+              size="xs"
+              spacing={1.5}
               aria-label={t('workbench.logs.level')}
             >
               <ToggleGroupItem value="all">

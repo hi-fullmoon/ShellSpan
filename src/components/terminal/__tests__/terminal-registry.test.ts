@@ -11,6 +11,11 @@ class RO {
 globalThis.ResizeObserver = (globalThis.ResizeObserver ?? RO) as typeof ResizeObserver;
 
 vi.mock('@/lib/tauri', () => ({
+  invokeGetSessionStatus: vi.fn().mockResolvedValue({
+    sessionId: 's1',
+    status: 'connected',
+    message: 'ready',
+  }),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
@@ -141,6 +146,25 @@ describe('terminalRegistry', () => {
     controller.simulateInput('hello');
 
     expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'hello');
+  });
+
+  it('reconciles a connected status emitted before listeners were ready', async () => {
+    const setStatus = vi.fn();
+    terminalRegistry.create(
+      's1',
+      setStatus,
+      vi.fn(),
+      () => 'connecting',
+      vi.fn(),
+    );
+
+    await vi.waitFor(() => {
+      expect(setStatus).toHaveBeenCalledWith('s1', {
+        sessionId: 's1',
+        status: 'connected',
+        message: 'ready',
+      });
+    });
   });
 
   it('shows disconnected hint and triggers reconnect on Enter', async () => {

@@ -87,6 +87,9 @@ export default {
   'workbench.settings.title': 'Settings',
 
   'workbench.logs.title': 'Logs',
+  'workbench.logs.source': 'Source',
+  'workbench.logs.sourceBackend': 'Backend',
+  'workbench.logs.sourceFrontend': 'Frontend',
   'workbench.logs.empty': 'No log files',
   'workbench.logs.noMatches': 'No logs match the current filters',
   'workbench.logs.autoScroll': 'Auto scroll',
@@ -216,6 +219,7 @@ export default {
   'sftp.transfer.discard': 'Discard',
   'sftp.transfer.undoDelete': 'Undo',
   'sftp.transfer.cancellingDelete': 'Cancelling',
+  'sftp.transfer.cancelling': 'Cancelling',
   'sftp.transfer.cancelled': 'Cancelled',
   'sftp.transfer.trashed': 'Moved to trash',
   'sftp.transfer.restoring': 'Restoring',

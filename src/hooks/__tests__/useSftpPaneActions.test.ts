@@ -47,6 +47,7 @@ vi.mock('@/hooks/useTransferListeners', () => ({
 }));
 
 vi.mock('@/lib/tauri', () => ({
+  invokeCancelRemoteCopy: vi.fn().mockResolvedValue(undefined),
   invokeCopyLocalPaths: vi.fn().mockResolvedValue(undefined),
   invokeCopyRemoteToRemote: vi.fn().mockResolvedValue(undefined),
   invokePickLocalFiles: vi.fn().mockResolvedValue([]),
@@ -215,6 +216,7 @@ describe('useSftpPaneActions', () => {
       sourcePaths: ['/source/report.txt'],
       destinationDirectory: '/destination',
       conflictPolicies: ['fail'],
+      operationId: expect.stringContaining('-remote-copy-'),
     });
     expect(useTransferStore.getState().operations[0]).toMatchObject({
       kind: 'remote-copy',
