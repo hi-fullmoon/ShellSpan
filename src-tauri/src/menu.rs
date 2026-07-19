@@ -15,8 +15,6 @@ const TRAY_OPEN_SETTINGS_ID: &str = "tray.open_settings";
 #[cfg(not(target_os = "macos"))]
 const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
 #[cfg(not(target_os = "macos"))]
-const TRAY_SHOW_MAIN_WINDOW_ID: &str = "tray.show_main_window";
-#[cfg(not(target_os = "macos"))]
 const TRAY_QUIT_ID: &str = "tray.quit";
 #[cfg(not(target_os = "macos"))]
 const TRAY_ABOUT_ID: &str = "tray.about";
@@ -112,6 +110,10 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
     }
 
     if is_open_settings_menu_id(menu_id) {
+        // Bring the main window to the front so the settings tab becomes visible.
+        if let Err(error) = show_main_window(app) {
+            error!("failed to show main window for open-settings event: {error}");
+        }
         if let Err(error) = emit_system_open_settings(app) {
             error!("failed to handle open-settings menu event: {error}");
         }
@@ -130,13 +132,6 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
         if menu_id == TRAY_ABOUT_ID {
             if let Err(error) = emit_system_about(app) {
                 error!("failed to handle about menu event: {error}");
-            }
-            return;
-        }
-
-        if menu_id == TRAY_SHOW_MAIN_WINDOW_ID {
-            if let Err(error) = show_main_window(app) {
-                error!("failed to show main window from tray: {error}");
             }
             return;
         }
@@ -273,13 +268,6 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem};
 
-    let show_main_window_item = MenuItem::with_id(
-        app,
-        TRAY_SHOW_MAIN_WINDOW_ID,
-        "Show Main Window",
-        true,
-        None::<&str>,
-    )?;
     let open_settings_item =
         MenuItem::with_id(app, TRAY_OPEN_SETTINGS_ID, "Settings", true, None::<&str>)?;
     let check_update_item = MenuItem::with_id(
@@ -295,7 +283,6 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     Menu::with_items(
         app,
         &[
-            &show_main_window_item,
             &open_settings_item,
             &check_update_item,
             &about_item,
@@ -304,7 +291,6 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     )
 }
 
-#[cfg(not(target_os = "macos"))]
 fn show_main_window(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")

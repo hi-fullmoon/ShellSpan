@@ -1,6 +1,7 @@
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type Locale = 'zh-CN' | 'en-US';
 export type AppSection = 'workbench' | 'terminal' | 'sftp';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'credentials' | 'logs' | 'settings';
 export type AuthMethod = 'password' | 'key';
 export type RemoteFileKind = 'directory' | 'file' | 'symlink' | 'other';
 export type SessionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';

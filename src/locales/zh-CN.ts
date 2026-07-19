@@ -84,6 +84,8 @@ export default {
   'workbench.credentials.removeConfirm': '删除“{name}”保存的登录密码？连接配置会保留。',
   'workbench.credentials.operationFailed': '凭据操作失败',
 
+  'workbench.settings.title': '设置',
+
   'workbench.logs.title': '日志',
   'workbench.logs.empty': '暂无日志文件',
   'workbench.logs.noMatches': '没有符合当前筛选条件的日志',

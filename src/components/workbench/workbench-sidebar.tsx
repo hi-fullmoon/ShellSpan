@@ -2,8 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Sidebar } from '@/components/layout/app-shell';
-
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'credentials' | 'logs';
+import type { WorkbenchTab } from '@/types';
 
 interface WorkbenchSidebarProps {
   activeTab: WorkbenchTab;
@@ -37,6 +36,10 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
     {
       key: 'logs',
       label: t('workbench.logs.title'),
+    },
+    {
+      key: 'settings',
+      label: t('workbench.settings.title'),
     },
   ];
 

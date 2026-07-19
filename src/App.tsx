@@ -13,7 +13,6 @@ const Terminal = React.lazy(() => import('@/components/terminal'));
 const Sftp = React.lazy(() => import('@/components/sftp'));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
-import { openSettingsWindow } from '@/lib/window';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -34,9 +33,9 @@ export const App: React.FC = () => {
     const setup = async (): Promise<void> => {
       listeners.push(
         listen('system-open-settings', () => {
-          openSettingsWindow().catch(() => {
-            // ignore
-          });
+          const { setActiveSection, setActiveWorkbenchTab } = useAppStore.getState();
+          setActiveSection('workbench');
+          setActiveWorkbenchTab('settings');
         }),
       );
       listeners.push(

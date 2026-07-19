@@ -16,4 +16,13 @@ describe('appStore', () => {
     useAppStore.getState().setActiveSection('terminal');
     expect(useAppStore.getState().activeSection).toBe('terminal');
   });
+
+  it('defaults to connections workbench tab', () => {
+    expect(useAppStore.getState().activeWorkbenchTab).toBe('connections');
+  });
+
+  it('sets active workbench tab', () => {
+    useAppStore.getState().setActiveWorkbenchTab('settings');
+    expect(useAppStore.getState().activeWorkbenchTab).toBe('settings');
+  });
 });

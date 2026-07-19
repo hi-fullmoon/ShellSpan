@@ -1,26 +1,24 @@
 import React from 'react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
-import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { useAppStore } from '@/stores/appStore';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import type { Locale, ThemeMode } from '@/types';
 
-export const SettingsApp: React.FC = () => {
-  useDisableContextMenu();
+export const SettingsPanel: React.FC = () => {
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
   const setStartupUpdateCheck = useAppStore((state) => state.setStartupUpdateCheck);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-app-surface">
-      <div className="flex h-12 items-center border-b border-app-border bg-app-surface-muted px-4">
-        <span className="text-base font-semibold text-app-text">
-          {t('section.settings')}
-        </span>
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center border-b border-app-border px-3 py-1.5">
+        <div className="text-sm font-medium text-app-text">
+          {t('workbench.settings.title')}
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-3">

@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
+import { useAppStore } from '@/stores/appStore';
 import { ConnectionForm } from './connection-form';
 import { ConnectionList } from './connection-list';
 import { KnownHostsPanel } from './known-hosts-panel';
 import { CredentialsPanel } from './credentials-panel';
 import { LogPanel } from './log-panel';
-import { WorkbenchSidebar, type WorkbenchTab } from './workbench-sidebar';
+import { SettingsPanel } from './settings-panel';
+import { WorkbenchSidebar } from './workbench-sidebar';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
 import type { ConnectionProfile } from '@/types';
@@ -15,7 +17,8 @@ import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 
 const Workbench: React.FC = () => {
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState<WorkbenchTab>('connections');
+  const activeTab = useAppStore((state) => state.activeWorkbenchTab);
+  const setActiveTab = useAppStore((state) => state.setActiveWorkbenchTab);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ConnectionProfile | undefined>();
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
@@ -88,6 +91,7 @@ const Workbench: React.FC = () => {
             <CredentialsPanel onEdit={handleEdit} />
           )}
           {activeTab === 'logs' && <LogPanel />}
+          {activeTab === 'settings' && <SettingsPanel />}
         </div>
       </div>
 
