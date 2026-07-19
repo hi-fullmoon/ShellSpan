@@ -8,8 +8,9 @@ import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { parentPortablePath } from '@/lib/path-utils';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useToast } from '@/hooks/useToast';
+import { useI18n } from '@/hooks/useI18n';
 import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
-import { useTransferStore } from '@/stores/transferStore';
+import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
 import type { FileEntry } from '@/components/sftp/file-entry-formatters';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 
@@ -89,14 +90,15 @@ function writeClipboardText(value: string): Promise<void> {
 export function useSftpPaneActions(
   connection: SftpConnection,
   side: SftpSide,
+  localMode?: boolean,
 ): UseSftpPaneActionsResult {
-  const isLocal = side === 'local';
-  const path = isLocal ? connection.localPath : connection.remotePath;
-  const entries = isLocal ? connection.localEntries : connection.remoteEntries;
-  const pane = isLocal ? connection.localPane : connection.remotePane;
+  const isLocal = localMode ?? side === 'local';
+  const path = side === 'local' ? connection.localPath : connection.remotePath;
+  const entries = side === 'local' ? connection.localEntries : connection.remoteEntries;
+  const pane = side === 'local' ? connection.localPane : connection.remotePane;
   const remoteBookmarks = connection.remoteBookmarks;
 
-  const { loadLocalDirectory } = useLocalDirectory(connection);
+  const { loadLocalDirectory } = useLocalDirectory(connection, side);
   const {
     loadRemoteDirectory,
     createRemoteEntry,
@@ -108,9 +110,10 @@ export function useSftpPaneActions(
     downloadRemotePaths,
     openRemoteFile,
     previewRemoteFile,
-  } = useSftpConnection(connection);
+  } = useSftpConnection(connection, side);
   const { addOperation, markOperationFailed, markOperationRunning, removeOperation } = useTransferStore();
   const { error, success } = useToast();
+  const { t } = useI18n();
 
   const setPaneState = useSftpStore((state) => state.setPaneState);
   const setRemoteClipboard = useSftpStore((state) => state.setRemoteClipboard);
@@ -129,6 +132,15 @@ export function useSftpPaneActions(
     () => entries.filter((entry) => selectedPaths.includes(entry.path)),
     [entries, selectedPaths],
   );
+
+  const pathsAreBusy = useCallback(
+    (paths: string[]) => hasActivePathOperation(connection.id, paths),
+    [connection.id],
+  );
+
+  const reportBusyPaths = useCallback(() => {
+    error(t('sftp.transfer.pathBusy'));
+  }, [error, t]);
 
   const reload = useCallback(async () => {
     if (isLocal) {
@@ -189,53 +201,46 @@ export function useSftpPaneActions(
       if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target) return;
+      if (pathsAreBusy([target.path])) {
+        reportBusyPaths();
+        return;
+      }
       try {
         const folders = await invokePickLocalFolder();
         if (!folders.length) return;
-        const operationId = `${connection.id}-download-${Date.now()}`;
-        addOperation({
-          operationId,
-          kind: 'download',
-          currentPath: target.path,
-          totalBytes: 0,
-          processedBytes: 0,
-          totalSteps: 1,
-          completedSteps: 0,
-        });
-        await downloadRemotePaths([target.path], folders[0], operationId);
+        if (pathsAreBusy([target.path])) {
+          reportBusyPaths();
+          return;
+        }
+        await downloadRemotePaths([target.path], folders[0]);
       } catch (err) {
         error(err instanceof Error ? err.message : String(err));
       }
     },
-    [addOperation, connection.id, downloadRemotePaths, isLocal, selectedEntries, error],
+    [downloadRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
   );
 
   const onBatchDownload = useCallback(
     async () => {
       if (isLocal || !selectedEntries.length) return;
+      const selectedRemotePaths = selectedEntries.map((entry) => entry.path);
+      if (pathsAreBusy(selectedRemotePaths)) {
+        reportBusyPaths();
+        return;
+      }
       try {
         const folders = await invokePickLocalFolder();
         if (!folders.length) return;
-        const operationId = `${connection.id}-batch-download-${Date.now()}`;
-        addOperation({
-          operationId,
-          kind: 'download',
-          currentPath: selectedEntries[0]?.path,
-          totalBytes: 0,
-          processedBytes: 0,
-          totalSteps: selectedEntries.length,
-          completedSteps: 0,
-        });
-        await downloadRemotePaths(
-          selectedEntries.map((e) => e.path),
-          folders[0],
-          operationId,
-        );
+        if (pathsAreBusy(selectedRemotePaths)) {
+          reportBusyPaths();
+          return;
+        }
+        await downloadRemotePaths(selectedRemotePaths, folders[0]);
       } catch (err) {
         error(err instanceof Error ? err.message : String(err));
       }
     },
-    [addOperation, connection.id, downloadRemotePaths, isLocal, selectedEntries, error],
+    [downloadRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
   );
 
   const onCopy = useCallback(
@@ -356,6 +361,11 @@ export function useSftpPaneActions(
   const handleRename = useCallback(
     async (newName: string) => {
       if (isLocal || !renameTarget) return;
+      if (pathsAreBusy([renameTarget.path])) {
+        reportBusyPaths();
+        setRenameTarget(undefined);
+        return;
+      }
       try {
         await renameRemotePath(renameTarget.path, newName);
         await reload();
@@ -366,7 +376,7 @@ export function useSftpPaneActions(
         setRenameTarget(undefined);
       }
     },
-    [clearSelection, isLocal, renameRemotePath, renameTarget, reload, error],
+    [clearSelection, isLocal, pathsAreBusy, renameRemotePath, renameTarget, reload, reportBusyPaths, error],
   );
 
   const onDelete = useCallback(
@@ -374,6 +384,10 @@ export function useSftpPaneActions(
       if (isLocal) return;
       const targets = entriesToDelete?.length ? entriesToDelete : selectedEntries;
       if (!targets.length) return;
+      if (pathsAreBusy(targets.map((entry) => entry.path))) {
+        reportBusyPaths();
+        return;
+      }
       try {
         await deleteRemotePaths(targets.map((e) => e.path));
         await reload();
@@ -382,7 +396,7 @@ export function useSftpPaneActions(
         error(err instanceof Error ? err.message : String(err));
       }
     },
-    [clearSelection, deleteRemotePaths, isLocal, reload, selectedEntries, error],
+    [clearSelection, deleteRemotePaths, isLocal, pathsAreBusy, reload, reportBusyPaths, selectedEntries, error],
   );
 
   const onUploadFiles = useCallback(async () => {

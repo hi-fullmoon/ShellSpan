@@ -142,6 +142,28 @@ describe('SftpPane', () => {
     expect(screen.getByText('Test')).toBeInTheDocument();
   });
 
+  it('renders the right pane as local with a source switch action', () => {
+    const connection = createConnection();
+    const onTitleClick = vi.fn();
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        localMode
+        onTitleClick={onTitleClick}
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('sftp.local')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'sftp.source.switch' }),
+    );
+    expect(onTitleClick).toHaveBeenCalledTimes(1);
+  });
+
   it('renders file list', () => {
     const connection = createConnection();
     render(

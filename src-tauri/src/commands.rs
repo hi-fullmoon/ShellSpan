@@ -1,7 +1,7 @@
 use super::*;
 use crate::sftp_pool::SftpPool;
 use crate::models::{
-    AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CreateRemoteEntryRequest,
+    AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest,
     CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest,
     HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KnownHostEntry, LocalDirectoryListing,
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
@@ -504,6 +504,21 @@ pub(crate) async fn copy_remote_path(
         info!("Copied remote path successfully");
     }
     result
+}
+
+#[tauri::command]
+pub(crate) async fn copy_remote_to_remote(
+    app: AppHandle,
+    request: CopyRemoteToRemoteRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), String> {
+    let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        copy_remote_to_remote_blocking(request, Some(&pool), known_hosts.as_deref())
+    })
+    .await
+    .map_err(|error| format!("failed to join remote transfer task: {error}"))?
 }
 
 #[tauri::command]

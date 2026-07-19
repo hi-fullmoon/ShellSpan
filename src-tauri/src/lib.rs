@@ -28,7 +28,7 @@ pub(crate) use identity_cache::RemoteIdentityCache;
 pub(crate) use local_fs::copy_local_paths_blocking;
 pub(crate) use path_utils::portable_local_path;
 pub(crate) use remote_fs::{
-    copy_remote_path_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
+    copy_remote_path_blocking, copy_remote_to_remote_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
     download_remote_paths_blocking, list_remote_directory_blocking, open_remote_file_blocking,
     read_remote_file_blocking, rename_remote_path_blocking, restore_remote_path_blocking,
     trash_remote_path_blocking, update_remote_permissions_blocking,
@@ -156,6 +156,7 @@ pub fn run() {
             commands::restore_remote_path,
             commands::delete_remote_path,
             commands::copy_remote_path,
+            commands::copy_remote_to_remote,
             commands::upload_local_paths,
             commands::copy_local_paths,
             commands::cancel_upload,

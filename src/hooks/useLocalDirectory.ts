@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { invokeListLocalDirectory, invokeOpenPath } from '@/lib/tauri';
-import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
 
-export function useLocalDirectory(connection: SftpConnection): {
+export function useLocalDirectory(connection: SftpConnection, side: SftpSide = 'local'): {
   loadLocalDirectory: (path?: string) => Promise<void>;
   openLocalPath: (path: string) => Promise<void>;
 } {
@@ -13,23 +13,23 @@ export function useLocalDirectory(connection: SftpConnection): {
 
   const loadLocalDirectory = useCallback(
     async (path?: string) => {
-      setLoading(connection.id, 'local', true);
-      setError(connection.id, 'local');
+      setLoading(connection.id, side, true);
+      setError(connection.id, side);
       try {
         const listing = await invokeListLocalDirectory(path ?? '');
-        setPath(connection.id, 'local', listing.path);
-        setEntries(connection.id, 'local', listing.entries);
+        setPath(connection.id, side, listing.path);
+        setEntries(connection.id, side, listing.entries);
       } catch (error) {
         setError(
           connection.id,
-          'local',
+          side,
           error instanceof Error ? error.message : String(error),
         );
       } finally {
-        setLoading(connection.id, 'local', false);
+        setLoading(connection.id, side, false);
       }
     },
-    [connection.id, setPath, setEntries, setLoading, setError],
+    [connection.id, setPath, setEntries, setLoading, setError, side],
   );
 
   const openLocalPath = useCallback(async (path: string) => {

@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { FolderIcon, ServerIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { useSftpStore } from '@/stores/sftpStore';
+import {
+  getSftpPaneConnection,
+  getSftpPaneSource,
+  useSftpStore,
+  type SftpSide,
+} from '@/stores/sftpStore';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { SplitPane } from '@/components/ui/split-pane';
@@ -22,6 +28,8 @@ import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { useSystemFileDrop } from '@/hooks/useSystemFileDrop';
 import { useToast } from '@/hooks/useToast';
+import { invokeCopyRemoteToRemote } from '@/lib/tauri';
+import { useTransferStore } from '@/stores/transferStore';
 import type { ConnectionProfile, RemoteFileEntry, UploadConflictPolicy } from '@/types';
 
 const Sftp: React.FC = () => {
@@ -29,6 +37,7 @@ const Sftp: React.FC = () => {
   const connections = useSftpStore((state) => state.connections);
   const activeConnectionId = useSftpStore((state) => state.activeConnectionId);
   const connection = connections.find((c) => c.id === activeConnectionId);
+  const addLocalConnection = useSftpStore((state) => state.addLocalConnection);
   const {
     open: openSftpConnection,
     verifyHostKey,
@@ -50,6 +59,7 @@ const Sftp: React.FC = () => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         if (activeSection !== 'sftp') return;
         event.preventDefault();
+        if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
         setNewConnectionMenuOpen((prev) => !prev);
       }
     };
@@ -86,6 +96,7 @@ const Sftp: React.FC = () => {
             open={newConnectionMenuOpen}
             onClose={() => setNewConnectionMenuOpen(false)}
             onConnect={openSftpConnection}
+            onOpenLocal={addLocalConnection}
           />
         </div>
         <SftpTabContextMenu
@@ -148,7 +159,7 @@ interface SftpContentProps {
       y: number;
     } | null,
   ) => void;
-  openSftpConnection: (profile: ConnectionProfile) => Promise<void>;
+  openSftpConnection: (profile: ConnectionProfile, targetConnectionId?: string, targetSide?: SftpSide) => Promise<void>;
   verifyHostKey: (host: string, port: number, onVerified: () => void) => Promise<void>;
 }
 
@@ -160,6 +171,8 @@ interface UploadQueue {
   accepted: string[];
   policies: UploadConflictPolicy[];
   remembered: UploadConflictAction | undefined;
+  sourceSide?: SftpSide;
+  sourceLocal: boolean;
 }
 
 export const SftpContent: React.FC<SftpContentProps> = ({
@@ -172,18 +185,31 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   verifyHostKey,
 }) => {
   const { t } = useI18n();
-  const localActions = useSftpPaneActions(connection, 'local');
-  const remoteActions = useSftpPaneActions(connection, 'remote');
-  const { loadLocalDirectory } = useLocalDirectory(connection);
-  const { loadRemoteDirectory, downloadRemotePaths } = useSftpConnection(connection);
+  const leftSource = getSftpPaneSource(connection, 'local');
+  const rightSource = getSftpPaneSource(connection, 'remote');
+  const leftIsLocal = leftSource === 'local';
+  const rightIsLocal = rightSource === 'local';
+  const localActions = useSftpPaneActions(connection, 'local', leftIsLocal);
+  const remoteActions = useSftpPaneActions(connection, 'remote', rightIsLocal);
+  const { loadLocalDirectory } = useLocalDirectory(connection, 'local');
+  const { loadLocalDirectory: loadRightLocalDirectory } = useLocalDirectory(connection, 'remote');
+  const leftRemote = useSftpConnection(connection, 'local');
+  const rightRemote = useSftpConnection(connection, 'remote');
   const { error } = useToast();
   const setPaneState = useSftpStore((state) => state.setPaneState);
+  const setPaneLocal = useSftpStore((state) => state.setPaneLocal);
+  const addLocalConnection = useSftpStore((state) => state.addLocalConnection);
+  const addTransferOperation = useTransferStore((state) => state.addOperation);
+  const markTransferRunning = useTransferStore((state) => state.markOperationRunning);
+  const markTransferCompleted = useTransferStore((state) => state.markOperationCompleted);
+  const markTransferFailed = useTransferStore((state) => state.markOperationFailed);
 
   const selectedRemotePaths = new Set(connection.remotePane.selectedPaths);
   const selectedLocalPaths = new Set(connection.localPane.selectedPaths);
 
   const uploadQueueRef = useRef<UploadQueue | null>(null);
   const [uploadConflict, setUploadConflict] = useState<PendingUploadConflict | undefined>(undefined);
+  const [sourceTargetSide, setSourceTargetSide] = useState<SftpSide | null>(null);
 
   const leftPaneRef = useRef<HTMLDivElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
@@ -244,36 +270,85 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     }
 
     if (queue.accepted.length > 0) {
-      if (queue.side === 'local') {
-        await localActions.copyWithPolicies(
+      const targetLocal = queue.side === 'local' ? leftIsLocal : rightIsLocal;
+      if (targetLocal && queue.sourceLocal) {
+        const targetActions = queue.side === 'local' ? localActions : remoteActions;
+        await targetActions.copyWithPolicies(
           queue.accepted,
           queue.destination,
           queue.policies,
         );
-      } else {
-        await remoteActions.uploadWithPolicies(
+      } else if (targetLocal && queue.sourceSide) {
+        const sourceRemote = queue.sourceSide === 'local' ? leftRemote : rightRemote;
+        await sourceRemote.downloadRemotePaths(queue.accepted, queue.destination);
+      } else if (queue.sourceLocal) {
+        const targetActions = queue.side === 'local' ? localActions : remoteActions;
+        await targetActions.uploadWithPolicies(
           queue.accepted,
           queue.destination,
           queue.policies,
         );
+      } else if (queue.sourceSide) {
+        const request = {
+          sourceConnection: getSftpPaneConnection(connection, queue.sourceSide),
+          destinationConnection: getSftpPaneConnection(connection, queue.side),
+          sourcePaths: queue.accepted,
+          destinationDirectory: queue.destination,
+          conflictPolicies: queue.policies,
+        };
+        const operationId = `${connection.id}-remote-copy-${Date.now()}`;
+        const runRemoteCopy = async (): Promise<void> => {
+          markTransferRunning(operationId);
+          try {
+            await invokeCopyRemoteToRemote(request);
+            markTransferCompleted(operationId);
+          } catch (copyError) {
+            markTransferFailed(
+              operationId,
+              copyError instanceof Error ? copyError.message : String(copyError),
+            );
+            throw copyError;
+          }
+        };
+        addTransferOperation({
+          operationId,
+          kind: 'remote-copy',
+          connectionId: connection.id,
+          paths: queue.accepted,
+          currentPath: queue.accepted[0],
+          totalBytes: 0,
+          processedBytes: 0,
+          totalSteps: queue.accepted.length,
+          completedSteps: 0,
+          status: 'running',
+          retry: runRemoteCopy,
+        });
+        try {
+          await runRemoteCopy();
+        } catch {
+          // The task row keeps the failure and retry action visible.
+        }
       }
     }
 
     uploadQueueRef.current = null;
     setUploadConflict(undefined);
-  }, [connection.localEntries, connection.remoteEntries, localActions, remoteActions]);
+  }, [addTransferOperation, connection, connection.localEntries, connection.remoteEntries, leftIsLocal, leftRemote, localActions, markTransferCompleted, markTransferFailed, markTransferRunning, remoteActions, rightIsLocal, rightRemote]);
 
   const refreshAfterQueue = useCallback(
     async (side: 'local' | 'remote') => {
-      if (side === 'local') {
-        await loadLocalDirectory(connection.localPath);
-        setPaneState(connection.id, 'local', { selectedPaths: [] });
+      const source = side === 'local' ? leftSource : rightSource;
+      const path = side === 'local' ? connection.localPath : connection.remotePath;
+      if (source === 'local') {
+        await (side === 'local' ? loadLocalDirectory(path) : loadRightLocalDirectory(path));
       } else {
-        await loadRemoteDirectory(connection.remotePath);
-        setPaneState(connection.id, 'remote', { selectedPaths: [] });
+        await (side === 'local'
+          ? leftRemote.loadRemoteDirectory(path)
+          : rightRemote.loadRemoteDirectory(path));
       }
+      setPaneState(connection.id, side, { selectedPaths: [] });
     },
-    [connection.id, connection.localPath, connection.remotePath, loadLocalDirectory, loadRemoteDirectory, setPaneState],
+    [connection.id, connection.localPath, connection.remotePath, leftRemote, leftSource, loadLocalDirectory, loadRightLocalDirectory, rightRemote, rightSource, setPaneState],
   );
 
   const handleUploadConflictResolution = async (
@@ -310,26 +385,24 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     payload: SftpDndPayload,
     targetSide: 'local' | 'remote',
   ): Promise<void> => {
+    if (payload.side === targetSide) return;
     const paths = payload.entries.map((entry) => entry.path);
-    if (payload.side === 'local' && targetSide === 'remote') {
-      uploadQueueRef.current = {
-        paths,
-        destination: connection.remotePath,
-        side: 'remote',
-        index: 0,
-        accepted: [],
-        policies: [],
-        remembered: undefined,
-      };
-      await processUploadQueue();
-      setPaneState(connection.id, 'local', { selectedPaths: [] });
-      if (!uploadQueueRef.current) {
-        await refreshAfterQueue('remote');
-      }
-    } else if (payload.side === 'remote' && targetSide === 'local') {
-      await downloadRemotePaths(paths, connection.localPath);
-      await loadLocalDirectory(connection.localPath);
-      setPaneState(connection.id, 'remote', { selectedPaths: [] });
+    const sourceLocal = payload.side === 'local' ? leftIsLocal : rightIsLocal;
+    uploadQueueRef.current = {
+      paths,
+      destination: targetSide === 'local' ? connection.localPath : connection.remotePath,
+      side: targetSide,
+      sourceSide: payload.side,
+      sourceLocal,
+      index: 0,
+      accepted: [],
+      policies: [],
+      remembered: undefined,
+    };
+    await processUploadQueue();
+    setPaneState(connection.id, payload.side, { selectedPaths: [] });
+    if (!uploadQueueRef.current) {
+      await refreshAfterQueue(targetSide);
     }
   };
 
@@ -348,6 +421,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         paths,
         destination,
         side,
+        sourceLocal: true,
         index: 0,
         accepted: [],
         policies: [],
@@ -358,7 +432,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         await refreshAfterQueue(side);
       }
     },
-    [connection.id, connection.localPath, connection.remotePath, loadLocalDirectory, loadRemoteDirectory, refreshAfterQueue, setPaneState, processUploadQueue],
+    [connection.id, connection.localPath, connection.remotePath, refreshAfterQueue, processUploadQueue],
   );
 
   const handleSystemDropRejected = useCallback(
@@ -381,7 +455,10 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     <SftpDndContext onDragEnd={handleDragEnd}>
       <div className="flex h-full flex-col bg-app-bg">
         <SftpTabBar
-          onNewTabClick={() => setNewConnectionMenuOpen(true)}
+          onNewTabClick={() => {
+            setSourceTargetSide(null);
+            setNewConnectionMenuOpen(true);
+          }}
           onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}
         />
         <div className="flex-1 min-h-0">
@@ -398,9 +475,46 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 }
                 systemDropActive={systemDragActive}
                 systemDropHovered={systemHoveredSide === 'local'}
+                localMode={leftIsLocal}
+                onTitleClick={() => {
+                  setSourceTargetSide('local');
+                  setNewConnectionMenuOpen(true);
+                }}
+                onVerifyHostKey={() => {
+                  const request = getSftpPaneConnection(connection, 'local');
+                  void verifyHostKey(
+                    request.host,
+                    request.port,
+                    () => void leftRemote.loadRemoteDirectory(connection.localPath),
+                  );
+                }}
               />
             }
-            right={
+            right={rightSource === 'empty' ? (
+              <div className="flex h-full flex-col items-center justify-center gap-4 bg-app-surface p-8 text-center">
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-semibold text-app-text">{t('sftp.source.emptyTitle')}</p>
+                  <p className="max-w-xs text-xs text-app-text-soft">{t('sftp.source.emptyDescription')}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setPaneLocal(connection.id, 'remote')}>
+                    <FolderIcon data-icon="inline-start" />
+                    {t('sftp.source.local')}
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => {
+                      setSourceTargetSide('remote');
+                      setNewConnectionMenuOpen(true);
+                    }}
+                  >
+                    <ServerIcon data-icon="inline-start" />
+                    {t('sftp.source.remote')}
+                  </Button>
+                </div>
+              </div>
+            ) : (
               <SftpPane
                 ref={rightPaneRef}
                 connection={connection}
@@ -411,16 +525,22 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                   setPaneState(connection.id, 'remote', { selectedPaths: Array.from(paths) })
                 }
                 onVerifyHostKey={() => {
+                  const request = getSftpPaneConnection(connection, 'remote');
                   void verifyHostKey(
-                    connection.connection.host,
-                    connection.connection.port,
-                    () => void loadRemoteDirectory(connection.remotePath),
+                    request.host,
+                    request.port,
+                    () => void rightRemote.loadRemoteDirectory(connection.remotePath),
                   );
                 }}
                 systemDropActive={systemDragActive}
                 systemDropHovered={systemHoveredSide === 'remote'}
+                localMode={rightIsLocal}
+                onTitleClick={() => {
+                  setSourceTargetSide('remote');
+                  setNewConnectionMenuOpen(true);
+                }}
               />
-            }
+            )}
           />
         </div>
 
@@ -522,8 +642,24 @@ export const SftpContent: React.FC<SftpContentProps> = ({
       </div>
       <SftpNewConnectionMenu
         open={newConnectionMenuOpen}
-        onClose={() => setNewConnectionMenuOpen(false)}
-        onConnect={openSftpConnection}
+        onClose={() => {
+          setNewConnectionMenuOpen(false);
+          setSourceTargetSide(null);
+        }}
+        onConnect={(profile) =>
+          openSftpConnection(
+            profile,
+            sourceTargetSide ? connection.id : undefined,
+            sourceTargetSide ?? 'remote',
+          )
+        }
+        onOpenLocal={() => {
+          if (sourceTargetSide) {
+            setPaneLocal(connection.id, sourceTargetSide);
+          } else {
+            addLocalConnection();
+          }
+        }}
       />
       <SftpTabContextMenu
         open={!!tabContextMenu}

@@ -11,6 +11,7 @@ import type {
 } from '@/types';
 
 export type SftpSide = 'local' | 'remote';
+export type SftpPaneSource = 'empty' | 'local' | 'remote';
 
 export interface SftpPaneState {
   pathInput: string;
@@ -32,6 +33,11 @@ export interface SftpConnection {
   title: string;
   pinned?: boolean;
   connection: RemoteConnectionRequest;
+  leftConnection?: RemoteConnectionRequest;
+  leftTitle?: string;
+  leftProfileId?: string;
+  leftSource?: SftpPaneSource;
+  rightSource?: SftpPaneSource;
   localPath: string;
   remotePath: string;
   localEntries: LocalFileEntry[];
@@ -44,6 +50,8 @@ export interface SftpConnection {
   remotePane: SftpPaneState;
   remoteBookmarks: string[];
   remoteClipboard?: SftpRemoteClipboard;
+  localOnly?: boolean;
+  rightLocal?: boolean;
 }
 
 export interface SftpDirectoryListing {
@@ -83,6 +91,8 @@ function createDefaultConnection(
     localPane: createDefaultPaneState(),
     remotePane: createDefaultPaneState(),
     remoteBookmarks: [],
+    leftSource: 'local',
+    rightSource: 'remote',
   };
 }
 
@@ -90,6 +100,15 @@ interface SftpState {
   connections: SftpConnection[];
   activeConnectionId: string | null;
   addConnection: (
+    summary: SessionSummary,
+    connection: RemoteConnectionRequest,
+    profileId?: string,
+  ) => void;
+  addLocalConnection: () => void;
+  setPaneLocal: (id: string, side: SftpSide) => void;
+  attachRemoteConnection: (
+    id: string,
+    side: SftpSide,
     summary: SessionSummary,
     connection: RemoteConnectionRequest,
     profileId?: string,
@@ -154,6 +173,24 @@ function getErrorKey(side: SftpSide): 'localError' | 'remoteError' {
   return side === 'local' ? 'localError' : 'remoteError';
 }
 
+export function getSftpPaneSource(
+  connection: SftpConnection,
+  side: SftpSide,
+): SftpPaneSource {
+  return side === 'local'
+    ? connection.leftSource ?? 'local'
+    : connection.rightSource ?? (connection.localOnly ? (connection.rightLocal ? 'local' : 'empty') : 'remote');
+}
+
+export function getSftpPaneConnection(
+  connection: SftpConnection,
+  side: SftpSide,
+): RemoteConnectionRequest {
+  return side === 'local'
+    ? connection.leftConnection ?? connection.connection
+    : connection.connection;
+}
+
 export const useSftpStore = create<SftpState>()((set) => ({
   connections: [],
   activeConnectionId: null,
@@ -167,6 +204,73 @@ export const useSftpStore = create<SftpState>()((set) => ({
         activeConnectionId: id,
       };
     }),
+
+  addLocalConnection: () =>
+    set((state) => {
+      const id = generateId();
+      const conn = createDefaultConnection(
+        id,
+        { sessionId: id, title: 'Local', host: '', port: 0, username: '' },
+        { host: '', port: 22, username: '', authMethod: 'password' },
+      );
+      conn.localOnly = true;
+      conn.rightLocal = false;
+      conn.rightSource = 'empty';
+      return { connections: [...state.connections, conn], activeConnectionId: id };
+    }),
+
+  setPaneLocal: (id, side) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (current) => ({
+        ...current,
+        ...(side === 'local'
+          ? {
+              leftSource: 'local' as const,
+              leftConnection: undefined,
+              leftTitle: undefined,
+              leftProfileId: undefined,
+            }
+          : { rightSource: 'local' as const, title: 'Local' }),
+        localOnly:
+          side === 'local'
+            ? getSftpPaneSource(current, 'remote') !== 'remote'
+            : getSftpPaneSource(current, 'local') !== 'remote',
+        rightLocal: side === 'remote',
+        [getPathKey(side)]: '',
+        [getEntriesKey(side)]: [],
+        [getErrorKey(side)]: undefined,
+        [getPaneKey(side)]: createDefaultPaneState(),
+      })),
+      activeConnectionId: id,
+    })),
+
+  attachRemoteConnection: (id, side, summary, connection, profileId) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (current) => ({
+        ...current,
+        ...(side === 'local'
+          ? {
+              leftSource: 'remote' as const,
+              leftConnection: connection,
+              leftTitle: summary.title,
+              leftProfileId: profileId,
+            }
+          : {
+              rightSource: 'remote' as const,
+              sessionId: summary.sessionId,
+              profileId,
+              title: summary.title,
+              connection,
+            }),
+        localOnly: false,
+        rightLocal: side === 'remote' ? false : current.rightLocal,
+        [getPathKey(side)]: '',
+        [getEntriesKey(side)]: [],
+        [getErrorKey(side)]: undefined,
+        [getPaneKey(side)]: createDefaultPaneState(),
+      })),
+      activeConnectionId: id,
+    })),
 
   removeConnection: (id) =>
     set((state) => {

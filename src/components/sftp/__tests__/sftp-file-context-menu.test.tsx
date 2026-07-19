@@ -92,6 +92,14 @@ describe('SftpFileContextMenu', () => {
     expect(onAction).toHaveBeenCalledWith('preview');
   });
 
+  it('disables conflicting actions while the selected path is busy', () => {
+    renderMenu({ selectionBusy: true });
+
+    expect(screen.getByText('common.download').closest('button')).toBeDisabled();
+    expect(screen.getByText('common.rename').closest('button')).toBeDisabled();
+    expect(screen.getByText('common.delete').closest('button')).toBeDisabled();
+  });
+
   it('does not delete until the confirmation is accepted', () => {
     const { onAction, onClose } = renderMenu();
 

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useTransferStore, type TransferOperation } from '@/stores/transferStore';
+import {
+  hasActivePathOperation,
+  useTransferStore,
+  type TransferOperation,
+} from '@/stores/transferStore';
 
 const operation: TransferOperation = {
   operationId: 'upload-1',
@@ -75,5 +79,37 @@ describe('transferStore', () => {
     expect(useTransferStore.getState().operations[0]?.currentPath).toBe(
       '/tmp/file.png',
     );
+  });
+
+  it('detects active operations on the same path and its descendants', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'download',
+      connectionId: 'connection-1',
+      paths: ['/remote/archive'],
+      status: 'running',
+    });
+
+    expect(hasActivePathOperation('connection-1', ['/remote/archive/file.zip'])).toBe(true);
+    expect(hasActivePathOperation('connection-1', ['/remote/other.txt'])).toBe(false);
+    expect(hasActivePathOperation('connection-2', ['/remote/archive'])).toBe(false);
+  });
+
+  it('keeps a path occupied until backend cancellation finishes', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'download',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.zip'],
+      status: 'running',
+      cancel,
+    });
+
+    await useTransferStore.getState().cancelOperation(operation.operationId);
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(useTransferStore.getState().operations[0]?.status).toBe('cancelling');
+    expect(hasActivePathOperation('connection-1', ['/remote/file.zip'])).toBe(true);
   });
 });

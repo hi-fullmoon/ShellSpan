@@ -5,11 +5,13 @@ import type {
   UploadProgressEvent,
 } from '@/types';
 
-export type TransferOperationKind = 'upload' | 'download' | 'delete';
+export type TransferOperationKind = 'upload' | 'download' | 'delete' | 'remote-copy';
 
 export interface TransferOperation {
   operationId: string;
   kind: TransferOperationKind;
+  connectionId?: string;
+  paths?: string[];
   currentPath?: string;
   totalBytes: number;
   processedBytes: number;
@@ -38,6 +40,8 @@ interface TransferState {
   removeOperation: (operationId: string) => void;
   markOperationRunning: (operationId: string) => void;
   markOperationFailed: (operationId: string, error: string) => void;
+  markOperationCompleted: (operationId: string) => void;
+  markOperationCancelled: (operationId: string) => void;
   retryOperation: (operationId: string) => Promise<void>;
   cancelOperation: (operationId: string) => Promise<void>;
   setOperationUndo: (operationId: string, undo: () => Promise<void>) => void;
@@ -122,6 +126,28 @@ export const useTransferStore = create<TransferState>()((set) => ({
           : operation,
       ),
     })),
+  markOperationCompleted: (operationId) =>
+    set((state) => ({
+      operations: state.operations.map((operation) =>
+        operation.operationId === operationId
+          ? {
+              ...operation,
+              status: 'running',
+              completedSteps: operation.totalSteps,
+              processedBytes: operation.totalBytes,
+              error: undefined,
+            }
+          : operation,
+      ),
+    })),
+  markOperationCancelled: (operationId) =>
+    set((state) => ({
+      operations: state.operations.map((operation) =>
+        operation.operationId === operationId
+          ? { ...operation, status: 'cancelled', error: undefined }
+          : operation,
+      ),
+    })),
   retryOperation: async (operationId) => {
     const operation = useTransferStore
       .getState()
@@ -153,13 +179,8 @@ export const useTransferStore = create<TransferState>()((set) => ({
     }));
     try {
       await operation.cancel();
-      set((state) => ({
-        operations: state.operations.map((item) =>
-          item.operationId === operationId
-            ? { ...item, status: 'cancelled' }
-            : item,
-        ),
-      }));
+      // The backend cancellation request only flips a flag. Keep the operation in
+      // `cancelling` until the running command observes it and exits.
     } catch (error) {
       useTransferStore.getState().markOperationFailed(
         operationId,
@@ -225,6 +246,38 @@ export function isTransferComplete(operation: TransferOperation): boolean {
   }
   if (operation.totalSteps === 0) return false;
   return operation.completedSteps >= operation.totalSteps;
+}
+
+export function isTransferActive(operation: TransferOperation): boolean {
+  return operation.status !== 'failed' &&
+    operation.status !== 'cancelled' &&
+    operation.status !== 'restored' &&
+    !isTransferComplete(operation);
+}
+
+function normalizeRemotePath(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized || '/';
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  const a = normalizeRemotePath(left);
+  const b = normalizeRemotePath(right);
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+export function hasActivePathOperation(
+  connectionId: string,
+  paths: string[],
+  operations = useTransferStore.getState().operations,
+): boolean {
+  return operations.some((operation) =>
+    operation.connectionId === connectionId &&
+    operation.paths?.some((activePath) =>
+      paths.some((path) => pathsOverlap(activePath, path)),
+    ) &&
+    isTransferActive(operation),
+  );
 }
 
 export function formatTransferProgress(operation: TransferOperation): string {

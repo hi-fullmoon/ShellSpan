@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ServerIcon, LayoutGridIcon } from 'lucide-react';
+import { ServerIcon, LayoutGridIcon, SearchIcon, FolderIcon } from 'lucide-react';
+import { usePlatform } from '@/hooks/usePlatform';
 import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
@@ -16,6 +17,7 @@ interface SftpNewConnectionMenuProps {
   open: boolean;
   onClose: () => void;
   onConnect: (profile: ConnectionProfile) => Promise<void>;
+  onOpenLocal?: () => void;
 }
 
 interface ProfileListItem {
@@ -27,8 +29,10 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   open,
   onClose,
   onConnect,
+  onOpenLocal,
 }) => {
   const { t } = useI18n();
+  const platform = usePlatform();
   const profiles = useProfileStore((state) => state.profiles);
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
@@ -74,7 +78,9 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
     ];
   }, [profiles, recentIds, query]);
 
-  const hasResults = filteredItems.length > 0;
+  const showLocal = Boolean(onOpenLocal) && (!query.trim() || t('sftp.newConnectionMenu.openLocal').toLowerCase().includes(query.trim().toLowerCase()));
+  const itemCount = filteredItems.length + (showLocal ? 1 : 0);
+  const hasResults = itemCount > 0;
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -119,17 +125,22 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
       }
       if (!hasResults) return;
 
-      if (event.key === 'ArrowDown') {
+      const isNext = event.key === 'ArrowDown' || (event.ctrlKey && event.key.toLowerCase() === 'n');
+      const isPrevious = event.key === 'ArrowUp' || (event.ctrlKey && event.key.toLowerCase() === 'p');
+      if (isNext) {
         event.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % filteredItems.length);
-      } else if (event.key === 'ArrowUp') {
+        setSelectedIndex((prev) => (prev + 1) % itemCount);
+      } else if (isPrevious) {
         event.preventDefault();
-        setSelectedIndex(
-          (prev) => (prev - 1 + filteredItems.length) % filteredItems.length,
-        );
+        setSelectedIndex((prev) => (prev - 1 + itemCount) % itemCount);
       } else if (event.key === 'Enter') {
         event.preventDefault();
-        const selected = filteredItems[selectedIndex];
+        if (showLocal && selectedIndex === 0) {
+          onOpenLocal?.();
+          onClose();
+          return;
+        }
+        const selected = filteredItems[selectedIndex - (showLocal ? 1 : 0)];
         if (selected) {
           void onConnect(selected.profile);
           onClose();
@@ -140,7 +151,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mounted, onClose, filteredItems, hasResults, selectedIndex, onConnect]);
+  }, [mounted, onClose, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal]);
 
   const handleOpenWorkbench = (): void => {
     setActiveSection('workbench');
@@ -183,35 +194,40 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
         role="dialog"
         aria-label={t('sftp.newConnectionMenu.title')}
       >
-        <div className="relative border-b border-app-border p-4">
+        <div className="border-b border-app-border p-4"><div className="relative">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-app-text-soft" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('sftp.newConnectionMenu.searchPlaceholder')}
-            className="h-11 rounded-xl pr-20 text-sm"
+            className="h-11 rounded-xl pl-10 pr-24 text-sm"
             autoFocus
           />
-          <span className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 rounded-md border border-app-border bg-app-surface-muted px-1.5 py-0.5 text-xs text-app-text-soft">
-            ⌘K
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-app-border bg-app-surface-muted px-2 py-0.5 font-mono text-xs text-app-text-soft">
+            {platform === 'macos' ? '⌘ K' : 'Ctrl K'}
           </span>
-        </div>
+        </div></div>
 
         <div className="max-h-[60vh] min-h-0 overflow-y-auto p-2">
           {hasResults ? (
             <>
+              {showLocal && <Button type="button" variant="secondary" data-command-index={0} onClick={() => { onOpenLocal?.(); onClose(); }} onMouseEnter={() => setSelectedIndex(0)} className={cn('mb-2 h-auto w-full justify-start gap-3 rounded-xl p-3 text-left', selectedIndex === 0 && 'ring-1 ring-app-primary')}><span className="flex size-9 items-center justify-center rounded-lg bg-app-primary text-app-primary-text"><FolderIcon /></span><span className="flex min-w-0 flex-1 flex-col items-start"><span className="text-sm font-medium">{t('sftp.newConnectionMenu.openLocal')}</span><span className="text-xs text-app-text-soft">{t('sftp.newConnectionMenu.openLocalHint')}</span></span>{selectedIndex === 0 && <span className="text-xs text-app-text-soft">↵</span>}</Button>}
+              {filteredItems.length > 0 && <>
               <h3 className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-app-text-soft">
                 {renderSectionLabel()}
               </h3>
               <ul ref={listRef} className="flex flex-col gap-1">
                 {filteredItems.map(({ profile }, index) => {
-                  const isSelected = index === selectedIndex;
+                  const commandIndex = index + (showLocal ? 1 : 0);
+                  const isSelected = commandIndex === selectedIndex;
                   return (
                     <li key={profile.id}>
                       <button
                         type="button"
                         aria-label={profile.name}
                         onClick={() => handleConnect(profile)}
-                        onMouseEnter={() => setSelectedIndex(index)}
+                        onMouseEnter={() => setSelectedIndex(commandIndex)}
+                        data-command-index={commandIndex}
                         className={cn(
                           'flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors',
                           isSelected
@@ -245,6 +261,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
                   );
                 })}
               </ul>
+              </>}
             </>
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 p-8 text-center">
@@ -272,7 +289,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
             {t('terminal.newTabMenu.openWorkbench')}
           </Button>
           <div className="flex items-center gap-3 text-xs text-app-text-soft">
-            <span>↑↓ {t('terminal.newTabMenu.navigate')}</span>
+            <span>↑↓ / Ctrl N P {t('terminal.newTabMenu.navigate')}</span>
             <span>↵ {t('sftp.newConnectionMenu.connect')}</span>
             <span>Esc {t('terminal.newTabMenu.close')}</span>
           </div>

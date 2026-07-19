@@ -17,6 +17,7 @@ import { isPortableRootPath } from '@/lib/path-utils';
 export interface SftpFileListProps {
   entries: FileEntry[];
   side: SftpSide;
+  localMode?: boolean;
   selectedPaths: string[];
   filterQuery: string;
   batchMode: boolean;
@@ -73,6 +74,7 @@ function compareEntries(
 export const SftpFileList: React.FC<SftpFileListProps> = ({
   entries,
   side,
+  localMode = false,
   selectedPaths,
   filterQuery,
   batchMode,
@@ -84,6 +86,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   onParentDirectory,
 }) => {
   const { t } = useI18n();
+  const presentationSide: SftpSide = localMode ? 'local' : side;
   const parentRef = useRef<HTMLDivElement>(null);
   const headerViewportRef = useRef<HTMLDivElement>(null);
   const [sortColumn, setSortColumn] = useState<SftpFileListSortColumn>('name');
@@ -197,7 +200,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
         className="shrink-0 overflow-hidden"
       >
         <SftpFileListHeader
-          side={side}
+          side={presentationSide}
           sortColumn={sortColumn}
           sortDirection={sortDirection}
           onSort={handleSort}
@@ -243,7 +246,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
                 >
                   {isParent ? (
                     <SftpParentRow
-                      side={side}
+                      side={presentationSide}
                       batchMode={batchMode}
                       onParentDirectory={handleParentDirectory}
                       onBlankContextMenu={onBlankContextMenu}
@@ -252,6 +255,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
                     <SftpFileListRow
                       entry={entry!}
                       side={side}
+                      presentationSide={presentationSide}
                       selected={selectedSet.has(entry!.path)}
                       batchMode={batchMode}
                       selectedEntries={selectedEntries}

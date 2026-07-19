@@ -65,10 +65,12 @@ export interface SftpFileContextMenuProps {
   x: number;
   y: number;
   side: SftpSide;
+  local?: boolean;
   currentPath?: string;
   selectedEntries: FileEntry[];
   isBookmarked: boolean;
   batchMode: boolean;
+  selectionBusy?: boolean;
   onClose: () => void;
   onAction: (action: SftpFileContextMenuAction) => void;
 }
@@ -101,10 +103,12 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   x,
   y,
   side,
+  local,
   currentPath,
   selectedEntries,
   isBookmarked,
   batchMode,
+  selectionBusy = false,
   onClose,
   onAction,
 }) => {
@@ -133,16 +137,16 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
 
   if (!open && deleteTargets.length === 0) return null;
 
-  const isLocal = side === 'local';
+  const isLocal = local ?? side === 'local';
   const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
   const hasSelection = selectedEntries.length > 0;
   const canOpen = singleSelection?.kind === 'directory';
   const canOpenWithDefaultEditor = !isLocal && singleSelection?.kind === 'file';
   const canPreview = !isLocal && singleSelection?.kind === 'file';
-  const canDownload = !isLocal && singleSelection !== undefined;
-  const canRename = !isLocal && singleSelection !== undefined;
+  const canDownload = !isLocal && singleSelection !== undefined && !selectionBusy;
+  const canRename = !isLocal && singleSelection !== undefined && !selectionBusy;
   const canCopy = !isLocal && singleSelection !== undefined;
-  const canDelete = !isLocal && hasSelection;
+  const canDelete = !isLocal && hasSelection && !selectionBusy;
   const canEditPermissions = !isLocal && singleSelection !== undefined;
   const canProperties = singleSelection !== undefined;
   const canBookmark = !isLocal && singleSelection?.kind === 'directory';

@@ -275,6 +275,14 @@ export interface CopyLocalPathsRequest {
   operationId: string;
 }
 
+export interface CopyRemoteToRemoteRequest {
+  sourceConnection: RemoteConnectionRequest;
+  destinationConnection: RemoteConnectionRequest;
+  sourcePaths: string[];
+  destinationDirectory: string;
+  conflictPolicies: UploadConflictPolicy[];
+}
+
 export type UploadConflictPolicy = 'overwrite' | 'replace' | 'skip' | 'fail';
 
 export type UpdateStatus =

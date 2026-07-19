@@ -19,6 +19,7 @@ import type { SftpDndPayload } from './sftp-dnd-context';
 export interface SftpFileListRowProps {
   entry: FileEntry;
   side: SftpSide;
+  presentationSide?: SftpSide;
   selected: boolean;
   batchMode: boolean;
   selectedEntries: FileEntry[];
@@ -57,6 +58,7 @@ function getKindLabel(
 export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
   entry,
   side,
+  presentationSide = side,
   selected,
   batchMode,
   selectedEntries,
@@ -139,7 +141,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
       )}
       style={{
         gridTemplateColumns:
-          side === 'remote'
+          presentationSide === 'remote'
             ? 'minmax(300px, 1fr) 148px 88px 96px 88px 88px'
             : 'minmax(300px, 1fr) 148px 88px 96px',
       }}
@@ -192,7 +194,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
         data-sftp-file-cell
         className={cn(
           'flex h-full items-center truncate pr-2',
-          side === 'local' && '-mr-2',
+          presentationSide === 'local' && '-mr-2',
           cellStateClass,
           mutedTextClass,
         )}
@@ -200,7 +202,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
         {getKindLabel(entry.kind, t)}
       </div>
 
-      {side === 'remote' && remote && (
+      {presentationSide === 'remote' && remote && (
         <>
           <div data-sftp-file-cell className={cn('flex h-full items-center truncate pr-2 font-mono', cellStateClass, mutedTextClass)}>
             {formatOwner(entry)}
