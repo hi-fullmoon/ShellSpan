@@ -30,6 +30,7 @@ import type {
   DownloadRemotePathsRequest,
   UploadLocalPathsRequest,
   CopyLocalPathsRequest,
+  CopyRemoteToRemoteRequest,
   SessionCreateRequest,
   SessionSummary,
   StatusEvent,
@@ -119,6 +120,12 @@ export async function invokeCopyLocalPaths(
   request: CopyLocalPathsRequest,
 ): Promise<void> {
   return invoke('copy_local_paths', { request });
+}
+
+export async function invokeCopyRemoteToRemote(
+  request: CopyRemoteToRemoteRequest,
+): Promise<void> {
+  return invoke('copy_remote_to_remote', { request });
 }
 
 export async function invokeCancelUpload(operationId: string): Promise<void> {

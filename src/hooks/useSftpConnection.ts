@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import {
   invokeCopyRemotePath,
+  invokeCancelDownload,
   invokeCreateRemoteEntry,
   invokeDeleteRemotePath,
   invokeDownloadRemotePaths,
@@ -13,7 +14,7 @@ import {
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
 } from '@/lib/tauri';
-import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import { getSftpPaneConnection, useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import type { SftpSide } from '@/stores/sftpStore';
 import type {
@@ -24,7 +25,11 @@ import type {
 
 const DELETE_UNDO_WINDOW_MS = 30_000;
 
-export function useSftpConnection(connection: SftpConnection): {
+function createOperationId(connectionId: string, kind: string): string {
+  return `${connectionId}-${kind}-${crypto.randomUUID()}`;
+}
+
+export function useSftpConnection(connection: SftpConnection, side: SftpSide = 'remote'): {
   loadRemoteDirectory: (path?: string) => Promise<void>;
   createRemoteEntry: (parentPath: string, name: string, kind: 'file' | 'directory') => Promise<void>;
   renameRemotePath: (path: string, newName: string) => Promise<void>;
@@ -36,6 +41,8 @@ export function useSftpConnection(connection: SftpConnection): {
   openRemoteFile: (path: string) => Promise<void>;
   previewRemoteFile: (path: string) => Promise<ReadRemoteFileResponse>;
 } {
+  const remoteConnection = getSftpPaneConnection(connection, side);
+  const panePath = side === 'local' ? connection.localPath : connection.remotePath;
   const setPath = useSftpStore((state) => state.setPath);
   const setEntries = useSftpStore((state) => state.setEntries);
   const setLoading = useSftpStore((state) => state.setLoading);
@@ -52,71 +59,73 @@ export function useSftpConnection(connection: SftpConnection): {
 
   const loadRemoteDirectory = useCallback(
     async (path?: string) => {
-      setLoading(connection.id, 'remote', true);
-      setError(connection.id, 'remote');
+      setLoading(connection.id, side, true);
+      setError(connection.id, side);
       try {
         const listing = await invokeListRemoteDirectory({
-          ...connection.connection,
+          ...remoteConnection,
           path,
         });
-        setPath(connection.id, 'remote', listing.path);
-        setEntries(connection.id, 'remote', listing.entries);
+        setPath(connection.id, side, listing.path);
+        setEntries(connection.id, side, listing.entries);
       } catch (error) {
         setError(
           connection.id,
-          'remote',
+          side,
           error instanceof Error ? error.message : String(error),
         );
       } finally {
-        setLoading(connection.id, 'remote', false);
+        setLoading(connection.id, side, false);
       }
     },
-    [connection.id, connection.connection, setPath, setEntries, setLoading, setError],
+    [connection.id, remoteConnection, setPath, setEntries, setLoading, setError, side],
   );
 
   const createRemoteEntry = useCallback(
     async (parentPath: string, name: string, kind: 'file' | 'directory') => {
       await invokeCreateRemoteEntry({
-        ...connection.connection,
+        ...remoteConnection,
         parentPath,
         name,
         kind,
       });
-      await loadRemoteDirectory(connection.remotePath);
+      await loadRemoteDirectory(panePath);
     },
-    [connection.connection, connection.remotePath, loadRemoteDirectory],
+    [remoteConnection, panePath, loadRemoteDirectory],
   );
 
   const renameRemotePath = useCallback(
     async (path: string, newName: string) => {
       await invokeRenameRemotePath({
-        ...connection.connection,
+        ...remoteConnection,
         path,
         newName,
       });
-      await loadRemoteDirectory(connection.remotePath);
+      await loadRemoteDirectory(panePath);
     },
-    [connection.connection, connection.remotePath, loadRemoteDirectory],
+    [remoteConnection, panePath, loadRemoteDirectory],
   );
 
   const copyRemotePath = useCallback(
     async (sourcePath: string, destinationDirectory: string) => {
       await invokeCopyRemotePath({
-        ...connection.connection,
+        ...remoteConnection,
         sourcePath,
         destinationDirectory,
       });
-      await loadRemoteDirectory(connection.remotePath);
+      await loadRemoteDirectory(panePath);
     },
-    [connection.connection, connection.remotePath, loadRemoteDirectory],
+    [remoteConnection, panePath, loadRemoteDirectory],
   );
 
   const deleteRemotePaths = useCallback(
     async (paths: string[]) => {
-      const operationId = `${connection.id}-delete-${Date.now()}`;
+      const operationId = createOperationId(connection.id, 'delete');
       addOperation({
         operationId,
         kind: 'delete',
+        connectionId: connection.id,
+        paths,
         currentPath: paths[0],
         totalBytes: 0,
         processedBytes: 0,
@@ -129,7 +138,7 @@ export function useSftpConnection(connection: SftpConnection): {
       try {
         for (const [index, path] of paths.entries()) {
           const trashedPath = await invokeTrashRemotePath({
-            ...connection.connection,
+            ...remoteConnection,
             path,
           });
           trashedPaths.push(trashedPath);
@@ -146,12 +155,12 @@ export function useSftpConnection(connection: SftpConnection): {
           while (pendingRestorePaths.length > 0) {
             const trashedPath = pendingRestorePaths[0];
             await invokeRestoreRemotePath({
-              ...connection.connection,
+              ...remoteConnection,
               ...trashedPath,
             });
             pendingRestorePaths.shift();
           }
-          await loadRemoteDirectory(connection.remotePath);
+          await loadRemoteDirectory(panePath);
         });
         setTimeout(() => {
           const operation = useTransferStore
@@ -169,19 +178,19 @@ export function useSftpConnection(connection: SftpConnection): {
           void Promise.allSettled(
             trashedPaths.map((trashedPath, index) =>
               invokeDeleteRemotePath({
-                ...connection.connection,
+                ...remoteConnection,
                 path: trashedPath.trashPath,
                 operationId: `${operationId}-cleanup-${index}`,
               }),
             ),
           );
         }, DELETE_UNDO_WINDOW_MS);
-        await loadRemoteDirectory(connection.remotePath);
+        await loadRemoteDirectory(panePath);
       } catch (error) {
         for (const trashedPath of [...trashedPaths].reverse()) {
           try {
             await invokeRestoreRemotePath({
-              ...connection.connection,
+              ...remoteConnection,
               ...trashedPath,
             });
           } catch {
@@ -192,15 +201,15 @@ export function useSftpConnection(connection: SftpConnection): {
           operationId,
           error instanceof Error ? error.message : String(error),
         );
-        await loadRemoteDirectory(connection.remotePath);
+        await loadRemoteDirectory(panePath);
         throw error;
       }
     },
     [
       addOperation,
-      connection.connection,
+      remoteConnection,
       connection.id,
-      connection.remotePath,
+      panePath,
       loadRemoteDirectory,
       markOperationFailed,
       setOperationUndo,
@@ -211,13 +220,13 @@ export function useSftpConnection(connection: SftpConnection): {
   const updateRemotePermissions = useCallback(
     async (path: string, permissions: number) => {
       await invokeUpdateRemotePermissions({
-        ...connection.connection,
+        ...remoteConnection,
         path,
         permissions,
       });
-      await loadRemoteDirectory(connection.remotePath);
+      await loadRemoteDirectory(panePath);
     },
-    [connection.connection, connection.remotePath, loadRemoteDirectory],
+    [remoteConnection, panePath, loadRemoteDirectory],
   );
 
   const uploadLocalPaths = useCallback(
@@ -226,7 +235,7 @@ export function useSftpConnection(connection: SftpConnection): {
         markOperationRunning(operationId);
         try {
           await invokeUploadLocalPaths({
-            ...connection.connection,
+            ...remoteConnection,
             destinationDirectory,
             localPaths,
             conflictPolicies,
@@ -255,9 +264,9 @@ export function useSftpConnection(connection: SftpConnection): {
       await runUpload();
     },
     [
-      connection.connection,
+      remoteConnection,
       connection.id,
-      connection.remotePath,
+      panePath,
       addOperation,
       markOperationFailed,
       markOperationRunning,
@@ -265,44 +274,63 @@ export function useSftpConnection(connection: SftpConnection): {
   );
 
   const downloadRemotePaths = useCallback(
-    async (remotePaths: string[], destinationDirectory: string, operationId = `${connection.id}-download-${Date.now()}`) => {
+    async (remotePaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'download')) => {
       addOperation({
         operationId,
         kind: 'download',
+        connectionId: connection.id,
+        paths: remotePaths,
         currentPath: remotePaths[0],
         totalBytes: 0,
         processedBytes: 0,
         totalSteps: remotePaths.length,
         completedSteps: 0,
+        status: 'running',
+        cancel: () => invokeCancelDownload(operationId),
       });
-      await invokeDownloadRemotePaths({
-        ...connection.connection,
-        remotePaths,
-        destinationDirectory,
-        operationId,
-      });
+      try {
+        await invokeDownloadRemotePaths({
+          ...remoteConnection,
+          remotePaths,
+          destinationDirectory,
+          operationId,
+        });
+      } catch (error) {
+        const operation = useTransferStore.getState().operations.find(
+          (item) => item.operationId === operationId,
+        );
+        if (operation?.status === 'cancelling') {
+          useTransferStore.getState().markOperationCancelled(operationId);
+          return;
+        }
+        markOperationFailed(
+          operationId,
+          error instanceof Error ? error.message : String(error),
+        );
+        throw error;
+      }
     },
-    [connection.connection, connection.id, addOperation],
+    [remoteConnection, connection.id, addOperation, markOperationFailed],
   );
 
   const openRemoteFile = useCallback(
     async (path: string) => {
       await invokeOpenRemoteFile({
-        ...connection.connection,
+        ...remoteConnection,
         path,
       });
     },
-    [connection.connection],
+    [remoteConnection],
   );
 
   const previewRemoteFile = useCallback(
     async (path: string): Promise<ReadRemoteFileResponse> => {
       return invokePreviewRemoteFile({
-        ...connection.connection,
+        ...remoteConnection,
         path,
       });
     },
-    [connection.connection],
+    [remoteConnection],
   );
 
   return {

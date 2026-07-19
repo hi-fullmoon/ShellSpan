@@ -79,6 +79,61 @@ describe('TransferProgress', () => {
     ).toHaveClass('h-0.5');
   });
 
+  it('cancels an active download from its task row', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        kind: 'download',
+        status: 'running',
+        retry: undefined,
+        cancel,
+      }],
+    });
+    render(<TransferProgress />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(useTransferStore.getState().operations[0]?.status).toBe('cancelling');
+  });
+
+  it('uses the download-specific failure message', () => {
+    useTransferStore.setState({
+      operations: [{ ...failedUpload, kind: 'download' }],
+    });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('sftp.transfer.downloadFailed')).toBeInTheDocument();
+  });
+
+  it('shows remote-to-remote completion before dismissing the task', () => {
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        operationId: 'remote-copy-1',
+        kind: 'remote-copy',
+        status: 'running',
+        completedSteps: 1,
+        totalSteps: 1,
+        error: undefined,
+        retry: undefined,
+      }],
+    });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('1/1')).toHaveClass('text-app-success');
+  });
+
+  it('uses the remote-copy-specific failure message', () => {
+    useTransferStore.setState({
+      operations: [{ ...failedUpload, kind: 'remote-copy' }],
+    });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('sftp.transfer.remoteCopyFailed')).toBeInTheDocument();
+  });
+
   it('keeps successful deletes until they are closed manually', () => {
     useTransferStore.setState({
       operations: [

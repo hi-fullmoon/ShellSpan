@@ -222,6 +222,17 @@ pub(crate) struct CopyLocalPathsRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct CopyRemoteToRemoteRequest {
+    pub(crate) source_connection: RemoteConnectionRequest,
+    pub(crate) destination_connection: RemoteConnectionRequest,
+    pub(crate) source_paths: Vec<String>,
+    pub(crate) destination_directory: String,
+    #[serde(default)]
+    pub(crate) conflict_policies: Vec<UploadConflictPolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HostKeyCheckRequest {
     pub(crate) host: String,
     pub(crate) port: u16,

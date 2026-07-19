@@ -8,7 +8,7 @@ import { generateId } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
-import { useSftpStore } from '@/stores/sftpStore';
+import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile } from '@/types';
 
@@ -30,20 +30,21 @@ const CLOSED_DIALOG: SftpHostKeyDialogState = {
 };
 
 export function useSftpConnectionOpener(): {
-  open: (profile: ConnectionProfile) => Promise<void>;
+  open: (profile: ConnectionProfile, targetConnectionId?: string, targetSide?: SftpSide) => Promise<void>;
   verifyHostKey: (host: string, port: number, onVerified: () => void) => Promise<void>;
   hostKeyDialog: SftpHostKeyDialogState;
   closeHostKeyDialog: () => void;
 } {
   const ensurePassword = useProfileStore((state) => state.ensurePassword);
   const addConnection = useSftpStore((state) => state.addConnection);
+  const attachRemoteConnection = useSftpStore((state) => state.attachRemoteConnection);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
   const touchProfile = useRecentProfilesStore((state) => state.touchProfile);
   const [hostKeyDialog, setHostKeyDialog] =
     useState<SftpHostKeyDialogState>(CLOSED_DIALOG);
 
   const finishOpen = useCallback(
-    (profile: ConnectionProfile): void => {
+    (profile: ConnectionProfile, targetConnectionId?: string, targetSide: SftpSide = 'remote'): void => {
       const connection = buildRemoteConnectionRequest(profile);
       const summary = {
         sessionId: generateId(),
@@ -52,11 +53,15 @@ export function useSftpConnectionOpener(): {
         port: profile.port,
         username: profile.username,
       };
-      addConnection(summary, connection, profile.id);
+      if (targetConnectionId) {
+        attachRemoteConnection(targetConnectionId, targetSide, summary, connection, profile.id);
+      } else {
+        addConnection(summary, connection, profile.id);
+      }
       touchProfile(profile.id);
       setActiveSection('sftp');
     },
-    [addConnection, setActiveSection, touchProfile],
+    [addConnection, attachRemoteConnection, setActiveSection, touchProfile],
   );
 
   const verifyHostKey = useCallback(
@@ -105,20 +110,20 @@ export function useSftpConnectionOpener(): {
   );
 
   const open = useCallback(
-    async (profile: ConnectionProfile) => {
+    async (profile: ConnectionProfile, targetConnectionId?: string, targetSide: SftpSide = 'remote') => {
       const profileWithPassword = await ensurePassword(profile);
 
       // The current host-key probe opens a direct TCP connection. Jump-host
       // sessions are still verified by the backend while establishing SFTP.
       if (profileWithPassword.jumpHost) {
-        finishOpen(profileWithPassword);
+        finishOpen(profileWithPassword, targetConnectionId, targetSide);
         return;
       }
 
       await verifyHostKey(
         profileWithPassword.host,
         profileWithPassword.port,
-        () => finishOpen(profileWithPassword),
+        () => finishOpen(profileWithPassword, targetConnectionId, targetSide),
       );
     },
     [ensurePassword, finishOpen, verifyHostKey],

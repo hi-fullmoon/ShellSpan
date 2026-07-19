@@ -33,6 +33,7 @@ export interface SftpBlankContextMenuProps {
   x: number;
   y: number;
   side: SftpSide;
+  local?: boolean;
   currentPath?: string;
   hasClipboard: boolean;
   isBookmarked: boolean;
@@ -72,6 +73,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
   x,
   y,
   side,
+  local,
   currentPath,
   hasClipboard,
   isBookmarked,
@@ -107,7 +109,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
 
   if (!open) return null;
 
-  const isLocal = side === 'local';
+  const isLocal = local ?? side === 'local';
 
   const handleAction = (action: SftpBlankContextMenuAction): void => {
     onAction(action);

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDndContext, useDroppable } from '@dnd-kit/core';
-import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, MoveDownIcon } from 'lucide-react';
+import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSf
 import type { FileEntry } from './file-entry-formatters';
 import type { SftpDndPayload } from './sftp-dnd-context';
 import { parentPortablePath } from '@/lib/path-utils';
+import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
 
 export interface SftpPaneProps {
   connection: SftpConnection;
@@ -27,6 +28,8 @@ export interface SftpPaneProps {
   onVerifyHostKey?: () => void;
   systemDropActive?: boolean;
   systemDropHovered?: boolean;
+  localMode?: boolean;
+  onTitleClick?: () => void;
 }
 
 interface HistoryState {
@@ -44,6 +47,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
     onVerifyHostKey,
     systemDropActive,
     systemDropHovered,
+    localMode,
+    onTitleClick,
   },
   ref,
 ) => {
@@ -66,23 +71,23 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
     [setNodeRef, ref],
   );
 
-  const isLocal = side === 'local';
+  const isLocal = localMode ?? side === 'local';
   const activeDrag = active?.data.current as SftpDndPayload | undefined;
   const canAcceptActiveDrag = !!activeDrag && activeDrag.side !== side;
-  const path = isLocal ? connection.localPath : connection.remotePath;
-  const entries = isLocal ? connection.localEntries : connection.remoteEntries;
-  const loading = isLocal ? connection.localLoading : connection.remoteLoading;
-  const error = isLocal ? connection.localError : connection.remoteError;
+  const path = side === 'local' ? connection.localPath : connection.remotePath;
+  const entries = side === 'local' ? connection.localEntries : connection.remoteEntries;
+  const loading = side === 'local' ? connection.localLoading : connection.remoteLoading;
+  const error = side === 'local' ? connection.localError : connection.remoteError;
   const isHostKeyError =
     !isLocal &&
     !!error &&
     (error.toLowerCase().includes('host key') ||
       error.toLowerCase().includes('trust this host'));
-  const pane = isLocal ? connection.localPane : connection.remotePane;
+  const pane = side === 'local' ? connection.localPane : connection.remotePane;
   const remoteBookmarks = connection.remoteBookmarks;
 
-  const { loadLocalDirectory } = useLocalDirectory(connection);
-  const { loadRemoteDirectory } = useSftpConnection(connection);
+  const { loadLocalDirectory } = useLocalDirectory(connection, side);
+  const { loadRemoteDirectory } = useSftpConnection(connection, side);
 
   const [history, setHistory] = useState<HistoryState>({
     stack: [path],
@@ -190,9 +195,19 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
     setBlankContextMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
-  const paneTitle = isLocal ? t('sftp.local') : connection.title;
+  const paneTitle = isLocal
+    ? t('sftp.local')
+    : side === 'local'
+      ? connection.leftTitle ?? connection.title
+      : connection.title;
 
   const selectedEntries = useMemo(() => entries.filter((entry) => selectedPaths.has(entry.path)), [entries, selectedPaths]);
+  const transferOperations = useTransferStore((state) => state.operations);
+  const selectionBusy = !isLocal && hasActivePathOperation(
+    connection.id,
+    selectedEntries.map((entry) => entry.path),
+    transferOperations,
+  );
   const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
   const isCurrentPathBookmarked = path ? remoteBookmarks.includes(path) : false;
 
@@ -339,9 +354,22 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
     <div ref={mergedRef} className="flex h-full flex-col overflow-hidden bg-app-surface">
       {/* Title bar */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-semibold text-app-text">{paneTitle}</span>
-        </div>
+        {onTitleClick ? (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={onTitleClick}
+            aria-label={t('sftp.source.switch')}
+            className="min-w-0 max-w-[70%] justify-start px-1"
+          >
+            <span className="truncate text-sm font-semibold">{paneTitle}</span>
+            <ChevronsUpDownIcon data-icon="inline-end" />
+          </Button>
+        ) : (
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-semibold text-app-text">{paneTitle}</span>
+          </div>
+        )}
         <div className="flex items-center gap-1.5">
           {!isLocal && remoteBookmarks.length > 0 && (
             <Button
@@ -433,14 +461,14 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
             </Button>
             {!isLocal && (
               <>
-                <Button variant="default" size="xs" onClick={() => void actions.onBatchDownload()} disabled={selectedEntries.length === 0}>
+                <Button variant="default" size="xs" onClick={() => void actions.onBatchDownload()} disabled={selectedEntries.length === 0 || selectionBusy}>
                   {t('common.download')}
                 </Button>
                 <Button
                   variant="destructive"
                   size="xs"
                   onClick={() => void actions.onDelete(selectedEntries)}
-                  disabled={selectedEntries.length === 0}
+                  disabled={selectedEntries.length === 0 || selectionBusy}
                 >
                   {t('common.delete')}
                 </Button>
@@ -452,6 +480,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
           <SftpFileList
             entries={entries}
             side={side}
+            localMode={isLocal}
             selectedPaths={Array.from(selectedPaths)}
             filterQuery=""
             batchMode={pane.batchMode}
@@ -470,10 +499,12 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
         x={fileContextMenu?.x ?? 0}
         y={fileContextMenu?.y ?? 0}
         side={side}
+        local={isLocal}
         currentPath={path}
         selectedEntries={selectedEntries}
         isBookmarked={singleSelection ? remoteBookmarks.includes(singleSelection.path) : false}
         batchMode={pane.batchMode}
+        selectionBusy={selectionBusy}
         onClose={() => setFileContextMenu(null)}
         onAction={handleFileContextMenuAction}
       />
@@ -483,6 +514,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
         x={blankContextMenu?.x ?? 0}
         y={blankContextMenu?.y ?? 0}
         side={side}
+        local={isLocal}
         currentPath={path}
         hasClipboard={!!connection.remoteClipboard}
         isBookmarked={isCurrentPathBookmarked}

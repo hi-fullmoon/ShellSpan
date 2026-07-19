@@ -17,6 +17,7 @@ export const TransferProgress: React.FC = () => {
   const removeOperation = useTransferStore((state) => state.removeOperation);
   const retryOperation = useTransferStore((state) => state.retryOperation);
   const undoOperation = useTransferStore((state) => state.undoOperation);
+  const cancelOperation = useTransferStore((state) => state.cancelOperation);
   const completedTimers = React.useRef(
     new Map<string, ReturnType<typeof setTimeout>>(),
   );
@@ -92,7 +93,11 @@ export const TransferProgress: React.FC = () => {
                       ? 'sftp.transfer.restoreFailed'
                       : op.kind === 'delete'
                         ? 'sftp.transfer.trashFailed'
-                      : 'sftp.transfer.uploadFailed',
+                        : op.kind === 'download'
+                          ? 'sftp.transfer.downloadFailed'
+                          : op.kind === 'remote-copy'
+                            ? 'sftp.transfer.remoteCopyFailed'
+                          : 'sftp.transfer.uploadFailed',
                   )}
                 </span>
                 {op.retry && (
@@ -157,6 +162,18 @@ export const TransferProgress: React.FC = () => {
                       onClick={() => void undoOperation(op.operationId)}
                     >
                       {t('sftp.transfer.undoDelete')}
+                    </Button>
+                  )}
+                {op.cancel &&
+                  op.status !== 'cancelling' &&
+                  op.status !== 'cancelled' &&
+                  !isTransferComplete(op) && (
+                    <Button
+                      variant="link"
+                      size="xs"
+                      onClick={() => void cancelOperation(op.operationId)}
+                    >
+                      {t('common.cancel')}
                     </Button>
                   )}
                 <Button

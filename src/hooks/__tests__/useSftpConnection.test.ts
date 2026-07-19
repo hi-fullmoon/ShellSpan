@@ -6,6 +6,7 @@ import { useTransferStore } from '@/stores/transferStore';
 
 const tauri = vi.hoisted(() => ({
   invokeCopyRemotePath: vi.fn().mockResolvedValue(undefined),
+  invokeCancelDownload: vi.fn().mockResolvedValue(undefined),
   invokeCreateRemoteEntry: vi.fn().mockResolvedValue(undefined),
   invokeDeleteRemotePath: vi.fn().mockResolvedValue(undefined),
   invokeDownloadRemotePaths: vi.fn().mockResolvedValue(undefined),
@@ -138,5 +139,53 @@ describe('useSftpConnection delete undo window', () => {
       }),
     );
     expect(useTransferStore.getState().operations).toHaveLength(0);
+  });
+});
+
+describe('useSftpConnection downloads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const connection = createConnection();
+    useSftpStore.setState({
+      connections: [connection],
+      activeConnectionId: connection.id,
+    });
+    useTransferStore.setState({ operations: [] });
+  });
+
+  it('marks a failed download and retains its affected paths', async () => {
+    tauri.invokeDownloadRemotePaths.mockRejectedValueOnce(new Error('offline'));
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await expect(
+      act(() => result.current.downloadRemotePaths([file.path], '/downloads')),
+    ).rejects.toThrow('offline');
+
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'download',
+      connectionId: connection.id,
+      paths: [file.path],
+      status: 'failed',
+      error: 'offline',
+    });
+  });
+
+  it('binds backend cancellation to a running download', async () => {
+    let rejectDownload!: (reason: Error) => void;
+    tauri.invokeDownloadRemotePaths.mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectDownload = reject; }),
+    );
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+    const download = result.current.downloadRemotePaths([file.path], '/downloads');
+    const operationId = useTransferStore.getState().operations[0]!.operationId;
+
+    await act(() => useTransferStore.getState().cancelOperation(operationId));
+    expect(tauri.invokeCancelDownload).toHaveBeenCalledWith(operationId);
+
+    rejectDownload(new Error('download cancelled'));
+    await act(() => download);
+    expect(useTransferStore.getState().operations[0]?.status).toBe('cancelled');
   });
 });

@@ -68,4 +68,65 @@ describe('sftpStore', () => {
     expect(state.connections[0]?.remotePath).toBe('/home');
     expect(state.connections[0]?.remoteEntries).toHaveLength(1);
   });
+
+  it('opens locally first and attaches a remote connection later', () => {
+    useSftpStore.getState().addLocalConnection();
+    const local = useSftpStore.getState().connections[0]!;
+
+    expect(local.localOnly).toBe(true);
+    expect(local.rightLocal).toBe(false);
+    expect(useSftpStore.getState().activeConnectionId).toBe(local.id);
+
+    useSftpStore.getState().setPaneLocal(local.id, 'remote');
+    expect(useSftpStore.getState().connections[0]?.rightSource).toBe('local');
+
+    useSftpStore.getState().attachRemoteConnection(
+      local.id,
+      'remote',
+      {
+        sessionId: 'remote-session',
+        title: 'Production',
+        host: 'prod.example.com',
+        port: 22,
+        username: 'deploy',
+      },
+      {
+        host: 'prod.example.com',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+      },
+      'profile-1',
+    );
+
+    const attached = useSftpStore.getState().connections[0]!;
+    expect(attached.localOnly).toBe(false);
+    expect(attached.title).toBe('Production');
+    expect(attached.connection.host).toBe('prod.example.com');
+
+    useSftpStore.getState().attachRemoteConnection(
+      local.id,
+      'local',
+      {
+        sessionId: 'left-remote-session',
+        title: 'Staging',
+        host: 'staging.example.com',
+        port: 22,
+        username: 'deploy',
+      },
+      {
+        host: 'staging.example.com',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+      },
+      'profile-2',
+    );
+
+    const dualRemote = useSftpStore.getState().connections[0]!;
+    expect(dualRemote.leftSource).toBe('remote');
+    expect(dualRemote.rightSource).toBe('remote');
+    expect(dualRemote.leftTitle).toBe('Staging');
+    expect(dualRemote.leftConnection?.host).toBe('staging.example.com');
+  });
 });

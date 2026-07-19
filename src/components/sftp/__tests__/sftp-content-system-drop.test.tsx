@@ -2,8 +2,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import React from 'react';
 import { useSftpStore } from '@/stores/sftpStore';
-import type { UseSystemFileDropOptions } from '@/hooks/useSystemFileDrop';
-import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
+import { useSystemFileDrop, type UseSystemFileDropOptions } from '@/hooks/useSystemFileDrop';
+import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
+import { SftpContent } from '../index';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({ t: (key: string) => key, locale: 'en-US' }),
@@ -128,10 +129,6 @@ describe('SftpContent system drop', () => {
   });
 
   it('uploads when dropped paths are routed to remote side', async () => {
-    const { useSystemFileDrop } = await import('@/hooks/useSystemFileDrop');
-    const { useSftpPaneActions } = await import('@/hooks/useSftpPaneActions');
-    const { SftpContent } = await import('../index');
-
     const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);
     const copyWithPolicies = vi.fn().mockResolvedValue(undefined);
     let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
@@ -166,10 +163,6 @@ describe('SftpContent system drop', () => {
   });
 
   it('copies locally when dropped paths are routed to local side', async () => {
-    const { useSystemFileDrop } = await import('@/hooks/useSystemFileDrop');
-    const { useSftpPaneActions } = await import('@/hooks/useSftpPaneActions');
-    const { SftpContent } = await import('../index');
-
     const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);
     const copyWithPolicies = vi.fn().mockResolvedValue(undefined);
     let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
