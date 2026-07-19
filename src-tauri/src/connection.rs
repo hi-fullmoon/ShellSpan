@@ -1,7 +1,7 @@
 use crate::known_hosts::verify_session_host_key;
 use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest, SessionCreateRequest};
 use crate::sftp_pool::{connection_key, SftpPool};
-use log::{debug, warn};
+use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
 use std::{
@@ -250,9 +250,10 @@ pub(crate) fn open_authenticated_session(
     let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
     session.set_tcp_stream(tcp);
     session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
-    session
-        .handshake()
-        .map_err(|error| format!("ssh handshake failed: {error}"))?;
+    session.handshake().map_err(|error| {
+        error!("SSH handshake failed remote={host}:{port}: {error}");
+        format!("ssh handshake failed: {error}")
+    })?;
 
     if let Some(path) = known_hosts_path {
         verify_session_host_key(&session, host, port, path)?;
@@ -440,14 +441,28 @@ fn authenticate(
                 .ok_or_else(|| "password auth selected, but no password provided".to_string())?;
             session
                 .userauth_password(username, password)
-                .map_err(|error| format!("password auth failed: {error}"))?;
+                .map_err(|error| {
+                    warn!(
+                        "SSH authentication failed username={} method={}: {error}",
+                        username,
+                        auth_method.as_str()
+                    );
+                    format!("password auth failed: {error}")
+                })?;
         }
         AuthMethod::Key => {
             let private_key_path = private_key_path
                 .ok_or_else(|| "private key auth selected, but no key path provided".to_string())?;
             session
                 .userauth_pubkey_file(username, None, Path::new(private_key_path), passphrase)
-                .map_err(|error| format!("private key auth failed: {error}"))?;
+                .map_err(|error| {
+                    warn!(
+                        "SSH authentication failed username={} method={}: {error}",
+                        username,
+                        auth_method.as_str()
+                    );
+                    format!("private key auth failed: {error}")
+                })?;
         }
     }
 
