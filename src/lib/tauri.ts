@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { createLogger } from '@/lib/logger';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   AuthMethod,
@@ -37,10 +38,21 @@ import type {
   UploadProgressEvent,
 } from '@/types';
 
+const logger = createLogger('ipc');
+
+async function invokeLogged<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args);
+  } catch (error) {
+    logger.error(`invoke ${cmd} failed`, error);
+    throw error;
+  }
+}
+
 export async function invokeCreateSession(
   request: SessionCreateRequest,
 ): Promise<SessionSummary> {
-  return invoke<SessionSummary>('create_session', { request }).catch((error) => {
+  return invokeLogged<SessionSummary>('create_session', { request }).catch((error) => {
     throw error as CreateSessionError;
   });
 }
@@ -49,11 +61,11 @@ export async function invokeCreateLocalSession(
   cols = 120,
   rows = 30,
 ): Promise<SessionSummary> {
-  return invoke<SessionSummary>('create_local_session', { cols, rows });
+  return invokeLogged<SessionSummary>('create_local_session', { cols, rows });
 }
 
 export async function invokeWriteSession(sessionId: string, data: string): Promise<void> {
-  return invoke('write_session', { sessionId, data });
+  return invokeLogged('write_session', { sessionId, data });
 }
 
 export async function invokeResizeSession(
@@ -61,114 +73,114 @@ export async function invokeResizeSession(
   cols: number,
   rows: number,
 ): Promise<void> {
-  return invoke('resize_session', { sessionId, cols, rows });
+  return invokeLogged('resize_session', { sessionId, cols, rows });
 }
 
 export async function invokeCloseSession(sessionId: string): Promise<void> {
-  return invoke('close_session', { sessionId });
+  return invokeLogged('close_session', { sessionId });
 }
 
 export async function invokeListRemoteDirectory(
   request: RemoteDirectoryRequest,
 ): Promise<RemoteDirectoryListing> {
-  return invoke('list_remote_directory', { request });
+  return invokeLogged('list_remote_directory', { request });
 }
 
 export async function invokeCreateRemoteEntry(
   request: CreateRemoteEntryRequest,
 ): Promise<void> {
-  return invoke('create_remote_entry', { request });
+  return invokeLogged('create_remote_entry', { request });
 }
 
 export async function invokeRenameRemotePath(
   request: RenameRemotePathRequest,
 ): Promise<void> {
-  return invoke('rename_remote_path', { request });
+  return invokeLogged('rename_remote_path', { request });
 }
 
 export async function invokeDeleteRemotePath(
   request: DeleteRemotePathRequest,
 ): Promise<void> {
-  return invoke('delete_remote_path', { request });
+  return invokeLogged('delete_remote_path', { request });
 }
 
 export async function invokeTrashRemotePath(
   request: TrashRemotePathRequest,
 ): Promise<TrashedRemotePath> {
-  return invoke('trash_remote_path', { request });
+  return invokeLogged('trash_remote_path', { request });
 }
 
 export async function invokeRestoreRemotePath(
   request: RestoreRemotePathRequest,
 ): Promise<void> {
-  return invoke('restore_remote_path', { request });
+  return invokeLogged('restore_remote_path', { request });
 }
 
 export async function invokeCopyRemotePath(
   request: CopyRemotePathRequest,
 ): Promise<void> {
-  return invoke('copy_remote_path', { request });
+  return invokeLogged('copy_remote_path', { request });
 }
 
 export async function invokeUploadLocalPaths(
   request: UploadLocalPathsRequest,
 ): Promise<void> {
-  return invoke('upload_local_paths', { request });
+  return invokeLogged('upload_local_paths', { request });
 }
 
 export async function invokeCopyLocalPaths(
   request: CopyLocalPathsRequest,
 ): Promise<void> {
-  return invoke('copy_local_paths', { request });
+  return invokeLogged('copy_local_paths', { request });
 }
 
 export async function invokeCopyRemoteToRemote(
   request: CopyRemoteToRemoteRequest,
 ): Promise<void> {
-  return invoke('copy_remote_to_remote', { request });
+  return invokeLogged('copy_remote_to_remote', { request });
 }
 
 export async function invokeCancelUpload(operationId: string): Promise<void> {
-  return invoke('cancel_upload', { operationId });
+  return invokeLogged('cancel_upload', { operationId });
 }
 
 export async function invokeCancelDelete(operationId: string): Promise<void> {
-  return invoke('cancel_delete', { operationId });
+  return invokeLogged('cancel_delete', { operationId });
 }
 
 export async function invokeDownloadRemotePaths(
   request: DownloadRemotePathsRequest,
 ): Promise<void> {
-  return invoke('download_remote_paths', { request });
+  return invokeLogged('download_remote_paths', { request });
 }
 
 export async function invokeCancelDownload(operationId: string): Promise<void> {
-  return invoke('cancel_download', { operationId });
+  return invokeLogged('cancel_download', { operationId });
 }
 
 export async function invokeOpenRemoteFile(
   request: OpenRemoteFileRequest,
 ): Promise<void> {
-  return invoke('open_remote_file', { request });
+  return invokeLogged('open_remote_file', { request });
 }
 
 export async function invokePreviewRemoteFile(
   request: ReadRemoteFileRequest,
 ): Promise<ReadRemoteFileResponse> {
-  return invoke('preview_remote_file', { request });
+  return invokeLogged('preview_remote_file', { request });
 }
 
 export async function invokeUpdateRemotePermissions(
   request: UpdateRemotePermissionsRequest,
 ): Promise<void> {
-  return invoke('update_remote_permissions', { request });
+  return invokeLogged('update_remote_permissions', { request });
 }
 
 export async function invokeCheckHostKey(
   host: string,
   port: number,
 ): Promise<HostKeyCheckResult> {
-  const result = await invoke<HostKeyCheckResult>('check_host_key', {
+  const result = await invokeLogged<HostKeyCheckResult>('check_host_key', {
     request: { host, port },
   });
 
@@ -180,80 +192,80 @@ export async function invokeCheckHostKey(
 }
 
 export async function invokeTrustHost(host: string, port: number): Promise<void> {
-  return invoke('trust_host', { request: { host, port } });
+  return invokeLogged('trust_host', { request: { host, port } });
 }
 
 export async function invokeListKnownHosts(): Promise<KnownHostEntry[]> {
-  return invoke('list_known_hosts');
+  return invokeLogged('list_known_hosts');
 }
 
 export async function invokeRemoveKnownHost(
   host: string,
   port: number,
 ): Promise<void> {
-  return invoke('remove_known_host', { host, port });
+  return invokeLogged('remove_known_host', { host, port });
 }
 
 export async function invokeListLogFiles(): Promise<LogFileInfo[]> {
-  return invoke('list_log_files');
+  return invokeLogged('list_log_files');
 }
 
 export async function invokeReadLogFile(name: string): Promise<string> {
-  return invoke('read_log_file', { name });
+  return invokeLogged('read_log_file', { name });
 }
 
 export async function invokeExportLogFile(
   name: string,
   content: string,
 ): Promise<string | null> {
-  return invoke('export_log_file', { name, content });
+  return invokeLogged('export_log_file', { name, content });
 }
 
 export async function invokeListLocalDirectory(
   path: string,
 ): Promise<LocalDirectoryListing> {
-  return invoke('list_local_directory', { path });
+  return invokeLogged('list_local_directory', { path });
 }
 
 export async function invokePickLocalFiles(): Promise<string[]> {
-  return invoke('pick_local_files');
+  return invokeLogged('pick_local_files');
 }
 
 export async function invokePickLocalFolder(title?: string): Promise<string[]> {
-  return invoke('pick_local_folder', { title });
+  return invokeLogged('pick_local_folder', { title });
 }
 
 export async function invokePickPrivateKeyFile(): Promise<string | null> {
-  return invoke('pick_private_key_file');
+  return invokeLogged('pick_private_key_file');
 }
 
 export async function invokeOpenPath(path: string): Promise<void> {
-  return invoke('open_path', { path });
+  return invokeLogged('open_path', { path });
 }
 
 export async function invokeStorePassword(
   profileId: string,
   password: string,
 ): Promise<void> {
-  return invoke('store_password', { profileId, password });
+  return invokeLogged('store_password', { profileId, password });
 }
 
 export async function invokeRetrievePassword(
   profileId: string,
 ): Promise<string | null> {
-  return invoke('retrieve_password', { profileId });
+  return invokeLogged('retrieve_password', { profileId });
 }
 
 export async function invokeRemovePassword(profileId: string): Promise<void> {
-  return invoke('remove_password', { profileId });
+  return invokeLogged('remove_password', { profileId });
 }
 
 export async function invokeListCachedCredentialProfileIds(): Promise<string[]> {
-  return invoke('list_cached_credential_profile_ids');
+  return invokeLogged('list_cached_credential_profile_ids');
 }
 
 export async function invokeClearCredentialCache(): Promise<void> {
-  return invoke('clear_credential_cache');
+  return invokeLogged('clear_credential_cache');
 }
 
 export function buildRemoteConnectionRequest(
@@ -351,5 +363,5 @@ export function isTauriRuntime(): boolean {
 }
 
 export async function invokeRequestAppRestart(): Promise<void> {
-  return invoke('request_app_restart');
+  return invokeLogged('request_app_restart');
 }
