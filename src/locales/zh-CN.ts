@@ -126,6 +126,8 @@ export default {
   'terminal.newTabMenu.navigate': '选择',
   'terminal.newTabMenu.connect': '连接',
   'terminal.newTabMenu.close': '关闭',
+  'terminal.newTabMenu.localTerminal': '本地终端',
+  'terminal.newTabMenu.localTerminalHint': '在当前设备上启动系统 Shell',
   'terminal.tab.noProfiles': '暂无已保存连接，请到工作台添加。',
   'terminal.tab.copyInfo': '复制连接信息',
   'terminal.tab.closeOthers': '关闭其他',
@@ -160,6 +162,7 @@ export default {
 
   'terminal.feedback.copied': '已复制',
   'terminal.feedback.copyFailed': '复制失败',
+  'terminal.feedback.pasteFailed': '粘贴失败',
 
   'terminal.message.shellReady': 'Shell 已就绪',
 

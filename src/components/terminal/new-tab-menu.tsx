@@ -6,7 +6,9 @@ import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { ServerIcon, LayoutGridIcon } from 'lucide-react';
+import { ServerIcon, LayoutGridIcon, SearchIcon, SquareTerminalIcon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { usePlatform } from '@/hooks/usePlatform';
 import type { ConnectionProfile } from '@/types';
 
 const ANIMATION_DURATION = 150;
@@ -17,6 +19,7 @@ interface NewTabMenuProps {
   open: boolean;
   onClose: () => void;
   onConnect: (profile: ConnectionProfile) => Promise<void>;
+  onOpenLocal?: () => Promise<void>;
 }
 
 interface ProfileListItem {
@@ -24,8 +27,14 @@ interface ProfileListItem {
   isRecent: boolean;
 }
 
-export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect }) => {
+export const NewTabMenu: React.FC<NewTabMenuProps> = ({
+  open,
+  onClose,
+  onConnect,
+  onOpenLocal,
+}) => {
   const { t } = useI18n();
+  const platform = usePlatform();
   const profiles = useProfileStore((state) => state.profiles);
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
@@ -71,7 +80,14 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect
     ];
   }, [profiles, recentIds, query]);
 
-  const hasResults = filteredItems.length > 0;
+  const showLocal =
+    Boolean(onOpenLocal) &&
+    (!query.trim() ||
+      t('terminal.newTabMenu.localTerminal')
+        .toLowerCase()
+        .includes(query.trim().toLowerCase()));
+  const itemCount = filteredItems.length + (showLocal ? 1 : 0);
+  const hasResults = itemCount > 0;
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -79,7 +95,9 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect
 
   useEffect(() => {
     if (selectedIndex < 0 || !listRef.current) return;
-    const selectedItem = listRef.current.children[selectedIndex] as HTMLElement | undefined;
+    const selectedItem = listRef.current.querySelector<HTMLElement>(
+      `[data-command-index="${selectedIndex}"]`,
+    );
     if (typeof selectedItem?.scrollIntoView === 'function') {
       selectedItem.scrollIntoView({ block: 'nearest' });
     }
@@ -116,17 +134,26 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect
       }
       if (!hasResults) return;
 
-      if (event.key === 'ArrowDown') {
+      const isNext =
+        event.key === 'ArrowDown' ||
+        (event.ctrlKey && event.key.toLowerCase() === 'n');
+      const isPrevious =
+        event.key === 'ArrowUp' ||
+        (event.ctrlKey && event.key.toLowerCase() === 'p');
+      if (isNext) {
         event.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % filteredItems.length);
-      } else if (event.key === 'ArrowUp') {
+        setSelectedIndex((prev) => (prev + 1) % itemCount);
+      } else if (isPrevious) {
         event.preventDefault();
-        setSelectedIndex(
-          (prev) => (prev - 1 + filteredItems.length) % filteredItems.length,
-        );
+        setSelectedIndex((prev) => (prev - 1 + itemCount) % itemCount);
       } else if (event.key === 'Enter') {
         event.preventDefault();
-        const selected = filteredItems[selectedIndex];
+        if (showLocal && selectedIndex === 0) {
+          void onOpenLocal?.();
+          onClose();
+          return;
+        }
+        const selected = filteredItems[selectedIndex - (showLocal ? 1 : 0)];
         if (selected) {
           void onConnect(selected.profile);
           onClose();
@@ -137,7 +164,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mounted, onClose, filteredItems, hasResults, selectedIndex, onConnect]);
+  }, [mounted, onClose, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal]);
 
   const handleOpenWorkbench = (): void => {
     setActiveSection('workbench');
@@ -146,6 +173,11 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect
 
   const handleConnect = (profile: ConnectionProfile): void => {
     void onConnect(profile);
+    onClose();
+  };
+
+  const handleOpenLocal = (): void => {
+    void onOpenLocal?.();
     onClose();
   };
 
@@ -180,35 +212,64 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect
         role="dialog"
         aria-label={t('terminal.newTabMenu.title')}
       >
-        <div className="relative border-b border-app-border p-4">
-          <Input
+        <div className="border-b border-app-border p-4">
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-app-text-soft" />
+            <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('terminal.newTabMenu.searchPlaceholder')}
-            className="h-11 rounded-xl pr-20 text-sm"
+            className="h-11 rounded-xl pl-10 pr-24 text-sm"
             autoFocus
-          />
-          <span className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 rounded-md border border-app-border bg-app-surface-muted px-1.5 py-0.5 text-xs text-app-text-soft">
-            ⌘K
-          </span>
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-app-border bg-app-surface-muted px-2 py-0.5 font-mono text-xs text-app-text-soft">
+              {platform === 'macos' ? '⌘ K' : 'Ctrl K'}
+            </span>
+          </div>
         </div>
 
         <div className="max-h-[60vh] min-h-0 overflow-y-auto p-2">
           {hasResults ? (
             <>
-              <h3 className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-app-text-soft">
-                {renderSectionLabel()}
-              </h3>
+              {showLocal && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleOpenLocal}
+                  onMouseEnter={() => setSelectedIndex(0)}
+                  data-command-index={0}
+                  className={cn(
+                    'mb-2 h-auto w-full justify-start gap-3 rounded-xl p-3 text-left',
+                    selectedIndex === 0 && 'ring-1 ring-app-primary',
+                  )}
+                >
+                  <span className="flex size-9 items-center justify-center rounded-lg bg-app-primary text-app-primary-text">
+                    <SquareTerminalIcon />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col items-start">
+                    <span className="text-sm font-medium">{t('terminal.newTabMenu.localTerminal')}</span>
+                    <span className="text-xs text-app-text-soft">{t('terminal.newTabMenu.localTerminalHint')}</span>
+                  </span>
+                  {selectedIndex === 0 && <span className="text-xs text-app-text-soft">↵</span>}
+                </Button>
+              )}
+              {filteredItems.length > 0 && (
+                <h3 className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-app-text-soft">
+                  {renderSectionLabel()}
+                </h3>
+              )}
               <ul ref={listRef} className="flex flex-col gap-1">
                 {filteredItems.map(({ profile }, index) => {
-                  const isSelected = index === selectedIndex;
+                  const commandIndex = index + (showLocal ? 1 : 0);
+                  const isSelected = commandIndex === selectedIndex;
                   return (
                     <li key={profile.id}>
                       <button
                         type="button"
                         aria-label={profile.name}
                         onClick={() => handleConnect(profile)}
-                        onMouseEnter={() => setSelectedIndex(index)}
+                        onMouseEnter={() => setSelectedIndex(commandIndex)}
+                        data-command-index={commandIndex}
                         className={cn(
                           'flex w-full items-center gap-3 rounded-xl p-3 text-left text-app-text transition-colors',
                           isSelected
@@ -258,16 +319,18 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({ open, onClose, onConnect
         </div>
 
         <div className="flex items-center justify-between border-t border-app-border px-4 py-3">
-          <button
+          <Button
             type="button"
             onClick={handleOpenWorkbench}
-            className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs text-app-text-soft transition-colors hover:bg-app-surface-muted hover:text-app-text"
+            variant="ghost"
+            size="sm"
+            className="gap-2 px-2 text-app-text-soft"
           >
             <LayoutGridIcon />
             {t('terminal.newTabMenu.openWorkbench')}
-          </button>
+          </Button>
           <div className="flex items-center gap-3 text-xs text-app-text-soft">
-            <span>↑↓ {t('terminal.newTabMenu.navigate')}</span>
+            <span>↑↓ / Ctrl N P {t('terminal.newTabMenu.navigate')}</span>
             <span>↵ {t('terminal.newTabMenu.connect')}</span>
             <span>Esc {t('terminal.newTabMenu.close')}</span>
           </div>

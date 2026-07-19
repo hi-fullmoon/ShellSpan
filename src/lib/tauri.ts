@@ -44,6 +44,13 @@ export async function invokeCreateSession(
   });
 }
 
+export async function invokeCreateLocalSession(
+  cols = 120,
+  rows = 30,
+): Promise<SessionSummary> {
+  return invoke<SessionSummary>('create_local_session', { cols, rows });
+}
+
 export async function invokeWriteSession(sessionId: string, data: string): Promise<void> {
   return invoke('write_session', { sessionId, data });
 }

@@ -13,6 +13,7 @@ export interface TerminalSession {
   profileId?: string;
   pinned?: boolean;
   color?: string;
+  reconnecting?: boolean;
 }
 
 const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
@@ -31,6 +32,7 @@ interface TerminalState {
     summary: SessionSummary,
     profileId?: string,
   ) => void;
+  setReconnecting: (sessionId: string, reconnecting: boolean) => void;
   reorderSessions: (activeId: string, insertIndex: number) => void;
   setActiveSession: (sessionId: string | null) => void;
   appendData: (sessionId: string, chunk: string) => void;
@@ -93,6 +95,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId,
         pinned: old?.pinned,
         color: old?.color,
+        reconnecting: true,
       };
       const sessions = state.sessions.filter(
         (session) => session.sessionId !== oldSessionId,
@@ -104,6 +107,12 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       };
     }),
   setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+  setReconnecting: (sessionId, reconnecting) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.sessionId === sessionId ? { ...session, reconnecting } : session,
+      ),
+    })),
   reorderSessions: (activeId, insertIndex) =>
     set((state) => {
       const fromIndex = state.sessions.findIndex(
@@ -127,6 +136,8 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
               ...session,
               status: event.status,
               statusMessage: event.message,
+              reconnecting:
+                event.status === 'connecting' ? session.reconnecting : false,
             }
           : session,
       ),

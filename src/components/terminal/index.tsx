@@ -19,7 +19,7 @@ const Terminal: React.FC = () => {
   const activeSession =
     sessions.find((s) => s.sessionId === activeSessionId) ?? null;
 
-  const { connect, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
+  const { connect, openLocal, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
 
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
@@ -35,6 +35,7 @@ const Terminal: React.FC = () => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         if (activeSection !== 'terminal') return;
         event.preventDefault();
+        if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
         setNewTabMenuOpen((prev) => !prev);
       }
     };
@@ -79,6 +80,7 @@ const Terminal: React.FC = () => {
           open={newTabMenuOpen}
           onClose={() => setNewTabMenuOpen(false)}
           onConnect={connect}
+          onOpenLocal={openLocal}
         />
       </div>
       <TerminalContextMenu

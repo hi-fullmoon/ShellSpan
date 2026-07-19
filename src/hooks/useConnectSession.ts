@@ -6,6 +6,7 @@ import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import type { ConnectionProfile } from '@/types';
 import {
   buildSessionCreateRequest,
+  invokeCreateLocalSession,
   invokeCreateSession,
   invokeTrustHost,
 } from '@/lib/tauri';
@@ -30,6 +31,7 @@ const CLOSED_DIALOG: HostKeyDialogState = {
 
 export function useConnectSession(): {
   connect: (profile: ConnectionProfile) => Promise<void>;
+  openLocal: () => Promise<void>;
   hostKeyDialog: HostKeyDialogState;
   closeHostKeyDialog: () => void;
 } {
@@ -57,6 +59,19 @@ export function useConnectSession(): {
           void connect(pending);
         }
       });
+    }
+  };
+
+  const openLocal = async (): Promise<void> => {
+    try {
+      const summary = await invokeCreateLocalSession();
+      addSession(summary);
+      setActiveSection('terminal');
+    } catch (error) {
+      useToastStore.getState().addToast(
+        error instanceof Error ? error.message : String(error),
+        'error',
+      );
     }
   };
 
@@ -121,6 +136,7 @@ export function useConnectSession(): {
 
   return {
     connect,
+    openLocal,
     hostKeyDialog,
     closeHostKeyDialog,
   };

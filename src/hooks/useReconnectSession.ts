@@ -12,6 +12,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
   const ensurePassword = useProfileStore((state) => state.ensurePassword);
   const getProfile = useProfileStore((state) => state.getProfile);
   const reconnectSession = useTerminalStore((state) => state.reconnectSession);
+  const setReconnecting = useTerminalStore((state) => state.setReconnecting);
   const setStatus = useTerminalStore((state) => state.setStatus);
 
   return async (sessionId: string): Promise<void> => {
@@ -28,6 +29,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
     }
 
     const profileWithPassword = await ensurePassword(profile);
+    setReconnecting(sessionId, true);
     try {
       const summary = await invokeCreateSession(
         buildSessionCreateRequest(profileWithPassword, 120, 30),
