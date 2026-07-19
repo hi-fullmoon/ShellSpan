@@ -11,6 +11,7 @@ import {
   invokeTrustHost,
 } from '@/lib/tauri';
 import { useToastStore } from '@/stores/toastStore';
+import { createLogger } from '@/lib/logger';
 
 interface HostKeyDialogState {
   open: boolean;
@@ -28,6 +29,8 @@ const CLOSED_DIALOG: HostKeyDialogState = {
   mismatch: false,
   onTrust: () => {},
 };
+
+const logger = createLogger('connect');
 
 export function useConnectSession(): {
   connect: (profile: ConnectionProfile) => Promise<void>;

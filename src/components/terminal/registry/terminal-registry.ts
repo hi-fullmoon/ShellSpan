@@ -15,7 +15,10 @@ import {
   shouldReconnectFromInput,
 } from '@/lib/terminal';
 import { t } from '@/locales';
+import { createLogger } from '@/lib/logger';
 import type { ClosedEvent, SessionStatus, StatusEvent } from '@/types';
+
+const logger = createLogger('terminal');
 
 export type StatusCallback = (sessionId: string, payload: StatusEvent) => void;
 export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
@@ -116,7 +119,8 @@ class TerminalControllerImpl implements TerminalController {
     const status = this.getStatus(this.sessionId);
 
     if (status === 'connected') {
-      void invokeWriteSession(this.sessionId, data).catch(() => {
+      void invokeWriteSession(this.sessionId, data).catch((error) => {
+        logger.error(`Failed to write input to session ${this.sessionId}`, error);
         this.writeSystemLine(
           formatTerminalNoticeLine(
             t('terminal.notice.writeFailedLabel'),

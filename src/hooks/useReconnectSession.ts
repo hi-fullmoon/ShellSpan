@@ -6,7 +6,10 @@ import {
   invokeCreateSession,
 } from '@/lib/tauri';
 import { t } from '@/locales';
+import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+
+const logger = createLogger('reconnect');
 
 export function useReconnectSession(): (sessionId: string) => Promise<void> {
   const ensurePassword = useProfileStore((state) => state.ensurePassword);
@@ -30,6 +33,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
 
     const profileWithPassword = await ensurePassword(profile);
     setReconnecting(sessionId, true);
+    logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
     try {
       const summary = await invokeCreateSession(
         buildSessionCreateRequest(profileWithPassword, 120, 30),

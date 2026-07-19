@@ -19,6 +19,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { AboutDialog } from '@/components/about-dialog';
 import { UpdateRestartDialog } from '@/components/update-restart-dialog';
 import { useUpdateFlow } from '@/hooks/useUpdateFlow';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('app');
 
 export const App: React.FC = () => {
   useDisableContextMenu();
@@ -45,8 +48,8 @@ export const App: React.FC = () => {
       );
       listeners.push(
         listen('system-request-app-exit', () => {
-          invoke('request_app_exit').catch(() => {
-            // ignore
+          invoke('request_app_exit').catch((error) => {
+            logger.error('Failed to request app exit', error);
           });
         }),
       );
