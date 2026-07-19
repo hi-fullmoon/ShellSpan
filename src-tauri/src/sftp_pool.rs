@@ -1,6 +1,7 @@
 use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest};
+use log::{debug, info, warn};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -52,10 +53,17 @@ impl SftpPool {
                 .sessions
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let entry = sessions.get_mut(&key)?;
+            let entry = match sessions.get_mut(&key) {
+                Some(entry) => entry,
+                None => {
+                    debug!("SFTP pool miss {}", key.label());
+                    return None;
+                }
+            };
             let idle_for = entry.last_used.elapsed();
             if idle_for > SFTP_POOL_IDLE_TTL {
                 sessions.remove(&key);
+                debug!("SFTP pool entry evicted after idle TTL {}", key.label());
                 return None;
             }
             entry.last_used = Instant::now();
@@ -63,10 +71,12 @@ impl SftpPool {
         };
 
         if should_health_check(idle_for) && !connection_is_healthy(&connection) {
+            warn!("SFTP pool health check failed {}", key.label());
             self.remove_if_same(&key, &connection);
             return None;
         }
 
+        debug!("SFTP pool hit {}", key.label());
         Some(connection)
     }
 
@@ -79,20 +89,30 @@ impl SftpPool {
             .sessions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let entry = sessions.entry(key.clone()).or_insert(PooledEntry {
-            connection: new_connection,
-            last_used: Instant::now(),
-        });
+        let entry = match sessions.entry(key.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                info!("SFTP pool connection inserted {}", key.label());
+                entry.insert(PooledEntry {
+                    connection: new_connection,
+                    last_used: Instant::now(),
+                })
+            }
+        };
         entry.last_used = Instant::now();
         entry.connection.clone()
     }
 
     pub(crate) fn invalidate(&self, request: &RemoteConnectionRequest) {
         let key = connection_key(request);
-        self.sessions
+        let removed = self
+            .sessions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&key);
+        if removed.is_some() {
+            debug!("SFTP pool connection invalidated {}", key.label());
+        }
     }
 
     fn remove_if_same(&self, key: &ConnectionKey, expected: &Arc<Mutex<ConnectedSftp>>) {
@@ -121,6 +141,10 @@ fn connection_is_healthy(connection: &Arc<Mutex<ConnectedSftp>>) -> bool {
 }
 
 impl ConnectionKey {
+    fn label(&self) -> String {
+        format!("{}@{}:{}", self.username, self.host, self.port)
+    }
+
     pub(crate) fn jump_host_key(jump_host: Option<&JumpHostConfig>) -> Option<JumpHostKey> {
         jump_host.map(|jump_host| JumpHostKey {
             host: jump_host.host.clone(),

@@ -16,6 +16,7 @@ use log::LevelFilter;
 #[cfg(target_os = "macos")]
 use tauri::Manager;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
 
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
 use models::{DownloadCancellationRegistry, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
@@ -98,19 +99,22 @@ pub fn run() {
     } else {
         LevelFilter::Info
     };
+    let backend_log_target = Target::new(TargetKind::LogDir {
+        file_name: Some("backend".into()),
+    })
+    .filter(|metadata| !metadata.target().starts_with(WEBVIEW_TARGET));
+    let frontend_log_target = Target::new(TargetKind::LogDir {
+        file_name: Some("frontend".into()),
+    })
+    .filter(|metadata| metadata.target().starts_with(WEBVIEW_TARGET));
     let log_targets = if cfg!(debug_assertions) {
         vec![
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                file_name: Some("termbridge".to_string()),
-            }),
+            Target::new(TargetKind::Stdout),
+            backend_log_target,
+            frontend_log_target,
         ]
     } else {
-        vec![tauri_plugin_log::Target::new(
-            tauri_plugin_log::TargetKind::LogDir {
-                file_name: Some("termbridge".to_string()),
-            },
-        )]
+        vec![backend_log_target, frontend_log_target]
     };
 
     let builder = tauri::Builder::default()
@@ -128,7 +132,7 @@ pub fn run() {
                 .level(log_level)
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(10))
-                .max_file_size(1_048_576)
+                .max_file_size(2 * 1024 * 1024)
                 .targets(log_targets)
                 .build(),
         )

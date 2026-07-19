@@ -32,6 +32,7 @@ pub(crate) async fn create_session(
     request: SessionCreateRequest,
 ) -> Result<SessionSummary, CreateSessionError> {
     validate_connection_fields(&request.host, &request.username).map_err(|message| {
+        error!("SSH session validation failed: {message}");
         CreateSessionError::Other { message }
     })?;
     info!(
@@ -53,8 +54,11 @@ pub(crate) async fn create_session(
                 )
             })
             .await
-            .map_err(|error| CreateSessionError::Other {
-                message: format!("failed to join host key check task: {error}"),
+            .map_err(|error| {
+                error!("Failed to join host key check task: {error}");
+                CreateSessionError::Other {
+                    message: format!("failed to join host key check task: {error}"),
+                }
             })?
             .map_err(|message| {
                 if let Some(kind) = crate::known_hosts::classify_host_key_error(&message) {
@@ -74,6 +78,10 @@ pub(crate) async fn create_session(
                         }
                     }
                 } else {
+                    error!(
+                        "Host key check failed host={} port={}: {message}",
+                        request.host, request.port
+                    );
                     CreateSessionError::Other { message }
                 }
             })?
@@ -95,11 +103,14 @@ pub(crate) async fn create_session(
                 });
             }
             HostKeyCheckStatus::Failure => {
-                return Err(CreateSessionError::Other {
-                    message: host_key_check
-                        .message
-                        .unwrap_or_else(|| "host key check failed".to_string()),
-                });
+                let message = host_key_check
+                    .message
+                    .unwrap_or_else(|| "host key check failed".to_string());
+                error!(
+                    "Host key check failed host={} port={}: {message}",
+                    request.host, request.port
+                );
+                return Err(CreateSessionError::Other { message });
             }
         }
     }
@@ -113,7 +124,10 @@ pub(crate) async fn create_session(
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
-    state.insert(session_id.clone(), ManagedSession { sender: tx }).map_err(|message| CreateSessionError::Other { message })?;
+    state.insert(session_id.clone(), ManagedSession { sender: tx }).map_err(|message| {
+        error!("Failed to register SSH session session_id={session_id}: {message}");
+        CreateSessionError::Other { message }
+    })?;
 
     info!(
         "Created SSH session session_id={} title={} host={} port={} username={}",
@@ -162,7 +176,10 @@ pub(crate) fn create_local_session(
             pixel_width: 0,
             pixel_height: 0,
         })
-        .map_err(|error| format!("failed to create local terminal: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to create local terminal session_id={session_id}: {error}");
+            format!("failed to create local terminal: {error}")
+        })?;
     let mut command = CommandBuilder::new(&shell);
     if !cfg!(target_os = "windows") {
         command.arg("-l");
@@ -170,30 +187,50 @@ pub(crate) fn create_local_session(
     let mut child = pair
         .slave
         .spawn_command(command)
-        .map_err(|error| format!("failed to start local shell: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to start local shell session_id={session_id} shell={shell}: {error}");
+            format!("failed to start local shell: {error}")
+        })?;
     drop(pair.slave);
     let mut reader = pair
         .master
         .try_clone_reader()
-        .map_err(|error| format!("failed to read local terminal: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to clone local terminal reader session_id={session_id}: {error}");
+            format!("failed to read local terminal: {error}")
+        })?;
     let mut writer = pair
         .master
         .take_writer()
-        .map_err(|error| format!("failed to write local terminal: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to take local terminal writer session_id={session_id}: {error}");
+            format!("failed to write local terminal: {error}")
+        })?;
     let master = pair.master;
     let (tx, rx) = mpsc::channel::<SessionCommand>();
-    state.insert(session_id.clone(), ManagedSession { sender: tx })?;
+    state
+        .insert(session_id.clone(), ManagedSession { sender: tx })
+        .map_err(|message| {
+            error!("Failed to register local session session_id={session_id}: {message}");
+            message
+        })?;
 
     let worker_id = session_id.clone();
     thread::spawn(move || {
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
+        let reader_id = worker_id.clone();
         thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
             loop {
                 match reader.read(&mut buffer) {
-                    Ok(0) | Err(_) => break,
+                    Ok(0) => break,
+                    Err(error) => {
+                        warn!("Local shell reader failed session_id={reader_id}: {error}");
+                        break;
+                    }
                     Ok(count) => {
-                        if output_tx.send(buffer[..count].to_vec()).is_err() {
+                        if let Err(error) = output_tx.send(buffer[..count].to_vec()) {
+                            warn!("Local shell output channel closed session_id={reader_id}: {error}");
                             break;
                         }
                     }
@@ -213,20 +250,30 @@ pub(crate) fn create_local_session(
             }
             match rx.recv_timeout(Duration::from_millis(16)) {
                 Ok(SessionCommand::Write(data)) => {
-                    let _ = writer.write_all(data.as_bytes());
-                    let _ = writer.flush();
+                    if let Err(error) = writer.write_all(data.as_bytes()) {
+                        warn!("Failed to write local shell input session_id={worker_id}: {error}");
+                    }
+                    if let Err(error) = writer.flush() {
+                        warn!("Failed to flush local shell input session_id={worker_id}: {error}");
+                    }
                 }
                 Ok(SessionCommand::Resize { cols, rows }) => {
-                    let _ = master.resize(PtySize {
+                    if let Err(error) = master.resize(PtySize {
                         rows: rows.max(1) as u16,
                         cols: cols.max(1) as u16,
                         pixel_width: 0,
                         pixel_height: 0,
-                    });
+                    }) {
+                        warn!(
+                            "Failed to resize local terminal session_id={worker_id} cols={cols} rows={rows}: {error}"
+                        );
+                    }
                 }
                 Ok(SessionCommand::Close) => {
                     closed_by_user = true;
-                    let _ = child.kill();
+                    if let Err(error) = child.kill() {
+                        warn!("Failed to kill local shell session_id={worker_id}: {error}");
+                    }
                     break;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -262,6 +309,7 @@ pub(crate) fn create_local_session(
             false,
         );
     });
+    info!("Created local session session_id={session_id} shell={shell}");
     Ok(summary)
 }
 
@@ -349,12 +397,17 @@ pub(crate) async fn list_remote_directory(
     })
     .await
     .map_err(|error| format!("failed to join directory listing task: {error}"))?;
-    if let Ok(listing) = &result {
-        debug!(
-            "Listed remote directory path={} entries={}",
-            listing.path,
-            listing.entries.len()
-        );
+    match &result {
+        Ok(listing) => {
+            debug!(
+                "Listed remote directory path={} entries={}",
+                listing.path,
+                listing.entries.len()
+            );
+        }
+        Err(error) => {
+            error!("List remote directory failed path={requested_path}: {error}");
+        }
     }
     result
 }
@@ -379,7 +432,9 @@ pub(crate) async fn create_remote_entry(
     })
     .await
     .map_err(|error| format!("failed to join create entry task: {error}"))?;
-    if result.is_ok() {
+    if let Err(error) = &result {
+        error!("Create remote entry failed: {error}");
+    } else {
         info!("Created remote entry successfully");
     }
     result
@@ -404,7 +459,9 @@ pub(crate) async fn rename_remote_path(
     })
     .await
     .map_err(|error| format!("failed to join rename task: {error}"))?;
-    if result.is_ok() {
+    if let Err(error) = &result {
+        error!("Rename remote path failed: {error}");
+    } else {
         info!("Renamed remote path successfully");
     }
     result
@@ -423,11 +480,15 @@ pub(crate) async fn trash_remote_path(
     );
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         trash_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join trash task: {error}"))?
+    .map_err(|error| format!("failed to join trash task: {error}"))?;
+    if let Err(error) = &result {
+        error!("Trash remote path failed: {error}");
+    }
+    result
 }
 
 #[tauri::command]
@@ -444,11 +505,15 @@ pub(crate) async fn restore_remote_path(
     );
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         restore_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join restore task: {error}"))?
+    .map_err(|error| format!("failed to join restore task: {error}"))?;
+    if let Err(error) = &result {
+        error!("Restore remote path failed: {error}");
+    }
+    result
 }
 
 #[tauri::command]
@@ -500,7 +565,9 @@ pub(crate) async fn copy_remote_path(
     })
     .await
     .map_err(|error| format!("failed to join copy task: {error}"))?;
-    if result.is_ok() {
+    if let Err(error) = &result {
+        error!("Copy remote path failed: {error}");
+    } else {
         info!("Copied remote path successfully");
     }
     result
@@ -514,11 +581,15 @@ pub(crate) async fn copy_remote_to_remote(
 ) -> Result<(), String> {
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         copy_remote_to_remote_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join remote transfer task: {error}"))?
+    .map_err(|error| format!("failed to join remote transfer task: {error}"))?;
+    if let Err(error) = &result {
+        error!("Copy remote to remote failed: {error}");
+    }
+    result
 }
 
 #[tauri::command]
@@ -729,7 +800,9 @@ pub(crate) async fn open_remote_file(
     })
     .await
     .map_err(|error| format!("failed to join open file task: {error}"))?;
-    if result.is_ok() {
+    if let Err(error) = &result {
+        error!("Open remote file failed: {error}");
+    } else {
         info!("Opened remote file successfully");
     }
     result
@@ -753,11 +826,16 @@ pub(crate) async fn preview_remote_file(
     })
     .await
     .map_err(|error| format!("failed to join file preview task: {error}"))?;
-    if let Ok(ref response) = result {
-        info!(
-            "Previewed remote file path={} size={} is_text={}",
-            response.path, response.size, response.is_text
-        );
+    match &result {
+        Ok(response) => {
+            info!(
+                "Previewed remote file path={} size={} is_text={}",
+                response.path, response.size, response.is_text
+            );
+        }
+        Err(error) => {
+            error!("Preview remote file failed: {error}");
+        }
     }
     result
 }
@@ -781,7 +859,9 @@ pub(crate) async fn update_remote_permissions(
     })
     .await
     .map_err(|error| format!("failed to join permissions update task: {error}"))?;
-    if result.is_ok() {
+    if let Err(error) = &result {
+        error!("Update remote permissions failed: {error}");
+    } else {
         info!("Updated remote permissions successfully");
     }
     result
@@ -910,7 +990,9 @@ pub(crate) async fn trust_host(
     })
     .await
     .map_err(|error| format!("failed to join trust host task: {error}"))?;
-    if result.is_ok() {
+    if let Err(error) = &result {
+        error!("Trust host failed: {error}");
+    } else {
         info!("Host trusted successfully");
     }
     result
@@ -972,7 +1054,7 @@ pub(crate) fn list_known_hosts(app: AppHandle) -> Result<Vec<KnownHostEntry>, St
     let mut known_hosts = session.known_hosts().map_err(|error| format!("failed to initialize known hosts: {error}"))?;
 
     if let Err(error) = known_hosts.read_file(&path, KnownHostFileKind::OpenSSH) {
-        log::warn!("Failed to parse known hosts file: {error}");
+        warn!("Failed to parse known hosts file: {error}");
     }
 
     let mut entries = Vec::new();
@@ -1087,7 +1169,7 @@ pub(crate) fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String>
     for entry in fs::read_dir(&log_dir).map_err(|error| format!("failed to read log dir: {error}"))? {
         let entry = entry.map_err(|error| format!("failed to read log dir entry: {error}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if !name.starts_with("termbridge") {
+        if !(name.starts_with("backend") || name.starts_with("frontend")) || !name.ends_with(".log") {
             continue;
         }
 

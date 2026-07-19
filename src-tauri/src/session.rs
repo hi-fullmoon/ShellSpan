@@ -1,6 +1,6 @@
 #[cfg(unix)]
 use libc::{poll, pollfd, POLLIN, POLLOUT};
-use log::{info, warn};
+use log::{error, info, warn};
 use ssh2::{Channel, ExtendedData, Session};
 use std::{
     io::{ErrorKind, Read, Write},
@@ -76,20 +76,32 @@ pub(crate) fn run_ssh_session(
 
     let mut channel = session
         .channel_session()
-        .map_err(|error| format!("failed to open ssh channel: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to open SSH channel session_id={session_id}: {error}");
+            format!("failed to open ssh channel: {error}")
+        })?;
     channel
         .request_pty(
             "xterm-256color",
             None,
             Some((request.terminal_cols, request.terminal_rows, 0, 0)),
         )
-        .map_err(|error| format!("failed to allocate PTY: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to allocate PTY session_id={session_id}: {error}");
+            format!("failed to allocate PTY: {error}")
+        })?;
     channel
         .handle_extended_data(ExtendedData::Merge)
-        .map_err(|error| format!("failed to configure extended-data mode: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to configure extended-data mode session_id={session_id}: {error}");
+            format!("failed to configure extended-data mode: {error}")
+        })?;
     channel
         .shell()
-        .map_err(|error| format!("failed to start remote shell: {error}"))?;
+        .map_err(|error| {
+            error!("Failed to start remote shell session_id={session_id}: {error}");
+            format!("failed to start remote shell: {error}")
+        })?;
     session.set_blocking(false);
 
     info!("SSH session connected session_id={session_id}");
@@ -155,6 +167,7 @@ fn session_loop(
                 Ok(command) => pending_commands.push(command),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    info!("SSH session controller dropped session_id={session_id}");
                     graceful_shutdown(channel);
                     return Ok(Some("session controller dropped".to_string()));
                 }
@@ -172,6 +185,7 @@ fn session_loop(
                     made_progress = true;
                 }
                 SessionCommand::Close => {
+                    info!("SSH session closed locally session_id={session_id}");
                     graceful_shutdown(channel);
                     return Ok(Some("session closed locally".to_string()));
                 }
@@ -181,6 +195,7 @@ fn session_loop(
         match channel.read(&mut buffer) {
             Ok(0) => {
                 if channel.eof() {
+                    info!("Remote shell exited session_id={session_id}");
                     return Ok(Some("remote shell exited".to_string()));
                 }
             }

@@ -1,4 +1,4 @@
-use log::error;
+use log::{error, info};
 use tauri::{AppHandle, Builder, Emitter, Manager};
 
 #[cfg(target_os = "macos")]
@@ -121,8 +121,10 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
     }
 
     if is_check_update_menu_id(menu_id) {
-        if let Err(error) = emit_system_check_update(app) {
-            error!("failed to handle check-update menu event: {error}");
+        info!("Update check initiated menu_id={menu_id}");
+        match emit_system_check_update(app) {
+            Ok(()) => info!("Update check event delivered to frontend"),
+            Err(error) => error!("failed to handle check-update menu event: {error}"),
         }
         return;
     }
