@@ -126,6 +126,8 @@ export default {
   'terminal.newTabMenu.navigate': 'navigate',
   'terminal.newTabMenu.connect': 'connect',
   'terminal.newTabMenu.close': 'close',
+  'terminal.newTabMenu.localTerminal': 'Local terminal',
+  'terminal.newTabMenu.localTerminalHint': 'Start the system shell on this device',
   'terminal.tab.noProfiles': 'No saved connections. Add one in the Workbench.',
   'terminal.tab.copyInfo': 'Copy Connection Info',
   'terminal.tab.closeOthers': 'Close Others',
@@ -160,6 +162,7 @@ export default {
 
   'terminal.feedback.copied': 'Copied',
   'terminal.feedback.copyFailed': 'Copy failed',
+  'terminal.feedback.pasteFailed': 'Paste failed',
 
   'terminal.message.shellReady': 'Shell ready',
 

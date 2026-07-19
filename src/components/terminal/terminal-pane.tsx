@@ -5,12 +5,34 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useActiveController } from '@/components/terminal/hooks/use-active-controller';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import { TerminalPaneContextMenu } from './terminal-pane-context-menu';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 import { ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
+
+const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
+  <div
+    className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+    role="status"
+    aria-label={label}
+  >
+    <span className="rounded-sm bg-app-surface/90 px-3 py-1.5 font-mono text-sm text-app-text-soft shadow-sm">
+      <span aria-hidden="true">
+        {label}
+        {[0, 1, 2].map((index) => (
+          <span
+            key={index}
+            className="inline-block animate-pulse"
+            style={{ animationDelay: `${index * 200}ms` }}
+          >
+            .
+          </span>
+        ))}
+      </span>
+    </span>
+  </div>
+);
 
 export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
@@ -23,11 +45,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-
   const activeSessionId = activeSession?.sessionId ?? null;
   const { focus, searchNext, searchPrevious, clearSearch } = useActiveController(paneRef, activeSessionId);
 
@@ -71,7 +88,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleOpenSearch]);
 
-  // Bind xterm custom key handler for find/escape and pane context menu.
+  // Bind xterm custom key handler for find/escape and copy.
   useEffect(() => {
     if (!terminal) return;
 
@@ -114,34 +131,35 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
       return true;
     });
 
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      const selection = terminal.getSelection();
+      if (!selection) return;
+      void navigator.clipboard
+        .writeText(selection)
+        .catch(() => showError(t('terminal.feedback.copyFailed')));
+    });
+
     const element = terminal.element;
     const handleContextMenu = (event: MouseEvent): void => {
       event.preventDefault();
-      setContextMenu({ x: event.clientX, y: event.clientY });
+      if (activeSession?.status !== 'connected') return;
+
+      void navigator.clipboard
+        .readText()
+        .then((text) => {
+          if (text) terminal.paste(text);
+        })
+        .catch(() => showError(t('terminal.feedback.pasteFailed')));
     };
     element?.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
+      selectionDisposable.dispose();
       element?.removeEventListener('contextmenu', handleContextMenu);
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t]);
-
-  const handleContextMenuClose = useCallback((): void => {
-    setContextMenu(null);
-  }, []);
-
-  const handleContextMenuCopyFeedback = useCallback(
-    (feedback: 'copied' | 'failed') => {
-      if (feedback === 'copied') {
-        success(t('terminal.feedback.copied'));
-      } else {
-        showError(t('terminal.feedback.copyFailed'));
-      }
-    },
-    [success, showError, t],
-  );
+  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
@@ -196,23 +214,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
           </Button>
         </div>
       )}
-      {activeSession?.status === 'connecting' && (
+      {activeSession?.status === 'connecting' && !activeSession.reconnecting && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
           <Spinner />
           <span className="text-xs text-app-text-soft">{t('terminal.status.connecting')}...</span>
         </div>
       )}
+      {activeSession?.reconnecting && (
+        <ReconnectingIndicator label={t('terminal.notice.reconnectingLabel')} />
+      )}
       <div ref={paneRef} className="h-full w-full p-0" />
-      <TerminalPaneContextMenu
-        open={!!contextMenu}
-        x={contextMenu?.x ?? 0}
-        y={contextMenu?.y ?? 0}
-        session={activeSession}
-        terminal={terminal}
-        onClose={handleContextMenuClose}
-        onCopyFeedback={handleContextMenuCopyFeedback}
-        onFind={handleOpenSearch}
-      />
     </div>
   );
 };

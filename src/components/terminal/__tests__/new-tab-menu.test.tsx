@@ -129,6 +129,31 @@ describe('NewTabMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('opens a local terminal and supports Ctrl+N/Ctrl+P navigation', () => {
+    const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
+    useProfileStore.setState({ profiles: [p1] });
+    const onOpenLocal = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <NewTabMenu
+        open
+        onClose={onClose}
+        onConnect={mockConnect}
+        onOpenLocal={onOpenLocal}
+      />,
+    );
+
+    expect(screen.getByText('terminal.newTabMenu.localTerminal')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'n', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    expect(onOpenLocal).toHaveBeenCalledTimes(1);
+    expect(mockConnect).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('cycles selection with arrow keys', () => {
     const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
     const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');

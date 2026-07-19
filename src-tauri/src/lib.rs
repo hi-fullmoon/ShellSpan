@@ -143,6 +143,7 @@ pub fn run() {
         .manage(keychain::CredentialManager::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
+            commands::create_local_session,
             commands::write_session,
             commands::resize_session,
             commands::close_session,

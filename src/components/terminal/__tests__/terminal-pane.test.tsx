@@ -57,19 +57,26 @@ beforeEach(() => {
 
 function makeMockTerminal(selection = '') {
   const handlers: Array<(event: KeyboardEvent) => boolean> = [];
+  const selectionHandlers: Array<() => void> = [];
   const terminal = {
     getSelection: vi.fn().mockReturnValue(selection),
     selectAll: vi.fn(),
     clear: vi.fn(),
     write: vi.fn(),
+    paste: vi.fn(),
     element: document.createElement('div'),
-    onSelectionChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+    onSelectionChange: vi.fn((handler: () => void) => {
+      selectionHandlers.push(handler);
+      return { dispose: vi.fn() };
+    }),
     attachCustomKeyEventHandler: vi.fn((handler) => {
       handlers.push(handler);
     }),
     getCustomKeyEventHandlers: () => handlers,
+    getSelectionChangeHandlers: () => selectionHandlers,
   } as unknown as import('@xterm/xterm').Terminal & {
     getCustomKeyEventHandlers: () => Array<(event: KeyboardEvent) => boolean>;
+    getSelectionChangeHandlers: () => Array<() => void>;
   };
 
   const controller = {
@@ -120,17 +127,53 @@ describe('TerminalPane', () => {
     expect(document.querySelector('div.absolute.inset-0.z-10')).toBeNull();
   });
 
+  it('shows reconnecting dots over the terminal without the loading spinner', () => {
+    render(
+      <TerminalPane
+        activeSession={makeSession({ status: 'connecting', reconnecting: true })}
+      />,
+    );
+
+    const indicator = screen.getByRole('status', {
+      name: 'terminal.notice.reconnectingLabel',
+    });
+    expect(indicator).toHaveTextContent('terminal.notice.reconnectingLabel...');
+    expect(indicator.querySelectorAll('.animate-pulse')).toHaveLength(3);
+    expect(document.querySelector('svg.animate-spin')).toBeNull();
+  });
+
+  it('pastes clipboard text on right click', async () => {
+    vi.mocked(navigator.clipboard.readText).mockResolvedValue('pasted text');
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    terminal.element?.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => {
+      expect(terminal.paste).toHaveBeenCalledWith('pasted text');
+    });
+  });
+
   it('renders without an active session', () => {
     const { container } = render(<TerminalPane activeSession={null} />);
     expect(screen.queryByRole('button', { name: 'terminal.tab.search' })).not.toBeInTheDocument();
     expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
   });
 
-  it('does not copy on selection change', () => {
-    makeMockTerminal('selected text');
+  it('copies selected text when the selection changes', async () => {
+    const terminal = makeMockTerminal('selected text');
     render(<TerminalPane activeSession={makeSession()} />);
 
-    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    terminal.getSelectionChangeHandlers()[0]?.();
+
+    await vi.waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('selected text');
+    });
   });
 
   it('copies selection via keyboard shortcut on macOS', async () => {

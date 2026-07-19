@@ -122,6 +122,18 @@ describe('terminalStore', () => {
     expect(state.sessions[0]?.profileId).toBe('profile-1');
     expect(state.sessions[0]?.pinned).toBe(true);
     expect(state.sessions[0]?.color).toBe('#ef4444');
+    expect(state.sessions[0]?.reconnecting).toBe(true);
     expect(state.activeSessionId).toBe('s2');
+  });
+
+  it('tracks reconnecting until the connection status settles', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' });
+
+    store.setReconnecting('s1', true);
+    expect(useTerminalStore.getState().sessions[0]?.reconnecting).toBe(true);
+
+    store.setStatus('s1', { sessionId: 's1', status: 'connected' });
+    expect(useTerminalStore.getState().sessions[0]?.reconnecting).toBe(false);
   });
 });

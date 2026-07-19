@@ -11,13 +11,16 @@ use crate::models::{
     TrashedRemotePath, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
-use log::{debug, error, info, warn};
 use base64::Engine;
+use log::{debug, error, info, warn};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use std::io::{Read, Write};
 use std::sync::{
     atomic::AtomicBool,
     Arc, mpsc,
 };
 use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
@@ -118,6 +121,147 @@ pub(crate) async fn create_session(
     );
     let connection_request = remote_connection_request_from_session(&request);
     spawn_ssh_thread(app, session_id, request, rx, pool.inner().clone(), connection_request);
+    Ok(summary)
+}
+
+#[tauri::command]
+pub(crate) fn create_local_session(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    cols: u16,
+    rows: u16,
+) -> Result<SessionSummary, String> {
+    let session_id = Uuid::new_v4().to_string();
+    let shell = if cfg!(target_os = "windows") {
+        "powershell.exe".to_string()
+    } else {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+    };
+    let title = std::path::Path::new(&shell)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Local")
+        .to_string();
+    let summary = SessionSummary {
+        session_id: session_id.clone(),
+        title,
+        host: "local".to_string(),
+        port: 0,
+        username: std::env::var(if cfg!(target_os = "windows") {
+            "USERNAME"
+        } else {
+            "USER"
+        })
+        .unwrap_or_else(|_| "local".to_string()),
+    };
+
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("failed to create local terminal: {error}"))?;
+    let mut command = CommandBuilder::new(&shell);
+    if !cfg!(target_os = "windows") {
+        command.arg("-l");
+    }
+    let mut child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| format!("failed to start local shell: {error}"))?;
+    drop(pair.slave);
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| format!("failed to read local terminal: {error}"))?;
+    let mut writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("failed to write local terminal: {error}"))?;
+    let master = pair.master;
+    let (tx, rx) = mpsc::channel::<SessionCommand>();
+    state.insert(session_id.clone(), ManagedSession { sender: tx })?;
+
+    let worker_id = session_id.clone();
+    thread::spawn(move || {
+        let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
+        thread::spawn(move || {
+            let mut buffer = [0_u8; 8192];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(count) => {
+                        if output_tx.send(buffer[..count].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        let _ = emit_status(
+            &app,
+            &worker_id,
+            SessionStatus::Connected,
+            Some("local shell ready".to_string()),
+        );
+        let mut closed_by_user = false;
+        loop {
+            while let Ok(bytes) = output_rx.try_recv() {
+                let _ = emit_data(&app, &worker_id, String::from_utf8_lossy(&bytes).into_owned());
+            }
+            match rx.recv_timeout(Duration::from_millis(16)) {
+                Ok(SessionCommand::Write(data)) => {
+                    let _ = writer.write_all(data.as_bytes());
+                    let _ = writer.flush();
+                }
+                Ok(SessionCommand::Resize { cols, rows }) => {
+                    let _ = master.resize(PtySize {
+                        rows: rows.max(1) as u16,
+                        cols: cols.max(1) as u16,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
+                }
+                Ok(SessionCommand::Close) => {
+                    closed_by_user = true;
+                    let _ = child.kill();
+                    break;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+        }
+        while let Ok(bytes) = output_rx.try_recv() {
+            let _ = emit_data(&app, &worker_id, String::from_utf8_lossy(&bytes).into_owned());
+        }
+        let reason = if closed_by_user {
+            "local shell closed"
+        } else {
+            "local shell exited"
+        };
+        let _ = emit_status(
+            &app,
+            &worker_id,
+            SessionStatus::Disconnected,
+            Some(reason.to_string()),
+        );
+        let _ = emit_closed(
+            &app,
+            &worker_id,
+            Some(reason.to_string()),
+            if closed_by_user {
+                ClosedReasonKind::LocalClose
+            } else {
+                ClosedReasonKind::RemoteExit
+            },
+            false,
+        );
+    });
     Ok(summary)
 }
 

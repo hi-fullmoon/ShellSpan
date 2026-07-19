@@ -34,7 +34,7 @@
   --radius: 0.375rem;
   --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.04), 0 1px 3px 0 rgba(0, 0, 0, 0.03);
   --shadow-dialog: 0 24px 48px -12px rgba(0, 0, 0, 0.18);
-  --shadow-toast: 0 12px 28px -8px rgba(0, 0, 0, 0.16);
+  --shadow-toast: 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
   --background: var(--app-bg);
   --foreground: var(--app-text);
   --card: var(--app-surface);
@@ -80,6 +80,7 @@
   --app-error: #ef4444;
   --app-warning: #f59e0b;
   --app-success: #22c55e;
+  --shadow-toast: 0 6px 16px 0 rgba(0, 0, 0, 0.32), 0 3px 6px -4px rgba(0, 0, 0, 0.4), 0 9px 28px 8px rgba(0, 0, 0, 0.24);
   --background: var(--app-bg);
   --foreground: var(--app-text);
   --card: var(--app-surface);
@@ -221,4 +222,13 @@ body {
   html {
     @apply font-sans;
   }
+}
+
+/* Global toast: antd-message style filled status icons (solid colored disc, glyph cut out in surface color) */
+.toast-icon-filled circle {
+  fill: currentColor;
+}
+
+.toast-icon-filled :is(path, line, polyline) {
+  stroke: var(--popover);
 }

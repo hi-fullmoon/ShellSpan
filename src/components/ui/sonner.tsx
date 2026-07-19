@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import { useTheme } from "@/hooks/useTheme"
 import { Toaster as Sonner, type ToasterProps, toast } from "sonner"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { CircleCheckIcon, InfoIcon, CircleAlertIcon, CircleXIcon, Loader2Icon } from "lucide-react"
 import { useToastStore } from "@/stores/toastStore"
 
 const Toaster = ({ ...props }: ToasterProps) => {
@@ -49,34 +49,39 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={resolvedTheme as ToasterProps["theme"]}
       className="toaster group"
+      position="top-right"
+      gap={8}
+      offset={{ top: 56, right: 16 }}
       icons={{
         success: (
-          <CircleCheckIcon className="size-4" />
+          <CircleCheckIcon className="toast-icon-filled size-4 text-[#52c41a]" />
         ),
         info: (
-          <InfoIcon className="size-4" />
+          <InfoIcon className="toast-icon-filled size-4 text-[#1677ff]" />
         ),
         warning: (
-          <TriangleAlertIcon className="size-4" />
+          <CircleAlertIcon className="toast-icon-filled size-4 text-[#faad14]" />
         ),
         error: (
-          <OctagonXIcon className="size-4" />
+          <CircleXIcon className="toast-icon-filled size-4 text-[#ff4d4f]" />
         ),
         loading: (
-          <Loader2Icon className="size-4 animate-spin" />
+          <Loader2Icon className="size-4 animate-spin text-[#1677ff]" />
         ),
       }}
       style={
         {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
+          "--normal-border": "transparent",
+          "--border-radius": "8px",
         } as React.CSSProperties
       }
       toastOptions={{
         classNames: {
-          toast: 'cn-toast shadow-[var(--shadow-toast)]',
+          toast:
+            'gap-2! px-4! py-[9px]! text-sm! shadow-[var(--shadow-toast)]!',
+          title: 'font-normal!',
         },
       }}
       {...props}
