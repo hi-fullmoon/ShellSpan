@@ -84,6 +84,8 @@ export default {
   'workbench.credentials.removeConfirm': 'Delete the login password saved for “{name}”? The connection profile will remain.',
   'workbench.credentials.operationFailed': 'Credential operation failed',
 
+  'workbench.settings.title': 'Settings',
+
   'workbench.logs.title': 'Logs',
   'workbench.logs.empty': 'No log files',
   'workbench.logs.noMatches': 'No logs match the current filters',

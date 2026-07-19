@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AppSection, Locale, ThemeMode } from '@/types';
+import type { AppSection, Locale, ThemeMode, WorkbenchTab } from '@/types';
 
 interface AppPreferences {
   theme: ThemeMode;
@@ -10,7 +10,9 @@ interface AppPreferences {
 
 interface AppState extends AppPreferences {
   activeSection: AppSection;
+  activeWorkbenchTab: WorkbenchTab;
   setActiveSection: (section: AppSection) => void;
+  setActiveWorkbenchTab: (tab: WorkbenchTab) => void;
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
@@ -46,7 +48,9 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       ...initial,
       activeSection: 'workbench',
+      activeWorkbenchTab: 'connections',
       setActiveSection: (section) => set({ activeSection: section }),
+      setActiveWorkbenchTab: (activeWorkbenchTab) => set({ activeWorkbenchTab }),
       setTheme: (theme) => set({ theme }),
       setLocale: (locale) => set({ locale }),
       setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
