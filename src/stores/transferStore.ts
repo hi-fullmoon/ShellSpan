@@ -1,9 +1,12 @@
 import { create } from 'zustand';
+import { createLogger } from '@/lib/logger';
 import type {
   DeleteProgressEvent,
   DownloadProgressEvent,
   UploadProgressEvent,
 } from '@/types';
+
+const logger = createLogger('transfer');
 
 export type TransferOperationKind = 'upload' | 'download' | 'delete' | 'remote-copy';
 
@@ -12,6 +15,7 @@ export interface TransferOperation {
   kind: TransferOperationKind;
   connectionId?: string;
   paths?: string[];
+  pathScopes?: Array<{ connectionId: string; paths: string[] }>;
   currentPath?: string;
   totalBytes: number;
   processedBytes: number;
@@ -272,11 +276,19 @@ export function hasActivePathOperation(
   operations = useTransferStore.getState().operations,
 ): boolean {
   return operations.some((operation) =>
-    operation.connectionId === connectionId &&
-    operation.paths?.some((activePath) =>
-      paths.some((path) => pathsOverlap(activePath, path)),
-    ) &&
-    isTransferActive(operation),
+    isTransferActive(operation) &&
+    (
+      operation.pathScopes?.some((scope) =>
+        scope.connectionId === connectionId &&
+        scope.paths.some((activePath) =>
+          paths.some((path) => pathsOverlap(activePath, path)),
+        ),
+      ) ??
+      (operation.connectionId === connectionId &&
+        operation.paths?.some((activePath) =>
+          paths.some((path) => pathsOverlap(activePath, path)),
+        ))
+    ),
   );
 }
 

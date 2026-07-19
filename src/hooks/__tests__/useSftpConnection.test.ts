@@ -1,7 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
-import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import {
+  getSftpPaneConnectionKey,
+  useSftpStore,
+  type SftpConnection,
+} from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 
 const tauri = vi.hoisted(() => ({
@@ -63,7 +67,7 @@ function createConnection(): SftpConnection {
       selectedPaths: [],
       batchMode: false,
     },
-    remoteBookmarks: [],
+    remoteBookmarks: { local: [], remote: [] },
   };
 }
 
@@ -164,7 +168,7 @@ describe('useSftpConnection downloads', () => {
 
     expect(useTransferStore.getState().operations[0]).toMatchObject({
       kind: 'download',
-      connectionId: connection.id,
+      connectionId: getSftpPaneConnectionKey(connection, 'remote'),
       paths: [file.path],
       status: 'failed',
       error: 'offline',

@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import { invokeCopyRemoteToRemote } from '@/lib/tauri';
+import { useTransferStore } from '@/stores/transferStore';
 
 vi.mock('@/hooks/useSftpConnection', () => ({
   useSftpConnection: () => ({
@@ -46,6 +48,7 @@ vi.mock('@/hooks/useTransferListeners', () => ({
 
 vi.mock('@/lib/tauri', () => ({
   invokeCopyLocalPaths: vi.fn().mockResolvedValue(undefined),
+  invokeCopyRemoteToRemote: vi.fn().mockResolvedValue(undefined),
   invokePickLocalFiles: vi.fn().mockResolvedValue([]),
   invokePickLocalFolder: vi.fn().mockResolvedValue([]),
 }));
@@ -77,6 +80,7 @@ function addConnection(): SftpConnection {
 describe('useSftpPaneActions', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
+    useTransferStore.setState({ operations: [] });
   });
 
   it('returns expected action handlers and state', () => {
@@ -159,6 +163,66 @@ describe('useSftpPaneActions', () => {
       sourcePath: '/home/test.txt',
       sourceName: 'test.txt',
       kind: 'file',
+      sourceSide: 'remote',
+      sourceConnection: connection.connection,
+      sourceConnectionKey: JSON.stringify(['h', 22, 'u', '', 0, '']),
+    });
+  });
+
+  it('uses the source connection when pasting across two remote panes', async () => {
+    const connection = addConnection();
+    useSftpStore.getState().attachRemoteConnection(
+      connection.id,
+      'local',
+      {
+        sessionId: 'left',
+        title: 'Source',
+        host: 'source.example.com',
+        port: 22,
+        username: 'source-user',
+      },
+      {
+        host: 'source.example.com',
+        port: 22,
+        username: 'source-user',
+        authMethod: 'password',
+      },
+    );
+    useSftpStore.getState().setPath(connection.id, 'local', '/source');
+    useSftpStore.getState().setPath(connection.id, 'remote', '/destination');
+    useSftpStore.getState().setEntries(connection.id, 'local', [{
+      path: '/source/report.txt',
+      name: 'report.txt',
+      kind: 'file',
+      size: 10,
+    }]);
+
+    const dualRemote = useSftpStore.getState().connections[0]!;
+    const { result: sourceActions } = renderHook(() =>
+      useSftpPaneActions(dualRemote, 'local', false),
+    );
+    act(() => sourceActions.current.onCopy(dualRemote.localEntries[0]));
+
+    const withClipboard = useSftpStore.getState().connections[0]!;
+    const { result: destinationActions } = renderHook(() =>
+      useSftpPaneActions(withClipboard, 'remote', false),
+    );
+    await act(() => destinationActions.current.onPaste());
+
+    expect(vi.mocked(invokeCopyRemoteToRemote)).toHaveBeenCalledWith({
+      sourceConnection: withClipboard.leftConnection,
+      destinationConnection: withClipboard.connection,
+      sourcePaths: ['/source/report.txt'],
+      destinationDirectory: '/destination',
+      conflictPolicies: ['fail'],
+    });
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'remote-copy',
+      completedSteps: 1,
+      pathScopes: [
+        expect.objectContaining({ paths: ['/source/report.txt'] }),
+        expect.objectContaining({ paths: ['/destination/report.txt'] }),
+      ],
     });
   });
 });

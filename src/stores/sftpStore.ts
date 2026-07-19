@@ -24,6 +24,9 @@ export interface SftpRemoteClipboard {
   sourcePath: string;
   sourceName: string;
   kind: RemoteFileKind;
+  sourceSide: SftpSide;
+  sourceConnection: RemoteConnectionRequest;
+  sourceConnectionKey: string;
 }
 
 export interface SftpConnection {
@@ -48,7 +51,7 @@ export interface SftpConnection {
   remoteError?: string;
   localPane: SftpPaneState;
   remotePane: SftpPaneState;
-  remoteBookmarks: string[];
+  remoteBookmarks: Record<SftpSide, string[]>;
   remoteClipboard?: SftpRemoteClipboard;
   localOnly?: boolean;
   rightLocal?: boolean;
@@ -90,7 +93,7 @@ function createDefaultConnection(
     remoteLoading: false,
     localPane: createDefaultPaneState(),
     remotePane: createDefaultPaneState(),
-    remoteBookmarks: [],
+    remoteBookmarks: { local: [], remote: [] },
     leftSource: 'local',
     rightSource: 'remote',
   };
@@ -137,8 +140,8 @@ interface SftpState {
     id: string,
     clipboard?: SftpRemoteClipboard,
   ) => void;
-  addRemoteBookmark: (id: string, path: string) => void;
-  removeRemoteBookmark: (id: string, path: string) => void;
+  addRemoteBookmark: (id: string, side: SftpSide, path: string) => void;
+  removeRemoteBookmark: (id: string, side: SftpSide, path: string) => void;
 }
 
 function updateConnection(
@@ -191,6 +194,22 @@ export function getSftpPaneConnection(
     : connection.connection;
 }
 
+export function getSftpPaneConnectionKey(
+  connection: SftpConnection,
+  side: SftpSide,
+): string {
+  const request = getSftpPaneConnection(connection, side);
+  const jump = request.jumpHost;
+  return JSON.stringify([
+    request.host,
+    request.port,
+    request.username,
+    jump?.host ?? '',
+    jump?.port ?? 0,
+    jump?.username ?? '',
+  ]);
+}
+
 export const useSftpStore = create<SftpState>()((set) => ({
   connections: [],
   activeConnectionId: null,
@@ -240,6 +259,11 @@ export const useSftpStore = create<SftpState>()((set) => ({
         [getEntriesKey(side)]: [],
         [getErrorKey(side)]: undefined,
         [getPaneKey(side)]: createDefaultPaneState(),
+        remoteBookmarks: { ...current.remoteBookmarks, [side]: [] },
+        remoteClipboard:
+          current.remoteClipboard?.sourceSide === side
+            ? undefined
+            : current.remoteClipboard,
       })),
       activeConnectionId: id,
     })),
@@ -268,6 +292,11 @@ export const useSftpStore = create<SftpState>()((set) => ({
         [getEntriesKey(side)]: [],
         [getErrorKey(side)]: undefined,
         [getPaneKey(side)]: createDefaultPaneState(),
+        remoteBookmarks: { ...current.remoteBookmarks, [side]: [] },
+        remoteClipboard:
+          current.remoteClipboard?.sourceSide === side
+            ? undefined
+            : current.remoteClipboard,
       })),
       activeConnectionId: id,
     })),
@@ -389,21 +418,27 @@ export const useSftpStore = create<SftpState>()((set) => ({
       })),
     })),
 
-  addRemoteBookmark: (id, path) =>
+  addRemoteBookmark: (id, side, path) =>
     set((state) => ({
       connections: updateConnection(state, id, (connection) => ({
         ...connection,
-        remoteBookmarks: connection.remoteBookmarks.includes(path)
-          ? connection.remoteBookmarks
-          : [...connection.remoteBookmarks, path],
+        remoteBookmarks: {
+          ...connection.remoteBookmarks,
+          [side]: connection.remoteBookmarks[side].includes(path)
+            ? connection.remoteBookmarks[side]
+            : [...connection.remoteBookmarks[side], path],
+        },
       })),
     })),
 
-  removeRemoteBookmark: (id, path) =>
+  removeRemoteBookmark: (id, side, path) =>
     set((state) => ({
       connections: updateConnection(state, id, (connection) => ({
         ...connection,
-        remoteBookmarks: connection.remoteBookmarks.filter((p) => p !== path),
+        remoteBookmarks: {
+          ...connection.remoteBookmarks,
+          [side]: connection.remoteBookmarks[side].filter((p) => p !== path),
+        },
       })),
     })),
 }));

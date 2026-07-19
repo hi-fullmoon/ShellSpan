@@ -4,6 +4,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import {
   getSftpPaneConnection,
+  getSftpPaneConnectionKey,
   getSftpPaneSource,
   useSftpStore,
   type SftpSide,
@@ -219,6 +220,11 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     return normalized.split('/').filter(Boolean).pop() ?? path;
   };
 
+  const remoteDestinationPath = (directory: string, sourcePath: string): string => {
+    const base = directory === '/' ? '' : directory.replace(/\/+$/, '');
+    return `${base}/${localPathName(sourcePath)}`;
+  };
+
   const processUploadQueue = React.useCallback(async () => {
     const queue = uploadQueueRef.current;
     if (!queue) return;
@@ -289,6 +295,8 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           queue.policies,
         );
       } else if (queue.sourceSide) {
+        const sourceConnectionKey = getSftpPaneConnectionKey(connection, queue.sourceSide);
+        const destinationConnectionKey = getSftpPaneConnectionKey(connection, queue.side);
         const request = {
           sourceConnection: getSftpPaneConnection(connection, queue.sourceSide),
           destinationConnection: getSftpPaneConnection(connection, queue.side),
@@ -313,8 +321,17 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         addTransferOperation({
           operationId,
           kind: 'remote-copy',
-          connectionId: connection.id,
+          connectionId: sourceConnectionKey,
           paths: queue.accepted,
+          pathScopes: [
+            { connectionId: sourceConnectionKey, paths: queue.accepted },
+            {
+              connectionId: destinationConnectionKey,
+              paths: queue.accepted.map((path) =>
+                remoteDestinationPath(queue.destination, path),
+              ),
+            },
+          ],
           currentPath: queue.accepted[0],
           totalBytes: 0,
           processedBytes: 0,
@@ -385,7 +402,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     payload: SftpDndPayload,
     targetSide: 'local' | 'remote',
   ): Promise<void> => {
-    if (payload.side === targetSide) return;
+    if (payload.side === targetSide || uploadQueueRef.current) return;
     const paths = payload.entries.map((entry) => entry.path);
     const sourceLocal = payload.side === 'local' ? leftIsLocal : rightIsLocal;
     uploadQueueRef.current = {
@@ -415,6 +432,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
 
   const handleSystemDrop = useCallback(
     async (paths: string[], side: 'local' | 'remote') => {
+      if (uploadQueueRef.current) return;
       const destination = side === 'local' ? connection.localPath : connection.remotePath;
       if (!destination) return;
       uploadQueueRef.current = {
@@ -632,7 +650,10 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         <SftpUploadConflictDialog
           conflict={uploadConflict}
           open={uploadConflict !== undefined}
-          onClose={() => setUploadConflict(undefined)}
+          onClose={() => {
+            uploadQueueRef.current = null;
+            setUploadConflict(undefined);
+          }}
           onResolve={(action, applyToRemaining) => {
             void handleUploadConflictResolution(action, applyToRemaining);
           }}

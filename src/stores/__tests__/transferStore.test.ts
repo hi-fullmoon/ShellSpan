@@ -112,4 +112,20 @@ describe('transferStore', () => {
     expect(useTransferStore.getState().operations[0]?.status).toBe('cancelling');
     expect(hasActivePathOperation('connection-1', ['/remote/file.zip'])).toBe(true);
   });
+
+  it('isolates identical paths by remote connection and tracks both copy ends', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'remote-copy',
+      status: 'running',
+      pathScopes: [
+        { connectionId: 'source', paths: ['/shared/report.txt'] },
+        { connectionId: 'destination', paths: ['/shared/report.txt'] },
+      ],
+    });
+
+    expect(hasActivePathOperation('source', ['/shared/report.txt'])).toBe(true);
+    expect(hasActivePathOperation('destination', ['/shared/report.txt'])).toBe(true);
+    expect(hasActivePathOperation('unrelated', ['/shared/report.txt'])).toBe(false);
+  });
 });
