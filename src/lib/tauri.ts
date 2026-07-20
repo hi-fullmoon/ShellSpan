@@ -142,6 +142,22 @@ export async function invokeCopyLocalPaths(
   return invokeLogged('copy_local_paths', { request });
 }
 
+export async function invokeRenameLocalPath(path: string, newName: string): Promise<void> {
+  return invokeLogged('rename_local_path', { path, newName });
+}
+
+export async function invokeTrashLocalPaths(paths: string[]): Promise<void> {
+  return invokeLogged('trash_local_paths', { paths });
+}
+
+export async function invokePasteLocalPaths(
+  sourcePaths: string[],
+  destinationDirectory: string,
+  copySuffix: string,
+): Promise<string[]> {
+  return invokeLogged('paste_local_paths', { sourcePaths, destinationDirectory, copySuffix });
+}
+
 export async function invokeCopyRemoteToRemote(
   request: CopyRemoteToRemoteRequest,
 ): Promise<void> {

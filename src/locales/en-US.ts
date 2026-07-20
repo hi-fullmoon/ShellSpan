@@ -282,6 +282,7 @@ export default {
   'sftp.contextMenu.download': 'Download',
   'sftp.contextMenu.copy': 'Copy',
   'sftp.contextMenu.paste': 'Paste',
+  'sftp.copySuffix': 'copy',
   'sftp.contextMenu.copyName': 'Copy Name',
   'sftp.contextMenu.copyPath': 'Copy Path',
   'sftp.contextMenu.copyContainingDirectory': 'Copy Containing Directory',

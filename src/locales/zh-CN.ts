@@ -282,6 +282,7 @@ export default {
   'sftp.contextMenu.download': '下载',
   'sftp.contextMenu.copy': '复制',
   'sftp.contextMenu.paste': '粘贴',
+  'sftp.copySuffix': '副本',
   'sftp.contextMenu.copyName': '复制名称',
   'sftp.contextMenu.copyPath': '复制路径',
   'sftp.contextMenu.copyContainingDirectory': '复制所在目录',
