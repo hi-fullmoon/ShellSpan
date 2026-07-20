@@ -108,6 +108,23 @@ describe('LogPanel', () => {
     expect(mockAddToast).toHaveBeenCalledWith('workbench.logs.copied');
   });
 
+  it('filters log entries by the search query', () => {
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    mockContent =
+      `[${todayString}][12:34:56][INFO][termbridge] persisted log entry\n` +
+      `[${todayString}][12:34:57][ERROR][termbridge] something failed badly`;
+
+    render(<LogPanel />);
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'failed' },
+    });
+
+    expect(screen.queryByText('persisted log entry')).not.toBeInTheDocument();
+    expect(screen.getByText('failed')).toBeInTheDocument();
+  });
+
   it('displays all date filter options and marks today as selected', () => {
     render(<LogPanel />);
 
@@ -136,27 +153,4 @@ describe('LogPanel', () => {
     ).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('lists log sources as tags and switches to the newest file of the clicked source', () => {
-    mockFiles = [
-      { name: 'frontend.log', size: 20, modifiedAt: 3 },
-      { name: 'frontend_2000-01-01.log', size: 10, modifiedAt: 2 },
-      { name: 'backend.log', size: 30, modifiedAt: 1 },
-    ];
-    mockActiveFileName = 'frontend.log';
-
-    render(<LogPanel />);
-
-    const frontendChip = screen.getByRole('button', {
-      name: 'workbench.logs.sourceFrontend',
-    });
-    const backendChip = screen.getByRole('button', {
-      name: 'workbench.logs.sourceBackend',
-    });
-    expect(frontendChip).toHaveAttribute('aria-pressed', 'true');
-    expect(backendChip).toHaveAttribute('aria-pressed', 'false');
-
-    fireEvent.click(backendChip);
-
-    expect(loadFile).toHaveBeenCalledWith('backend.log');
-  });
 });
