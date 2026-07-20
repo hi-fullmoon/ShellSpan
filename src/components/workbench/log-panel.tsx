@@ -6,14 +6,22 @@ import React, {
   useState,
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import {
+  DownloadIcon,
+  FileSearchIcon,
+  RefreshCwIcon,
+  SearchIcon,
+} from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
 import { useLogStore } from '@/stores/logStore';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { EmptyState, Spinner } from '@/components/ui/empty-state';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Spinner } from '@/components/ui/empty-state';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/useToast';
 import { invokeExportLogFile } from '@/lib/tauri';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -44,19 +52,6 @@ type DateFilterOption = (typeof DATE_FILTER_OPTIONS)[number]['key'];
 
 const LOG_LEVELS = ['INFO', 'WARN', 'ERROR', 'DEBUG'] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
-
-type LogSourceFamily = 'backend' | 'frontend';
-
-const LOG_SOURCE_LABEL_KEYS: Record<LogSourceFamily, LocaleKey> = {
-  backend: 'workbench.logs.sourceBackend',
-  frontend: 'workbench.logs.sourceFrontend',
-};
-
-function getLogFileFamily(fileName: string): LogSourceFamily | undefined {
-  if (fileName.startsWith('backend')) return 'backend';
-  if (fileName.startsWith('frontend')) return 'frontend';
-  return undefined;
-}
 
 const LOG_LINE_REGEX =
   /^\[(\d{4}-\d{2}-\d{2})\]\[(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]\[(DEBUG|INFO|WARN|ERROR)\](?:\[(.*?)\])?\s*(.*)$/;
@@ -139,21 +134,73 @@ function getLevelClasses(level: string): string {
   }
 }
 
+function getLevelDotClasses(level: string): string {
+  switch (level) {
+    case 'ERROR':
+      return 'bg-app-error';
+    case 'WARN':
+      return 'bg-app-warning';
+    case 'DEBUG':
+      return 'bg-app-primary';
+    case 'INFO':
+    default:
+      return 'bg-app-success';
+  }
+}
+
+function renderHighlightedText(text: string, query: string): React.ReactNode {
+  if (!query) return text;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  while (cursor < text.length) {
+    const matchIndex = lowerText.indexOf(lowerQuery, cursor);
+    if (matchIndex === -1) {
+      nodes.push(text.slice(cursor));
+      break;
+    }
+    if (matchIndex > cursor) {
+      nodes.push(text.slice(cursor, matchIndex));
+    }
+    nodes.push(
+      <mark
+        key={key++}
+        className="rounded-[2px] bg-app-warning/30 text-inherit"
+      >
+        {text.slice(matchIndex, matchIndex + lowerQuery.length)}
+      </mark>,
+    );
+    cursor = matchIndex + lowerQuery.length;
+  }
+  return nodes;
+}
+
 interface LogLineProps {
   line: ParsedLogLine;
   originalIndex: number;
+  query: string;
   onDoubleClick: () => void;
 }
 
-const LogLine: React.FC<LogLineProps> = ({ line, originalIndex, onDoubleClick }) => {
+const LogLine: React.FC<LogLineProps> = ({
+  line,
+  originalIndex,
+  query,
+  onDoubleClick,
+}) => {
   if (!line.level || !line.message) {
     return (
       <button
         type="button"
         onDoubleClick={onDoubleClick}
-        className="w-full cursor-pointer px-1 py-0.5 text-left text-app-text-soft transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
+        className="flex w-full cursor-pointer items-start gap-2 border-l-2 border-transparent px-2 py-1 text-left text-app-text-soft transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
       >
-        {line.raw}
+        <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-transparent" />
+        <span className="min-w-0 whitespace-pre-wrap break-all">
+          {renderHighlightedText(line.raw, query)}
+        </span>
       </button>
     );
   }
@@ -168,14 +215,20 @@ const LogLine: React.FC<LogLineProps> = ({ line, originalIndex, onDoubleClick })
     <button
       type="button"
       onDoubleClick={onDoubleClick}
-      className="grid w-full cursor-pointer grid-cols-[110px_2.75rem_1fr] items-start gap-2 px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50 md:grid-cols-[110px_2.75rem_4.5rem_1fr]"
+      className="flex w-full cursor-pointer items-start gap-2 border-l-2 border-transparent px-2 py-1 text-left transition-colors hover:border-l-app-primary/40 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
     >
-      <span className="shrink-0 whitespace-nowrap text-[10px] text-app-text-soft">
+      <span
+        className={cn(
+          'mt-1.5 size-1.5 shrink-0 rounded-full',
+          getLevelDotClasses(line.level),
+        )}
+      />
+      <span className="w-[19ch] shrink-0 whitespace-nowrap text-[10px] leading-4 text-app-text-soft">
         {line.date} {shortTime}
       </span>
       <span
         className={cn(
-          'inline-flex h-4 shrink-0 items-center justify-center rounded px-1 text-[10px] font-semibold uppercase',
+          'inline-flex h-4 w-11 shrink-0 items-center justify-center rounded px-1 text-[10px] font-semibold uppercase',
           getLevelClasses(line.level),
         )}
       >
@@ -184,15 +237,15 @@ const LogLine: React.FC<LogLineProps> = ({ line, originalIndex, onDoubleClick })
       <Tooltip>
         <TooltipTrigger
           render={
-            <span className="hidden truncate text-[10px] text-app-text-soft md:block" />
+            <span className="hidden w-28 shrink-0 truncate text-[10px] leading-4 text-app-text-soft md:block" />
           }
         >
-          {line.target ? line.target.split('::').pop() : ''}
+          {line.target ? renderHighlightedText(line.target.split('::').pop() ?? '', query) : ''}
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
-      <span className="min-w-0 whitespace-pre-wrap break-all text-app-text">
-        {line.message}
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-all text-app-text">
+        {renderHighlightedText(line.message, query)}
       </span>
     </button>
   );
@@ -213,29 +266,16 @@ export const LogPanel: React.FC = () => {
   const [autoScroll, setAutoScroll] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
+  const [query, setQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Newest file per source family; `files` is sorted by modifiedAt desc.
-  const sourceFiles = useMemo(() => {
-    const map = new Map<LogSourceFamily, string>();
-    for (const file of files) {
-      const family = getLogFileFamily(file.name);
-      if (family && !map.has(family)) {
-        map.set(family, file.name);
-      }
-    }
-    return map;
-  }, [files]);
-
-  const activeFamily = activeFileName
-    ? getLogFileFamily(activeFileName)
-    : undefined;
 
   const parsedLines = useMemo(() => parseLogContent(content), [content]);
 
   const today = useMemo(() => new Date(), []);
 
-  const filteredLines = useMemo(() => {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const searchFilteredLines = useMemo(() => {
     return parsedLines
       .map((line, index) => ({
         line,
@@ -245,17 +285,33 @@ export const LogPanel: React.FC = () => {
         if (!matchesDateFilter(line.date, dateFilter, today)) {
           return false;
         }
-        if (levelFilter !== 'all' && line.level !== levelFilter) {
+        if (normalizedQuery && !line.raw.toLowerCase().includes(normalizedQuery)) {
           return false;
         }
         return true;
       });
-  }, [parsedLines, dateFilter, levelFilter, today]);
+  }, [parsedLines, dateFilter, today, normalizedQuery]);
+
+  const levelCounts = useMemo(() => {
+    const counts: Partial<Record<LogLevel, number>> = {};
+    for (const { line } of searchFilteredLines) {
+      if (line.level && (LOG_LEVELS as readonly string[]).includes(line.level)) {
+        const level = line.level as LogLevel;
+        counts[level] = (counts[level] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [searchFilteredLines]);
+
+  const filteredLines = useMemo(() => {
+    if (levelFilter === 'all') return searchFilteredLines;
+    return searchFilteredLines.filter(({ line }) => line.level === levelFilter);
+  }, [searchFilteredLines, levelFilter]);
 
   const virtualizer = useVirtualizer({
     count: filteredLines.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 18,
+    estimateSize: () => 20,
     measureElement: (element) => element.getBoundingClientRect().height,
     overscan: 20,
   });
@@ -322,72 +378,79 @@ export const LogPanel: React.FC = () => {
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
+    <TooltipProvider>
     <div className="flex h-full flex-col">
-      <div className="border-b border-app-border">
-        <div className="flex h-9 items-center justify-between px-3">
-          <div className="flex items-center gap-2">
+      <div className="shrink-0 border-b border-app-border">
+        <div className="flex h-10 items-center gap-2 px-3">
+          <div className="flex min-w-0 items-center gap-2">
             <span className="text-sm font-medium text-app-text">
               {t('workbench.logs.title')}
             </span>
             {activeFileName && (
-              <span className="text-xs text-muted-foreground">{activeFileName}</span>
+              <Badge
+                variant="secondary"
+                className="max-w-44 truncate font-mono text-[10px]"
+              >
+                {activeFileName}
+              </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Checkbox
+          <div className="flex flex-1 items-center justify-end gap-1.5">
+            <div className="relative w-full max-w-52">
+              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('workbench.logs.searchPlaceholder')}
+                aria-label={t('workbench.logs.searchPlaceholder')}
+                className="h-8 pl-7 text-xs"
+              />
+            </div>
+            <Label className="flex h-7 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <Switch
+                size="sm"
                 checked={autoScroll}
-                onCheckedChange={(checked) => setAutoScroll(checked === true)}
+                onCheckedChange={setAutoScroll}
+                aria-label={t('workbench.logs.autoScroll')}
               />
               {t('workbench.logs.autoScroll')}
             </Label>
-            <Button variant="secondary" size="sm" onClick={handleRefresh}>
-              {t('common.refresh')}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExport}
-              disabled={!content}
-            >
-              {t('workbench.logs.export')}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 text-app-text hover:bg-app-text/10"
+                    aria-label={t('common.refresh')}
+                    onClick={handleRefresh}
+                  />
+                }
+              >
+                <RefreshCwIcon />
+              </TooltipTrigger>
+              <TooltipContent>{t('common.refresh')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 text-app-text hover:bg-app-text/10"
+                    aria-label={t('workbench.logs.export')}
+                    onClick={handleExport}
+                    disabled={!content}
+                  />
+                }
+              >
+                <DownloadIcon />
+              </TooltipTrigger>
+              <TooltipContent>{t('workbench.logs.export')}</TooltipContent>
+            </Tooltip>
           </div>
         </div>
         <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-app-border px-3 py-1.5">
-          {sourceFiles.size > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">
-                {t('workbench.logs.source')}
-              </span>
-              <ToggleGroup
-                value={activeFamily ? [activeFamily] : []}
-                onValueChange={(value) => {
-                  const nextValue = value[0] as LogSourceFamily | undefined;
-                  const nextFile = nextValue
-                    ? sourceFiles.get(nextValue)
-                    : undefined;
-                  if (nextFile && nextFile !== activeFileName) {
-                    void loadFile(nextFile);
-                  }
-                }}
-                variant="tag"
-                size="xs"
-                spacing={1.5}
-                aria-label={t('workbench.logs.source')}
-              >
-                {(
-                  Object.keys(LOG_SOURCE_LABEL_KEYS) as LogSourceFamily[]
-                )
-                  .filter((family) => sourceFiles.has(family))
-                  .map((family) => (
-                    <ToggleGroupItem key={family} value={family}>
-                      {t(LOG_SOURCE_LABEL_KEYS[family])}
-                    </ToggleGroupItem>
-                  ))}
-              </ToggleGroup>
-            </div>
-          )}
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.date')}
@@ -431,6 +494,9 @@ export const LogPanel: React.FC = () => {
               {LOG_LEVELS.map((level) => (
                 <ToggleGroupItem key={level} value={level}>
                   {level}
+                  <span aria-hidden="true" className="ml-1 opacity-50">
+                    {levelCounts[level] ?? 0}
+                  </span>
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
@@ -447,7 +513,7 @@ export const LogPanel: React.FC = () => {
           className="min-h-0 flex-1 font-mono text-xs"
           viewportRef={scrollRef}
         >
-          <div className="p-3">
+          <div className="p-1.5">
             {filteredLines.length > 0 ? (
               <div
                 style={{
@@ -474,6 +540,7 @@ export const LogPanel: React.FC = () => {
                       <LogLine
                         line={line}
                         originalIndex={originalIndex}
+                        query={normalizedQuery}
                         onDoubleClick={() => copyLogContent(line.raw)}
                       />
                     </div>
@@ -481,13 +548,48 @@ export const LogPanel: React.FC = () => {
                 })}
               </div>
             ) : (
-              <span className="text-muted-foreground">
-                {t(content ? 'workbench.logs.noMatches' : 'workbench.logs.empty')}
-              </span>
+              !loading && (
+                <div className="flex h-full min-h-40 items-center justify-center">
+                  <EmptyState
+                    icon={<FileSearchIcon className="h-5 w-5" />}
+                    title={t(
+                      content
+                        ? 'workbench.logs.noMatches'
+                        : 'workbench.logs.empty',
+                    )}
+                  />
+                </div>
+              )
             )}
           </div>
         </ScrollArea>
       </div>
+      <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-app-border px-3 text-[11px] text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2">
+          {activeFileName && (
+            <>
+              <span className="relative flex size-1.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-app-success opacity-60" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-app-success" />
+              </span>
+              <span className="shrink-0">{t('workbench.logs.live')}</span>
+              <span aria-hidden="true" className="shrink-0">
+                ·
+              </span>
+            </>
+          )}
+          <span className="shrink-0">
+            {t('workbench.logs.lineCount', {
+              count: filteredLines.length,
+              total: parsedLines.length,
+            })}
+          </span>
+        </div>
+        <span className="hidden shrink-0 sm:block">
+          {t('workbench.logs.copyHint')}
+        </span>
+      </div>
     </div>
+    </TooltipProvider>
   );
 };
