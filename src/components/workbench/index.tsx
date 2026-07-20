@@ -55,6 +55,19 @@ const Workbench: React.FC = () => {
     }
   };
 
+  const handleSubmitAndConnect = async (
+    values: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<void> => {
+    let profile: ConnectionProfile;
+    if (editing) {
+      await updateProfile(editing.id, values);
+      profile = { ...editing, ...values, updatedAt: Date.now() };
+    } else {
+      profile = await addProfile(values);
+    }
+    await connect(profile);
+  };
+
   const handleDelete = async (): Promise<void> => {
     if (!deleting) return;
     await removeProfile(deleting.id);
@@ -99,6 +112,7 @@ const Workbench: React.FC = () => {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         onSubmit={handleSubmit}
+        onConnect={handleSubmitAndConnect}
         initial={editing}
       />
 

@@ -19,7 +19,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/useToast';
@@ -406,15 +405,19 @@ export const LogPanel: React.FC = () => {
                 className="h-8 pl-7 text-xs"
               />
             </div>
-            <Label className="flex h-7 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-              <Switch
-                size="sm"
-                checked={autoScroll}
-                onCheckedChange={setAutoScroll}
-                aria-label={t('workbench.logs.autoScroll')}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Switch
+                    size="sm"
+                    checked={autoScroll}
+                    onCheckedChange={setAutoScroll}
+                    aria-label={t('workbench.logs.autoScroll')}
+                  />
+                }
               />
-              {t('workbench.logs.autoScroll')}
-            </Label>
+              <TooltipContent>{t('workbench.logs.autoScroll')}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={

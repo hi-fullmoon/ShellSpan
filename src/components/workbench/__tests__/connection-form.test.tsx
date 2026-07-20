@@ -100,7 +100,7 @@ describe('ConnectionForm', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ password: undefined }),
@@ -108,5 +108,26 @@ describe('ConnectionForm', () => {
     expect(
       screen.queryByText('connection.form.validation.passwordRequired'),
     ).not.toBeInTheDocument();
+  });
+
+  it('calls onConnect instead of onSubmit when the primary action is clicked', () => {
+    const onSubmit = vi.fn();
+    const onConnect = vi.fn();
+    render(
+      <ConnectionForm
+        open={true}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+        onConnect={onConnect}
+        initial={profile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
+
+    expect(onConnect).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'My Server' }),
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
