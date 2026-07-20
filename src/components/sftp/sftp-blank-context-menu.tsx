@@ -151,15 +151,13 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
             <Separator className="my-0.5" />
           </>
         )}
-        {!isLocal && (
-          <MenuItem
-            onClick={() => handleAction('paste')}
-            disabled={!hasClipboard}
-            icon={<ClipboardPasteIcon className="h-3.5 w-3.5" />}
-          >
-            {t('sftp.contextMenu.paste')}
-          </MenuItem>
-        )}
+        <MenuItem
+          onClick={() => handleAction('paste')}
+          disabled={!hasClipboard}
+          icon={<ClipboardPasteIcon className="h-3.5 w-3.5" />}
+        >
+          {t('sftp.contextMenu.paste')}
+        </MenuItem>
         <MenuItem
           onClick={() => handleAction('copyCurrentDirectoryPath')}
           disabled={!currentPath}

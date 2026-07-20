@@ -144,9 +144,9 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   const canOpenWithDefaultEditor = !isLocal && singleSelection?.kind === 'file';
   const canPreview = !isLocal && singleSelection?.kind === 'file';
   const canDownload = !isLocal && singleSelection !== undefined && !selectionBusy;
-  const canRename = !isLocal && singleSelection !== undefined && !selectionBusy;
-  const canCopy = !isLocal && singleSelection !== undefined;
-  const canDelete = !isLocal && hasSelection && !selectionBusy;
+  const canRename = singleSelection !== undefined && !selectionBusy;
+  const canCopy = isLocal ? hasSelection : singleSelection !== undefined;
+  const canDelete = hasSelection && !selectionBusy;
   const canEditPermissions = !isLocal && singleSelection !== undefined;
   const canProperties = singleSelection !== undefined;
   const canBookmark = !isLocal && singleSelection?.kind === 'directory';
