@@ -36,15 +36,29 @@ describe('appStore', () => {
 
   it('updates terminal preferences', () => {
     useAppStore.getState().setTerminalFontSize(16);
+    useAppStore.getState().setTerminalFontFamily('consolas');
     useAppStore.getState().setTerminalCursorBlink(false);
+    useAppStore.getState().setTerminalCursorStyle('bar');
     useAppStore.getState().setTerminalCopyOnSelect(false);
     useAppStore.getState().setTerminalScrollback(50000);
 
     expect(useAppStore.getState()).toMatchObject({
       terminalFontSize: 16,
+      terminalFontFamily: 'consolas',
       terminalCursorBlink: false,
+      terminalCursorStyle: 'bar',
       terminalCopyOnSelect: false,
       terminalScrollback: 50000,
+    });
+  });
+
+  it('updates startup and SFTP preferences', () => {
+    useAppStore.getState().setStartupSection('sftp');
+    useAppStore.getState().setSftpShowHiddenFiles(false);
+
+    expect(useAppStore.getState()).toMatchObject({
+      startupSection: 'sftp',
+      sftpShowHiddenFiles: false,
     });
   });
 });

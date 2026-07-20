@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { changeLocale, t, type LocaleKey } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { Locale } from '@/types';
@@ -24,9 +24,14 @@ export function useI18n(): {
   }, [locale]);
 
   const setLocale = (next: Locale): void => {
-    setReady(false);
     setLocaleStore(next);
   };
 
-  return { ready, locale, setLocale, t };
+  const translate = useCallback(
+    (key: LocaleKey, variables?: Record<string, string | number>): string =>
+      t(key, variables),
+    [locale],
+  );
+
+  return { ready, locale, setLocale, t: translate };
 }

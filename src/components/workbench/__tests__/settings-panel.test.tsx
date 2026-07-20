@@ -29,10 +29,15 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('settings.general.title')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.title')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.fontSize')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.fontFamily')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.cursorStyle')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.cursorBlink')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.copyOnSelect')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.scrollback')).toBeInTheDocument();
     expect(screen.getByText('settings.shortcuts.title')).toBeInTheDocument();
+    expect(screen.getByText('settings.general.startupSection')).toBeInTheDocument();
+    expect(screen.getByText('settings.sftp.title')).toBeInTheDocument();
+    expect(screen.getByText('settings.sftp.showHiddenFiles')).toBeInTheDocument();
     expect(
       screen.getByRole('combobox', { name: 'settings.appearance.theme' }),
     ).toHaveTextContent('theme.system');
@@ -42,6 +47,6 @@ describe('SettingsPanel', () => {
     expect(
       screen.getByText('settings.general.startupUpdateCheck'),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(3);
+    expect(screen.getAllByRole('switch')).toHaveLength(4);
   });
 });

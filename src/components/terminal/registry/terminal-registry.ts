@@ -17,7 +17,7 @@ import {
 } from '@/lib/terminal';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
-import type { ClosedEvent, SessionStatus, StatusEvent } from '@/types';
+import type { ClosedEvent, SessionStatus, StatusEvent, TerminalCursorStyle, TerminalFontFamily } from '@/types';
 
 const logger = createLogger('terminal');
 
@@ -28,13 +28,25 @@ export type RequestReconnectCallback = (sessionId: string) => void;
 
 export interface TerminalDisplayPreferences {
   fontSize: number;
+  fontFamily: TerminalFontFamily;
   cursorBlink: boolean;
+  cursorStyle: TerminalCursorStyle;
   scrollback: number;
 }
 
+const TERMINAL_FONT_FAMILIES: Record<TerminalFontFamily, string> = {
+  system: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  menlo: 'Menlo, monospace',
+  monaco: 'Monaco, monospace',
+  consolas: 'Consolas, monospace',
+  courierNew: '"Courier New", monospace',
+};
+
 const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
   fontSize: 14,
+  fontFamily: 'system',
   cursorBlink: true,
+  cursorStyle: 'block',
   scrollback: 10000,
 };
 
@@ -98,7 +110,7 @@ class TerminalControllerImpl implements TerminalController {
     this.removeFromRegistry = removeFromRegistry;
 
     this.terminal = new Terminal({
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
       fontSize: preferences.fontSize,
       theme: {
         background: 'var(--app-surface)',
@@ -106,6 +118,7 @@ class TerminalControllerImpl implements TerminalController {
         cursor: 'var(--app-primary)',
       },
       cursorBlink: preferences.cursorBlink,
+      cursorStyle: preferences.cursorStyle,
       scrollback: preferences.scrollback,
     });
     this.fitAddon = new FitAddon();
@@ -360,7 +373,9 @@ class TerminalControllerImpl implements TerminalController {
   updateOptions(preferences: TerminalDisplayPreferences): void {
     if (this.disposed) return;
     this.terminal.options.fontSize = preferences.fontSize;
+    this.terminal.options.fontFamily = TERMINAL_FONT_FAMILIES[preferences.fontFamily];
     this.terminal.options.cursorBlink = preferences.cursorBlink;
+    this.terminal.options.cursorStyle = preferences.cursorStyle;
     this.terminal.options.scrollback = preferences.scrollback;
     if (this.host) {
       try {

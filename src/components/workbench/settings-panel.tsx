@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon } from 'lucide-react';
+import { FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { Locale, ShortcutAction, ThemeMode } from '@/types';
+import type { AppSection, Locale, ShortcutAction, TerminalCursorStyle, TerminalFontFamily, ThemeMode } from '@/types';
 
 const SHORTCUT_ACTIONS: ShortcutAction[] = [
   'openWorkbench',
@@ -55,14 +55,22 @@ export const SettingsPanel: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
   const setStartupUpdateCheck = useAppStore((state) => state.setStartupUpdateCheck);
+  const startupSection = useAppStore((state) => state.startupSection);
+  const setStartupSection = useAppStore((state) => state.setStartupSection);
   const terminalFontSize = useAppStore((state) => state.terminalFontSize);
   const setTerminalFontSize = useAppStore((state) => state.setTerminalFontSize);
+  const terminalFontFamily = useAppStore((state) => state.terminalFontFamily);
+  const setTerminalFontFamily = useAppStore((state) => state.setTerminalFontFamily);
   const terminalCursorBlink = useAppStore((state) => state.terminalCursorBlink);
   const setTerminalCursorBlink = useAppStore((state) => state.setTerminalCursorBlink);
+  const terminalCursorStyle = useAppStore((state) => state.terminalCursorStyle);
+  const setTerminalCursorStyle = useAppStore((state) => state.setTerminalCursorStyle);
   const terminalCopyOnSelect = useAppStore((state) => state.terminalCopyOnSelect);
   const setTerminalCopyOnSelect = useAppStore((state) => state.setTerminalCopyOnSelect);
   const terminalScrollback = useAppStore((state) => state.terminalScrollback);
   const setTerminalScrollback = useAppStore((state) => state.setTerminalScrollback);
+  const sftpShowHiddenFiles = useAppStore((state) => state.sftpShowHiddenFiles);
+  const setSftpShowHiddenFiles = useAppStore((state) => state.setSftpShowHiddenFiles);
   const shortcuts = useAppStore((state) => state.shortcuts);
   const setShortcut = useAppStore((state) => state.setShortcut);
   const resetShortcut = useAppStore((state) => state.resetShortcut);
@@ -199,6 +207,29 @@ export const SettingsPanel: React.FC = () => {
             <CardContent className="p-0">
               <Separator />
               <SettingRow
+                label={t('settings.terminal.fontFamily')}
+                description={t('settings.terminal.fontFamilyDescription')}
+              >
+                <Select
+                  value={terminalFontFamily}
+                  onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}
+                >
+                  <SelectTrigger size="sm" aria-label={t('settings.terminal.fontFamily')}>
+                    <SelectValue>{t(`settings.terminal.fontFamily.${terminalFontFamily}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(['system', 'menlo', 'monaco', 'consolas', 'courierNew'] as const).map((font) => (
+                        <SelectItem key={font} value={font}>
+                          {t(`settings.terminal.fontFamily.${font}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
                 label={t('settings.terminal.fontSize')}
                 description={t('settings.terminal.fontSizeDescription')}
               >
@@ -216,6 +247,29 @@ export const SettingsPanel: React.FC = () => {
                       {[12, 13, 14, 15, 16, 18].map((size) => (
                         <SelectItem key={size} value={String(size)}>
                           {t('settings.terminal.fontSizeValue', { size })}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.cursorStyle')}
+                description={t('settings.terminal.cursorStyleDescription')}
+              >
+                <Select
+                  value={terminalCursorStyle}
+                  onValueChange={(value) => setTerminalCursorStyle(value as TerminalCursorStyle)}
+                >
+                  <SelectTrigger size="sm" aria-label={t('settings.terminal.cursorStyle')}>
+                    <SelectValue>{t(`settings.terminal.cursorStyle.${terminalCursorStyle}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(['block', 'underline', 'bar'] as const).map((style) => (
+                        <SelectItem key={style} value={style}>
+                          {t(`settings.terminal.cursorStyle.${style}`)}
                         </SelectItem>
                       ))}
                     </SelectGroup>
@@ -293,6 +347,29 @@ export const SettingsPanel: React.FC = () => {
             <CardContent className="p-0">
               <Separator />
               <SettingRow
+                label={t('settings.general.startupSection')}
+                description={t('settings.general.startupSectionDescription')}
+              >
+                <Select
+                  value={startupSection}
+                  onValueChange={(value) => setStartupSection(value as AppSection)}
+                >
+                  <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
+                    <SelectValue>{t(`settings.general.startupSection.${startupSection}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(['workbench', 'terminal', 'sftp'] as const).map((section) => (
+                        <SelectItem key={section} value={section}>
+                          {t(`settings.general.startupSection.${section}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
                 label={t('settings.general.startupUpdateCheck')}
                 description={t('settings.general.startupUpdateCheckDescription')}
               >
@@ -301,6 +378,35 @@ export const SettingsPanel: React.FC = () => {
                     aria-label={t('settings.general.startupUpdateCheck')}
                     checked={startupUpdateCheck}
                     onCheckedChange={setStartupUpdateCheck}
+                  />
+                </div>
+              </SettingRow>
+            </CardContent>
+          </Card>
+
+          <Card size="sm" className="rounded-lg">
+            <CardHeader>
+              <div className="flex items-start gap-2.5">
+                <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <FolderCogIcon />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <CardTitle>{t('settings.sftp.title')}</CardTitle>
+                  <CardDescription>{t('settings.sftp.description')}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Separator />
+              <SettingRow
+                label={t('settings.sftp.showHiddenFiles')}
+                description={t('settings.sftp.showHiddenFilesDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.sftp.showHiddenFiles')}
+                    checked={sftpShowHiddenFiles}
+                    onCheckedChange={setSftpShowHiddenFiles}
                   />
                 </div>
               </SettingRow>

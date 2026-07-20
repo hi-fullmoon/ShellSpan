@@ -10,17 +10,21 @@ export const TerminalControllerLayer: React.FC = () => {
   const setClosed = useTerminalStore((s) => s.setClosed);
   const reconnectSession = useReconnectSession();
   const terminalFontSize = useAppStore((s) => s.terminalFontSize);
+  const terminalFontFamily = useAppStore((s) => s.terminalFontFamily);
   const terminalCursorBlink = useAppStore((s) => s.terminalCursorBlink);
+  const terminalCursorStyle = useAppStore((s) => s.terminalCursorStyle);
   const terminalScrollback = useAppStore((s) => s.terminalScrollback);
   const knownRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     terminalRegistry.updateOptions({
       fontSize: terminalFontSize,
+      fontFamily: terminalFontFamily,
       cursorBlink: terminalCursorBlink,
+      cursorStyle: terminalCursorStyle,
       scrollback: terminalScrollback,
     });
-  }, [terminalCursorBlink, terminalFontSize, terminalScrollback]);
+  }, [terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback]);
 
   useEffect(() => {
     const currentIds = new Set(sessions.map((s) => s.sessionId));
