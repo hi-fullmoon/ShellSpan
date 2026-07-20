@@ -697,6 +697,27 @@ pub(crate) async fn rename_local_path(path: String, new_name: String) -> Result<
 }
 
 #[tauri::command]
+pub(crate) async fn paste_local_paths(
+    source_paths: Vec<String>,
+    destination_directory: String,
+    copy_suffix: String,
+) -> Result<Vec<String>, String> {
+    info!(
+        "Pasting local paths count={} destination_directory={destination_directory}",
+        source_paths.len()
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::paste_local_paths_blocking(source_paths, destination_directory, copy_suffix)
+    })
+    .await
+    .map_err(|error| format!("failed to join paste local paths task: {error}"))?;
+    if let Err(error) = &result {
+        warn!("Paste local paths failed: {error}");
+    }
+    result
+}
+
+#[tauri::command]
 pub(crate) fn cancel_upload(
     uploads: State<'_, UploadCancellationRegistry>,
     operation_id: String,
