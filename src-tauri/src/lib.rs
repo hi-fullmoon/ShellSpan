@@ -24,7 +24,7 @@ pub(crate) use connection::{
     summarize_remote_connection_request, summarize_session_request, validate_connection_fields,
 };
 pub(crate) use identity_cache::RemoteIdentityCache;
-pub(crate) use local_fs::{copy_local_paths_blocking, rename_local_path_blocking};
+pub(crate) use local_fs::{copy_local_paths_blocking, paste_local_paths_blocking, rename_local_path_blocking};
 pub(crate) use path_utils::portable_local_path;
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, copy_remote_to_remote_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
@@ -167,6 +167,7 @@ pub fn run() {
             commands::upload_local_paths,
             commands::copy_local_paths,
             commands::rename_local_path,
+            commands::paste_local_paths,
             commands::cancel_upload,
             commands::cancel_delete,
             commands::download_remote_paths,

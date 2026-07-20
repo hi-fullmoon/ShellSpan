@@ -94,6 +94,83 @@ pub(crate) fn rename_local_path_blocking(path: String, new_name: String) -> Resu
         .map_err(|error| format!("failed to rename {} to {trimmed}: {error}", source.display()))
 }
 
+pub(crate) fn paste_local_paths_blocking(
+    source_paths: Vec<String>,
+    destination_directory: String,
+    copy_suffix: String,
+) -> Result<Vec<String>, String> {
+    if source_paths.is_empty() {
+        return Err("no source paths were provided for paste".to_string());
+    }
+
+    let destination_directory = portable_local_path(Path::new(&destination_directory));
+    let destination_directory = Path::new(&destination_directory);
+    if !destination_directory.is_dir() {
+        return Err(format!(
+            "destination is not a directory: {}",
+            destination_directory.display()
+        ));
+    }
+
+    let mut existing_names = local_entry_names(destination_directory)?;
+    let mut written = Vec::new();
+
+    for source in &source_paths {
+        let source_path = Path::new(&portable_local_path(Path::new(source))).to_path_buf();
+        let file_name = source_path
+            .file_name()
+            .ok_or_else(|| format!("invalid source path: {}", source_path.display()))?
+            .to_string_lossy()
+            .to_string();
+        if file_name == TERM_BRIDGE_DIRECTORY {
+            return Err("'.termbridge' is reserved for application data".to_string());
+        }
+        let destination_name = resolve_paste_target_name(&existing_names, &file_name, &copy_suffix);
+        let destination_path = destination_directory.join(&destination_name);
+        if paths_refer_to_same_entry(&source_path, &destination_path) {
+            continue;
+        }
+        copy_local_entry_to_path(&source_path, &destination_path)?;
+        existing_names.insert(destination_name);
+        written.push(destination_path.to_string_lossy().to_string());
+    }
+
+    Ok(written)
+}
+
+fn resolve_paste_target_name(
+    existing_names: &HashSet<String>,
+    base_name: &str,
+    copy_suffix: &str,
+) -> String {
+    if !existing_names.contains(base_name) {
+        return base_name.to_string();
+    }
+    let (stem, extension) = split_file_name(base_name);
+    for index in 1u32.. {
+        let suffix = if index == 1 {
+            format!(" {copy_suffix}")
+        } else {
+            format!(" {copy_suffix} {index}")
+        };
+        let candidate = match extension {
+            Some(ext) => format!("{stem}{suffix}.{ext}"),
+            None => format!("{stem}{suffix}"),
+        };
+        if !existing_names.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn split_file_name(name: &str) -> (&str, Option<&str>) {
+    match name.rfind('.') {
+        Some(index) if index > 0 => (&name[..index], Some(&name[index + 1..])),
+        _ => (name, None),
+    }
+}
+
 fn paths_refer_to_same_entry(source: &Path, destination: &Path) -> bool {
     if source == destination {
         return true;
@@ -373,5 +450,102 @@ mod tests {
         assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "a/b".to_string()).is_err());
         assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "a\\b".to_string()).is_err());
         assert!(src.exists());
+    }
+
+    #[test]
+    fn paste_copies_file_without_conflict() {
+        let temp = TempDir::new().unwrap();
+        let src_dir = temp.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        let src = src_dir.join("report.txt");
+        fs::write(&src, "data").unwrap();
+        let dest = temp.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+
+        let written = paste_local_paths_blocking(
+            vec![src.to_str().unwrap().to_string()],
+            dest.to_str().unwrap().to_string(),
+            "copy".to_string(),
+        ).unwrap();
+
+        assert_eq!(written.len(), 1);
+        assert_eq!(fs::read_to_string(dest.join("report.txt")).unwrap(), "data");
+    }
+
+    #[test]
+    fn paste_auto_renames_on_conflict() {
+        let temp = TempDir::new().unwrap();
+        let src = temp.path().join("report.txt");
+        fs::write(&src, "new").unwrap();
+
+        let written = paste_local_paths_blocking(
+            vec![src.to_str().unwrap().to_string()],
+            temp.path().to_str().unwrap().to_string(),
+            "copy".to_string(),
+        ).unwrap();
+
+        assert_eq!(written, vec![temp.path().join("report copy.txt").to_string_lossy().to_string()]);
+        assert_eq!(fs::read_to_string(temp.path().join("report copy.txt")).unwrap(), "new");
+    }
+
+    #[test]
+    fn paste_increments_suffix_for_repeated_conflicts() {
+        let temp = TempDir::new().unwrap();
+        fs::write(temp.path().join("report.txt"), "0").unwrap();
+        fs::write(temp.path().join("report copy.txt"), "1").unwrap();
+        let src_dir = temp.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        let src = src_dir.join("report.txt");
+        fs::write(&src, "new").unwrap();
+
+        let written = paste_local_paths_blocking(
+            vec![src.to_str().unwrap().to_string()],
+            temp.path().to_str().unwrap().to_string(),
+            "copy".to_string(),
+        ).unwrap();
+
+        assert!(written[0].ends_with("report copy 2.txt"));
+    }
+
+    #[test]
+    fn paste_auto_renames_directories_and_extensionless_files() {
+        let temp = TempDir::new().unwrap();
+        let src_dir = temp.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::create_dir(src_dir.join("docs")).unwrap();
+        fs::write(src_dir.join("docs/a.txt"), "a").unwrap();
+        fs::write(src_dir.join("Makefile"), "m").unwrap();
+        let dest = temp.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+        fs::create_dir(dest.join("docs")).unwrap();
+        fs::write(dest.join("Makefile"), "old").unwrap();
+
+        let written = paste_local_paths_blocking(
+            vec![
+                src_dir.join("docs").to_str().unwrap().to_string(),
+                src_dir.join("Makefile").to_str().unwrap().to_string(),
+            ],
+            dest.to_str().unwrap().to_string(),
+            "copy".to_string(),
+        ).unwrap();
+
+        assert!(dest.join("docs copy/a.txt").exists());
+        assert_eq!(fs::read_to_string(dest.join("Makefile copy")).unwrap(), "m");
+        assert_eq!(written.len(), 2);
+    }
+
+    #[test]
+    fn paste_uses_localized_suffix() {
+        let temp = TempDir::new().unwrap();
+        let src = temp.path().join("报告.txt");
+        fs::write(&src, "data").unwrap();
+
+        let written = paste_local_paths_blocking(
+            vec![src.to_str().unwrap().to_string()],
+            temp.path().to_str().unwrap().to_string(),
+            "副本".to_string(),
+        ).unwrap();
+
+        assert!(written[0].ends_with("报告 副本.txt"));
     }
 }
