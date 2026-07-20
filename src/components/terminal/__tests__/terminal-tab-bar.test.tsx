@@ -46,6 +46,7 @@ describe('TerminalTabBar', () => {
     expect(screen.getByText('B')).toBeInTheDocument();
 
     const tabs = screen.getAllByRole('tab');
+    expect(tabs[1]).not.toHaveClass('shadow-md');
     fireEvent.click(tabs[1]);
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });

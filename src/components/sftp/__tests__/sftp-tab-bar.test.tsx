@@ -48,6 +48,7 @@ describe('SftpTabBar', () => {
     );
     expect(screen.getByText('Conn A')).toBeInTheDocument();
     expect(screen.getByText('Conn B')).toBeInTheDocument();
+    expect(screen.getAllByRole('tab')[1]).not.toHaveClass('shadow-md');
   });
 
   it('activates a tab when clicked', async () => {
