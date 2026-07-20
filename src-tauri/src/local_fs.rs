@@ -68,6 +68,32 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
     Ok(())
 }
 
+pub(crate) fn rename_local_path_blocking(path: String, new_name: String) -> Result<(), String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("new name must not be empty".to_string());
+    }
+    if trimmed == TERM_BRIDGE_DIRECTORY {
+        return Err("'.termbridge' is reserved for application data".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("new name must not contain path separators".to_string());
+    }
+    let source = Path::new(&portable_local_path(Path::new(&path))).to_path_buf();
+    if !source.exists() {
+        return Err(format!("path does not exist: {}", source.display()));
+    }
+    let parent = source
+        .parent()
+        .ok_or_else(|| format!("cannot rename a path without parent: {}", source.display()))?;
+    let destination = parent.join(trimmed);
+    if destination.exists() {
+        return Err(format!("an entry named {trimmed} already exists"));
+    }
+    fs::rename(&source, &destination)
+        .map_err(|error| format!("failed to rename {} to {trimmed}: {error}", source.display()))
+}
+
 fn paths_refer_to_same_entry(source: &Path, destination: &Path) -> bool {
     if source == destination {
         return true;
@@ -298,5 +324,54 @@ mod tests {
         copy_local_paths_blocking(request).unwrap();
 
         assert_eq!(fs::read_to_string(source.join("keep.txt")).unwrap(), "unchanged");
+    }
+
+    #[test]
+    fn renames_a_file_within_the_same_directory() {
+        let temp = TempDir::new().unwrap();
+        let src = temp.path().join("old.txt");
+        fs::write(&src, "hello").unwrap();
+
+        rename_local_path_blocking(src.to_str().unwrap().to_string(), "new.txt".to_string()).unwrap();
+
+        assert!(!src.exists());
+        assert_eq!(fs::read_to_string(temp.path().join("new.txt")).unwrap(), "hello");
+    }
+
+    #[test]
+    fn rename_fails_when_target_name_exists() {
+        let temp = TempDir::new().unwrap();
+        fs::write(temp.path().join("old.txt"), "a").unwrap();
+        fs::write(temp.path().join("new.txt"), "b").unwrap();
+
+        let result = rename_local_path_blocking(
+            temp.path().join("old.txt").to_str().unwrap().to_string(),
+            "new.txt".to_string(),
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(temp.path().join("old.txt")).unwrap(), "a");
+    }
+
+    #[test]
+    fn rename_rejects_reserved_termbridge_name() {
+        let temp = TempDir::new().unwrap();
+        let src = temp.path().join("old.txt");
+        fs::write(&src, "a").unwrap();
+
+        let result = rename_local_path_blocking(src.to_str().unwrap().to_string(), ".termbridge".to_string());
+        assert!(result.is_err());
+        assert!(src.exists());
+    }
+
+    #[test]
+    fn rename_rejects_empty_and_separator_names() {
+        let temp = TempDir::new().unwrap();
+        let src = temp.path().join("old.txt");
+        fs::write(&src, "a").unwrap();
+
+        assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "  ".to_string()).is_err());
+        assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "a/b".to_string()).is_err());
+        assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "a\\b".to_string()).is_err());
+        assert!(src.exists());
     }
 }
