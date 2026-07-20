@@ -26,6 +26,18 @@ export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
 export type GetStatusCallback = (sessionId: string) => SessionStatus;
 export type RequestReconnectCallback = (sessionId: string) => void;
 
+export interface TerminalDisplayPreferences {
+  fontSize: number;
+  cursorBlink: boolean;
+  scrollback: number;
+}
+
+const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
+  fontSize: 14,
+  cursorBlink: true,
+  scrollback: 10000,
+};
+
 export interface TerminalController {
   sessionId: string;
   terminal: Terminal;
@@ -45,6 +57,7 @@ export interface TerminalController {
   simulateInput(data: string): void;
   write(chunk: string): void;
   rebindSession(sessionId: string): void;
+  updateOptions(preferences: TerminalDisplayPreferences): void;
   dispose(): void;
 }
 
@@ -75,6 +88,7 @@ class TerminalControllerImpl implements TerminalController {
     getStatus: GetStatusCallback,
     requestReconnect: RequestReconnectCallback,
     removeFromRegistry: (sessionId: string) => void,
+    preferences: TerminalDisplayPreferences,
   ) {
     this.sessionId = sessionId;
     this.setStatus = setStatus;
@@ -85,14 +99,14 @@ class TerminalControllerImpl implements TerminalController {
 
     this.terminal = new Terminal({
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 14,
+      fontSize: preferences.fontSize,
       theme: {
         background: 'var(--app-surface)',
         foreground: 'var(--app-text)',
         cursor: 'var(--app-primary)',
       },
-      cursorBlink: true,
-      scrollback: 10000,
+      cursorBlink: preferences.cursorBlink,
+      scrollback: preferences.scrollback,
     });
     this.fitAddon = new FitAddon();
     this.searchAddon = new SearchAddon();
@@ -343,6 +357,20 @@ class TerminalControllerImpl implements TerminalController {
     void this.setupListeners();
   }
 
+  updateOptions(preferences: TerminalDisplayPreferences): void {
+    if (this.disposed) return;
+    this.terminal.options.fontSize = preferences.fontSize;
+    this.terminal.options.cursorBlink = preferences.cursorBlink;
+    this.terminal.options.scrollback = preferences.scrollback;
+    if (this.host) {
+      try {
+        this.fitAddon.fit();
+      } catch {
+        // The host can briefly be unmeasurable while switching sections.
+      }
+    }
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -364,12 +392,14 @@ interface TerminalRegistry {
   ): TerminalController;
   get(sessionId: string): TerminalController | undefined;
   rebindSession(oldSessionId: string, newSessionId: string): void;
+  updateOptions(preferences: TerminalDisplayPreferences): void;
   dispose(sessionId: string): void;
   disposeAll(): void;
 }
 
 export const terminalRegistry: TerminalRegistry = (() => {
   const controllers = new Map<string, TerminalController>();
+  let preferences = DEFAULT_TERMINAL_PREFERENCES;
 
   return {
     create(sessionId, setStatus, setClosed, getStatus, requestReconnect) {
@@ -384,6 +414,7 @@ export const terminalRegistry: TerminalRegistry = (() => {
         getStatus,
         requestReconnect,
         (currentSessionId) => controllers.delete(currentSessionId),
+        preferences,
       );
       controllers.set(sessionId, controller);
       return controller;
@@ -399,6 +430,12 @@ export const terminalRegistry: TerminalRegistry = (() => {
       controllers.delete(oldSessionId);
       controller.rebindSession(newSessionId);
       controllers.set(newSessionId, controller);
+    },
+    updateOptions(nextPreferences) {
+      preferences = nextPreferences;
+      for (const controller of controllers.values()) {
+        controller.updateOptions(preferences);
+      }
     },
     dispose(sessionId) {
       const controller = controllers.get(sessionId);

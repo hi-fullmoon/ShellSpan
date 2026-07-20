@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { TerminalPane } from '../terminal-pane';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
+import { useAppStore } from '@/stores/appStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -46,6 +47,7 @@ function makeSession(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useAppStore.setState({ terminalCopyOnSelect: true });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
   Object.assign(navigator, {
     clipboard: {
@@ -174,6 +176,16 @@ describe('TerminalPane', () => {
     await vi.waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('selected text');
     });
+  });
+
+  it('does not copy selected text when copy on select is disabled', () => {
+    useAppStore.setState({ terminalCopyOnSelect: false });
+    const terminal = makeMockTerminal('selected text');
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.getSelectionChangeHandlers()[0]?.();
+
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it('copies selection via keyboard shortcut on macOS', async () => {
