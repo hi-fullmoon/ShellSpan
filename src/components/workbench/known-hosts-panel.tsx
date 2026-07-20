@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useKnownHostsStore } from '@/stores/knownHostsStore';
-import { EmptyState, Spinner } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -18,6 +18,7 @@ import {
 import {
   FingerprintIcon,
   RefreshCwIcon,
+  SearchXIcon,
   ShieldCheckIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -111,19 +112,21 @@ export const KnownHostsPanel: React.FC = () => {
           </div>
         )}
         {loading && hosts.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <Spinner />
-          </div>
+          <PanelLoadingState />
         )}
         {!loading && hosts.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <EmptyState title={t('workbench.knownHosts.empty')} />
-          </div>
+          <PanelEmptyState
+            title={t('workbench.knownHosts.empty')}
+            description={t('workbench.knownHosts.emptyDescription')}
+            icon={<ShieldCheckIcon className="size-5" />}
+          />
         )}
         {!loading && hosts.length > 0 && filteredHosts.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <EmptyState title={t('workbench.knownHosts.filteredEmpty')} />
-          </div>
+          <PanelEmptyState
+            title={t('workbench.knownHosts.filteredEmpty')}
+            description={t('common.noSearchResults')}
+            icon={<SearchXIcon className="size-5" />}
+          />
         )}
         {filteredHosts.length > 0 && (
           <ResponsiveCardGrid

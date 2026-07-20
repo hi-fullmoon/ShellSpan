@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
+import { PanelEmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -14,6 +14,7 @@ import {
   MonitorIcon,
   PencilIcon,
   PlusIcon,
+  SearchXIcon,
   TerminalIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -60,24 +61,22 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
 
   if (profiles.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <EmptyState
-          title={t('workbench.connections.empty')}
-          description={t('workbench.connections.emptyDescription')}
-          icon={<MonitorIcon className="size-6" />}
-          action={
-            <Button
-              variant="default"
-              size="default"
-              onClick={onAdd}
-              data-icon="inline-start"
-            >
-              <PlusIcon data-icon="inline-start" />
-              {t('workbench.connections.new')}
-            </Button>
-          }
-        />
-      </div>
+      <PanelEmptyState
+        title={t('workbench.connections.empty')}
+        description={t('workbench.connections.emptyDescription')}
+        icon={<MonitorIcon className="size-5" />}
+        action={
+          <Button
+            variant="default"
+            size="default"
+            onClick={onAdd}
+            data-icon="inline-start"
+          >
+            <PlusIcon data-icon="inline-start" />
+            {t('workbench.connections.new')}
+          </Button>
+        }
+      />
     );
   }
 
@@ -113,9 +112,11 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {filteredProfiles.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <EmptyState title={t('workbench.connections.filteredEmpty')} />
-            </div>
+            <PanelEmptyState
+              title={t('workbench.connections.filteredEmpty')}
+              description={t('common.noSearchResults')}
+              icon={<SearchXIcon className="size-5" />}
+            />
           ) : (
             <ResponsiveCardGrid
               columns={1}

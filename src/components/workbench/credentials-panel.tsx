@@ -7,6 +7,7 @@ import {
   KeyRoundIcon,
   LockKeyholeIcon,
   RefreshCwIcon,
+  SearchXIcon,
   ServerIcon,
   Trash2Icon,
   UserIcon,
@@ -31,7 +32,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { EmptyState, Spinner } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { Separator } from '@/components/ui/separator';
@@ -201,25 +202,23 @@ export const CredentialsPanel: React.FC = () => {
               </div>
             )}
             {loading && credentials.length === 0 && (
-              <div className="flex h-full items-center justify-center">
-                <Spinner />
-              </div>
+              <PanelLoadingState />
             )}
             {!loading && credentials.length === 0 && (
-              <div className="flex h-full items-center justify-center">
-                <EmptyState
-                  title={t('workbench.credentials.empty')}
-                  description={t('workbench.credentials.emptyDescription')}
-                  icon={<KeyRoundIcon className="size-5" />}
-                />
-              </div>
+              <PanelEmptyState
+                title={t('workbench.credentials.empty')}
+                description={t('workbench.credentials.emptyDescription')}
+                icon={<KeyRoundIcon className="size-5" />}
+              />
             )}
             {!loading &&
               credentials.length > 0 &&
               filteredCredentials.length === 0 && (
-                <div className="flex h-full items-center justify-center">
-                  <EmptyState title={t('workbench.credentials.filteredEmpty')} />
-                </div>
+                <PanelEmptyState
+                  title={t('workbench.credentials.filteredEmpty')}
+                  description={t('common.noSearchResults')}
+                  icon={<SearchXIcon className="size-5" />}
+                />
               )}
             {filteredCredentials.length > 0 && (
               <ResponsiveCardGrid
