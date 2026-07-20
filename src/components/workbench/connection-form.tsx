@@ -1,11 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { FolderOpen, KeyRound, Network, Server } from 'lucide-react';
+import { FolderOpen, ChevronDown, KeyRound, Network, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
 import { invokePickPrivateKeyFile } from '@/lib/tauri';
@@ -19,6 +25,7 @@ export interface ConnectionFormProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  onConnect?: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void;
   initial?: ConnectionProfile;
 }
 
@@ -75,6 +82,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   open,
   onClose,
   onSubmit,
+  onConnect,
   initial,
 }) => {
   const { t } = useI18n();
@@ -158,19 +166,27 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (): void => {
+  const buildValues = (): Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'> => ({
+    name: form.name.trim(),
+    host: form.host.trim(),
+    port: Number(form.port),
+    username: form.username.trim(),
+    authMethod: form.authMethod,
+    password: form.password.trim() || undefined,
+    privateKeyPath: form.privateKeyPath.trim() || undefined,
+    passphrase: form.passphrase.trim() || undefined,
+    jumpHost: form.useJumpHost ? form.jumpHost : undefined,
+  });
+
+  const handleSaveOnly = (): void => {
     if (!validate()) return;
-    onSubmit({
-      name: form.name.trim(),
-      host: form.host.trim(),
-      port: Number(form.port),
-      username: form.username.trim(),
-      authMethod: form.authMethod,
-      password: form.password.trim() || undefined,
-      privateKeyPath: form.privateKeyPath.trim() || undefined,
-      passphrase: form.passphrase.trim() || undefined,
-      jumpHost: form.useJumpHost ? form.jumpHost : undefined,
-    });
+    onSubmit(buildValues());
+    onClose();
+  };
+
+  const handleConnect = (): void => {
+    if (!validate()) return;
+    (onConnect ?? onSubmit)(buildValues());
     onClose();
   };
 
@@ -351,9 +367,33 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         </div>
 
         <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
-          <Button variant="default" className="w-full" onClick={handleSubmit}>
-            {t('common.save')}
-          </Button>
+          <div className="flex w-full">
+            <Button
+              variant="default"
+              className="flex-1 rounded-r-none"
+              onClick={handleConnect}
+            >
+              {t('common.connect')}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="default"
+                    className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                    aria-label={t('connection.form.moreActions')}
+                  />
+                }
+              >
+                <ChevronDown />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" className="w-40 rounded-md">
+                <DropdownMenuItem onClick={handleSaveOnly}>
+                  {t('connection.form.saveOnly')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </DrawerFooter>
       </DrawerContent>
     </Drawer>

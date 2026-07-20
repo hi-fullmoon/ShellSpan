@@ -30,6 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
@@ -382,17 +383,23 @@ const CredentialDetails: React.FC<CredentialDetailsProps> = ({
       </DrawerHeader>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
-        <div className="flex items-center gap-3 rounded-lg bg-app-primary/[0.04] p-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-app-primary/15 text-app-primary">
+        <div className="flex items-center gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-app-primary/15 bg-app-surface text-app-primary shadow-sm">
             <LockKeyholeIcon className="size-4" />
           </span>
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-app-text">
+          <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
+            <div className="truncate text-sm font-medium text-app-text">
               {t('workbench.credentials.passwordCredential')}
             </div>
-            <div className="text-xs text-muted-foreground">
-              {t('workbench.credentials.systemKeychain')}
-            </div>
+            <Badge
+              variant="outline"
+              className="max-w-full border-app-primary/20 bg-app-primary/[0.06] px-1.5 text-[10px] text-app-primary"
+            >
+              <DatabaseIcon data-icon="inline-start" />
+              <span className="truncate">
+                {t('workbench.credentials.systemKeychain')}
+              </span>
+            </Badge>
           </div>
         </div>
 
