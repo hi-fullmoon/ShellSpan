@@ -71,6 +71,7 @@ export default {
   'workbench.knownHosts.fingerprint': '指纹',
   'workbench.knownHosts.keyType': '密钥类型',
   'workbench.knownHosts.loadFailed': '加载失败',
+  'workbench.knownHosts.createConnection': '创建连接',
 
   'workbench.credentials.title': '钥匙串',
   'workbench.credentials.count': '{count}/{total} 个凭据',

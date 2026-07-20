@@ -71,6 +71,7 @@ export default {
   'workbench.knownHosts.fingerprint': 'Fingerprint',
   'workbench.knownHosts.keyType': 'Key Type',
   'workbench.knownHosts.loadFailed': 'Failed to load',
+  'workbench.knownHosts.createConnection': 'Create connection',
 
   'workbench.credentials.title': 'Keychain',
   'workbench.credentials.count': '{count}/{total} credentials',

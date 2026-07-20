@@ -17,7 +17,9 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   FingerprintIcon,
+  PlusIcon,
   RefreshCwIcon,
+  SearchIcon,
   SearchXIcon,
   ShieldCheckIcon,
   Trash2Icon,
@@ -36,7 +38,13 @@ const keyTypeBadgeClass = (keyType: string): string =>
   KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ??
   'bg-app-surface-muted text-muted-foreground';
 
-export const KnownHostsPanel: React.FC = () => {
+export interface KnownHostsPanelProps {
+  onCreateConnection?: (host: string, port: number) => void;
+}
+
+export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
+  onCreateConnection,
+}) => {
   const { t } = useI18n();
   const { hosts, loading, error, loadHosts, removeHost } = useKnownHostsStore();
   const [removing, setRemoving] = React.useState<{
@@ -84,12 +92,13 @@ export const KnownHostsPanel: React.FC = () => {
           </div>
         </div>
         <div className="flex w-full items-center gap-2 sm:w-auto">
-          <div className="min-w-0 flex-1 sm:w-64">
+          <div className="relative min-w-0 flex-1 sm:w-64">
+            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('workbench.knownHosts.searchPlaceholder')}
-              className="h-8"
+              className="h-8 pl-7"
             />
           </div>
           <IconActionButton
@@ -156,6 +165,19 @@ export const KnownHostsPanel: React.FC = () => {
                       {host.keyType}
                     </span>
                   </div>
+                  {onCreateConnection && (
+                    <IconActionButton
+                      onClick={() => onCreateConnection(host.host, host.port)}
+                      aria-label={t('workbench.knownHosts.createConnection')}
+                      tooltip={t('workbench.knownHosts.createConnection')}
+                      className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <PlusIcon
+                        data-icon="inline-start"
+                        className="text-app-primary"
+                      />
+                    </IconActionButton>
+                  )}
                   <IconActionButton
                     onClick={() => confirmRemove(host.host, host.port)}
                     aria-label={t('common.delete')}

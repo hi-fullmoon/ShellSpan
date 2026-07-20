@@ -110,6 +110,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
         (platform === 'macos' && event.metaKey && event.key.toLowerCase() === 'c') ||
         (platform !== 'macos' && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c');
 
+      const isFindShortcut =
+        (platform === 'macos' && event.metaKey && event.key.toLowerCase() === 'f') ||
+        (platform !== 'macos' && event.ctrlKey && event.key.toLowerCase() === 'f');
+
+      if (isFindShortcut) {
+        event.preventDefault();
+        handleOpenSearch();
+        return false;
+      }
+
       if (isCopyShortcut) {
         const selection = terminal.getSelection();
         if (selection) {
