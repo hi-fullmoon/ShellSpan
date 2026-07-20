@@ -270,7 +270,7 @@ mod host_key_check_status_tests {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type", content = "payload")]
+#[serde(tag = "type", content = "payload")]
 pub(crate) enum CreateSessionError {
     HostKeyUnknown {
         host: String,
@@ -284,6 +284,36 @@ pub(crate) enum CreateSessionError {
     Other {
         message: String,
     },
+}
+
+#[cfg(test)]
+mod create_session_error_tests {
+    use super::CreateSessionError;
+
+    #[test]
+    fn host_key_unknown_serializes_with_pascal_case_type_tag() {
+        let error = CreateSessionError::HostKeyUnknown {
+            host: "example.com".to_string(),
+            port: 22,
+            fingerprint: Some("SHA256:abc".to_string()),
+        };
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"type":"HostKeyUnknown","payload":{"host":"example.com","port":22,"fingerprint":"SHA256:abc"}}"#
+        );
+    }
+
+    #[test]
+    fn host_key_mismatch_serializes_with_pascal_case_type_tag() {
+        let error = CreateSessionError::HostKeyMismatch {
+            host: "example.com".to_string(),
+            port: 22,
+        };
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"type":"HostKeyMismatch","payload":{"host":"example.com","port":22}}"#
+        );
+    }
 }
 
 #[derive(Debug, Deserialize)]
