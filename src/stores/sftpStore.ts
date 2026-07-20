@@ -55,6 +55,7 @@ export interface SftpConnection {
   remoteClipboard?: SftpRemoteClipboard;
   localOnly?: boolean;
   rightLocal?: boolean;
+  splitRatio: number;
 }
 
 export interface SftpDirectoryListing {
@@ -96,6 +97,7 @@ function createDefaultConnection(
     remoteBookmarks: { local: [], remote: [] },
     leftSource: 'local',
     rightSource: 'remote',
+    splitRatio: 0.5,
   };
 }
 
@@ -142,6 +144,7 @@ interface SftpState {
   ) => void;
   addRemoteBookmark: (id: string, side: SftpSide, path: string) => void;
   removeRemoteBookmark: (id: string, side: SftpSide, path: string) => void;
+  setSplitRatio: (id: string, ratio: number) => void;
 }
 
 function updateConnection(
@@ -439,6 +442,14 @@ export const useSftpStore = create<SftpState>()((set) => ({
           ...connection.remoteBookmarks,
           [side]: connection.remoteBookmarks[side].filter((p) => p !== path),
         },
+      })),
+    })),
+
+  setSplitRatio: (id, ratio) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        splitRatio: ratio,
       })),
     })),
 }));

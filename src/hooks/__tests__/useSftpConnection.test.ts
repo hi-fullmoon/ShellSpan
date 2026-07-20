@@ -69,6 +69,7 @@ function createConnection(): SftpConnection {
       batchMode: false,
     },
     remoteBookmarks: { local: [], remote: [] },
+    splitRatio: 0.5,
   };
 }
 
