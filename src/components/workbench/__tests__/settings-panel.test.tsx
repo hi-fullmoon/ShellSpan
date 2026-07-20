@@ -47,6 +47,6 @@ describe('SettingsPanel', () => {
     expect(
       screen.getByText('settings.general.startupUpdateCheck'),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(4);
+    expect(screen.getAllByRole('switch')).toHaveLength(10);
   });
 });

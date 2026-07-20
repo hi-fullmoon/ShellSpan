@@ -136,4 +136,32 @@ describe('terminalStore', () => {
     store.setStatus('s1', { sessionId: 's1', status: 'connected' });
     expect(useTerminalStore.getState().sessions[0]?.reconnecting).toBe(false);
   });
+
+  it('restores saved profile tabs as disconnected sessions', () => {
+    useTerminalStore.getState().addRestoredSessions([{
+      title: 'Saved',
+      host: 'example.com',
+      port: 22,
+      username: 'tester',
+      profileId: 'profile-1',
+    }]);
+
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      title: 'Saved',
+      status: 'disconnected',
+      profileId: 'profile-1',
+      closed: { retryable: true },
+    });
+  });
+
+  it('marks a closed session as disconnected', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' });
+    store.setClosed('s1', {
+      sessionId: 's1',
+      reasonKind: 'transport_disconnect',
+      retryable: true,
+    });
+    expect(useTerminalStore.getState().sessions[0]?.status).toBe('disconnected');
+  });
 });

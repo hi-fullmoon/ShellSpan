@@ -14,6 +14,8 @@ export const TerminalControllerLayer: React.FC = () => {
   const terminalCursorBlink = useAppStore((s) => s.terminalCursorBlink);
   const terminalCursorStyle = useAppStore((s) => s.terminalCursorStyle);
   const terminalScrollback = useAppStore((s) => s.terminalScrollback);
+  const terminalColorScheme = useAppStore((s) => s.terminalColorScheme);
+  const terminalAutoReconnect = useAppStore((s) => s.terminalAutoReconnect);
   const knownRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -23,8 +25,10 @@ export const TerminalControllerLayer: React.FC = () => {
       cursorBlink: terminalCursorBlink,
       cursorStyle: terminalCursorStyle,
       scrollback: terminalScrollback,
+      colorScheme: terminalColorScheme,
+      autoReconnect: terminalAutoReconnect,
     });
-  }, [terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback]);
+  }, [terminalAutoReconnect, terminalColorScheme, terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback]);
 
   useEffect(() => {
     const currentIds = new Set(sessions.map((s) => s.sessionId));

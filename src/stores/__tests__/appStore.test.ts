@@ -55,10 +55,37 @@ describe('appStore', () => {
   it('updates startup and SFTP preferences', () => {
     useAppStore.getState().setStartupSection('sftp');
     useAppStore.getState().setSftpShowHiddenFiles(false);
+    useAppStore.getState().setSftpConflictPolicy('skip');
+    useAppStore.getState().setSftpRetryCount(3);
+    useAppStore.getState().setSftpDownloadDirectory('/downloads');
+    useAppStore.getState().setSftpCompletionNotification(false);
 
     expect(useAppStore.getState()).toMatchObject({
       startupSection: 'sftp',
       sftpShowHiddenFiles: false,
+      sftpConflictPolicy: 'skip',
+      sftpRetryCount: 3,
+      sftpDownloadDirectory: '/downloads',
+      sftpCompletionNotification: false,
+    });
+  });
+
+  it('updates terminal safety and continuity preferences', () => {
+    const state = useAppStore.getState();
+    state.setTerminalColorScheme('solarizedDark');
+    state.setTerminalMultiLinePasteWarning(false);
+    state.setTerminalLargePasteWarning(false);
+    state.setTerminalAutoReconnect(true);
+    state.setConfirmBeforeExit(false);
+    state.setRestoreWorkspace(false);
+
+    expect(useAppStore.getState()).toMatchObject({
+      terminalColorScheme: 'solarizedDark',
+      terminalMultiLinePasteWarning: false,
+      terminalLargePasteWarning: false,
+      terminalAutoReconnect: true,
+      confirmBeforeExit: false,
+      restoreWorkspace: false,
     });
   });
 });

@@ -22,6 +22,7 @@ import {
 } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
+import { useAppStore } from '@/stores/appStore';
 import type { SftpSide } from '@/stores/sftpStore';
 import type {
   ReadRemoteFileResponse,
@@ -35,6 +36,27 @@ const DELETE_UNDO_WINDOW_MS = 30_000;
 
 function createOperationId(connectionId: string, kind: string): string {
   return `${connectionId}-${kind}-${crypto.randomUUID()}`;
+}
+
+async function runWithConfiguredRetries(
+  task: () => Promise<void>,
+  shouldRetry: () => boolean = () => true,
+): Promise<void> {
+  const retryCount = useAppStore.getState().sftpRetryCount;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    try {
+      await task();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetry()) throw error;
+      if (attempt < retryCount) {
+        await new Promise((resolve) => window.setTimeout(resolve, 750 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
 }
 
 export function useSftpConnection(connection: SftpConnection, side: SftpSide = 'remote'): {
@@ -245,13 +267,15 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       const runUpload = async (): Promise<void> => {
         markOperationRunning(operationId);
         try {
-          await invokeUploadLocalPaths({
-            ...remoteConnection,
-            destinationDirectory,
-            localPaths,
-            conflictPolicies,
-            operationId,
-          });
+          await runWithConfiguredRetries(() =>
+            invokeUploadLocalPaths({
+              ...remoteConnection,
+              destinationDirectory,
+              localPaths,
+              conflictPolicies,
+              operationId,
+            }),
+          );
         } catch (error) {
           markOperationFailed(
             operationId,
@@ -289,6 +313,35 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const downloadRemotePaths = useCallback(
     async (remotePaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'download')) => {
+      const runDownload = async (): Promise<void> => {
+        try {
+          await runWithConfiguredRetries(
+            () => invokeDownloadRemotePaths({
+              ...remoteConnection,
+              remotePaths,
+              destinationDirectory,
+              operationId,
+            }),
+            () =>
+              useTransferStore.getState().operations.find(
+                (item) => item.operationId === operationId,
+              )?.status !== 'cancelling',
+          );
+        } catch (error) {
+          const operation = useTransferStore.getState().operations.find(
+            (item) => item.operationId === operationId,
+          );
+          if (operation?.status === 'cancelling') {
+            useTransferStore.getState().markOperationCancelled(operationId);
+            return;
+          }
+          markOperationFailed(
+            operationId,
+            error instanceof Error ? error.message : String(error),
+          );
+          throw error;
+        }
+      };
       addOperation({
         operationId,
         kind: 'download',
@@ -300,29 +353,10 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         totalSteps: remotePaths.length,
         completedSteps: 0,
         status: 'running',
+        retry: runDownload,
         cancel: () => invokeCancelDownload(operationId),
       });
-      try {
-        await invokeDownloadRemotePaths({
-          ...remoteConnection,
-          remotePaths,
-          destinationDirectory,
-          operationId,
-        });
-      } catch (error) {
-        const operation = useTransferStore.getState().operations.find(
-          (item) => item.operationId === operationId,
-        );
-        if (operation?.status === 'cancelling') {
-          useTransferStore.getState().markOperationCancelled(operationId);
-          return;
-        }
-        markOperationFailed(
-          operationId,
-          error instanceof Error ? error.message : String(error),
-        );
-        throw error;
-      }
+      await runDownload();
     },
     [remoteConnection, remoteConnectionKey, connection.id, addOperation, markOperationFailed],
   );

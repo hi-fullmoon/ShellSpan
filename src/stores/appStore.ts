@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, ShortcutAction, ShortcutBindings, TerminalCursorStyle, TerminalFontFamily, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, ThemeMode, WorkbenchTab } from '@/types';
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   openWorkbench: 'mod+1',
@@ -21,7 +21,17 @@ interface AppPreferences {
   terminalCursorStyle: TerminalCursorStyle;
   terminalCopyOnSelect: boolean;
   terminalScrollback: number;
+  terminalColorScheme: TerminalColorScheme;
+  terminalMultiLinePasteWarning: boolean;
+  terminalLargePasteWarning: boolean;
+  terminalAutoReconnect: boolean;
+  confirmBeforeExit: boolean;
+  restoreWorkspace: boolean;
   sftpShowHiddenFiles: boolean;
+  sftpConflictPolicy: SftpConflictPolicy;
+  sftpRetryCount: number;
+  sftpDownloadDirectory: string;
+  sftpCompletionNotification: boolean;
   shortcuts: ShortcutBindings;
 }
 
@@ -40,7 +50,17 @@ interface AppState extends AppPreferences {
   setTerminalCursorStyle: (cursorStyle: TerminalCursorStyle) => void;
   setTerminalCopyOnSelect: (enabled: boolean) => void;
   setTerminalScrollback: (lines: number) => void;
+  setTerminalColorScheme: (scheme: TerminalColorScheme) => void;
+  setTerminalMultiLinePasteWarning: (enabled: boolean) => void;
+  setTerminalLargePasteWarning: (enabled: boolean) => void;
+  setTerminalAutoReconnect: (enabled: boolean) => void;
+  setConfirmBeforeExit: (enabled: boolean) => void;
+  setRestoreWorkspace: (enabled: boolean) => void;
   setSftpShowHiddenFiles: (enabled: boolean) => void;
+  setSftpConflictPolicy: (policy: SftpConflictPolicy) => void;
+  setSftpRetryCount: (count: number) => void;
+  setSftpDownloadDirectory: (path: string) => void;
+  setSftpCompletionNotification: (enabled: boolean) => void;
   setShortcut: (action: ShortcutAction, shortcut: string) => void;
   resetShortcut: (action: ShortcutAction) => void;
   resetShortcuts: () => void;
@@ -64,7 +84,17 @@ function readInitialPreferences(): AppPreferences {
         terminalCursorStyle: parsed.terminalCursorStyle ?? 'block',
         terminalCopyOnSelect: parsed.terminalCopyOnSelect ?? true,
         terminalScrollback: parsed.terminalScrollback ?? 10000,
+        terminalColorScheme: parsed.terminalColorScheme ?? 'app',
+        terminalMultiLinePasteWarning: parsed.terminalMultiLinePasteWarning ?? true,
+        terminalLargePasteWarning: parsed.terminalLargePasteWarning ?? true,
+        terminalAutoReconnect: parsed.terminalAutoReconnect ?? false,
+        confirmBeforeExit: parsed.confirmBeforeExit ?? true,
+        restoreWorkspace: parsed.restoreWorkspace ?? true,
         sftpShowHiddenFiles: parsed.sftpShowHiddenFiles ?? true,
+        sftpConflictPolicy: parsed.sftpConflictPolicy ?? 'ask',
+        sftpRetryCount: parsed.sftpRetryCount ?? 1,
+        sftpDownloadDirectory: parsed.sftpDownloadDirectory ?? '',
+        sftpCompletionNotification: parsed.sftpCompletionNotification ?? true,
         shortcuts: { ...DEFAULT_SHORTCUTS, ...parsed.shortcuts },
       };
     }
@@ -82,7 +112,17 @@ function readInitialPreferences(): AppPreferences {
     terminalCursorStyle: 'block',
     terminalCopyOnSelect: true,
     terminalScrollback: 10000,
+    terminalColorScheme: 'app',
+    terminalMultiLinePasteWarning: true,
+    terminalLargePasteWarning: true,
+    terminalAutoReconnect: false,
+    confirmBeforeExit: true,
+    restoreWorkspace: true,
     sftpShowHiddenFiles: true,
+    sftpConflictPolicy: 'ask',
+    sftpRetryCount: 1,
+    sftpDownloadDirectory: '',
+    sftpCompletionNotification: true,
     shortcuts: DEFAULT_SHORTCUTS,
   };
 }
@@ -110,7 +150,17 @@ export const useAppStore = create<AppState>()(
       setTerminalCursorStyle: (terminalCursorStyle) => set({ terminalCursorStyle }),
       setTerminalCopyOnSelect: (terminalCopyOnSelect) => set({ terminalCopyOnSelect }),
       setTerminalScrollback: (terminalScrollback) => set({ terminalScrollback }),
+      setTerminalColorScheme: (terminalColorScheme) => set({ terminalColorScheme }),
+      setTerminalMultiLinePasteWarning: (terminalMultiLinePasteWarning) => set({ terminalMultiLinePasteWarning }),
+      setTerminalLargePasteWarning: (terminalLargePasteWarning) => set({ terminalLargePasteWarning }),
+      setTerminalAutoReconnect: (terminalAutoReconnect) => set({ terminalAutoReconnect }),
+      setConfirmBeforeExit: (confirmBeforeExit) => set({ confirmBeforeExit }),
+      setRestoreWorkspace: (restoreWorkspace) => set({ restoreWorkspace }),
       setSftpShowHiddenFiles: (sftpShowHiddenFiles) => set({ sftpShowHiddenFiles }),
+      setSftpConflictPolicy: (sftpConflictPolicy) => set({ sftpConflictPolicy }),
+      setSftpRetryCount: (sftpRetryCount) => set({ sftpRetryCount }),
+      setSftpDownloadDirectory: (sftpDownloadDirectory) => set({ sftpDownloadDirectory }),
+      setSftpCompletionNotification: (sftpCompletionNotification) => set({ sftpCompletionNotification }),
       setShortcut: (action, shortcut) =>
         set((state) => ({ shortcuts: { ...state.shortcuts, [action]: shortcut } })),
       resetShortcut: (action) =>
@@ -132,7 +182,17 @@ export const useAppStore = create<AppState>()(
         terminalCursorStyle: state.terminalCursorStyle,
         terminalCopyOnSelect: state.terminalCopyOnSelect,
         terminalScrollback: state.terminalScrollback,
+        terminalColorScheme: state.terminalColorScheme,
+        terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
+        terminalLargePasteWarning: state.terminalLargePasteWarning,
+        terminalAutoReconnect: state.terminalAutoReconnect,
+        confirmBeforeExit: state.confirmBeforeExit,
+        restoreWorkspace: state.restoreWorkspace,
         sftpShowHiddenFiles: state.sftpShowHiddenFiles,
+        sftpConflictPolicy: state.sftpConflictPolicy,
+        sftpRetryCount: state.sftpRetryCount,
+        sftpDownloadDirectory: state.sftpDownloadDirectory,
+        sftpCompletionNotification: state.sftpCompletionNotification,
         shortcuts: state.shortcuts,
       }),
       onRehydrateStorage: () => (state) => {

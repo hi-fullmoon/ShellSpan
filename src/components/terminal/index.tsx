@@ -18,6 +18,10 @@ const Terminal: React.FC = () => {
   const activeSessionId = useTerminalStore((s) => s.activeSessionId);
   const activeSession =
     sessions.find((s) => s.sessionId === activeSessionId) ?? null;
+  const addRestoredSessions = useTerminalStore((s) => s.addRestoredSessions);
+  const restoreWorkspace = useAppStore((s) => s.restoreWorkspace);
+  const workspaceReadyRef = React.useRef(false);
+  const skipNextWorkspaceSaveRef = React.useRef(false);
 
   const { connect, openLocal, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
 
@@ -29,6 +33,43 @@ const Terminal: React.FC = () => {
   } | null>(null);
 
   const activeSection = useAppStore((s) => s.activeSection);
+
+  useEffect(() => {
+    const storageKey = 'termbridge.terminalWorkspace';
+    if (!workspaceReadyRef.current) {
+      workspaceReadyRef.current = true;
+      if (!restoreWorkspace) {
+        localStorage.removeItem(storageKey);
+        return;
+      }
+      try {
+        const raw = localStorage.getItem(storageKey);
+        const restored = raw ? JSON.parse(raw) as Array<Omit<TerminalSession, 'status' | 'sessionId'>> : [];
+        if (restored.length > 0) {
+          skipNextWorkspaceSaveRef.current = true;
+          addRestoredSessions(restored.filter((session) => Boolean(session.profileId)));
+        }
+      } catch {
+        localStorage.removeItem(storageKey);
+      }
+      return;
+    }
+    if (!restoreWorkspace) {
+      localStorage.removeItem(storageKey);
+    }
+  }, [addRestoredSessions, restoreWorkspace]);
+
+  useEffect(() => {
+    if (!workspaceReadyRef.current || !restoreWorkspace) return;
+    if (skipNextWorkspaceSaveRef.current) {
+      skipNextWorkspaceSaveRef.current = false;
+      return;
+    }
+    const snapshots = sessions
+      .filter((session) => Boolean(session.profileId))
+      .map(({ sessionId: _sessionId, status: _status, closed: _closed, reconnecting: _reconnecting, ...session }) => session);
+    localStorage.setItem('termbridge.terminalWorkspace', JSON.stringify(snapshots));
+  }, [restoreWorkspace, sessions]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {

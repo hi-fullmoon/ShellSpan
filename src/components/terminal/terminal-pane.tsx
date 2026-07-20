@@ -2,6 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { useActiveController } from '@/components/terminal/hooks/use-active-controller';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
@@ -44,9 +54,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   const { t } = useI18n();
   const { success, error: showError } = useToast();
   const copyOnSelect = useAppStore((state) => state.terminalCopyOnSelect);
+  const multiLinePasteWarning = useAppStore((state) => state.terminalMultiLinePasteWarning);
+  const largePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
+  const [pendingPaste, setPendingPaste] = useState('');
   const activeSessionId = activeSession?.sessionId ?? null;
   const { focus, searchNext, searchPrevious, clearSearch } = useActiveController(paneRef, activeSessionId);
 
@@ -143,6 +156,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
     });
 
     const element = terminal.element;
+    const pasteText = (text: string): void => {
+      const isMultiLine = /[\r\n]/.test(text);
+      const isLarge = new Blob([text]).size > 5 * 1024;
+      if ((multiLinePasteWarning && isMultiLine) || (largePasteWarning && isLarge)) {
+        setPendingPaste(text);
+        return;
+      }
+      terminal.paste(text);
+    };
     const handleContextMenu = (event: MouseEvent): void => {
       event.preventDefault();
       if (activeSession?.status !== 'connected') return;
@@ -150,19 +172,28 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
       void navigator.clipboard
         .readText()
         .then((text) => {
-          if (text) terminal.paste(text);
+          if (text) pasteText(text);
         })
         .catch(() => showError(t('terminal.feedback.pasteFailed')));
     };
+    const handlePaste = (event: ClipboardEvent): void => {
+      const text = event.clipboardData?.getData('text/plain');
+      if (!text) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pasteText(text);
+    };
     element?.addEventListener('contextmenu', handleContextMenu);
+    element?.addEventListener('paste', handlePaste);
 
     return () => {
       selectionDisposable.dispose();
       element?.removeEventListener('contextmenu', handleContextMenu);
+      element?.removeEventListener('paste', handlePaste);
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t, copyOnSelect]);
+  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
@@ -227,6 +258,32 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
         <ReconnectingIndicator label={t('terminal.notice.reconnectingLabel')} />
       )}
       <div ref={paneRef} className="h-full w-full p-0" />
+      <AlertDialog open={Boolean(pendingPaste)} onOpenChange={(open) => { if (!open) setPendingPaste(''); }}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('terminal.pasteWarning.title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('terminal.pasteWarning.description', {
+                lines: pendingPaste ? pendingPaste.split(/\r?\n/).length : 0,
+                characters: pendingPaste.length,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingPaste('')}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                terminal?.paste(pendingPaste);
+                setPendingPaste('');
+              }}
+            >
+              {t('terminal.pasteWarning.confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

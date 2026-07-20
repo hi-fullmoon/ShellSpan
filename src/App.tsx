@@ -14,6 +14,7 @@ const Sftp = React.lazy(() => import('@/components/sftp'));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { isTransferActive, useTransferStore } from '@/stores/transferStore';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { AboutDialog } from '@/components/about-dialog';
@@ -21,6 +22,16 @@ import { UpdateRestartDialog } from '@/components/update-restart-dialog';
 import { useUpdateFlow } from '@/hooks/useUpdateFlow';
 import { createLogger } from '@/lib/logger';
 import { useAppShortcuts } from '@/hooks/useAppShortcuts';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const logger = createLogger('app');
 
@@ -31,6 +42,13 @@ export const App: React.FC = () => {
   useAppShortcuts();
 
   const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
+  const [exitDialogOpen, setExitDialogOpen] = React.useState(false);
+
+  const requestAppExit = React.useCallback((): void => {
+    invoke('request_app_exit').catch((error) => {
+      logger.error('Failed to request app exit', error);
+    });
+  }, []);
 
   React.useEffect(() => {
     const listeners: Promise<() => void>[] = [];
@@ -50,9 +68,15 @@ export const App: React.FC = () => {
       );
       listeners.push(
         listen('system-request-app-exit', () => {
-          invoke('request_app_exit').catch((error) => {
-            logger.error('Failed to request app exit', error);
-          });
+          const hasLiveSessions = useTerminalStore.getState().sessions.some(
+            (session) => session.status === 'connected' || session.status === 'connecting',
+          );
+          const hasActiveTransfers = useTransferStore.getState().operations.some(isTransferActive);
+          if (useAppStore.getState().confirmBeforeExit && (hasLiveSessions || hasActiveTransfers)) {
+            setExitDialogOpen(true);
+          } else {
+            requestAppExit();
+          }
         }),
       );
     };
@@ -64,9 +88,9 @@ export const App: React.FC = () => {
         unlisteners.forEach((unlisten) => unlisten());
       });
     };
-  }, []);
+  }, [requestAppExit]);
 
-  const { ready } = useI18n();
+  const { ready, t } = useI18n();
   const activeSection = useAppStore((state) => state.activeSection);
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
   const connectedSessions = useTerminalStore(
@@ -127,6 +151,27 @@ export const App: React.FC = () => {
       </MainContent>
 
       <AboutDialog open={aboutDialogOpen} onClose={() => setAboutDialogOpen(false)} />
+
+      <AlertDialog open={exitDialogOpen} onOpenChange={setExitDialogOpen}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('app.exitConfirm.title')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('app.exitConfirm.description')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                setExitDialogOpen(false);
+                requestAppExit();
+              }}
+            >
+              {t('app.exitConfirm.confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <UpdateRestartDialog
         downloadProgress={updateDownloadProgress}

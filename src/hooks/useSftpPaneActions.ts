@@ -22,6 +22,7 @@ import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore
 import { createLogger } from '@/lib/logger';
 import type { FileEntry } from '@/components/sftp/file-entry-formatters';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
+import { useAppStore } from '@/stores/appStore';
 
 const logger = createLogger('sftp');
 
@@ -228,7 +229,8 @@ export function useSftpPaneActions(
         return;
       }
       try {
-        const folders = await invokePickLocalFolder();
+        const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
+        const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
         if (!folders.length) return;
         if (pathsAreBusy([target.path])) {
           reportBusyPaths();
@@ -252,7 +254,8 @@ export function useSftpPaneActions(
         return;
       }
       try {
-        const folders = await invokePickLocalFolder();
+        const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
+        const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
         if (!folders.length) return;
         if (pathsAreBusy(selectedRemotePaths)) {
           reportBusyPaths();
@@ -506,7 +509,11 @@ export function useSftpPaneActions(
         totalSteps: files.length,
         completedSteps: 0,
       });
-      await uploadLocalPaths(files, path, operationId);
+      const defaultPolicy = useAppStore.getState().sftpConflictPolicy;
+      const policies: UploadConflictPolicy[] = files.map(() =>
+        defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
+      );
+      await uploadLocalPaths(files, path, operationId, policies);
       await reload();
       clearSelection();
     } catch (err) {
@@ -530,7 +537,11 @@ export function useSftpPaneActions(
         totalSteps: folders.length,
         completedSteps: 0,
       });
-      await uploadLocalPaths(folders, path, operationId);
+      const defaultPolicy = useAppStore.getState().sftpConflictPolicy;
+      const policies: UploadConflictPolicy[] = folders.map(() =>
+        defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
+      );
+      await uploadLocalPaths(folders, path, operationId, policies);
       await reload();
       clearSelection();
     } catch (err) {

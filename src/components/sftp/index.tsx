@@ -274,6 +274,16 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         continue;
       }
 
+      const defaultConflictPolicy = useAppStore.getState().sftpConflictPolicy;
+      if (defaultConflictPolicy !== 'ask') {
+        if (defaultConflictPolicy === 'overwrite') {
+          queue.accepted.push(path);
+          queue.policies.push('overwrite');
+        }
+        queue.index += 1;
+        continue;
+      }
+
       if (queue.remembered) {
         if (
           queue.remembered === 'overwrite' ||

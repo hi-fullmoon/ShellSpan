@@ -47,7 +47,11 @@ function makeSession(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useAppStore.setState({ terminalCopyOnSelect: true });
+  useAppStore.setState({
+    terminalCopyOnSelect: true,
+    terminalMultiLinePasteWarning: true,
+    terminalLargePasteWarning: true,
+  });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
   Object.assign(navigator, {
     clipboard: {
@@ -159,6 +163,19 @@ describe('TerminalPane', () => {
     await vi.waitFor(() => {
       expect(terminal.paste).toHaveBeenCalledWith('pasted text');
     });
+  });
+
+  it('confirms before pasting multiple lines', async () => {
+    vi.mocked(navigator.clipboard.readText).mockResolvedValue('echo one\necho two');
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.element?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    expect(await screen.findByText('terminal.pasteWarning.title')).toBeInTheDocument();
+    expect(terminal.paste).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' }));
+    expect(terminal.paste).toHaveBeenCalledWith('echo one\necho two');
   });
 
   it('renders without an active session', () => {

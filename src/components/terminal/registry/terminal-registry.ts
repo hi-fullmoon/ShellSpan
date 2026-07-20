@@ -17,7 +17,7 @@ import {
 } from '@/lib/terminal';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
-import type { ClosedEvent, SessionStatus, StatusEvent, TerminalCursorStyle, TerminalFontFamily } from '@/types';
+import type { ClosedEvent, SessionStatus, StatusEvent, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily } from '@/types';
 
 const logger = createLogger('terminal');
 
@@ -32,6 +32,8 @@ export interface TerminalDisplayPreferences {
   cursorBlink: boolean;
   cursorStyle: TerminalCursorStyle;
   scrollback: number;
+  colorScheme: TerminalColorScheme;
+  autoReconnect: boolean;
 }
 
 const TERMINAL_FONT_FAMILIES: Record<TerminalFontFamily, string> = {
@@ -48,6 +50,37 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
   cursorBlink: true,
   cursorStyle: 'block',
   scrollback: 10000,
+  colorScheme: 'app',
+  autoReconnect: false,
+};
+
+const TERMINAL_COLOR_SCHEMES: Record<TerminalColorScheme, NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme']> = {
+  app: {
+    background: 'var(--app-surface)',
+    foreground: 'var(--app-text)',
+    cursor: 'var(--app-primary)',
+  },
+  oneDark: {
+    background: '#282c34',
+    foreground: '#abb2bf',
+    cursor: '#528bff',
+    black: '#282c34', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
+    blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#abb2bf',
+  },
+  solarizedDark: {
+    background: '#002b36',
+    foreground: '#839496',
+    cursor: '#93a1a1',
+    black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
+    blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+  },
+  light: {
+    background: '#ffffff',
+    foreground: '#1f2328',
+    cursor: '#0969da',
+    black: '#24292f', red: '#cf222e', green: '#116329', yellow: '#4d2d00',
+    blue: '#0969da', magenta: '#8250df', cyan: '#1b7c83', white: '#f6f8fa',
+  },
 };
 
 export interface TerminalController {
@@ -92,6 +125,7 @@ class TerminalControllerImpl implements TerminalController {
   private inputBlockedNoticeRef = false;
   private reconnectRequestedRef = false;
   private listenerGeneration = 0;
+  private preferences: TerminalDisplayPreferences;
 
   constructor(
     sessionId: string,
@@ -108,15 +142,12 @@ class TerminalControllerImpl implements TerminalController {
     this.getStatus = getStatus;
     this.requestReconnect = requestReconnect;
     this.removeFromRegistry = removeFromRegistry;
+    this.preferences = preferences;
 
     this.terminal = new Terminal({
       fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
       fontSize: preferences.fontSize,
-      theme: {
-        background: 'var(--app-surface)',
-        foreground: 'var(--app-text)',
-        cursor: 'var(--app-primary)',
-      },
+      theme: TERMINAL_COLOR_SCHEMES[preferences.colorScheme],
       cursorBlink: preferences.cursorBlink,
       cursorStyle: preferences.cursorStyle,
       scrollback: preferences.scrollback,
@@ -252,6 +283,20 @@ class TerminalControllerImpl implements TerminalController {
         ),
       );
       this.inputBlockedNoticeRef = true;
+      if (event.payload.retryable && this.preferences.autoReconnect && !this.reconnectRequestedRef) {
+        this.reconnectRequestedRef = true;
+        window.setTimeout(() => {
+          if (this.disposed) return;
+          this.writeSystemLine(
+            formatTerminalNoticeLine(
+              t('terminal.notice.reconnectingLabel'),
+              t('terminal.notice.reconnectingMessage'),
+              '36',
+            ),
+          );
+          this.requestReconnect(this.sessionId);
+        }, 1500);
+      }
     });
     if (this.disposed || generation !== this.listenerGeneration) {
       closedUnlisten();
@@ -372,11 +417,13 @@ class TerminalControllerImpl implements TerminalController {
 
   updateOptions(preferences: TerminalDisplayPreferences): void {
     if (this.disposed) return;
+    this.preferences = preferences;
     this.terminal.options.fontSize = preferences.fontSize;
     this.terminal.options.fontFamily = TERMINAL_FONT_FAMILIES[preferences.fontFamily];
     this.terminal.options.cursorBlink = preferences.cursorBlink;
     this.terminal.options.cursorStyle = preferences.cursorStyle;
     this.terminal.options.scrollback = preferences.scrollback;
+    this.terminal.options.theme = TERMINAL_COLOR_SCHEMES[preferences.colorScheme];
     if (this.host) {
       try {
         this.fitAddon.fit();
