@@ -50,6 +50,13 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
             None => continue,
         };
         let destination_path = destination_directory.join(&destination_name);
+        // A system drag can hand us a path that already lives in the target
+        // directory. Treat copying an entry onto itself as a no-op. Besides
+        // avoiding fs::copy failures, this must happen before Replace removes
+        // an existing directory, which would otherwise delete the source.
+        if paths_refer_to_same_entry(source_path, &destination_path) {
+            continue;
+        }
         if conflict_policy == UploadConflictPolicy::Replace && destination_path.is_dir() {
             fs::remove_dir_all(&destination_path)
                 .map_err(|error| format!("failed to replace directory {}: {error}", destination_path.display()))?;
@@ -59,6 +66,17 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
     }
 
     Ok(())
+}
+
+fn paths_refer_to_same_entry(source: &Path, destination: &Path) -> bool {
+    if source == destination {
+        return true;
+    }
+
+    match (fs::canonicalize(source), fs::canonicalize(destination)) {
+        (Ok(source), Ok(destination)) => source == destination,
+        _ => false,
+    }
 }
 
 fn local_entry_names(directory: &Path) -> Result<HashSet<String>, String> {
@@ -247,5 +265,38 @@ mod tests {
 
         assert!(dest_existing.join("nested/new.txt").exists());
         assert!(!dest_existing_nested.join("old.txt").exists());
+    }
+
+    #[test]
+    fn overwrite_file_onto_itself_is_a_noop() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("file.txt");
+        fs::write(&source, "unchanged").unwrap();
+
+        let request = make_request(
+            vec![source.to_str().unwrap()],
+            temp.path().to_str().unwrap(),
+            vec![UploadConflictPolicy::Overwrite],
+        );
+        copy_local_paths_blocking(request).unwrap();
+
+        assert_eq!(fs::read_to_string(source).unwrap(), "unchanged");
+    }
+
+    #[test]
+    fn replace_directory_onto_itself_is_a_noop() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("keep.txt"), "unchanged").unwrap();
+
+        let request = make_request(
+            vec![source.to_str().unwrap()],
+            temp.path().to_str().unwrap(),
+            vec![UploadConflictPolicy::Replace],
+        );
+        copy_local_paths_blocking(request).unwrap();
+
+        assert_eq!(fs::read_to_string(source.join("keep.txt")).unwrap(), "unchanged");
     }
 }

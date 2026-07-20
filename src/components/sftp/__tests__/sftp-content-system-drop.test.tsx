@@ -195,4 +195,39 @@ describe('SftpContent system drop', () => {
     await waitFor(() => expect(copyWithPolicies).toHaveBeenCalledWith(['/remote/file.txt'], '/local', ['fail']));
     expect(uploadWithPolicies).not.toHaveBeenCalled();
   });
+
+  it('ignores a local file dropped back into its current directory', async () => {
+    const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);
+    const copyWithPolicies = vi.fn().mockResolvedValue(undefined);
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+
+    vi.mocked(useSftpPaneActions).mockReturnValue(
+      createActions({ uploadWithPolicies, copyWithPolicies }),
+    );
+
+    createConnection();
+    const connection = useSftpStore.getState().connections[0]!;
+
+    render(
+      <SftpContent
+        connection={connection}
+        newConnectionMenuOpen={false}
+        setNewConnectionMenuOpen={vi.fn()}
+        tabContextMenu={null}
+        setTabContextMenu={vi.fn()}
+        openSftpConnection={vi.fn().mockResolvedValue(undefined)}
+        verifyHostKey={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await capturedOnDrop!(['/local/file.txt'], 'local');
+
+    expect(copyWithPolicies).not.toHaveBeenCalled();
+    expect(uploadWithPolicies).not.toHaveBeenCalled();
+  });
 });

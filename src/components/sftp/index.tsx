@@ -30,6 +30,7 @@ import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { useSystemFileDrop } from '@/hooks/useSystemFileDrop';
 import { useToast } from '@/hooks/useToast';
 import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote } from '@/lib/tauri';
+import { normalizePortablePath, parentPortablePath } from '@/lib/path-utils';
 import { useTransferStore } from '@/stores/transferStore';
 import type { ConnectionProfile, RemoteFileEntry, UploadConflictPolicy } from '@/types';
 
@@ -221,6 +222,19 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     return normalized.split('/').filter(Boolean).pop() ?? path;
   };
 
+  const localPathsEqual = (left: string, right: string): boolean => {
+    const normalize = (value: string): string => {
+      let normalized = normalizePortablePath(value);
+      while (normalized.length > 1 && normalized.endsWith('/')) {
+        normalized = normalized.slice(0, -1);
+      }
+      return /^[A-Za-z]:/.test(normalized) || normalized.startsWith('//')
+        ? normalized.toLowerCase()
+        : normalized;
+    };
+    return normalize(left) === normalize(right);
+  };
+
   const remoteDestinationPath = (directory: string, sourcePath: string): string => {
     const base = directory === '/' ? '' : directory.replace(/\/+$/, '');
     return `${base}/${localPathName(sourcePath)}`;
@@ -238,6 +252,19 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     while (queue.index < queue.paths.length) {
       const path = queue.paths[queue.index];
       const name = localPathName(path);
+      const targetLocal = queue.side === 'local' ? leftIsLocal : rightIsLocal;
+
+      // Finder/Explorer can report a system drop back onto the directory the
+      // item already belongs to. Ignore it before presenting a false conflict.
+      if (
+        targetLocal &&
+        queue.sourceLocal &&
+        localPathsEqual(parentPortablePath(path), queue.destination)
+      ) {
+        queue.index += 1;
+        continue;
+      }
+
       const existing = existingByName.get(name);
 
       if (!existing) {
