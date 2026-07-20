@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionProfile } from '@/types';
 import { useProfileStore } from '@/stores/profileStore';
@@ -8,17 +8,19 @@ const {
   invokeListCachedCredentialProfileIds,
   invokeClearCredentialCache,
   invokeRemovePassword,
+  invokeRetrievePassword,
 } = vi.hoisted(() => ({
   invokeListCachedCredentialProfileIds: vi.fn(),
   invokeClearCredentialCache: vi.fn(),
   invokeRemovePassword: vi.fn(),
+  invokeRetrievePassword: vi.fn(),
 }));
 
 vi.mock('@/lib/tauri', () => ({
   invokeListCachedCredentialProfileIds,
   invokeClearCredentialCache,
   invokeRemovePassword,
-  invokeRetrievePassword: vi.fn(),
+  invokeRetrievePassword,
   invokeStorePassword: vi.fn(),
 }));
 
@@ -56,24 +58,57 @@ describe('CredentialsPanel', () => {
     invokeListCachedCredentialProfileIds.mockResolvedValue(['profile-1']);
     invokeClearCredentialCache.mockResolvedValue(undefined);
     invokeRemovePassword.mockResolvedValue(undefined);
+    invokeRetrievePassword.mockResolvedValue('super-secret');
     useProfileStore.setState(initialProfileState, true);
     useProfileStore.setState({ profiles: [savedProfile, unsavedProfile] });
   });
 
-  it('lists saved credential metadata and its cache status', async () => {
-    render(<CredentialsPanel onEdit={vi.fn()} />);
+  it('lists saved credential metadata', async () => {
+    render(<CredentialsPanel />);
 
     expect(await screen.findByText('Production')).toBeInTheDocument();
     expect(screen.getByText('alice@prod.example.com:22')).toBeInTheDocument();
-    expect(screen.getByText('workbench.credentials.cached')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'workbench.credentials.clearCache',
+      }),
+    ).toBeEnabled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { pressed: false })).toBeInTheDocument();
     expect(screen.queryByText('Staging')).not.toBeInTheDocument();
     expect(invokeListCachedCredentialProfileIds).toHaveBeenCalledTimes(1);
   });
 
   it('clears only the in-memory cache status', async () => {
-    render(<CredentialsPanel onEdit={vi.fn()} />);
-    await screen.findByText('workbench.credentials.cached');
+    render(<CredentialsPanel />);
+    const clearButton = await screen.findByRole('button', {
+      name: 'workbench.credentials.clearCache',
+    });
+    await waitFor(() => expect(clearButton).toBeEnabled());
 
+    fireEvent.click(clearButton);
+
+    await waitFor(() => {
+      expect(invokeClearCredentialCache).toHaveBeenCalledTimes(1);
+    });
+    expect(clearButton).toBeDisabled();
+    expect(screen.getByText('Production')).toBeInTheDocument();
+  });
+
+  it('ignores a stale refresh result after clearing the cache', async () => {
+    let resolveRefresh!: (profileIds: string[]) => void;
+    const refreshResult = new Promise<string[]>((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    render(<CredentialsPanel />);
+    const clearButton = await screen.findByRole('button', {
+      name: 'workbench.credentials.clearCache',
+    });
+    await waitFor(() => expect(clearButton).toBeEnabled());
+    invokeListCachedCredentialProfileIds.mockReturnValueOnce(refreshResult);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.refresh' }));
     fireEvent.click(
       screen.getByRole('button', {
         name: 'workbench.credentials.clearCache',
@@ -83,12 +118,15 @@ describe('CredentialsPanel', () => {
     await waitFor(() => {
       expect(invokeClearCredentialCache).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByText('workbench.credentials.stored')).toBeInTheDocument();
-    expect(screen.getByText('Production')).toBeInTheDocument();
+    resolveRefresh(['profile-1']);
+
+    await waitFor(() => {
+      expect(clearButton).toBeDisabled();
+    });
   });
 
   it('deletes the keychain item while retaining the connection profile', async () => {
-    render(<CredentialsPanel onEdit={vi.fn()} />);
+    render(<CredentialsPanel />);
     await screen.findByText('Production');
 
     fireEvent.click(screen.getByLabelText('common.delete'));
@@ -112,13 +150,37 @@ describe('CredentialsPanel', () => {
     expect(useProfileStore.getState().profiles).toHaveLength(2);
   });
 
-  it('opens the connection editor for credential replacement', async () => {
-    const onEdit = vi.fn();
-    render(<CredentialsPanel onEdit={onEdit} />);
+  it('reveals the password only after retrieving it from the keychain', async () => {
+    invokeListCachedCredentialProfileIds.mockResolvedValue([]);
+    render(<CredentialsPanel />);
     await screen.findByText('Production');
+    const clearButton = screen.getByRole('button', {
+      name: 'workbench.credentials.clearCache',
+    });
+    expect(clearButton).toBeDisabled();
 
-    fireEvent.click(screen.getByLabelText('common.edit'));
+    fireEvent.click(screen.getByRole('button', { pressed: false }));
+    const details = screen.getByRole('dialog');
+    expect(
+      within(details).getByRole('heading', { name: 'Production' }),
+    ).toBeInTheDocument();
+    expect(
+      within(details).getByText('alice@prod.example.com:22'),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'workbench.credentials.showPassword',
+      }),
+    );
 
-    expect(onEdit).toHaveBeenCalledWith(savedProfile);
+    expect(await screen.findByText('super-secret')).toBeInTheDocument();
+    expect(invokeRetrievePassword).toHaveBeenCalledWith('profile-1');
+    expect(
+      screen.getByRole('button', {
+        name: 'workbench.credentials.hidePassword',
+      }),
+    ).toBeInTheDocument();
+    expect(clearButton).toBeEnabled();
   });
+
 });

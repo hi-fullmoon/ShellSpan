@@ -143,7 +143,15 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     if (!form.username.trim()) {
       nextErrors.username = t('connection.form.validation.usernameRequired');
     }
-    if (form.authMethod === 'password' && !form.password.trim()) {
+    const canKeepStoredPassword = Boolean(
+      initial?.authMethod === 'password' &&
+        (initial.passwordStored || initial.password),
+    );
+    if (
+      form.authMethod === 'password' &&
+      !form.password.trim() &&
+      !canKeepStoredPassword
+    ) {
       nextErrors.password = t('connection.form.validation.passwordRequired');
     }
     if (form.authMethod === 'key' && !form.privateKeyPath.trim()) {
@@ -233,6 +241,11 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
               type="password"
               value={form.password}
               onChange={(e) => updateField('password', e.target.value)}
+              placeholder={
+                initial?.passwordStored
+                  ? t('connection.form.passwordStoredPlaceholder')
+                  : undefined
+              }
             />
           </FormRow>
         )}

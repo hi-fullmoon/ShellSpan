@@ -1,12 +1,39 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useKnownHostsStore } from '@/stores/knownHostsStore';
-import { Button } from '@/components/ui/button';
 import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
-import { ShieldCheckIcon, Trash2Icon } from 'lucide-react';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  FingerprintIcon,
+  RefreshCwIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { IconActionButton } from './icon-action-button';
+import { ManagementCard, ManagementCardIcon } from './management-card';
+
+const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
+  ED25519: 'bg-app-primary/10 text-app-primary',
+  ECDSA: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+  RSA: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+};
+
+const keyTypeBadgeClass = (keyType: string): string =>
+  KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ??
+  'bg-app-surface-muted text-muted-foreground';
 
 export const KnownHostsPanel: React.FC = () => {
   const { t } = useI18n();
@@ -41,7 +68,8 @@ export const KnownHostsPanel: React.FC = () => {
   });
 
   return (
-    <div className="flex h-full flex-col">
+    <TooltipProvider>
+      <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-sm font-medium text-app-text">
@@ -63,9 +91,17 @@ export const KnownHostsPanel: React.FC = () => {
               className="h-8"
             />
           </div>
-          <Button variant="secondary" size="sm" onClick={loadHosts}>
-            {t('common.refresh')}
-          </Button>
+          <IconActionButton
+            className="size-7 text-app-text hover:bg-app-text/10"
+            aria-label={t('common.refresh')}
+            tooltip={t('common.refresh')}
+            onClick={loadHosts}
+          >
+            <RefreshCwIcon
+              data-icon="inline-start"
+              className={cn(loading && 'animate-spin')}
+            />
+          </IconActionButton>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2">
@@ -99,44 +135,48 @@ export const KnownHostsPanel: React.FC = () => {
             gap="0.375rem"
           >
             {filteredHosts.map((host) => (
-              <div
-                key={`${host.host}:${host.port}`}
-                className="group flex flex-col gap-2 rounded-[10px] border border-app-border bg-app-surface p-2 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-app-primary/10 text-app-primary">
-                      <ShieldCheckIcon className="h-3.5 w-3.5" />
-                    </div>
-                    <div className="flex min-w-0 flex-col">
-                      <span className="truncate text-xs font-medium text-app-text">
-                        {host.host}:{host.port}
-                      </span>
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {t('workbench.knownHosts.keyType')}: {host.keyType}
-                      </span>
-                    </div>
+              <ManagementCard key={`${host.host}:${host.port}`}>
+                <div className="flex items-center gap-2.5">
+                  <ManagementCardIcon>
+                    <ShieldCheckIcon />
+                  </ManagementCardIcon>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="truncate text-[13px] font-medium leading-tight text-app-text">
+                      {host.host}:{host.port}
+                    </span>
+                    <span
+                      className={cn(
+                        'w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
+                        keyTypeBadgeClass(host.keyType),
+                      )}
+                    >
+                      {host.keyType}
+                    </span>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
+                  <IconActionButton
                     onClick={() => confirmRemove(host.host, host.port)}
                     aria-label={t('common.delete')}
+                    tooltip={t('common.delete')}
+                    className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
                   >
-                    <Trash2Icon className="text-destructive" />
-                  </Button>
+                    <Trash2Icon
+                      data-icon="inline-start"
+                      className="text-destructive"
+                    />
+                  </IconActionButton>
                 </div>
-                <div className="rounded-md border border-app-border bg-muted px-2 py-1.5">
-                  <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-                    {t('workbench.knownHosts.fingerprint')}
-                  </div>
-                  <div
-                    className="break-all font-mono text-[10px] text-app-text"
-                  >
-                    {host.fingerprint}
+                <div className="flex items-start gap-2 rounded-md border border-app-border/60 bg-muted/60 px-2.5 py-2">
+                  <FingerprintIcon className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">
+                      {t('workbench.knownHosts.fingerprint')}
+                    </div>
+                    <div className="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-app-text">
+                      {host.fingerprint}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </ManagementCard>
             ))}
           </ResponsiveCardGrid>
         )}
@@ -177,6 +217,7 @@ export const KnownHostsPanel: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 };
