@@ -418,7 +418,7 @@ export default {
 
   'settings.general.startupUpdateCheck': '启动时检查更新',
   'settings.general.confirmBeforeExit': '退出前确认',
-  'settings.general.confirmBeforeExitDescription': '有活动会话或传输任务时，在退出应用前询问确认。',
+  'settings.general.confirmBeforeExitDescription': '关闭窗口或退出应用前询问确认。',
   'settings.general.restoreWorkspace': '恢复上次终端标签',
   'settings.general.restoreWorkspaceDescription': '下次启动时恢复已保存连接的终端标签，并保持为待重连状态。',
   'settings.terminal.colorScheme': '终端配色',

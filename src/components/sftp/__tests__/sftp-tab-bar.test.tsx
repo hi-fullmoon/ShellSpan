@@ -65,6 +65,23 @@ describe('SftpTabBar', () => {
     expect(useSftpStore.getState().activeConnectionId).toBe(idB);
   });
 
+  it('shows separators only between tabs that are not adjacent to the active tab', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    addConnection('Conn C');
+    addConnection('Conn D');
+    const connections = useSftpStore.getState().connections;
+    useSftpStore.getState().setActiveConnection(connections[1]?.id ?? null);
+
+    render(<SftpTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs[0].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+    expect(tabs[1].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+    expect(tabs[2].querySelector('[data-tab-separator]')).toBeInTheDocument();
+    expect(tabs[3].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+  });
+
   it('closes a tab after confirming in the dialog', async () => {
     addConnection('Conn A');
     render(

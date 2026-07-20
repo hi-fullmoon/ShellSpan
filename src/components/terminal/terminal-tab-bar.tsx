@@ -116,7 +116,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       )}
       style={
         session.color
-          ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 20 : 8}%, transparent)` }
+          ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` }
           : undefined
       }
     >

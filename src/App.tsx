@@ -14,7 +14,6 @@ const Sftp = React.lazy(() => import('@/components/sftp'));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { isTransferActive, useTransferStore } from '@/stores/transferStore';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { AboutDialog } from '@/components/about-dialog';
@@ -68,11 +67,7 @@ export const App: React.FC = () => {
       );
       listeners.push(
         listen('system-request-app-exit', () => {
-          const hasLiveSessions = useTerminalStore.getState().sessions.some(
-            (session) => session.status === 'connected' || session.status === 'connecting',
-          );
-          const hasActiveTransfers = useTransferStore.getState().operations.some(isTransferActive);
-          if (useAppStore.getState().confirmBeforeExit && (hasLiveSessions || hasActiveTransfers)) {
+          if (useAppStore.getState().confirmBeforeExit) {
             setExitDialogOpen(true);
           } else {
             requestAppExit();
