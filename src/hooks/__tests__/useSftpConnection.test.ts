@@ -7,6 +7,7 @@ import {
   type SftpConnection,
 } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
+import { useAppStore } from '@/stores/appStore';
 
 const tauri = vi.hoisted(() => ({
   invokeCopyRemotePath: vi.fn().mockResolvedValue(undefined),
@@ -155,6 +156,7 @@ describe('useSftpConnection downloads', () => {
       activeConnectionId: connection.id,
     });
     useTransferStore.setState({ operations: [] });
+    useAppStore.setState({ sftpRetryCount: 0 });
   });
 
   it('marks a failed download and retains its affected paths', async () => {

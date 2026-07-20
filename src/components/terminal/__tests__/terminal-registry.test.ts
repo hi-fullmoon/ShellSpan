@@ -42,6 +42,8 @@ describe('terminalRegistry', () => {
       cursorBlink: true,
       cursorStyle: 'block',
       scrollback: 10000,
+      colorScheme: 'app',
+      autoReconnect: false,
     });
     vi.clearAllMocks();
   });
@@ -146,6 +148,8 @@ describe('terminalRegistry', () => {
       cursorBlink: false,
       cursorStyle: 'bar',
       scrollback: 5000,
+      colorScheme: 'oneDark',
+      autoReconnect: true,
     });
 
     expect(existing.terminal.options).toMatchObject({

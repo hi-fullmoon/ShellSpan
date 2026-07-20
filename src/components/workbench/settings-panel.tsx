@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon } from 'lucide-react';
+import { FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon, XIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
@@ -14,7 +14,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { AppSection, Locale, ShortcutAction, TerminalCursorStyle, TerminalFontFamily, ThemeMode } from '@/types';
+import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, ThemeMode } from '@/types';
+import { invokePickLocalFolder } from '@/lib/tauri';
 
 const SHORTCUT_ACTIONS: ShortcutAction[] = [
   'openWorkbench',
@@ -69,8 +70,28 @@ export const SettingsPanel: React.FC = () => {
   const setTerminalCopyOnSelect = useAppStore((state) => state.setTerminalCopyOnSelect);
   const terminalScrollback = useAppStore((state) => state.terminalScrollback);
   const setTerminalScrollback = useAppStore((state) => state.setTerminalScrollback);
+  const terminalColorScheme = useAppStore((state) => state.terminalColorScheme);
+  const setTerminalColorScheme = useAppStore((state) => state.setTerminalColorScheme);
+  const terminalMultiLinePasteWarning = useAppStore((state) => state.terminalMultiLinePasteWarning);
+  const setTerminalMultiLinePasteWarning = useAppStore((state) => state.setTerminalMultiLinePasteWarning);
+  const terminalLargePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
+  const setTerminalLargePasteWarning = useAppStore((state) => state.setTerminalLargePasteWarning);
+  const terminalAutoReconnect = useAppStore((state) => state.terminalAutoReconnect);
+  const setTerminalAutoReconnect = useAppStore((state) => state.setTerminalAutoReconnect);
+  const confirmBeforeExit = useAppStore((state) => state.confirmBeforeExit);
+  const setConfirmBeforeExit = useAppStore((state) => state.setConfirmBeforeExit);
+  const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
+  const setRestoreWorkspace = useAppStore((state) => state.setRestoreWorkspace);
   const sftpShowHiddenFiles = useAppStore((state) => state.sftpShowHiddenFiles);
   const setSftpShowHiddenFiles = useAppStore((state) => state.setSftpShowHiddenFiles);
+  const sftpConflictPolicy = useAppStore((state) => state.sftpConflictPolicy);
+  const setSftpConflictPolicy = useAppStore((state) => state.setSftpConflictPolicy);
+  const sftpRetryCount = useAppStore((state) => state.sftpRetryCount);
+  const setSftpRetryCount = useAppStore((state) => state.setSftpRetryCount);
+  const sftpDownloadDirectory = useAppStore((state) => state.sftpDownloadDirectory);
+  const setSftpDownloadDirectory = useAppStore((state) => state.setSftpDownloadDirectory);
+  const sftpCompletionNotification = useAppStore((state) => state.sftpCompletionNotification);
+  const setSftpCompletionNotification = useAppStore((state) => state.setSftpCompletionNotification);
   const shortcuts = useAppStore((state) => state.shortcuts);
   const setShortcut = useAppStore((state) => state.setShortcut);
   const resetShortcut = useAppStore((state) => state.resetShortcut);
@@ -230,6 +251,29 @@ export const SettingsPanel: React.FC = () => {
               </SettingRow>
               <Separator />
               <SettingRow
+                label={t('settings.terminal.colorScheme')}
+                description={t('settings.terminal.colorSchemeDescription')}
+              >
+                <Select
+                  value={terminalColorScheme}
+                  onValueChange={(value) => setTerminalColorScheme(value as TerminalColorScheme)}
+                >
+                  <SelectTrigger size="sm" aria-label={t('settings.terminal.colorScheme')}>
+                    <SelectValue>{t(`settings.terminal.colorScheme.${terminalColorScheme}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(['app', 'oneDark', 'solarizedDark', 'light'] as const).map((scheme) => (
+                        <SelectItem key={scheme} value={scheme}>
+                          {t(`settings.terminal.colorScheme.${scheme}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
                 label={t('settings.terminal.fontSize')}
                 description={t('settings.terminal.fontSizeDescription')}
               >
@@ -329,6 +373,45 @@ export const SettingsPanel: React.FC = () => {
                   </SelectContent>
                 </Select>
               </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.multiLinePasteWarning')}
+                description={t('settings.terminal.multiLinePasteWarningDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.terminal.multiLinePasteWarning')}
+                    checked={terminalMultiLinePasteWarning}
+                    onCheckedChange={setTerminalMultiLinePasteWarning}
+                  />
+                </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.largePasteWarning')}
+                description={t('settings.terminal.largePasteWarningDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.terminal.largePasteWarning')}
+                    checked={terminalLargePasteWarning}
+                    onCheckedChange={setTerminalLargePasteWarning}
+                  />
+                </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.autoReconnect')}
+                description={t('settings.terminal.autoReconnectDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.terminal.autoReconnect')}
+                    checked={terminalAutoReconnect}
+                    onCheckedChange={setTerminalAutoReconnect}
+                  />
+                </div>
+              </SettingRow>
             </CardContent>
           </Card>
 
@@ -381,6 +464,32 @@ export const SettingsPanel: React.FC = () => {
                   />
                 </div>
               </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.general.confirmBeforeExit')}
+                description={t('settings.general.confirmBeforeExitDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.general.confirmBeforeExit')}
+                    checked={confirmBeforeExit}
+                    onCheckedChange={setConfirmBeforeExit}
+                  />
+                </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.general.restoreWorkspace')}
+                description={t('settings.general.restoreWorkspaceDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.general.restoreWorkspace')}
+                    checked={restoreWorkspace}
+                    onCheckedChange={setRestoreWorkspace}
+                  />
+                </div>
+              </SettingRow>
             </CardContent>
           </Card>
 
@@ -407,6 +516,96 @@ export const SettingsPanel: React.FC = () => {
                     aria-label={t('settings.sftp.showHiddenFiles')}
                     checked={sftpShowHiddenFiles}
                     onCheckedChange={setSftpShowHiddenFiles}
+                  />
+                </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.sftp.conflictPolicy')}
+                description={t('settings.sftp.conflictPolicyDescription')}
+              >
+                <Select
+                  value={sftpConflictPolicy}
+                  onValueChange={(value) => setSftpConflictPolicy(value as SftpConflictPolicy)}
+                >
+                  <SelectTrigger size="sm" aria-label={t('settings.sftp.conflictPolicy')}>
+                    <SelectValue>{t(`settings.sftp.conflictPolicy.${sftpConflictPolicy}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(['ask', 'overwrite', 'skip'] as const).map((policy) => (
+                        <SelectItem key={policy} value={policy}>
+                          {t(`settings.sftp.conflictPolicy.${policy}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.sftp.retryCount')}
+                description={t('settings.sftp.retryCountDescription')}
+              >
+                <Select value={String(sftpRetryCount)} onValueChange={(value) => setSftpRetryCount(Number(value))}>
+                  <SelectTrigger size="sm" aria-label={t('settings.sftp.retryCount')}>
+                    <SelectValue>{t('settings.sftp.retryCountValue', { count: sftpRetryCount })}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {[0, 1, 3].map((count) => (
+                        <SelectItem key={count} value={String(count)}>
+                          {t('settings.sftp.retryCountValue', { count })}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.sftp.downloadDirectory')}
+                description={t('settings.sftp.downloadDirectoryDescription')}
+              >
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-w-0 flex-1 justify-start"
+                    title={sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}
+                    onClick={() => {
+                      void invokePickLocalFolder().then((folders) => {
+                        if (folders[0]) setSftpDownloadDirectory(folders[0]);
+                      });
+                    }}
+                  >
+                    <span className="truncate">
+                      {sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}
+                    </span>
+                  </Button>
+                  {sftpDownloadDirectory && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0"
+                      aria-label={t('settings.sftp.downloadDirectoryClear')}
+                      onClick={() => setSftpDownloadDirectory('')}
+                    >
+                      <XIcon />
+                    </Button>
+                  )}
+                </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.sftp.completionNotification')}
+                description={t('settings.sftp.completionNotificationDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.sftp.completionNotification')}
+                    checked={sftpCompletionNotification}
+                    onCheckedChange={setSftpCompletionNotification}
                   />
                 </div>
               </SettingRow>

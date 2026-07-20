@@ -26,6 +26,7 @@ interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
   addSession: (summary: SessionSummary, profileId?: string) => void;
+  addRestoredSessions: (sessions: Array<Omit<TerminalSession, 'status' | 'sessionId'>>) => void;
   removeSession: (sessionId: string) => void;
   reconnectSession: (
     oldSessionId: string,
@@ -66,6 +67,24 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           },
         ],
         activeSessionId: summary.sessionId,
+      };
+    }),
+  addRestoredSessions: (restored) =>
+    set((state) => {
+      if (state.sessions.length > 0 || restored.length === 0) return state;
+      const sessions = restored.map((session, index) => ({
+        ...session,
+        sessionId: `restored-${Date.now()}-${index}`,
+        status: 'disconnected' as const,
+        closed: {
+          sessionId: `restored-${Date.now()}-${index}`,
+          reasonKind: 'transport_disconnect' as const,
+          retryable: true,
+        },
+      }));
+      return {
+        sessions,
+        activeSessionId: sessions[0]?.sessionId ?? null,
       };
     }),
   removeSession: (sessionId) =>
@@ -146,7 +165,11 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
     set((state) => ({
       sessions: state.sessions.map((session) =>
         session.sessionId === sessionId
-          ? { ...session, closed: event }
+          ? {
+              ...session,
+              closed: event,
+              status: event.reasonKind === 'error' ? 'error' : 'disconnected',
+            }
           : session,
       ),
     })),

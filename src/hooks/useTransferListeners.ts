@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useTransferStore } from '@/stores/transferStore';
 import type {
@@ -7,12 +7,17 @@ import type {
   RemoteCopyProgressEvent,
   UploadProgressEvent,
 } from '@/types';
+import { useAppStore } from '@/stores/appStore';
+import { useToastStore } from '@/stores/toastStore';
+import { t } from '@/locales';
 
 export function useTransferListeners(): void {
   const updateUpload = useTransferStore((state) => state.updateUpload);
   const updateDownload = useTransferStore((state) => state.updateDownload);
   const updateDelete = useTransferStore((state) => state.updateDelete);
   const updateRemoteCopy = useTransferStore((state) => state.updateRemoteCopy);
+  const addToast = useToastStore((state) => state.addToast);
+  const notifiedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let unlistenUpload: (() => void) | undefined;
@@ -21,16 +26,32 @@ export function useTransferListeners(): void {
     let unlistenRemoteCopy: (() => void) | undefined;
 
     const setup = async (): Promise<void> => {
+      const notifyCompleted = (operationId: string, totalSteps: number, completedSteps: number): void => {
+        if (
+          totalSteps <= 0 ||
+          completedSteps < totalSteps ||
+          notifiedRef.current.has(operationId)
+        ) return;
+        notifiedRef.current.add(operationId);
+        if (
+          useAppStore.getState().sftpCompletionNotification &&
+          (document.visibilityState !== 'visible' || !document.hasFocus())
+        ) {
+          addToast(t('sftp.transfer.completedNotification'), 'success');
+        }
+      };
       unlistenUpload = await listen<UploadProgressEvent>(
         'upload-progress',
         (event) => {
           updateUpload(event.payload);
+          notifyCompleted(event.payload.operationId, event.payload.totalSteps, event.payload.completedSteps);
         },
       );
       unlistenDownload = await listen<DownloadProgressEvent>(
         'download-progress',
         (event) => {
           updateDownload(event.payload);
+          notifyCompleted(event.payload.operationId, event.payload.totalSteps, event.payload.completedSteps);
         },
       );
       unlistenDelete = await listen<DeleteProgressEvent>(
@@ -43,6 +64,7 @@ export function useTransferListeners(): void {
         'remote-copy-progress',
         (event) => {
           updateRemoteCopy(event.payload);
+          notifyCompleted(event.payload.operationId, event.payload.totalSteps, event.payload.completedSteps);
         },
       );
     };
@@ -55,5 +77,5 @@ export function useTransferListeners(): void {
       unlistenDelete?.();
       unlistenRemoteCopy?.();
     };
-  }, [updateUpload, updateDownload, updateDelete, updateRemoteCopy]);
+  }, [addToast, updateUpload, updateDownload, updateDelete, updateRemoteCopy]);
 }
