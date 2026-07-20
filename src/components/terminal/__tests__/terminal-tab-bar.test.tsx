@@ -380,7 +380,7 @@ describe('TerminalTabBar', () => {
 
     const tab = screen.getByRole('tab');
     expect(tab.style.backgroundColor).toBe(
-      'color-mix(in srgb, rgb(239, 68, 68) 20%, transparent)',
+      'color-mix(in srgb, rgb(239, 68, 68) 25%, transparent)',
     );
   });
 

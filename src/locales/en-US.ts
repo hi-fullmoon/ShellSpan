@@ -419,7 +419,7 @@ export default {
 
   'settings.general.startupUpdateCheck': 'Check for updates on startup',
   'settings.general.confirmBeforeExit': 'Confirm before quitting',
-  'settings.general.confirmBeforeExitDescription': 'Ask before quitting while sessions or transfers are active.',
+  'settings.general.confirmBeforeExitDescription': 'Ask for confirmation before closing the window or quitting the app.',
   'settings.general.restoreWorkspace': 'Restore terminal tabs',
   'settings.general.restoreWorkspaceDescription': 'Restore saved-connection tabs in a disconnected, ready-to-reconnect state.',
   'settings.terminal.colorScheme': 'Terminal color scheme',

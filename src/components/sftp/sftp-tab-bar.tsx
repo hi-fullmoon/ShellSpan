@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import {
   AlertDialog,
@@ -43,6 +44,7 @@ interface ConnectionTabProps {
   renameValue?: string;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
+  showSeparatorAfter?: boolean;
   onActivate: (id: string) => void;
   onContextMenu: (connection: SftpConnection, x: number, y: number) => void;
   onClose: (id: string) => void;
@@ -61,6 +63,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
   renameValue = '',
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
+  showSeparatorAfter = false,
   onActivate,
   onContextMenu,
   onClose,
@@ -94,6 +97,14 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
+      {showSeparatorAfter && (
+        <Separator
+          orientation="vertical"
+          aria-hidden="true"
+          data-tab-separator
+          className="pointer-events-none absolute right-0 top-1/2 h-5 -translate-y-1/2 bg-app-border"
+        />
+      )}
       {showDropIndicatorLeft && (
         <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
       )}
@@ -190,6 +201,7 @@ interface SortableTabProps {
   onRenameCancel: () => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
+  showSeparatorAfter?: boolean;
 }
 
 const SortableTab: React.FC<SortableTabProps> = ({
@@ -207,6 +219,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onRenameCancel,
   showDropIndicatorLeft,
   showDropIndicatorRight,
+  showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: connection.id,
@@ -232,6 +245,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
         renameValue={renameValue}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
+        showSeparatorAfter={showSeparatorAfter}
         onActivate={onActivate}
         onContextMenu={onContextMenu}
         onClose={onClose}
@@ -406,6 +420,9 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const closingConnection = closingConnectionId ? (connections.find((c) => c.id === closingConnectionId) ?? null) : null;
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
+  const visibleConnections = draggingConnectionId
+    ? connections.filter((connection) => connection.id !== draggingConnectionId)
+    : connections;
 
   if (connections.length === 0) {
     return null;
@@ -432,12 +449,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
               const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
               const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
               const isLastVisible = visibleIndex === visibleTabCount - 1;
+              const isActive = activeConnectionId === connection.id;
+              const nextVisibleConnection = visibleIndex >= 0 ? visibleConnections[visibleIndex + 1] : undefined;
+              const showSeparatorAfter =
+                !isActive && !!nextVisibleConnection && nextVisibleConnection.id !== activeConnectionId;
 
               return (
                 <SortableTab
                   key={connection.id}
                   connection={connection}
-                  active={activeConnectionId === connection.id}
+                  active={isActive}
                   onActivate={setActiveConnection}
                   onContextMenu={(conn, x, y) => onTabContextMenu?.(conn, x, y)}
                   onClose={handleCloseConnection}
@@ -450,6 +471,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                   onRenameCancel={handleRenameCancel}
                   showDropIndicatorLeft={insertIndex !== null && visibleIndex >= 0 && insertIndex === visibleIndex}
                   showDropIndicatorRight={insertIndex !== null && isLastVisible && insertIndex === visibleTabCount}
+                  showSeparatorAfter={showSeparatorAfter}
                 />
               );
             })}
