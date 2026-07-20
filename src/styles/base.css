@@ -232,3 +232,34 @@ body {
 .toast-icon-filled :is(path, line, polyline) {
   stroke: var(--popover);
 }
+
+/* Toast enter animation: slide in horizontally from the edge matching data-x-position.
+   Sonner only animates vertically by default; we append a --x custom property to its
+   transform so the existing --y behavior (stacking, swipe, dismiss) is preserved. */
+[data-sonner-toaster] [data-sonner-toast] {
+  transform: var(--y) var(--x, translateX(0));
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-x-position='right']:not([data-mounted='true']) {
+  --x: translateX(100%);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-x-position='right'][data-mounted='true'] {
+  --x: translateX(0);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-x-position='left']:not([data-mounted='true']) {
+  --x: translateX(-100%);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-x-position='left'][data-mounted='true'] {
+  --x: translateX(0);
+}
+
+/* Keep the entrance purely horizontal by suppressing the default vertical offset. */
+[data-sonner-toaster] [data-sonner-toast][data-x-position='right'][data-y-position='top']:not([data-mounted='true']),
+[data-sonner-toaster] [data-sonner-toast][data-x-position='right'][data-y-position='bottom']:not([data-mounted='true']),
+[data-sonner-toaster] [data-sonner-toast][data-x-position='left'][data-y-position='top']:not([data-mounted='true']),
+[data-sonner-toaster] [data-sonner-toast][data-x-position='left'][data-y-position='bottom']:not([data-mounted='true']) {
+  --y: translateY(0);
+}
