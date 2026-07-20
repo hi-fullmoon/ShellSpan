@@ -15,7 +15,8 @@ export function shortcutFromKeyboardEvent(event: KeyboardEvent): string | null {
   return [...parts, key].join('+');
 }
 
-export function eventMatchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
+export function eventMatchesShortcut(event: KeyboardEvent, shortcut?: string): boolean {
+  if (!shortcut) return false;
   const parts = shortcut.split('+');
   const key = parts[parts.length - 1];
   const eventKey = event.key.toLowerCase() === ' ' ? 'space' : event.key.toLowerCase();
@@ -28,7 +29,8 @@ export function eventMatchesShortcut(event: KeyboardEvent, shortcut: string): bo
   );
 }
 
-export function getShortcutKeys(shortcut: string, platform: Platform): string[] {
+export function getShortcutKeys(shortcut: string | undefined, platform: Platform): string[] {
+  if (!shortcut) return [];
   const labels: Record<string, string> = {
     mod: platform === 'macos' ? '⌘' : 'Ctrl',
     alt: platform === 'macos' ? '⌥' : 'Alt',

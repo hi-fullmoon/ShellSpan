@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, ThemeMode } from '@/types';
+import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode } from '@/types';
 import { invokePickLocalFolder } from '@/lib/tauri';
 
 const SHORTCUT_ACTIONS: ShortcutAction[] = [
@@ -22,6 +22,11 @@ const SHORTCUT_ACTIONS: ShortcutAction[] = [
   'openTerminal',
   'openSftp',
   'openSettings',
+  'newTerminalTab',
+  'closeTerminalTab',
+  'nextTerminalTab',
+  'previousTerminalTab',
+  'findTerminal',
 ];
 
 interface SettingRowProps {
@@ -78,6 +83,18 @@ export const SettingsPanel: React.FC = () => {
   const setTerminalLargePasteWarning = useAppStore((state) => state.setTerminalLargePasteWarning);
   const terminalAutoReconnect = useAppStore((state) => state.terminalAutoReconnect);
   const setTerminalAutoReconnect = useAppStore((state) => state.setTerminalAutoReconnect);
+  const terminalLineHeight = useAppStore((state) => state.terminalLineHeight);
+  const setTerminalLineHeight = useAppStore((state) => state.setTerminalLineHeight);
+  const terminalLetterSpacing = useAppStore((state) => state.terminalLetterSpacing);
+  const setTerminalLetterSpacing = useAppStore((state) => state.setTerminalLetterSpacing);
+  const terminalUrlDetection = useAppStore((state) => state.terminalUrlDetection);
+  const setTerminalUrlDetection = useAppStore((state) => state.setTerminalUrlDetection);
+  const terminalTrimTrailingWhitespace = useAppStore((state) => state.terminalTrimTrailingWhitespace);
+  const setTerminalTrimTrailingWhitespace = useAppStore((state) => state.setTerminalTrimTrailingWhitespace);
+  const terminalRightClickBehavior = useAppStore((state) => state.terminalRightClickBehavior);
+  const setTerminalRightClickBehavior = useAppStore((state) => state.setTerminalRightClickBehavior);
+  const terminalBellStyle = useAppStore((state) => state.terminalBellStyle);
+  const setTerminalBellStyle = useAppStore((state) => state.setTerminalBellStyle);
   const confirmBeforeExit = useAppStore((state) => state.confirmBeforeExit);
   const setConfirmBeforeExit = useAppStore((state) => state.setConfirmBeforeExit);
   const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
@@ -105,6 +122,11 @@ export const SettingsPanel: React.FC = () => {
       openTerminal: t('settings.shortcuts.openTerminal'),
       openSftp: t('settings.shortcuts.openSftp'),
       openSettings: t('settings.shortcuts.openSettings'),
+      newTerminalTab: t('settings.shortcuts.newTerminalTab'),
+      closeTerminalTab: t('settings.shortcuts.closeTerminalTab'),
+      nextTerminalTab: t('settings.shortcuts.nextTerminalTab'),
+      previousTerminalTab: t('settings.shortcuts.previousTerminalTab'),
+      findTerminal: t('settings.shortcuts.findTerminal'),
     }),
     [t],
   );
@@ -299,6 +321,46 @@ export const SettingsPanel: React.FC = () => {
               </SettingRow>
               <Separator />
               <SettingRow
+                label={t('settings.terminal.lineHeight')}
+                description={t('settings.terminal.lineHeightDescription')}
+              >
+                <Select value={String(terminalLineHeight)} onValueChange={(value) => setTerminalLineHeight(Number(value))}>
+                  <SelectTrigger size="sm" aria-label={t('settings.terminal.lineHeight')}>
+                    <SelectValue>{t('settings.terminal.lineHeightValue', { value: terminalLineHeight })}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {[1, 1.1, 1.2, 1.4].map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {t('settings.terminal.lineHeightValue', { value })}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.letterSpacing')}
+                description={t('settings.terminal.letterSpacingDescription')}
+              >
+                <Select value={String(terminalLetterSpacing)} onValueChange={(value) => setTerminalLetterSpacing(Number(value))}>
+                  <SelectTrigger size="sm" aria-label={t('settings.terminal.letterSpacing')}>
+                    <SelectValue>{t('settings.terminal.letterSpacingValue', { value: terminalLetterSpacing })}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {[0, 1, 2].map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {t('settings.terminal.letterSpacingValue', { value })}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
                 label={t('settings.terminal.cursorStyle')}
                 description={t('settings.terminal.cursorStyleDescription')}
               >
@@ -345,6 +407,78 @@ export const SettingsPanel: React.FC = () => {
                     onCheckedChange={setTerminalCopyOnSelect}
                   />
                 </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.trimTrailingWhitespace')}
+                description={t('settings.terminal.trimTrailingWhitespaceDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.terminal.trimTrailingWhitespace')}
+                    checked={terminalTrimTrailingWhitespace}
+                    onCheckedChange={setTerminalTrimTrailingWhitespace}
+                  />
+                </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.rightClickBehavior')}
+                description={t('settings.terminal.rightClickBehaviorDescription')}
+              >
+                <Select
+                  value={terminalRightClickBehavior}
+                  onValueChange={(value) => setTerminalRightClickBehavior(value as TerminalRightClickBehavior)}
+                >
+                  <SelectTrigger size="sm" aria-label={t('settings.terminal.rightClickBehavior')}>
+                    <SelectValue>{t(`settings.terminal.rightClickBehavior.${terminalRightClickBehavior}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(['paste', 'copyPaste', 'none'] as const).map((behavior) => (
+                        <SelectItem key={behavior} value={behavior}>
+                          {t(`settings.terminal.rightClickBehavior.${behavior}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.urlDetection')}
+                description={t('settings.terminal.urlDetectionDescription')}
+              >
+                <div className="flex justify-end">
+                  <Switch
+                    aria-label={t('settings.terminal.urlDetection')}
+                    checked={terminalUrlDetection}
+                    onCheckedChange={setTerminalUrlDetection}
+                  />
+                </div>
+              </SettingRow>
+              <Separator />
+              <SettingRow
+                label={t('settings.terminal.bellStyle')}
+                description={t('settings.terminal.bellStyleDescription')}
+              >
+                <Select
+                  value={terminalBellStyle}
+                  onValueChange={(value) => setTerminalBellStyle(value as TerminalBellStyle)}
+                >
+                  <SelectTrigger size="sm" aria-label={t('settings.terminal.bellStyle')}>
+                    <SelectValue>{t(`settings.terminal.bellStyle.${terminalBellStyle}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(['none', 'sound'] as const).map((style) => (
+                        <SelectItem key={style} value={style}>
+                          {t(`settings.terminal.bellStyle.${style}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </SettingRow>
               <Separator />
               <SettingRow
@@ -647,7 +781,7 @@ export const SettingsPanel: React.FC = () => {
                           setEditingAction(action);
                         }}
                       >
-                        <ShortcutKeys shortcut={shortcuts[action]} />
+                        <ShortcutKeys shortcut={shortcuts[action] ?? DEFAULT_SHORTCUTS[action]} />
                       </Button>
                       <Tooltip>
                         <TooltipTrigger
@@ -655,7 +789,7 @@ export const SettingsPanel: React.FC = () => {
                             <Button
                               variant="ghost"
                               size="icon"
-                              disabled={shortcuts[action] === DEFAULT_SHORTCUTS[action]}
+                              disabled={(shortcuts[action] ?? DEFAULT_SHORTCUTS[action]) === DEFAULT_SHORTCUTS[action]}
                               aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
                             />
                           }

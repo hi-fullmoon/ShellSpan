@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { DEFAULT_SHORTCUTS, useAppStore } from '../appStore';
+import { DEFAULT_SHORTCUTS, mergeShortcutBindings, useAppStore } from '../appStore';
 
 const initialState = useAppStore.getState();
 
@@ -32,6 +32,45 @@ describe('appStore', () => {
 
     useAppStore.getState().resetShortcut('openTerminal');
     expect(useAppStore.getState().shortcuts.openTerminal).toBe(DEFAULT_SHORTCUTS.openTerminal);
+  });
+
+  it('fills shortcuts added after an older persisted configuration', () => {
+    expect(mergeShortcutBindings({
+      openWorkbench: 'mod+9',
+      openTerminal: 'mod+2',
+      openSftp: 'mod+3',
+      openSettings: 'mod+,',
+    })).toEqual({
+      ...DEFAULT_SHORTCUTS,
+      openWorkbench: 'mod+9',
+    });
+  });
+
+  it('rehydrates an older shortcut object without dropping new actions', async () => {
+    localStorage.setItem('termbridge.preferences', JSON.stringify({
+      state: {
+        shortcuts: {
+          openWorkbench: 'mod+9',
+          openTerminal: 'mod+2',
+          openSftp: 'mod+3',
+          openSettings: 'mod+,',
+        },
+      },
+      version: 0,
+    }));
+
+    await useAppStore.persist.rehydrate();
+
+    expect(useAppStore.getState().shortcuts).toEqual({
+      ...DEFAULT_SHORTCUTS,
+      openWorkbench: 'mod+9',
+    });
+  });
+
+  it('rejects invalid persisted shortcut values', () => {
+    expect(mergeShortcutBindings({ openWorkbench: 42, findTerminal: '' })).toEqual(
+      DEFAULT_SHORTCUTS,
+    );
   });
 
   it('updates terminal preferences', () => {
@@ -78,6 +117,12 @@ describe('appStore', () => {
     state.setTerminalAutoReconnect(true);
     state.setConfirmBeforeExit(false);
     state.setRestoreWorkspace(false);
+    state.setTerminalLineHeight(1.2);
+    state.setTerminalLetterSpacing(1);
+    state.setTerminalUrlDetection(false);
+    state.setTerminalTrimTrailingWhitespace(false);
+    state.setTerminalRightClickBehavior('copyPaste');
+    state.setTerminalBellStyle('sound');
 
     expect(useAppStore.getState()).toMatchObject({
       terminalColorScheme: 'solarizedDark',
@@ -86,6 +131,12 @@ describe('appStore', () => {
       terminalAutoReconnect: true,
       confirmBeforeExit: false,
       restoreWorkspace: false,
+      terminalLineHeight: 1.2,
+      terminalLetterSpacing: 1,
+      terminalUrlDetection: false,
+      terminalTrimTrailingWhitespace: false,
+      terminalRightClickBehavior: 'copyPaste',
+      terminalBellStyle: 'sound',
     });
   });
 });

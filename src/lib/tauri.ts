@@ -84,6 +84,10 @@ export async function invokeCloseSession(sessionId: string): Promise<void> {
   return invokeLogged('close_session', { sessionId });
 }
 
+export async function invokeOpenUrl(url: string): Promise<void> {
+  return invokeLogged('open_url', { url });
+}
+
 export async function invokeListRemoteDirectory(
   request: RemoteDirectoryRequest,
 ): Promise<RemoteDirectoryListing> {

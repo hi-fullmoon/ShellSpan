@@ -4,13 +4,20 @@ export type AppSection = 'workbench' | 'terminal' | 'sftp';
 export type TerminalFontFamily = 'system' | 'menlo' | 'monaco' | 'consolas' | 'courierNew';
 export type TerminalCursorStyle = 'block' | 'underline' | 'bar';
 export type TerminalColorScheme = 'app' | 'oneDark' | 'solarizedDark' | 'light';
+export type TerminalBellStyle = 'none' | 'sound';
+export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'knownHosts' | 'credentials' | 'logs' | 'settings';
 export type ShortcutAction =
   | 'openWorkbench'
   | 'openTerminal'
   | 'openSftp'
-  | 'openSettings';
+  | 'openSettings'
+  | 'newTerminalTab'
+  | 'closeTerminalTab'
+  | 'nextTerminalTab'
+  | 'previousTerminalTab'
+  | 'findTerminal';
 export type ShortcutBindings = Record<ShortcutAction, string>;
 export type AuthMethod = 'password' | 'key';
 export type RemoteFileKind = 'directory' | 'file' | 'symlink' | 'other';

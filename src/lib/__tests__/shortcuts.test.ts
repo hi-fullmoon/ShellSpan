@@ -21,4 +21,9 @@ describe('shortcuts', () => {
     expect(getShortcutKeys('mod+shift+k', 'macos')).toEqual(['⌘', '⇧', 'K']);
     expect(getShortcutKeys('mod+shift+k', 'windows')).toEqual(['Ctrl', 'Shift', 'K']);
   });
+
+  it('safely ignores missing persisted bindings', () => {
+    expect(eventMatchesShortcut(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true }), undefined)).toBe(false);
+    expect(getShortcutKeys(undefined, 'macos')).toEqual([]);
+  });
 });

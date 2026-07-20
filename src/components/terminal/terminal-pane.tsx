@@ -56,6 +56,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   const copyOnSelect = useAppStore((state) => state.terminalCopyOnSelect);
   const multiLinePasteWarning = useAppStore((state) => state.terminalMultiLinePasteWarning);
   const largePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
+  const trimTrailingWhitespace = useAppStore((state) => state.terminalTrimTrailingWhitespace);
+  const rightClickBehavior = useAppStore((state) => state.terminalRightClickBehavior);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -90,17 +92,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
     [caseSensitive, searchNext, searchPrevious],
   );
 
-  // Global keyboard shortcut to open search from anywhere in the panel.
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
-      if (isCtrlOrMeta && event.key === 'f') {
-        event.preventDefault();
-        handleOpenSearch();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    const handleOpenSearchRequest = (): void => handleOpenSearch();
+    document.addEventListener('termbridge:find-terminal', handleOpenSearchRequest);
+    return () => document.removeEventListener('termbridge:find-terminal', handleOpenSearchRequest);
   }, [handleOpenSearch]);
 
   // Bind xterm custom key handler for find/escape and copy.
@@ -119,20 +114,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
         const selection = terminal.getSelection();
         if (selection) {
           event.preventDefault();
+          const copiedText = trimTrailingWhitespace
+            ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
+            : selection;
           void navigator.clipboard
-            .writeText(selection)
+            .writeText(copiedText)
             .then(() => success(t('terminal.feedback.copied')))
             .catch(() => showError(t('terminal.feedback.copyFailed')));
           return false;
         }
-      }
-
-      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
-
-      if (isCtrlOrMeta && event.key === 'f') {
-        event.preventDefault();
-        handleOpenSearch();
-        return false;
       }
 
       if (event.key === 'Escape') {
@@ -150,8 +140,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
       if (!copyOnSelect) return;
       const selection = terminal.getSelection();
       if (!selection) return;
+      const copiedText = trimTrailingWhitespace
+        ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
+        : selection;
       void navigator.clipboard
-        .writeText(selection)
+        .writeText(copiedText)
         .catch(() => showError(t('terminal.feedback.copyFailed')));
     });
 
@@ -168,6 +161,21 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
     const handleContextMenu = (event: MouseEvent): void => {
       event.preventDefault();
       if (activeSession?.status !== 'connected') return;
+
+      if (rightClickBehavior === 'none') return;
+      if (rightClickBehavior === 'copyPaste') {
+        const selection = terminal.getSelection();
+        if (selection) {
+          const copiedText = trimTrailingWhitespace
+            ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
+            : selection;
+          void navigator.clipboard
+            .writeText(copiedText)
+            .then(() => success(t('terminal.feedback.copied')))
+            .catch(() => showError(t('terminal.feedback.copyFailed')));
+          return;
+        }
+      }
 
       void navigator.clipboard
         .readText()
@@ -193,7 +201,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning]);
+  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">

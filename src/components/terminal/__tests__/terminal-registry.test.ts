@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { terminalRegistry } from '../registry/terminal-registry';
+import { findHttpLinksInLine, terminalRegistry } from '../registry/terminal-registry';
 
 // xterm + addons work in jsdom for write/buffer; fit yields 0x0 (harmless).
 // Polyfill ResizeObserver if undefined.
@@ -44,6 +44,10 @@ describe('terminalRegistry', () => {
       scrollback: 10000,
       colorScheme: 'app',
       autoReconnect: false,
+      lineHeight: 1,
+      letterSpacing: 0,
+      urlDetection: true,
+      bellStyle: 'none',
     });
     vi.clearAllMocks();
   });
@@ -148,8 +152,12 @@ describe('terminalRegistry', () => {
       cursorBlink: false,
       cursorStyle: 'bar',
       scrollback: 5000,
+      lineHeight: 1.2,
+      letterSpacing: 1,
       colorScheme: 'oneDark',
       autoReconnect: true,
+      urlDetection: false,
+      bellStyle: 'sound',
     });
 
     expect(existing.terminal.options).toMatchObject({
@@ -158,6 +166,8 @@ describe('terminalRegistry', () => {
       cursorBlink: false,
       cursorStyle: 'bar',
       scrollback: 5000,
+      lineHeight: 1.2,
+      letterSpacing: 1,
     });
 
     const future = createController('s2');
@@ -167,6 +177,8 @@ describe('terminalRegistry', () => {
       cursorBlink: false,
       cursorStyle: 'bar',
       scrollback: 5000,
+      lineHeight: 1.2,
+      letterSpacing: 1,
     });
   });
 
@@ -225,5 +237,18 @@ describe('terminalRegistry', () => {
 
     controller.simulateInput('\r');
     expect(requestReconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('findHttpLinksInLine', () => {
+  it('finds HTTP links and trims sentence punctuation', () => {
+    expect(findHttpLinksInLine('Open https://example.com/docs, then http://localhost:3000.')).toEqual([
+      { text: 'https://example.com/docs', start: 6, end: 29 },
+      { text: 'http://localhost:3000', start: 37, end: 57 },
+    ]);
+  });
+
+  it('ignores non-HTTP schemes', () => {
+    expect(findHttpLinksInLine('javascript:alert(1) file:///tmp/test')).toEqual([]);
   });
 });
