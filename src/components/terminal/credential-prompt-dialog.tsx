@@ -5,12 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  CompactDialogBody,
-  CompactDialogContent,
-  CompactDialogFooter,
-  CompactDialogHeader,
-} from '@/components/ui/compact-dialog';
+import { CompactDialogBody, CompactDialogContent, CompactDialogFooter, CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { usePasswordPromptStore } from '@/stores/passwordPromptStore';
 
 export const CredentialPromptDialog: React.FC = () => {
@@ -37,14 +32,23 @@ export const CredentialPromptDialog: React.FC = () => {
   };
 
   return (
-    <Dialog open={!!pending} onOpenChange={(next) => { if (!next) handleCancel(); }}>
+    <Dialog
+      open={!!pending}
+      onOpenChange={(next) => {
+        if (!next) handleCancel();
+      }}
+    >
       <CompactDialogContent className="max-w-sm" showCloseButton={false}>
         <CompactDialogHeader
           title={t('dialog.credentialPrompt.title')}
-          description={pending ? t('dialog.credentialPrompt.description', {
-            username: pending.request.username,
-            host: pending.request.host,
-          }) : undefined}
+          description={
+            pending
+              ? t('dialog.credentialPrompt.description', {
+                  username: pending.request.username,
+                  host: pending.request.host,
+                })
+              : undefined
+          }
         />
         <CompactDialogBody>
           <div className="flex flex-col gap-3">
@@ -63,10 +67,10 @@ export const CredentialPromptDialog: React.FC = () => {
                 autoFocus
               />
             </div>
-            <Label className="flex items-center gap-2 cursor-pointer text-xs text-app-text-soft">
-              <Checkbox checked={remember} onCheckedChange={(checked) => setRemember(Boolean(checked))} />
-              {t('dialog.credentialPrompt.rememberPassword')}
-            </Label>
+            <label className="flex items-center gap-2 text-xs text-app-text-soft cursor-pointer select-none">
+              <Checkbox id="remember-password" checked={remember} onCheckedChange={(checked) => setRemember(Boolean(checked))} className="p-0" />
+              <span className="leading-5">{t('dialog.credentialPrompt.rememberPassword')}</span>
+            </label>
           </div>
         </CompactDialogBody>
         <CompactDialogFooter>

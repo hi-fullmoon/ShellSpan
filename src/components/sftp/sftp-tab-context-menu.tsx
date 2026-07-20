@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
@@ -50,6 +60,9 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const addConnection = useSftpStore((state) => state.addConnection);
   const getProfile = useProfileStore((state) => state.getProfile);
   const [renameTarget, setRenameTarget] = useState<SftpConnection | null>(null);
+  const [closeConfirm, setCloseConfirm] = useState(false);
+  const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
+  const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -70,32 +83,55 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
   const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
 
+  const closeOthersCount = connections.filter(
+    (c) => c.id !== target.id && !c.pinned,
+  ).length;
+
+  const closeToRightCount = (() => {
+    const idx = connections.findIndex((c) => c.id === target.id);
+    if (idx === -1) return 0;
+    return connections.slice(idx + 1).filter((c) => !c.pinned).length;
+  })();
+
   const handleClose = (): void => {
-    removeConnection(target.id);
     onClose();
+    setCloseConfirm(true);
   };
 
   const handleCloseOthers = (): void => {
+    onClose();
+    setCloseOthersConfirm(true);
+  };
+
+  const handleCloseToRight = (): void => {
+    onClose();
+    setCloseToRightConfirm(true);
+  };
+
+  const confirmClose = (): void => {
+    removeConnection(target.id);
+    setCloseConfirm(false);
+  };
+
+  const confirmCloseOthers = (): void => {
     connections.forEach((conn) => {
       if (conn.id !== target.id && !conn.pinned) {
         removeConnection(conn.id);
       }
     });
-    onClose();
+    setCloseOthersConfirm(false);
   };
 
-  const handleCloseToRight = (): void => {
+  const confirmCloseToRight = (): void => {
     const idx = connections.findIndex((conn) => conn.id === target.id);
-    if (idx === -1) {
-      onClose();
-      return;
+    if (idx > -1) {
+      connections.slice(idx + 1).forEach((conn) => {
+        if (!conn.pinned) {
+          removeConnection(conn.id);
+        }
+      });
     }
-    connections.slice(idx + 1).forEach((conn) => {
-      if (!conn.pinned) {
-        removeConnection(conn.id);
-      }
-    });
-    onClose();
+    setCloseToRightConfirm(false);
   };
 
   const handleRenameConfirm = (value: string): void => {
@@ -184,6 +220,66 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         confirmText={t('common.save')}
         defaultValue={renameTarget?.title ?? ''}
       />
+      <AlertDialog open={closeConfirm} onOpenChange={(o) => { if (!o) setCloseConfirm(false); }}>
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('sftp.tab.closeConfirmTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {t('sftp.tab.closeConfirmMessage', { title: target.title })}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmClose}>
+              {t('common.close')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={closeOthersConfirm} onOpenChange={(o) => { if (!o) setCloseOthersConfirm(false); }}>
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('sftp.tab.closeOthersConfirmTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {t('sftp.tab.closeOthersConfirmMessage', { count: closeOthersCount })}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseOthers}>
+              {t('common.close')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={closeToRightConfirm} onOpenChange={(o) => { if (!o) setCloseToRightConfirm(false); }}>
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('sftp.tab.closeToRightConfirmTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {t('sftp.tab.closeToRightConfirmMessage', { count: closeToRightCount })}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseToRight}>
+              {t('common.close')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>,
     document.body,
   );

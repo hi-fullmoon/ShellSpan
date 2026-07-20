@@ -48,6 +48,12 @@ export async function promptForMissingPassword(
       await invokeStorePassword(profile.id, result.password).catch((error) => {
         logger.warn('Failed to store password in keychain', error);
       });
+      // Update the store so the UI reflects the stored state.
+      useProfileStore.setState((state) => ({
+        profiles: state.profiles.map((p) =>
+          p.id === profile.id ? { ...p, passwordStored: true } : p,
+        ),
+      }));
     }
 
     enriched = { ...enriched, password: result.password, passwordStored: result.remember || enriched.passwordStored };

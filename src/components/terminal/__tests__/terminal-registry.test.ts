@@ -78,8 +78,8 @@ describe('terminalRegistry', () => {
     expect(terminalElement).not.toBeNull();
     expect(viewport).not.toBeNull();
     expect(terminalElement).toHaveClass('terminal', 'xterm');
-    expect(terminalElement).toHaveStyle({ backgroundColor: 'var(--app-surface)' });
-    expect(viewport).toHaveStyle({ backgroundColor: 'var(--app-surface)' });
+    expect(terminalElement).toHaveStyle({ backgroundColor: '#000000' });
+    expect(viewport).toHaveStyle({ backgroundColor: '#000000' });
     expect(terminalElement).toHaveStyle({ width: '100%', height: '100%' });
 
     terminalRegistry.updateOptions({
