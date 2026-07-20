@@ -6,6 +6,7 @@ import {
   invokeGetSessionStatus,
   invokeResizeSession,
   invokeWriteSession,
+  invokeOpenUrl,
   listenToSshClosed,
   listenToSshData,
   listenToSshStatus,
@@ -17,7 +18,8 @@ import {
 } from '@/lib/terminal';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
-import type { ClosedEvent, SessionStatus, StatusEvent, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily } from '@/types';
+import type { ClosedEvent, SessionStatus, StatusEvent, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily } from '@/types';
+import type { IDisposable, ILink } from '@xterm/xterm';
 
 const logger = createLogger('terminal');
 
@@ -34,6 +36,10 @@ export interface TerminalDisplayPreferences {
   scrollback: number;
   colorScheme: TerminalColorScheme;
   autoReconnect: boolean;
+  lineHeight: number;
+  letterSpacing: number;
+  urlDetection: boolean;
+  bellStyle: TerminalBellStyle;
 }
 
 const TERMINAL_FONT_FAMILIES: Record<TerminalFontFamily, string> = {
@@ -52,7 +58,44 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
   scrollback: 10000,
   colorScheme: 'app',
   autoReconnect: false,
+  lineHeight: 1,
+  letterSpacing: 0,
+  urlDetection: true,
+  bellStyle: 'none',
 };
+
+const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
+
+function trimUrlPunctuation(url: string): string {
+  return url.replace(/[),.;!?\]}]+$/g, '');
+}
+
+export function findHttpLinksInLine(line: string): Array<{ text: string; start: number; end: number }> {
+  const links: Array<{ text: string; start: number; end: number }> = [];
+  for (const match of line.matchAll(URL_PATTERN)) {
+    if (match.index === undefined) continue;
+    const text = trimUrlPunctuation(match[0]);
+    if (!text) continue;
+    links.push({ text, start: match.index + 1, end: match.index + text.length });
+  }
+  return links;
+}
+
+function playBellSound(): void {
+  const AudioContextConstructor = window.AudioContext;
+  if (!AudioContextConstructor) return;
+  const context = new AudioContextConstructor();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.frequency.value = 880;
+  gain.gain.setValueAtTime(0.05, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.08);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start();
+  oscillator.stop(context.currentTime + 0.08);
+  oscillator.addEventListener('ended', () => void context.close(), { once: true });
+}
 
 const TERMINAL_COLOR_SCHEMES: Record<TerminalColorScheme, NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme']> = {
   app: {
@@ -126,6 +169,7 @@ class TerminalControllerImpl implements TerminalController {
   private reconnectRequestedRef = false;
   private listenerGeneration = 0;
   private preferences: TerminalDisplayPreferences;
+  private linkProviderDisposable?: IDisposable;
 
   constructor(
     sessionId: string,
@@ -151,6 +195,8 @@ class TerminalControllerImpl implements TerminalController {
       cursorBlink: preferences.cursorBlink,
       cursorStyle: preferences.cursorStyle,
       scrollback: preferences.scrollback,
+      lineHeight: preferences.lineHeight,
+      letterSpacing: preferences.letterSpacing,
     });
     this.fitAddon = new FitAddon();
     this.searchAddon = new SearchAddon();
@@ -170,6 +216,10 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.onData((data) => {
       this.handleInput(data);
     });
+    this.terminal.onBell(() => {
+      if (this.preferences.bellStyle === 'sound') playBellSound();
+    });
+    this.updateLinkProvider();
 
     void this.setupListeners();
   }
@@ -220,6 +270,40 @@ class TerminalControllerImpl implements TerminalController {
   private writeSystemLine(line: string): void {
     if (this.disposed) return;
     this.terminal.writeln(line);
+  }
+
+  private updateLinkProvider(): void {
+    this.linkProviderDisposable?.dispose();
+    this.linkProviderDisposable = undefined;
+    if (!this.preferences.urlDetection) return;
+    this.linkProviderDisposable = this.terminal.registerLinkProvider({
+      provideLinks: (bufferLineNumber, callback) => {
+        const line = this.terminal.buffer.active
+          .getLine(bufferLineNumber - 1)
+          ?.translateToString(true);
+        if (!line) {
+          callback(undefined);
+          return;
+        }
+        const links: ILink[] = [];
+        for (const detected of findHttpLinksInLine(line)) {
+          links.push({
+            text: detected.text,
+            range: {
+              start: { x: detected.start, y: bufferLineNumber },
+              end: { x: detected.end, y: bufferLineNumber },
+            },
+            decorations: { pointerCursor: true, underline: true },
+            activate: (_event, text) => {
+              void invokeOpenUrl(text).catch((error) => {
+                logger.warn(`Failed to open terminal URL: ${text}`, error);
+              });
+            },
+          });
+        }
+        callback(links.length > 0 ? links : undefined);
+      },
+    });
   }
 
   private resetNoticeState(): void {
@@ -424,6 +508,9 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.options.cursorStyle = preferences.cursorStyle;
     this.terminal.options.scrollback = preferences.scrollback;
     this.terminal.options.theme = TERMINAL_COLOR_SCHEMES[preferences.colorScheme];
+    this.terminal.options.lineHeight = preferences.lineHeight;
+    this.terminal.options.letterSpacing = preferences.letterSpacing;
+    this.updateLinkProvider();
     if (this.host) {
       try {
         this.fitAddon.fit();
@@ -439,6 +526,7 @@ class TerminalControllerImpl implements TerminalController {
     logger.debug(`Terminal disposed for session ${this.sessionId}`);
     this.detach();
     this.clearListeners();
+    this.linkProviderDisposable?.dispose();
     this.terminal.dispose();
     this.removeFromRegistry(this.sessionId);
   }

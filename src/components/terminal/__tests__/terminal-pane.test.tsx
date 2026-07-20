@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalPane } from '../terminal-pane';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
@@ -51,6 +51,8 @@ beforeEach(() => {
     terminalCopyOnSelect: true,
     terminalMultiLinePasteWarning: true,
     terminalLargePasteWarning: true,
+    terminalTrimTrailingWhitespace: true,
+    terminalRightClickBehavior: 'paste',
   });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
   Object.assign(navigator, {
@@ -111,7 +113,7 @@ describe('TerminalPane', () => {
   it('opens the search bar via the keyboard shortcut and closes it', async () => {
     render(<TerminalPane activeSession={makeSession()} />);
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
-    fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
+    act(() => document.dispatchEvent(new Event('termbridge:find-terminal')));
     const searchInput = screen.getByPlaceholderText('terminal.search.placeholder');
     expect(searchInput).toBeInTheDocument();
     expect(searchInput.parentElement).toHaveClass('border-t-0');
@@ -193,6 +195,31 @@ describe('TerminalPane', () => {
     await vi.waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('selected text');
     });
+  });
+
+  it('trims trailing whitespace from copied lines', async () => {
+    const terminal = makeMockTerminal('first  \nsecond\t');
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.getSelectionChangeHandlers()[0]?.();
+
+    await vi.waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('first\nsecond');
+    });
+  });
+
+  it('copies a selection on right click in copy-or-paste mode', async () => {
+    useAppStore.setState({ terminalRightClickBehavior: 'copyPaste' });
+    const terminal = makeMockTerminal('selected');
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.element?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('selected');
+    });
+    expect(navigator.clipboard.readText).not.toHaveBeenCalled();
+    expect(terminal.paste).not.toHaveBeenCalled();
   });
 
   it('does not copy selected text when copy on select is disabled', () => {

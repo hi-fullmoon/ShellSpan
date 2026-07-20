@@ -38,26 +38,31 @@ describe('ConnectionForm', () => {
     expect(formBody).toBeInTheDocument();
     expect(formBody).toHaveClass('flex-1');
     expect(formBody).toHaveClass('min-h-0');
-    expect(formBody).toHaveClass('gap-2');
+    expect(formBody).toHaveClass('gap-5');
   });
 
-  it('renders the translated auth method label instead of the raw key', () => {
+  it('renders the auth method as a segmented toggle with the translated label', () => {
     render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
 
-    const authSelect = document.body.querySelector('[data-slot="select-trigger"]');
-    expect(authSelect).toHaveTextContent(/^connection\.form\.auth\.password$/);
+    const pressedItem = document.body.querySelector(
+      '[data-slot="toggle-group-item"][aria-pressed="true"]',
+    );
+    expect(pressedItem).toHaveTextContent(/^connection\.form\.auth\.password$/);
   });
 
   it('renders the translated jump-host auth method label when enabled', () => {
     render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
 
-    const jumpHostCheckbox = document.body.querySelector('[data-slot="checkbox"]');
-    expect(jumpHostCheckbox).toBeInTheDocument();
-    fireEvent.click(jumpHostCheckbox!);
+    const jumpHostSwitch = document.body.querySelector('[data-slot="switch"]');
+    expect(jumpHostSwitch).toBeInTheDocument();
+    fireEvent.click(jumpHostSwitch!);
 
-    const authSelects = document.body.querySelectorAll('[data-slot="select-trigger"]');
-    expect(authSelects).toHaveLength(2);
-    expect(authSelects[1]).toHaveTextContent(/^connection\.form\.auth\.password$/);
+    const authGroups = document.body.querySelectorAll('[data-slot="toggle-group"]');
+    expect(authGroups).toHaveLength(2);
+    const pressedItem = authGroups[1].querySelector(
+      '[data-slot="toggle-group-item"][aria-pressed="true"]',
+    );
+    expect(pressedItem).toHaveTextContent(/^connection\.form\.auth\.password$/);
   });
 
   it('resets form values when opening with a new profile', () => {

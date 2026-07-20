@@ -86,6 +86,12 @@ const Terminal: React.FC = () => {
     };
   }, [activeSection]);
 
+  useEffect(() => {
+    const handleNewTabRequest = (): void => setNewTabMenuOpen(true);
+    document.addEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
+    return () => document.removeEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
+  }, []);
+
   return (
     <div className="flex h-full flex-col bg-app-bg">
       <TerminalControllerLayer />

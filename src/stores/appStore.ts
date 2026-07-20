@@ -1,13 +1,18 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   openWorkbench: 'mod+1',
   openTerminal: 'mod+2',
   openSftp: 'mod+3',
   openSettings: 'mod+,',
+  newTerminalTab: 'mod+t',
+  closeTerminalTab: 'mod+w',
+  nextTerminalTab: 'mod+shift+]',
+  previousTerminalTab: 'mod+shift+[',
+  findTerminal: 'mod+f',
 };
 
 interface AppPreferences {
@@ -25,6 +30,12 @@ interface AppPreferences {
   terminalMultiLinePasteWarning: boolean;
   terminalLargePasteWarning: boolean;
   terminalAutoReconnect: boolean;
+  terminalLineHeight: number;
+  terminalLetterSpacing: number;
+  terminalUrlDetection: boolean;
+  terminalTrimTrailingWhitespace: boolean;
+  terminalRightClickBehavior: TerminalRightClickBehavior;
+  terminalBellStyle: TerminalBellStyle;
   confirmBeforeExit: boolean;
   restoreWorkspace: boolean;
   sftpShowHiddenFiles: boolean;
@@ -54,6 +65,12 @@ interface AppState extends AppPreferences {
   setTerminalMultiLinePasteWarning: (enabled: boolean) => void;
   setTerminalLargePasteWarning: (enabled: boolean) => void;
   setTerminalAutoReconnect: (enabled: boolean) => void;
+  setTerminalLineHeight: (lineHeight: number) => void;
+  setTerminalLetterSpacing: (letterSpacing: number) => void;
+  setTerminalUrlDetection: (enabled: boolean) => void;
+  setTerminalTrimTrailingWhitespace: (enabled: boolean) => void;
+  setTerminalRightClickBehavior: (behavior: TerminalRightClickBehavior) => void;
+  setTerminalBellStyle: (style: TerminalBellStyle) => void;
   setConfirmBeforeExit: (enabled: boolean) => void;
   setRestoreWorkspace: (enabled: boolean) => void;
   setSftpShowHiddenFiles: (enabled: boolean) => void;
@@ -68,11 +85,30 @@ interface AppState extends AppPreferences {
 
 const STORAGE_KEY = 'termbridge.preferences';
 
+export function mergeShortcutBindings(value: unknown): ShortcutBindings {
+  const stored = value && typeof value === 'object'
+    ? value as Partial<Record<ShortcutAction, unknown>>
+    : {};
+  return Object.fromEntries(
+    (Object.entries(DEFAULT_SHORTCUTS) as Array<[ShortcutAction, string]>).map(
+      ([action, fallback]) => [
+        action,
+        typeof stored[action] === 'string' && stored[action].length > 0
+          ? stored[action]
+          : fallback,
+      ],
+    ),
+  ) as ShortcutBindings;
+}
+
 function readInitialPreferences(): AppPreferences {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<AppPreferences>;
+      const stored = JSON.parse(raw) as Partial<AppPreferences> & {
+        state?: Partial<AppPreferences>;
+      };
+      const parsed = stored.state ?? stored;
       return {
         theme: parsed.theme ?? 'system',
         locale: parsed.locale ?? 'zh-CN',
@@ -88,6 +124,12 @@ function readInitialPreferences(): AppPreferences {
         terminalMultiLinePasteWarning: parsed.terminalMultiLinePasteWarning ?? true,
         terminalLargePasteWarning: parsed.terminalLargePasteWarning ?? true,
         terminalAutoReconnect: parsed.terminalAutoReconnect ?? false,
+        terminalLineHeight: parsed.terminalLineHeight ?? 1,
+        terminalLetterSpacing: parsed.terminalLetterSpacing ?? 0,
+        terminalUrlDetection: parsed.terminalUrlDetection ?? true,
+        terminalTrimTrailingWhitespace: parsed.terminalTrimTrailingWhitespace ?? true,
+        terminalRightClickBehavior: parsed.terminalRightClickBehavior ?? 'paste',
+        terminalBellStyle: parsed.terminalBellStyle ?? 'none',
         confirmBeforeExit: parsed.confirmBeforeExit ?? true,
         restoreWorkspace: parsed.restoreWorkspace ?? true,
         sftpShowHiddenFiles: parsed.sftpShowHiddenFiles ?? true,
@@ -95,7 +137,7 @@ function readInitialPreferences(): AppPreferences {
         sftpRetryCount: parsed.sftpRetryCount ?? 1,
         sftpDownloadDirectory: parsed.sftpDownloadDirectory ?? '',
         sftpCompletionNotification: parsed.sftpCompletionNotification ?? true,
-        shortcuts: { ...DEFAULT_SHORTCUTS, ...parsed.shortcuts },
+        shortcuts: mergeShortcutBindings(parsed.shortcuts),
       };
     }
   } catch {
@@ -116,6 +158,12 @@ function readInitialPreferences(): AppPreferences {
     terminalMultiLinePasteWarning: true,
     terminalLargePasteWarning: true,
     terminalAutoReconnect: false,
+    terminalLineHeight: 1,
+    terminalLetterSpacing: 0,
+    terminalUrlDetection: true,
+    terminalTrimTrailingWhitespace: true,
+    terminalRightClickBehavior: 'paste',
+    terminalBellStyle: 'none',
     confirmBeforeExit: true,
     restoreWorkspace: true,
     sftpShowHiddenFiles: true,
@@ -154,6 +202,12 @@ export const useAppStore = create<AppState>()(
       setTerminalMultiLinePasteWarning: (terminalMultiLinePasteWarning) => set({ terminalMultiLinePasteWarning }),
       setTerminalLargePasteWarning: (terminalLargePasteWarning) => set({ terminalLargePasteWarning }),
       setTerminalAutoReconnect: (terminalAutoReconnect) => set({ terminalAutoReconnect }),
+      setTerminalLineHeight: (terminalLineHeight) => set({ terminalLineHeight }),
+      setTerminalLetterSpacing: (terminalLetterSpacing) => set({ terminalLetterSpacing }),
+      setTerminalUrlDetection: (terminalUrlDetection) => set({ terminalUrlDetection }),
+      setTerminalTrimTrailingWhitespace: (terminalTrimTrailingWhitespace) => set({ terminalTrimTrailingWhitespace }),
+      setTerminalRightClickBehavior: (terminalRightClickBehavior) => set({ terminalRightClickBehavior }),
+      setTerminalBellStyle: (terminalBellStyle) => set({ terminalBellStyle }),
       setConfirmBeforeExit: (confirmBeforeExit) => set({ confirmBeforeExit }),
       setRestoreWorkspace: (restoreWorkspace) => set({ restoreWorkspace }),
       setSftpShowHiddenFiles: (sftpShowHiddenFiles) => set({ sftpShowHiddenFiles }),
@@ -162,10 +216,12 @@ export const useAppStore = create<AppState>()(
       setSftpDownloadDirectory: (sftpDownloadDirectory) => set({ sftpDownloadDirectory }),
       setSftpCompletionNotification: (sftpCompletionNotification) => set({ sftpCompletionNotification }),
       setShortcut: (action, shortcut) =>
-        set((state) => ({ shortcuts: { ...state.shortcuts, [action]: shortcut } })),
+        set((state) => ({
+          shortcuts: { ...DEFAULT_SHORTCUTS, ...state.shortcuts, [action]: shortcut },
+        })),
       resetShortcut: (action) =>
         set((state) => ({
-          shortcuts: { ...state.shortcuts, [action]: DEFAULT_SHORTCUTS[action] },
+          shortcuts: { ...DEFAULT_SHORTCUTS, ...state.shortcuts, [action]: DEFAULT_SHORTCUTS[action] },
         })),
       resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
     }),
@@ -186,6 +242,12 @@ export const useAppStore = create<AppState>()(
         terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
         terminalLargePasteWarning: state.terminalLargePasteWarning,
         terminalAutoReconnect: state.terminalAutoReconnect,
+        terminalLineHeight: state.terminalLineHeight,
+        terminalLetterSpacing: state.terminalLetterSpacing,
+        terminalUrlDetection: state.terminalUrlDetection,
+        terminalTrimTrailingWhitespace: state.terminalTrimTrailingWhitespace,
+        terminalRightClickBehavior: state.terminalRightClickBehavior,
+        terminalBellStyle: state.terminalBellStyle,
         confirmBeforeExit: state.confirmBeforeExit,
         restoreWorkspace: state.restoreWorkspace,
         sftpShowHiddenFiles: state.sftpShowHiddenFiles,
@@ -195,6 +257,16 @@ export const useAppStore = create<AppState>()(
         sftpCompletionNotification: state.sftpCompletionNotification,
         shortcuts: state.shortcuts,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState && typeof persistedState === 'object'
+          ? persistedState as Partial<AppState>
+          : {};
+        return {
+          ...currentState,
+          ...persisted,
+          shortcuts: mergeShortcutBindings(persisted.shortcuts),
+        };
+      },
       onRehydrateStorage: () => (state) => {
         if (state) state.setActiveSection(state.startupSection);
       },

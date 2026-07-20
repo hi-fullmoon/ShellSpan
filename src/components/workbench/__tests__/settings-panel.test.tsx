@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../settings-panel';
+import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
+import type { ShortcutBindings } from '@/types';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -19,6 +21,10 @@ vi.mock('@/hooks/useTheme', () => ({
 }));
 
 describe('SettingsPanel', () => {
+  beforeEach(() => {
+    useAppStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS } });
+  });
+
   it('renders appearance, terminal, general, and shortcut sections', () => {
     render(<SettingsPanel />);
 
@@ -47,6 +53,20 @@ describe('SettingsPanel', () => {
     expect(
       screen.getByText('settings.general.startupUpdateCheck'),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(10);
+    expect(screen.getAllByRole('switch')).toHaveLength(12);
+  });
+
+  it('renders when persisted shortcuts come from an older version', () => {
+    useAppStore.setState({
+      shortcuts: {
+        openWorkbench: 'mod+1',
+        openTerminal: 'mod+2',
+        openSftp: 'mod+3',
+        openSettings: 'mod+,',
+      } as ShortcutBindings,
+    });
+
+    expect(() => render(<SettingsPanel />)).not.toThrow();
+    expect(screen.getByText('settings.shortcuts.newTerminalTab')).toBeInTheDocument();
   });
 });

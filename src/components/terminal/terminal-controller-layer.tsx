@@ -16,6 +16,10 @@ export const TerminalControllerLayer: React.FC = () => {
   const terminalScrollback = useAppStore((s) => s.terminalScrollback);
   const terminalColorScheme = useAppStore((s) => s.terminalColorScheme);
   const terminalAutoReconnect = useAppStore((s) => s.terminalAutoReconnect);
+  const terminalLineHeight = useAppStore((s) => s.terminalLineHeight);
+  const terminalLetterSpacing = useAppStore((s) => s.terminalLetterSpacing);
+  const terminalUrlDetection = useAppStore((s) => s.terminalUrlDetection);
+  const terminalBellStyle = useAppStore((s) => s.terminalBellStyle);
   const knownRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -27,8 +31,12 @@ export const TerminalControllerLayer: React.FC = () => {
       scrollback: terminalScrollback,
       colorScheme: terminalColorScheme,
       autoReconnect: terminalAutoReconnect,
+      lineHeight: terminalLineHeight,
+      letterSpacing: terminalLetterSpacing,
+      urlDetection: terminalUrlDetection,
+      bellStyle: terminalBellStyle,
     });
-  }, [terminalAutoReconnect, terminalColorScheme, terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback]);
+  }, [terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalScrollback, terminalUrlDetection]);
 
   useEffect(() => {
     const currentIds = new Set(sessions.map((s) => s.sessionId));

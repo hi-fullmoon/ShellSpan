@@ -310,6 +310,14 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
     }
   }, [activeSessionId, sessions.length]);
 
+  useEffect(() => {
+    const handleCloseTabRequest = (): void => {
+      if (activeSessionId) setClosingSessionId(activeSessionId);
+    };
+    document.addEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
+    return () => document.removeEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
+  }, [activeSessionId]);
+
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
     const container = scrollRef.current;
     if (!container) {
