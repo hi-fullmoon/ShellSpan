@@ -12,13 +12,15 @@ import {
   FileSearchIcon,
   RefreshCwIcon,
   SearchIcon,
+  SearchXIcon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
 import { useLogStore } from '@/stores/logStore';
+import type { LogSource } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { EmptyState, Spinner } from '@/components/ui/empty-state';
+import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
@@ -257,11 +259,13 @@ export const LogPanel: React.FC = () => {
   const {
     files,
     activeFileName,
+    activeSource,
     content,
     loading,
     loadFiles,
     loadFile,
     refreshActiveFile,
+    setActiveSource,
   } = useLogStore();
   const [autoScroll, setAutoScroll] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
@@ -358,12 +362,6 @@ export const LogPanel: React.FC = () => {
   );
 
   useEffect(() => {
-    if (files.length > 0 && !activeFileName) {
-      void loadFile(files[0].name);
-    }
-  }, [files, activeFileName, loadFile]);
-
-  useEffect(() => {
     if (!activeFileName) return;
     const timer = setInterval(() => {
       refreshActiveFile();
@@ -407,87 +405,108 @@ export const LogPanel: React.FC = () => {
     }
   }, [content, activeFileName, success, showError, t]);
 
+  const handleSourceChange = (value: LogSource | undefined): void => {
+    if (!value) return;
+    setActiveSource(value);
+  };
+
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
     <TooltipProvider>
     <div className="flex h-full flex-col">
-      <div className="shrink-0 border-b border-app-border">
-        <div className="flex h-10 items-center gap-2 px-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="text-sm font-medium text-app-text">
-              {t('workbench.logs.title')}
-            </span>
-            {activeFileName && (
-              <Badge
-                variant="secondary"
-                className="max-w-44 truncate font-mono text-[10px]"
-              >
-                {activeFileName}
-              </Badge>
-            )}
-          </div>
-          <div className="flex flex-1 items-center justify-end gap-1.5">
-            <div className="relative w-full max-w-52">
-              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('workbench.logs.searchPlaceholder')}
-                aria-label={t('workbench.logs.searchPlaceholder')}
-                className="h-8 pl-7 text-xs"
-              />
-            </div>
-            <Tooltip>
-              <TooltipTrigger
-                render={<span className="inline-flex h-7 items-center justify-center" />}
-              >
-                <Switch
-                  size="sm"
-                  checked={autoScroll}
-                  onCheckedChange={setAutoScroll}
-                  aria-label={t('workbench.logs.autoScroll')}
-                  className="after:hidden"
-                />
-              </TooltipTrigger>
-              <TooltipContent>{t('workbench.logs.autoScroll')}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-app-text hover:bg-app-text/10"
-                    aria-label={t('common.refresh')}
-                    onClick={handleRefresh}
-                  />
-                }
-              >
-                <RefreshCwIcon />
-              </TooltipTrigger>
-              <TooltipContent>{t('common.refresh')}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-app-text hover:bg-app-text/10"
-                    aria-label={t('workbench.logs.export')}
-                    onClick={handleExport}
-                    disabled={!content}
-                  />
-                }
-              >
-                <DownloadIcon />
-              </TooltipTrigger>
-              <TooltipContent>{t('workbench.logs.export')}</TooltipContent>
-            </Tooltip>
-          </div>
+      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-sm font-medium text-app-text">
+            {t('workbench.logs.title')}
+          </span>
+          <ToggleGroup
+            value={[activeSource]}
+            onValueChange={(value) => {
+              handleSourceChange(value[0] as LogSource | undefined);
+            }}
+            variant="tag"
+            size="xs"
+            spacing={1.5}
+            aria-label={t('workbench.logs.source')}
+          >
+            <ToggleGroupItem value="frontend">
+              {t('workbench.logs.frontend')}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="backend">
+              {t('workbench.logs.backend')}
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {activeFileName && (
+            <Badge
+              variant="secondary"
+              className="max-w-44 truncate font-mono text-[10px]"
+            >
+              {activeFileName}
+            </Badge>
+          )}
         </div>
-        <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-app-border px-3 py-1.5">
+        <div className="flex w-full items-center gap-1.5 sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:w-52">
+            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t('workbench.logs.searchPlaceholder')}
+              aria-label={t('workbench.logs.searchPlaceholder')}
+              className="h-8 pl-7 text-xs"
+            />
+          </div>
+          <Tooltip>
+            <TooltipTrigger
+              render={<span className="inline-flex h-7 items-center justify-center" />}
+            >
+              <Switch
+                size="sm"
+                checked={autoScroll}
+                onCheckedChange={setAutoScroll}
+                aria-label={t('workbench.logs.autoScroll')}
+                className="after:hidden"
+              />
+            </TooltipTrigger>
+            <TooltipContent>{t('workbench.logs.autoScroll')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-app-text hover:bg-app-text/10"
+                  aria-label={t('common.refresh')}
+                  onClick={handleRefresh}
+                />
+              }
+            >
+              <RefreshCwIcon />
+            </TooltipTrigger>
+            <TooltipContent>{t('common.refresh')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-app-text hover:bg-app-text/10"
+                  aria-label={t('workbench.logs.export')}
+                  onClick={handleExport}
+                  disabled={!content}
+                />
+              }
+            >
+              <DownloadIcon />
+            </TooltipTrigger>
+            <TooltipContent>{t('workbench.logs.export')}</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+      <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-1.5">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.date')}
@@ -539,11 +558,10 @@ export const LogPanel: React.FC = () => {
             </ToggleGroup>
           </div>
         </div>
-      </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
-            <Spinner />
+            <PanelLoadingState />
           </div>
         )}
         <ScrollArea
@@ -588,12 +606,29 @@ export const LogPanel: React.FC = () => {
               !loading && (
                 <div className="flex h-full min-h-40 items-center justify-center">
                   <EmptyState
-                    icon={<FileSearchIcon className="h-5 w-5" />}
+                    icon={
+                      content ? (
+                        <SearchXIcon className="size-5" />
+                      ) : (
+                        <FileSearchIcon className="size-5" />
+                      )
+                    }
                     title={t(
                       content
                         ? 'workbench.logs.noMatches'
                         : 'workbench.logs.empty',
                     )}
+                    description={
+                      content
+                        ? t('workbench.logs.noMatchesDescription')
+                        : t('workbench.logs.emptyDescription', {
+                            source: t(
+                              activeSource === 'frontend'
+                                ? 'workbench.logs.frontend'
+                                : 'workbench.logs.backend',
+                            ),
+                          })
+                    }
                   />
                 </div>
               )

@@ -8,6 +8,7 @@ export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'knownHosts' | 'credentials' | 'logs' | 'settings';
+export type LogSource = 'frontend' | 'backend';
 export type ShortcutAction =
   | 'openWorkbench'
   | 'openTerminal'
