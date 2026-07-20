@@ -138,6 +138,18 @@ pub(crate) fn paste_local_paths_blocking(
     Ok(written)
 }
 
+pub(crate) fn trash_local_paths_blocking(paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err("no paths were provided for trash".to_string());
+    }
+    for path in &paths {
+        let portable = portable_local_path(Path::new(path));
+        trash::delete(&portable)
+            .map_err(|error| format!("failed to move {portable} to trash: {error}"))?;
+    }
+    Ok(())
+}
+
 fn resolve_paste_target_name(
     existing_names: &HashSet<String>,
     base_name: &str,
@@ -547,5 +559,19 @@ mod tests {
         ).unwrap();
 
         assert!(written[0].ends_with("报告 副本.txt"));
+    }
+
+    #[test]
+    fn trash_rejects_empty_path_list() {
+        let result = trash_local_paths_blocking(vec![]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn trash_fails_for_missing_path() {
+        let temp = TempDir::new().unwrap();
+        let missing = temp.path().join("does-not-exist.txt");
+        let result = trash_local_paths_blocking(vec![missing.to_str().unwrap().to_string()]);
+        assert!(result.is_err());
     }
 }

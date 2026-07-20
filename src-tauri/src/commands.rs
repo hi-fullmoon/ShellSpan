@@ -718,6 +718,20 @@ pub(crate) async fn paste_local_paths(
 }
 
 #[tauri::command]
+pub(crate) async fn trash_local_paths(paths: Vec<String>) -> Result<(), String> {
+    info!("Trashing local paths count={}", paths.len());
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::trash_local_paths_blocking(paths)
+    })
+    .await
+    .map_err(|error| format!("failed to join trash local paths task: {error}"))?;
+    if let Err(error) = &result {
+        warn!("Trash local paths failed: {error}");
+    }
+    result
+}
+
+#[tauri::command]
 pub(crate) fn cancel_upload(
     uploads: State<'_, UploadCancellationRegistry>,
     operation_id: String,
