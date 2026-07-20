@@ -451,7 +451,7 @@ export default {
   'terminal.pasteWarning.description': '即将粘贴 {lines} 行、{characters} 个字符。粘贴后内容可能立即执行。',
   'terminal.pasteWarning.confirm': '仍然粘贴',
   'app.exitConfirm.title': '退出 TermBridge？',
-  'app.exitConfirm.description': '当前仍有活动会话或文件传输，退出会中断这些任务。',
+  'app.exitConfirm.description': '确定要退出 TermBridge 吗？退出后所有会话和传输任务都会中断。',
   'app.exitConfirm.confirm': '退出',
   'app.errorBoundary.title': '应用遇到了一些问题',
   'app.errorBoundary.description': '页面渲染时发生异常。你可以先重试，若问题仍然存在，请重新加载应用。',
