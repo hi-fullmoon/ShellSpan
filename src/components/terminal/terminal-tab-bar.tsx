@@ -20,6 +20,16 @@ import { Input } from '@/components/ui/input';
 import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import type { SessionStatus } from '@/types';
 
 export interface TerminalTabBarProps {
@@ -227,7 +237,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: session.sessionId,
-    disabled: renaming || session.pinned,
+    disabled: renaming,
   });
 
   return (
@@ -279,6 +289,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -315,8 +326,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   };
 
   const handleCloseSession = (sessionId: string): void => {
-    removeSession(sessionId);
-    invokeCloseSession(sessionId).catch(() => {});
+    setClosingSessionId(sessionId);
+  };
+
+  const confirmCloseSession = (): void => {
+    if (closingSessionId) {
+      removeSession(closingSessionId);
+      invokeCloseSession(closingSessionId).catch(() => {});
+    }
+    setClosingSessionId(null);
   };
 
   const finishDrag = (): void => {
@@ -378,7 +396,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
     const draggedSession = sessions.find((s) => s.sessionId === draggingSessionId);
     const pinnedCount = sessions.filter((s) => s.pinned).length;
     const minInsertIndex = draggedSession?.pinned ? 0 : pinnedCount;
-    setInsertIndex(Math.max(minInsertIndex, newInsertIndex));
+    const maxInsertIndex = draggedSession?.pinned ? pinnedCount : visibleTabs.length;
+    setInsertIndex(Math.min(maxInsertIndex, Math.max(minInsertIndex, newInsertIndex)));
   };
 
   const handleDragEnd = (event: DragEndEvent): void => {
@@ -412,6 +431,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   };
 
   const draggingSession = draggingSessionId ? (sessions.find((s) => s.sessionId === draggingSessionId) ?? null) : null;
+
+  const closingSession = closingSessionId ? (sessions.find((s) => s.sessionId === closingSessionId) ?? null) : null;
 
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
 
@@ -489,6 +510,39 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
           <PlusIcon />
         </Button>
       )}
+      <AlertDialog
+        open={!!closingSessionId}
+        onOpenChange={(open) => {
+          if (!open) setClosingSessionId(null);
+        }}
+      >
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('terminal.tab.closeConfirmTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {closingSession
+                ? t('terminal.tab.closeConfirmMessage', { title: closingSession.title })
+                : ''}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              size="sm"
+              onClick={confirmCloseSession}
+            >
+              {t('common.close')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
