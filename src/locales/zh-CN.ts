@@ -105,6 +105,7 @@ export default {
   'workbench.logs.empty': '暂无日志文件',
   'workbench.logs.noMatches': '没有符合当前筛选条件的日志',
   'workbench.logs.autoScroll': '自动滚动',
+  'workbench.logs.scrollToBottom': '滚动到底部',
   'workbench.logs.date': '日期',
   'workbench.logs.today': '今天',
   'workbench.logs.last3days': '近三天',
