@@ -155,6 +155,13 @@ describe('SftpFileContextMenu', () => {
     expect(screen.queryByText('common.download')).not.toBeInTheDocument();
   });
 
+  it('enables rename, copy, and delete for the local side', () => {
+    renderMenu({ side: 'local', selectedEntries: [createRemoteFileEntry('local.txt')] });
+    expect(screen.getByText('common.rename').closest('button')).not.toBeDisabled();
+    expect(screen.getByText('sftp.contextMenu.copy').closest('button')).not.toBeDisabled();
+    expect(screen.getByText('common.delete').closest('button')).not.toBeDisabled();
+  });
+
   it('closes on escape key', () => {
     const { onClose } = renderMenu();
     fireEvent.keyDown(document, { key: 'Escape' });

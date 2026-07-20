@@ -527,7 +527,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
         side={side}
         local={isLocal}
         currentPath={path}
-        hasClipboard={!!connection.remoteClipboard}
+        hasClipboard={isLocal ? actions.hasLocalClipboard : !!connection.remoteClipboard}
         isBookmarked={isCurrentPathBookmarked}
         batchMode={pane.batchMode}
         onClose={() => setBlankContextMenu(null)}

@@ -77,8 +77,12 @@ describe('SftpBlankContextMenu', () => {
   it('hides remote-only items for local side', () => {
     renderMenu({ side: 'local' });
     expect(screen.queryByText('sftp.contextMenu.newFile')).not.toBeInTheDocument();
-    expect(screen.queryByText('sftp.contextMenu.paste')).not.toBeInTheDocument();
     expect(screen.queryByText('sftp.contextMenu.bookmark.add')).not.toBeInTheDocument();
+  });
+
+  it('shows paste for the local side when the local clipboard has data', () => {
+    renderMenu({ side: 'local', hasClipboard: true });
+    expect(screen.getByText('sftp.contextMenu.paste').closest('button')).not.toBeDisabled();
   });
 
   it('fires action when clicking a menu item', () => {
