@@ -107,8 +107,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-9 w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
-        active ? 'bg-app-surface text-app-text shadow-md' : 'bg-app-border/40 text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
+        active ? 'h-9 bg-app-surface text-app-text shadow-md' : 'h-[35px] bg-app-border/40 text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80' : 'cursor-pointer',
       )}
       style={
@@ -440,7 +440,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
 
   return (
-    <div className="flex h-9 items-center gap-0 border-b border-app-border bg-app-surface-muted px-0">
+    <div className="flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -453,7 +453,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
           <div
             ref={scrollRef}
             onWheel={handleWheel}
-            className="flex h-[36px] min-w-0 items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex h-[36px] min-w-0 items-start gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {sessions.map((session, index) => {
               const isDragging = draggingSessionId === session.sessionId;

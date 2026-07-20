@@ -1,6 +1,8 @@
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type Locale = 'zh-CN' | 'en-US';
 export type AppSection = 'workbench' | 'terminal' | 'sftp';
+export type TerminalFontFamily = 'system' | 'menlo' | 'monaco' | 'consolas' | 'courierNew';
+export type TerminalCursorStyle = 'block' | 'underline' | 'bar';
 export type WorkbenchTab = 'connections' | 'knownHosts' | 'credentials' | 'logs' | 'settings';
 export type ShortcutAction =
   | 'openWorkbench'

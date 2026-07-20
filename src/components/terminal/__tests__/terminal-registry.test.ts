@@ -36,7 +36,13 @@ function createController(sessionId: string) {
 describe('terminalRegistry', () => {
   beforeEach(() => {
     terminalRegistry.disposeAll();
-    terminalRegistry.updateOptions({ fontSize: 14, cursorBlink: true, scrollback: 10000 });
+    terminalRegistry.updateOptions({
+      fontSize: 14,
+      fontFamily: 'system',
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+    });
     vi.clearAllMocks();
   });
 
@@ -134,18 +140,28 @@ describe('terminalRegistry', () => {
 
   it('applies display preferences to current and future terminals', () => {
     const existing = createController('s1');
-    terminalRegistry.updateOptions({ fontSize: 16, cursorBlink: false, scrollback: 5000 });
+    terminalRegistry.updateOptions({
+      fontSize: 16,
+      fontFamily: 'consolas',
+      cursorBlink: false,
+      cursorStyle: 'bar',
+      scrollback: 5000,
+    });
 
     expect(existing.terminal.options).toMatchObject({
       fontSize: 16,
+      fontFamily: 'Consolas, monospace',
       cursorBlink: false,
+      cursorStyle: 'bar',
       scrollback: 5000,
     });
 
     const future = createController('s2');
     expect(future.terminal.options).toMatchObject({
       fontSize: 16,
+      fontFamily: 'Consolas, monospace',
       cursorBlink: false,
+      cursorStyle: 'bar',
       scrollback: 5000,
     });
   });

@@ -22,6 +22,7 @@ import type { FileEntry } from './file-entry-formatters';
 import type { SftpDndPayload } from './sftp-dnd-context';
 import { parentPortablePath } from '@/lib/path-utils';
 import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
+import { useAppStore } from '@/stores/appStore';
 
 export interface SftpPaneProps {
   connection: SftpConnection;
@@ -57,6 +58,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
   ref,
 ) => {
   const { t } = useI18n();
+  const showHiddenFiles = useAppStore((state) => state.sftpShowHiddenFiles);
   const { active } = useDndContext();
   const { setNodeRef, isOver } = useDroppable({
     id: `sftp-pane-${side}-${connection.id}`,
@@ -80,6 +82,10 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
   const canAcceptActiveDrag = !!activeDrag && activeDrag.side !== side;
   const path = side === 'local' ? connection.localPath : connection.remotePath;
   const entries = side === 'local' ? connection.localEntries : connection.remoteEntries;
+  const visibleEntries = useMemo(
+    () => showHiddenFiles ? entries : entries.filter((entry) => !entry.name.startsWith('.')),
+    [entries, showHiddenFiles],
+  );
   const loading = side === 'local' ? connection.localLoading : connection.remoteLoading;
   const error = side === 'local' ? connection.localError : connection.remoteError;
   const isHostKeyError =
@@ -205,7 +211,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
       ? connection.leftTitle ?? connection.title
       : connection.title;
 
-  const selectedEntries = useMemo(() => entries.filter((entry) => selectedPaths.has(entry.path)), [entries, selectedPaths]);
+  const selectedEntries = useMemo(() => visibleEntries.filter((entry) => selectedPaths.has(entry.path)), [visibleEntries, selectedPaths]);
   const transferOperations = useTransferStore((state) => state.operations);
   const selectionBusy = !isLocal && hasActivePathOperation(
     getSftpPaneConnectionKey(connection, side),
@@ -216,8 +222,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
   const isCurrentPathBookmarked = path ? remoteBookmarks.includes(path) : false;
 
   const handleSelectAll = useCallback((): void => {
-    onSelectedPathsChange(new Set(entries.map((entry) => entry.path)));
-  }, [entries, onSelectedPathsChange]);
+    onSelectedPathsChange(new Set(visibleEntries.map((entry) => entry.path)));
+  }, [visibleEntries, onSelectedPathsChange]);
 
   const handleExitBatchMode = useCallback((): void => {
     actions.onToggleBatchMode();
@@ -483,7 +489,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
         )}
         {!error && (
           <SftpFileList
-            entries={entries}
+            entries={visibleEntries}
             side={side}
             localMode={isLocal}
             selectedPaths={Array.from(selectedPaths)}

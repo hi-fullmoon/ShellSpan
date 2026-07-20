@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { SftpPane } from '../sftp-pane';
 import { useSftpStore } from '@/stores/sftpStore';
 import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
+import { useAppStore } from '@/stores/appStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -93,6 +94,7 @@ function createMockActions(): UseSftpPaneActionsResult {
 describe('SftpPane', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
+    useAppStore.setState({ sftpShowHiddenFiles: true });
   });
 
   const createConnection = (): ReturnType<typeof useSftpStore.getState>['connections'][number] => {
@@ -176,6 +178,28 @@ describe('SftpPane', () => {
       />,
     );
     expect(screen.getByTestId('mock-file-list')).toBeInTheDocument();
+  });
+
+  it('hides dotfiles when hidden files are disabled', () => {
+    const connection = createConnection();
+    connection.localEntries = [
+      { path: '/home/visible.txt', name: 'visible.txt', kind: 'file' },
+      { path: '/home/.env', name: '.env', kind: 'file' },
+    ];
+    useAppStore.setState({ sftpShowHiddenFiles: false });
+
+    render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('entry-visible.txt')).toBeInTheDocument();
+    expect(screen.queryByTestId('entry-.env')).not.toBeInTheDocument();
   });
 
   it('shows a host-key verification entry for an unknown remote host', () => {

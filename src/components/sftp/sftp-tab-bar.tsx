@@ -89,8 +89,8 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-9 w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
-        active ? 'bg-app-surface text-app-text shadow-md' : 'bg-app-border/40 text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
+        active ? 'h-9 bg-app-surface text-app-text shadow-md' : 'h-[35px] bg-app-border/40 text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
@@ -412,7 +412,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   }
 
   return (
-    <div className="flex h-9 items-center gap-0 border-b border-app-border bg-app-surface-muted px-0">
+    <div className="flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -425,7 +425,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           <div
             ref={scrollRef}
             onWheel={handleWheel}
-            className="flex h-[36px] min-w-0 items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex h-[36px] min-w-0 items-start gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {connections.map((connection, index) => {
               const isDragging = draggingConnectionId === connection.id;

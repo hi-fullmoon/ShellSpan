@@ -8,9 +8,12 @@ const locales: Record<Locale, Record<string, string>> = {
   'en-US': enUS,
 };
 
+let initializedLocale: Locale | undefined;
+
 export type LocaleKey = keyof typeof zhCN;
 
 export function initI18n(locale: Locale): Promise<void> {
+  initializedLocale = locale;
   return intl.init({
     currentLocale: locale,
     locales,
@@ -18,6 +21,8 @@ export function initI18n(locale: Locale): Promise<void> {
 }
 
 export function changeLocale(locale: Locale): Promise<void> {
+  if (initializedLocale === locale) return Promise.resolve();
+  initializedLocale = locale;
   return intl.init({
     currentLocale: locale,
     locales,
