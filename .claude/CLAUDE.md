@@ -89,21 +89,19 @@ chore(deps): upgrade React to 19.2.5
 ### 文件组织
 ```
 src/
-  components/       # 可复用 UI 组件
-    Button.tsx
-    Terminal/
-      index.tsx
-      Terminal.tsx
-      TerminalHeader.tsx
-      types.ts
-  hooks/            # 自定义 Hooks
-    useTerminal.ts
+  components/       # React 组件
+    ui/             # 基础 UI 组件（shadcn/ui 风格）
+    layout/         # 布局组件
+    terminal/       # 终端功能组件
+    sftp/           # SFTP 功能组件
+    workbench/      # 工作台组件
+    titlebar/       # 标题栏组件
+  hooks/            # 全局自定义 Hooks
   stores/           # Zustand 状态存储
-    settingsStore.ts
-  lib/              # 工具函数
-    utils.ts
-  types.ts          # 全局类型
-  locales/          # 国际化
+  lib/              # 工具函数 / logger
+  types/            # 全局类型定义
+  locales/          # 国际化资源
+  styles/           # 全局样式 / CSS 变量
 ```
 
 ### 命名规范
@@ -118,14 +116,6 @@ src/
 - 不得硬编码密钥/密码
 - 不得有无用导入
 - 不得有类型错误（tsc 必须通过）
-
-## 提交前检查清单
-
-- [ ] `pnpm build` 成功（tsc + vite build）
-- [ ] `pnpm test` 通过
-- [ ] 无 console.log / debugger / TODO
-- [ ] commit message 符合规范
-- [ ] Tauri 命令已测试（如修改了 src-tauri/）
 
 ## 审查重点
 
