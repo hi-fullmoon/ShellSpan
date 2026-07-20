@@ -267,15 +267,21 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
-  private updateElementBackground(): void {
+  private updateElementStyles(): void {
     const element = this.terminal.element;
     if (!element) return;
 
+    element.style.width = '100%';
+    element.style.height = '100%';
+
     const background = TERMINAL_COLOR_SCHEMES[this.preferences.colorScheme]?.background;
+    const viewport = element.querySelector<HTMLElement>('.xterm-viewport');
     if (background) {
-      element.style.backgroundColor = background;
+      element.style.setProperty('background-color', background, 'important');
+      viewport?.style.setProperty('background-color', background, 'important');
     } else {
       element.style.removeProperty('background-color');
+      viewport?.style.removeProperty('background-color');
     }
   }
 
@@ -434,12 +440,13 @@ class TerminalControllerImpl implements TerminalController {
       try {
         this.terminal.open(this.container);
         this.opened = true;
-        this.updateElementBackground();
       } catch {
         // jsdom: open() may fail when host is detached. xterm buffers
         // writes before open(), so write() still accumulates buffer.
       }
     }
+
+    this.updateElementStyles();
 
     try {
       this.fitAddon.fit();
@@ -521,7 +528,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.options.cursorStyle = preferences.cursorStyle;
     this.terminal.options.scrollback = preferences.scrollback;
     this.terminal.options.theme = TERMINAL_COLOR_SCHEMES[preferences.colorScheme];
-    this.updateElementBackground();
+    this.updateElementStyles();
     this.terminal.options.lineHeight = preferences.lineHeight;
     this.terminal.options.letterSpacing = preferences.letterSpacing;
     this.updateLinkProvider();
