@@ -60,6 +60,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const addConnection = useSftpStore((state) => state.addConnection);
   const getProfile = useProfileStore((state) => state.getProfile);
   const [renameTarget, setRenameTarget] = useState<SftpConnection | null>(null);
+  const [confirmationTarget, setConfirmationTarget] = useState<SftpConnection | null>(null);
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
   const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
@@ -77,7 +78,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
     };
   }, [open, onClose]);
 
-  const target = connection ?? renameTarget;
+  const target = connection ?? renameTarget ?? confirmationTarget;
   if (!target) return null;
 
   const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
@@ -94,23 +95,41 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   })();
 
   const handleClose = (): void => {
+    setConfirmationTarget(target);
     onClose();
     setCloseConfirm(true);
   };
 
   const handleCloseOthers = (): void => {
+    setConfirmationTarget(target);
     onClose();
     setCloseOthersConfirm(true);
   };
 
   const handleCloseToRight = (): void => {
+    setConfirmationTarget(target);
     onClose();
     setCloseToRightConfirm(true);
   };
 
+  const dismissCloseConfirm = (): void => {
+    setCloseConfirm(false);
+    setConfirmationTarget(null);
+  };
+
+  const dismissCloseOthersConfirm = (): void => {
+    setCloseOthersConfirm(false);
+    setConfirmationTarget(null);
+  };
+
+  const dismissCloseToRightConfirm = (): void => {
+    setCloseToRightConfirm(false);
+    setConfirmationTarget(null);
+  };
+
   const confirmClose = (): void => {
     removeConnection(target.id);
-    setCloseConfirm(false);
+    dismissCloseConfirm();
   };
 
   const confirmCloseOthers = (): void => {
@@ -119,7 +138,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         removeConnection(conn.id);
       }
     });
-    setCloseOthersConfirm(false);
+    dismissCloseOthersConfirm();
   };
 
   const confirmCloseToRight = (): void => {
@@ -131,7 +150,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         }
       });
     }
-    setCloseToRightConfirm(false);
+    dismissCloseToRightConfirm();
   };
 
   const handleRenameConfirm = (value: string): void => {
@@ -220,7 +239,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         confirmText={t('common.save')}
         defaultValue={renameTarget?.title ?? ''}
       />
-      <AlertDialog open={closeConfirm} onOpenChange={(o) => { if (!o) setCloseConfirm(false); }}>
+      <AlertDialog open={closeConfirm} onOpenChange={(o) => { if (!o) dismissCloseConfirm(); }}>
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
           <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
             <AlertDialogTitle className="text-sm leading-5">
@@ -240,7 +259,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog open={closeOthersConfirm} onOpenChange={(o) => { if (!o) setCloseOthersConfirm(false); }}>
+      <AlertDialog open={closeOthersConfirm} onOpenChange={(o) => { if (!o) dismissCloseOthersConfirm(); }}>
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
           <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
             <AlertDialogTitle className="text-sm leading-5">
@@ -260,7 +279,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog open={closeToRightConfirm} onOpenChange={(o) => { if (!o) setCloseToRightConfirm(false); }}>
+      <AlertDialog open={closeToRightConfirm} onOpenChange={(o) => { if (!o) dismissCloseToRightConfirm(); }}>
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
           <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
             <AlertDialogTitle className="text-sm leading-5">
