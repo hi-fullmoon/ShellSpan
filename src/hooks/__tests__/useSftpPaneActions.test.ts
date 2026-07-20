@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
-import { invokeCopyRemoteToRemote } from '@/lib/tauri';
+import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/tauri';
 import { useTransferStore } from '@/stores/transferStore';
 
 vi.mock('@/hooks/useSftpConnection', () => ({
@@ -52,6 +52,9 @@ vi.mock('@/lib/tauri', () => ({
   invokeCopyRemoteToRemote: vi.fn().mockResolvedValue(undefined),
   invokePickLocalFiles: vi.fn().mockResolvedValue([]),
   invokePickLocalFolder: vi.fn().mockResolvedValue([]),
+  invokeRenameLocalPath: vi.fn().mockResolvedValue(undefined),
+  invokeTrashLocalPaths: vi.fn().mockResolvedValue(undefined),
+  invokePasteLocalPaths: vi.fn().mockResolvedValue([]),
 }));
 
 const initialState = useSftpStore.getState();
@@ -75,7 +78,7 @@ function addConnection(): SftpConnection {
   const connection = useSftpStore.getState().connections[0]!;
   useSftpStore.getState().setPath(connection.id, 'remote', '/home');
   useSftpStore.getState().setPath(connection.id, 'local', '/local');
-  return connection;
+  return useSftpStore.getState().connections[0]!;
 }
 
 describe('useSftpPaneActions', () => {
@@ -226,5 +229,64 @@ describe('useSftpPaneActions', () => {
         expect.objectContaining({ paths: ['/destination/report.txt'] }),
       ],
     });
+  });
+
+  it('copies local entries into the local clipboard', () => {
+    const connection = addConnection();
+    const localEntry = { path: '/local/a.txt', name: 'a.txt', kind: 'file' as const, size: 10 };
+
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
+    expect(result.current.hasLocalClipboard).toBe(false);
+
+    act(() => result.current.onCopy(localEntry));
+
+    expect(result.current.hasLocalClipboard).toBe(true);
+  });
+
+  it('pastes local clipboard entries into the current directory', async () => {
+    const connection = addConnection();
+    connection.localPane.selectedPaths = ['/local/a.txt'];
+    connection.localEntries = [
+      { path: '/local/a.txt', name: 'a.txt', kind: 'file' as const, size: 10 },
+    ];
+
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
+    act(() => result.current.onCopy());
+    await act(() => result.current.onPaste());
+
+    expect(vi.mocked(invokePasteLocalPaths)).toHaveBeenCalledWith(
+      ['/local/a.txt'],
+      '/local',
+      expect.any(String),
+    );
+  });
+
+  it('renames a local entry via the local rename command', async () => {
+    const connection = addConnection();
+    connection.localPane.selectedPaths = ['/local/a.txt'];
+    connection.localEntries = [
+      { path: '/local/a.txt', name: 'a.txt', kind: 'file' as const, size: 10 },
+    ];
+
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
+    act(() => result.current.onRename());
+    await act(() => result.current.handleRename('b.txt'));
+
+    expect(vi.mocked(invokeRenameLocalPath)).toHaveBeenCalledWith('/local/a.txt', 'b.txt');
+    expect(result.current.renameTarget).toBeUndefined();
+  });
+
+  it('trashes local entries via the trash command', async () => {
+    const connection = addConnection();
+    connection.localPane.selectedPaths = ['/local/a.txt', '/local/b.txt'];
+    connection.localEntries = [
+      { path: '/local/a.txt', name: 'a.txt', kind: 'file' as const, size: 10 },
+      { path: '/local/b.txt', name: 'b.txt', kind: 'file' as const, size: 10 },
+    ];
+
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
+    await act(() => result.current.onDelete());
+
+    expect(vi.mocked(invokeTrashLocalPaths)).toHaveBeenCalledWith(['/local/a.txt', '/local/b.txt']);
   });
 });
