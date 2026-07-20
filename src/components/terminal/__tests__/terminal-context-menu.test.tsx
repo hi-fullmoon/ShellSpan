@@ -197,6 +197,38 @@ describe('TerminalContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('shows the close-others confirmation after the parent closes the context menu', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    const session = makeSession('s1', 'A');
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.closeOthers'));
+    rerender(
+      <TerminalContextMenu
+        open={false}
+        x={0}
+        y={0}
+        session={null}
+        onClose={onClose}
+      />,
+    );
+
+    expect(
+      screen.getByText('terminal.tab.closeOthersConfirmTitle'),
+    ).toBeInTheDocument();
+    expect(useTerminalStore.getState().sessions).toHaveLength(2);
+  });
+
   it('close others skips pinned sessions', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');

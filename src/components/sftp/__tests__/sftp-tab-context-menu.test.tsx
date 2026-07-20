@@ -14,6 +14,40 @@ const connection = {
 } as SftpConnection;
 
 describe('SftpTabContextMenu', () => {
+  it.each([
+    ['common.close', 'sftp.tab.closeConfirmTitle'],
+    ['sftp.tab.closeOthers', 'sftp.tab.closeOthersConfirmTitle'],
+    ['sftp.tab.closeToRight', 'sftp.tab.closeToRightConfirmTitle'],
+  ])(
+    'shows the confirmation for %s after the parent closes the context menu',
+    (menuItem, dialogTitle) => {
+      const onClose = vi.fn();
+      const { rerender } = render(
+        <SftpTabContextMenu
+          open
+          x={10}
+          y={10}
+          connection={connection}
+          onClose={onClose}
+        />,
+      );
+
+      fireEvent.click(screen.getByText(menuItem));
+      rerender(
+        <SftpTabContextMenu
+          open={false}
+          x={0}
+          y={0}
+          connection={null}
+          onClose={onClose}
+        />,
+      );
+
+      expect(screen.getByText(dialogTitle)).toBeInTheDocument();
+      expect(onClose).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('clears the rename dialog state before the context menu is reopened', () => {
     const onClose = vi.fn();
     const { rerender } = render(
