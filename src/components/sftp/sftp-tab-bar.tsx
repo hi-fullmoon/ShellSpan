@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom';
 import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
+import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
@@ -261,6 +262,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
 
 export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabContextMenu }) => {
   const { t } = useI18n();
+  const sftpHideSingleTabBar = useAppStore((state) => state.sftpHideSingleTabBar);
   const connections = useSftpStore((state) => state.connections);
   const activeConnectionId = useSftpStore((state) => state.activeConnectionId);
   const setActiveConnection = useSftpStore((state) => state.setActiveConnection);
@@ -426,6 +428,10 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
 
   if (connections.length === 0) {
     return null;
+  }
+
+  if (connections.length === 1 && sftpHideSingleTabBar) {
+    return <div className="h-0 border-b border-app-border" />;
   }
 
   return (

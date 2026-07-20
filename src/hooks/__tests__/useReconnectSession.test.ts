@@ -31,6 +31,12 @@ vi.mock('@/lib/tauri', () => ({
   })),
 }));
 
+vi.mock('@/lib/passwordPrompt', () => ({
+  promptForMissingPassword: vi.fn(
+    (profile) => Promise.resolve({ ...profile, password: 'mock-pass' }),
+  ),
+}));
+
 const initialTerminal = useTerminalStore.getState();
 const initialProfile = useProfileStore.getState();
 

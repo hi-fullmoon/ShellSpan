@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
@@ -12,6 +11,7 @@ import {
 } from '@/lib/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
+import { promptForMissingPassword } from '@/lib/passwordPrompt';
 
 interface HostKeyDialogState {
   open: boolean;
@@ -38,7 +38,6 @@ export function useConnectSession(): {
   hostKeyDialog: HostKeyDialogState;
   closeHostKeyDialog: () => void;
 } {
-  const ensurePassword = useProfileStore((state) => state.ensurePassword);
   const addSession = useTerminalStore((state) => state.addSession);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
 
@@ -47,7 +46,11 @@ export function useConnectSession(): {
 
   const connect = async (profile: ConnectionProfile): Promise<void> => {
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
-    const profileWithPassword = await ensurePassword(profile);
+    const profileWithPassword = await promptForMissingPassword(profile);
+    if (!profileWithPassword) {
+      logger.info('Connection cancelled by user (password dialog dismissed)');
+      return;
+    }
     pendingProfileRef.current = profileWithPassword;
     try {
       const summary = await invokeCreateSession(

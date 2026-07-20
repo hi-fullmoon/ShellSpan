@@ -345,6 +345,10 @@ export default {
   'dialog.hostKey.fingerprint': 'Fingerprint',
   'dialog.hostKey.trustAndConnect': 'Trust & Connect',
 
+  'dialog.credentialPrompt.title': 'Password Required',
+  'dialog.credentialPrompt.description': 'Enter the password for {username}@{host}',
+  'dialog.credentialPrompt.rememberPassword': 'Remember in system keychain',
+
   'settings.appearance.title': 'Appearance',
   'settings.description': 'Tune how TermBridge looks, behaves, and responds to you.',
   'settings.appearance.description': 'Choose the interface theme and display language.',
@@ -442,6 +446,8 @@ export default {
   'settings.terminal.largePasteWarningDescription': 'Confirm before pasting more than 5 KB of text.',
   'settings.terminal.autoReconnect': 'Reconnect automatically',
   'settings.terminal.autoReconnectDescription': 'Try to reconnect once after an unexpected network disconnect.',
+  'settings.terminal.hideSingleTabBar': 'Hide tab bar with one tab',
+  'settings.terminal.hideSingleTabBarDescription': 'Hide the tab bar when only one terminal tab is open.',
   'settings.sftp.conflictPolicy': 'Existing file behavior',
   'settings.sftp.conflictPolicyDescription': 'Default action when an upload or drop finds an existing item.',
   'settings.sftp.conflictPolicy.ask': 'Always ask',
@@ -456,6 +462,8 @@ export default {
   'settings.sftp.downloadDirectoryClear': 'Ask every time instead',
   'settings.sftp.completionNotification': 'Transfer completion alert',
   'settings.sftp.completionNotificationDescription': 'Show an alert when a transfer finishes while the app is in the background.',
+  'settings.sftp.hideSingleTabBar': 'Hide tab bar with one tab',
+  'settings.sftp.hideSingleTabBarDescription': 'Hide the tab bar when only one SFTP tab is open.',
   'terminal.pasteWarning.title': 'Paste into the terminal?',
   'terminal.pasteWarning.description': 'You are about to paste {lines} lines and {characters} characters. The content may run immediately.',
   'terminal.pasteWarning.confirm': 'Paste anyway',

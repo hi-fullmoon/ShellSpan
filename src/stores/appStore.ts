@@ -43,6 +43,8 @@ interface AppPreferences {
   sftpRetryCount: number;
   sftpDownloadDirectory: string;
   sftpCompletionNotification: boolean;
+  terminalHideSingleTabBar: boolean;
+  sftpHideSingleTabBar: boolean;
   shortcuts: ShortcutBindings;
 }
 
@@ -78,6 +80,8 @@ interface AppState extends AppPreferences {
   setSftpRetryCount: (count: number) => void;
   setSftpDownloadDirectory: (path: string) => void;
   setSftpCompletionNotification: (enabled: boolean) => void;
+  setTerminalHideSingleTabBar: (enabled: boolean) => void;
+  setSftpHideSingleTabBar: (enabled: boolean) => void;
   setShortcut: (action: ShortcutAction, shortcut: string) => void;
   resetShortcut: (action: ShortcutAction) => void;
   resetShortcuts: () => void;
@@ -137,6 +141,8 @@ function readInitialPreferences(): AppPreferences {
         sftpRetryCount: parsed.sftpRetryCount ?? 1,
         sftpDownloadDirectory: parsed.sftpDownloadDirectory ?? '',
         sftpCompletionNotification: parsed.sftpCompletionNotification ?? true,
+        terminalHideSingleTabBar: parsed.terminalHideSingleTabBar ?? false,
+        sftpHideSingleTabBar: parsed.sftpHideSingleTabBar ?? false,
         shortcuts: mergeShortcutBindings(parsed.shortcuts),
       };
     }
@@ -171,6 +177,8 @@ function readInitialPreferences(): AppPreferences {
     sftpRetryCount: 1,
     sftpDownloadDirectory: '',
     sftpCompletionNotification: true,
+    terminalHideSingleTabBar: false,
+    sftpHideSingleTabBar: false,
     shortcuts: DEFAULT_SHORTCUTS,
   };
 }
@@ -215,6 +223,8 @@ export const useAppStore = create<AppState>()(
       setSftpRetryCount: (sftpRetryCount) => set({ sftpRetryCount }),
       setSftpDownloadDirectory: (sftpDownloadDirectory) => set({ sftpDownloadDirectory }),
       setSftpCompletionNotification: (sftpCompletionNotification) => set({ sftpCompletionNotification }),
+      setTerminalHideSingleTabBar: (terminalHideSingleTabBar) => set({ terminalHideSingleTabBar }),
+      setSftpHideSingleTabBar: (sftpHideSingleTabBar) => set({ sftpHideSingleTabBar }),
       setShortcut: (action, shortcut) =>
         set((state) => ({
           shortcuts: { ...DEFAULT_SHORTCUTS, ...state.shortcuts, [action]: shortcut },
@@ -255,6 +265,8 @@ export const useAppStore = create<AppState>()(
         sftpRetryCount: state.sftpRetryCount,
         sftpDownloadDirectory: state.sftpDownloadDirectory,
         sftpCompletionNotification: state.sftpCompletionNotification,
+        terminalHideSingleTabBar: state.terminalHideSingleTabBar,
+        sftpHideSingleTabBar: state.sftpHideSingleTabBar,
         shortcuts: state.shortcuts,
       }),
       merge: (persistedState, currentState) => {

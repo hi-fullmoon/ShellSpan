@@ -21,6 +21,7 @@ import { UpdateRestartDialog } from '@/components/update-restart-dialog';
 import { useUpdateFlow } from '@/hooks/useUpdateFlow';
 import { createLogger } from '@/lib/logger';
 import { useAppShortcuts } from '@/hooks/useAppShortcuts';
+import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -189,6 +190,8 @@ export const App: React.FC = () => {
           ''
         }
       />
+
+      <CredentialPromptDialog />
 
       <Toaster />
     </AppShell>
