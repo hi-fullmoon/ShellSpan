@@ -5,6 +5,16 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { invokeCloseSession } from '@/lib/tauri';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -67,6 +77,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const getProfile = useProfileStore((state) => state.getProfile);
   const { connect } = useConnectSession();
   const [renameTarget, setRenameTarget] = useState<TerminalSession | null>(null);
+  const [confirmationTarget, setConfirmationTarget] = useState<TerminalSession | null>(null);
+  const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
+  const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -81,11 +94,21 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     };
   }, [open, onClose]);
 
-  const target = session ?? renameTarget;
+  const target = session ?? renameTarget ?? confirmationTarget;
   if (!target) return null;
 
   const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
   const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
+
+  const closeOthersCount = sessions.filter(
+    (s) => s.sessionId !== target.sessionId && !s.pinned,
+  ).length;
+
+  const closeToRightCount = (() => {
+    const idx = sessions.findIndex((s) => s.sessionId === target.sessionId);
+    if (idx === -1) return 0;
+    return sessions.slice(idx + 1).filter((s) => !s.pinned).length;
+  })();
 
   const closeSession = (sessionId: string): void => {
     removeSession(sessionId);
@@ -110,31 +133,53 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   };
 
   const handleClose = (): void => {
-    closeSession(target.sessionId);
+    document.dispatchEvent(
+      new CustomEvent('termbridge:close-terminal-tab', { detail: { sessionId: target.sessionId } }),
+    );
     onClose();
   };
 
   const handleCloseOthers = (): void => {
+    setConfirmationTarget(target);
+    onClose();
+    setCloseOthersConfirm(true);
+  };
+
+  const handleCloseToRight = (): void => {
+    setConfirmationTarget(target);
+    onClose();
+    setCloseToRightConfirm(true);
+  };
+
+  const dismissCloseOthersConfirm = (): void => {
+    setCloseOthersConfirm(false);
+    setConfirmationTarget(null);
+  };
+
+  const dismissCloseToRightConfirm = (): void => {
+    setCloseToRightConfirm(false);
+    setConfirmationTarget(null);
+  };
+
+  const confirmCloseOthers = (): void => {
     sessions.forEach((s) => {
       if (s.sessionId !== target.sessionId && !s.pinned) {
         closeSession(s.sessionId);
       }
     });
-    onClose();
+    dismissCloseOthersConfirm();
   };
 
-  const handleCloseToRight = (): void => {
+  const confirmCloseToRight = (): void => {
     const idx = sessions.findIndex((s) => s.sessionId === target.sessionId);
-    if (idx === -1) {
-      onClose();
-      return;
+    if (idx > -1) {
+      sessions.slice(idx + 1).forEach((s) => {
+        if (!s.pinned) {
+          closeSession(s.sessionId);
+        }
+      });
     }
-    sessions.slice(idx + 1).forEach((s) => {
-      if (!s.pinned) {
-        closeSession(s.sessionId);
-      }
-    });
-    onClose();
+    dismissCloseToRightConfirm();
   };
 
   const handleRenameConfirm = (value: string): void => {
@@ -245,6 +290,46 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         cancelText={t('common.cancel')}
         defaultValue={renameTarget?.title ?? ''}
       />
+      <AlertDialog open={closeOthersConfirm} onOpenChange={(o) => { if (!o) dismissCloseOthersConfirm(); }}>
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('terminal.tab.closeOthersConfirmTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {t('terminal.tab.closeOthersConfirmMessage', { count: closeOthersCount })}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseOthers}>
+              {t('common.close')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={closeToRightConfirm} onOpenChange={(o) => { if (!o) dismissCloseToRightConfirm(); }}>
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('terminal.tab.closeToRightConfirmTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {t('terminal.tab.closeToRightConfirmMessage', { count: closeToRightCount })}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseToRight}>
+              {t('common.close')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>,
     document.body,
   );

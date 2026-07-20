@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { TerminalContextMenu } from '../terminal-context-menu';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -137,14 +137,16 @@ describe('TerminalContextMenu', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('close removes only the target session and calls invokeCloseSession', async () => {
+  it('close dispatches a close-terminal-tab event and calls onClose', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
     const session = makeSession('s2', 'B');
 
-    const { invokeCloseSession } = await import('@/lib/tauri');
     const onClose = vi.fn();
+    const eventListener = vi.fn();
+    document.addEventListener('termbridge:close-terminal-tab', eventListener);
+
     render(
       <TerminalContextMenu
         open
@@ -157,11 +159,13 @@ describe('TerminalContextMenu', () => {
 
     fireEvent.click(screen.getByText('common.close'));
 
-    expect(
-      useTerminalStore.getState().sessions.map((s) => s.sessionId),
-    ).toEqual(['s1', 's3']);
-    expect(invokeCloseSession).toHaveBeenCalledWith('s2');
+    expect(eventListener).toHaveBeenCalledTimes(1);
+    expect((eventListener.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      sessionId: 's2',
+    });
     expect(onClose).toHaveBeenCalledTimes(1);
+
+    document.removeEventListener('termbridge:close-terminal-tab', eventListener);
   });
 
   it('close others leaves only the target session', () => {
@@ -182,6 +186,10 @@ describe('TerminalContextMenu', () => {
     );
 
     fireEvent.click(screen.getByText('terminal.tab.closeOthers'));
+
+    // Confirm via AlertDialog
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByText('common.close'));
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
@@ -209,6 +217,10 @@ describe('TerminalContextMenu', () => {
 
     fireEvent.click(screen.getByText('terminal.tab.closeOthers'));
 
+    // Confirm via AlertDialog
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByText('common.close'));
+
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
     ).toEqual(['s1', 's2']);
@@ -233,6 +245,10 @@ describe('TerminalContextMenu', () => {
     );
 
     fireEvent.click(screen.getByText('terminal.tab.closeToRight'));
+
+    // Confirm via AlertDialog
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByText('common.close'));
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
@@ -259,6 +275,10 @@ describe('TerminalContextMenu', () => {
     );
 
     fireEvent.click(screen.getByText('terminal.tab.closeToRight'));
+
+    // Confirm via AlertDialog
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByText('common.close'));
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),

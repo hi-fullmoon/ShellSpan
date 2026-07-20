@@ -327,8 +327,10 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   }, [activeSessionId, sessions.length]);
 
   useEffect(() => {
-    const handleCloseTabRequest = (): void => {
-      if (activeSessionId) setClosingSessionId(activeSessionId);
+    const handleCloseTabRequest = (e: Event): void => {
+      const detail = (e as CustomEvent<{ sessionId: string }>).detail;
+      const closeId = detail?.sessionId ?? activeSessionId;
+      if (closeId) setClosingSessionId(closeId);
     };
     document.addEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
     return () => document.removeEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);

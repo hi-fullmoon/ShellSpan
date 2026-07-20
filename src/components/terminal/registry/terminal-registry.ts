@@ -99,7 +99,7 @@ function playBellSound(): void {
 
 const TERMINAL_COLOR_SCHEMES: Record<TerminalColorScheme, NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme']> = {
   app: {
-    background: 'var(--app-surface)',
+    background: '#000000',
     foreground: 'var(--app-text)',
     cursor: 'var(--app-primary)',
   },
