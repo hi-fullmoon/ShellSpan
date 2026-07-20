@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Toaster } from '../sonner';
 import { useToastStore } from '@/stores/toastStore';
@@ -17,6 +17,18 @@ describe('Toaster', () => {
     expect(
       screen.getByRole('region', { name: 'Notifications alt+T' }),
     ).toBeInTheDocument();
+  });
+
+  it('top-aligns the icon for multiline toast content', async () => {
+    useToastStore.getState().addToast('First line\nSecond line', 'error', 3000);
+    render(<Toaster />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-icon]')).toHaveClass(
+        'mt-[3px]!',
+        'self-start!',
+      );
+    });
   });
 
   it('exposes toast store add/remove API', () => {
