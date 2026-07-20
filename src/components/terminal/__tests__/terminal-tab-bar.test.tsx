@@ -50,7 +50,7 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });
 
-  it('close button removes a session without activating the tab', () => {
+  it('close button asks for confirmation before removing a session', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setActiveSession('s2');
@@ -66,9 +66,23 @@ describe('TerminalTabBar', () => {
     expect(closeButtons[0]).toHaveAttribute('aria-label', 'close');
 
     fireEvent.click(closeButtons[0]);
+    // Session is kept until the dialog is confirmed
+    expect(useTerminalStore.getState().sessions.some((s) => s.sessionId === 's1')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     const state = useTerminalStore.getState();
     expect(state.sessions.some((s) => s.sessionId === 's1')).toBe(false);
     expect(state.activeSessionId).toBe('s2');
+  });
+
+  it('keeps the session when the close confirmation is cancelled', () => {
+    addSession('s1', 'A');
+    render(<TerminalTabBar />);
+
+    fireEvent.click(screen.getByLabelText('close'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
+    expect(useTerminalStore.getState().sessions.some((s) => s.sessionId === 's1')).toBe(true);
   });
 
   it('opens the context menu on right-click with session and coords', () => {
@@ -213,6 +227,7 @@ describe('TerminalTabBar', () => {
     const closeButtons = screen.getAllByLabelText('close');
     fireEvent.pointerDown(closeButtons[0], { clientX: 5, clientY: 5 });
     fireEvent.click(closeButtons[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
 
     const state = useTerminalStore.getState();
     expect(state.sessions.some((s) => s.sessionId === 's1')).toBe(false);
