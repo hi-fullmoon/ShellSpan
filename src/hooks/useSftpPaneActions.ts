@@ -5,6 +5,9 @@ import {
   invokeCopyRemoteToRemote,
   invokePickLocalFiles,
   invokePickLocalFolder,
+  invokeRenameLocalPath,
+  invokeTrashLocalPaths,
+  invokePasteLocalPaths,
 } from '@/lib/tauri';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { parentPortablePath } from '@/lib/path-utils';
@@ -42,6 +45,7 @@ export interface UseSftpPaneActionsResult {
   propertiesTarget?: FileEntry;
   previewContent?: ReadRemoteFileResponse;
   uploadConflict?: PendingUploadConflict;
+  hasLocalClipboard: boolean;
   onOpen: (entry: FileEntry) => void;
   onOpenWithDefaultEditor: (entry?: FileEntry) => Promise<void>;
   onPreview: (entry?: FileEntry) => Promise<void>;
@@ -147,6 +151,7 @@ export function useSftpPaneActions(
   const [propertiesTarget, setPropertiesTarget] = useState<FileEntry | undefined>(undefined);
   const [previewContent, setPreviewContent] = useState<ReadRemoteFileResponse | undefined>(undefined);
   const [uploadConflict, setUploadConflict] = useState<PendingUploadConflict | undefined>(undefined);
+  const [localClipboard, setLocalClipboard] = useState<FileEntry[]>([]);
 
   const selectedPaths = pane.selectedPaths;
   const selectedEntries = useMemo(
@@ -272,7 +277,13 @@ export function useSftpPaneActions(
 
   const onCopy = useCallback(
     (entry?: FileEntry) => {
-      if (isLocal) return;
+      if (isLocal) {
+        const targets = entry ? [entry] : selectedEntries;
+        if (!targets.length) return;
+        setLocalClipboard(targets);
+        success(`Copied ${targets.length} item(s)`);
+        return;
+      }
       const target = entry ?? selectedEntries[0];
       if (!target) return;
       setRemoteClipboard(connection.id, {
@@ -289,7 +300,23 @@ export function useSftpPaneActions(
   );
 
   const onPaste = useCallback(async () => {
-    if (isLocal || !connection.remoteClipboard) return;
+    if (isLocal) {
+      if (!localClipboard.length) return;
+      try {
+        await invokePasteLocalPaths(
+          localClipboard.map((entry) => entry.path),
+          path,
+          t('sftp.copySuffix'),
+        );
+        await reload();
+        clearSelection();
+      } catch (err) {
+        logger.warn('Local paste failed', err);
+        error(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+    if (!connection.remoteClipboard) return;
     try {
       if (connection.remoteClipboard.sourceConnectionKey === remoteConnectionKey) {
         await copyRemotePath(connection.remoteClipboard.sourcePath, path);
@@ -355,7 +382,7 @@ export function useSftpPaneActions(
       logger.warn('Paste failed', err);
       error(err instanceof Error ? err.message : String(err));
     }
-  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, reload, remoteConnection, remoteConnectionKey, error]);
+  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, reload, remoteConnection, remoteConnectionKey, t, error]);
 
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
@@ -443,24 +470,27 @@ export function useSftpPaneActions(
 
   const onRename = useCallback(
     (entry?: FileEntry) => {
-      if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target) return;
       setRenameTarget(target);
     },
-    [isLocal, selectedEntries],
+    [selectedEntries],
   );
 
   const handleRename = useCallback(
     async (newName: string) => {
-      if (isLocal || !renameTarget) return;
-      if (pathsAreBusy([renameTarget.path])) {
-        reportBusyPaths();
-        setRenameTarget(undefined);
-        return;
-      }
+      if (!renameTarget) return;
       try {
-        await renameRemotePath(renameTarget.path, newName);
+        if (isLocal) {
+          await invokeRenameLocalPath(renameTarget.path, newName);
+        } else {
+          if (pathsAreBusy([renameTarget.path])) {
+            reportBusyPaths();
+            setRenameTarget(undefined);
+            return;
+          }
+          await renameRemotePath(renameTarget.path, newName);
+        }
         await reload();
         clearSelection();
       } catch (err) {
@@ -475,9 +505,19 @@ export function useSftpPaneActions(
 
   const onDelete = useCallback(
     async (entriesToDelete?: FileEntry[]) => {
-      if (isLocal) return;
       const targets = entriesToDelete?.length ? entriesToDelete : selectedEntries;
       if (!targets.length) return;
+      if (isLocal) {
+        try {
+          await invokeTrashLocalPaths(targets.map((entry) => entry.path));
+          await reload();
+          clearSelection();
+        } catch (err) {
+          logger.warn('Failed to trash local paths', err);
+          error(err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
       if (pathsAreBusy(targets.map((entry) => entry.path))) {
         reportBusyPaths();
         return;
@@ -690,6 +730,7 @@ export function useSftpPaneActions(
     propertiesTarget,
     previewContent,
     uploadConflict,
+    hasLocalClipboard: localClipboard.length > 0,
     onOpen,
     onOpenWithDefaultEditor,
     onPreview,

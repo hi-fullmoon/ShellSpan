@@ -55,6 +55,7 @@ function createMockActions(): UseSftpPaneActionsResult {
     propertiesTarget: undefined,
     previewContent: undefined,
     uploadConflict: undefined,
+    hasLocalClipboard: false,
     onOpen: vi.fn(),
     onOpenWithDefaultEditor: vi.fn().mockResolvedValue(undefined),
     onPreview: vi.fn().mockResolvedValue(undefined),
