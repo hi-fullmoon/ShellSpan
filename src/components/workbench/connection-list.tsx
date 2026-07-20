@@ -4,8 +4,19 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { IconActionButton } from './icon-action-button';
+import { ManagementCard, ManagementCardIcon } from './management-card';
 import type { ConnectionProfile } from '@/types';
-import { MonitorIcon, PlusIcon, TerminalIcon, FolderIcon, PencilIcon, CopyIcon, Trash2Icon } from 'lucide-react';
+import {
+  CopyIcon,
+  FolderIcon,
+  MonitorIcon,
+  PencilIcon,
+  PlusIcon,
+  TerminalIcon,
+  Trash2Icon,
+} from 'lucide-react';
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];
@@ -53,12 +64,15 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
         <EmptyState
           title={t('workbench.connections.empty')}
           description={t('workbench.connections.emptyDescription')}
-          icon={
-            <MonitorIcon className="h-6 w-6" />
-          }
+          icon={<MonitorIcon className="size-6" />}
           action={
-            <Button variant="default" size="default" onClick={onAdd} data-icon="inline-start">
-              <PlusIcon />
+            <Button
+              variant="default"
+              size="default"
+              onClick={onAdd}
+              data-icon="inline-start"
+            >
+              <PlusIcon data-icon="inline-start" />
               {t('workbench.connections.new')}
             </Button>
           }
@@ -68,62 +82,65 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-app-text">
-            {t('workbench.connections.title')}
+    <TooltipProvider>
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-app-text">
+              {t('workbench.connections.title')}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {t('workbench.connections.count', {
+                count: filteredProfiles.length,
+                total: profiles.length,
+              })}
+            </div>
           </div>
-          <div className="text-[11px] text-muted-foreground">
-            {t('workbench.connections.count', {
-              count: filteredProfiles.length,
-              total: profiles.length,
-            })}
-          </div>
-        </div>
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          <div className="min-w-0 flex-1 sm:w-64">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('workbench.connections.searchPlaceholder')}
-              className="h-8"
-            />
-          </div>
-          <Button variant="default" size="sm" onClick={onAdd}>
-            {t('workbench.connections.new')}
-          </Button>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {filteredProfiles.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <EmptyState title={t('workbench.connections.filteredEmpty')} />
-          </div>
-        ) : (
-          <ResponsiveCardGrid
-            columns={1}
-            breakpoints={[
-              { minWidth: 800, columns: 2 },
-              { minWidth: 900, columns: 3 },
-            ]}
-          >
-            {filteredProfiles.map((profile) => (
-              <ConnectionCard
-                key={profile.id}
-                profile={profile}
-                onEdit={() => onEdit(profile)}
-                onDelete={() => onDelete(profile)}
-                onConnectTerminal={() => onConnectTerminal(profile)}
-                onConnectSftp={() => onConnectSftp(profile)}
-                onDuplicate={() => onDuplicate(profile)}
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <div className="min-w-0 flex-1 sm:w-64">
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('workbench.connections.searchPlaceholder')}
+                className="h-8"
               />
-            ))}
-          </ResponsiveCardGrid>
-        )}
+            </div>
+            <Button variant="default" size="sm" onClick={onAdd}>
+              {t('workbench.connections.new')}
+            </Button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {filteredProfiles.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <EmptyState title={t('workbench.connections.filteredEmpty')} />
+            </div>
+          ) : (
+            <ResponsiveCardGrid
+              columns={1}
+              breakpoints={[
+                { minWidth: 800, columns: 2 },
+                { minWidth: 900, columns: 3 },
+              ]}
+              gap="0.375rem"
+            >
+              {filteredProfiles.map((profile) => (
+                <ConnectionCard
+                  key={profile.id}
+                  profile={profile}
+                  onEdit={() => onEdit(profile)}
+                  onDelete={() => onDelete(profile)}
+                  onConnectTerminal={() => onConnectTerminal(profile)}
+                  onConnectSftp={() => onConnectSftp(profile)}
+                  onDuplicate={() => onDuplicate(profile)}
+                />
+              ))}
+            </ResponsiveCardGrid>
+          )}
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 };
 
@@ -147,12 +164,12 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   const { t } = useI18n();
 
   return (
-    <div className="group flex flex-col gap-3 rounded-[10px] border border-app-border bg-app-surface p-3 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]">
+    <ManagementCard>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary">
-            <MonitorIcon className="h-4 w-4" />
-          </div>
+          <ManagementCardIcon>
+            <MonitorIcon />
+          </ManagementCardIcon>
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-medium text-app-text">
               {profile.name}
@@ -187,48 +204,43 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
       )}
       <div className="flex flex-wrap items-center gap-1">
         <div className="flex flex-wrap items-center gap-1 sm:justify-end">
-          <Button
-            variant="ghost"
-            size="icon"
+          <IconActionButton
             onClick={onConnectTerminal}
             aria-label={t('workbench.connections.connectTerminal')}
+            tooltip={t('workbench.connections.connectTerminal')}
           >
-            <TerminalIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
+            <TerminalIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
             onClick={onConnectSftp}
             aria-label={t('workbench.connections.connectSftp')}
+            tooltip={t('workbench.connections.connectSftp')}
           >
-            <FolderIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
+            <FolderIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
             onClick={onEdit}
             aria-label={t('common.edit')}
+            tooltip={t('common.edit')}
           >
-            <PencilIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
+            <PencilIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
             onClick={onDuplicate}
             aria-label={t('common.duplicate')}
+            tooltip={t('common.duplicate')}
           >
-            <CopyIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
+            <CopyIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
             onClick={onDelete}
             aria-label={t('common.delete')}
+            tooltip={t('common.delete')}
           >
-            <Trash2Icon className="text-app-error" />
-          </Button>
+            <Trash2Icon data-icon="inline-start" className="text-app-error" />
+          </IconActionButton>
         </div>
       </div>
-    </div>
+    </ManagementCard>
   );
 };

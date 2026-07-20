@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, screen } from '@testing-library/react';
 import { ConnectionForm } from '../connection-form';
 import type { ConnectionProfile } from '@/types';
 
@@ -77,5 +77,31 @@ describe('ConnectionForm', () => {
     );
 
     expect(nameInput.value).toBe('Other Server');
+  });
+
+  it('keeps an existing keychain password when the field is left blank', () => {
+    const onSubmit = vi.fn();
+    const storedProfile: ConnectionProfile = {
+      ...profile,
+      password: undefined,
+      passwordStored: true,
+    };
+    render(
+      <ConnectionForm
+        open={true}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+        initial={storedProfile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ password: undefined }),
+    );
+    expect(
+      screen.queryByText('connection.form.validation.passwordRequired'),
+    ).not.toBeInTheDocument();
   });
 });
