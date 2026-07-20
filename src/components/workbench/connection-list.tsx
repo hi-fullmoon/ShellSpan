@@ -14,6 +14,7 @@ import {
   MonitorIcon,
   PencilIcon,
   PlusIcon,
+  SearchIcon,
   SearchXIcon,
   TerminalIcon,
   Trash2Icon,
@@ -96,12 +97,13 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
             </div>
           </div>
           <div className="flex w-full items-center gap-2 sm:w-auto">
-            <div className="min-w-0 flex-1 sm:w-64">
+            <div className="relative min-w-0 flex-1 sm:w-64">
+              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.connections.searchPlaceholder')}
-                className="h-8"
+                className="h-8 pl-7"
               />
             </div>
             <Button variant="default" size="sm" onClick={onAdd}>
