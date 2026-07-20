@@ -111,7 +111,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       }}
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
-        active ? 'h-9 bg-app-surface text-app-text shadow-md' : 'h-[35px] bg-app-border/25 text-app-text-soft',
+        active ? 'h-9 bg-app-surface text-app-text' : 'h-[35px] bg-app-border/25 text-app-text-soft',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80' : 'cursor-pointer',
       )}
       style={
