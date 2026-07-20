@@ -452,7 +452,7 @@ export default {
   'terminal.pasteWarning.description': 'You are about to paste {lines} lines and {characters} characters. The content may run immediately.',
   'terminal.pasteWarning.confirm': 'Paste anyway',
   'app.exitConfirm.title': 'Quit TermBridge?',
-  'app.exitConfirm.description': 'Sessions or file transfers are still active. Quitting will interrupt them.',
+  'app.exitConfirm.description': 'Are you sure you want to quit TermBridge? Any sessions and file transfers will be interrupted.',
   'app.exitConfirm.confirm': 'Quit',
   'app.errorBoundary.title': 'Something went wrong',
   'app.errorBoundary.description': 'The page failed to render. Try again first, or reload the app if the problem continues.',
