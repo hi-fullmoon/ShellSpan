@@ -31,7 +31,7 @@ vi.mock('@/lib/tauri', () => ({
   })),
 }));
 
-vi.mock('@/lib/passwordPrompt', () => ({
+vi.mock('@/lib/password-prompt', () => ({
   promptForMissingPassword: vi.fn(
     (profile) => Promise.resolve({ ...profile, password: 'mock-pass' }),
   ),

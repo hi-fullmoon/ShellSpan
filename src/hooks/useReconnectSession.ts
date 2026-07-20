@@ -7,7 +7,7 @@ import {
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import { promptForMissingPassword } from '@/lib/passwordPrompt';
+import { promptForMissingPassword } from '@/lib/password-prompt';
 
 const logger = createLogger('reconnect');
 

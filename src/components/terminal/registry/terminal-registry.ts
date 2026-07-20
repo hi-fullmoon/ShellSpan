@@ -244,14 +244,12 @@ class TerminalControllerImpl implements TerminalController {
     if (shouldReconnectFromInput(status, data)) {
       if (!this.reconnectRequestedRef) {
         this.reconnectRequestedRef = true;
-        this.writeSystemLine(
-          formatTerminalNoticeLine(
-            t('terminal.notice.reconnectingLabel'),
-            t('terminal.notice.reconnectingMessage'),
-            '36',
-          ),
-        );
-        this.requestReconnect(this.sessionId);
+        // The password dialog (if needed) or the ReconnectingIndicator/Ui
+        // provides immediate feedback, so we skip writing a system line here.
+        Promise.resolve(this.requestReconnect(this.sessionId)).finally(() => {
+          if (this.disposed) return;
+          this.reconnectRequestedRef = false;
+        });
       }
       return;
     }

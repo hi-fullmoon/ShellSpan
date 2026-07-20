@@ -11,7 +11,7 @@ import {
 } from '@/lib/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
-import { promptForMissingPassword } from '@/lib/passwordPrompt';
+import { promptForMissingPassword } from '@/lib/password-prompt';
 
 interface HostKeyDialogState {
   open: boolean;
