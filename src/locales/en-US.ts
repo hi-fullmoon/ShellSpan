@@ -105,6 +105,7 @@ export default {
   'workbench.logs.empty': 'No log files',
   'workbench.logs.noMatches': 'No logs match the current filters',
   'workbench.logs.autoScroll': 'Auto scroll',
+  'workbench.logs.scrollToBottom': 'Scroll to bottom',
   'workbench.logs.date': 'Date',
   'workbench.logs.today': 'Today',
   'workbench.logs.last3days': 'Last 3 Days',

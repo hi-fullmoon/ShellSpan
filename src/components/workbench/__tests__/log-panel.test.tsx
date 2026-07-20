@@ -16,6 +16,7 @@ vi.mock('@/hooks/useToast', () => ({
 const loadFiles = vi.fn().mockResolvedValue(undefined);
 const loadFile = vi.fn().mockResolvedValue(undefined);
 const refreshActiveFile = vi.fn().mockResolvedValue(undefined);
+const scrollToIndex = vi.fn();
 const defaultContent =
   'first complete log line\nsecond complete log line\nthird complete log line';
 let mockContent = defaultContent;
@@ -51,7 +52,7 @@ vi.mock('@tanstack/react-virtual', () => ({
       })),
     getTotalSize: () => count * 18,
     measureElement: vi.fn(),
-    scrollToIndex: vi.fn(),
+    scrollToIndex,
   }),
 }));
 
@@ -151,6 +152,48 @@ describe('LogPanel', () => {
     expect(
       screen.getAllByRole('button', { name: 'workbench.logs.all' })[1],
     ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('uses a stable hover target for the auto-scroll tooltip', () => {
+    render(<LogPanel />);
+
+    const autoScrollSwitch = screen.getByRole('switch', {
+      name: 'workbench.logs.autoScroll',
+    });
+    const tooltipTrigger = autoScrollSwitch.parentElement;
+
+    expect(tooltipTrigger).toHaveAttribute('data-slot', 'tooltip-trigger');
+    expect(tooltipTrigger).toHaveClass('h-7');
+    expect(tooltipTrigger).not.toHaveClass('size-7');
+    expect(autoScrollSwitch).toHaveClass('after:hidden');
+  });
+
+  it('shows a floating button away from the bottom and scrolls to the last log line', () => {
+    render(<LogPanel />);
+
+    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    expect(viewport).not.toBeNull();
+    Object.defineProperties(viewport as HTMLElement, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 100 },
+    });
+
+    fireEvent.scroll(viewport as HTMLElement);
+
+    const scrollButton = screen.getByRole('button', {
+      name: 'workbench.logs.scrollToBottom',
+    });
+    scrollToIndex.mockClear();
+    fireEvent.click(scrollButton);
+
+    expect(scrollToIndex).toHaveBeenCalledWith(2, {
+      align: 'end',
+      behavior: 'smooth',
+    });
+    expect(screen.queryByRole('button', {
+      name: 'workbench.logs.scrollToBottom',
+    })).not.toBeInTheDocument();
   });
 
 });

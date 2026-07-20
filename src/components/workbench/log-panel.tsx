@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
+  ArrowDownToLineIcon,
   DownloadIcon,
   FileSearchIcon,
   RefreshCwIcon,
@@ -266,6 +267,7 @@ export const LogPanel: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
   const [query, setQuery] = useState('');
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const parsedLines = useMemo(() => parseLogContent(content), [content]);
@@ -315,6 +317,28 @@ export const LogPanel: React.FC = () => {
     overscan: 20,
   });
 
+  const updateIsAtBottom = useCallback((): void => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    setIsAtBottom(distanceFromBottom <= 8);
+  }, []);
+
+  useEffect(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+
+    viewport.addEventListener('scroll', updateIsAtBottom, { passive: true });
+    updateIsAtBottom();
+    return () => viewport.removeEventListener('scroll', updateIsAtBottom);
+  }, [updateIsAtBottom]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(updateIsAtBottom);
+    return () => cancelAnimationFrame(frame);
+  }, [filteredLines.length, updateIsAtBottom]);
+
   useEffect(() => {
     loadFiles();
   }, [loadFiles]);
@@ -352,6 +376,15 @@ export const LogPanel: React.FC = () => {
       virtualizer.scrollToIndex(filteredLines.length - 1, { align: 'end' });
     }
   }, [filteredLines.length, autoScroll, virtualizer]);
+
+  const handleScrollToBottom = (): void => {
+    if (filteredLines.length === 0) return;
+    virtualizer.scrollToIndex(filteredLines.length - 1, {
+      align: 'end',
+      behavior: 'smooth',
+    });
+    setIsAtBottom(true);
+  };
 
   const handleRefresh = (): void => {
     void loadFiles().then(() => {
@@ -407,15 +440,16 @@ export const LogPanel: React.FC = () => {
             </div>
             <Tooltip>
               <TooltipTrigger
-                render={
-                  <Switch
-                    size="sm"
-                    checked={autoScroll}
-                    onCheckedChange={setAutoScroll}
-                    aria-label={t('workbench.logs.autoScroll')}
-                  />
-                }
-              />
+                render={<span className="inline-flex h-7 items-center justify-center" />}
+              >
+                <Switch
+                  size="sm"
+                  checked={autoScroll}
+                  onCheckedChange={setAutoScroll}
+                  aria-label={t('workbench.logs.autoScroll')}
+                  className="after:hidden"
+                />
+              </TooltipTrigger>
               <TooltipContent>{t('workbench.logs.autoScroll')}</TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -566,6 +600,24 @@ export const LogPanel: React.FC = () => {
             )}
           </div>
         </ScrollArea>
+        {!isAtBottom && filteredLines.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="absolute bottom-3 right-4 z-10 size-8 rounded-full border border-app-border shadow-md"
+                  aria-label={t('workbench.logs.scrollToBottom')}
+                  onClick={handleScrollToBottom}
+                />
+              }
+            >
+              <ArrowDownToLineIcon />
+            </TooltipTrigger>
+            <TooltipContent>{t('workbench.logs.scrollToBottom')}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
       <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-app-border px-3 text-[11px] text-muted-foreground">
         <div className="flex min-w-0 items-center gap-2">
