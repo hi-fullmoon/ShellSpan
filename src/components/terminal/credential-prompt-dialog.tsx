@@ -63,10 +63,10 @@ export const CredentialPromptDialog: React.FC = () => {
                 autoFocus
               />
             </div>
-            <label className="flex items-center gap-2 text-xs text-app-text-soft cursor-pointer select-none">
+            <Label className="flex items-center gap-2 cursor-pointer text-xs text-app-text-soft">
               <Checkbox checked={remember} onCheckedChange={(checked) => setRemember(Boolean(checked))} />
               {t('dialog.credentialPrompt.rememberPassword')}
-            </label>
+            </Label>
           </div>
         </CompactDialogBody>
         <CompactDialogFooter>
