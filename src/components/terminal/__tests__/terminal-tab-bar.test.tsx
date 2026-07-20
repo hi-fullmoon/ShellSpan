@@ -50,6 +50,22 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });
 
+  it('shows separators only between tabs that are not adjacent to the active tab', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    addSession('s4', 'D');
+    useTerminalStore.getState().setActiveSession('s2');
+
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs[0].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+    expect(tabs[1].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+    expect(tabs[2].querySelector('[data-tab-separator]')).toBeInTheDocument();
+    expect(tabs[3].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+  });
+
   it('close button asks for confirmation before removing a session', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
@@ -364,7 +380,7 @@ describe('TerminalTabBar', () => {
 
     const tab = screen.getByRole('tab');
     expect(tab.style.backgroundColor).toBe(
-      'color-mix(in srgb, rgb(239, 68, 68) 15%, transparent)',
+      'color-mix(in srgb, rgb(239, 68, 68) 20%, transparent)',
     );
   });
 
