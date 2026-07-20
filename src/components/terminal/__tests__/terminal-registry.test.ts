@@ -69,14 +69,18 @@ describe('terminalRegistry', () => {
     expect(controller.terminal.buffer.active.length).toBeGreaterThan(0);
   });
 
-  it('applies the color scheme background to the xterm owner element', () => {
+  it('applies the color scheme background to the xterm owner and viewport', () => {
     const controller = createController('s1');
     controller.attach(document.createElement('div'));
 
     const terminalElement = controller.terminal.element;
+    const viewport = terminalElement?.querySelector<HTMLElement>('.xterm-viewport');
     expect(terminalElement).not.toBeNull();
+    expect(viewport).not.toBeNull();
     expect(terminalElement).toHaveClass('terminal', 'xterm');
     expect(terminalElement).toHaveStyle({ backgroundColor: 'var(--app-surface)' });
+    expect(viewport).toHaveStyle({ backgroundColor: 'var(--app-surface)' });
+    expect(terminalElement).toHaveStyle({ width: '100%', height: '100%' });
 
     terminalRegistry.updateOptions({
       fontSize: 14,
@@ -93,6 +97,7 @@ describe('terminalRegistry', () => {
     });
 
     expect(terminalElement?.style.backgroundColor).toBe('rgb(40, 44, 52)');
+    expect(viewport?.style.backgroundColor).toBe('rgb(40, 44, 52)');
   });
 
   it('detach keeps buffer intact; reattach to a different host preserves buffer', () => {
