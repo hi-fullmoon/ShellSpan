@@ -427,8 +427,9 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>((
           </div>
         )}
         {loading && entries.length === 0 && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-app-surface">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
             <Spinner />
+            <span className="text-xs text-app-text-soft">{t('common.loading')}</span>
           </div>
         )}
         {error && (
