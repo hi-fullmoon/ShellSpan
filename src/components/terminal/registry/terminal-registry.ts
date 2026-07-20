@@ -267,6 +267,18 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
+  private updateElementBackground(): void {
+    const element = this.terminal.element;
+    if (!element) return;
+
+    const background = TERMINAL_COLOR_SCHEMES[this.preferences.colorScheme]?.background;
+    if (background) {
+      element.style.backgroundColor = background;
+    } else {
+      element.style.removeProperty('background-color');
+    }
+  }
+
   private writeSystemLine(line: string): void {
     if (this.disposed) return;
     this.terminal.writeln(line);
@@ -422,6 +434,7 @@ class TerminalControllerImpl implements TerminalController {
       try {
         this.terminal.open(this.container);
         this.opened = true;
+        this.updateElementBackground();
       } catch {
         // jsdom: open() may fail when host is detached. xterm buffers
         // writes before open(), so write() still accumulates buffer.
@@ -508,6 +521,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.options.cursorStyle = preferences.cursorStyle;
     this.terminal.options.scrollback = preferences.scrollback;
     this.terminal.options.theme = TERMINAL_COLOR_SCHEMES[preferences.colorScheme];
+    this.updateElementBackground();
     this.terminal.options.lineHeight = preferences.lineHeight;
     this.terminal.options.letterSpacing = preferences.letterSpacing;
     this.updateLinkProvider();

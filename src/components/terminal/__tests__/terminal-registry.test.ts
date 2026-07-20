@@ -69,6 +69,32 @@ describe('terminalRegistry', () => {
     expect(controller.terminal.buffer.active.length).toBeGreaterThan(0);
   });
 
+  it('applies the color scheme background to the xterm owner element', () => {
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+
+    const terminalElement = controller.terminal.element;
+    expect(terminalElement).not.toBeNull();
+    expect(terminalElement).toHaveClass('terminal', 'xterm');
+    expect(terminalElement).toHaveStyle({ backgroundColor: 'var(--app-surface)' });
+
+    terminalRegistry.updateOptions({
+      fontSize: 14,
+      fontFamily: 'system',
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      colorScheme: 'oneDark',
+      autoReconnect: false,
+      lineHeight: 1,
+      letterSpacing: 0,
+      urlDetection: true,
+      bellStyle: 'none',
+    });
+
+    expect(terminalElement?.style.backgroundColor).toBe('rgb(40, 44, 52)');
+  });
+
   it('detach keeps buffer intact; reattach to a different host preserves buffer', () => {
     const controller = createController('s1');
     const host1 = document.createElement('div');
