@@ -120,6 +120,10 @@ export const SettingsPanel: React.FC = () => {
   const setSftpDownloadDirectory = useAppStore((state) => state.setSftpDownloadDirectory);
   const sftpCompletionNotification = useAppStore((state) => state.sftpCompletionNotification);
   const setSftpCompletionNotification = useAppStore((state) => state.setSftpCompletionNotification);
+  const terminalHideSingleTabBar = useAppStore((state) => state.terminalHideSingleTabBar);
+  const setTerminalHideSingleTabBar = useAppStore((state) => state.setTerminalHideSingleTabBar);
+  const sftpHideSingleTabBar = useAppStore((state) => state.sftpHideSingleTabBar);
+  const setSftpHideSingleTabBar = useAppStore((state) => state.setSftpHideSingleTabBar);
   const shortcuts = useAppStore((state) => state.shortcuts);
   const setShortcut = useAppStore((state) => state.setShortcut);
   const resetShortcut = useAppStore((state) => state.resetShortcut);
@@ -222,6 +226,61 @@ export const SettingsPanel: React.FC = () => {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                </SettingRow>
+              </CardContent>
+            </Card>
+
+            <Card size="sm" className="rounded-lg">
+              <CardHeader>
+                <div className="flex items-start gap-2.5">
+                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Settings2Icon />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <CardTitle>{t('settings.general.title')}</CardTitle>
+                    <CardDescription>{t('settings.general.description')}</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Separator />
+                <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
+                  <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
+                    <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
+                      <SelectValue>{t(`settings.general.startupSection.${startupSection}`)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {(['workbench', 'terminal', 'sftp'] as const).map((section) => (
+                          <SelectItem key={section} value={section}>
+                            {t(`settings.general.startupSection.${section}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </SettingRow>
+                <Separator />
+                <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
+                  <div className="flex justify-end">
+                    <Switch
+                      aria-label={t('settings.general.startupUpdateCheck')}
+                      checked={startupUpdateCheck}
+                      onCheckedChange={setStartupUpdateCheck}
+                    />
+                  </div>
+                </SettingRow>
+                <Separator />
+                <SettingRow label={t('settings.general.confirmBeforeExit')} description={t('settings.general.confirmBeforeExitDescription')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.general.confirmBeforeExit')} checked={confirmBeforeExit} onCheckedChange={setConfirmBeforeExit} />
+                  </div>
+                </SettingRow>
+                <Separator />
+                <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
+                  </div>
                 </SettingRow>
               </CardContent>
             </Card>
@@ -471,59 +530,17 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-              </CardContent>
-            </Card>
-
-            <Card size="sm" className="rounded-lg">
-              <CardHeader>
-                <div className="flex items-start gap-2.5">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <Settings2Icon />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <CardTitle>{t('settings.general.title')}</CardTitle>
-                    <CardDescription>{t('settings.general.description')}</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
                 <Separator />
-                <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
-                  <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
-                      <SelectValue>{t(`settings.general.startupSection.${startupSection}`)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {(['workbench', 'terminal', 'sftp'] as const).map((section) => (
-                          <SelectItem key={section} value={section}>
-                            {t(`settings.general.startupSection.${section}`)}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </SettingRow>
-                <Separator />
-                <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
+                <SettingRow
+                  label={t('settings.terminal.hideSingleTabBar')}
+                  description={t('settings.terminal.hideSingleTabBarDescription')}
+                >
                   <div className="flex justify-end">
                     <Switch
-                      aria-label={t('settings.general.startupUpdateCheck')}
-                      checked={startupUpdateCheck}
-                      onCheckedChange={setStartupUpdateCheck}
+                      aria-label={t('settings.terminal.hideSingleTabBar')}
+                      checked={terminalHideSingleTabBar}
+                      onCheckedChange={setTerminalHideSingleTabBar}
                     />
-                  </div>
-                </SettingRow>
-                <Separator />
-                <SettingRow label={t('settings.general.confirmBeforeExit')} description={t('settings.general.confirmBeforeExitDescription')}>
-                  <div className="flex justify-end">
-                    <Switch aria-label={t('settings.general.confirmBeforeExit')} checked={confirmBeforeExit} onCheckedChange={setConfirmBeforeExit} />
-                  </div>
-                </SettingRow>
-                <Separator />
-                <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
-                  <div className="flex justify-end">
-                    <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
                   </div>
                 </SettingRow>
               </CardContent>
@@ -618,6 +635,19 @@ export const SettingsPanel: React.FC = () => {
                       aria-label={t('settings.sftp.completionNotification')}
                       checked={sftpCompletionNotification}
                       onCheckedChange={setSftpCompletionNotification}
+                    />
+                  </div>
+                </SettingRow>
+                <Separator />
+                <SettingRow
+                  label={t('settings.sftp.hideSingleTabBar')}
+                  description={t('settings.sftp.hideSingleTabBarDescription')}
+                >
+                  <div className="flex justify-end">
+                    <Switch
+                      aria-label={t('settings.sftp.hideSingleTabBar')}
+                      checked={sftpHideSingleTabBar}
+                      onCheckedChange={setSftpHideSingleTabBar}
                     />
                   </div>
                 </SettingRow>

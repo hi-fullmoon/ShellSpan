@@ -5,14 +5,13 @@ import {
   invokeCloseSession,
   invokeCreateSession,
 } from '@/lib/tauri';
-import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { promptForMissingPassword } from '@/lib/passwordPrompt';
 
 const logger = createLogger('reconnect');
 
 export function useReconnectSession(): (sessionId: string) => Promise<void> {
-  const ensurePassword = useProfileStore((state) => state.ensurePassword);
   const getProfile = useProfileStore((state) => state.getProfile);
   const reconnectSession = useTerminalStore((state) => state.reconnectSession);
   const setReconnecting = useTerminalStore((state) => state.setReconnecting);
@@ -31,7 +30,12 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
       return;
     }
 
-    const profileWithPassword = await ensurePassword(profile);
+    const profileWithPassword = await promptForMissingPassword(profile);
+    if (!profileWithPassword) {
+      logger.info(`Reconnect cancelled by user for session ${sessionId}`);
+      return;
+    }
+
     setReconnecting(sessionId, true);
     logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
     try {

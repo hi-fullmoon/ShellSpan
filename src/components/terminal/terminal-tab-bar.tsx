@@ -15,6 +15,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
+import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
@@ -286,6 +287,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
 
 export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, onTabContextMenu }) => {
   const { t } = useI18n();
+  const terminalHideSingleTabBar = useAppStore((state) => state.terminalHideSingleTabBar);
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
@@ -464,8 +466,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
     ? sessions.filter((session) => session.sessionId !== draggingSessionId)
     : sessions;
 
+  const shouldHide = sessions.length === 1 && terminalHideSingleTabBar;
+
   return (
-    <div className="flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0">
+    <div
+      className={cn(
+        'flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0',
+        shouldHide && 'h-0 overflow-hidden',
+      )}
+    >
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

@@ -345,6 +345,10 @@ export default {
   'dialog.hostKey.fingerprint': '指纹',
   'dialog.hostKey.trustAndConnect': '信任并连接',
 
+  'dialog.credentialPrompt.title': '请输入密码',
+  'dialog.credentialPrompt.description': '输入 {username}@{host} 的登录密码',
+  'dialog.credentialPrompt.rememberPassword': '保存到系统钥匙串',
+
   'settings.appearance.title': '外观',
   'settings.description': '按你的习惯调整 TermBridge 的外观、行为与操作方式。',
   'settings.appearance.description': '选择界面主题和显示语言。',
@@ -441,6 +445,8 @@ export default {
   'settings.terminal.largePasteWarningDescription': '粘贴超过 5 KB 的文本前显示确认。',
   'settings.terminal.autoReconnect': '断线自动重连',
   'settings.terminal.autoReconnectDescription': '网络异常断开后自动尝试重连一次。',
+  'settings.terminal.hideSingleTabBar': '单个标签时隐藏标签栏',
+  'settings.terminal.hideSingleTabBarDescription': '仅打开一个终端标签时隐藏标签栏。',
   'settings.sftp.conflictPolicy': '同名文件处理',
   'settings.sftp.conflictPolicyDescription': '拖放或上传遇到同名项目时使用的默认操作。',
   'settings.sftp.conflictPolicy.ask': '每次询问',
@@ -455,6 +461,8 @@ export default {
   'settings.sftp.downloadDirectoryClear': '恢复为每次询问',
   'settings.sftp.completionNotification': '传输完成提醒',
   'settings.sftp.completionNotificationDescription': '应用不在前台时，在传输完成后显示提醒。',
+  'settings.sftp.hideSingleTabBar': '单个标签时隐藏标签栏',
+  'settings.sftp.hideSingleTabBarDescription': '仅打开一个 SFTP 标签时隐藏标签栏。',
   'terminal.pasteWarning.title': '确认粘贴到终端？',
   'terminal.pasteWarning.description': '即将粘贴 {lines} 行、{characters} 个字符。粘贴后内容可能立即执行。',
   'terminal.pasteWarning.confirm': '仍然粘贴',

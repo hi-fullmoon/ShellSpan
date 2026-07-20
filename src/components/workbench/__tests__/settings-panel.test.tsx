@@ -53,7 +53,7 @@ describe('SettingsPanel', () => {
     expect(
       screen.getByText('settings.general.startupUpdateCheck'),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(12);
+    expect(screen.getAllByRole('switch')).toHaveLength(14);
   });
 
   it('renders when persisted shortcuts come from an older version', () => {

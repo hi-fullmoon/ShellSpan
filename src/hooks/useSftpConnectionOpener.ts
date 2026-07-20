@@ -6,11 +6,11 @@ import {
 } from '@/lib/tauri';
 import { generateId } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
-import { useProfileStore } from '@/stores/profileStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile } from '@/types';
+import { promptForMissingPassword } from '@/lib/passwordPrompt';
 
 interface SftpHostKeyDialogState {
   open: boolean;
@@ -35,7 +35,6 @@ export function useSftpConnectionOpener(): {
   hostKeyDialog: SftpHostKeyDialogState;
   closeHostKeyDialog: () => void;
 } {
-  const ensurePassword = useProfileStore((state) => state.ensurePassword);
   const addConnection = useSftpStore((state) => state.addConnection);
   const attachRemoteConnection = useSftpStore((state) => state.attachRemoteConnection);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
@@ -111,7 +110,10 @@ export function useSftpConnectionOpener(): {
 
   const open = useCallback(
     async (profile: ConnectionProfile, targetConnectionId?: string, targetSide: SftpSide = 'remote') => {
-      const profileWithPassword = await ensurePassword(profile);
+      const profileWithPassword = await promptForMissingPassword(profile);
+      if (!profileWithPassword) {
+        return;
+      }
 
       // The current host-key probe opens a direct TCP connection. Jump-host
       // sessions are still verified by the backend while establishing SFTP.
@@ -126,7 +128,7 @@ export function useSftpConnectionOpener(): {
         () => finishOpen(profileWithPassword, targetConnectionId, targetSide),
       );
     },
-    [ensurePassword, finishOpen, verifyHostKey],
+    [finishOpen, verifyHostKey],
   );
 
   const closeHostKeyDialog = (): void => {
