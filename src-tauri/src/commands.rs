@@ -683,6 +683,20 @@ pub(crate) async fn copy_local_paths(
 }
 
 #[tauri::command]
+pub(crate) async fn rename_local_path(path: String, new_name: String) -> Result<(), String> {
+    info!("Renaming local path path={path} new_name={new_name}");
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::rename_local_path_blocking(path, new_name)
+    })
+    .await
+    .map_err(|error| format!("failed to join rename local path task: {error}"))?;
+    if let Err(error) = &result {
+        warn!("Rename local path failed: {error}");
+    }
+    result
+}
+
+#[tauri::command]
 pub(crate) fn cancel_upload(
     uploads: State<'_, UploadCancellationRegistry>,
     operation_id: String,
