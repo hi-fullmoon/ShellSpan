@@ -175,11 +175,11 @@ export default {
   'terminal.notice.reconnectingLabel': 'Reconnecting',
   'terminal.notice.reconnectingMessage': 'Please wait...',
   'terminal.notice.hintLabel': 'Hint',
-  'terminal.notice.disconnectedHint': 'Session disconnected. Press Enter to reconnect.',
+  'terminal.notice.disconnectedHint': 'Session disconnected. Press Enter to reconnect',
   'terminal.notice.closedLabel': 'Session closed',
-  'terminal.notice.pressEnterReconnect': 'Press Enter to reconnect.',
+  'terminal.notice.pressEnterReconnect': 'Press Enter to reconnect',
   'terminal.notice.writeFailedLabel': 'Write failed',
-  'terminal.notice.writeFailedMessage': 'Input is currently blocked.',
+  'terminal.notice.writeFailedMessage': 'Input is currently blocked',
 
   'sftp.newTab': 'New SFTP',
   'sftp.empty': 'No SFTP connections',
@@ -332,7 +332,8 @@ export default {
 
   'update.restartDialog.title': 'New version downloaded',
   'update.restartDialog.description': 'Version {version} is ready. Restart the app to finish installation.',
-  'update.restartDialog.activeSessionWarning': 'Restarting will interrupt the current SSH sessions. Make sure any remote work can be safely interrupted first.',
+  'update.restartDialog.activeSessionWarning':
+    'Restarting will interrupt the current SSH sessions. Make sure any remote work can be safely interrupted first.',
   'update.restartDialog.later': 'Later',
   'update.restartDialog.installNow': 'Restart and Install',
 
