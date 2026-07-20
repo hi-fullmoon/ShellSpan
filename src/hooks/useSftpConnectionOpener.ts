@@ -10,7 +10,7 @@ import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile } from '@/types';
-import { promptForMissingPassword } from '@/lib/passwordPrompt';
+import { promptForMissingPassword } from '@/lib/password-prompt';
 
 interface SftpHostKeyDialogState {
   open: boolean;
