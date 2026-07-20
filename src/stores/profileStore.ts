@@ -32,8 +32,14 @@ export const useProfileStore = create<ProfileState>()(
       addProfile: async (profile) => {
         const id = generateId();
         const now = Date.now();
+        const passwordStored = Boolean(profile.password);
+        if (profile.password) {
+          await invokeStorePassword(id, profile.password);
+        }
         const newProfile: ConnectionProfile = {
           ...profile,
+          password: undefined,
+          passwordStored,
           id,
           createdAt: now,
           updatedAt: now,
@@ -41,20 +47,28 @@ export const useProfileStore = create<ProfileState>()(
         set((state) => ({
           profiles: [...state.profiles, newProfile],
         }));
-        if (newProfile.password) {
-          await invokeStorePassword(id, newProfile.password);
-          set((state) => ({
-            profiles: state.profiles.map((p) =>
-              p.id === id
-                ? { ...p, password: undefined, passwordStored: true }
-                : p,
-            ),
-          }));
-        }
-        return get().profiles.find((p) => p.id === id)!;
+        return newProfile;
       },
       updateProfile: async (id, updates) => {
+        const current = get().profiles.find((profile) => profile.id === id);
+        if (!current) return;
         const password = updates.password;
+        const nextAuthMethod = updates.authMethod ?? current.authMethod;
+        let passwordStored = current.passwordStored ?? Boolean(current.password);
+
+        if (password !== undefined) {
+          if (password) {
+            await invokeStorePassword(id, password);
+            passwordStored = true;
+          } else {
+            await invokeRemovePassword(id);
+            passwordStored = false;
+          }
+        } else if (nextAuthMethod !== 'password' && passwordStored) {
+          await invokeRemovePassword(id);
+          passwordStored = false;
+        }
+
         set((state) => ({
           profiles: state.profiles.map((p) =>
             p.id === id
@@ -64,30 +78,18 @@ export const useProfileStore = create<ProfileState>()(
                   id: p.id,
                   createdAt: p.createdAt,
                   updatedAt: Date.now(),
-                  password:
-                    password !== undefined ? undefined : p.password,
+                  password: undefined,
+                  passwordStored,
                 }
               : p,
           ),
         }));
-        if (password !== undefined) {
-          if (password) {
-            await invokeStorePassword(id, password);
-          } else {
-            await invokeRemovePassword(id);
-          }
-          set((state) => ({
-            profiles: state.profiles.map((p) =>
-              p.id === id ? { ...p, passwordStored: Boolean(password) } : p,
-            ),
-          }));
-        }
       },
       removeProfile: async (id) => {
+        await invokeRemovePassword(id);
         set((state) => ({
           profiles: state.profiles.filter((p) => p.id !== id),
         }));
-        await invokeRemovePassword(id);
         useRecentProfilesStore.getState().removeProfile(id);
       },
       duplicateProfile: async (id) => {
@@ -101,26 +103,23 @@ export const useProfileStore = create<ProfileState>()(
           passwordStored: _passwordStored,
           ...rest
         } = original;
+        const duplicateId = generateId();
+        const password = await invokeRetrievePassword(id);
+        if (password) {
+          await invokeStorePassword(duplicateId, password);
+        }
         const duplicate: ConnectionProfile = {
           ...rest,
-          id: generateId(),
+          id: duplicateId,
           name: `${name} (copy)`,
-          passwordStored: false,
+          password: undefined,
+          passwordStored: Boolean(password),
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
         set((state) => ({
           profiles: [...state.profiles, duplicate],
         }));
-        const password = await invokeRetrievePassword(id);
-        if (password) {
-          await invokeStorePassword(duplicate.id, password);
-          set((state) => ({
-            profiles: state.profiles.map((p) =>
-              p.id === duplicate.id ? { ...p, passwordStored: true } : p,
-            ),
-          }));
-        }
       },
       removeStoredPassword: async (id) => {
         await invokeRemovePassword(id);
