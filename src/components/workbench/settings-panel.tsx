@@ -10,6 +10,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
@@ -182,7 +183,7 @@ export const SettingsPanel: React.FC = () => {
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex max-w-3xl flex-col gap-2 p-2">
             <Card size="sm" className="rounded-lg">
               <CardHeader>
@@ -714,7 +715,7 @@ export const SettingsPanel: React.FC = () => {
               </CardContent>
             </Card>
           </div>
-        </div>
+        </ScrollArea>
 
         <Dialog
           open={editingAction !== null}

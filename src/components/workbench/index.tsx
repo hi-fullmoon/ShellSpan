@@ -22,6 +22,9 @@ const Workbench: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ConnectionProfile | undefined>();
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
+  const [initialValues, setInitialValues] = useState<
+    { host: string; port: string } | undefined
+  >();
   const { connect, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
   const {
     open: openSftpConnection,
@@ -35,13 +38,22 @@ const Workbench: React.FC = () => {
   const removeProfile = useProfileStore((state) => state.removeProfile);
   const duplicateProfile = useProfileStore((state) => state.duplicateProfile);
 
+  const handleCreateFromKnownHost = (host: string, port: number): void => {
+    setEditing(undefined);
+    setInitialValues({ host, port: String(port) });
+    setActiveTab('connections');
+    setFormOpen(true);
+  };
+
   const handleAdd = (): void => {
     setEditing(undefined);
+    setInitialValues(undefined);
     setFormOpen(true);
   };
 
   const handleEdit = (profile: ConnectionProfile): void => {
     setEditing(profile);
+    setInitialValues(undefined);
     setFormOpen(true);
   };
 
@@ -99,7 +111,9 @@ const Workbench: React.FC = () => {
               onDuplicate={handleDuplicate}
             />
           )}
-          {activeTab === 'knownHosts' && <KnownHostsPanel />}
+          {activeTab === 'knownHosts' && (
+            <KnownHostsPanel onCreateConnection={handleCreateFromKnownHost} />
+          )}
           {activeTab === 'credentials' && (
             <CredentialsPanel />
           )}
@@ -114,6 +128,7 @@ const Workbench: React.FC = () => {
         onSubmit={handleSubmit}
         onConnect={handleSubmitAndConnect}
         initial={editing}
+        initialValues={initialValues}
       />
 
       <AlertDialog open={!!deleting} onOpenChange={(open) => { if (!open) setDeleting(undefined); }}>

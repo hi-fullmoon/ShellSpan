@@ -27,6 +27,8 @@ export interface ConnectionFormProps {
   onSubmit: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onConnect?: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void;
   initial?: ConnectionProfile;
+  /** Partial pre-fill values (e.g. host + port from a known-host entry). */
+  initialValues?: Pick<FormState, 'host' | 'port'>;
 }
 
 interface FormState {
@@ -84,6 +86,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   onSubmit,
   onConnect,
   initial,
+  initialValues,
 }) => {
   const { t } = useI18n();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -91,10 +94,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
 
   useEffect(() => {
     if (open) {
-      setForm(initial ? profileToForm(initial) : EMPTY_FORM);
+      if (initial) {
+        setForm(profileToForm(initial));
+      } else if (initialValues) {
+        setForm({ ...EMPTY_FORM, ...initialValues });
+      } else {
+        setForm(EMPTY_FORM);
+      }
       setErrors({});
     }
-  }, [initial, open]);
+  }, [initial, initialValues, open]);
 
   const updateField = <K extends keyof FormState>(
     key: K,

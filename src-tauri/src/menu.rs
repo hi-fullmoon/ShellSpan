@@ -139,6 +139,10 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
         }
 
         if menu_id == TRAY_QUIT_ID {
+            // Bring the main window to the front so the quit confirmation dialog is visible.
+            if let Err(error) = show_main_window(app) {
+                error!("failed to show main window for app-exit event: {error}");
+            }
             if let Err(error) = emit_system_request_app_exit(app) {
                 error!("failed to handle app-exit menu event: {error}");
             }
