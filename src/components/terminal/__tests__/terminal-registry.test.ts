@@ -36,6 +36,7 @@ function createController(sessionId: string) {
 describe('terminalRegistry', () => {
   beforeEach(() => {
     terminalRegistry.disposeAll();
+    terminalRegistry.updateOptions({ fontSize: 14, cursorBlink: true, scrollback: 10000 });
     vi.clearAllMocks();
   });
 
@@ -129,6 +130,24 @@ describe('terminalRegistry', () => {
       controller.dispose();
       controller.dispose();
     }).not.toThrow();
+  });
+
+  it('applies display preferences to current and future terminals', () => {
+    const existing = createController('s1');
+    terminalRegistry.updateOptions({ fontSize: 16, cursorBlink: false, scrollback: 5000 });
+
+    expect(existing.terminal.options).toMatchObject({
+      fontSize: 16,
+      cursorBlink: false,
+      scrollback: 5000,
+    });
+
+    const future = createController('s2');
+    expect(future.terminal.options).toMatchObject({
+      fontSize: 16,
+      cursorBlink: false,
+      scrollback: 5000,
+    });
   });
 
   it('writes connected input to the session', async () => {

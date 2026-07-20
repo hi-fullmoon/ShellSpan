@@ -1,11 +1,23 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AppSection, Locale, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, ShortcutAction, ShortcutBindings, ThemeMode, WorkbenchTab } from '@/types';
+
+export const DEFAULT_SHORTCUTS: ShortcutBindings = {
+  openWorkbench: 'mod+1',
+  openTerminal: 'mod+2',
+  openSftp: 'mod+3',
+  openSettings: 'mod+,',
+};
 
 interface AppPreferences {
   theme: ThemeMode;
   locale: Locale;
   startupUpdateCheck: boolean;
+  terminalFontSize: number;
+  terminalCursorBlink: boolean;
+  terminalCopyOnSelect: boolean;
+  terminalScrollback: number;
+  shortcuts: ShortcutBindings;
 }
 
 interface AppState extends AppPreferences {
@@ -16,6 +28,13 @@ interface AppState extends AppPreferences {
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
+  setTerminalFontSize: (fontSize: number) => void;
+  setTerminalCursorBlink: (enabled: boolean) => void;
+  setTerminalCopyOnSelect: (enabled: boolean) => void;
+  setTerminalScrollback: (lines: number) => void;
+  setShortcut: (action: ShortcutAction, shortcut: string) => void;
+  resetShortcut: (action: ShortcutAction) => void;
+  resetShortcuts: () => void;
 }
 
 const STORAGE_KEY = 'termbridge.preferences';
@@ -29,6 +48,11 @@ function readInitialPreferences(): AppPreferences {
         theme: parsed.theme ?? 'system',
         locale: parsed.locale ?? 'zh-CN',
         startupUpdateCheck: parsed.startupUpdateCheck ?? true,
+        terminalFontSize: parsed.terminalFontSize ?? 14,
+        terminalCursorBlink: parsed.terminalCursorBlink ?? true,
+        terminalCopyOnSelect: parsed.terminalCopyOnSelect ?? true,
+        terminalScrollback: parsed.terminalScrollback ?? 10000,
+        shortcuts: { ...DEFAULT_SHORTCUTS, ...parsed.shortcuts },
       };
     }
   } catch {
@@ -38,6 +62,11 @@ function readInitialPreferences(): AppPreferences {
     theme: 'system',
     locale: 'zh-CN',
     startupUpdateCheck: true,
+    terminalFontSize: 14,
+    terminalCursorBlink: true,
+    terminalCopyOnSelect: true,
+    terminalScrollback: 10000,
+    shortcuts: DEFAULT_SHORTCUTS,
   };
 }
 
@@ -54,6 +83,17 @@ export const useAppStore = create<AppState>()(
       setTheme: (theme) => set({ theme }),
       setLocale: (locale) => set({ locale }),
       setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
+      setTerminalFontSize: (terminalFontSize) => set({ terminalFontSize }),
+      setTerminalCursorBlink: (terminalCursorBlink) => set({ terminalCursorBlink }),
+      setTerminalCopyOnSelect: (terminalCopyOnSelect) => set({ terminalCopyOnSelect }),
+      setTerminalScrollback: (terminalScrollback) => set({ terminalScrollback }),
+      setShortcut: (action, shortcut) =>
+        set((state) => ({ shortcuts: { ...state.shortcuts, [action]: shortcut } })),
+      resetShortcut: (action) =>
+        set((state) => ({
+          shortcuts: { ...state.shortcuts, [action]: DEFAULT_SHORTCUTS[action] },
+        })),
+      resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
     }),
     {
       name: STORAGE_KEY,
@@ -61,6 +101,11 @@ export const useAppStore = create<AppState>()(
         theme: state.theme,
         locale: state.locale,
         startupUpdateCheck: state.startupUpdateCheck,
+        terminalFontSize: state.terminalFontSize,
+        terminalCursorBlink: state.terminalCursorBlink,
+        terminalCopyOnSelect: state.terminalCopyOnSelect,
+        terminalScrollback: state.terminalScrollback,
+        shortcuts: state.shortcuts,
       }),
     },
   ),

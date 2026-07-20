@@ -20,6 +20,7 @@ import { AboutDialog } from '@/components/about-dialog';
 import { UpdateRestartDialog } from '@/components/update-restart-dialog';
 import { useUpdateFlow } from '@/hooks/useUpdateFlow';
 import { createLogger } from '@/lib/logger';
+import { useAppShortcuts } from '@/hooks/useAppShortcuts';
 
 const logger = createLogger('app');
 
@@ -27,6 +28,7 @@ export const App: React.FC = () => {
   useDisableContextMenu();
   useTheme();
   useTransferListeners();
+  useAppShortcuts();
 
   const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
 

@@ -9,6 +9,7 @@ import type { TerminalSession as TerminalSessionState } from '@/stores/terminalS
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/stores/appStore';
 import { ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 
 const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
@@ -42,6 +43,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   const paneRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const { success, error: showError } = useToast();
+  const copyOnSelect = useAppStore((state) => state.terminalCopyOnSelect);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -132,6 +134,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
     });
 
     const selectionDisposable = terminal.onSelectionChange(() => {
+      if (!copyOnSelect) return;
       const selection = terminal.getSelection();
       if (!selection) return;
       void navigator.clipboard
@@ -159,7 +162,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t]);
+  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, success, showError, t, copyOnSelect]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">

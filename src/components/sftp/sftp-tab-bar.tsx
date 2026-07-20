@@ -90,7 +90,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       }}
       className={cn(
         'group relative flex h-9 w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
-        active ? 'bg-app-surface text-app-text shadow-sm' : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        active ? 'bg-app-surface text-app-text shadow-md' : 'bg-app-border/40 text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
@@ -100,7 +100,6 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       {showDropIndicatorRight && (
         <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
       )}
-      {active && <div data-testid="tab-active-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-app-primary" />}
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="min-w-0 flex-1">
@@ -131,7 +130,12 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <strong className="block flex-1 truncate text-left text-xs font-medium leading-none">
+            <strong
+              className={cn(
+                'block flex-1 truncate text-left text-xs leading-none',
+                active ? 'font-semibold' : 'font-medium',
+              )}
+            >
               {connection.title}
             </strong>
           </div>

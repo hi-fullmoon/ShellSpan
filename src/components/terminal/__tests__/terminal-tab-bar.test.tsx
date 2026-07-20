@@ -217,6 +217,99 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s3');
   });
 
+  it('keeps a pinned tab pinned when reordered within the pinned region', async () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    useTerminalStore.getState().togglePin('s1');
+    useTerminalStore.getState().togglePin('s2');
+
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    const setRect = (el: HTMLElement, left: number, width: number): void => {
+      el.getBoundingClientRect = vi.fn(() => ({
+        left,
+        right: left + width,
+        top: 0,
+        bottom: 24,
+        x: left,
+        y: 0,
+        width,
+        height: 24,
+        toJSON: () => ({}),
+      }));
+    };
+    setRect(tabs[0], 0, 100);
+    setRect(tabs[1], 100, 100);
+    setRect(tabs[2], 200, 100);
+
+    await act(async () => {
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
+      fireEvent.pointerMove(document, { clientX: 180, clientY: 10 });
+    });
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 180, clientY: 10 });
+    });
+
+    const state = useTerminalStore.getState();
+    expect(state.sessions.map((s) => s.sessionId)).toEqual(['s2', 's1', 's3']);
+    expect(state.sessions.find((s) => s.sessionId === 's1')?.pinned).toBe(true);
+  });
+
+  it('unpins a pinned tab when dropped into the unpinned region', async () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    useTerminalStore.getState().togglePin('s1');
+    useTerminalStore.getState().togglePin('s2');
+
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    const setRect = (el: HTMLElement, left: number, width: number): void => {
+      el.getBoundingClientRect = vi.fn(() => ({
+        left,
+        right: left + width,
+        top: 0,
+        bottom: 24,
+        x: left,
+        y: 0,
+        width,
+        height: 24,
+        toJSON: () => ({}),
+      }));
+    };
+    setRect(tabs[0], 0, 100);
+    setRect(tabs[1], 100, 100);
+    setRect(tabs[2], 200, 100);
+
+    await act(async () => {
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
+      fireEvent.pointerMove(document, { clientX: 260, clientY: 10 });
+    });
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 260, clientY: 10 });
+    });
+
+    const state = useTerminalStore.getState();
+    expect(state.sessions.map((s) => s.sessionId)).toEqual(['s2', 's3', 's1']);
+    expect(state.sessions.find((s) => s.sessionId === 's1')?.pinned).toBe(false);
+    expect(state.sessions.find((s) => s.sessionId === 's2')?.pinned).toBe(true);
+  });
+
   it('does not initiate a drag when clicking the close button (pointerDown stopped)', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
@@ -262,7 +355,7 @@ describe('TerminalTabBar', () => {
     expect(screen.queryByLabelText('unpin')).not.toBeInTheDocument();
   });
 
-  it('renders a colored bottom border on the active tab when the session has a color', () => {
+  it('renders the session color as the background on the active tab', () => {
     addSession('s1', 'A');
     useTerminalStore.getState().setTabColor('s1', '#ef4444');
     useTerminalStore.getState().setActiveSession('s1');
@@ -270,13 +363,9 @@ describe('TerminalTabBar', () => {
     render(<TerminalTabBar />);
 
     const tab = screen.getByRole('tab');
-    expect(tab).not.toHaveStyle({ borderLeftColor: '#ef4444' });
     expect(tab.style.backgroundColor).toBe(
       'color-mix(in srgb, rgb(239, 68, 68) 15%, transparent)',
     );
-
-    const indicator = screen.getByTestId('tab-active-indicator');
-    expect(indicator).toHaveStyle({ backgroundColor: '#ef4444' });
   });
 
   it('renders the session color as the background on an inactive tab', () => {

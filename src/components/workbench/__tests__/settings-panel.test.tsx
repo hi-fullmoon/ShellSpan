@@ -19,7 +19,7 @@ vi.mock('@/hooks/useTheme', () => ({
 }));
 
 describe('SettingsPanel', () => {
-  it('renders appearance and general sections', () => {
+  it('renders appearance, terminal, general, and shortcut sections', () => {
     render(<SettingsPanel />);
 
     expect(screen.getByText('workbench.settings.title')).toBeInTheDocument();
@@ -27,9 +27,21 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('settings.appearance.theme')).toBeInTheDocument();
     expect(screen.getByText('settings.appearance.language')).toBeInTheDocument();
     expect(screen.getByText('settings.general.title')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.title')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.fontSize')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.cursorBlink')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.copyOnSelect')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.scrollback')).toBeInTheDocument();
+    expect(screen.getByText('settings.shortcuts.title')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'settings.appearance.theme' }),
+    ).toHaveTextContent('theme.system');
+    expect(
+      screen.getByRole('combobox', { name: 'settings.appearance.language' }),
+    ).toHaveTextContent('locale.zh-CN');
     expect(
       screen.getByText('settings.general.startupUpdateCheck'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('switch')).toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(3);
   });
 });
