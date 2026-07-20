@@ -22,11 +22,20 @@ const defaultContent =
 let mockContent = defaultContent;
 let mockFiles: { name: string; size: number; modifiedAt: number }[] = [];
 let mockActiveFileName: string | undefined = 'termbridge.log';
+let mockActiveSource: 'frontend' | 'backend' = 'frontend';
+const setActiveSource = vi.fn();
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string, variables?: Record<string, string | number>) =>
-      variables?.count === undefined ? key : `${key}:${variables.count}`,
+    t: (key: string, variables?: Record<string, string | number>) => {
+      if (variables?.count !== undefined) {
+        return `${key}:${variables.count}`;
+      }
+      if (variables?.source !== undefined) {
+        return `${key}:${variables.source}`;
+      }
+      return key;
+    },
   }),
 }));
 
@@ -34,11 +43,13 @@ vi.mock('@/stores/logStore', () => ({
   useLogStore: () => ({
     files: mockFiles,
     activeFileName: mockActiveFileName,
+    activeSource: mockActiveSource,
     content: mockContent,
     loading: false,
     loadFiles,
     loadFile,
     refreshActiveFile,
+    setActiveSource,
   }),
 }));
 
@@ -65,6 +76,7 @@ describe('LogPanel', () => {
     mockContent = defaultContent;
     mockFiles = [];
     mockActiveFileName = 'termbridge.log';
+    mockActiveSource = 'frontend';
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText },
@@ -196,4 +208,34 @@ describe('LogPanel', () => {
     })).not.toBeInTheDocument();
   });
 
+  it('renders the source switcher next to the title', () => {
+    render(<LogPanel />);
+
+    expect(
+      screen.getByRole('button', { name: 'workbench.logs.frontend' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      screen.getByRole('button', { name: 'workbench.logs.backend' }),
+    ).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('switches the active log source', () => {
+    render(<LogPanel />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'workbench.logs.backend' }),
+    );
+
+    expect(setActiveSource).toHaveBeenCalledWith('backend');
+  });
+
+  it('shows the current source in the empty state description', () => {
+    mockActiveFileName = undefined;
+    mockContent = '';
+    render(<LogPanel />);
+
+    expect(
+      screen.getByText('workbench.logs.emptyDescription:workbench.logs.frontend'),
+    ).toBeInTheDocument();
+  });
 });
