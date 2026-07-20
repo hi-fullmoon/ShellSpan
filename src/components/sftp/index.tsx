@@ -200,6 +200,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   const { error } = useToast();
   const setPaneState = useSftpStore((state) => state.setPaneState);
   const setPaneLocal = useSftpStore((state) => state.setPaneLocal);
+  const setSplitRatio = useSftpStore((state) => state.setSplitRatio);
   const addLocalConnection = useSftpStore((state) => state.addLocalConnection);
   const addTransferOperation = useTransferStore((state) => state.addOperation);
   const markTransferRunning = useTransferStore((state) => state.markOperationRunning);
@@ -534,6 +535,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         />
         <div className="flex-1 min-h-0">
           <SplitPane
+            minWidth={500}
+            split={connection.splitRatio}
+            onSplitChange={(ratio) => setSplitRatio(connection.id, ratio)}
             left={
               <SftpPane
                 ref={leftPaneRef}

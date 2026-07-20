@@ -6,15 +6,37 @@ export interface SplitPaneProps {
   right: React.ReactNode;
   minWidth?: number;
   defaultSplit?: number;
+  split?: number;
+  onSplitChange?: (split: number) => void;
   className?: string;
 }
 
-export const SplitPane: React.FC<SplitPaneProps> = ({ left, right, minWidth = 240, defaultSplit = 0.5, className }) => {
+export const SplitPane: React.FC<SplitPaneProps> = ({
+  left,
+  right,
+  minWidth = 240,
+  defaultSplit = 0.5,
+  split: controlledSplit,
+  onSplitChange,
+  className,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [split, setSplit] = useState(defaultSplit);
+  const [internalSplit, setInternalSplit] = useState(defaultSplit);
+  const split = controlledSplit ?? internalSplit;
   const [dragging, setDragging] = useState(false);
   const [suppressGroup, setSuppressGroup] = useState(false);
   const draggingRef = useRef(false);
+
+  const setSplit = useCallback(
+    (next: number) => {
+      if (onSplitChange) {
+        onSplitChange(next);
+      } else {
+        setInternalSplit(next);
+      }
+    },
+    [onSplitChange],
+  );
 
   const handleMouseDown = useCallback(() => {
     draggingRef.current = true;
@@ -42,7 +64,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({ left, right, minWidth = 24
       const nextSplit = Math.min(Math.max(x / width, minWidth / width), 1 - minWidth / width);
       setSplit(nextSplit);
     },
-    [minWidth],
+    [minWidth, setSplit],
   );
 
   React.useEffect(() => {
