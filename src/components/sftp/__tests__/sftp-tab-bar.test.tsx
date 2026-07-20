@@ -65,7 +65,7 @@ describe('SftpTabBar', () => {
     expect(useSftpStore.getState().activeConnectionId).toBe(idB);
   });
 
-  it('closes a tab when close button is clicked', async () => {
+  it('closes a tab after confirming in the dialog', async () => {
     addConnection('Conn A');
     render(
       <SftpTabBar
@@ -75,7 +75,24 @@ describe('SftpTabBar', () => {
     );
     const closeButton = screen.getByRole('button', { name: 'close' });
     await userEvent.click(closeButton);
+    // Connection is kept until the dialog is confirmed
+    expect(useSftpStore.getState().connections).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'common.close' }));
     expect(useSftpStore.getState().connections).toHaveLength(0);
+  });
+
+  it('keeps the tab when the close confirmation is cancelled', async () => {
+    addConnection('Conn A');
+    render(
+      <SftpTabBar
+        onNewTabClick={vi.fn()}
+        onTabContextMenu={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'close' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    expect(useSftpStore.getState().connections).toHaveLength(1);
   });
 
   it('renders a compact pin icon for pinned tabs', () => {

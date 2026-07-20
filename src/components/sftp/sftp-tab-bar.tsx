@@ -19,6 +19,16 @@ import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface SftpTabBarProps {
   onNewTabClick?: () => void;
@@ -248,6 +258,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [renamingConnectionId, setRenamingConnectionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [closingConnectionId, setClosingConnectionId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -375,7 +386,20 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     setRenameValue('');
   };
 
+  const handleCloseConnection = (id: string): void => {
+    setClosingConnectionId(id);
+  };
+
+  const confirmCloseConnection = (): void => {
+    if (closingConnectionId) {
+      removeConnection(closingConnectionId);
+    }
+    setClosingConnectionId(null);
+  };
+
   const draggingConnection = draggingConnectionId ? (connections.find((c) => c.id === draggingConnectionId) ?? null) : null;
+
+  const closingConnection = closingConnectionId ? (connections.find((c) => c.id === closingConnectionId) ?? null) : null;
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
 
@@ -412,7 +436,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                   active={activeConnectionId === connection.id}
                   onActivate={setActiveConnection}
                   onContextMenu={(conn, x, y) => onTabContextMenu?.(conn, x, y)}
-                  onClose={removeConnection}
+                  onClose={handleCloseConnection}
                   onTogglePin={togglePin}
                   renaming={renamingConnectionId === connection.id}
                   renameValue={renameValue}
@@ -457,6 +481,39 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           <PlusIcon />
         </Button>
       )}
+      <AlertDialog
+        open={!!closingConnectionId}
+        onOpenChange={(open) => {
+          if (!open) setClosingConnectionId(null);
+        }}
+      >
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('sftp.tab.closeConfirmTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {closingConnection
+                ? t('sftp.tab.closeConfirmMessage', { title: closingConnection.title })
+                : ''}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm">
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              size="sm"
+              onClick={confirmCloseConnection}
+            >
+              {t('common.close')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
