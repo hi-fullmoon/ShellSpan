@@ -1,15 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/stores/appStore';
+import { applyTheme, resolveTheme } from '@/lib/theme';
 import type { ThemeMode } from '@/types';
-
-function resolveTheme(mode: ThemeMode): 'light' | 'dark' {
-  if (mode === 'system') {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light';
-  }
-  return mode;
-}
 
 export function useTheme(): {
   theme: ThemeMode;
@@ -17,21 +9,23 @@ export function useTheme(): {
   setTheme: (theme: ThemeMode) => void;
 } {
   const theme = useAppStore((state) => state.theme);
-  const setTheme = useAppStore((state) => state.setTheme);
+  const setThemeStore = useAppStore((state) => state.setTheme);
   const resolvedTheme = useMemo(() => resolveTheme(theme), [theme]);
+  const setTheme = useCallback((nextTheme: ThemeMode): void => {
+    // Apply synchronously so the next browser paint already uses the new theme.
+    applyTheme(nextTheme);
+    setThemeStore(nextTheme);
+  }, [setThemeStore]);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', resolvedTheme);
-    document.documentElement.style.backgroundColor = 'var(--app-bg)';
-  }, [resolvedTheme]);
+    applyTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     if (theme !== 'system') return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = (): void => {
-      const next = media.matches ? 'dark' : 'light';
-      document.documentElement.setAttribute('data-theme', next);
-      document.documentElement.style.backgroundColor = 'var(--app-bg)';
+      applyTheme('system');
     };
     media.addEventListener('change', handler);
     return () => media.removeEventListener('change', handler);

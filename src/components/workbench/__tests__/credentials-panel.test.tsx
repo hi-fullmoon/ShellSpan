@@ -9,11 +9,13 @@ const {
   invokeClearCredentialCache,
   invokeRemovePassword,
   invokeRetrievePassword,
+  invokeUpdateProfile,
 } = vi.hoisted(() => ({
   invokeListCachedCredentialProfileIds: vi.fn(),
   invokeClearCredentialCache: vi.fn(),
   invokeRemovePassword: vi.fn(),
   invokeRetrievePassword: vi.fn(),
+  invokeUpdateProfile: vi.fn(),
 }));
 
 vi.mock('@/lib/tauri', () => ({
@@ -22,6 +24,7 @@ vi.mock('@/lib/tauri', () => ({
   invokeRemovePassword,
   invokeRetrievePassword,
   invokeStorePassword: vi.fn(),
+  invokeUpdateProfile,
 }));
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -59,6 +62,7 @@ describe('CredentialsPanel', () => {
     invokeClearCredentialCache.mockResolvedValue(undefined);
     invokeRemovePassword.mockResolvedValue(undefined);
     invokeRetrievePassword.mockResolvedValue('super-secret');
+    invokeUpdateProfile.mockResolvedValue(undefined);
     useProfileStore.setState(initialProfileState, true);
     useProfileStore.setState({ profiles: [savedProfile, unsavedProfile] });
   });
