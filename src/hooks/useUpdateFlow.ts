@@ -41,6 +41,7 @@ export function useUpdateFlow({
     undefined,
   );
   const [restartDialogDismissed, setRestartDialogDismissed] = useState(false);
+  const checkingRef = useRef(false);
 
   const runUpdateCheck = useCallback(
     async (mode: 'startup' | 'manual') => {
@@ -52,9 +53,6 @@ export function useUpdateFlow({
       }
 
       if (mode === 'manual') {
-        if (updateState.phase === 'checking') {
-          return;
-        }
         if (updateState.phase === 'downloading') {
           toast.info(t('update.downloading'));
           return;
@@ -65,6 +63,13 @@ export function useUpdateFlow({
         }
       }
 
+      // Synchronous guard: prevents concurrent calls before React state updates.
+      // Keep this after the phase checks so manual checks still provide feedback.
+      if (checkingRef.current) {
+        return;
+      }
+
+      checkingRef.current = true;
       dispatchUpdateState({ type: 'checkStarted' });
       setUpdateDownloadProgress(undefined);
 
@@ -115,6 +120,8 @@ export function useUpdateFlow({
         if (mode === 'manual') {
           toast.error(message);
         }
+      } finally {
+        checkingRef.current = false;
       }
     },
     [t, toast, updateState.phase],

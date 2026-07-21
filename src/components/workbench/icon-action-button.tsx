@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -11,19 +11,41 @@ interface IconActionButtonProps extends React.ComponentProps<typeof Button> {
   tooltip: React.ReactNode;
 }
 
+/**
+ * Icon button wrapped in a tooltip.
+ *
+ * Uses a ref-based guard to prevent double-firing when the click event
+ * is processed by both the inner Button and the wrapping TooltipTrigger.
+ */
 export const IconActionButton: React.FC<IconActionButtonProps> = ({
   tooltip,
   children,
   className,
   disabled,
+  onClick,
   ...props
 }) => {
+  const clickGuardRef = useRef(false);
+
+  const handleClick = useCallback(
+    (e: Parameters<NonNullable<typeof onClick>>[0]) => {
+      if (clickGuardRef.current) return;
+      clickGuardRef.current = true;
+      onClick?.(e);
+      setTimeout(() => {
+        clickGuardRef.current = false;
+      }, 0);
+    },
+    [onClick],
+  );
+
   const button = (
     <Button
       variant="ghost"
       size="icon"
       className={cn(className)}
       disabled={disabled}
+      onClick={handleClick}
       {...props}
     >
       {children}

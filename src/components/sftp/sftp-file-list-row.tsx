@@ -102,6 +102,12 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
 
   const handleClick = (e: React.MouseEvent): void => {
     e.preventDefault();
+    // On the second click of a double-click sequence (detail=2), skip the
+    // single-click action and let handleDoubleClick take over. This prevents
+    // onSelect from firing twice before onDoubleClick.
+    if (e.detail === 2) {
+      return;
+    }
     onSelect(entry, e);
   };
 

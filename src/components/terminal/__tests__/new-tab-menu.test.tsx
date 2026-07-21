@@ -79,6 +79,22 @@ describe('NewTabMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('connects only once when a profile row is double-clicked', () => {
+    const profile = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
+    useProfileStore.setState({ profiles: [profile] });
+
+    const onClose = vi.fn();
+    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+
+    const row = screen.getByRole('button', { name: 'Alpha' });
+    fireEvent.click(row, { detail: 1 });
+    fireEvent.click(row, { detail: 2 });
+
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(mockConnect).toHaveBeenCalledWith(profile);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('shows recent profiles first when recentIds exist', () => {
     const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
     const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
