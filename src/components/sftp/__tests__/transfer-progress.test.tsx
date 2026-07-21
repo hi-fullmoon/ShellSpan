@@ -68,7 +68,7 @@ describe('TransferProgress', () => {
     );
   });
 
-  it('uses a thin progress track for active transfers', () => {
+  it('uses a 3px progress track aligned to the bottom edge for active transfers', () => {
     useTransferStore.setState({
       operations: [{ ...failedUpload, status: 'running' }],
     });
@@ -76,7 +76,7 @@ describe('TransferProgress', () => {
 
     expect(
       document.body.querySelector('[data-slot="transfer-progress-track"]'),
-    ).toHaveClass('h-0.5');
+    ).toHaveClass('bottom-0', 'h-[3px]');
   });
 
   it('cancels an active download from its task row', async () => {
