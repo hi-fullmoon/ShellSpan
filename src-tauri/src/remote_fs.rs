@@ -2291,19 +2291,76 @@ fn upload_regular_file_atomically(
             ));
         }
 
-        let rename_flags = if allow_overwrite {
-            RenameFlags::OVERWRITE | RenameFlags::ATOMIC | RenameFlags::NATIVE
-        } else {
-            RenameFlags::ATOMIC | RenameFlags::NATIVE
-        };
-        sftp.rename(&temporary_path, remote_path, Some(rename_flags))
-            .map_err(|error| format!("failed to finalize remote upload: {error}"))
+        commit_remote_upload(sftp, &temporary_path, remote_path, allow_overwrite)
     })();
 
     if upload_result.is_err() {
         let _ = sftp.unlink(&temporary_path);
     }
     upload_result
+}
+
+fn commit_remote_upload(
+    sftp: &Sftp,
+    temporary_path: &Path,
+    remote_path: &Path,
+    allow_overwrite: bool,
+) -> Result<(), String> {
+    if !allow_overwrite || !remote_path_exists(sftp, remote_path) {
+        return sftp
+            .rename(
+                temporary_path,
+                remote_path,
+                Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+            )
+            .map_err(|error| format!("failed to finalize remote upload: {error}"));
+    }
+
+    // Most SFTP servers negotiate protocol v3. That version has no overwrite
+    // flag on SSH_FXP_RENAME, so libssh2 cannot send RenameFlags::OVERWRITE and
+    // an attempted rename over an existing file commonly returns SFTP failure.
+    // Preserve the old target first, then restore it if committing the upload
+    // fails. Both moves stay on the same remote filesystem.
+    let backup_path = temporary_upload_backup_path(temporary_path)?;
+    sftp.rename(
+        remote_path,
+        &backup_path,
+        Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+    )
+    .map_err(|error| format!("failed to preserve remote upload target: {error}"))?;
+
+    if let Err(error) = sftp.rename(
+        temporary_path,
+        remote_path,
+        Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+    ) {
+        return match sftp.rename(
+            &backup_path,
+            remote_path,
+            Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
+        ) {
+            Ok(()) => Err(format!("failed to finalize remote upload: {error}")),
+            Err(restore_error) => Err(format!(
+                "failed to finalize remote upload: {error}; the previous file remains at {} because it could not be restored: {restore_error}",
+                backup_path.display()
+            )),
+        };
+    }
+
+    if let Err(error) = sftp.unlink(&backup_path) {
+        warn!(
+            "failed to clean remote upload backup path={}: {error}",
+            backup_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn temporary_upload_backup_path(temporary_path: &Path) -> Result<PathBuf, String> {
+    let parent = temporary_path
+        .parent()
+        .ok_or_else(|| "unable to resolve remote upload staging directory".to_string())?;
+    Ok(parent.join(format!("backup-{}.part", Uuid::new_v4())))
 }
 
 fn temporary_upload_path(remote_path: &Path) -> Result<PathBuf, String> {
@@ -2594,6 +2651,18 @@ mod tests {
             .unwrap()
             .ends_with(TERM_BRIDGE_UPLOAD_SUFFIX));
         assert_ne!(temporary, Path::new("/srv/files/report.txt"));
+    }
+
+    #[test]
+    fn temporary_upload_backup_stays_in_upload_directory() {
+        let temporary = Path::new("/srv/files/.termbridge/upload/upload-id.part");
+        let backup = temporary_upload_backup_path(temporary).expect("temporary upload backup");
+
+        assert_eq!(backup.parent(), temporary.parent());
+        let name = backup.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("backup-"));
+        assert!(name.ends_with(TERM_BRIDGE_UPLOAD_SUFFIX));
+        assert_ne!(backup, temporary);
     }
 
     #[test]
