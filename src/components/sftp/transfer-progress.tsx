@@ -196,7 +196,7 @@ export const TransferProgress: React.FC = () => {
               !isTransferComplete(op) && (
               <div
                 data-slot="transfer-progress-track"
-                className="absolute inset-x-2 bottom-1 h-0.5 overflow-hidden rounded-full bg-app-surface-muted"
+                className="absolute inset-x-2 bottom-0 h-[3px] overflow-hidden rounded-full bg-app-surface-muted"
               >
                 <div
                   className="h-full bg-app-primary transition-all"
