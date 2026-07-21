@@ -16,6 +16,11 @@ export interface TerminalSession {
   reconnecting?: boolean;
 }
 
+export type TerminalWorkspaceSession = Pick<
+  TerminalSession,
+  'title' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color'
+>;
+
 const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
   const pinned = sessions.filter((session) => session.pinned);
   const unpinned = sessions.filter((session) => !session.pinned);
@@ -26,7 +31,7 @@ interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
   addSession: (summary: SessionSummary, profileId?: string) => void;
-  addRestoredSessions: (sessions: Array<Omit<TerminalSession, 'status' | 'sessionId'>>) => void;
+  addRestoredSessions: (sessions: TerminalWorkspaceSession[]) => void;
   removeSession: (sessionId: string) => void;
   reconnectSession: (
     oldSessionId: string,

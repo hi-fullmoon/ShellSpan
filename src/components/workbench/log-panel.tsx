@@ -633,19 +633,6 @@ export const LogPanel: React.FC = () => {
           </Tooltip>
         )}
       </div>
-      <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-app-border px-3 text-[11px] text-muted-foreground">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0">
-            {t('workbench.logs.lineCount', {
-              count: filteredLines.length,
-              total: parsedLines.length,
-            })}
-          </span>
-        </div>
-        <span className="hidden shrink-0 sm:block">
-          {t('workbench.logs.copyHint')}
-        </span>
-      </div>
     </div>
     </TooltipProvider>
   );

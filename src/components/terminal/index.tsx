@@ -11,6 +11,14 @@ import { TerminalPane } from './terminal-pane';
 import { NewTabMenu } from './new-tab-menu';
 import { TerminalContextMenu } from './terminal-context-menu';
 import { HostKeyDialog } from './host-key-dialog';
+import {
+  invokeClearTerminalWorkspace,
+  invokeSaveTerminalWorkspace,
+} from '@/lib/tauri';
+import { serializeTerminalWorkspace } from '@/lib/terminal-workspace';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('terminalWorkspace');
 
 const Terminal: React.FC = () => {
   const { t } = useI18n();
@@ -18,10 +26,7 @@ const Terminal: React.FC = () => {
   const activeSessionId = useTerminalStore((s) => s.activeSessionId);
   const activeSession =
     sessions.find((s) => s.sessionId === activeSessionId) ?? null;
-  const addRestoredSessions = useTerminalStore((s) => s.addRestoredSessions);
   const restoreWorkspace = useAppStore((s) => s.restoreWorkspace);
-  const workspaceReadyRef = React.useRef(false);
-  const skipNextWorkspaceSaveRef = React.useRef(false);
 
   const { connect, openLocal, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
 
@@ -35,40 +40,21 @@ const Terminal: React.FC = () => {
   const activeSection = useAppStore((s) => s.activeSection);
 
   useEffect(() => {
-    const storageKey = 'termbridge.terminalWorkspace';
-    if (!workspaceReadyRef.current) {
-      workspaceReadyRef.current = true;
-      if (!restoreWorkspace) {
-        localStorage.removeItem(storageKey);
-        return;
-      }
-      try {
-        const raw = localStorage.getItem(storageKey);
-        const restored = raw ? JSON.parse(raw) as Array<Omit<TerminalSession, 'status' | 'sessionId'>> : [];
-        if (restored.length > 0) {
-          skipNextWorkspaceSaveRef.current = true;
-          addRestoredSessions(restored.filter((session) => Boolean(session.profileId)));
-        }
-      } catch {
-        localStorage.removeItem(storageKey);
-      }
-      return;
-    }
     if (!restoreWorkspace) {
-      localStorage.removeItem(storageKey);
+      void invokeClearTerminalWorkspace().catch((error) => {
+        logger.error('failed to clear terminal workspace', error);
+      });
     }
-  }, [addRestoredSessions, restoreWorkspace]);
+  }, [restoreWorkspace]);
 
   useEffect(() => {
-    if (!workspaceReadyRef.current || !restoreWorkspace) return;
-    if (skipNextWorkspaceSaveRef.current) {
-      skipNextWorkspaceSaveRef.current = false;
-      return;
-    }
-    const snapshots = sessions
-      .filter((session) => Boolean(session.profileId))
-      .map(({ sessionId: _sessionId, status: _status, closed: _closed, reconnecting: _reconnecting, ...session }) => session);
-    localStorage.setItem('termbridge.terminalWorkspace', JSON.stringify(snapshots));
+    if (!restoreWorkspace) return;
+    const timer = window.setTimeout(() => {
+      void invokeSaveTerminalWorkspace(serializeTerminalWorkspace(sessions)).catch((error) => {
+        logger.error('failed to save terminal workspace', error);
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
   }, [restoreWorkspace, sessions]);
 
   useEffect(() => {

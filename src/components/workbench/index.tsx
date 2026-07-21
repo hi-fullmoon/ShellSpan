@@ -77,7 +77,7 @@ const Workbench: React.FC = () => {
     } else {
       profile = await addProfile(values);
     }
-    await connect(profile);
+    void connect(profile);
   };
 
   const handleDelete = async (): Promise<void> => {

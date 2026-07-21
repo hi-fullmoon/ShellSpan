@@ -217,6 +217,9 @@ pub fn run() {
             commands::list_sftp_bookmarks,
             commands::add_sftp_bookmark,
             commands::remove_sftp_bookmark,
+            commands::load_terminal_workspace,
+            commands::save_terminal_workspace,
+            commands::clear_terminal_workspace,
         ]);
 
     menu::configure_builder(builder)

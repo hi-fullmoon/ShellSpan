@@ -1583,6 +1583,28 @@ pub(crate) fn remove_sftp_bookmark(
     db.delete_sftp_bookmark(&id)
 }
 
+#[tauri::command]
+pub(crate) fn load_terminal_workspace(
+    db: State<'_, Database>,
+) -> Result<Option<String>, String> {
+    db.load_terminal_workspace()
+}
+
+#[tauri::command]
+pub(crate) fn save_terminal_workspace(
+    db: State<'_, Database>,
+    sessions_json: String,
+) -> Result<(), String> {
+    db.save_terminal_workspace(&sessions_json)
+}
+
+#[tauri::command]
+pub(crate) fn clear_terminal_workspace(
+    db: State<'_, Database>,
+) -> Result<(), String> {
+    db.clear_terminal_workspace()
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_termbridge_application_entry;

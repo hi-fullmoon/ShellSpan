@@ -1,10 +1,8 @@
 import { create } from 'zustand';
 import { generateId } from '@/lib/utils';
 import type {
-  LocalDirectoryListing,
   LocalFileEntry,
   RemoteConnectionRequest,
-  RemoteDirectoryListing,
   RemoteFileEntry,
   RemoteFileKind,
   SessionSummary,

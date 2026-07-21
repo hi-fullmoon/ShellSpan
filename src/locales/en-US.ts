@@ -126,8 +126,6 @@ export default {
   'workbench.logs.exported': 'Log exported to {path}',
   'workbench.logs.exportFailed': 'Failed to export log',
   'workbench.logs.searchPlaceholder': 'Filter logs...',
-  'workbench.logs.lineCount': '{count} / {total} lines',
-  'workbench.logs.copyHint': 'Double-click a line to copy',
 
   'connection.form.title.new': 'New Connection',
   'connection.form.title.edit': 'Edit Connection',
@@ -136,6 +134,7 @@ export default {
   'connection.form.section.auth': 'Authentication',
   'connection.form.browse': 'Browse',
   'connection.form.saveOnly': 'Save only',
+  'connection.form.submitFailed': 'Failed to save the connection',
   'connection.form.moreActions': 'More actions',
   'connection.form.jumpHostHint': 'Connect through an intermediate server',
   'connection.form.auth.password': 'Password',

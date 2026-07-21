@@ -98,6 +98,13 @@ describe('LogPanel', () => {
     expect(screen.getByText('persisted log entry')).toBeInTheDocument();
   });
 
+  it('does not render a footer status bar', () => {
+    render(<LogPanel />);
+
+    expect(screen.queryByText(/workbench\.logs\.lineCount/)).not.toBeInTheDocument();
+    expect(screen.queryByText('workbench.logs.copyHint')).not.toBeInTheDocument();
+  });
+
   it('shows an empty-filter message when no log entries match', () => {
     mockContent =
       '[2000-01-01][12:34:56][INFO][termbridge] persisted log entry\n';

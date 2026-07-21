@@ -126,8 +126,6 @@ export default {
   'workbench.logs.exported': '日志已导出到 {path}',
   'workbench.logs.exportFailed': '日志导出失败',
   'workbench.logs.searchPlaceholder': '筛选日志...',
-  'workbench.logs.lineCount': '{count} / {total} 行',
-  'workbench.logs.copyHint': '双击复制单行日志',
 
   'connection.form.title.new': '新建连接',
   'connection.form.title.edit': '编辑连接',
@@ -136,6 +134,7 @@ export default {
   'connection.form.section.auth': '认证方式',
   'connection.form.browse': '浏览',
   'connection.form.saveOnly': '仅保存',
+  'connection.form.submitFailed': '保存连接失败',
   'connection.form.moreActions': '更多操作',
   'connection.form.jumpHostHint': '通过跳板机连接目标服务器',
   'connection.form.auth.password': '密码认证',
