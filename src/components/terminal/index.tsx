@@ -11,10 +11,7 @@ import { TerminalPane } from './terminal-pane';
 import { NewTabMenu } from './new-tab-menu';
 import { TerminalContextMenu } from './terminal-context-menu';
 import { HostKeyDialog } from './host-key-dialog';
-import {
-  invokeClearTerminalWorkspace,
-  invokeSaveTerminalWorkspace,
-} from '@/lib/tauri';
+import { invokeClearTerminalWorkspace, invokeSaveTerminalWorkspace } from '@/lib/tauri';
 import { serializeTerminalWorkspace } from '@/lib/terminal-workspace';
 import { createLogger } from '@/lib/logger';
 
@@ -24,8 +21,7 @@ const Terminal: React.FC = () => {
   const { t } = useI18n();
   const sessions = useTerminalStore((s) => s.sessions);
   const activeSessionId = useTerminalStore((s) => s.activeSessionId);
-  const activeSession =
-    sessions.find((s) => s.sessionId === activeSessionId) ?? null;
+  const activeSession = sessions.find((s) => s.sessionId === activeSessionId) ?? null;
   const restoreWorkspace = useAppStore((s) => s.restoreWorkspace);
 
   const { connect, openLocal, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
@@ -82,12 +78,7 @@ const Terminal: React.FC = () => {
     <div className="flex h-full flex-col bg-app-bg">
       <TerminalControllerLayer />
       {sessions.length > 0 && (
-        <TerminalTabBar
-          onNewTabClick={() => setNewTabMenuOpen(true)}
-          onTabContextMenu={(session, x, y) =>
-            setContextMenu({ session, x, y })
-          }
-        />
+        <TerminalTabBar onNewTabClick={() => setNewTabMenuOpen(true)} onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y })} />
       )}
       <div className="relative min-h-0 flex-1">
         {sessions.length === 0 ? (
@@ -96,11 +87,7 @@ const Terminal: React.FC = () => {
               title={t('terminal.empty')}
               description={t('terminal.openFromWorkbench')}
               action={
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => setNewTabMenuOpen(true)}
-                >
+                <Button variant="default" size="sm" onClick={() => setNewTabMenuOpen(true)}>
                   {t('terminal.empty.newConnection')}
                 </Button>
               }
@@ -109,12 +96,7 @@ const Terminal: React.FC = () => {
         ) : (
           <TerminalPane activeSession={activeSession} />
         )}
-        <NewTabMenu
-          open={newTabMenuOpen}
-          onClose={() => setNewTabMenuOpen(false)}
-          onConnect={connect}
-          onOpenLocal={openLocal}
-        />
+        <NewTabMenu open={newTabMenuOpen} onClose={() => setNewTabMenuOpen(false)} onConnect={connect} onOpenLocal={openLocal} />
       </div>
       <TerminalContextMenu
         open={!!contextMenu}
