@@ -64,6 +64,9 @@ node -e "
 # 让 Cargo 根据更新后的 Cargo.toml 同步 Cargo.lock
 cargo check --manifest-path src-tauri/Cargo.toml
 
+# 生成 CHANGELOG.md（基于已有 tag 自动聚合）
+command -v git-cliff >/dev/null 2>&1 && git-cliff -o CHANGELOG.md || echo "  [skip] git-cliff not found, CHANGELOG.md not updated"
+
 # 提交 + tag + 推送
 git add -A
 git commit -m "chore(release): bump version to $NEW"

@@ -12,6 +12,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "version": "bash scripts/bump-version.sh",
+    "changelog": "git-cliff -o CHANGELOG.md",
     "release": "bash scripts/release-github.sh"
   },
   "dependencies": {

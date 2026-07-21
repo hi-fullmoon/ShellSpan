@@ -1,0 +1,51 @@
+# git-cliff ~ configuration file
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+header = "# Changelog\n\nAll notable changes to TermBridge are documented in this file.\n\n"
+body = """
+{% if not version %}
+## [Unreleased]
+{% else %}
+## [{{ version }}](https://github.com/zhengbiwen/TermBridge/releases/tag/{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first() }}
+{% for commit in commits | sort(attribute="message") %}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | trim }}{% if commit.breaking %}\n  - ⚠️ **BREAKING CHANGE:** {{ commit.breaking_description }}{% endif %}
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+postprocessors = [
+  { pattern = '\\(#(\d+)\\)', replace = "([#$1](https://github.com/zhengbiwen/TermBridge/pull/$1))" },
+]
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+sort_commits = "oldest"
+
+# Map commit types to display groups
+# Order matters: specific patterns first, then generic catch-all
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^refactor", group = "Refactoring" },
+  { message = "^style", group = "Style" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^perf", group = "Performance" },
+  { message = "^test", group = "Testing" },
+  { message = "^ci", group = "CI/CD" },
+  { message = "^build", group = "Build System" },
+  { message = "^revert", group = "Revert" },
+  # Skip version bump commits
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore\\(build\\)", skip = true },
+  { message = "^chore", group = "Chore" },
+  { message = ".*", group = "Other" },
+]
+
+[git.remote]
+origin = "https://github.com/zhengbiwen/TermBridge"
