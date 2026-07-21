@@ -37,6 +37,7 @@ export function useSftpConnectionOpener(): {
 } {
   const addConnection = useSftpStore((state) => state.addConnection);
   const attachRemoteConnection = useSftpStore((state) => state.attachRemoteConnection);
+  const hydrateSftpBookmarks = useSftpStore((state) => state.hydrateSftpBookmarks);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
   const touchProfile = useRecentProfilesStore((state) => state.touchProfile);
   const [hostKeyDialog, setHostKeyDialog] =
@@ -57,10 +58,20 @@ export function useSftpConnectionOpener(): {
       } else {
         addConnection(summary, connection, profile.id);
       }
+      const connectionId = targetConnectionId ?? useSftpStore.getState().activeConnectionId;
+      if (connectionId) {
+        void hydrateSftpBookmarks(
+          profile.host,
+          profile.port,
+          profile.username,
+          connectionId,
+          targetSide,
+        );
+      }
       touchProfile(profile.id);
       setActiveSection('sftp');
     },
-    [addConnection, attachRemoteConnection, setActiveSection, touchProfile],
+    [addConnection, attachRemoteConnection, hydrateSftpBookmarks, setActiveSection, touchProfile],
   );
 
   const verifyHostKey = useCallback(

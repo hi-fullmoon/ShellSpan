@@ -9,7 +9,7 @@ import {
   invokeUpdateProfile,
   invokeRemoveProfile,
 } from '@/lib/tauri';
-import { generateId, safeInvoke } from '@/lib/utils';
+import { generateId } from '@/lib/utils';
 import { useRecentProfilesStore } from './recentProfilesStore';
 import { createLogger } from '@/lib/logger';
 
@@ -95,12 +95,22 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       createdAt: now,
       updatedAt: now,
     };
+    try {
+      await invokeAddProfile(profileToRow(newProfile));
+    } catch (error) {
+      if (passwordStored) {
+        try {
+          await invokeRemovePassword(id);
+        } catch (cleanupError) {
+          logger.error('failed to clean up password after profile insert failed', cleanupError);
+        }
+      }
+      throw error;
+    }
+
     set((state) => ({
       profiles: [...state.profiles, newProfile],
     }));
-
-    // Write-through to database (fire-and-forget)
-    safeInvoke(invokeAddProfile, profileToRow(newProfile));
 
     return newProfile;
   },
@@ -112,18 +122,12 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     const nextAuthMethod = updates.authMethod ?? current.authMethod;
     let passwordStored = current.passwordStored ?? Boolean(current.password);
 
-    if (password !== undefined) {
-      if (password) {
-        await invokeStorePassword(id, password);
-        passwordStored = true;
-      } else {
-        await invokeRemovePassword(id);
-        passwordStored = false;
-      }
-    } else if (nextAuthMethod !== 'password' && passwordStored) {
-      await invokeRemovePassword(id);
-      passwordStored = false;
-    }
+    const shouldStorePassword = password !== undefined && Boolean(password);
+    const shouldRemovePassword = password !== undefined
+      ? !password
+      : nextAuthMethod !== 'password' && passwordStored;
+    if (shouldStorePassword) passwordStored = true;
+    if (shouldRemovePassword) passwordStored = false;
 
     const updated = {
       ...current,
@@ -135,23 +139,39 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       passwordStored,
     };
 
+    await invokeUpdateProfile(id, profileToRow(updated));
+
+    try {
+      if (shouldStorePassword) {
+        await invokeStorePassword(id, password!);
+      } else if (shouldRemovePassword) {
+        await invokeRemovePassword(id);
+      }
+    } catch (error) {
+      try {
+        await invokeUpdateProfile(id, profileToRow(current));
+      } catch (rollbackError) {
+        logger.error('failed to roll back profile after keychain update failed', rollbackError);
+      }
+      throw error;
+    }
+
     set((state) => ({
       profiles: state.profiles.map((p) => (p.id === id ? updated : p)),
     }));
-
-    // Write-through to database (fire-and-forget)
-    safeInvoke(invokeUpdateProfile, id, profileToRow(updated));
   },
 
   removeProfile: async (id) => {
-    await invokeRemovePassword(id);
+    await invokeRemoveProfile(id);
+    try {
+      await invokeRemovePassword(id);
+    } catch (error) {
+      logger.error('profile removed but its stored password could not be deleted', error);
+    }
     set((state) => ({
       profiles: state.profiles.filter((p) => p.id !== id),
     }));
     useRecentProfilesStore.getState().removeProfile(id);
-
-    // Write-through to database (fire-and-forget)
-    safeInvoke(invokeRemoveProfile, id);
   },
 
   duplicateProfile: async (id) => {
@@ -179,23 +199,26 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+    try {
+      await invokeAddProfile(profileToRow(duplicate));
+    } catch (error) {
+      if (password) {
+        try {
+          await invokeRemovePassword(duplicateId);
+        } catch (cleanupError) {
+          logger.error('failed to clean up duplicated password after insert failed', cleanupError);
+        }
+      }
+      throw error;
+    }
+
     set((state) => ({
       profiles: [...state.profiles, duplicate],
     }));
-
-    // Write-through to database (fire-and-forget)
-    safeInvoke(invokeAddProfile, profileToRow(duplicate));
   },
 
   removeStoredPassword: async (id) => {
-    await invokeRemovePassword(id);
-    set((state) => ({
-      profiles: state.profiles.map((p) =>
-        p.id === id
-          ? { ...p, password: undefined, passwordStored: false }
-          : p,
-      ),
-    }));
+    await get().updateProfile(id, { password: '' });
   },
 
   getProfile: (id) => get().profiles.find((p) => p.id === id),

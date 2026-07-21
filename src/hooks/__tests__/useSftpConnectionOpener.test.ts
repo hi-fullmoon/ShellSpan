@@ -22,7 +22,7 @@ vi.mock('@/lib/tauri', () => ({
   invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
 }));
 
-import { invokeCheckHostKey, invokeTrustHost } from '@/lib/tauri';
+import { invokeCheckHostKey, invokeListSftpBookmarks, invokeTrustHost } from '@/lib/tauri';
 
 const profile: ConnectionProfile = {
   id: 'p1',
@@ -63,6 +63,11 @@ describe('useSftpConnectionOpener', () => {
     expect(useSftpStore.getState().connections).toHaveLength(1);
     expect(useAppStore.getState().activeSection).toBe('sftp');
     expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(invokeListSftpBookmarks).toHaveBeenCalledWith(
+      profile.host,
+      profile.port,
+      profile.username,
+    );
   });
 
   it('asks for confirmation before trusting an unknown host and opening SFTP', async () => {
