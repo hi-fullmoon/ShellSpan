@@ -1,4 +1,4 @@
-use crate::connection::connect_sftp;
+use crate::connection::{connect_sftp, TransferTimeoutGuard};
 use crate::identity_cache::RemoteIdentityCache;
 use crate::sftp_pool::SftpPool;
 use crate::portable_local_path;
@@ -481,6 +481,7 @@ fn upload_local_paths_inner(
 
     let connected = connect_sftp(&request.connection, pool, known_hosts)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
     if !request.conflict_policies.is_empty()
@@ -575,6 +576,7 @@ fn download_remote_paths_inner(
 
     let connected = connect_sftp(&request.connection, pool, known_hosts)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
     let destination_directory = Path::new(&request.destination_directory);
     fs::create_dir_all(destination_directory)
         .map_err(|error| format!("failed to create destination directory: {error}"))?;
@@ -820,6 +822,7 @@ pub(crate) fn copy_remote_to_remote_blocking(
     let destination = connect_sftp(&request.destination_connection, pool, known_hosts)?;
     if Arc::ptr_eq(&source, &destination) {
         let connected = source.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
         return copy_remote_to_remote_with_sftp(
             app,
             request,
@@ -843,6 +846,8 @@ pub(crate) fn copy_remote_to_remote_blocking(
         let source_guard = source.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         (source_guard, destination_guard)
     };
+    let _source_transfer_timeout = TransferTimeoutGuard::new(&source.session);
+    let _destination_transfer_timeout = TransferTimeoutGuard::new(&destination.session);
     copy_remote_to_remote_with_sftp(
         app,
         request,

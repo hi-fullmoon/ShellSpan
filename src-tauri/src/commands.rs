@@ -1,12 +1,13 @@
 use super::*;
 use crate::sftp_pool::SftpPool;
+use crate::db::Database;
 use crate::models::{
     AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest,
     CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest,
     HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KnownHostEntry, LocalDirectoryListing,
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
-    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand,
+    ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
     RestoreRemotePathRequest, SessionCreateRequest, SessionStatus, SessionSummary, TrashRemotePathRequest,
     TrashedRemotePath, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
@@ -1482,6 +1483,104 @@ pub(crate) fn spawn_ssh_thread(
             }
         }
     });
+}
+
+// --- Database commands ---
+
+#[tauri::command]
+pub(crate) fn list_profiles(
+    db: State<'_, Database>,
+) -> Result<Vec<ProfileRow>, String> {
+    db.list_profiles()
+}
+
+#[tauri::command]
+pub(crate) fn add_profile(
+    db: State<'_, Database>,
+    profile: ProfileRow,
+) -> Result<(), String> {
+    db.insert_profile(&profile)
+}
+
+#[tauri::command]
+pub(crate) fn update_profile(
+    db: State<'_, Database>,
+    id: String,
+    profile: ProfileRow,
+) -> Result<(), String> {
+    db.update_profile(&id, &profile)
+}
+
+#[tauri::command]
+pub(crate) fn remove_profile(
+    db: State<'_, Database>,
+    id: String,
+) -> Result<(), String> {
+    db.delete_profile(&id)
+}
+
+#[tauri::command]
+pub(crate) fn load_preferences(
+    db: State<'_, Database>,
+) -> Result<Vec<(String, String)>, String> {
+    db.load_preferences()
+}
+
+#[tauri::command]
+pub(crate) fn save_preferences(
+    db: State<'_, Database>,
+    entries: Vec<(String, String)>,
+) -> Result<(), String> {
+    db.save_preferences(&entries)
+}
+
+#[tauri::command]
+pub(crate) fn list_recent_profiles(
+    db: State<'_, Database>,
+) -> Result<Vec<String>, String> {
+    db.list_recent_profiles()
+}
+
+#[tauri::command]
+pub(crate) fn touch_recent_profile(
+    db: State<'_, Database>,
+    profile_id: String,
+) -> Result<(), String> {
+    db.touch_recent_profile(&profile_id)
+}
+
+#[tauri::command]
+pub(crate) fn remove_recent_profile(
+    db: State<'_, Database>,
+    profile_id: String,
+) -> Result<(), String> {
+    db.remove_recent_profile(&profile_id)
+}
+
+#[tauri::command]
+pub(crate) fn list_sftp_bookmarks(
+    db: State<'_, Database>,
+    host: String,
+    port: u16,
+    username: String,
+) -> Result<Vec<SftpBookmarkRow>, String> {
+    db.list_sftp_bookmarks(&host, port, &username)
+}
+
+#[tauri::command]
+pub(crate) fn add_sftp_bookmark(
+    db: State<'_, Database>,
+    bookmark: SftpBookmarkRow,
+) -> Result<(), String> {
+    db.insert_sftp_bookmark(&bookmark)
+}
+
+#[tauri::command]
+pub(crate) fn remove_sftp_bookmark(
+    db: State<'_, Database>,
+    id: String,
+) -> Result<(), String> {
+    db.delete_sftp_bookmark(&id)
 }
 
 #[cfg(test)]

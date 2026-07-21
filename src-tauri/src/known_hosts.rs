@@ -26,11 +26,11 @@ pub(crate) fn classify_host_key_error(message: &str) -> Option<HostKeyErrorKind>
 const KNOWN_HOSTS_FILENAME: &str = "known_hosts";
 
 pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let app_local_data = app
+    let home = app
         .path()
-        .app_local_data_dir()
-        .map_err(|error| format!("failed to resolve app local data dir: {error}"))?;
-    Ok(app_local_data.join(KNOWN_HOSTS_FILENAME))
+        .home_dir()
+        .map_err(|error| format!("failed to resolve home dir: {error}"))?;
+    Ok(home.join(".termbridge").join(KNOWN_HOSTS_FILENAME))
 }
 
 fn get_known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {

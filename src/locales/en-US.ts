@@ -126,7 +126,6 @@ export default {
   'workbench.logs.exported': 'Log exported to {path}',
   'workbench.logs.exportFailed': 'Failed to export log',
   'workbench.logs.searchPlaceholder': 'Filter logs...',
-  'workbench.logs.live': 'Live',
   'workbench.logs.lineCount': '{count} / {total} lines',
   'workbench.logs.copyHint': 'Double-click a line to copy',
 
