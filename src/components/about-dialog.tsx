@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Dialog } from '@/components/ui/dialog';
 import {
@@ -7,6 +7,7 @@ import {
   CompactDialogHeader,
 } from '@/components/ui/compact-dialog';
 import { useI18n } from '@/hooks/useI18n';
+import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { isTauriRuntime } from '@/lib/tauri';
 
 interface AboutDialogProps {
@@ -39,13 +40,15 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({ open, onClose }) => {
     void load();
   }, [open]);
 
-  const handleOpenGitHub = (): void => {
+  const openGitHub = useCallback((): void => {
     if (isTauriRuntime()) {
       void invoke('open_url', { url: GITHUB_URL });
     } else {
       window.open(GITHUB_URL, '_blank', 'noopener,noreferrer');
     }
-  };
+  }, []);
+
+  const handleOpenGitHub = useDebouncedCallback(openGitHub, 500);
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>

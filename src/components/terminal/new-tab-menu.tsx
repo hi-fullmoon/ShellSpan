@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
@@ -44,6 +44,14 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
   const [closing, setClosing] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
+  const activatingRef = useRef(false);
+
+  const activateOnce = useCallback((action: () => void): void => {
+    if (activatingRef.current) return;
+    activatingRef.current = true;
+    action();
+    onClose();
+  }, [onClose]);
 
   const filteredItems = useMemo<ProfileListItem[]>(() => {
     const q = query.trim().toLowerCase();
@@ -106,6 +114,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
   useEffect(() => {
     let timer: number | null = null;
     if (open) {
+      activatingRef.current = false;
       setMounted(true);
       setClosing(false);
       setQuery('');
@@ -149,14 +158,16 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
       } else if (event.key === 'Enter') {
         event.preventDefault();
         if (showLocal && selectedIndex === 0) {
-          void onOpenLocal?.();
-          onClose();
+          activateOnce(() => {
+            void onOpenLocal?.();
+          });
           return;
         }
         const selected = filteredItems[selectedIndex - (showLocal ? 1 : 0)];
         if (selected) {
-          void onConnect(selected.profile);
-          onClose();
+          activateOnce(() => {
+            void onConnect(selected.profile);
+          });
         }
       }
     };
@@ -164,7 +175,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mounted, onClose, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal]);
+  }, [mounted, onClose, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal, activateOnce]);
 
   const handleOpenWorkbench = (): void => {
     setActiveSection('workbench');
@@ -172,13 +183,15 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
   };
 
   const handleConnect = (profile: ConnectionProfile): void => {
-    void onConnect(profile);
-    onClose();
+    activateOnce(() => {
+      void onConnect(profile);
+    });
   };
 
   const handleOpenLocal = (): void => {
-    void onOpenLocal?.();
-    onClose();
+    activateOnce(() => {
+      void onOpenLocal?.();
+    });
   };
 
   const renderSectionLabel = (): string | null => {

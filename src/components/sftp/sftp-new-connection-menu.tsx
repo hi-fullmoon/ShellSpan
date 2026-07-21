@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ServerIcon, LayoutGridIcon, SearchIcon, FolderIcon } from 'lucide-react';
 import { usePlatform } from '@/hooks/usePlatform';
@@ -42,6 +42,14 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   const [closing, setClosing] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
+  const activatingRef = useRef(false);
+
+  const activateOnce = useCallback((action: () => void): void => {
+    if (activatingRef.current) return;
+    activatingRef.current = true;
+    action();
+    onClose();
+  }, [onClose]);
 
   const filteredItems = useMemo<ProfileListItem[]>(() => {
     const q = query.trim().toLowerCase();
@@ -97,6 +105,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   useEffect(() => {
     let timer: number | null = null;
     if (open) {
+      activatingRef.current = false;
       setMounted(true);
       setClosing(false);
       setQuery('');
@@ -136,14 +145,14 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
       } else if (event.key === 'Enter') {
         event.preventDefault();
         if (showLocal && selectedIndex === 0) {
-          onOpenLocal?.();
-          onClose();
+          activateOnce(() => onOpenLocal?.());
           return;
         }
         const selected = filteredItems[selectedIndex - (showLocal ? 1 : 0)];
         if (selected) {
-          void onConnect(selected.profile);
-          onClose();
+          activateOnce(() => {
+            void onConnect(selected.profile);
+          });
         }
       }
     };
@@ -151,7 +160,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mounted, onClose, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal]);
+  }, [mounted, onClose, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal, activateOnce]);
 
   const handleOpenWorkbench = (): void => {
     setActiveSection('workbench');
@@ -159,8 +168,9 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   };
 
   const handleConnect = (profile: ConnectionProfile): void => {
-    void onConnect(profile);
-    onClose();
+    activateOnce(() => {
+      void onConnect(profile);
+    });
   };
 
   const renderSectionLabel = (): string | null => {
@@ -211,7 +221,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
         <div className="max-h-[60vh] min-h-0 overflow-y-auto p-2">
           {hasResults ? (
             <>
-              {showLocal && <Button type="button" variant="secondary" data-command-index={0} onClick={() => { onOpenLocal?.(); onClose(); }} onMouseEnter={() => setSelectedIndex(0)} className={cn('mb-2 h-auto w-full justify-start gap-3 rounded-xl p-3 text-left', selectedIndex === 0 && 'ring-1 ring-app-primary')}><span className="flex size-9 items-center justify-center rounded-lg bg-app-primary text-app-primary-text"><FolderIcon /></span><span className="flex min-w-0 flex-1 flex-col items-start"><span className="text-sm font-medium">{t('sftp.newConnectionMenu.openLocal')}</span><span className="text-xs text-app-text-soft">{t('sftp.newConnectionMenu.openLocalHint')}</span></span>{selectedIndex === 0 && <span className="text-xs text-app-text-soft">↵</span>}</Button>}
+              {showLocal && <Button type="button" variant="secondary" data-command-index={0} onClick={() => activateOnce(() => onOpenLocal?.())} onMouseEnter={() => setSelectedIndex(0)} className={cn('mb-2 h-auto w-full justify-start gap-3 rounded-xl p-3 text-left', selectedIndex === 0 && 'ring-1 ring-app-primary')}><span className="flex size-9 items-center justify-center rounded-lg bg-app-primary text-app-primary-text"><FolderIcon /></span><span className="flex min-w-0 flex-1 flex-col items-start"><span className="text-sm font-medium">{t('sftp.newConnectionMenu.openLocal')}</span><span className="text-xs text-app-text-soft">{t('sftp.newConnectionMenu.openLocalHint')}</span></span>{selectedIndex === 0 && <span className="text-xs text-app-text-soft">↵</span>}</Button>}
               {filteredItems.length > 0 && <>
               <h3 className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-app-text-soft">
                 {renderSectionLabel()}
