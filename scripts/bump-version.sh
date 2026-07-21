@@ -61,6 +61,9 @@ node -e "
   fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
 "
 
+# 让 Cargo 根据更新后的 Cargo.toml 同步 Cargo.lock
+cargo check --manifest-path src-tauri/Cargo.toml
+
 # 提交 + tag + 推送
 git add -A
 git commit -m "chore(release): bump version to $NEW"
