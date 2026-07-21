@@ -88,4 +88,44 @@ describe('ConnectionList', () => {
       screen.queryByText('workbench.connections.empty'),
     ).not.toBeInTheDocument();
   });
+
+  it('debounces repeated clicks on every profile-card action', () => {
+    vi.useFakeTimers();
+    const onEdit = vi.fn();
+    const onDelete = vi.fn();
+    const onConnectTerminal = vi.fn();
+    const onConnectSftp = vi.fn();
+    const onDuplicate = vi.fn();
+    render(
+      <ConnectionList
+        profiles={[makeProfile()]}
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onConnectTerminal={onConnectTerminal}
+        onConnectSftp={onConnectSftp}
+        onDuplicate={onDuplicate}
+      />,
+    );
+
+    const actions = [
+      ['workbench.connections.connectTerminal', onConnectTerminal],
+      ['workbench.connections.connectSftp', onConnectSftp],
+      ['common.edit', onEdit],
+      ['common.duplicate', onDuplicate],
+      ['common.delete', onDelete],
+    ] as const;
+
+    for (const [accessibleName, handler] of actions) {
+      const button = screen.getByRole('button', { name: accessibleName });
+      fireEvent.click(button);
+      vi.advanceTimersByTime(100);
+      fireEvent.click(button);
+      expect(handler).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(400);
+      fireEvent.click(button);
+      expect(handler).toHaveBeenCalledTimes(2);
+    }
+    vi.useRealTimers();
+  });
 });

@@ -29,6 +29,46 @@ const profile: ConnectionProfile = {
 };
 
 describe('ConnectionForm', () => {
+  it('fills an empty name from the host when the host loses focus', () => {
+    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+
+    const nameInput = screen.getByPlaceholderText('My Server');
+    const hostInput = screen.getByPlaceholderText('192.168.1.1');
+    fireEvent.change(hostInput, { target: { value: '  server.example.com  ' } });
+    fireEvent.blur(hostInput);
+
+    expect(nameInput).toHaveValue('server.example.com');
+  });
+
+  it('does not overwrite an existing name when the host loses focus', () => {
+    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+
+    const nameInput = screen.getByPlaceholderText('My Server');
+    const hostInput = screen.getByPlaceholderText('192.168.1.1');
+    fireEvent.change(nameInput, { target: { value: 'Production' } });
+    fireEvent.change(hostInput, { target: { value: 'prod.example.com' } });
+    fireEvent.blur(hostInput);
+
+    expect(nameInput).toHaveValue('Production');
+  });
+
+  it('does not fill the name while editing an existing connection', () => {
+    render(
+      <ConnectionForm
+        open={true}
+        onClose={() => {}}
+        onSubmit={() => {}}
+        initial={{ ...profile, name: '' }}
+      />,
+    );
+
+    const nameInput = screen.getByPlaceholderText('My Server');
+    const hostInput = screen.getByPlaceholderText('192.168.1.1');
+    fireEvent.blur(hostInput);
+
+    expect(nameInput).toHaveValue('');
+  });
+
   it('renders the form body as a constrained scrollable region', () => {
     render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
 
@@ -129,5 +169,28 @@ describe('ConnectionForm', () => {
       expect.objectContaining({ name: 'My Server' }),
     );
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('submits only once when the primary action is clicked repeatedly', () => {
+    const onConnect = vi.fn(() => new Promise<void>(() => {}));
+    render(
+      <ConnectionForm
+        open={true}
+        onClose={() => {}}
+        onSubmit={() => {}}
+        onConnect={onConnect}
+        initial={profile}
+      />,
+    );
+
+    const connectButton = screen.getByRole('button', { name: 'common.connect' });
+    fireEvent.click(connectButton);
+    fireEvent.click(connectButton);
+
+    expect(onConnect).toHaveBeenCalledTimes(1);
+    expect(connectButton).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'connection.form.moreActions' }),
+    ).toBeDisabled();
   });
 });

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FolderOpen, ChevronDown, KeyRound, Network, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -24,8 +25,12 @@ import type {
 export interface ConnectionFormProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  onConnect?: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  onSubmit: (
+    profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
+  ) => void | Promise<void>;
+  onConnect?: (
+    profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
+  ) => void | Promise<void>;
   initial?: ConnectionProfile;
   /** Partial pre-fill values (e.g. host + port from a known-host entry). */
   initialValues?: Pick<FormState, 'host' | 'port'>;
@@ -89,8 +94,11 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   initialValues,
 }) => {
   const { t } = useI18n();
+  const { error: showError } = useToast();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionInFlightRef = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -187,16 +195,36 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     jumpHost: form.useJumpHost ? form.jumpHost : undefined,
   });
 
+  const submit = async (
+    action: ConnectionFormProps['onSubmit'],
+  ): Promise<void> => {
+    if (submissionInFlightRef.current || !validate()) return;
+
+    submissionInFlightRef.current = true;
+    setIsSubmitting(true);
+    try {
+      await action(buildValues());
+      onClose();
+    } catch {
+      showError(t('connection.form.submitFailed'));
+    } finally {
+      submissionInFlightRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSaveOnly = (): void => {
-    if (!validate()) return;
-    onSubmit(buildValues());
-    onClose();
+    void submit(onSubmit);
   };
 
   const handleConnect = (): void => {
-    if (!validate()) return;
-    (onConnect ?? onSubmit)(buildValues());
-    onClose();
+    void submit(onConnect ?? onSubmit);
+  };
+
+  const handleHostBlur = (): void => {
+    if (!initial && !form.name.trim() && form.host.trim()) {
+      updateField('name', form.host.trim());
+    }
   };
 
   return (
@@ -227,6 +255,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                 <Input
                   value={form.host}
                   onChange={(e) => updateField('host', e.target.value)}
+                  onBlur={handleHostBlur}
                   placeholder="192.168.1.1"
                 />
               </FormRow>
@@ -381,6 +410,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
               variant="default"
               className="flex-1 rounded-r-none"
               onClick={handleConnect}
+              disabled={isSubmitting}
             >
               {t('common.connect')}
             </Button>
@@ -391,13 +421,17 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                     variant="default"
                     className="rounded-l-none border-l border-primary-foreground/20 px-2"
                     aria-label={t('connection.form.moreActions')}
+                    disabled={isSubmitting}
                   />
                 }
               >
                 <ChevronDown />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="top" className="w-40 rounded-md">
-                <DropdownMenuItem onClick={handleSaveOnly}>
+                <DropdownMenuItem
+                  onClick={handleSaveOnly}
+                  disabled={isSubmitting}
+                >
                   {t('connection.form.saveOnly')}
                 </DropdownMenuItem>
               </DropdownMenuContent>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
 import { PanelEmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,8 @@ import {
   TerminalIcon,
   Trash2Icon,
 } from 'lucide-react';
+
+const CARD_ACTION_DEBOUNCE_MS = 500;
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];
@@ -165,6 +168,20 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   onDuplicate,
 }) => {
   const { t } = useI18n();
+  const handleConnectTerminal = useDebouncedCallback(
+    onConnectTerminal,
+    CARD_ACTION_DEBOUNCE_MS,
+  );
+  const handleConnectSftp = useDebouncedCallback(
+    onConnectSftp,
+    CARD_ACTION_DEBOUNCE_MS,
+  );
+  const handleEdit = useDebouncedCallback(onEdit, CARD_ACTION_DEBOUNCE_MS);
+  const handleDuplicate = useDebouncedCallback(
+    onDuplicate,
+    CARD_ACTION_DEBOUNCE_MS,
+  );
+  const handleDelete = useDebouncedCallback(onDelete, CARD_ACTION_DEBOUNCE_MS);
 
   return (
     <ManagementCard>
@@ -208,35 +225,35 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
       <div className="flex flex-wrap items-center gap-1">
         <div className="flex flex-wrap items-center gap-1 sm:justify-end">
           <IconActionButton
-            onClick={onConnectTerminal}
+            onClick={handleConnectTerminal}
             aria-label={t('workbench.connections.connectTerminal')}
             tooltip={t('workbench.connections.connectTerminal')}
           >
             <TerminalIcon data-icon="inline-start" />
           </IconActionButton>
           <IconActionButton
-            onClick={onConnectSftp}
+            onClick={handleConnectSftp}
             aria-label={t('workbench.connections.connectSftp')}
             tooltip={t('workbench.connections.connectSftp')}
           >
             <FolderIcon data-icon="inline-start" />
           </IconActionButton>
           <IconActionButton
-            onClick={onEdit}
+            onClick={handleEdit}
             aria-label={t('common.edit')}
             tooltip={t('common.edit')}
           >
             <PencilIcon data-icon="inline-start" />
           </IconActionButton>
           <IconActionButton
-            onClick={onDuplicate}
+            onClick={handleDuplicate}
             aria-label={t('common.duplicate')}
             tooltip={t('common.duplicate')}
           >
             <CopyIcon data-icon="inline-start" />
           </IconActionButton>
           <IconActionButton
-            onClick={onDelete}
+            onClick={handleDelete}
             aria-label={t('common.delete')}
             tooltip={t('common.delete')}
           >

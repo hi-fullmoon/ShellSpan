@@ -1,8 +1,8 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::Mutex;
 
-const CURRENT_SCHEMA_VERSION: i32 = 1;
+const CURRENT_SCHEMA_VERSION: i32 = 2;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS sftp_bookmarks (
 );
 ";
 
+const SCHEMA_V2: &str = "
+CREATE TABLE IF NOT EXISTS terminal_workspace (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    sessions_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+";
+
 pub(crate) struct Database {
     conn: Mutex<Connection>,
 }
@@ -58,8 +66,8 @@ impl Database {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("failed to create database directory: {e}"))?;
         }
-        let conn = Connection::open(db_path)
-            .map_err(|e| format!("failed to open database: {e}"))?;
+        let conn =
+            Connection::open(db_path).map_err(|e| format!("failed to open database: {e}"))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .map_err(|e| format!("failed to set pragmas: {e}"))?;
         let db = Self {
@@ -83,6 +91,12 @@ impl Database {
             )
             .unwrap_or(0);
 
+        if current > CURRENT_SCHEMA_VERSION {
+            return Err(format!(
+                "database schema version {current} is newer than this build ({CURRENT_SCHEMA_VERSION})"
+            ));
+        }
+
         if current < 1 {
             conn.execute_batch(SCHEMA_V1)
                 .map_err(|e| format!("migration v1 failed: {e}"))?;
@@ -90,10 +104,11 @@ impl Database {
                 .map_err(|e| format!("migration v1 version insert failed: {e}"))?;
         }
 
-        if current > CURRENT_SCHEMA_VERSION {
-            return Err(format!(
-                "database schema version {current} is newer than this build ({CURRENT_SCHEMA_VERSION})"
-            ));
+        if current < 2 {
+            conn.execute_batch(SCHEMA_V2)
+                .map_err(|e| format!("migration v2 failed: {e}"))?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])
+                .map_err(|e| format!("migration v2 version insert failed: {e}"))?;
         }
 
         Ok(())
@@ -101,9 +116,7 @@ impl Database {
 
     // --- Profiles ---
 
-    pub(crate) fn list_profiles(
-        &self,
-    ) -> Result<Vec<crate::models::ProfileRow>, String> {
+    pub(crate) fn list_profiles(&self) -> Result<Vec<crate::models::ProfileRow>, String> {
         let conn = self
             .conn
             .lock()
@@ -152,10 +165,7 @@ impl Database {
             .map_err(|e| format!("failed to collect profiles: {e}"))
     }
 
-    pub(crate) fn insert_profile(
-        &self,
-        profile: &crate::models::ProfileRow,
-    ) -> Result<(), String> {
+    pub(crate) fn insert_profile(&self, profile: &crate::models::ProfileRow) -> Result<(), String> {
         let conn = self
             .conn
             .lock()
@@ -244,10 +254,7 @@ impl Database {
             .map_err(|e| format!("failed to collect preferences: {e}"))
     }
 
-    pub(crate) fn save_preferences(
-        &self,
-        entries: &[(String, String)],
-    ) -> Result<(), String> {
+    pub(crate) fn save_preferences(&self, entries: &[(String, String)]) -> Result<(), String> {
         let conn = self
             .conn
             .lock()
@@ -271,9 +278,7 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         let mut stmt = conn
-            .prepare(
-                "SELECT profile_id FROM recent_profiles ORDER BY sort_order ASC",
-            )
+            .prepare("SELECT profile_id FROM recent_profiles ORDER BY sort_order ASC")
             .map_err(|e| format!("failed to prepare list_recent_profiles: {e}"))?;
         let rows = stmt
             .query_map([], |row| row.get(0))
@@ -289,11 +294,8 @@ impl Database {
             .map_err(|e| format!("database lock poisoned: {e}"))?;
 
         // Shift all existing entries down to make room at position 0
-        conn.execute(
-            "UPDATE recent_profiles SET sort_order = sort_order + 1",
-            [],
-        )
-        .map_err(|e| format!("failed to shift recent_profiles: {e}"))?;
+        conn.execute("UPDATE recent_profiles SET sort_order = sort_order + 1", [])
+            .map_err(|e| format!("failed to shift recent_profiles: {e}"))?;
 
         // Upsert at position 0
         conn.execute(
@@ -304,11 +306,8 @@ impl Database {
         .map_err(|e| format!("failed to touch recent_profile: {e}"))?;
 
         // Prune to max 10
-        conn.execute(
-            "DELETE FROM recent_profiles WHERE sort_order >= 10",
-            [],
-        )
-        .map_err(|e| format!("failed to prune recent_profiles: {e}"))?;
+        conn.execute("DELETE FROM recent_profiles WHERE sort_order >= 10", [])
+            .map_err(|e| format!("failed to prune recent_profiles: {e}"))?;
 
         Ok(())
     }
@@ -394,14 +393,59 @@ impl Database {
             .conn
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
-        conn.execute(
-            "DELETE FROM sftp_bookmarks WHERE id=?1",
-            params![id],
-        )
-        .map_err(|e| format!("failed to delete sftp_bookmark: {e}"))?;
+        conn.execute("DELETE FROM sftp_bookmarks WHERE id=?1", params![id])
+            .map_err(|e| format!("failed to delete sftp_bookmark: {e}"))?;
         Ok(())
     }
 
+    // --- Terminal Workspace ---
+
+    pub(crate) fn load_terminal_workspace(&self) -> Result<Option<String>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.query_row(
+            "SELECT sessions_json FROM terminal_workspace WHERE id=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("failed to load terminal workspace: {e}"))
+    }
+
+    pub(crate) fn save_terminal_workspace(&self, sessions_json: &str) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.execute(
+            "INSERT INTO terminal_workspace (id, sessions_json, updated_at) \
+             VALUES (1, ?1, ?2) \
+             ON CONFLICT(id) DO UPDATE SET \
+             sessions_json=excluded.sessions_json, updated_at=excluded.updated_at",
+            params![sessions_json, current_timestamp_ms()],
+        )
+        .map(|_| ())
+        .map_err(|e| format!("failed to save terminal workspace: {e}"))
+    }
+
+    pub(crate) fn clear_terminal_workspace(&self) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.execute("DELETE FROM terminal_workspace WHERE id=1", [])
+            .map(|_| ())
+            .map_err(|e| format!("failed to clear terminal workspace: {e}"))
+    }
+}
+
+fn current_timestamp_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 #[cfg(test)]
@@ -440,17 +484,72 @@ mod tests {
         let db = test_db();
         let conn = db.conn.lock().unwrap();
         let version: i32 = conn
-            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
         // Verify tables exist by querying them
         conn.execute("SELECT 1 FROM profiles LIMIT 0", []).unwrap();
-        conn.execute("SELECT 1 FROM preferences LIMIT 0", []).unwrap();
+        conn.execute("SELECT 1 FROM preferences LIMIT 0", [])
+            .unwrap();
         conn.execute("SELECT 1 FROM recent_profiles LIMIT 0", [])
             .unwrap();
         conn.execute("SELECT 1 FROM sftp_bookmarks LIMIT 0", [])
             .unwrap();
+        conn.execute("SELECT 1 FROM terminal_workspace LIMIT 0", [])
+            .unwrap();
+    }
+
+    #[test]
+    fn migration_upgrades_v1_database_to_v2() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
+            .unwrap();
+        let db = Database {
+            conn: Mutex::new(conn),
+        };
+
+        db.migrate().unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let version: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 2);
+        conn.execute("SELECT 1 FROM terminal_workspace LIMIT 0", [])
+            .unwrap();
+    }
+
+    #[test]
+    fn migration_rejects_newer_database_without_modifying_it() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
+            .unwrap();
+        let db = Database {
+            conn: Mutex::new(conn),
+        };
+
+        let error = db.migrate().unwrap_err();
+
+        assert_eq!(
+            error,
+            "database schema version 3 is newer than this build (2)"
+        );
+        let conn = db.conn.lock().unwrap();
+        let workspace_table_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='terminal_workspace'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(workspace_table_count, 0);
     }
 
     #[test]
@@ -603,24 +702,18 @@ mod tests {
         };
         db.insert_sftp_bookmark(&bookmark).unwrap();
 
-        let list = db
-            .list_sftp_bookmarks("example.com", 22, "alice")
-            .unwrap();
+        let list = db.list_sftp_bookmarks("example.com", 22, "alice").unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].path, "/var/log");
         assert_eq!(list[0].side, "remote");
         assert_eq!(list[0].label.as_deref(), Some("Logs"));
 
         // Different host should return empty
-        let list = db
-            .list_sftp_bookmarks("other.com", 22, "alice")
-            .unwrap();
+        let list = db.list_sftp_bookmarks("other.com", 22, "alice").unwrap();
         assert!(list.is_empty());
 
         db.delete_sftp_bookmark("b1").unwrap();
-        let list = db
-            .list_sftp_bookmarks("example.com", 22, "alice")
-            .unwrap();
+        let list = db.list_sftp_bookmarks("example.com", 22, "alice").unwrap();
         assert!(list.is_empty());
     }
 
@@ -675,5 +768,24 @@ mod tests {
         assert!(list[0].jump_host_config.is_some());
         let config = list[0].jump_host_config.as_deref().unwrap();
         assert!(config.contains("jump.example.com"));
+    }
+
+    #[test]
+    fn terminal_workspace_roundtrip_and_clear() {
+        let db = test_db();
+        assert_eq!(db.load_terminal_workspace().unwrap(), None);
+
+        let sessions = r#"[{"profileId":"p1","title":"Server"}]"#;
+        db.save_terminal_workspace(sessions).unwrap();
+        assert_eq!(
+            db.load_terminal_workspace().unwrap().as_deref(),
+            Some(sessions)
+        );
+
+        db.save_terminal_workspace("[]").unwrap();
+        assert_eq!(db.load_terminal_workspace().unwrap().as_deref(), Some("[]"));
+
+        db.clear_terminal_workspace().unwrap();
+        assert_eq!(db.load_terminal_workspace().unwrap(), None);
     }
 }

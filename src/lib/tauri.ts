@@ -2,17 +2,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/lib/logger';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
-  AuthMethod,
   ClosedEvent,
   ConnectionProfile,
   CopyRemotePathRequest,
   CreateRemoteEntryRequest,
   CreateSessionError,
   DataEvent,
-  DeleteProgressEvent,
   DownloadProgressEvent,
   HostKeyCheckResult,
-  JumpHostConfig,
   KnownHostEntry,
   LocalDirectoryListing,
   LogFileInfo,
@@ -454,3 +451,14 @@ export async function invokeRemoveSftpBookmark(id: string): Promise<void> {
   return invokeLogged('remove_sftp_bookmark', { id });
 }
 
+export async function invokeLoadTerminalWorkspace(): Promise<string | null> {
+  return invokeLogged<string | null>('load_terminal_workspace');
+}
+
+export async function invokeSaveTerminalWorkspace(sessionsJson: string): Promise<void> {
+  return invokeLogged('save_terminal_workspace', { sessionsJson });
+}
+
+export async function invokeClearTerminalWorkspace(): Promise<void> {
+  return invokeLogged('clear_terminal_workspace');
+}
