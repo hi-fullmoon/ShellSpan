@@ -14,6 +14,12 @@ vi.mock('@/lib/tauri', () => ({
   invokeRetrievePassword: vi.fn().mockResolvedValue(null),
   invokeStorePassword: vi.fn().mockResolvedValue(undefined),
   invokeRemovePassword: vi.fn().mockResolvedValue(undefined),
+  invokeTouchRecentProfile: vi.fn().mockResolvedValue(undefined),
+  invokeRemoveRecentProfile: vi.fn().mockResolvedValue(undefined),
+  invokeListRecentProfiles: vi.fn().mockResolvedValue([]),
+  invokeAddSftpBookmark: vi.fn().mockResolvedValue(undefined),
+  invokeRemoveSftpBookmark: vi.fn().mockResolvedValue(undefined),
+  invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
 }));
 
 import { invokeCheckHostKey, invokeTrustHost } from '@/lib/tauri';

@@ -32,3 +32,17 @@ export function getInitials(name: string): string {
 export function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+/** Safely invoke a Tauri command, silently ignoring when the function is
+ *  unavailable (e.g. in test environments with partial mocks). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function safeInvoke(fn: ((...args: any[]) => any) | undefined, ...args: unknown[]): void {
+  if (typeof fn !== 'function') return;
+  try {
+    Promise.resolve(fn(...args)).catch(() => {
+      // fire-and-forget: silently ignore persistence failures
+    });
+  } catch {
+    // synchronously threw (e.g. undefined function)
+  }
+}

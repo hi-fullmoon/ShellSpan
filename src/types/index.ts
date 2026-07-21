@@ -327,3 +327,30 @@ export interface UpdateVersionInfo {
   latestVersion?: string;
   downloadedVersion?: string;
 }
+
+// --- Database row types ---
+
+export interface ProfileRow {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  authMethod: AuthMethod;
+  passwordStored: boolean;
+  privateKeyPath?: string;
+  jumpHostConfig?: string; // JSON serialized JumpHostConfig
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SftpBookmarkRow {
+  id: string;
+  host: string;
+  port: number;
+  username: string;
+  path: string;
+  side: 'local' | 'remote';
+  label?: string;
+  createdAt: number;
+}

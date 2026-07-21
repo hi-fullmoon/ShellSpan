@@ -999,3 +999,34 @@ mod session_manager_tests {
     }
 }
 
+// --- Database row types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProfileRow {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) username: String,
+    pub(crate) auth_method: AuthMethod,
+    pub(crate) password_stored: bool,
+    pub(crate) private_key_path: Option<String>,
+    pub(crate) jump_host_config: Option<String>,
+    pub(crate) created_at: i64,
+    pub(crate) updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SftpBookmarkRow {
+    pub(crate) id: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) username: String,
+    pub(crate) path: String,
+    pub(crate) side: String,
+    pub(crate) label: Option<String>,
+    pub(crate) created_at: i64,
+}
+

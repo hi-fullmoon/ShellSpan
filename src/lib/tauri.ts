@@ -16,12 +16,14 @@ import type {
   KnownHostEntry,
   LocalDirectoryListing,
   LogFileInfo,
+  ProfileRow,
   RemoteConnectionRequest,
   RemoteDirectoryListing,
   RemoteDirectoryRequest,
   RenameRemotePathRequest,
   DeleteRemotePathRequest,
   RestoreRemotePathRequest,
+  SftpBookmarkRow,
   TrashRemotePathRequest,
   TrashedRemotePath,
   OpenRemoteFileRequest,
@@ -393,3 +395,62 @@ export function isTauriRuntime(): boolean {
 export async function invokeRequestAppRestart(): Promise<void> {
   return invokeLogged('request_app_restart');
 }
+
+// --- Database commands ---
+
+export async function invokeListProfiles(): Promise<ProfileRow[]> {
+  return invokeLogged<ProfileRow[]>('list_profiles');
+}
+
+export async function invokeAddProfile(profile: ProfileRow): Promise<void> {
+  return invokeLogged('add_profile', { profile });
+}
+
+export async function invokeUpdateProfile(id: string, profile: ProfileRow): Promise<void> {
+  return invokeLogged('update_profile', { id, profile });
+}
+
+export async function invokeRemoveProfile(id: string): Promise<void> {
+  return invokeLogged('remove_profile', { id });
+}
+
+export async function invokeLoadPreferences(): Promise<[string, string][]> {
+  return invokeLogged<[string, string][]>('load_preferences');
+}
+
+export async function invokeSavePreferences(
+  entries: [string, string][],
+): Promise<void> {
+  return invokeLogged('save_preferences', { entries });
+}
+
+export async function invokeListRecentProfiles(): Promise<string[]> {
+  return invokeLogged<string[]>('list_recent_profiles');
+}
+
+export async function invokeTouchRecentProfile(profileId: string): Promise<void> {
+  return invokeLogged('touch_recent_profile', { profileId });
+}
+
+export async function invokeRemoveRecentProfile(profileId: string): Promise<void> {
+  return invokeLogged('remove_recent_profile', { profileId });
+}
+
+export async function invokeListSftpBookmarks(
+  host: string,
+  port: number,
+  username: string,
+): Promise<SftpBookmarkRow[]> {
+  return invokeLogged<SftpBookmarkRow[]>('list_sftp_bookmarks', { host, port, username });
+}
+
+export async function invokeAddSftpBookmark(
+  bookmark: SftpBookmarkRow,
+): Promise<void> {
+  return invokeLogged('add_sftp_bookmark', { bookmark });
+}
+
+export async function invokeRemoveSftpBookmark(id: string): Promise<void> {
+  return invokeLogged('remove_sftp_bookmark', { id });
+}
+

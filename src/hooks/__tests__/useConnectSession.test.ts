@@ -17,6 +17,9 @@ vi.mock('@/lib/tauri', () => ({
   invokeStorePassword: vi.fn().mockResolvedValue(undefined),
   invokeRemovePassword: vi.fn().mockResolvedValue(undefined),
   buildRemoteConnectionRequest: vi.fn(),
+  invokeTouchRecentProfile: vi.fn().mockResolvedValue(undefined),
+  invokeRemoveRecentProfile: vi.fn().mockResolvedValue(undefined),
+  invokeListRecentProfiles: vi.fn().mockResolvedValue([]),
 }));
 
 import {

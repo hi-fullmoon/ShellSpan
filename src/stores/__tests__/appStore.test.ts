@@ -46,27 +46,6 @@ describe('appStore', () => {
     });
   });
 
-  it('rehydrates an older shortcut object without dropping new actions', async () => {
-    localStorage.setItem('termbridge.preferences', JSON.stringify({
-      state: {
-        shortcuts: {
-          openWorkbench: 'mod+9',
-          openTerminal: 'mod+2',
-          openSftp: 'mod+3',
-          openSettings: 'mod+,',
-        },
-      },
-      version: 0,
-    }));
-
-    await useAppStore.persist.rehydrate();
-
-    expect(useAppStore.getState().shortcuts).toEqual({
-      ...DEFAULT_SHORTCUTS,
-      openWorkbench: 'mod+9',
-    });
-  });
-
   it('rejects invalid persisted shortcut values', () => {
     expect(mergeShortcutBindings({ openWorkbench: 42, findTerminal: '' })).toEqual(
       DEFAULT_SHORTCUTS,

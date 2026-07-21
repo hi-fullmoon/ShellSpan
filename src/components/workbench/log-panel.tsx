@@ -136,20 +136,6 @@ function getLevelClasses(level: string): string {
   }
 }
 
-function getLevelDotClasses(level: string): string {
-  switch (level) {
-    case 'ERROR':
-      return 'bg-app-error';
-    case 'WARN':
-      return 'bg-app-warning';
-    case 'DEBUG':
-      return 'bg-app-primary';
-    case 'INFO':
-    default:
-      return 'bg-app-success';
-  }
-}
-
 function renderHighlightedText(text: string, query: string): React.ReactNode {
   if (!query) return text;
   const lowerText = text.toLowerCase();
@@ -197,9 +183,8 @@ const LogLine: React.FC<LogLineProps> = ({
       <button
         type="button"
         onDoubleClick={onDoubleClick}
-        className="flex w-full cursor-pointer items-start gap-2 border-l-2 border-transparent px-2 py-1 text-left text-app-text-soft transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
+        className="flex w-full cursor-pointer items-start gap-2 px-2 py-1 text-left text-app-text-soft transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
       >
-        <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-transparent" />
         <span className="min-w-0 whitespace-pre-wrap break-all">
           {renderHighlightedText(line.raw, query)}
         </span>
@@ -217,14 +202,8 @@ const LogLine: React.FC<LogLineProps> = ({
     <button
       type="button"
       onDoubleClick={onDoubleClick}
-      className="flex w-full cursor-pointer items-start gap-2 border-l-2 border-transparent px-2 py-1 text-left transition-colors hover:border-l-app-primary/40 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
+      className="flex w-full cursor-pointer items-start gap-2 px-2 py-1 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
     >
-      <span
-        className={cn(
-          'mt-1.5 size-1.5 shrink-0 rounded-full',
-          getLevelDotClasses(line.level),
-        )}
-      />
       <span className="w-[19ch] shrink-0 whitespace-nowrap text-[10px] leading-4 text-app-text-soft">
         {line.date} {shortTime}
       </span>
@@ -656,18 +635,6 @@ export const LogPanel: React.FC = () => {
       </div>
       <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-app-border px-3 text-[11px] text-muted-foreground">
         <div className="flex min-w-0 items-center gap-2">
-          {activeFileName && (
-            <>
-              <span className="relative flex size-1.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-app-success opacity-60" />
-                <span className="relative inline-flex size-1.5 rounded-full bg-app-success" />
-              </span>
-              <span className="shrink-0">{t('workbench.logs.live')}</span>
-              <span aria-hidden="true" className="shrink-0">
-                ·
-              </span>
-            </>
-          )}
           <span className="shrink-0">
             {t('workbench.logs.lineCount', {
               count: filteredLines.length,

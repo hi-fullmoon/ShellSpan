@@ -5,16 +5,34 @@ const {
   invokeRemovePassword,
   invokeRetrievePassword,
   invokeStorePassword,
+  invokeAddProfile,
+  invokeUpdateProfile,
+  invokeRemoveProfile,
+  invokeListProfiles,
+  invokeHasExistingData,
+  invokeMigrateProfiles,
 } = vi.hoisted(() => ({
   invokeRemovePassword: vi.fn(),
   invokeRetrievePassword: vi.fn(),
   invokeStorePassword: vi.fn(),
+  invokeAddProfile: vi.fn(),
+  invokeUpdateProfile: vi.fn(),
+  invokeRemoveProfile: vi.fn(),
+  invokeListProfiles: vi.fn().mockResolvedValue([]),
+  invokeHasExistingData: vi.fn().mockResolvedValue(true),
+  invokeMigrateProfiles: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/tauri', () => ({
   invokeRemovePassword,
   invokeRetrievePassword,
   invokeStorePassword,
+  invokeAddProfile,
+  invokeUpdateProfile,
+  invokeRemoveProfile,
+  invokeListProfiles,
+  invokeHasExistingData,
+  invokeMigrateProfiles,
 }));
 
 const profileValues = {
@@ -32,7 +50,11 @@ describe('profileStore keychain lifecycle', () => {
     invokeStorePassword.mockResolvedValue(undefined);
     invokeRemovePassword.mockResolvedValue(undefined);
     invokeRetrievePassword.mockResolvedValue(null);
-    useProfileStore.setState({ profiles: [] });
+    invokeAddProfile.mockResolvedValue(undefined);
+    invokeUpdateProfile.mockResolvedValue(undefined);
+    invokeRemoveProfile.mockResolvedValue(undefined);
+    invokeListProfiles.mockResolvedValue([]);
+    useProfileStore.setState({ profiles: [], initialized: false });
   });
 
   it('stores the secret before persisting only credential metadata', async () => {

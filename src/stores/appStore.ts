@@ -1,7 +1,14 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { subscribeWithSelector } from 'zustand/middleware';
 import { changeLocale } from '@/locales';
 import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
+import {
+  invokeLoadPreferences,
+  invokeSavePreferences,
+} from '@/lib/tauri';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('appStore');
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   openWorkbench: 'mod+1',
@@ -49,8 +56,10 @@ interface AppPreferences {
 }
 
 interface AppState extends AppPreferences {
+  initialized: boolean;
   activeSection: AppSection;
   activeWorkbenchTab: WorkbenchTab;
+  hydrateFromDb: () => Promise<void>;
   setActiveSection: (section: AppSection) => void;
   setActiveWorkbenchTab: (tab: WorkbenchTab) => void;
   setTheme: (theme: ThemeMode) => void;
@@ -87,68 +96,21 @@ interface AppState extends AppPreferences {
   resetShortcuts: () => void;
 }
 
-const STORAGE_KEY = 'termbridge.preferences';
+const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
+  'theme', 'locale', 'startupUpdateCheck', 'startupSection',
+  'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
+  'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
+  'terminalColorScheme', 'terminalMultiLinePasteWarning',
+  'terminalLargePasteWarning', 'terminalAutoReconnect',
+  'terminalLineHeight', 'terminalLetterSpacing', 'terminalUrlDetection',
+  'terminalTrimTrailingWhitespace', 'terminalRightClickBehavior',
+  'terminalBellStyle', 'confirmBeforeExit', 'restoreWorkspace',
+  'sftpShowHiddenFiles', 'sftpConflictPolicy', 'sftpRetryCount',
+  'sftpDownloadDirectory', 'sftpCompletionNotification',
+  'terminalHideSingleTabBar', 'sftpHideSingleTabBar', 'shortcuts',
+];
 
-export function mergeShortcutBindings(value: unknown): ShortcutBindings {
-  const stored = value && typeof value === 'object'
-    ? value as Partial<Record<ShortcutAction, unknown>>
-    : {};
-  return Object.fromEntries(
-    (Object.entries(DEFAULT_SHORTCUTS) as Array<[ShortcutAction, string]>).map(
-      ([action, fallback]) => [
-        action,
-        typeof stored[action] === 'string' && stored[action].length > 0
-          ? stored[action]
-          : fallback,
-      ],
-    ),
-  ) as ShortcutBindings;
-}
-
-function readInitialPreferences(): AppPreferences {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const stored = JSON.parse(raw) as Partial<AppPreferences> & {
-        state?: Partial<AppPreferences>;
-      };
-      const parsed = stored.state ?? stored;
-      return {
-        theme: parsed.theme ?? 'system',
-        locale: parsed.locale ?? 'zh-CN',
-        startupUpdateCheck: parsed.startupUpdateCheck ?? true,
-        startupSection: parsed.startupSection ?? 'workbench',
-        terminalFontSize: parsed.terminalFontSize ?? 14,
-        terminalFontFamily: parsed.terminalFontFamily ?? 'system',
-        terminalCursorBlink: parsed.terminalCursorBlink ?? true,
-        terminalCursorStyle: parsed.terminalCursorStyle ?? 'block',
-        terminalCopyOnSelect: parsed.terminalCopyOnSelect ?? true,
-        terminalScrollback: parsed.terminalScrollback ?? 10000,
-        terminalColorScheme: parsed.terminalColorScheme ?? 'app',
-        terminalMultiLinePasteWarning: parsed.terminalMultiLinePasteWarning ?? true,
-        terminalLargePasteWarning: parsed.terminalLargePasteWarning ?? true,
-        terminalAutoReconnect: parsed.terminalAutoReconnect ?? false,
-        terminalLineHeight: parsed.terminalLineHeight ?? 1,
-        terminalLetterSpacing: parsed.terminalLetterSpacing ?? 0,
-        terminalUrlDetection: parsed.terminalUrlDetection ?? true,
-        terminalTrimTrailingWhitespace: parsed.terminalTrimTrailingWhitespace ?? true,
-        terminalRightClickBehavior: parsed.terminalRightClickBehavior ?? 'paste',
-        terminalBellStyle: parsed.terminalBellStyle ?? 'none',
-        confirmBeforeExit: parsed.confirmBeforeExit ?? true,
-        restoreWorkspace: parsed.restoreWorkspace ?? true,
-        sftpShowHiddenFiles: parsed.sftpShowHiddenFiles ?? true,
-        sftpConflictPolicy: parsed.sftpConflictPolicy ?? 'ask',
-        sftpRetryCount: parsed.sftpRetryCount ?? 1,
-        sftpDownloadDirectory: parsed.sftpDownloadDirectory ?? '',
-        sftpCompletionNotification: parsed.sftpCompletionNotification ?? true,
-        terminalHideSingleTabBar: parsed.terminalHideSingleTabBar ?? false,
-        sftpHideSingleTabBar: parsed.sftpHideSingleTabBar ?? false,
-        shortcuts: mergeShortcutBindings(parsed.shortcuts),
-      };
-    }
-  } catch {
-    // ignore
-  }
+function getDefaultPreferences(): AppPreferences {
   return {
     theme: 'system',
     locale: 'zh-CN',
@@ -183,105 +145,191 @@ function readInitialPreferences(): AppPreferences {
   };
 }
 
-const initial = readInitialPreferences();
+const defaults = getDefaultPreferences();
+
+export function mergeShortcutBindings(value: unknown): ShortcutBindings {
+  const stored = value && typeof value === 'object'
+    ? value as Partial<Record<ShortcutAction, unknown>>
+    : {};
+  return Object.fromEntries(
+    (Object.entries(DEFAULT_SHORTCUTS) as Array<[ShortcutAction, string]>).map(
+      ([action, fallback]) => [
+        action,
+        typeof stored[action] === 'string' && stored[action].length > 0
+          ? stored[action]
+          : fallback,
+      ],
+    ),
+  ) as ShortcutBindings;
+}
+
+function entriesToPreferences(entries: [string, string][]): Partial<AppPreferences> {
+  const prefs: Record<string, unknown> = {};
+  for (const [key, value] of entries) {
+    try { prefs[key] = JSON.parse(value); } catch { prefs[key] = value; }
+  }
+
+  return {
+    theme: (prefs.theme as ThemeMode) ?? defaults.theme,
+    locale: (prefs.locale as Locale) ?? defaults.locale,
+    startupUpdateCheck: (prefs.startupUpdateCheck as boolean) ?? defaults.startupUpdateCheck,
+    startupSection: (prefs.startupSection as AppSection) ?? defaults.startupSection,
+    terminalFontSize: (prefs.terminalFontSize as number) ?? defaults.terminalFontSize,
+    terminalFontFamily: (prefs.terminalFontFamily as TerminalFontFamily) ?? defaults.terminalFontFamily,
+    terminalCursorBlink: (prefs.terminalCursorBlink as boolean) ?? defaults.terminalCursorBlink,
+    terminalCursorStyle: (prefs.terminalCursorStyle as TerminalCursorStyle) ?? defaults.terminalCursorStyle,
+    terminalCopyOnSelect: (prefs.terminalCopyOnSelect as boolean) ?? defaults.terminalCopyOnSelect,
+    terminalScrollback: (prefs.terminalScrollback as number) ?? defaults.terminalScrollback,
+    terminalColorScheme: (prefs.terminalColorScheme as TerminalColorScheme) ?? defaults.terminalColorScheme,
+    terminalMultiLinePasteWarning: (prefs.terminalMultiLinePasteWarning as boolean) ?? defaults.terminalMultiLinePasteWarning,
+    terminalLargePasteWarning: (prefs.terminalLargePasteWarning as boolean) ?? defaults.terminalLargePasteWarning,
+    terminalAutoReconnect: (prefs.terminalAutoReconnect as boolean) ?? defaults.terminalAutoReconnect,
+    terminalLineHeight: (prefs.terminalLineHeight as number) ?? defaults.terminalLineHeight,
+    terminalLetterSpacing: (prefs.terminalLetterSpacing as number) ?? defaults.terminalLetterSpacing,
+    terminalUrlDetection: (prefs.terminalUrlDetection as boolean) ?? defaults.terminalUrlDetection,
+    terminalTrimTrailingWhitespace: (prefs.terminalTrimTrailingWhitespace as boolean) ?? defaults.terminalTrimTrailingWhitespace,
+    terminalRightClickBehavior: (prefs.terminalRightClickBehavior as TerminalRightClickBehavior) ?? defaults.terminalRightClickBehavior,
+    terminalBellStyle: (prefs.terminalBellStyle as TerminalBellStyle) ?? defaults.terminalBellStyle,
+    confirmBeforeExit: (prefs.confirmBeforeExit as boolean) ?? defaults.confirmBeforeExit,
+    restoreWorkspace: (prefs.restoreWorkspace as boolean) ?? defaults.restoreWorkspace,
+    sftpShowHiddenFiles: (prefs.sftpShowHiddenFiles as boolean) ?? defaults.sftpShowHiddenFiles,
+    sftpConflictPolicy: (prefs.sftpConflictPolicy as SftpConflictPolicy) ?? defaults.sftpConflictPolicy,
+    sftpRetryCount: (prefs.sftpRetryCount as number) ?? defaults.sftpRetryCount,
+    sftpDownloadDirectory: (prefs.sftpDownloadDirectory as string) ?? defaults.sftpDownloadDirectory,
+    sftpCompletionNotification: (prefs.sftpCompletionNotification as boolean) ?? defaults.sftpCompletionNotification,
+    terminalHideSingleTabBar: (prefs.terminalHideSingleTabBar as boolean) ?? defaults.terminalHideSingleTabBar,
+    sftpHideSingleTabBar: (prefs.sftpHideSingleTabBar as boolean) ?? defaults.sftpHideSingleTabBar,
+    shortcuts: mergeShortcutBindings(prefs.shortcuts),
+  };
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function debouncedSaveToDb(state: AppPreferences) {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const entries: [string, string][] = PREFERENCE_KEYS.map((key) => [
+      key as string,
+      JSON.stringify(state[key]),
+    ]);
+    invokeSavePreferences(entries).catch((error) => {
+      logger.error('failed to save preferences to database', error);
+    });
+  }, 500);
+}
 
 export const useAppStore = create<AppState>()(
-  persist(
-    (set) => ({
-      ...initial,
-      activeSection: initial.startupSection,
-      activeWorkbenchTab: 'connections',
-      setActiveSection: (section) => set({ activeSection: section }),
-      setActiveWorkbenchTab: (activeWorkbenchTab) => set({ activeWorkbenchTab }),
-      setTheme: (theme) => set({ theme }),
-      setLocale: (locale) => {
-        void changeLocale(locale);
-        set({ locale });
-      },
-      setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
-      setStartupSection: (startupSection) => set({ startupSection }),
-      setTerminalFontSize: (terminalFontSize) => set({ terminalFontSize }),
-      setTerminalFontFamily: (terminalFontFamily) => set({ terminalFontFamily }),
-      setTerminalCursorBlink: (terminalCursorBlink) => set({ terminalCursorBlink }),
-      setTerminalCursorStyle: (terminalCursorStyle) => set({ terminalCursorStyle }),
-      setTerminalCopyOnSelect: (terminalCopyOnSelect) => set({ terminalCopyOnSelect }),
-      setTerminalScrollback: (terminalScrollback) => set({ terminalScrollback }),
-      setTerminalColorScheme: (terminalColorScheme) => set({ terminalColorScheme }),
-      setTerminalMultiLinePasteWarning: (terminalMultiLinePasteWarning) => set({ terminalMultiLinePasteWarning }),
-      setTerminalLargePasteWarning: (terminalLargePasteWarning) => set({ terminalLargePasteWarning }),
-      setTerminalAutoReconnect: (terminalAutoReconnect) => set({ terminalAutoReconnect }),
-      setTerminalLineHeight: (terminalLineHeight) => set({ terminalLineHeight }),
-      setTerminalLetterSpacing: (terminalLetterSpacing) => set({ terminalLetterSpacing }),
-      setTerminalUrlDetection: (terminalUrlDetection) => set({ terminalUrlDetection }),
-      setTerminalTrimTrailingWhitespace: (terminalTrimTrailingWhitespace) => set({ terminalTrimTrailingWhitespace }),
-      setTerminalRightClickBehavior: (terminalRightClickBehavior) => set({ terminalRightClickBehavior }),
-      setTerminalBellStyle: (terminalBellStyle) => set({ terminalBellStyle }),
-      setConfirmBeforeExit: (confirmBeforeExit) => set({ confirmBeforeExit }),
-      setRestoreWorkspace: (restoreWorkspace) => set({ restoreWorkspace }),
-      setSftpShowHiddenFiles: (sftpShowHiddenFiles) => set({ sftpShowHiddenFiles }),
-      setSftpConflictPolicy: (sftpConflictPolicy) => set({ sftpConflictPolicy }),
-      setSftpRetryCount: (sftpRetryCount) => set({ sftpRetryCount }),
-      setSftpDownloadDirectory: (sftpDownloadDirectory) => set({ sftpDownloadDirectory }),
-      setSftpCompletionNotification: (sftpCompletionNotification) => set({ sftpCompletionNotification }),
-      setTerminalHideSingleTabBar: (terminalHideSingleTabBar) => set({ terminalHideSingleTabBar }),
-      setSftpHideSingleTabBar: (sftpHideSingleTabBar) => set({ sftpHideSingleTabBar }),
-      setShortcut: (action, shortcut) =>
-        set((state) => ({
-          shortcuts: { ...DEFAULT_SHORTCUTS, ...state.shortcuts, [action]: shortcut },
-        })),
-      resetShortcut: (action) =>
-        set((state) => ({
-          shortcuts: { ...DEFAULT_SHORTCUTS, ...state.shortcuts, [action]: DEFAULT_SHORTCUTS[action] },
-        })),
-      resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
-    }),
-    {
-      name: STORAGE_KEY,
-      partialize: (state) => ({
-        theme: state.theme,
-        locale: state.locale,
-        startupUpdateCheck: state.startupUpdateCheck,
-        startupSection: state.startupSection,
-        terminalFontSize: state.terminalFontSize,
-        terminalFontFamily: state.terminalFontFamily,
-        terminalCursorBlink: state.terminalCursorBlink,
-        terminalCursorStyle: state.terminalCursorStyle,
-        terminalCopyOnSelect: state.terminalCopyOnSelect,
-        terminalScrollback: state.terminalScrollback,
-        terminalColorScheme: state.terminalColorScheme,
-        terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
-        terminalLargePasteWarning: state.terminalLargePasteWarning,
-        terminalAutoReconnect: state.terminalAutoReconnect,
-        terminalLineHeight: state.terminalLineHeight,
-        terminalLetterSpacing: state.terminalLetterSpacing,
-        terminalUrlDetection: state.terminalUrlDetection,
-        terminalTrimTrailingWhitespace: state.terminalTrimTrailingWhitespace,
-        terminalRightClickBehavior: state.terminalRightClickBehavior,
-        terminalBellStyle: state.terminalBellStyle,
-        confirmBeforeExit: state.confirmBeforeExit,
-        restoreWorkspace: state.restoreWorkspace,
-        sftpShowHiddenFiles: state.sftpShowHiddenFiles,
-        sftpConflictPolicy: state.sftpConflictPolicy,
-        sftpRetryCount: state.sftpRetryCount,
-        sftpDownloadDirectory: state.sftpDownloadDirectory,
-        sftpCompletionNotification: state.sftpCompletionNotification,
-        terminalHideSingleTabBar: state.terminalHideSingleTabBar,
-        sftpHideSingleTabBar: state.sftpHideSingleTabBar,
-        shortcuts: state.shortcuts,
-      }),
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState && typeof persistedState === 'object'
-          ? persistedState as Partial<AppState>
-          : {};
-        return {
-          ...currentState,
-          ...persisted,
-          shortcuts: mergeShortcutBindings(persisted.shortcuts),
-        };
-      },
-      onRehydrateStorage: () => (state) => {
-        if (state) state.setActiveSection(state.startupSection);
-      },
+  subscribeWithSelector((set, _get) => ({
+    ...defaults,
+    initialized: false,
+    activeSection: defaults.startupSection,
+    activeWorkbenchTab: 'connections' as WorkbenchTab,
+
+    hydrateFromDb: async () => {
+      try {
+        const entries = await invokeLoadPreferences();
+        if (entries.length > 0) {
+          const prefs = entriesToPreferences(entries);
+          set({ ...prefs, initialized: true, activeSection: prefs.startupSection ?? defaults.startupSection });
+          if (prefs.locale) {
+            void changeLocale(prefs.locale);
+          }
+          logger.info('preferences loaded from database');
+        } else {
+          set({ initialized: true });
+        }
+      } catch (error) {
+        logger.error('failed to hydrate preferences from database', error);
+        set({ initialized: true });
+      }
     },
-  ),
+
+    setActiveSection: (activeSection) => set({ activeSection }),
+    setActiveWorkbenchTab: (activeWorkbenchTab) => set({ activeWorkbenchTab }),
+    setTheme: (theme) => set({ theme }),
+    setLocale: (locale) => {
+      void changeLocale(locale);
+      set({ locale });
+    },
+    setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
+    setStartupSection: (startupSection) => set({ startupSection }),
+    setTerminalFontSize: (terminalFontSize) => set({ terminalFontSize }),
+    setTerminalFontFamily: (terminalFontFamily) => set({ terminalFontFamily }),
+    setTerminalCursorBlink: (terminalCursorBlink) => set({ terminalCursorBlink }),
+    setTerminalCursorStyle: (terminalCursorStyle) => set({ terminalCursorStyle }),
+    setTerminalCopyOnSelect: (terminalCopyOnSelect) => set({ terminalCopyOnSelect }),
+    setTerminalScrollback: (terminalScrollback) => set({ terminalScrollback }),
+    setTerminalColorScheme: (terminalColorScheme) => set({ terminalColorScheme }),
+    setTerminalMultiLinePasteWarning: (terminalMultiLinePasteWarning) => set({ terminalMultiLinePasteWarning }),
+    setTerminalLargePasteWarning: (terminalLargePasteWarning) => set({ terminalLargePasteWarning }),
+    setTerminalAutoReconnect: (terminalAutoReconnect) => set({ terminalAutoReconnect }),
+    setTerminalLineHeight: (terminalLineHeight) => set({ terminalLineHeight }),
+    setTerminalLetterSpacing: (terminalLetterSpacing) => set({ terminalLetterSpacing }),
+    setTerminalUrlDetection: (terminalUrlDetection) => set({ terminalUrlDetection }),
+    setTerminalTrimTrailingWhitespace: (terminalTrimTrailingWhitespace) => set({ terminalTrimTrailingWhitespace }),
+    setTerminalRightClickBehavior: (terminalRightClickBehavior) => set({ terminalRightClickBehavior }),
+    setTerminalBellStyle: (terminalBellStyle) => set({ terminalBellStyle }),
+    setConfirmBeforeExit: (confirmBeforeExit) => set({ confirmBeforeExit }),
+    setRestoreWorkspace: (restoreWorkspace) => set({ restoreWorkspace }),
+    setSftpShowHiddenFiles: (sftpShowHiddenFiles) => set({ sftpShowHiddenFiles }),
+    setSftpConflictPolicy: (sftpConflictPolicy) => set({ sftpConflictPolicy }),
+    setSftpRetryCount: (sftpRetryCount) => set({ sftpRetryCount }),
+    setSftpDownloadDirectory: (sftpDownloadDirectory) => set({ sftpDownloadDirectory }),
+    setSftpCompletionNotification: (sftpCompletionNotification) => set({ sftpCompletionNotification }),
+    setTerminalHideSingleTabBar: (terminalHideSingleTabBar) => set({ terminalHideSingleTabBar }),
+    setSftpHideSingleTabBar: (sftpHideSingleTabBar) => set({ sftpHideSingleTabBar }),
+    setShortcut: (action, shortcut) =>
+      set((state) => ({
+        shortcuts: { ...DEFAULT_SHORTCUTS, ...state.shortcuts, [action]: shortcut },
+      })),
+    resetShortcut: (action) =>
+      set((state) => ({
+        shortcuts: { ...DEFAULT_SHORTCUTS, ...state.shortcuts, [action]: DEFAULT_SHORTCUTS[action] },
+      })),
+    resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
+  })),
+);
+
+// Subscribe to preference changes and persist to database
+let previousPrefs: AppPreferences | null = null;
+useAppStore.subscribe(
+  (state) => {
+    // Only save after initialization is complete
+    if (!state.initialized) return;
+    const currentPrefs: AppPreferences = {
+      theme: state.theme,
+      locale: state.locale,
+      startupUpdateCheck: state.startupUpdateCheck,
+      startupSection: state.startupSection,
+      terminalFontSize: state.terminalFontSize,
+      terminalFontFamily: state.terminalFontFamily,
+      terminalCursorBlink: state.terminalCursorBlink,
+      terminalCursorStyle: state.terminalCursorStyle,
+      terminalCopyOnSelect: state.terminalCopyOnSelect,
+      terminalScrollback: state.terminalScrollback,
+      terminalColorScheme: state.terminalColorScheme,
+      terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
+      terminalLargePasteWarning: state.terminalLargePasteWarning,
+      terminalAutoReconnect: state.terminalAutoReconnect,
+      terminalLineHeight: state.terminalLineHeight,
+      terminalLetterSpacing: state.terminalLetterSpacing,
+      terminalUrlDetection: state.terminalUrlDetection,
+      terminalTrimTrailingWhitespace: state.terminalTrimTrailingWhitespace,
+      terminalRightClickBehavior: state.terminalRightClickBehavior,
+      terminalBellStyle: state.terminalBellStyle,
+      confirmBeforeExit: state.confirmBeforeExit,
+      restoreWorkspace: state.restoreWorkspace,
+      sftpShowHiddenFiles: state.sftpShowHiddenFiles,
+      sftpConflictPolicy: state.sftpConflictPolicy,
+      sftpRetryCount: state.sftpRetryCount,
+      sftpDownloadDirectory: state.sftpDownloadDirectory,
+      sftpCompletionNotification: state.sftpCompletionNotification,
+      terminalHideSingleTabBar: state.terminalHideSingleTabBar,
+      sftpHideSingleTabBar: state.sftpHideSingleTabBar,
+      shortcuts: state.shortcuts,
+    };
+    if (previousPrefs && JSON.stringify(previousPrefs) === JSON.stringify(currentPrefs)) return;
+    previousPrefs = currentPrefs;
+    debouncedSaveToDb(currentPrefs);
+  },
 );

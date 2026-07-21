@@ -16,7 +16,30 @@ use std::{
 const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
 const SSH_SESSION_IO_TIMEOUT_MS: u32 = 15_000;
+const SSH_TRANSFER_IO_TIMEOUT_MS: u32 = 120_000;
 pub(crate) const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
+
+pub(crate) struct TransferTimeoutGuard<'a> {
+    session: &'a Session,
+    previous_timeout_ms: u32,
+}
+
+impl<'a> TransferTimeoutGuard<'a> {
+    pub(crate) fn new(session: &'a Session) -> Self {
+        let previous_timeout_ms = session.timeout();
+        session.set_timeout(SSH_TRANSFER_IO_TIMEOUT_MS);
+        Self {
+            session,
+            previous_timeout_ms,
+        }
+    }
+}
+
+impl Drop for TransferTimeoutGuard<'_> {
+    fn drop(&mut self) {
+        self.session.set_timeout(self.previous_timeout_ms);
+    }
+}
 
 pub(crate) fn connect_sftp(
     request: &RemoteConnectionRequest,
@@ -517,6 +540,19 @@ mod tests {
             expect_shared(connect_sftp(request, Some(pool), None));
         }
         let _ = dummy_call;
+    }
+
+    #[test]
+    fn transfer_timeout_guard_restores_the_normal_session_timeout() {
+        let session = Session::new().expect("session should initialize");
+        session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
+
+        {
+            let _guard = TransferTimeoutGuard::new(&session);
+            assert_eq!(session.timeout(), SSH_TRANSFER_IO_TIMEOUT_MS);
+        }
+
+        assert_eq!(session.timeout(), SSH_SESSION_IO_TIMEOUT_MS);
     }
 
     #[test]

@@ -9,6 +9,15 @@ import type {
   RemoteFileKind,
   SessionSummary,
 } from '@/types';
+import {
+  invokeListSftpBookmarks,
+  invokeAddSftpBookmark,
+  invokeRemoveSftpBookmark,
+} from '@/lib/tauri';
+import { safeInvoke } from '@/lib/utils';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('sftpStore');
 
 export type SftpSide = 'local' | 'remote';
 export type SftpPaneSource = 'empty' | 'local' | 'remote';
@@ -142,6 +151,7 @@ interface SftpState {
     id: string,
     clipboard?: SftpRemoteClipboard,
   ) => void;
+  hydrateSftpBookmarks: (host: string, port: number, username: string, connectionId: string, side: SftpSide) => Promise<void>;
   addRemoteBookmark: (id: string, side: SftpSide, path: string) => void;
   removeRemoteBookmark: (id: string, side: SftpSide, path: string) => void;
   setSplitRatio: (id: string, ratio: number) => void;
@@ -421,29 +431,73 @@ export const useSftpStore = create<SftpState>()((set) => ({
       })),
     })),
 
-  addRemoteBookmark: (id, side, path) =>
-    set((state) => ({
-      connections: updateConnection(state, id, (connection) => ({
-        ...connection,
-        remoteBookmarks: {
-          ...connection.remoteBookmarks,
-          [side]: connection.remoteBookmarks[side].includes(path)
-            ? connection.remoteBookmarks[side]
-            : [...connection.remoteBookmarks[side], path],
-        },
-      })),
-    })),
+  hydrateSftpBookmarks: async (host, port, username, connectionId, side) => {
+    try {
+      const rows = await invokeListSftpBookmarks(host, port, username);
+      const paths = rows
+        .filter((r) => r.side === side)
+        .map((r) => r.path);
+      if (paths.length === 0) return;
+      set((state) => ({
+        connections: updateConnection(state, connectionId, (connection) => ({
+          ...connection,
+          remoteBookmarks: {
+            ...connection.remoteBookmarks,
+            [side]: [...new Set([...connection.remoteBookmarks[side], ...paths])],
+          },
+        })),
+      }));
+      logger.info(`loaded ${paths.length} SFTP bookmarks for ${username}@${host}`);
+    } catch (error) {
+      logger.error('failed to hydrate SFTP bookmarks', error);
+    }
+  },
 
-  removeRemoteBookmark: (id, side, path) =>
+  addRemoteBookmark: (id, side, path) => {
+    const connection = useSftpStore.getState().connections.find((c) => c.id === id);
     set((state) => ({
-      connections: updateConnection(state, id, (connection) => ({
-        ...connection,
+      connections: updateConnection(state, id, (conn) => ({
+        ...conn,
         remoteBookmarks: {
-          ...connection.remoteBookmarks,
-          [side]: connection.remoteBookmarks[side].filter((p) => p !== path),
+          ...conn.remoteBookmarks,
+          [side]: conn.remoteBookmarks[side].includes(path)
+            ? conn.remoteBookmarks[side]
+            : [...conn.remoteBookmarks[side], path],
         },
       })),
-    })),
+    }));
+    // Write-through to SQLite (fire-and-forget)
+    if (connection) {
+      const now = Date.now();
+      safeInvoke(invokeAddSftpBookmark, {
+        id: `${connection.connection.host}:${connection.connection.port}:${connection.connection.username}:${side}:${path}`,
+        host: connection.connection.host,
+        port: connection.connection.port,
+        username: connection.connection.username,
+        path,
+        side,
+        createdAt: now,
+      });
+    }
+  },
+
+  removeRemoteBookmark: (id, side, path) => {
+    const connection = useSftpStore.getState().connections.find((c) => c.id === id);
+    set((state) => ({
+      connections: updateConnection(state, id, (conn) => ({
+        ...conn,
+        remoteBookmarks: {
+          ...conn.remoteBookmarks,
+          [side]: conn.remoteBookmarks[side].filter((p) => p !== path),
+        },
+      })),
+    }));
+    // Write-through to SQLite (fire-and-forget)
+    if (connection) {
+      const bookmarkId = `${connection.connection.host}:${connection.connection.port}:${connection.connection.username}:${side}:${path}`;
+      safeInvoke(invokeRemoveSftpBookmark, bookmarkId);
+    }
+  },
 
   setSplitRatio: (id, ratio) =>
     set((state) => ({

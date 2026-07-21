@@ -126,7 +126,6 @@ export default {
   'workbench.logs.exported': '日志已导出到 {path}',
   'workbench.logs.exportFailed': '日志导出失败',
   'workbench.logs.searchPlaceholder': '筛选日志...',
-  'workbench.logs.live': '实时',
   'workbench.logs.lineCount': '{count} / {total} 行',
   'workbench.logs.copyHint': '双击复制单行日志',
 

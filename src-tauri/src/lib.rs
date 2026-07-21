@@ -1,5 +1,6 @@
 mod commands;
 mod connection;
+mod db;
 mod identity_cache;
 mod keychain;
 mod local_fs;
@@ -125,6 +126,13 @@ pub fn run() {
                     window.set_title("").ok();
                 }
             }
+            let termbridge_dir = _app
+                .path()
+                .home_dir()
+                .map_err(|e| format!("failed to resolve home dir: {e}"))?
+                .join(".termbridge");
+            let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
+            _app.manage(database);
             Ok(())
         })
         .plugin(
@@ -197,6 +205,18 @@ pub fn run() {
             commands::start_port_forwards,
             commands::stop_port_forwards,
             commands::open_url,
+            commands::list_profiles,
+            commands::add_profile,
+            commands::update_profile,
+            commands::remove_profile,
+            commands::load_preferences,
+            commands::save_preferences,
+            commands::list_recent_profiles,
+            commands::touch_recent_profile,
+            commands::remove_recent_profile,
+            commands::list_sftp_bookmarks,
+            commands::add_sftp_bookmark,
+            commands::remove_sftp_bookmark,
         ]);
 
     menu::configure_builder(builder)
