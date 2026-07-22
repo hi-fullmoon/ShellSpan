@@ -86,10 +86,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
       data-direction={direction}
       className={cn('flex h-full w-full overflow-hidden', direction === 'vertical' && 'flex-col', className)}
     >
-      <div
-        style={direction === 'horizontal' ? { width: `${split * 100}%` } : { height: `${split * 100}%` }}
-        className="min-h-0 min-w-0"
-      >
+      <div style={direction === 'horizontal' ? { width: `${split * 100}%` } : { height: `${split * 100}%` }} className="min-h-0 min-w-0">
         {left}
       </div>
       <div
@@ -98,9 +95,11 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
           'relative z-10 shrink-0 shadow-none scale-[-1]',
           direction === 'horizontal'
             ? dividerStyle === 'subtle'
-              ? 'border-l-[0.5px] border-app-border/40'
+              ? 'border-l-[0.5px] border-app-border/15 dark:border-l dark:border-app-border'
               : 'border-l border-app-border'
-            : 'border-t border-app-border',
+            : dividerStyle === 'subtle'
+              ? 'border-t border-app-border/15 dark:border-t dark:border-app-border'
+              : 'border-t border-app-border',
         )}
       >
         <div
@@ -122,7 +121,9 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
               direction === 'horizontal' ? 'h-full' : 'w-full',
               dragging
                 ? direction === 'horizontal'
-                  ? dividerStyle === 'subtle' ? 'w-0.5 bg-app-primary/80' : 'w-[3px] bg-app-primary'
+                  ? dividerStyle === 'subtle'
+                    ? 'w-0.5 bg-app-primary/80'
+                    : 'w-[3px] bg-app-primary'
                   : 'h-[3px] bg-app-primary'
                 : direction === 'horizontal'
                   ? dividerStyle === 'subtle'
@@ -133,10 +134,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
           />
         </div>
       </div>
-      <div
-        style={direction === 'horizontal' ? { width: `${(1 - split) * 100}%` } : { height: `${(1 - split) * 100}%` }}
-        className="min-h-0 min-w-0"
-      >
+      <div style={direction === 'horizontal' ? { width: `${(1 - split) * 100}%` } : { height: `${(1 - split) * 100}%` }} className="min-h-0 min-w-0">
         {right}
       </div>
     </div>
