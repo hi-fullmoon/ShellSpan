@@ -204,7 +204,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
         role="dialog"
         aria-label={t('sftp.newConnectionMenu.title')}
       >
-        <div className="border-b border-app-border p-4"><div className="relative">
+        <div className="border-b border-app-border/50 p-4"><div className="relative">
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-app-text-soft" />
           <Input
             value={query}
@@ -287,7 +287,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-app-border px-4 py-3">
+        <div className="flex items-center justify-between border-t border-app-border/50 px-4 py-3">
           <Button
             type="button"
             variant="ghost"

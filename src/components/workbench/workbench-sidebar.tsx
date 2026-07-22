@@ -44,7 +44,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   ];
 
   return (
-    <Sidebar className="border-r border-app-border p-2">
+    <Sidebar className="border-r border-app-border/50 p-2">
       <nav className="flex flex-col gap-1">
         {items.map((item) => {
           const active = activeTab === item.key;

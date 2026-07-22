@@ -59,7 +59,7 @@ export const TransferProgress: React.FC = () => {
   if (operations.length === 0) return null;
 
   return (
-    <div className="max-h-64 shrink-0 overflow-y-auto border-t border-app-border bg-app-surface">
+    <div className="max-h-64 shrink-0 overflow-y-auto border-t border-app-border/50 bg-app-surface">
       {operations.map((op) => {
         const progress =
           op.totalBytes > 0
@@ -68,7 +68,7 @@ export const TransferProgress: React.FC = () => {
         return (
           <div
             key={op.operationId}
-            className="relative flex h-10 items-center gap-3 border-b border-app-border bg-app-surface-muted/60 px-2 text-sm last:border-b-0"
+            className="relative flex h-10 items-center gap-3 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-sm last:border-b-0"
           >
             <FileIcon
               className="size-5 shrink-0 text-app-primary"

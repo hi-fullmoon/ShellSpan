@@ -79,7 +79,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">
-      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border/50 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-sm font-medium text-app-text">
             {t('workbench.knownHosts.title')}
