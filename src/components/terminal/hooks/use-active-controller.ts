@@ -8,6 +8,7 @@ interface SearchOptions {
 export function useActiveController(
   paneRef: React.RefObject<HTMLDivElement | null>,
   activeSessionId: string | null,
+  shouldFocus = true,
 ): {
   focus: () => void;
   searchNext: (query: string, options?: SearchOptions) => void;
@@ -36,12 +37,7 @@ export function useActiveController(
     controller.attach(paneRef.current);
     attachedIdRef.current = activeSessionId;
 
-    const focusFrame = requestAnimationFrame(() => {
-      controller.focus();
-    });
-
     return () => {
-      cancelAnimationFrame(focusFrame);
       const current = attachedIdRef.current;
       if (current === null) return;
       const c = terminalRegistry.get(current);
@@ -49,6 +45,14 @@ export function useActiveController(
       attachedIdRef.current = null;
     };
   }, [activeSessionId, paneRef]);
+
+  useEffect(() => {
+    if (!shouldFocus || activeSessionId === null) return;
+    const focusFrame = requestAnimationFrame(() => {
+      terminalRegistry.get(activeSessionId)?.focus();
+    });
+    return () => cancelAnimationFrame(focusFrame);
+  }, [activeSessionId, shouldFocus]);
 
   const focus = useCallback(() => {
     if (activeSessionId === null) return;

@@ -110,6 +110,44 @@ describe('TerminalContextMenu', () => {
     expect(screen.getByText('terminal.tab.color')).toBeInTheDocument();
   });
 
+  it('offers split directions and reports the selected direction', () => {
+    const session = makeSession('s1', 'A');
+    const onSplit = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+        canSplit
+        onSplit={onSplit}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.splitRight'));
+
+    expect(onSplit).toHaveBeenCalledWith('s1', 'right');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables split actions when no second session is available', () => {
+    const session = makeSession('s1', 'A');
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('terminal.tab.splitRight').closest('button')).toBeDisabled();
+    expect(screen.getByText('terminal.tab.splitDown').closest('button')).toBeDisabled();
+  });
+
   it('renders nothing when open is false', () => {
     const session = makeSession('s1', 'A', 'p1');
     const { container } = render(

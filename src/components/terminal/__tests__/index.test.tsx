@@ -1,8 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import Terminal from '../index';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
+import { terminalRegistry } from '../registry/terminal-registry';
 
 const mockConnect = vi.fn();
 
@@ -34,7 +35,9 @@ vi.mock('../terminal-controller-layer', () => ({
 }));
 
 vi.mock('../terminal-pane', () => ({
-  TerminalPane: () => <div data-testid="terminal-pane" />,
+  TerminalPane: ({ activeSession }: { activeSession: { sessionId: string } | null }) => (
+    <div data-testid="terminal-pane" data-session-id={activeSession?.sessionId} />
+  ),
 }));
 
 vi.mock('../new-tab-menu', () => ({
@@ -57,7 +60,23 @@ vi.mock('../new-tab-menu', () => ({
 }));
 
 vi.mock('../terminal-context-menu', () => ({
-  TerminalContextMenu: () => null,
+  TerminalContextMenu: ({
+    open,
+    session,
+    onSplit,
+    onUnsplit,
+  }: {
+    open: boolean;
+    session: { sessionId: string } | null;
+    onSplit: (sessionId: string, direction: 'right' | 'bottom') => void;
+    onUnsplit: () => void;
+  }) => open && session ? (
+    <div>
+      <button type="button" onClick={() => onSplit(session.sessionId, 'right')}>split-right</button>
+      <button type="button" onClick={() => onSplit(session.sessionId, 'bottom')}>split-down</button>
+      <button type="button" onClick={onUnsplit}>unsplit</button>
+    </div>
+  ) : null,
 }));
 
 vi.mock('../host-key-dialog', () => ({
@@ -138,5 +157,140 @@ describe('Terminal', () => {
 
     expect(screen.getByTestId('terminal-pane')).toBeInTheDocument();
     expect(screen.queryByText('terminal.empty')).not.toBeInTheDocument();
+  });
+
+  it('focuses the terminal when its active tab is clicked', async () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 's1', title: 'Session A', host: 'h', port: 22, username: 'u',
+    });
+    const focus = vi.fn();
+    vi.spyOn(terminalRegistry, 'get').mockReturnValue({ focus } as never);
+
+    render(<Terminal />);
+    fireEvent.click(screen.getByRole('tab'));
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('splits an inactive tab beside the active terminal from its context menu', () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 's1', title: 'Session A', host: 'h', port: 22, username: 'u',
+    });
+    useTerminalStore.getState().addSession({
+      sessionId: 's2', title: 'Session B', host: 'h', port: 22, username: 'u',
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    expect(screen.getAllByTestId('terminal-pane')).toHaveLength(2);
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s2', 's1']);
+    expect(container.querySelector('[data-direction="horizontal"]')).toBeInTheDocument();
+    const groups = container.querySelectorAll<HTMLElement>('[data-terminal-group]');
+    expect(groups).toHaveLength(2);
+    expect(within(groups[0]).getAllByRole('tab')).toHaveLength(1);
+    expect(within(groups[1]).getAllByRole('tab')).toHaveLength(1);
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+  });
+
+  it('can split the active tab when another session is available', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[1], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s1', 's2']);
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('keeps the bottom pane when the top pane is split left-to-right', () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-down' }));
+
+    const topGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    fireEvent.contextMenu(within(topGroup).getByRole('tab', { name: /s2/ }), {
+      clientX: 10,
+      clientY: 20,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual([
+      's3',
+      's2',
+      's1',
+    ]);
+    expect(container.querySelectorAll('[data-terminal-group]')).toHaveLength(3);
+    expect(container.querySelector('[data-direction="vertical"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-direction="horizontal"]')).toBeInTheDocument();
+  });
+
+  it('switches the matching group tab when the active session changes externally', () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    useTerminalStore.getState().setActiveSession('s2');
+
+    render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    act(() => useTerminalStore.getState().setActiveSession('s3'));
+
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s3', 's1']);
+  });
+
+  it('keeps tab selection independent in each terminal group', () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    useTerminalStore.getState().setActiveSession('s2');
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    fireEvent.click(within(firstGroup).getByRole('tab', { name: /s3/ }));
+
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s3', 's1']);
+    expect(within(firstGroup).getAllByRole('tab')).toHaveLength(2);
+  });
+
+  it('adds a newly opened session to the focused terminal group', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+    act(() => useTerminalStore.getState().addSession({
+      sessionId: 's3', title: 's3', host: 'h', port: 22, username: 'u',
+    }));
+
+    const secondGroup = container.querySelector<HTMLElement>('[data-terminal-group="second"]')!;
+    expect(within(secondGroup).getAllByRole('tab')).toHaveLength(2);
+    expect(within(secondGroup).getByRole('tab', { name: /s3/ })).toBeInTheDocument();
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s2', 's3']);
   });
 });

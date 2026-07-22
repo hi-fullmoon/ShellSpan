@@ -19,9 +19,10 @@ import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
+import type { TerminalSplitDirection } from './terminal-split';
 
 const MENU_WIDTH = 256;
-const MENU_HEIGHT = 360;
+const MENU_HEIGHT = 420;
 
 const TAB_COLORS = [
   '#ef4444',
@@ -59,6 +60,10 @@ export interface TerminalContextMenuProps {
   y: number;
   session: TerminalSession | null;
   onClose: () => void;
+  canSplit?: boolean;
+  isSplit?: boolean;
+  onSplit?: (sessionId: string, direction: TerminalSplitDirection) => void;
+  onUnsplit?: () => void;
 }
 
 export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
@@ -67,6 +72,10 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   y,
   session,
   onClose,
+  canSplit = false,
+  isSplit = false,
+  onSplit,
+  onUnsplit,
 }) => {
   const { t } = useI18n();
   const sessions = useTerminalStore((state) => state.sessions);
@@ -198,6 +207,16 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     onClose();
   };
 
+  const handleSplit = (direction: TerminalSplitDirection): void => {
+    onSplit?.(target.sessionId, direction);
+    onClose();
+  };
+
+  const handleUnsplit = (): void => {
+    onUnsplit?.();
+    onClose();
+  };
+
   return createPortal(
     <>
       {open && session && (
@@ -236,6 +255,18 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         <MenuItem onClick={handleCopyInfo}>
           {t('terminal.tab.copyInfo')}
         </MenuItem>
+        <Separator className="my-0.5" />
+        <MenuItem onClick={() => handleSplit('right')} disabled={!canSplit}>
+          {t('terminal.tab.splitRight')}
+        </MenuItem>
+        <MenuItem onClick={() => handleSplit('bottom')} disabled={!canSplit}>
+          {t('terminal.tab.splitDown')}
+        </MenuItem>
+        {isSplit && (
+          <MenuItem onClick={handleUnsplit}>
+            {t('terminal.tab.unsplit')}
+          </MenuItem>
+        )}
         <Separator className="my-0.5" />
         <MenuItem onClick={handleClose}>
           {t('common.close')}
