@@ -3,6 +3,22 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.6](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.6) - 2026-07-22
+
+
+### Chore
+
+- **icons:** update app icon set
+
+### Features
+
+- **term:** configure local terminal environment variables
+- **ui:** improve update check feedback with toasts and window focus
+
+### Refactoring
+
+- **ui:** use compact dialog in update restart dialog
+
 ## [v2.0.5](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.5) - 2026-07-22
 
 
