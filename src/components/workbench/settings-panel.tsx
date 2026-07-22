@@ -176,7 +176,7 @@ export const SettingsPanel: React.FC = () => {
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col overflow-hidden bg-background">
-        <header className="flex shrink-0 items-center border-b border-app-border px-3 py-1.5">
+        <header className="flex shrink-0 items-center border-b border-app-border/50 px-3 py-1.5">
           <div className="min-w-0">
             <h1 className="text-sm font-medium text-app-text">{t('workbench.settings.title')}</h1>
             <p className="text-[11px] text-muted-foreground">{t('settings.description')}</p>
@@ -185,7 +185,7 @@ export const SettingsPanel: React.FC = () => {
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex max-w-3xl flex-col gap-2 p-2">
-            <Card size="sm" className="rounded-lg">
+            <Card size="sm" className="rounded-lg pb-0">
               <CardHeader>
                 <div className="flex items-start gap-2.5">
                   <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -198,7 +198,7 @@ export const SettingsPanel: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
                   <Select value={theme} onValueChange={(value) => setTheme(value as ThemeMode)}>
                     <SelectTrigger size="sm" aria-label={t('settings.appearance.theme')}>
@@ -213,7 +213,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.appearance.language')} description={t('settings.appearance.languageDescription')}>
                   <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
                     <SelectTrigger size="sm" aria-label={t('settings.appearance.language')}>
@@ -231,7 +231,7 @@ export const SettingsPanel: React.FC = () => {
               </CardContent>
             </Card>
 
-            <Card size="sm" className="rounded-lg">
+            <Card size="sm" className="rounded-lg pb-0">
               <CardHeader>
                 <div className="flex items-start gap-2.5">
                   <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -244,7 +244,7 @@ export const SettingsPanel: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
                   <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
                     <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
@@ -261,7 +261,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -271,13 +271,13 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.confirmBeforeExit')} description={t('settings.general.confirmBeforeExitDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.general.confirmBeforeExit')} checked={confirmBeforeExit} onCheckedChange={setConfirmBeforeExit} />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
@@ -286,7 +286,7 @@ export const SettingsPanel: React.FC = () => {
               </CardContent>
             </Card>
 
-            <Card size="sm" className="rounded-lg">
+            <Card size="sm" className="rounded-lg pb-0">
               <CardHeader>
                 <div className="flex items-start gap-2.5">
                   <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -299,7 +299,7 @@ export const SettingsPanel: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
                   <Select value={terminalFontFamily} onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.fontFamily')}>
@@ -316,7 +316,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.colorScheme')} description={t('settings.terminal.colorSchemeDescription')}>
                   <Select value={terminalColorScheme} onValueChange={(value) => setTerminalColorScheme(value as TerminalColorScheme)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.colorScheme')}>
@@ -333,7 +333,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.fontSize')} description={t('settings.terminal.fontSizeDescription')}>
                   <Select value={String(terminalFontSize)} onValueChange={(value) => setTerminalFontSize(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.fontSize')}>
@@ -350,7 +350,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.lineHeight')} description={t('settings.terminal.lineHeightDescription')}>
                   <Select value={String(terminalLineHeight)} onValueChange={(value) => setTerminalLineHeight(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.lineHeight')}>
@@ -367,7 +367,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.letterSpacing')} description={t('settings.terminal.letterSpacingDescription')}>
                   <Select value={String(terminalLetterSpacing)} onValueChange={(value) => setTerminalLetterSpacing(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.letterSpacing')}>
@@ -384,7 +384,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.cursorStyle')} description={t('settings.terminal.cursorStyleDescription')}>
                   <Select value={terminalCursorStyle} onValueChange={(value) => setTerminalCursorStyle(value as TerminalCursorStyle)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.cursorStyle')}>
@@ -401,13 +401,13 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.cursorBlink')} description={t('settings.terminal.cursorBlinkDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.terminal.cursorBlink')} checked={terminalCursorBlink} onCheckedChange={setTerminalCursorBlink} />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.copyOnSelect')} description={t('settings.terminal.copyOnSelectDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -417,7 +417,7 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
                   label={t('settings.terminal.trimTrailingWhitespace')}
                   description={t('settings.terminal.trimTrailingWhitespaceDescription')}
@@ -430,7 +430,7 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.rightClickBehavior')} description={t('settings.terminal.rightClickBehaviorDescription')}>
                   <Select
                     value={terminalRightClickBehavior}
@@ -450,7 +450,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.urlDetection')} description={t('settings.terminal.urlDetectionDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -460,7 +460,7 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.bellStyle')} description={t('settings.terminal.bellStyleDescription')}>
                   <Select value={terminalBellStyle} onValueChange={(value) => setTerminalBellStyle(value as TerminalBellStyle)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.bellStyle')}>
@@ -477,7 +477,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.scrollback')} description={t('settings.terminal.scrollbackDescription')}>
                   <Select value={String(terminalScrollback)} onValueChange={(value) => setTerminalScrollback(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.scrollback')}>
@@ -498,7 +498,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
                   label={t('settings.terminal.multiLinePasteWarning')}
                   description={t('settings.terminal.multiLinePasteWarningDescription')}
@@ -511,7 +511,7 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.largePasteWarning')} description={t('settings.terminal.largePasteWarningDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -521,7 +521,7 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.autoReconnect')} description={t('settings.terminal.autoReconnectDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -531,7 +531,7 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
                   label={t('settings.terminal.hideSingleTabBar')}
                   description={t('settings.terminal.hideSingleTabBarDescription')}
@@ -547,7 +547,7 @@ export const SettingsPanel: React.FC = () => {
               </CardContent>
             </Card>
 
-            <Card size="sm" className="rounded-lg">
+            <Card size="sm" className="rounded-lg pb-0">
               <CardHeader>
                 <div className="flex items-start gap-2.5">
                   <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -560,13 +560,13 @@ export const SettingsPanel: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.showHiddenFiles')} description={t('settings.sftp.showHiddenFilesDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.sftp.showHiddenFiles')} checked={sftpShowHiddenFiles} onCheckedChange={setSftpShowHiddenFiles} />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.conflictPolicy')} description={t('settings.sftp.conflictPolicyDescription')}>
                   <Select value={sftpConflictPolicy} onValueChange={(value) => setSftpConflictPolicy(value as SftpConflictPolicy)}>
                     <SelectTrigger size="sm" aria-label={t('settings.sftp.conflictPolicy')}>
@@ -583,7 +583,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.retryCount')} description={t('settings.sftp.retryCountDescription')}>
                   <Select value={String(sftpRetryCount)} onValueChange={(value) => setSftpRetryCount(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.sftp.retryCount')}>
@@ -600,7 +600,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.downloadDirectory')} description={t('settings.sftp.downloadDirectoryDescription')}>
                   <div className="flex gap-1">
                     <Button
@@ -629,7 +629,7 @@ export const SettingsPanel: React.FC = () => {
                     )}
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.completionNotification')} description={t('settings.sftp.completionNotificationDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -639,7 +639,7 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
                   label={t('settings.sftp.hideSingleTabBar')}
                   description={t('settings.sftp.hideSingleTabBarDescription')}
@@ -655,7 +655,7 @@ export const SettingsPanel: React.FC = () => {
               </CardContent>
             </Card>
 
-            <Card size="sm" className="rounded-lg">
+            <Card size="sm" className="rounded-lg pb-0">
               <CardHeader>
                 <div className="flex items-start gap-2.5">
                   <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -674,10 +674,10 @@ export const SettingsPanel: React.FC = () => {
                 </CardAction>
               </CardHeader>
               <CardContent className="p-0">
-                <Separator />
+                <Separator className="data-horizontal:border-border/40" />
                 {SHORTCUT_ACTIONS.map((action, index) => (
                   <React.Fragment key={action}>
-                    {index > 0 && <Separator />}
+                    {index > 0 && <Separator className="data-horizontal:border-border/40" />}
                     <div className="flex min-h-12 items-center justify-between gap-3 px-3 py-2">
                       <span className="text-sm font-medium">{shortcutLabels[action]}</span>
                       <div className="flex items-center gap-1">
