@@ -1,41 +1,30 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="96" y="96" width="832" height="832" rx="208" fill="#0F172A"/>
-  <rect x="112" y="112" width="800" height="800" rx="192" stroke="#334155" stroke-width="20"/>
+  <defs>
+    <linearGradient id="background" x1="154" y1="104" x2="870" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17243D"/>
+      <stop offset="0.52" stop-color="#0D1628"/>
+      <stop offset="1" stop-color="#070B13"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="232" y1="284" x2="772" y2="748" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7BE7FF"/>
+      <stop offset="0.48" stop-color="#55A7FF"/>
+      <stop offset="1" stop-color="#7A6CFF"/>
+    </linearGradient>
+    <linearGradient id="border" x1="132" y1="86" x2="875" y2="942" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3E5778"/>
+      <stop offset="0.55" stop-color="#233754"/>
+      <stop offset="1" stop-color="#101C2F"/>
+    </linearGradient>
+    <filter id="shadow" x="27" y="30" width="970" height="976" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#050509" flood-opacity="0.52"/>
+    </filter>
+  </defs>
 
-  <path
-    d="M364 370L226 512L364 654"
-    stroke="#F8FAFC"
-    stroke-width="76"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+  <g filter="url(#shadow)">
+    <rect x="72" y="64" width="880" height="880" rx="220" fill="url(#background)"/>
+    <rect x="86" y="78" width="852" height="852" rx="206" stroke="url(#border)" stroke-width="28"/>
+  </g>
 
-  <path
-    d="M548 664H820"
-    stroke="#22D3EE"
-    stroke-width="76"
-    stroke-linecap="round"
-  />
-
-  <path
-    d="M548 664C548 546 623 470 684 470C745 470 820 546 820 664"
-    stroke="#22D3EE"
-    stroke-width="76"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-
-  <path
-    d="M602 620V740"
-    stroke="#22D3EE"
-    stroke-width="76"
-    stroke-linecap="round"
-  />
-
-  <path
-    d="M766 620V740"
-    stroke="#22D3EE"
-    stroke-width="76"
-    stroke-linecap="round"
-  />
+  <!-- A single custom-built T. -->
+  <path d="M234 264H790C814 264 828 278 828 302V322C828 346 814 360 790 360H562V714C562 746 544 764 512 764C480 764 462 746 462 714V360H234C210 360 196 346 196 322V302C196 278 210 264 234 264Z" fill="url(#mark)"/>
 </svg>
