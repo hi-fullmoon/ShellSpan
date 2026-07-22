@@ -58,6 +58,8 @@ export default {
   'workbench.connections.count': '{count}/{total} 个连接',
   'workbench.connections.searchPlaceholder': '搜索名称、主机、用户或跳板机',
   'workbench.connections.filteredEmpty': '没有匹配的连接',
+  'workbench.connections.deleteTitle': '删除连接？',
+  'workbench.connections.deleteConfirm': '确定要删除连接"{name}"吗？删除后配置无法恢复。',
 
   'workbench.knownHosts.title': 'Known Hosts',
   'workbench.knownHosts.empty': '暂无 known hosts 记录',

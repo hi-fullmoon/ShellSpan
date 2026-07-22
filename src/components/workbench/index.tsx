@@ -134,11 +134,11 @@ const Workbench: React.FC = () => {
       <AlertDialog open={!!deleting} onOpenChange={(open) => { if (!open) setDeleting(undefined); }}>
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
           <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
-            <AlertDialogTitle className="text-sm leading-5">{t('common.delete')}</AlertDialogTitle>
+            <AlertDialogTitle className="text-sm leading-5">{t('workbench.connections.deleteTitle')}</AlertDialogTitle>
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {deleting ? deleting.name : ''}
+              {deleting ? t('workbench.connections.deleteConfirm', { name: deleting.name }) : ''}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
