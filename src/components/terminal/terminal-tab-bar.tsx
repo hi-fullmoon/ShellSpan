@@ -111,15 +111,11 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
-        active ? 'h-9 bg-app-surface text-app-text' : 'h-[35px] bg-app-border/25 text-app-text-soft',
+        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
+        active ? 'h-9 bg-app-surface text-app-text' : 'h-9 bg-app-border/25 text-app-text-soft',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80' : 'cursor-pointer',
       )}
-      style={
-        session.color
-          ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` }
-          : undefined
-      }
+      style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
     >
       {showSeparatorAfter && (
         <Separator
@@ -167,14 +163,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
-            <strong
-              className={cn(
-                'block flex-1 truncate text-left text-xs leading-none',
-                active ? 'font-semibold' : 'font-medium',
-              )}
-            >
-              {session.title}
-            </strong>
+            <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
           </div>
           {session.pinned ? (
             <button
@@ -464,19 +453,12 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   const closingSession = closingSessionId ? (sessions.find((s) => s.sessionId === closingSessionId) ?? null) : null;
 
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
-  const visibleSessions = draggingSessionId
-    ? sessions.filter((session) => session.sessionId !== draggingSessionId)
-    : sessions;
+  const visibleSessions = draggingSessionId ? sessions.filter((session) => session.sessionId !== draggingSessionId) : sessions;
 
   const shouldHide = sessions.length === 1 && terminalHideSingleTabBar;
 
   return (
-    <div
-      className={cn(
-        'flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0',
-        shouldHide && 'h-0 overflow-hidden',
-      )}
-    >
+    <div className={cn('flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -498,8 +480,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
               const isLastVisible = visibleIndex === visibleTabCount - 1;
               const isActive = activeSessionId === session.sessionId;
               const nextVisibleSession = visibleIndex >= 0 ? visibleSessions[visibleIndex + 1] : undefined;
-              const showSeparatorAfter =
-                !isActive && !!nextVisibleSession && nextVisibleSession.sessionId !== activeSessionId;
+              const showSeparatorAfter = !isActive && !!nextVisibleSession && nextVisibleSession.sessionId !== activeSessionId;
 
               return (
                 <SortableTab
@@ -562,26 +543,16 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
       >
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
           <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('terminal.tab.closeConfirmTitle')}
-            </AlertDialogTitle>
+            <AlertDialogTitle className="text-sm leading-5">{t('terminal.tab.closeConfirmTitle')}</AlertDialogTitle>
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closingSession
-                ? t('terminal.tab.closeConfirmMessage', { title: closingSession.title })
-                : ''}
+              {closingSession ? t('terminal.tab.closeConfirmMessage', { title: closingSession.title }) : ''}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
-            <AlertDialogCancel size="sm">
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              size="sm"
-              onClick={confirmCloseSession}
-            >
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseSession}>
               {t('common.close')}
             </AlertDialogAction>
           </AlertDialogFooter>
