@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../settings-panel';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
@@ -25,8 +25,9 @@ describe('SettingsPanel', () => {
     useAppStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS } });
   });
 
-  it('renders appearance, terminal, general, and shortcut sections', () => {
+  it('renders appearance, terminal, general, and shortcut sections', async () => {
     render(<SettingsPanel />);
+    await waitFor(() => {});
 
     expect(screen.getByText('workbench.settings.title')).toBeInTheDocument();
     expect(screen.getByText('settings.appearance.title')).toBeInTheDocument();
@@ -56,7 +57,7 @@ describe('SettingsPanel', () => {
     expect(screen.getAllByRole('switch')).toHaveLength(14);
   });
 
-  it('renders when persisted shortcuts come from an older version', () => {
+  it('renders when persisted shortcuts come from an older version', async () => {
     useAppStore.setState({
       shortcuts: {
         openWorkbench: 'mod+1',
@@ -67,6 +68,7 @@ describe('SettingsPanel', () => {
     });
 
     expect(() => render(<SettingsPanel />)).not.toThrow();
+    await waitFor(() => {});
     expect(screen.getByText('settings.shortcuts.newTerminalTab')).toBeInTheDocument();
   });
 });

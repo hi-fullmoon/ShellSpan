@@ -12,6 +12,16 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
+vi.mock('@/components/ui/scroll-area', () => ({
+  ScrollArea: ({ children, className, viewportRef, ...props }: any) => (
+    <div data-slot="scroll-area" className={className} {...props}>
+      <div ref={viewportRef} data-slot="scroll-area-viewport">
+        {children}
+      </div>
+    </div>
+  ),
+}));
+
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize: () => number }) => ({
     getVirtualItems: () =>

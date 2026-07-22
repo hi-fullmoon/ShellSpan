@@ -1,5 +1,11 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { useRecentProfilesStore } from '../recentProfilesStore';
+
+vi.mock('@/lib/tauri', () => ({
+  invokeListRecentProfiles: vi.fn().mockResolvedValue([]),
+  invokeTouchRecentProfile: vi.fn().mockResolvedValue(undefined),
+  invokeRemoveRecentProfile: vi.fn().mockResolvedValue(undefined),
+}));
 
 const initial = useRecentProfilesStore.getState();
 

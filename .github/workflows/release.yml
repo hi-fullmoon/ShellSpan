@@ -6,21 +6,144 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      tag:
+        description: Existing release tag to rebuild (for example v2.0.7)
+        required: true
+        type: string
       release_notes:
         description: Optional release notes override
         required: false
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  preflight:
+    name: Validate Release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      notes: ${{ steps.meta.outputs.notes }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      - name: Validate tag and versions
+        id: meta
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          node - "$RELEASE_TAG" <<'NODE'
+          const fs = require('fs');
+          const tag = process.argv[2];
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+          const cargoToml = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
+          const cargoLock = fs.readFileSync('src-tauri/Cargo.lock', 'utf8');
+          const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          const lockVersion = cargoLock.match(/\[\[package\]\]\s*\nname\s*=\s*"TermBridge"\s*\nversion\s*=\s*"([^"]+)"/m)?.[1];
+          const expectedTag = `v${pkg.version}`;
+
+          if (tag !== expectedTag) {
+            console.error(`Release tag/version mismatch: tag=${tag}, expected=${expectedTag}`);
+            process.exit(1);
+          }
+
+          const versions = {
+            package: pkg.version,
+            tauri: tauri.version,
+            cargo: cargoVersion,
+            lock: lockVersion,
+          };
+          const mismatches = Object.entries(versions).filter(([, version]) => version !== pkg.version);
+          if (mismatches.length > 0) {
+            console.error(`Release versions are not aligned: ${JSON.stringify(versions)}`);
+            process.exit(1);
+          }
+          NODE
+
+          APP_VERSION="${RELEASE_TAG#v}"
+          IS_PRERELEASE=false
+          if [[ "$APP_VERSION" == *-* ]]; then
+            IS_PRERELEASE=true
+          fi
+
+          NOTES="$RELEASE_NOTES"
+          if [[ -z "$NOTES" ]]; then
+            NOTES="Release $RELEASE_TAG"
+          fi
+
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "version=$APP_VERSION"
+            echo "prerelease=$IS_PRERELEASE"
+            delimiter="release_notes_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+            echo "notes<<$delimiter"
+            echo "$NOTES"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
+  build-frontend:
+    name: Test and Build Frontend
+    runs-on: ubuntu-24.04
+    needs: preflight
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build frontend
+        run: pnpm run build
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
+    needs:
+      - preflight
+      - build-frontend
     strategy:
       fail-fast: false
       matrix:
@@ -29,80 +152,108 @@ jobs:
             runner: macos-15
             rust_target: aarch64-apple-darwin
             bundle_args: --bundles app,dmg
+            updater_suffix: .app.tar.gz
           - platform: darwin-x86_64
             runner: macos-15-intel
             rust_target: x86_64-apple-darwin
             bundle_args: --bundles app,dmg
+            updater_suffix: .app.tar.gz
           - platform: windows-x86_64
-            runner: windows-latest
+            runner: windows-2025
             rust_target: x86_64-pc-windows-msvc
-            bundle_args: ""
+            bundle_args: --bundles nsis,msi
+            updater_suffix: .msi.zip
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout release tag
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: frontend-dist
+          path: dist
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.rust_target }}
 
       - name: Cache Rust build
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: |
             src-tauri -> target
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify tag/version alignment
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Build Tauri bundle on macOS
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          node - "${GITHUB_REF_NAME}" <<'NODE'
-          const fs = require('fs');
-          const tag = process.argv[2];
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
-          const expected = `v${pkg.version}`;
-          if (tag !== expected || tauri.version !== pkg.version) {
-            console.error(`Release tag/version mismatch: tag=${tag} package=${pkg.version} tauri=${tauri.version}`);
-            process.exit(1);
-          }
-          NODE
-
-      - name: Build Tauri bundle
-        run: pnpm exec tauri build --target ${{ matrix.rust_target }} ${{ matrix.bundle_args }}
+          echo '{"build":{"beforeBuildCommand":""}}' > tauri-ci-override.json
+          read -r -a bundle_args <<< "$BUNDLE_ARGS"
+          pnpm exec tauri build --target "$RUST_TARGET" "${bundle_args[@]}" --config tauri-ci-override.json
         env:
+          BUNDLE_ARGS: ${{ matrix.bundle_args }}
+          RUST_TARGET: ${{ matrix.rust_target }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+
+      - name: Build Tauri bundle on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          perl -MLocale::Maketext::Simple -e 1
+          Set-Content -Path tauri-ci-override.json -Value '{"build":{"beforeBuildCommand":""}}'
+          $bundleArgs = if ($env:PRERELEASE -eq 'true') { 'nsis' } else { 'nsis,msi' }
+          Write-Host "Building bundles: $bundleArgs (prerelease=$env:PRERELEASE)"
+          pnpm exec tauri build --target $env:RUST_TARGET --bundles $bundleArgs --config tauri-ci-override.json
 
       - name: Prepare release artifact
         shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          RUST_TARGET: ${{ matrix.rust_target }}
+          UPDATER_SUFFIX: ${{ matrix.updater_suffix }}
         run: |
           mkdir -p release-artifact
-          bundle_dir="src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+          bundle_dir="src-tauri/target/$RUST_TARGET/release/bundle"
           if [[ ! -d "$bundle_dir" ]]; then
             bundle_dir="src-tauri/target/release/bundle"
           fi
 
           if [[ ! -d "$bundle_dir" ]]; then
-            echo "Bundle directory not found for target ${{ matrix.rust_target }}" >&2
+            echo "Bundle directory not found for target $RUST_TARGET" >&2
             find src-tauri/target -type d | sort >&2 || true
             exit 1
           fi
 
-          if [[ "${{ matrix.platform }}" == darwin-* ]]; then
+          if [[ "$PLATFORM" == darwin-* ]]; then
             app_path="$(find "$bundle_dir" -name '*.app' -type d -prune | head -n 1)"
             if [[ -z "$app_path" ]]; then
               echo "macOS .app bundle not found in $bundle_dir" >&2
@@ -118,12 +269,12 @@ jobs:
 
             archs="$(lipo -archs "$app_binary")"
             expected_arch="arm64"
-            if [[ "${{ matrix.platform }}" == "darwin-x86_64" ]]; then
+            if [[ "$PLATFORM" == "darwin-x86_64" ]]; then
               expected_arch="x86_64"
             fi
 
             if [[ " $archs " != *" $expected_arch "* ]]; then
-              echo "Unexpected macOS app architecture for ${{ matrix.platform }}: $archs" >&2
+              echo "Unexpected macOS app architecture for $PLATFORM: $archs" >&2
               exit 1
             fi
 
@@ -132,121 +283,186 @@ jobs:
 
           cp -R "$bundle_dir" release-artifact/bundle
 
-          if [[ "${{ matrix.platform }}" == darwin-* ]]; then
+          if [[ "$PLATFORM" == darwin-* ]]; then
             archive="$(find release-artifact/bundle -type f -name '*.app.tar.gz' | head -n 1)"
-            if [[ -n "$archive" ]]; then
-              archive_dir="$(dirname "$archive")"
-              renamed_archive="${archive_dir}/TermBridge-${{ matrix.platform }}.app.tar.gz"
-              mv "$archive" "$renamed_archive"
-              if [[ -f "${archive}.sig" ]]; then
-                mv "${archive}.sig" "${renamed_archive}.sig"
-              fi
+            dmg="$(find release-artifact/bundle -type f -name '*.dmg' | head -n 1)"
+            if [[ -z "$archive" || ! -f "${archive}.sig" || -z "$dmg" ]]; then
+              echo "Required macOS release assets are incomplete" >&2
+              find release-artifact/bundle -type f -print >&2
+              exit 1
             fi
 
-            dmg="$(find release-artifact/bundle -type f -name '*.dmg' | head -n 1)"
-            if [[ -n "$dmg" ]]; then
-              mv "$dmg" "$(dirname "$dmg")/TermBridge-${{ matrix.platform }}.dmg"
+            archive_dir="$(dirname "$archive")"
+            renamed_archive="${archive_dir}/TermBridge-${PLATFORM}.app.tar.gz"
+            mv "$archive" "$renamed_archive"
+            mv "${archive}.sig" "${renamed_archive}.sig"
+            mv "$dmg" "$(dirname "$dmg")/TermBridge-${PLATFORM}.dmg"
+          else
+            # Detect the updater archive suffix dynamically — MSI requires
+            # numeric-only versions, so prerelease builds (e.g. 2.0.7-test.1)
+            # skip MSI and produce .nsis.zip instead of .msi.zip.
+            installer_count="$(find release-artifact/bundle -type f -name '*-setup.exe' | wc -l | tr -d ' ')"
+            msi_updater="$(find release-artifact/bundle -type f -name '*.msi.zip' | head -n 1)"
+            nsis_updater="$(find release-artifact/bundle -type f -name '*.nsis.zip' | head -n 1)"
+            updater_file="${msi_updater:-$nsis_updater}"
+            if [[ -z "$updater_file" || "$installer_count" != "1" ]]; then
+              echo "Required Windows release assets are missing or ambiguous" >&2
+              find release-artifact/bundle -type f -print >&2
+              exit 1
             fi
+            case "$updater_file" in
+              *.msi.zip) UPDATER_SUFFIX=".msi.zip" ;;
+              *.nsis.zip) UPDATER_SUFFIX=".nsis.zip" ;;
+              *.exe.zip) UPDATER_SUFFIX=".exe.zip" ;;
+              *) echo "Unknown updater archive format: $updater_file" >&2; exit 1 ;;
+            esac
           fi
 
           cat > release-artifact/release-metadata.json <<EOF
           {
-            "platform": "${{ matrix.platform }}"
+            "platform": "$PLATFORM",
+            "updaterArchiveSuffix": "$UPDATER_SUFFIX"
           }
           EOF
 
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: bundle-${{ matrix.platform }}
           path: release-artifact
           if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   release:
     name: Publish Release
-    runs-on: ubuntu-latest
-    needs: build
+    runs-on: ubuntu-24.04
+    needs:
+      - preflight
+      - build
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout release tag
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
 
       - name: Download bundle artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: release-inputs
 
-      - name: Resolve release metadata
-        id: meta
-        shell: bash
-        run: |
-          APP_VERSION="$(node -p "require('./package.json').version")"
-          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF_NAME}"
-          else
-            TAG="v${APP_VERSION}"
-          fi
-
-          NOTES="${{ github.event.inputs.release_notes || '' }}"
-          if [[ -z "$NOTES" ]]; then
-            NOTES="Release ${TAG}"
-          fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
-
       - name: Generate combined updater manifest
         shell: bash
+        env:
+          RELEASE_NOTES: ${{ needs.preflight.outputs.notes }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           mkdir -p release-output
+          printf '%s\n' "$RELEASE_NOTES" > release-output/release-notes.md
           node scripts/build-updater-json.mjs \
             --artifacts-root release-inputs \
-            --repo "${GITHUB_REPOSITORY}" \
-            --tag "${{ steps.meta.outputs.tag }}" \
-            --notes "${{ steps.meta.outputs.notes }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --notes "$RELEASE_NOTES" \
             --output release-output/latest.json
 
       - name: Publish release assets
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IS_PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           mapfile -t assets < <(find release-inputs -type f \( \
             -name '*.dmg' -o \
             -name '*.exe' -o \
             -name '*.app.tar.gz' -o \
             -name '*.msi.zip' -o \
+            -name '*.nsis.zip' -o \
+            -name '*.exe.zip' -o \
             -name '*.app.tar.gz.sig' -o \
-            -name '*.msi.zip.sig' \
+            -name '*.msi.zip.sig' -o \
+            -name '*.nsis.zip.sig' -o \
+            -name '*.exe.zip.sig' \
           \) | sort)
           assets+=(release-output/latest.json)
 
-          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
-            gh release upload "${{ steps.meta.outputs.tag }}" "${assets[@]}" --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            if [[ "$IS_PRERELEASE" == "true" ]]; then
+              gh release edit "$RELEASE_TAG" \
+                --prerelease \
+                --latest=false \
+                --title "TermBridge $RELEASE_TAG" \
+                --notes-file release-output/release-notes.md
+            else
+              gh release edit "$RELEASE_TAG" \
+                --prerelease=false \
+                --title "TermBridge $RELEASE_TAG" \
+                --notes-file release-output/release-notes.md
+            fi
           else
-            gh release create "${{ steps.meta.outputs.tag }}" "${assets[@]}" \
-              --title "TermBridge ${{ steps.meta.outputs.tag }}" \
-              --notes "${{ steps.meta.outputs.notes }}"
+            release_args=(--verify-tag)
+            if [[ "$IS_PRERELEASE" == "true" ]]; then
+              release_args+=(--prerelease --latest=false)
+            fi
+
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              "${release_args[@]}" \
+              --title "TermBridge $RELEASE_TAG" \
+              --notes-file release-output/release-notes.md
           fi
 
-      - name: Verify updater endpoint
+      - name: Verify published updater manifest
         shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          endpoint="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json"
+          endpoint="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json"
+          manifest_file="$(mktemp)"
           for _ in {1..12}; do
-            if body="$(curl -fsSL "$endpoint" 2>/dev/null)"; then
-              if node -e 'JSON.parse(process.argv[1]);' "$body" >/dev/null 2>&1; then
-                echo "Updater endpoint is reachable: $endpoint"
-                exit 0
-              fi
+            if curl -fsSL "$endpoint" -o "$manifest_file"; then
+              break
             fi
             sleep 3
           done
 
-          echo "Failed to verify updater endpoint: $endpoint" >&2
-          exit 1
+          node - "$manifest_file" "$RELEASE_TAG" <<'NODE'
+          const fs = require('fs');
+          const [manifestPath, tag] = process.argv.slice(2);
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          const expectedPlatforms = ['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64'];
+
+          if (manifest.version !== tag) {
+            throw new Error(`Unexpected updater version: ${manifest.version}, expected ${tag}`);
+          }
+
+          for (const platform of expectedPlatforms) {
+            const update = manifest.platforms?.[platform];
+            if (!update?.signature || !update?.url) {
+              throw new Error(`Incomplete updater entry for ${platform}`);
+            }
+            if (!update.url.includes(`/releases/download/${tag}/`)) {
+              throw new Error(`Updater URL for ${platform} points at the wrong tag: ${update.url}`);
+            }
+            console.log(update.url);
+          }
+          NODE
+
+          while IFS= read -r url; do
+            curl -fsSIL "$url" >/dev/null
+          done < <(node -e '
+            const fs = require("fs");
+            const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            for (const update of Object.values(manifest.platforms)) console.log(update.url);
+          ' "$manifest_file")
+
+          echo "Updater manifest and assets are reachable: $endpoint"

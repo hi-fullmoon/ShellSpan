@@ -33,10 +33,21 @@ async function readArtifactMetadata(metadataPath) {
   return metadata;
 }
 
-function findUpdaterArchive(files) {
-  return files.find((filePath) =>
+function findUpdaterArchive(files, preferredSuffix, platform) {
+  const candidates = files.filter((filePath) =>
     UPDATER_ARCHIVE_PATTERNS.some((suffix) => filePath.endsWith(suffix)),
   );
+  const matches = preferredSuffix
+    ? candidates.filter((filePath) => filePath.endsWith(preferredSuffix))
+    : candidates;
+
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected exactly one ${preferredSuffix || 'updater'} archive for ${platform}, found ${matches.length}`,
+    );
+  }
+
+  return matches[0];
 }
 
 export async function buildUpdaterManifest({
@@ -63,11 +74,11 @@ export async function buildUpdaterManifest({
     const bundleFiles = allFiles.filter((filePath) =>
       filePath.startsWith(`${bundleDir}${path.sep}`),
     );
-    const updaterArchive = findUpdaterArchive(bundleFiles);
-
-    if (!updaterArchive) {
-      throw new Error(`No updater archive found for ${metadata.platform} in ${bundleDir}`);
-    }
+    const updaterArchive = findUpdaterArchive(
+      bundleFiles,
+      metadata.updaterArchiveSuffix,
+      metadata.platform,
+    );
 
     const signaturePath = `${updaterArchive}.sig`;
     const signature = (await readFile(signaturePath, 'utf8')).trim();
