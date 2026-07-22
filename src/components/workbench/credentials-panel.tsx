@@ -151,7 +151,7 @@ export const CredentialsPanel: React.FC = () => {
     <TooltipProvider>
       <div className="flex h-full min-w-0">
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="flex shrink-0 flex-col gap-2 border-b border-app-border px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
+          <header className="flex shrink-0 flex-col gap-2 border-b border-app-border/50 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h1 className="text-sm font-medium text-app-text">
                 {t('workbench.credentials.title')}
