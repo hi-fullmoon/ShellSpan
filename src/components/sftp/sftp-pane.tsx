@@ -13,7 +13,7 @@ import { SftpBookmarkMenu } from './sftp-bookmark-menu';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { getSftpPaneConnectionKey, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
-import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
+import { type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './file-entry-formatters';
 import type { SftpDndPayload } from './sftp-dnd-context';
 import { parentPortablePath } from '@/lib/path-utils';
@@ -429,13 +429,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </div>
             {!isLocal && remoteBookmarks.length > 0 && (
               <Button
-                variant="secondary"
-                size="sm"
+                variant="ghost"
+                size="icon"
                 onClick={handleBookmarkButtonClick}
-                className="gap-1.5 px-2"
+                className="h-[30px] w-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary [&_svg]:size-3.5"
                 aria-label={t('sftp.contextMenu.bookmark.add')}
               >
-                <BookmarkIcon className="h-3.5 w-3.5" />
+                <BookmarkIcon />
               </Button>
             )}
           </div>
