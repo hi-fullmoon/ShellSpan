@@ -93,8 +93,8 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs font-medium transition-colors select-none',
-        active ? 'h-9 bg-app-surface text-app-text' : 'h-[35px] bg-app-border/25 text-app-text-soft',
+        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
+        active ? 'h-9 bg-app-surface text-app-text' : 'h-9 bg-app-border/25 text-app-text-soft',
         renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
@@ -142,14 +142,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <strong
-              className={cn(
-                'block flex-1 truncate text-left text-xs leading-none',
-                active ? 'font-semibold' : 'font-medium',
-              )}
-            >
-              {connection.title}
-            </strong>
+            <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
           </div>
           {connection.pinned ? (
             <button
@@ -422,20 +415,18 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const closingConnection = closingConnectionId ? (connections.find((c) => c.id === closingConnectionId) ?? null) : null;
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
-  const visibleConnections = draggingConnectionId
-    ? connections.filter((connection) => connection.id !== draggingConnectionId)
-    : connections;
+  const visibleConnections = draggingConnectionId ? connections.filter((connection) => connection.id !== draggingConnectionId) : connections;
 
   if (connections.length === 0) {
     return null;
   }
 
   if (connections.length === 1 && sftpHideSingleTabBar) {
-    return <div className="h-0 border-b border-app-border" />;
+    return <div className="h-0 border-b border-app-border/50" />;
   }
 
   return (
-    <div className="flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0">
+    <div className="flex h-9 items-start gap-0 border-b border-app-border/50 bg-app-surface-muted px-0">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -457,8 +448,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
               const isLastVisible = visibleIndex === visibleTabCount - 1;
               const isActive = activeConnectionId === connection.id;
               const nextVisibleConnection = visibleIndex >= 0 ? visibleConnections[visibleIndex + 1] : undefined;
-              const showSeparatorAfter =
-                !isActive && !!nextVisibleConnection && nextVisibleConnection.id !== activeConnectionId;
+              const showSeparatorAfter = !isActive && !!nextVisibleConnection && nextVisibleConnection.id !== activeConnectionId;
 
               return (
                 <SortableTab
@@ -521,26 +511,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
       >
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
           <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('sftp.tab.closeConfirmTitle')}
-            </AlertDialogTitle>
+            <AlertDialogTitle className="text-sm leading-5">{t('sftp.tab.closeConfirmTitle')}</AlertDialogTitle>
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closingConnection
-                ? t('sftp.tab.closeConfirmMessage', { title: closingConnection.title })
-                : ''}
+              {closingConnection ? t('sftp.tab.closeConfirmMessage', { title: closingConnection.title }) : ''}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
-            <AlertDialogCancel size="sm">
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              size="sm"
-              onClick={confirmCloseConnection}
-            >
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseConnection}>
               {t('common.close')}
             </AlertDialogAction>
           </AlertDialogFooter>

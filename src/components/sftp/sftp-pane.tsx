@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDndContext, useDroppable } from '@dnd-kit/core';
 import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon, SearchIcon, XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -111,6 +111,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     } | null>(null);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const searchInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+      if (showSearch && searchInputRef.current) {
+        searchInputRef.current.focus();
+      }
+    }, [showSearch]);
 
     useEffect(() => {
       if (isLocal) {
@@ -356,14 +363,14 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     return (
       <div ref={mergedRef} className="flex h-full flex-col overflow-hidden bg-app-surface">
         {/* Title bar */}
-        <div className="flex h-9 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-1">
+        <div className="flex h-10 shrink-0 items-center justify-between border-b border-app-border/50 bg-app-surface px-1">
           {onTitleClick ? (
             <Button
               variant="ghost"
               size="xs"
               onClick={onTitleClick}
               aria-label={t('sftp.source.switch')}
-              className="min-w-0 max-w-[70%] justify-start px-1"
+              className="min-w-0 max-w-[70%] justify-start px-1 h-full"
             >
               <span className="truncate text-sm font-semibold">{paneTitle}</span>
               <ChevronsUpDownIcon data-icon="inline-end" />
@@ -374,36 +381,52 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            {showSearch && (
-              <div className="flex items-center gap-1.5 rounded-md border border-app-border bg-app-surface-muted px-2 h-7">
-                <SearchIcon className="h-3.5 w-3.5 shrink-0 text-app-text-soft" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t('sftp.filter')}
-                  autoFocus
-                  className="h-full w-48 bg-transparent text-sm text-app-text placeholder:text-app-text-soft/50 outline-none"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => {
+            {/* Search — animated expand from icon */}
+            <div
+              className={cn(
+                'flex items-center gap-0 rounded-md h-[30px] overflow-hidden transition-all duration-300 ease-out',
+                showSearch ? 'w-56 bg-app-surface-muted px-[0_6px]' : 'w-7 border-transparent bg-transparent',
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (showSearch) {
                     setShowSearch(false);
                     setSearchQuery('');
-                  }}
-                  className="h-4 w-4 shrink-0 ml-auto"
-                  aria-label={t('sftp.hideFilter')}
-                >
-                  <XIcon className="h-[8px] w-[8px] text-app-text-soft/40" />
-                </Button>
-              </div>
-            )}
-            {!showSearch && (
-              <Button variant="ghost" size="icon" onClick={() => setShowSearch(true)} className="h-7 w-7" aria-label={t('sftp.showFilter')}>
+                  } else {
+                    setShowSearch(true);
+                  }
+                }}
+                className={cn(
+                  'h-[30px] w-7 shrink-0 flex items-center justify-center rounded text-app-text-soft',
+                  !showSearch && 'hover:bg-app-border/50 hover:text-app-text',
+                )}
+                aria-label={showSearch ? t('sftp.hideFilter') : t('sftp.showFilter')}
+              >
                 <SearchIcon className="h-3.5 w-3.5" />
+              </button>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t('sftp.filter')}
+                className="h-full min-w-0 flex-1 bg-transparent text-sm text-app-text placeholder:text-app-text-soft/50 outline-none"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setShowSearch(false);
+                  setSearchQuery('');
+                }}
+                className="h-4 w-4 shrink-0"
+                aria-label={t('sftp.hideFilter')}
+              >
+                <XIcon className="text-app-text-soft/40" />
               </Button>
-            )}
+            </div>
             {!isLocal && remoteBookmarks.length > 0 && (
               <Button
                 variant="secondary"
@@ -419,7 +442,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
         </div>
 
         {/* Navigation row */}
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border bg-app-surface-muted px-1">
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-surface-muted px-1">
           <div className="flex items-center">
             <Button variant="ghost" size="icon" onClick={goBack} disabled={!canGoBack} className="h-6 w-6">
               <ChevronLeftIcon className={cn('h-4 w-4', !canGoBack && 'opacity-30')} />
