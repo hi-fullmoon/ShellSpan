@@ -428,6 +428,7 @@ export default {
 
   'update.checking': '正在检查更新...',
   'update.latest': '当前已是最新版本。',
+  'update.available': '发现新版本 {version}，正在下载更新...',
   'update.downloading': '正在下载更新...',
   'update.downloaded': '更新已下载完成。',
   'update.progress': '下载进度：{progress}%',

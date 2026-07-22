@@ -72,6 +72,9 @@ export function useUpdateFlow({
       checkingRef.current = true;
       dispatchUpdateState({ type: 'checkStarted' });
       setUpdateDownloadProgress(undefined);
+      if (mode === 'manual') {
+        toast.info(t('update.checking'));
+      }
 
       try {
         const available = await checkForUpdate();
@@ -93,6 +96,9 @@ export function useUpdateFlow({
           payload: { latestVersion: available.version },
         });
         logger.info(`Update available: ${available.version}`);
+        if (mode === 'manual') {
+          toast.info(t('update.available', { version: available.version }));
+        }
 
         dispatchUpdateState({ type: 'downloadStarted' });
         setUpdateDownloadProgress(0);
