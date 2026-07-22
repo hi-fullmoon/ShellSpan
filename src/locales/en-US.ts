@@ -58,6 +58,8 @@ export default {
   'workbench.connections.count': '{count}/{total} connections',
   'workbench.connections.searchPlaceholder': 'Search by name, host, user or jump host',
   'workbench.connections.filteredEmpty': 'No matching connections',
+  'workbench.connections.deleteTitle': 'Delete connection?',
+  'workbench.connections.deleteConfirm': 'Delete connection "{name}"? This action cannot be undone.',
 
   'workbench.knownHosts.title': 'Known Hosts',
   'workbench.knownHosts.empty': 'No known hosts entries',
