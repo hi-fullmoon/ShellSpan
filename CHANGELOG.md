@@ -3,6 +3,29 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.5](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.5) - 2026-07-22
+
+
+### Bug Fixes
+
+- **ui:** fix sftp source switch button height
+- **i18n:** use proper i18n keys for delete confirmation
+
+### Features
+
+- **ui:** add bottom border to title bar
+- **term:** add split pane support with recursive layout and subtle dividers
+
+### Refactoring
+
+- **sftp:** add search auto-focus and simplify tab bar
+
+### Style
+
+- **settings:** improve card layout and separator styling
+- **ui:** reduce border opacity to 50% for softer borders
+- **term:** simplify terminal tab bar styles
+
 ## [v2.0.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.4) - 2026-07-21
 
 
