@@ -60,7 +60,7 @@ synchronize_version() {
   node - "$version" <<'NODE'
 const fs = require('fs');
 const version = process.argv[2];
-if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
+if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version)) {
   console.error(`Invalid version: ${version}`);
   process.exit(1);
 }

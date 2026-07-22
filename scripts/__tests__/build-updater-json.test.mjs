@@ -6,7 +6,13 @@ import { buildUpdaterManifest } from '../build-updater-json.mjs';
 
 const tempDirs = [];
 
-async function createArtifact(rootDir, platform, archiveRelativePath, signature) {
+async function createArtifact(
+  rootDir,
+  platform,
+  archiveRelativePath,
+  signature,
+  updaterArchiveSuffix,
+) {
   const artifactDir = path.join(rootDir, platform);
   const bundleDir = path.join(artifactDir, 'bundle');
   const archivePath = path.join(bundleDir, archiveRelativePath);
@@ -14,7 +20,7 @@ async function createArtifact(rootDir, platform, archiveRelativePath, signature)
   await mkdir(path.dirname(archivePath), { recursive: true });
   await writeFile(
     path.join(artifactDir, 'release-metadata.json'),
-    JSON.stringify({ platform }, null, 2),
+    JSON.stringify({ platform, updaterArchiveSuffix }, null, 2),
   );
   await writeFile(archivePath, 'archive');
   await writeFile(`${archivePath}.sig`, `${signature}\n`);
@@ -41,18 +47,26 @@ describe('buildUpdaterManifest', () => {
       'darwin-aarch64',
       path.join('macos', 'TermBridge.app.tar.gz'),
       'sig-macos-arm',
+      '.app.tar.gz',
     );
     await createArtifact(
       rootDir,
       'darwin-x86_64',
       path.join('macos', 'TermBridge-x64.app.tar.gz'),
       'sig-macos-intel',
+      '.app.tar.gz',
     );
     await createArtifact(
       rootDir,
       'windows-x86_64',
-      path.join('nsis', 'TermBridge_1.0.1_x64-setup.nsis.zip'),
+      path.join('msi', 'TermBridge_1.0.1_x64_en-US.msi.zip'),
       'sig-windows',
+      '.msi.zip',
+    );
+    await mkdir(path.join(rootDir, 'windows-x86_64', 'bundle', 'nsis'), { recursive: true });
+    await writeFile(
+      path.join(rootDir, 'windows-x86_64', 'bundle', 'nsis', 'TermBridge_1.0.1_x64-setup.nsis.zip'),
+      'unused updater archive',
     );
 
     const manifest = await buildUpdaterManifest({
@@ -75,7 +89,7 @@ describe('buildUpdaterManifest', () => {
       },
       'windows-x86_64': {
         signature: 'sig-windows',
-        url: 'https://github.com/hi-fullmoon/TermBridge/releases/download/v1.0.1/TermBridge_1.0.1_x64-setup.nsis.zip',
+        url: 'https://github.com/hi-fullmoon/TermBridge/releases/download/v1.0.1/TermBridge_1.0.1_x64_en-US.msi.zip',
       },
     });
   });

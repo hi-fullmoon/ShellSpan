@@ -3,6 +3,81 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
+
+
+### CI/CD
+
+- **build:** add NSIS and EXE installer artifacts to release upload
+
+### Testing
+
+- eliminate act() warnings in settings-panel and useI18n tests
+
+## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
+
+
+### CI/CD
+
+- **build:** add NSIS and EXE installer artifacts to release upload
+
+### Testing
+
+- eliminate act() warnings in settings-panel and useI18n tests
+
+## [v2.0.6-test.3](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.6-test.3) - 2026-07-22
+
+
+## [v2.0.7-test.2](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.2) - 2026-07-22
+
+
+### Bug Fixes
+
+- **test:** add missing scroll-area and tauri mocks
+
+## [v2.0.7-test.1](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.1) - 2026-07-22
+
+
+### CI/CD
+
+- **build:** overhaul release pipeline with preflight validation and asset verification
+
+## [v2.0.7-test.5](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.5) - 2026-07-22
+
+
+### CI/CD
+
+- **deps:** upgrade actions/setup-node v5 -> v6
+
+## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
+
+
+### CI/CD
+
+- **deps:** upgrade actions/setup-node v5 -> v6
+
+## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
+
+
+### CI/CD
+
+- **deps:** upgrade GitHub Actions to latest major versions
+
+### Chore
+
+- **scripts:** fix auto-bump for pre-release versions
+
+## [v2.0.7-test.2](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.2) - 2026-07-22
+
+
+### CI/CD
+
+- **build:** harden release pipeline with preflight validation and asset verification
+
+### Chore
+
+- **scripts:** extend version validation to support semver pre-release/build suffixes
+
 ## [v2.0.6](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.6) - 2026-07-22
 
 

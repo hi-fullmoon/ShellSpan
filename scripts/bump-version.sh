@@ -18,9 +18,9 @@ case "$CHOICE" in
   2) BUMP="minor" ;;
   3) BUMP="major" ;;
   4)
-    read -rp "输入版本号 (格式 x.y.z): " MANUAL_VERSION
-    if ! echo "$MANUAL_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-      echo "无效版本号，需符合 semver 格式 x.y.z"
+    read -rp "输入版本号 (格式 x.y.z，可带预发布/构建后缀): " MANUAL_VERSION
+    if ! echo "$MANUAL_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+      echo "无效版本号，需符合 semver 格式（如 2.0.7 或 2.0.7-test.1）"
       exit 1
     fi
     NEW="$MANUAL_VERSION"
@@ -29,14 +29,18 @@ case "$CHOICE" in
 esac
 
 if [[ "$CHOICE" != "4" ]]; then
-  NEW=$(node -p "
-    (() => {
-      const [m, n, p] = '$CURRENT'.split('.').map(Number);
-      if ('$BUMP' === 'patch') return \`\${m}.\${n}.\${p + 1}\`;
-      if ('$BUMP' === 'minor') return \`\${m}.\${n + 1}.0\`;
-      return \`\${m + 1}.0.0\`;
-    })()
-  ")
+  NEW=$(node -e '
+    const [current, bump] = process.argv.slice(1);
+    const match = current.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    if (!match) {
+      console.error(`当前版本不是有效的 semver: ${current}`);
+      process.exit(1);
+    }
+    const [, major, minor, patch] = match.map(Number);
+    if (bump === "patch") console.log(`${major}.${minor}.${patch + 1}`);
+    else if (bump === "minor") console.log(`${major}.${minor + 1}.0`);
+    else console.log(`${major + 1}.0.0`);
+  ' "$CURRENT" "$BUMP")
 fi
 
 echo ""

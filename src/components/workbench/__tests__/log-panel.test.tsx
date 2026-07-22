@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { HTMLAttributes, ReactNode, Ref } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogPanel } from '../log-panel';
 
@@ -11,6 +12,25 @@ vi.mock('@/hooks/useToast', () => ({
     success: mockAddToast,
     error: mockAddToast,
   }),
+}));
+
+vi.mock('@/components/ui/scroll-area', () => ({
+  ScrollArea: ({
+    children,
+    viewportRef,
+    horizontal: _horizontal,
+    ...props
+  }: HTMLAttributes<HTMLDivElement> & {
+    children?: ReactNode;
+    viewportRef?: Ref<HTMLDivElement>;
+    horizontal?: boolean;
+  }) => (
+    <div data-slot="scroll-area" {...props}>
+      <div ref={viewportRef} data-slot="scroll-area-viewport">
+        {children}
+      </div>
+    </div>
+  ),
 }));
 
 const loadFiles = vi.fn().mockResolvedValue(undefined);

@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
 
-export async function readUpdaterPubkeyFromTauriConfig() {
-  const config = JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+export async function readUpdaterPubkeyFromTauriConfig(
+  configPath = new URL('../src-tauri/tauri.conf.json', import.meta.url),
+) {
+  const config = JSON.parse(await readFile(configPath, 'utf8'));
   return config.plugins?.updater?.pubkey ?? '';
 }
 
@@ -15,7 +17,7 @@ function extractKeyIdFromDecodedMinisignPublicKey(decodedKey) {
   return match?.[1]?.toUpperCase() ?? '';
 }
 
-export async function readUpdaterPubkeyKeyId() {
-  const pubkey = await readUpdaterPubkeyFromTauriConfig();
+export async function readUpdaterPubkeyKeyId(configPath) {
+  const pubkey = await readUpdaterPubkeyFromTauriConfig(configPath);
   return extractKeyIdFromDecodedMinisignPublicKey(decodeWrappedBase64(pubkey));
 }
