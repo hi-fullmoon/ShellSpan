@@ -3,6 +3,14 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.7](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7) - 2026-07-22
+
+
+### Style
+
+- **ui:** polish sftp bookmark menu and tab bar
+- **ui:** refine split pane subtle divider styling
+
 ## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
 
 
