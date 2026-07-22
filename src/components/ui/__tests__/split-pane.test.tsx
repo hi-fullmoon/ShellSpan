@@ -38,7 +38,7 @@ describe('SplitPane', () => {
 
     expect(container.querySelector('[data-slot="split-pane-divider"]')).toHaveClass(
       'border-l-[0.5px]',
-      'border-app-border/40',
+      'border-app-border/15',
     );
   });
 
