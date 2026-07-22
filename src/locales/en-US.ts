@@ -428,6 +428,7 @@ export default {
 
   'update.checking': 'Checking for updates...',
   'update.latest': 'You already have the latest version.',
+  'update.available': 'Version {version} is available. Downloading the update...',
   'update.downloading': 'Downloading update...',
   'update.downloaded': 'Update downloaded.',
   'update.progress': 'Download progress: {progress}%',

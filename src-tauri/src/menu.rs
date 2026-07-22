@@ -122,6 +122,11 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
 
     if is_check_update_menu_id(menu_id) {
         info!("Update check initiated menu_id={menu_id}");
+        // Update feedback is rendered in the main window. This is especially
+        // important for tray-menu checks when the window is currently hidden.
+        if let Err(error) = show_main_window(app) {
+            error!("failed to show main window for check-update event: {error}");
+        }
         match emit_system_check_update(app) {
             Ok(()) => info!("Update check event delivered to frontend"),
             Err(error) => error!("failed to handle check-update menu event: {error}"),

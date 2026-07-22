@@ -73,4 +73,25 @@ describe('useUpdateFlow', () => {
       expect(result.current.updateState.phase).toBe('downloaded');
     });
   });
+
+  it('immediately reports a found update while its download is pending', async () => {
+    const downloadPending = new Promise<void>(() => {});
+    mocks.checkForUpdate.mockResolvedValue({ version: '2.1.0' });
+    mocks.downloadAndInstallUpdate.mockReturnValue(downloadPending);
+
+    const { result } = renderHook(() =>
+      useUpdateFlow({ startupUpdateCheck: false }),
+    );
+
+    act(() => {
+      void result.current.runUpdateCheck('manual');
+    });
+
+    await waitFor(() => {
+      expect(result.current.updateState.phase).toBe('downloading');
+    });
+
+    expect(mocks.info).toHaveBeenNthCalledWith(1, 'update.checking');
+    expect(mocks.info).toHaveBeenNthCalledWith(2, 'update.available');
+  });
 });
