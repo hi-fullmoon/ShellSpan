@@ -234,6 +234,42 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s3');
   });
 
+  it('hands a tab drop to the split target without reordering tabs', async () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    const onTabDragEnd = vi.fn().mockReturnValue(true);
+    const reorderSpy = vi.spyOn(useTerminalStore.getState(), 'reorderSessions');
+
+    render(<TerminalTabBar onTabDragEnd={onTabDragEnd} />);
+    const tabs = screen.getAllByRole('tab');
+    tabs[0].getBoundingClientRect = vi.fn(() => ({
+      left: 0, right: 100, top: 0, bottom: 24, x: 0, y: 0,
+      width: 100, height: 24, toJSON: () => ({}),
+    }));
+    tabs[1].getBoundingClientRect = vi.fn(() => ({
+      left: 100, right: 200, top: 0, bottom: 24, x: 100, y: 0,
+      width: 100, height: 24, toJSON: () => ({}),
+    }));
+
+    await act(async () => {
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
+      fireEvent.pointerMove(document, { clientX: 60, clientY: 160 });
+    });
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 60, clientY: 160 });
+    });
+
+    expect(onTabDragEnd).toHaveBeenCalled();
+    expect(onTabDragEnd.mock.calls[0][0]).toBe('s1');
+    expect(reorderSpy).not.toHaveBeenCalled();
+  });
+
   it('keeps a pinned tab pinned when reordered within the pinned region', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');

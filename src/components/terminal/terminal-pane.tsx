@@ -47,9 +47,10 @@ const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
 
 export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
+  isActive?: boolean;
 }
 
-export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => {
+export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isActive = true }) => {
   const paneRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const { success, error: showError } = useToast();
@@ -63,7 +64,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [pendingPaste, setPendingPaste] = useState('');
   const activeSessionId = activeSession?.sessionId ?? null;
-  const { focus, searchNext, searchPrevious, clearSearch } = useActiveController(paneRef, activeSessionId);
+  const { focus, searchNext, searchPrevious, clearSearch } = useActiveController(
+    paneRef,
+    activeSessionId,
+    isActive,
+  );
 
   const controller = activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId);
   const terminal = controller?.terminal ?? null;
@@ -93,10 +98,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession }) => 
   );
 
   useEffect(() => {
+    if (!isActive) return;
     const handleOpenSearchRequest = (): void => handleOpenSearch();
     document.addEventListener('termbridge:find-terminal', handleOpenSearchRequest);
     return () => document.removeEventListener('termbridge:find-terminal', handleOpenSearchRequest);
-  }, [handleOpenSearch]);
+  }, [handleOpenSearch, isActive]);
 
   // Bind xterm custom key handler for find/escape and copy.
   useEffect(() => {

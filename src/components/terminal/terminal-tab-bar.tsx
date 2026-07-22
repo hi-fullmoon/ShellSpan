@@ -35,8 +35,18 @@ import {
 import type { SessionStatus } from '@/types';
 
 export interface TerminalTabBarProps {
+  sessions?: TerminalSession[];
+  activeSessionId?: string | null;
+  forceVisible?: boolean;
+  activeGroup?: boolean;
   onNewTabClick?: () => void;
   onTabContextMenu?: (session: TerminalSession, x: number, y: number) => void;
+  onTabActivate?: (sessionId: string) => void;
+  onTabDragMove?: (sessionId: string, x: number, y: number) => void;
+  onTabDragEnd?: (sessionId: string, x: number, y: number) => boolean;
+  onTabDragCancel?: () => void;
+  onTabReorder?: (sessionId: string, insertIndex: number) => void;
+  externalInsertIndex?: number | null;
 }
 
 const sessionStatusDotClass = (status: SessionStatus): string => {
@@ -274,11 +284,28 @@ const SortableTab: React.FC<SortableTabProps> = ({
   );
 };
 
-export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, onTabContextMenu }) => {
+export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
+  sessions: controlledSessions,
+  activeSessionId: controlledActiveSessionId,
+  forceVisible = false,
+  activeGroup = true,
+  onNewTabClick,
+  onTabContextMenu,
+  onTabActivate,
+  onTabDragMove,
+  onTabDragEnd,
+  onTabDragCancel,
+  onTabReorder,
+  externalInsertIndex = null,
+}) => {
   const { t } = useI18n();
   const terminalHideSingleTabBar = useAppStore((state) => state.terminalHideSingleTabBar);
-  const sessions = useTerminalStore((state) => state.sessions);
-  const activeSessionId = useTerminalStore((state) => state.activeSessionId);
+  const storeSessions = useTerminalStore((state) => state.sessions);
+  const storeActiveSessionId = useTerminalStore((state) => state.activeSessionId);
+  const sessions = controlledSessions ?? storeSessions;
+  const activeSessionId = controlledActiveSessionId === undefined
+    ? storeActiveSessionId
+    : controlledActiveSessionId;
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
   const removeSession = useTerminalStore((state) => state.removeSession);
   const reorderSessions = useTerminalStore((state) => state.reorderSessions);
@@ -286,7 +313,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   const togglePin = useTerminalStore((state) => state.togglePin);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const tabBarRef = useRef<HTMLDivElement>(null);
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragPointerStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
@@ -318,12 +347,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
   useEffect(() => {
     const handleCloseTabRequest = (e: Event): void => {
       const detail = (e as CustomEvent<{ sessionId: string }>).detail;
-      const closeId = detail?.sessionId ?? activeSessionId;
+      const requestedId = detail?.sessionId;
+      if (requestedId && !sessions.some((session) => session.sessionId === requestedId)) return;
+      if (!requestedId && !activeGroup) return;
+      const closeId = requestedId ?? activeSessionId;
       if (closeId) setClosingSessionId(closeId);
     };
     document.addEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
     return () => document.removeEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
-  }, [activeSessionId]);
+  }, [activeGroup, activeSessionId, sessions]);
 
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
     const container = scrollRef.current;
@@ -361,6 +393,11 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
     }
     const nextId = String(event.active.id);
     setDraggingSessionId(nextId);
+    const activatorEvent = event.activatorEvent as PointerEvent;
+    dragPointerStartRef.current = {
+      x: activatorEvent.clientX ?? 0,
+      y: activatorEvent.clientY ?? 0,
+    };
 
     const container = scrollRef.current;
     if (container) {
@@ -381,12 +418,38 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
     }
 
     const currentX = dragStartPosRef.current.x + event.delta.x;
+    onTabDragMove?.(
+      draggingSessionId,
+      dragPointerStartRef.current.x + event.delta.x,
+      dragPointerStartRef.current.y + event.delta.y,
+    );
     const container = scrollRef.current;
-    if (!container) {
+    const tabBarRect = tabBarRef.current?.getBoundingClientRect();
+    const pointerX = dragPointerStartRef.current.x + event.delta.x;
+    const pointerY = dragPointerStartRef.current.y + event.delta.y;
+    const tabs = container
+      ? Array.from(container.querySelectorAll<HTMLElement>('[data-session-tab]'))
+      : [];
+    const tabRects = tabs.map((tab) => tab.getBoundingClientRect());
+    const isInsideTabBar = tabBarRect && tabBarRect.width > 0 && tabBarRect.height > 0
+      ? pointerX >= tabBarRect.left
+        && pointerX <= tabBarRect.right
+        && pointerY >= tabBarRect.top
+        && pointerY <= tabBarRect.bottom
+      : tabRects.some((rect) => (
+        pointerX >= rect.left
+        && pointerX <= rect.right
+        && pointerY >= rect.top
+        && pointerY <= rect.bottom
+      ));
+    if (
+      !container
+      || !isInsideTabBar
+    ) {
+      setInsertIndex(null);
       return;
     }
 
-    const tabs = Array.from(container.querySelectorAll<HTMLElement>('[data-session-tab]'));
     const visibleTabs = tabs.filter((tab) => tab.dataset.sessionTab !== draggingSessionId);
 
     let newInsertIndex = 0;
@@ -414,19 +477,29 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
 
   const handleDragEnd = (event: DragEndEvent): void => {
     const activeId = String(event.active.id);
-    if (insertIndex !== null) {
+    const splitHandled = onTabDragEnd?.(
+      activeId,
+      dragPointerStartRef.current.x + event.delta.x,
+      dragPointerStartRef.current.y + event.delta.y,
+    ) ?? false;
+    if (!splitHandled && insertIndex !== null) {
       const draggedSession = sessions.find((s) => s.sessionId === activeId);
       const pinnedCount = sessions.filter((s) => s.pinned).length;
       // A pinned tab dropped into the unpinned region loses its pin.
       if (draggedSession?.pinned && insertIndex >= pinnedCount) {
         togglePin(activeId);
       }
-      reorderSessions(activeId, insertIndex);
+      if (onTabReorder) {
+        onTabReorder(activeId, insertIndex);
+      } else {
+        reorderSessions(activeId, insertIndex);
+      }
     }
     finishDrag();
   };
 
   const handleDragCancel = (): void => {
+    onTabDragCancel?.();
     finishDrag();
   };
 
@@ -454,11 +527,16 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
 
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
   const visibleSessions = draggingSessionId ? sessions.filter((session) => session.sessionId !== draggingSessionId) : sessions;
+  const displayedInsertIndex = externalInsertIndex ?? insertIndex;
 
-  const shouldHide = sessions.length === 1 && terminalHideSingleTabBar;
+  const shouldHide = !forceVisible && sessions.length === 1 && terminalHideSingleTabBar;
 
   return (
-    <div className={cn('flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}>
+    <div
+      ref={tabBarRef}
+      data-terminal-tab-bar
+      className={cn('flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
+    >
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -487,7 +565,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
                   key={session.sessionId}
                   session={session}
                   active={isActive}
-                  onActivate={setActiveSession}
+                  onActivate={onTabActivate ?? setActiveSession}
                   onContextMenu={(s, x, y) => onTabContextMenu?.(s, x, y)}
                   onClose={handleCloseSession}
                   onTogglePin={togglePin}
@@ -497,8 +575,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({ onNewTabClick, o
                   onRenameChange={setRenameValue}
                   onRenameCommit={handleRenameCommit}
                   onRenameCancel={handleRenameCancel}
-                  showDropIndicatorLeft={insertIndex !== null && visibleIndex >= 0 && insertIndex === visibleIndex}
-                  showDropIndicatorRight={insertIndex !== null && isLastVisible && insertIndex === visibleTabCount}
+                  showDropIndicatorLeft={displayedInsertIndex !== null && visibleIndex >= 0 && displayedInsertIndex === visibleIndex}
+                  showDropIndicatorRight={displayedInsertIndex !== null && isLastVisible && displayedInsertIndex === visibleTabCount}
                   showSeparatorAfter={showSeparatorAfter}
                 />
               );

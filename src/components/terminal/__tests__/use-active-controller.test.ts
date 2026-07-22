@@ -33,13 +33,14 @@ function setupPane() {
 function renderControllerHook(
   host: HTMLDivElement,
   activeSessionId: string | null,
+  shouldFocus = true,
 ) {
   return renderHook(
-    ({ sid }: { sid: string | null }) => {
+    ({ sid, focus }: { sid: string | null; focus: boolean }) => {
       const paneRef = useRef<HTMLDivElement | null>(host);
-      return useActiveController(paneRef, sid);
+      return useActiveController(paneRef, sid, focus);
     },
-    { initialProps: { sid: activeSessionId } },
+    { initialProps: { sid: activeSessionId, focus: shouldFocus } },
   );
 }
 
@@ -76,7 +77,7 @@ describe('useActiveController', () => {
     const c2 = createController('s2');
     const { rerender } = renderControllerHook(host, 's1');
     expect(host.firstChild).toBe(c1.container);
-    rerender({ sid: 's2' });
+    rerender({ sid: 's2', focus: true });
     expect(c1.host).toBeNull();
     expect(host.firstChild).toBe(c2.container);
   });
@@ -138,7 +139,7 @@ describe('useActiveController', () => {
     createController('s1');
     const { result, rerender } = renderControllerHook(host, 's1');
     const first = result.current;
-    rerender({ sid: 's1' });
+    rerender({ sid: 's1', focus: true });
     expect(result.current.searchNext).toBe(first.searchNext);
     expect(result.current.searchPrevious).toBe(first.searchPrevious);
     expect(result.current.clearSearch).toBe(first.clearSearch);
@@ -148,5 +149,16 @@ describe('useActiveController', () => {
     const host = setupPane();
     expect(() => renderControllerHook(host, 'missing')).not.toThrow();
     expect(host.firstChild).toBeNull();
+  });
+
+  it('does not auto-focus a controller in an inactive terminal group', async () => {
+    const host = setupPane();
+    const controller = createController('s1');
+    const spy = vi.spyOn(controller, 'focus');
+
+    renderControllerHook(host, 's1', false);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    expect(spy).not.toHaveBeenCalled();
   });
 });
