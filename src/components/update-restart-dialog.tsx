@@ -1,13 +1,12 @@
 import React from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import {
+  CompactDialogBody,
+  CompactDialogContent,
+  CompactDialogFooter,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
 import { useI18n } from '@/hooks/useI18n';
 
 interface UpdateRestartDialogProps {
@@ -31,15 +30,12 @@ export const UpdateRestartDialog: React.FC<UpdateRestartDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onLater(); }}>
-      <DialogContent className="max-w-md bg-app-surface border-app-border">
-        <DialogHeader>
-          <DialogTitle>{t('update.restartDialog.title')}</DialogTitle>
-          <DialogDescription>
-            {t('update.restartDialog.description', { version })}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-3 py-2">
+      <CompactDialogContent className="max-w-sm" showCloseButton={false}>
+        <CompactDialogHeader
+          title={t('update.restartDialog.title')}
+          description={t('update.restartDialog.description', { version })}
+        />
+        <CompactDialogBody>
           {typeof downloadProgress === 'number' ? (
             <p className="text-sm text-app-text-soft">
               {t('update.progress', { progress: Math.max(0, Math.min(100, downloadProgress)) })}
@@ -51,17 +47,16 @@ export const UpdateRestartDialog: React.FC<UpdateRestartDialogProps> = ({
               {t('update.restartDialog.activeSessionWarning')}
             </div>
           ) : null}
-        </div>
-
-        <DialogFooter>
-          <Button variant="secondary" onClick={onLater}>
+        </CompactDialogBody>
+        <CompactDialogFooter>
+          <Button variant="outline" size="sm" onClick={onLater}>
             {t('update.restartDialog.later')}
           </Button>
-          <Button onClick={onInstallNow}>
+          <Button size="sm" onClick={onInstallNow}>
             {t('update.restartDialog.installNow')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
+        </CompactDialogFooter>
+      </CompactDialogContent>
     </Dialog>
   );
 };
