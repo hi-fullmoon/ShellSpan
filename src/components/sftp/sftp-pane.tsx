@@ -370,7 +370,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               size="xs"
               onClick={onTitleClick}
               aria-label={t('sftp.source.switch')}
-              className="min-w-0 max-w-[70%] justify-start px-1 h-full"
+              className="min-w-0 max-w-[70%] justify-start px-1 h-8"
             >
               <span className="truncate text-sm font-semibold">{paneTitle}</span>
               <ChevronsUpDownIcon data-icon="inline-end" />
