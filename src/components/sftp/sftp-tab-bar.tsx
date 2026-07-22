@@ -422,7 +422,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   }
 
   if (connections.length === 1 && sftpHideSingleTabBar) {
-    return <div className="h-0 border-b border-app-border/50" />;
+    return null;
   }
 
   return (
