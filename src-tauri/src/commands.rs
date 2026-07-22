@@ -189,6 +189,7 @@ pub(crate) fn create_local_session(
             format!("failed to create local terminal: {error}")
         })?;
     let mut command = CommandBuilder::new(&shell);
+    configure_local_terminal_environment(&mut command);
     if !cfg!(target_os = "windows") {
         command.arg("-l");
     }
@@ -1402,6 +1403,18 @@ fn is_termbridge_application_entry(name: &std::ffi::OsStr) -> bool {
     name == std::ffi::OsStr::new(".termbridge")
 }
 
+fn configure_local_terminal_environment(command: &mut CommandBuilder) {
+    // Desktop applications on macOS and Windows commonly start without TERM.
+    // Interactive shells and plugins (notably zsh-autosuggestions) then fall
+    // back to incomplete terminal capabilities and their ZLE redraw sequences
+    // leave stale characters on screen. Keep this aligned with the terminal
+    // type requested for SSH sessions in session.rs.
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("TERM_PROGRAM", "TermBridge");
+    command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+}
+
 fn contains_shell_metacharacters(input: &str) -> bool {
     input.chars().any(|c| matches!(c, '&' | '|' | '<' | '>' | '(' | ')' | '^' | '"' | '%' | '!'))
 }
@@ -1607,12 +1620,28 @@ pub(crate) fn clear_terminal_workspace(
 
 #[cfg(test)]
 mod tests {
-    use super::is_termbridge_application_entry;
+    use super::{configure_local_terminal_environment, is_termbridge_application_entry};
+    use portable_pty::CommandBuilder;
     use std::ffi::OsStr;
 
     #[test]
     fn local_listing_hides_only_termbridge_application_directory() {
         assert!(is_termbridge_application_entry(OsStr::new(".termbridge")));
         assert!(!is_termbridge_application_entry(OsStr::new("termbridge")));
+    }
+
+    #[test]
+    fn local_shell_uses_xterm_terminal_capabilities() {
+        let mut command = CommandBuilder::new("shell");
+
+        configure_local_terminal_environment(&mut command);
+
+        assert_eq!(command.get_env("TERM"), Some(OsStr::new("xterm-256color")));
+        assert_eq!(command.get_env("COLORTERM"), Some(OsStr::new("truecolor")));
+        assert_eq!(command.get_env("TERM_PROGRAM"), Some(OsStr::new("TermBridge")));
+        assert_eq!(
+            command.get_env("TERM_PROGRAM_VERSION"),
+            Some(OsStr::new(env!("CARGO_PKG_VERSION"))),
+        );
     }
 }
