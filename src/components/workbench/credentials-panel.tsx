@@ -7,7 +7,6 @@ import {
   FileUpIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
-  PlusIcon,
   RefreshCwIcon,
   SearchIcon,
   SearchXIcon,
@@ -70,6 +69,7 @@ interface KeyCredential {
   id: string;
   label: string;
   keyId: string;
+  keyType: string;
 }
 
 type CredentialItem = PasswordCredential | KeyCredential;
@@ -133,7 +133,7 @@ export const CredentialsPanel: React.FC = () => {
   );
 
   const keyCredentials = useMemo(
-    () => keys.map((key) => ({ type: 'key' as const, id: `key:${key.id}`, label: key.label, keyId: key.id })),
+    () => keys.map((key) => ({ type: 'key' as const, id: `key:${key.id}`, label: key.label, keyId: key.id, keyType: key.keyType })),
     [keys],
   );
 
@@ -237,12 +237,10 @@ export const CredentialsPanel: React.FC = () => {
               </div>
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 px-2.5"
+                variant="default"
                 onClick={() => setKeyDrawerOpen(true)}
               >
-                <PlusIcon className="size-3.5" />
-                <span className="hidden sm:inline">{t('workbench.credentials.newKey')}</span>
+                {t('workbench.credentials.newKey')}
               </Button>
               <IconActionButton
                 className="size-7 text-app-text hover:bg-app-text/10"
@@ -812,18 +810,16 @@ const KeyCredentialDrawer: React.FC<KeyCredentialDrawerProps> = ({
 };
 
 function detectCredentialType(lowerPath: string, content: string): 'private' | 'public' | 'certificate' {
+  const lowerContent = content.toLowerCase();
   if (
     lowerPath.endsWith('.pub') ||
-    content.includes('ssh-') ||
-    content.includes('BEGIN PUBLIC KEY')
+    lowerContent.includes('ssh-') ||
+    lowerContent.includes('begin public key')
   ) {
     return 'public';
   }
   if (
-    lowerPath.endsWith('.pem') ||
-    lowerPath.endsWith('.crt') ||
-    lowerPath.endsWith('.cer') ||
-    content.includes('BEGIN CERTIFICATE')
+    lowerContent.includes('begin certificate')
   ) {
     return 'certificate';
   }
