@@ -57,6 +57,7 @@ pub(crate) fn start_port_forwards(
     username: String,
     auth_method: AuthMethod,
     password: Option<String>,
+    private_key_data: Option<String>,
     private_key_path: Option<String>,
     passphrase: Option<String>,
     jump_host: Option<JumpHostConfig>,
@@ -76,7 +77,8 @@ pub(crate) fn start_port_forwards(
         let host = host.clone();
         let username = username.clone();
         let pwd = password.clone();
-        let key = private_key_path.clone();
+        let key_data = private_key_data.clone();
+        let key_path = private_key_path.clone();
         let phrase = passphrase.clone();
         let jh = jump_host.clone();
         let cancel = cancel_flag.clone();
@@ -90,7 +92,7 @@ pub(crate) fn start_port_forwards(
                 handles.push(thread::spawn(move || {
                     local_forward_worker(
                         &host, port, &username, auth_method,
-                        pwd.as_deref(), key.as_deref(), phrase.as_deref(),
+                        pwd.as_deref(), key_data.as_deref(), key_path.as_deref(), phrase.as_deref(),
                         jh.as_ref(),
                         config.local_port, &remote_host, config.remote_port,
                         cancel, kh.as_deref(),
@@ -102,7 +104,7 @@ pub(crate) fn start_port_forwards(
                 handles.push(thread::spawn(move || {
                     remote_forward_worker(
                         &host, port, &username, auth_method,
-                        pwd.as_deref(), key.as_deref(), phrase.as_deref(),
+                        pwd.as_deref(), key_data.as_deref(), key_path.as_deref(), phrase.as_deref(),
                         jh.as_ref(),
                         config.local_port, &remote_host, config.remote_port,
                         cancel, kh.as_deref(),
@@ -132,6 +134,7 @@ fn open_forward_session(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
     jump_host: Option<&JumpHostConfig>,
@@ -147,6 +150,7 @@ fn open_forward_session(
             username,
             auth_method,
             password,
+            private_key_data,
             private_key_path,
             passphrase,
             host,
@@ -166,6 +170,7 @@ fn local_forward_worker(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
     jump_host: Option<&JumpHostConfig>,
@@ -177,7 +182,7 @@ fn local_forward_worker(
 ) {
     let result = local_forward_loop(
         host, port, username, auth_method,
-        password, private_key_path, passphrase,
+        password, private_key_data, private_key_path, passphrase,
         jump_host, local_port, remote_host, remote_port, cancel_flag,
         known_hosts_path,
     );
@@ -192,6 +197,7 @@ fn local_forward_loop(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
     jump_host: Option<&JumpHostConfig>,
@@ -201,7 +207,7 @@ fn local_forward_loop(
     cancel_flag: Arc<AtomicBool>,
     known_hosts_path: Option<&Path>,
 ) -> Result<(), String> {
-    let session = open_forward_session(host, port, username, auth_method, password, private_key_path, passphrase, jump_host, known_hosts_path)?;
+    let session = open_forward_session(host, port, username, auth_method, password, private_key_data, private_key_path, passphrase, jump_host, known_hosts_path)?;
     let remote_host = remote_host.to_owned();
 
     let listener = TcpListener::bind(("127.0.0.1", local_port))
@@ -250,6 +256,7 @@ fn remote_forward_worker(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
     jump_host: Option<&JumpHostConfig>,
@@ -261,7 +268,7 @@ fn remote_forward_worker(
 ) {
     let result = remote_forward_loop(
         host, port, username, auth_method,
-        password, private_key_path, passphrase,
+        password, private_key_data, private_key_path, passphrase,
         jump_host, local_port, remote_host, remote_port, cancel_flag,
         known_hosts_path,
     );
@@ -276,6 +283,7 @@ fn remote_forward_loop(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
     jump_host: Option<&JumpHostConfig>,
@@ -285,7 +293,7 @@ fn remote_forward_loop(
     cancel_flag: Arc<AtomicBool>,
     known_hosts_path: Option<&Path>,
 ) -> Result<(), String> {
-    let session = open_forward_session(host, port, username, auth_method, password, private_key_path, passphrase, jump_host, known_hosts_path)?;
+    let session = open_forward_session(host, port, username, auth_method, password, private_key_data, private_key_path, passphrase, jump_host, known_hosts_path)?;
     session.set_blocking(false);
     let remote_host = remote_host.to_owned();
 

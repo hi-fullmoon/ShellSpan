@@ -44,7 +44,10 @@ pub(crate) struct JumpHostConfig {
     pub(crate) username: String,
     pub(crate) auth_method: AuthMethod,
     pub(crate) password: Option<String>,
+    pub(crate) keychain_key_id: Option<String>,
     pub(crate) private_key_path: Option<String>,
+    #[serde(default)]
+    pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
 }
 
@@ -57,7 +60,10 @@ pub(crate) struct SessionCreateRequest {
     pub(crate) username: String,
     pub(crate) auth_method: AuthMethod,
     pub(crate) password: Option<String>,
+    pub(crate) keychain_key_id: Option<String>,
     pub(crate) private_key_path: Option<String>,
+    #[serde(default)]
+    pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
     pub(crate) terminal_cols: u32,
     pub(crate) terminal_rows: u32,
@@ -72,7 +78,10 @@ pub(crate) struct RemoteConnectionRequest {
     pub(crate) username: String,
     pub(crate) auth_method: AuthMethod,
     pub(crate) password: Option<String>,
+    pub(crate) keychain_key_id: Option<String>,
     pub(crate) private_key_path: Option<String>,
+    #[serde(default)]
+    pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
     pub(crate) jump_host: Option<JumpHostConfig>,
 }
@@ -339,6 +348,24 @@ impl AuthMethod {
     }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ProfileAuthMethod {
+    Password,
+    KeychainKey,
+    KeyPath,
+}
+
+impl ProfileAuthMethod {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ProfileAuthMethod::Password => "password",
+            ProfileAuthMethod::KeychainKey => "keychainKey",
+            ProfileAuthMethod::KeyPath => "keyPath",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum UploadConflictPolicy {
@@ -463,6 +490,14 @@ pub(crate) enum RemoteFileKind {
     File,
     Symlink,
     Other,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KeyCredentialSummary {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) key_type: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1009,7 +1044,7 @@ pub(crate) struct ProfileRow {
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) username: String,
-    pub(crate) auth_method: AuthMethod,
+    pub(crate) auth_method: ProfileAuthMethod,
     pub(crate) password_stored: bool,
     pub(crate) private_key_path: Option<String>,
     pub(crate) jump_host_config: Option<String>,

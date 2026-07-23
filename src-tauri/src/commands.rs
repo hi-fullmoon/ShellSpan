@@ -4,7 +4,7 @@ use crate::db::Database;
 use crate::models::{
     AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest,
     CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest,
-    HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KnownHostEntry, LocalDirectoryListing,
+    HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing,
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
     RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
@@ -22,20 +22,50 @@ use std::sync::{
 };
 use std::thread;
 use std::time::Duration;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KeyCredentialRequest {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) private_key: String,
+    pub(crate) public_key: Option<String>,
+    pub(crate) certificate: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KeyCredentialResponse {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) private_key: String,
+    pub(crate) public_key: Option<String>,
+    pub(crate) certificate: Option<String>,
+    pub(crate) key_type: String,
+    pub(crate) updated_at: i64,
+}
 
 #[tauri::command]
 pub(crate) async fn create_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
     pool: State<'_, SftpPool>,
-    request: SessionCreateRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: SessionCreateRequest,
 ) -> Result<SessionSummary, CreateSessionError> {
     validate_connection_fields(&request.host, &request.username).map_err(|message| {
         error!("SSH session validation failed: {message}");
         CreateSessionError::Other { message }
     })?;
+
+    if let Err(message) = resolve_keychain_key_for_session(&credentials, &mut request) {
+        error!("Failed to resolve keychain key: {message}");
+        return Err(CreateSessionError::Other { message });
+    }
+
     info!(
         "Creating SSH session {}",
         summarize_session_request(&request)
@@ -403,10 +433,12 @@ pub(crate) fn request_app_exit(app: AppHandle) {
 #[tauri::command]
 pub(crate) async fn list_remote_directory(
     app: AppHandle,
-    request: RemoteDirectoryRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RemoteDirectoryRequest,
     pool: State<'_, SftpPool>,
     cache: State<'_, RemoteIdentityCache>,
 ) -> Result<RemoteDirectoryListing, String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
     debug!(
         "Listing remote directory path={} {}",
@@ -439,9 +471,11 @@ pub(crate) async fn list_remote_directory(
 #[tauri::command]
 pub(crate) async fn create_remote_entry(
     app: AppHandle,
-    request: CreateRemoteEntryRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: CreateRemoteEntryRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Creating remote entry parent_path={} name={} kind={:?} {}",
         request.parent_path,
@@ -467,9 +501,11 @@ pub(crate) async fn create_remote_entry(
 #[tauri::command]
 pub(crate) async fn rename_remote_path(
     app: AppHandle,
-    request: RenameRemotePathRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RenameRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Renaming remote path path={} new_name={} {}",
         request.path,
@@ -494,9 +530,11 @@ pub(crate) async fn rename_remote_path(
 #[tauri::command]
 pub(crate) async fn trash_remote_path(
     app: AppHandle,
-    request: TrashRemotePathRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: TrashRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<TrashedRemotePath, String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Moving remote path to trash path={} {}",
         request.path,
@@ -518,9 +556,11 @@ pub(crate) async fn trash_remote_path(
 #[tauri::command]
 pub(crate) async fn restore_remote_path(
     app: AppHandle,
-    request: RestoreRemotePathRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RestoreRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Restoring remote path original_path={} trash_path={} {}",
         request.original_path,
@@ -543,10 +583,12 @@ pub(crate) async fn restore_remote_path(
 #[tauri::command]
 pub(crate) async fn delete_remote_path(
     app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
     deletes: State<'_, DeleteCancellationRegistry>,
-    request: DeleteRemotePathRequest,
+    mut request: DeleteRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Deleting remote path operation_id={} path={} {}",
         request.operation_id,
@@ -573,9 +615,11 @@ pub(crate) async fn delete_remote_path(
 #[tauri::command]
 pub(crate) async fn copy_remote_path(
     app: AppHandle,
-    request: CopyRemotePathRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: CopyRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Copying remote path source_path={} destination_directory={} {}",
         request.source_path,
@@ -600,10 +644,13 @@ pub(crate) async fn copy_remote_path(
 #[tauri::command]
 pub(crate) async fn copy_remote_to_remote(
     app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
     copies: State<'_, RemoteCopyCancellationRegistry>,
-    request: CopyRemoteToRemoteRequest,
+    mut request: CopyRemoteToRemoteRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.source_connection)?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.destination_connection)?;
     let cancel_flag = copies.register(request.operation_id.clone())?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
@@ -632,10 +679,12 @@ pub(crate) fn cancel_remote_copy(
 #[tauri::command]
 pub(crate) async fn upload_local_paths(
     app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
     uploads: State<'_, UploadCancellationRegistry>,
-    request: UploadLocalPathsRequest,
+    mut request: UploadLocalPathsRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Uploading local paths operation_id={} count={} destination_directory={} {}",
         request.operation_id,
@@ -754,10 +803,12 @@ pub(crate) fn cancel_delete(
 #[tauri::command]
 pub(crate) async fn download_remote_paths(
     app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
     downloads: State<'_, DownloadCancellationRegistry>,
-    request: DownloadRemotePathsRequest,
+    mut request: DownloadRemotePathsRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Downloading remote paths operation_id={} count={} destination_directory={} {}",
         request.operation_id,
@@ -871,9 +922,11 @@ pub(crate) async fn pick_private_key_file() -> Result<Option<String>, String> {
 #[tauri::command]
 pub(crate) async fn open_remote_file(
     app: AppHandle,
-    request: OpenRemoteFileRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: OpenRemoteFileRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Opening remote file path={} {}",
         request.path,
@@ -897,9 +950,11 @@ pub(crate) async fn open_remote_file(
 #[tauri::command]
 pub(crate) async fn preview_remote_file(
     app: AppHandle,
-    request: ReadRemoteFileRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: ReadRemoteFileRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<ReadRemoteFileResponse, String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Previewing remote file path={} {}",
         request.path,
@@ -929,9 +984,11 @@ pub(crate) async fn preview_remote_file(
 #[tauri::command]
 pub(crate) async fn update_remote_permissions(
     app: AppHandle,
-    request: UpdateRemotePermissionsRequest,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: UpdateRemotePermissionsRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), String> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     info!(
         "Updating remote permissions path={} permissions={:04o} {}",
         request.path,
@@ -1000,9 +1057,162 @@ pub(crate) fn migrate_passwords(
     Ok(credentials.migrate_passwords(&profiles))
 }
 
+fn detect_key_type(private_key: &str) -> &'static str {
+    let normalized = private_key.to_lowercase();
+    if normalized.contains("-----begin rsa private key-----") || normalized.contains("ssh-rsa") {
+        "rsa"
+    } else if normalized.contains("-----begin ec private key-----")
+        || normalized.contains("ecdsa-sha2")
+    {
+        "ecdsa"
+    } else if normalized.contains("ssh-ed25519") {
+        "ed25519"
+    } else if normalized.contains("-----begin dsa private key-----")
+        || normalized.contains("ssh-dss")
+    {
+        "dsa"
+    } else {
+        "unknown"
+    }
+}
+
+#[tauri::command]
+pub(crate) fn store_key_credential(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    database: State<'_, Database>,
+    request: KeyCredentialRequest,
+) -> Result<(), String> {
+    let updated_at = crate::db::current_timestamp_ms();
+    let key_type = detect_key_type(&request.private_key);
+    let payload = serde_json::json!({
+        "label": request.label,
+        "privateKey": request.private_key,
+        "publicKey": request.public_key,
+        "certificate": request.certificate,
+        "keyType": key_type,
+        "updatedAt": updated_at,
+    });
+    credentials.store_key_credential(&request.id, &payload.to_string())?;
+    database.upsert_key_credential(&request.id, &request.label, key_type, updated_at)
+}
+
+#[tauri::command]
+pub(crate) fn list_key_credentials(
+    database: State<'_, Database>,
+) -> Result<Vec<KeyCredentialSummary>, String> {
+    database.list_key_credentials()
+}
+
+#[tauri::command]
+pub(crate) fn retrieve_key_credential(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    id: String,
+) -> Result<Option<KeyCredentialResponse>, String> {
+    let Some(json) = credentials.retrieve_key_credential(&id)? else {
+        return Ok(None);
+    };
+    let value = serde_json::from_str::<serde_json::Value>(&json)
+        .map_err(|e| format!("failed to parse key credential: {e}"))?;
+    Ok(Some(KeyCredentialResponse {
+        id: id.clone(),
+        label: value
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&id)
+            .to_string(),
+        private_key: value
+            .get("privateKey")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        public_key: value.get("publicKey").and_then(|v| v.as_str()).map(String::from),
+        certificate: value.get("certificate").and_then(|v| v.as_str()).map(String::from),
+        key_type: value
+            .get("keyType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        updated_at: value
+            .get("updatedAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
+    }))
+}
+
+#[tauri::command]
+pub(crate) fn delete_key_credential(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    database: State<'_, Database>,
+    id: String,
+) -> Result<(), String> {
+    credentials.delete_key_credential(&id)?;
+    database.delete_key_credential(&id)
+}
+
+#[tauri::command]
+pub(crate) fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read file {}: {e}", std::path::Path::new(&path).display()))
+}
+
+fn load_keychain_private_key(
+    credentials: &crate::keychain::CredentialManager,
+    key_id: &str,
+) -> Result<String, String> {
+    let json = credentials
+        .retrieve_key_credential(key_id)?
+        .ok_or_else(|| format!("keychain key not found: {key_id}"))?;
+    let value = serde_json::from_str::<serde_json::Value>(&json)
+        .map_err(|e| format!("failed to parse key credential: {e}"))?;
+    value
+        .get("privateKey")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .ok_or_else(|| "key credential missing privateKey".to_string())
+}
+
+fn resolve_keychain_key_for_remote(
+    credentials: &crate::keychain::CredentialManager,
+    request: &mut RemoteConnectionRequest,
+) -> Result<(), String> {
+    if let Some(key_id) = request.keychain_key_id.as_deref() {
+        if request.private_key_data.is_none() {
+            request.private_key_data = Some(load_keychain_private_key(credentials, key_id)?);
+        }
+    }
+    if let Some(ref mut jump) = request.jump_host {
+        if let Some(key_id) = jump.keychain_key_id.as_deref() {
+            if jump.private_key_data.is_none() {
+                jump.private_key_data = Some(load_keychain_private_key(credentials, key_id)?);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_keychain_key_for_session(
+    credentials: &crate::keychain::CredentialManager,
+    request: &mut SessionCreateRequest,
+) -> Result<(), String> {
+    if let Some(key_id) = request.keychain_key_id.as_deref() {
+        if request.private_key_data.is_none() {
+            request.private_key_data = Some(load_keychain_private_key(credentials, key_id)?);
+        }
+    }
+    if let Some(ref mut jump) = request.jump_host {
+        if let Some(key_id) = jump.keychain_key_id.as_deref() {
+            if jump.private_key_data.is_none() {
+                jump.private_key_data = Some(load_keychain_private_key(credentials, key_id)?);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn start_port_forwards(
     app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     operation_id: String,
     host: String,
@@ -1010,6 +1220,7 @@ pub(crate) fn start_port_forwards(
     username: String,
     auth_method: AuthMethod,
     password: Option<String>,
+    keychain_key_id: Option<String>,
     private_key_path: Option<String>,
     passphrase: Option<String>,
     jump_host: Option<JumpHostConfig>,
@@ -1017,6 +1228,17 @@ pub(crate) fn start_port_forwards(
 ) -> Result<(), String> {
     info!("Starting port forwards operation_id={operation_id} count={}", forwards.len());
     validate_connection_fields(&host, &username)?;
+
+    let mut private_key_data: Option<String> = None;
+    if let Some(key_id) = keychain_key_id.as_deref() {
+        private_key_data = Some(load_keychain_private_key(&credentials, key_id)?);
+    }
+    let mut jump_host = jump_host;
+    if let Some(ref mut jump) = jump_host {
+        if let Some(key_id) = jump.keychain_key_id.as_deref() {
+            jump.private_key_data = Some(load_keychain_private_key(&credentials, key_id)?);
+        }
+    }
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
     forwards_state.register(operation_id.clone(), cancel_flag.clone())?;
@@ -1029,7 +1251,7 @@ pub(crate) fn start_port_forwards(
         crate::port_forward::start_port_forwards(
             manager, operation_id,
             host, port, username, auth_method,
-            password, private_key_path, passphrase,
+            password, private_key_data, private_key_path, passphrase,
             jump_host, forwards, cancel_flag,
             known_hosts,
         );
@@ -1428,7 +1650,9 @@ fn remote_connection_request_from_session(
         username: request.username.clone(),
         auth_method: request.auth_method,
         password: request.password.clone(),
+        keychain_key_id: request.keychain_key_id.clone(),
         private_key_path: request.private_key_path.clone(),
+        private_key_data: request.private_key_data.clone(),
         passphrase: request.passphrase.clone(),
         jump_host: request.jump_host.clone(),
     }

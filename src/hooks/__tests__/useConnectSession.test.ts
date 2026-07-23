@@ -41,7 +41,7 @@ const profile: ConnectionProfile = {
   host: 'h',
   port: 22,
   username: 'u',
-  authMethod: 'key',
+  authMethod: 'keyPath',
   createdAt: 0,
   updatedAt: 0,
 };

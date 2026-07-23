@@ -105,13 +105,13 @@ describe('profileStore keychain lifecycle', () => {
     });
 
     await useProfileStore.getState().updateProfile('profile-1', {
-      authMethod: 'key',
+      authMethod: 'keyPath',
       privateKeyPath: '/keys/id_ed25519',
     });
 
     expect(invokeRemovePassword).toHaveBeenCalledWith('profile-1');
     expect(useProfileStore.getState().profiles[0]).toMatchObject({
-      authMethod: 'key',
+      authMethod: 'keyPath',
       passwordStored: false,
     });
   });
@@ -130,7 +130,7 @@ describe('profileStore keychain lifecycle', () => {
     invokeUpdateProfile.mockRejectedValue(new Error('database unavailable'));
 
     await expect(
-      useProfileStore.getState().updateProfile('profile-1', { authMethod: 'key' }),
+      useProfileStore.getState().updateProfile('profile-1', { authMethod: 'keyPath' }),
     ).rejects.toThrow('database unavailable');
 
     expect(invokeRemovePassword).not.toHaveBeenCalled();

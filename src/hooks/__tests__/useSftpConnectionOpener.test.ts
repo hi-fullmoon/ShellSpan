@@ -30,7 +30,7 @@ const profile: ConnectionProfile = {
   host: '175.178.66.45',
   port: 22,
   username: 'root',
-  authMethod: 'key',
+  authMethod: 'keyPath',
   createdAt: 0,
   updatedAt: 0,
 };
