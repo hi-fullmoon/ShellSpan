@@ -97,7 +97,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
         active ? 'h-9 bg-app-surface text-app-text' : 'h-9 bg-app-border/25 text-app-text-soft',
-        renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80 shadow-md' : 'cursor-pointer',
+        renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
       {showSeparatorAfter && (
@@ -170,7 +170,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
               }}
               className={cn(
                 'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-                active ? 'flex' : 'hidden group-hover:flex',
+                !dragging && active ? 'flex' : 'hidden group-hover:flex',
               )}
             >
               <XIcon className="h-3 w-3" />
@@ -283,6 +283,15 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     }),
   );
 
+  const snapOverlayTopLeftToCursor = React.useCallback<Modifier>(({ transform }) => {
+    const offset = dragOverlayOffsetRef.current;
+    return {
+      ...transform,
+      x: transform.x + offset.x,
+      y: transform.y + offset.y,
+    };
+  }, []);
+
   useEffect(() => {
     const container = scrollRef.current;
     if (!container || !activeConnectionId) {
@@ -322,6 +331,11 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     }
     const nextId = String(event.active.id);
     setDraggingConnectionId(nextId);
+    const activatorEvent = event.activatorEvent as PointerEvent;
+    dragPointerStartRef.current = {
+      x: activatorEvent.clientX ?? 0,
+      y: activatorEvent.clientY ?? 0,
+    };
 
     const container = scrollRef.current;
     if (container) {
@@ -331,6 +345,10 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         dragStartPosRef.current = {
           x: rect.left + rect.width / 2,
           y: rect.top + rect.height / 2,
+        };
+        dragOverlayOffsetRef.current = {
+          x: dragPointerStartRef.current.x - rect.left,
+          y: dragPointerStartRef.current.y - rect.top,
         };
       }
     }
@@ -485,7 +503,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         {typeof document === 'undefined'
           ? null
           : createPortal(
-              <DragOverlay dropAnimation={null}>
+              <DragOverlay dropAnimation={null} modifiers={[snapOverlayTopLeftToCursor]}>
                 {draggingConnection && (
                   <ConnectionTab
                     connection={draggingConnection}
