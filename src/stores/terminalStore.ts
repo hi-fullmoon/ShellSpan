@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { TerminalLayoutNode } from '@/components/terminal/terminal-split';
 import type { ClosedEvent, SessionStatus, SessionSummary, StatusEvent } from '@/types';
 
 export interface TerminalSession {
@@ -18,7 +19,7 @@ export interface TerminalSession {
 
 export type TerminalWorkspaceSession = Pick<
   TerminalSession,
-  'title' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color'
+  'sessionId' | 'title' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color'
 >;
 
 const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
@@ -30,8 +31,16 @@ const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
 interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
-  addSession: (summary: SessionSummary, profileId?: string) => void;
-  addRestoredSessions: (sessions: TerminalWorkspaceSession[]) => void;
+  restoredLayout: TerminalLayoutNode | null;
+  addSession: (
+    summary: SessionSummary,
+    profileId?: string,
+    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+  ) => void;
+  addRestoredSessions: (
+    sessions: TerminalWorkspaceSession[],
+    layout?: TerminalLayoutNode | null,
+  ) => void;
   removeSession: (sessionId: string) => void;
   reconnectSession: (
     oldSessionId: string,
@@ -41,6 +50,8 @@ interface TerminalState {
   setReconnecting: (sessionId: string, reconnecting: boolean) => void;
   reorderSessions: (activeId: string, insertIndex: number) => void;
   setActiveSession: (sessionId: string | null) => void;
+  setRestoredLayout: (layout: TerminalLayoutNode | null) => void;
+  clearRestoredLayout: () => void;
   appendData: (sessionId: string, chunk: string) => void;
   setStatus: (sessionId: string, event: StatusEvent) => void;
   setClosed: (sessionId: string, event: ClosedEvent) => void;
@@ -52,37 +63,53 @@ interface TerminalState {
 export const useTerminalStore = create<TerminalState>()((set) => ({
   sessions: [],
   activeSessionId: null,
-  addSession: (summary, profileId) =>
+  restoredLayout: null,
+  addSession: (summary, profileId, options) =>
     set((state) => {
       const exists = state.sessions.some(
         (session) => session.sessionId === summary.sessionId,
       );
       if (exists) return state;
+
+      const sourceIndex = options?.insertAfterId
+        ? state.sessions.findIndex(
+            (session) => session.sessionId === options.insertAfterId,
+          )
+        : -1;
+      const newSession: TerminalSession = {
+        sessionId: summary.sessionId,
+        title: summary.title,
+        host: summary.host,
+        port: summary.port,
+        username: summary.username,
+        status: 'connecting',
+        profileId,
+        pinned: options?.pinned,
+        color: options?.color,
+      };
+
+      let sessions: TerminalSession[];
+      if (sourceIndex >= 0) {
+        sessions = [...state.sessions];
+        sessions.splice(sourceIndex + 1, 0, newSession);
+        sessions = sortSessions(sessions);
+      } else {
+        sessions = sortSessions([...state.sessions, newSession]);
+      }
+
       return {
-        sessions: [
-          ...state.sessions,
-          {
-            sessionId: summary.sessionId,
-            title: summary.title,
-            host: summary.host,
-            port: summary.port,
-            username: summary.username,
-            status: 'connecting',
-            profileId,
-          },
-        ],
+        sessions,
         activeSessionId: summary.sessionId,
       };
     }),
-  addRestoredSessions: (restored) =>
+  addRestoredSessions: (restored, layout) =>
     set((state) => {
       if (state.sessions.length > 0 || restored.length === 0) return state;
-      const sessions = restored.map((session, index) => ({
+      const sessions = restored.map((session) => ({
         ...session,
-        sessionId: `restored-${Date.now()}-${index}`,
         status: 'disconnected' as const,
         closed: {
-          sessionId: `restored-${Date.now()}-${index}`,
+          sessionId: session.sessionId,
           reasonKind: 'transport_disconnect' as const,
           retryable: true,
         },
@@ -90,8 +117,11 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       return {
         sessions,
         activeSessionId: sessions[0]?.sessionId ?? null,
+        restoredLayout: layout ?? null,
       };
     }),
+  setRestoredLayout: (layout) => set({ restoredLayout: layout }),
+  clearRestoredLayout: () => set({ restoredLayout: null }),
   removeSession: (sessionId) =>
     set((state) => {
       const sessions = state.sessions.filter(

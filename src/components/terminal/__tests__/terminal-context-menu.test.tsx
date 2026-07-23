@@ -448,7 +448,7 @@ describe('TerminalContextMenu', () => {
     expect(duplicateButton).toBeDisabled();
   });
 
-  it('duplicate calls connect with the profile and closes', () => {
+  it('duplicate calls connect with the profile and source tab options', () => {
     useProfileStore.setState({
       profiles: [
         {
@@ -463,7 +463,13 @@ describe('TerminalContextMenu', () => {
         },
       ],
     });
-    const session = makeSession('s1', 'A', 'p1');
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' },
+      'p1',
+    );
+    useTerminalStore.getState().togglePin('s1');
+    useTerminalStore.getState().setTabColor('s1', '#ef4444');
+    const session = useTerminalStore.getState().sessions[0]!;
 
     const onClose = vi.fn();
     render(
@@ -480,6 +486,11 @@ describe('TerminalContextMenu', () => {
 
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(mockConnect.mock.calls[0][0].id).toBe('p1');
+    expect(mockConnect.mock.calls[0][1]).toEqual({
+      insertAfterId: 's1',
+      pinned: true,
+      color: '#ef4444',
+    });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
