@@ -32,7 +32,7 @@ import { useToast } from '@/hooks/useToast';
 import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote } from '@/lib/tauri';
 import { normalizePortablePath, parentPortablePath } from '@/lib/path-utils';
 import { useTransferStore } from '@/stores/transferStore';
-import type { ConnectionProfile, RemoteFileEntry, UploadConflictPolicy } from '@/types';
+import type { ConnectionProfile, UploadConflictPolicy } from '@/types';
 
 const Sftp: React.FC = () => {
   const { t } = useI18n();
@@ -54,22 +54,11 @@ const Sftp: React.FC = () => {
     y: number;
   } | null>(null);
 
-  const activeSection = useAppStore((state) => state.activeSection);
-
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        if (activeSection !== 'sftp') return;
-        event.preventDefault();
-        if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
-        setNewConnectionMenuOpen((prev) => !prev);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [activeSection]);
+    const handleNewConnectionRequest = (): void => setNewConnectionMenuOpen((prev) => !prev);
+    document.addEventListener('termbridge:new-sftp-connection', handleNewConnectionRequest);
+    return () => document.removeEventListener('termbridge:new-sftp-connection', handleNewConnectionRequest);
+  }, []);
 
   if (!connection) {
     return (

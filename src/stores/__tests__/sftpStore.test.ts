@@ -130,6 +130,50 @@ describe('sftpStore', () => {
     expect(dualRemote.leftConnection?.host).toBe('staging.example.com');
   });
 
+  it('inserts a duplicated connection after the source tab', () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c1',
+        title: 'First',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+      'profile-1',
+    );
+    const firstId = useSftpStore.getState().connections[0]!.id;
+
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c2',
+        title: 'Second',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+      'profile-1',
+    );
+
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c3',
+        title: 'Duplicate',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+      'profile-1',
+      { insertAfterId: firstId, pinned: true },
+    );
+
+    const titles = useSftpStore.getState().connections.map((c) => c.title);
+    expect(titles).toEqual(['First', 'Duplicate', 'Second']);
+    expect(useSftpStore.getState().connections[1]?.pinned).toBe(true);
+  });
+
   it('keeps bookmarks isolated between remote panes', () => {
     useSftpStore.getState().addConnection(
       {

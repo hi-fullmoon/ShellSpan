@@ -115,6 +115,7 @@ interface SftpState {
     summary: SessionSummary,
     connection: RemoteConnectionRequest,
     profileId?: string,
+    options?: { insertAfterId?: string; pinned?: boolean },
   ) => void;
   addLocalConnection: () => void;
   setPaneLocal: (id: string, side: SftpSide) => void;
@@ -225,12 +226,26 @@ export const useSftpStore = create<SftpState>()((set) => ({
   connections: [],
   activeConnectionId: null,
 
-  addConnection: (summary, connection, profileId) =>
+  addConnection: (summary, connection, profileId, options) =>
     set((state) => {
       const id = generateId();
       const conn = createDefaultConnection(id, summary, connection, profileId);
+      conn.pinned = options?.pinned ?? false;
+
+      const sourceIndex = options?.insertAfterId
+        ? state.connections.findIndex((c) => c.id === options.insertAfterId)
+        : -1;
+
+      let connections: SftpConnection[];
+      if (sourceIndex >= 0) {
+        connections = [...state.connections];
+        connections.splice(sourceIndex + 1, 0, conn);
+      } else {
+        connections = [...state.connections, conn];
+      }
+
       return {
-        connections: [...state.connections, conn],
+        connections,
         activeConnectionId: id,
       };
     }),
