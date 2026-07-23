@@ -203,7 +203,9 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
           <span className="rounded-md bg-app-primary/10 px-2 py-1 text-[10px] text-app-primary">
             {profile.authMethod === 'password'
               ? t('connection.form.auth.password')
-              : t('connection.form.auth.key')}
+              : profile.authMethod === 'keychainKey'
+                ? t('connection.form.auth.keychainKey')
+                : t('connection.form.auth.keyPath')}
           </span>
           {profile.jumpHost && (
             <span className="rounded-md bg-app-surface-muted px-2 py-1 text-[10px] text-muted-foreground">

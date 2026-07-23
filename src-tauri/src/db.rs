@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::Mutex;
 
-const CURRENT_SCHEMA_VERSION: i32 = 2;
+const CURRENT_SCHEMA_VERSION: i32 = 5;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -54,6 +54,48 @@ CREATE TABLE IF NOT EXISTS terminal_workspace (
     sessions_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
+";
+
+const SCHEMA_V3: &str = "
+CREATE TABLE IF NOT EXISTS key_credentials (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+";
+
+const SCHEMA_V4: &str = "
+PRAGMA foreign_keys=OFF;
+
+CREATE TABLE profiles_new (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    username TEXT NOT NULL,
+    auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'keychainKey', 'keyPath')),
+    password_stored INTEGER NOT NULL DEFAULT 0,
+    private_key_path TEXT,
+    jump_host_config TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+INSERT INTO profiles_new
+SELECT id, name, host, port, username,
+       CASE auth_method WHEN 'key' THEN 'keyPath' ELSE auth_method END,
+       password_stored, private_key_path, jump_host_config, created_at, updated_at
+FROM profiles;
+
+DROP TABLE profiles;
+ALTER TABLE profiles_new RENAME TO profiles;
+
+PRAGMA foreign_keys=ON;
+";
+
+const SCHEMA_V5: &str = "
+ALTER TABLE key_credentials ADD COLUMN key_type TEXT DEFAULT 'unknown';
+UPDATE key_credentials SET key_type = 'unknown' WHERE key_type IS NULL;
 ";
 
 pub(crate) struct Database {
@@ -111,6 +153,27 @@ impl Database {
                 .map_err(|e| format!("migration v2 version insert failed: {e}"))?;
         }
 
+        if current < 3 {
+            conn.execute_batch(SCHEMA_V3)
+                .map_err(|e| format!("migration v3 failed: {e}"))?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
+                .map_err(|e| format!("migration v3 version insert failed: {e}"))?;
+        }
+
+        if current < 4 {
+            conn.execute_batch(SCHEMA_V4)
+                .map_err(|e| format!("migration v4 failed: {e}"))?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
+                .map_err(|e| format!("migration v4 version insert failed: {e}"))?;
+        }
+
+        if current < 5 {
+            conn.execute_batch(SCHEMA_V5)
+                .map_err(|e| format!("migration v5 failed: {e}"))?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (5)", [])
+                .map_err(|e| format!("migration v5 version insert failed: {e}"))?;
+        }
+
         Ok(())
     }
 
@@ -139,8 +202,9 @@ impl Database {
                     auth_method: {
                         let s: String = row.get(5)?;
                         match s.as_str() {
-                            "password" => crate::models::AuthMethod::Password,
-                            "key" => crate::models::AuthMethod::Key,
+                            "password" => crate::models::ProfileAuthMethod::Password,
+                            "keychainKey" => crate::models::ProfileAuthMethod::KeychainKey,
+                            "key" | "keyPath" => crate::models::ProfileAuthMethod::KeyPath,
                             other => {
                                 return Err(rusqlite::Error::FromSqlConversionFailure(
                                     5,
@@ -234,6 +298,61 @@ impl Database {
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         conn.execute("DELETE FROM profiles WHERE id=?1", params![id])
             .map_err(|e| format!("failed to delete profile: {e}"))?;
+        Ok(())
+    }
+
+    // --- Key credentials ---
+
+    pub(crate) fn list_key_credentials(
+        &self,
+    ) -> Result<Vec<crate::models::KeyCredentialSummary>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        let mut stmt = conn
+            .prepare("SELECT id, label, COALESCE(key_type, 'unknown') FROM key_credentials ORDER BY label")
+            .map_err(|e| format!("failed to prepare list_key_credentials: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(crate::models::KeyCredentialSummary {
+                    id: row.get(0)?,
+                    label: row.get(1)?,
+                    key_type: row.get(2)?,
+                })
+            })
+            .map_err(|e| format!("failed to query key_credentials: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("failed to collect key_credentials: {e}"))
+    }
+
+    pub(crate) fn upsert_key_credential(
+        &self,
+        id: &str,
+        label: &str,
+        key_type: &str,
+        updated_at: i64,
+    ) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.execute(
+            "INSERT INTO key_credentials (id, label, key_type, updated_at) VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(id) DO UPDATE SET label=excluded.label, key_type=excluded.key_type, updated_at=excluded.updated_at",
+            params![id, label, key_type, updated_at],
+        )
+        .map_err(|e| format!("failed to upsert key credential: {e}"))?;
+        Ok(())
+    }
+
+    pub(crate) fn delete_key_credential(&self, id: &str) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.execute("DELETE FROM key_credentials WHERE id=?1", params![id])
+            .map_err(|e| format!("failed to delete key credential: {e}"))?;
         Ok(())
     }
 
@@ -441,7 +560,7 @@ impl Database {
     }
 }
 
-fn current_timestamp_ms() -> i64 {
+pub(crate) fn current_timestamp_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -451,7 +570,7 @@ fn current_timestamp_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AuthMethod, ProfileRow, SftpBookmarkRow};
+    use crate::models::{ProfileAuthMethod, ProfileRow, SftpBookmarkRow};
 
     fn test_db() -> Database {
         let conn = Connection::open_in_memory().unwrap();
@@ -470,7 +589,7 @@ mod tests {
             host: "example.com".to_string(),
             port: 22,
             username: "alice".to_string(),
-            auth_method: AuthMethod::Password,
+            auth_method: ProfileAuthMethod::Password,
             password_stored: true,
             private_key_path: None,
             jump_host_config: None,
@@ -500,14 +619,22 @@ mod tests {
             .unwrap();
         conn.execute("SELECT 1 FROM terminal_workspace LIMIT 0", [])
             .unwrap();
+        conn.execute("SELECT 1 FROM key_credentials LIMIT 0", [])
+            .unwrap();
     }
 
     #[test]
-    fn migration_upgrades_v1_database_to_v2() {
+    fn migration_upgrades_v1_database_to_v4() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_V1).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
             .unwrap();
+        conn.execute(
+            "INSERT INTO profiles (id, name, host, port, username, auth_method, password_stored, created_at, updated_at) \
+             VALUES ('p1', 'Test', 'host', 22, 'user', 'key', 0, 1, 2)",
+            [],
+        )
+        .unwrap();
         let db = Database {
             conn: Mutex::new(conn),
         };
@@ -520,16 +647,27 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
         conn.execute("SELECT 1 FROM terminal_workspace LIMIT 0", [])
             .unwrap();
+        conn.execute("SELECT 1 FROM key_credentials LIMIT 0", [])
+            .unwrap();
+
+        let auth_method: String = conn
+            .query_row(
+                "SELECT auth_method FROM profiles LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(auth_method, "keyPath");
     }
 
     #[test]
     fn migration_rejects_newer_database_without_modifying_it() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_V1).unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
+        conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])
             .unwrap();
         let db = Database {
             conn: Mutex::new(conn),
@@ -539,7 +677,7 @@ mod tests {
 
         assert_eq!(
             error,
-            "database schema version 3 is newer than this build (2)"
+            format!("database schema version 6 is newer than this build ({CURRENT_SCHEMA_VERSION})")
         );
         let conn = db.conn.lock().unwrap();
         let workspace_table_count: i32 = conn
@@ -565,7 +703,7 @@ mod tests {
         assert_eq!(list[0].host, "example.com");
         assert_eq!(list[0].port, 22);
         assert_eq!(list[0].username, "alice");
-        assert_eq!(list[0].auth_method, AuthMethod::Password);
+        assert_eq!(list[0].auth_method, ProfileAuthMethod::Password);
         assert!(list[0].password_stored);
     }
 
@@ -726,7 +864,7 @@ mod tests {
             host: "example.com".to_string(),
             port: 22,
             username: "alice".to_string(),
-            auth_method: AuthMethod::Key,
+            auth_method: ProfileAuthMethod::KeyPath,
             password_stored: false,
             private_key_path: Some("/home/alice/.ssh/id_rsa".to_string()),
             jump_host_config: None,
@@ -736,7 +874,7 @@ mod tests {
         db.insert_profile(&profile).unwrap();
 
         let list = db.list_profiles().unwrap();
-        assert_eq!(list[0].auth_method, AuthMethod::Key);
+        assert_eq!(list[0].auth_method, ProfileAuthMethod::KeyPath);
         assert_eq!(
             list[0].private_key_path.as_deref(),
             Some("/home/alice/.ssh/id_rsa")
@@ -752,7 +890,7 @@ mod tests {
             host: "internal.example.com".to_string(),
             port: 22,
             username: "alice".to_string(),
-            auth_method: AuthMethod::Password,
+            auth_method: ProfileAuthMethod::Password,
             password_stored: true,
             private_key_path: None,
             jump_host_config: Some(

@@ -80,6 +80,7 @@ fn create_sftp_connection(
             &request.username,
             request.auth_method,
             request.password.as_deref(),
+            request.private_key_data.as_deref(),
             request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
             known_hosts_path,
@@ -92,6 +93,7 @@ fn create_sftp_connection(
             &request.username,
             request.auth_method,
             request.password.as_deref(),
+            request.private_key_data.as_deref(),
             request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
             &request.host,
@@ -186,16 +188,18 @@ fn summarize_connection_fields(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
 ) -> String {
     format!(
-        "host={} port={} username={} auth_method={} has_password={} has_private_key_path={} has_passphrase={}",
+        "host={} port={} username={} auth_method={} has_password={} has_private_key_data={} has_private_key_path={} has_passphrase={}",
         host.trim(),
         port,
         username.trim(),
         auth_method.as_str(),
         has_secret_value(password),
+        has_secret_value(private_key_data),
         has_secret_value(private_key_path),
         has_secret_value(passphrase),
     )
@@ -208,6 +212,7 @@ pub(crate) fn summarize_session_request(request: &SessionCreateRequest) -> Strin
         &request.username,
         request.auth_method,
         request.password.as_deref(),
+        request.private_key_data.as_deref(),
         request.private_key_path.as_deref(),
         request.passphrase.as_deref(),
     )
@@ -220,6 +225,7 @@ pub(crate) fn summarize_remote_connection_request(request: &RemoteConnectionRequ
         &request.username,
         request.auth_method,
         request.password.as_deref(),
+        request.private_key_data.as_deref(),
         request.private_key_path.as_deref(),
         request.passphrase.as_deref(),
     )
@@ -259,6 +265,7 @@ pub(crate) fn open_authenticated_session(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
     host: &str,
@@ -287,6 +294,7 @@ pub(crate) fn open_authenticated_session(
         username,
         auth_method,
         password,
+        private_key_data,
         private_key_path,
         passphrase,
     )?;
@@ -319,6 +327,7 @@ pub(crate) fn connect_through_jump_host(
     target_username: &str,
     target_auth_method: AuthMethod,
     target_password: Option<&str>,
+    target_private_key_data: Option<&str>,
     target_private_key_path: Option<&str>,
     target_passphrase: Option<&str>,
     known_hosts_path: Option<&Path>,
@@ -335,6 +344,7 @@ pub(crate) fn connect_through_jump_host(
         &jump.username,
         jump.auth_method,
         jump.password.as_deref(),
+        jump.private_key_data.as_deref(),
         jump.private_key_path.as_deref(),
         jump.passphrase.as_deref(),
         &jump.host,
@@ -387,6 +397,7 @@ pub(crate) fn connect_through_jump_host(
         target_username,
         target_auth_method,
         target_password,
+        target_private_key_data,
         target_private_key_path,
         target_passphrase,
         target_host,
@@ -455,6 +466,7 @@ fn authenticate(
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
+    private_key_data: Option<&str>,
     private_key_path: Option<&str>,
     passphrase: Option<&str>,
 ) -> Result<(), String> {
@@ -474,18 +486,31 @@ fn authenticate(
                 })?;
         }
         AuthMethod::Key => {
-            let private_key_path = private_key_path
-                .ok_or_else(|| "private key auth selected, but no key path provided".to_string())?;
-            session
-                .userauth_pubkey_file(username, None, Path::new(private_key_path), passphrase)
-                .map_err(|error| {
-                    warn!(
-                        "SSH authentication failed username={} method={}: {error}",
-                        username,
-                        auth_method.as_str()
-                    );
-                    format!("private key auth failed: {error}")
-                })?;
+            if let Some(key_data) = private_key_data {
+                session
+                    .userauth_pubkey_memory(username, None, key_data, passphrase)
+                    .map_err(|error| {
+                        warn!(
+                            "SSH authentication failed username={} method={} source=keychain: {error}",
+                            username,
+                            auth_method.as_str()
+                        );
+                        format!("private key auth failed: {error}")
+                    })?;
+            } else {
+                let private_key_path = private_key_path
+                    .ok_or_else(|| "private key auth selected, but no key path provided".to_string())?;
+                session
+                    .userauth_pubkey_file(username, None, Path::new(private_key_path), passphrase)
+                    .map_err(|error| {
+                        warn!(
+                            "SSH authentication failed username={} method={} source=file: {error}",
+                            username,
+                            auth_method.as_str()
+                        );
+                        format!("private key auth failed: {error}")
+                    })?;
+            }
         }
     }
 
@@ -512,7 +537,9 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("super-secret".to_string()),
+            keychain_key_id: None,
             private_key_path: Some("/Users/alice/.ssh/id_ed25519".to_string()),
+            private_key_data: None,
             passphrase: Some("keep-me-out-of-logs".to_string()),
             terminal_cols: 120,
             terminal_rows: 32,

@@ -3,45 +3,56 @@ use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-const SERVICE_NAME: &str = "com.termbridge";
+const PASSWORD_SERVICE: &str = "com.termbridge.password";
+const KEY_SERVICE: &str = "com.termbridge.key";
 
-fn entry_key(profile_id: &str) -> String {
+fn password_entry_key(profile_id: &str) -> String {
     format!("com.termbridge.password.{profile_id}")
 }
 
 trait CredentialBackend: Send + Sync {
-    fn set_password(&self, profile_id: &str, password: &str) -> Result<(), String>;
-    fn get_password(&self, profile_id: &str) -> Result<Option<String>, String>;
-    fn delete_password(&self, profile_id: &str) -> Result<(), String>;
+    fn set_credential(
+        &self,
+        service: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<(), String>;
+    fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String>;
+    fn delete_credential(&self, service: &str, key: &str) -> Result<(), String>;
 }
 
 struct SystemKeychainBackend;
 
 impl CredentialBackend for SystemKeychainBackend {
-    fn set_password(&self, profile_id: &str, password: &str) -> Result<(), String> {
-        let entry = Entry::new(SERVICE_NAME, &entry_key(profile_id))
+    fn set_credential(
+        &self,
+        service: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        let entry = Entry::new(service, key)
             .map_err(|e| format!("failed to create keyring entry: {e}"))?;
         entry
-            .set_password(password)
-            .map_err(|e| format!("failed to store password in keychain: {e}"))
+            .set_password(value)
+            .map_err(|e| format!("failed to store credential in keychain: {e}"))
     }
 
-    fn get_password(&self, profile_id: &str) -> Result<Option<String>, String> {
-        let entry = Entry::new(SERVICE_NAME, &entry_key(profile_id))
+    fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
+        let entry = Entry::new(service, key)
             .map_err(|e| format!("failed to create keyring entry: {e}"))?;
         match entry.get_password() {
-            Ok(password) => Ok(Some(password)),
+            Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("failed to retrieve password from keychain: {e}")),
+            Err(e) => Err(format!("failed to retrieve credential from keychain: {e}")),
         }
     }
 
-    fn delete_password(&self, profile_id: &str) -> Result<(), String> {
-        let entry = Entry::new(SERVICE_NAME, &entry_key(profile_id))
+    fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
+        let entry = Entry::new(service, key)
             .map_err(|e| format!("failed to create keyring entry: {e}"))?;
         match entry.delete_password() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("failed to delete password from keychain: {e}")),
+            Err(e) => Err(format!("failed to delete credential from keychain: {e}")),
         }
     }
 }
@@ -69,52 +80,34 @@ impl CredentialManager {
         }
     }
 
+    // --- Password credentials (legacy, per-profile) ---
+
     pub(crate) fn set_password(&self, profile_id: &str, password: &str) -> Result<(), String> {
-        self.backend.set_password(profile_id, password)?;
-        self.cache
-            .lock()
-            .map_err(|_| "credential cache lock poisoned".to_string())?
-            .insert(profile_id.to_string(), password.to_string());
-        debug!("Stored password in keychain for profile {profile_id}");
-        Ok(())
+        self.set_credential(PASSWORD_SERVICE, &password_entry_key(profile_id), password)
     }
 
     pub(crate) fn get_password(&self, profile_id: &str) -> Result<Option<String>, String> {
-        // Keep the cache lock while consulting the system keychain so concurrent
-        // SSH/SFTP opens for the same profile cannot trigger duplicate prompts.
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| "credential cache lock poisoned".to_string())?;
-        if let Some(password) = cache.get(profile_id).cloned() {
-            return Ok(Some(password));
-        }
-
-        let password = self.backend.get_password(profile_id)?;
-        if let Some(ref password) = password {
-            cache.insert(profile_id.to_string(), password.clone());
-            debug!("Loaded password from keychain for profile {profile_id}");
-        }
-        Ok(password)
+        self.get_credential(PASSWORD_SERVICE, &password_entry_key(profile_id))
     }
 
     pub(crate) fn delete_password(&self, profile_id: &str) -> Result<(), String> {
-        self.backend.delete_password(profile_id)?;
-        self.cache
-            .lock()
-            .map_err(|_| "credential cache lock poisoned".to_string())?
-            .remove(profile_id);
-        debug!("Deleted password from keychain for profile {profile_id}");
-        Ok(())
+        self.delete_credential(PASSWORD_SERVICE, &password_entry_key(profile_id))
     }
 
     pub(crate) fn cached_profile_ids(&self) -> Result<Vec<String>, String> {
+        let prefix = format!("{PASSWORD_SERVICE}:");
+        let password_key_prefix = format!("{PASSWORD_SERVICE}.",);
         let mut profile_ids = self
             .cache
             .lock()
             .map_err(|_| "credential cache lock poisoned".to_string())?
             .keys()
-            .cloned()
+            .filter(|key| key.starts_with(&prefix))
+            .filter_map(|key| {
+                key.strip_prefix(&prefix)
+                    .and_then(|entry_key| entry_key.strip_prefix(&password_key_prefix))
+                    .map(String::from)
+            })
             .collect::<Vec<_>>();
         profile_ids.sort();
         Ok(profile_ids)
@@ -153,6 +146,80 @@ impl CredentialManager {
         );
         results
     }
+
+    // --- Generic credentials ---
+
+    pub(crate) fn set_credential(
+        &self,
+        service: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        self.backend.set_credential(service, key, value)?;
+        self.cache
+            .lock()
+            .map_err(|_| "credential cache lock poisoned".to_string())?
+            .insert(format!("{service}:{key}"), value.to_string());
+        debug!("Stored credential in keychain service={service} key={key}");
+        Ok(())
+    }
+
+    pub(crate) fn get_credential(
+        &self,
+        service: &str,
+        key: &str,
+    ) -> Result<Option<String>, String> {
+        let cache_key = format!("{service}:{key}");
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| "credential cache lock poisoned".to_string())?;
+        if let Some(value) = cache.get(&cache_key).cloned() {
+            return Ok(Some(value));
+        }
+
+        let value = self.backend.get_credential(service, key)?;
+        if let Some(ref value) = value {
+            cache.insert(cache_key, value.clone());
+            debug!("Loaded credential from keychain service={service} key={key}");
+        }
+        Ok(value)
+    }
+
+    pub(crate) fn delete_credential(
+        &self,
+        service: &str,
+        key: &str,
+    ) -> Result<(), String> {
+        self.backend.delete_credential(service, key)?;
+        self.cache
+            .lock()
+            .map_err(|_| "credential cache lock poisoned".to_string())?
+            .remove(&format!("{service}:{key}"));
+        debug!("Deleted credential from keychain service={service} key={key}");
+        Ok(())
+    }
+
+    // --- Key credentials ---
+
+    pub(crate) fn store_key_credential(
+        &self,
+        key_id: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        self.set_credential(KEY_SERVICE, key_id, value)
+    }
+
+    pub(crate) fn retrieve_key_credential(
+        &self,
+        key_id: &str,
+    ) -> Result<Option<String>, String> {
+        self.get_credential(KEY_SERVICE, key_id)
+    }
+
+    pub(crate) fn delete_key_credential(&self, key_id: &str) -> Result<(), String> {
+        self.delete_credential(KEY_SERVICE, key_id)
+    }
 }
 
 #[cfg(test)]
@@ -162,30 +229,46 @@ mod tests {
 
     #[derive(Default)]
     struct MockBackend {
-        passwords: Mutex<HashMap<String, String>>,
+        credentials: Mutex<HashMap<String, HashMap<String, String>>>,
         get_calls: AtomicUsize,
         set_calls: AtomicUsize,
         delete_calls: AtomicUsize,
     }
 
     impl CredentialBackend for MockBackend {
-        fn set_password(&self, profile_id: &str, password: &str) -> Result<(), String> {
+        fn set_credential(
+            &self,
+            service: &str,
+            key: &str,
+            value: &str,
+        ) -> Result<(), String> {
             self.set_calls.fetch_add(1, Ordering::SeqCst);
-            self.passwords
-                .lock()
-                .unwrap()
-                .insert(profile_id.to_string(), password.to_string());
+            let mut creds = self.credentials.lock().unwrap();
+            creds
+                .entry(service.to_string())
+                .or_default()
+                .insert(key.to_string(), value.to_string());
             Ok(())
         }
 
-        fn get_password(&self, profile_id: &str) -> Result<Option<String>, String> {
+        fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
             self.get_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.passwords.lock().unwrap().get(profile_id).cloned())
+            Ok(self
+                .credentials
+                .lock()
+                .unwrap()
+                .get(service)
+                .and_then(|m| m.get(key))
+                .cloned())
         }
 
-        fn delete_password(&self, profile_id: &str) -> Result<(), String> {
+        fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
             self.delete_calls.fetch_add(1, Ordering::SeqCst);
-            self.passwords.lock().unwrap().remove(profile_id);
+            self.credentials
+                .lock()
+                .unwrap()
+                .get_mut(service)
+                .map(|m| m.remove(key));
             Ok(())
         }
     }
@@ -194,10 +277,8 @@ mod tests {
     fn repeated_reads_use_the_in_memory_cache() {
         let backend = Arc::new(MockBackend::default());
         backend
-            .passwords
-            .lock()
-            .unwrap()
-            .insert("profile-1".to_string(), "secret".to_string());
+            .set_credential(PASSWORD_SERVICE, &password_entry_key("profile-1"), "secret")
+            .unwrap();
         let manager = CredentialManager::with_backend(backend.clone());
 
         assert_eq!(

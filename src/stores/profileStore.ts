@@ -40,6 +40,7 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
     username: profile.username,
     authMethod: profile.authMethod,
     passwordStored: profile.passwordStored ?? false,
+    keychainKeyId: profile.keychainKeyId,
     privateKeyPath: profile.privateKeyPath,
     jumpHostConfig: profile.jumpHost ? JSON.stringify(profile.jumpHost) : undefined,
     createdAt: profile.createdAt,
@@ -56,6 +57,7 @@ function rowToProfile(row: ProfileRow): ConnectionProfile {
     username: row.username,
     authMethod: row.authMethod,
     passwordStored: row.passwordStored,
+    keychainKeyId: row.keychainKeyId,
     privateKeyPath: row.privateKeyPath,
     jumpHost: row.jumpHostConfig ? JSON.parse(row.jumpHostConfig) : undefined,
     password: undefined,
@@ -137,6 +139,9 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       updatedAt: Date.now(),
       password: undefined,
       passwordStored,
+      keychainKeyId: nextAuthMethod === 'keychainKey' ? updates.keychainKeyId ?? current.keychainKeyId : undefined,
+      privateKeyPath: nextAuthMethod === 'keyPath' ? updates.privateKeyPath ?? current.privateKeyPath : undefined,
+      passphrase: nextAuthMethod === 'keyPath' ? updates.passphrase ?? current.passphrase : undefined,
     };
 
     await invokeUpdateProfile(id, profileToRow(updated));
@@ -258,6 +263,7 @@ export function createJumpHostConfig(
     username: values.username ?? '',
     authMethod: values.authMethod ?? 'password',
     password: values.password,
+    keychainKeyId: values.keychainKeyId,
     privateKeyPath: values.privateKeyPath,
     passphrase: values.passphrase,
   };

@@ -3,10 +3,18 @@ import { FolderOpen, ChevronDown, KeyRound, Network, Server } from 'lucide-react
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
+import { useKeychainStore } from '@/stores/keychainStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +51,7 @@ interface FormState {
   username: string;
   authMethod: AuthMethod;
   password: string;
+  keychainKeyId: string;
   privateKeyPath: string;
   passphrase: string;
   useJumpHost: boolean;
@@ -56,6 +65,7 @@ const EMPTY_FORM: FormState = {
   username: '',
   authMethod: 'password',
   password: '',
+  keychainKeyId: '',
   privateKeyPath: '',
   passphrase: '',
   useJumpHost: false,
@@ -65,6 +75,7 @@ const EMPTY_FORM: FormState = {
     username: '',
     authMethod: 'password',
     password: '',
+    keychainKeyId: '',
     privateKeyPath: '',
     passphrase: '',
   },
@@ -78,6 +89,7 @@ function profileToForm(profile: ConnectionProfile): FormState {
     username: profile.username,
     authMethod: profile.authMethod,
     password: profile.password ?? '',
+    keychainKeyId: profile.keychainKeyId ?? '',
     privateKeyPath: profile.privateKeyPath ?? '',
     passphrase: profile.passphrase ?? '',
     useJumpHost: !!profile.jumpHost,
@@ -95,6 +107,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
 }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
+  const { keys, initialized, hydrate } = useKeychainStore();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -110,8 +123,11 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         setForm(EMPTY_FORM);
       }
       setErrors({});
+      if (!initialized) {
+        void hydrate();
+      }
     }
-  }, [initial, initialValues, open]);
+  }, [initial, initialValues, open, initialized, hydrate]);
 
   const updateField = <K extends keyof FormState>(
     key: K,
@@ -163,22 +179,51 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     if (!form.username.trim()) {
       nextErrors.username = t('connection.form.validation.usernameRequired');
     }
-    const canKeepStoredPassword = Boolean(
-      initial?.authMethod === 'password' &&
-        (initial.passwordStored || initial.password),
-    );
-    if (
-      form.authMethod === 'password' &&
-      !form.password.trim() &&
-      !canKeepStoredPassword
-    ) {
-      nextErrors.password = t('connection.form.validation.passwordRequired');
-    }
-    if (form.authMethod === 'key' && !form.privateKeyPath.trim()) {
-      nextErrors.privateKeyPath = t(
-        'connection.form.validation.privateKeyRequired',
+
+    if (form.authMethod === 'password') {
+      const canKeepStoredPassword = Boolean(
+        initial?.authMethod === 'password' &&
+          (initial.passwordStored || initial.password),
       );
+      if (!form.password.trim() && !canKeepStoredPassword) {
+        nextErrors.password = t('connection.form.validation.passwordRequired');
+      }
+    } else if (form.authMethod === 'keychainKey') {
+      if (!form.keychainKeyId.trim()) {
+        nextErrors.keychainKeyId = t(
+          'connection.form.validation.keychainKeyRequired',
+        );
+      }
+    } else if (form.authMethod === 'keyPath') {
+      if (!form.privateKeyPath.trim()) {
+        nextErrors.privateKeyPath = t(
+          'connection.form.validation.privateKeyRequired',
+        );
+      }
     }
+
+    if (form.useJumpHost) {
+      if (!form.jumpHost.host.trim()) {
+        nextErrors.jumpHostHost = t('connection.form.validation.jumpHostHostRequired');
+      }
+      if (!form.jumpHost.username.trim()) {
+        nextErrors.jumpHostUsername = t('connection.form.validation.jumpHostUsernameRequired');
+      }
+      if (form.jumpHost.authMethod === 'password' && !form.jumpHost.password?.trim()) {
+        nextErrors.jumpHostPassword = t('connection.form.validation.passwordRequired');
+      }
+      if (form.jumpHost.authMethod === 'keychainKey' && !form.jumpHost.keychainKeyId?.trim()) {
+        nextErrors.jumpHostKeychainKeyId = t(
+          'connection.form.validation.keychainKeyRequired',
+        );
+      }
+      if (form.jumpHost.authMethod === 'keyPath' && !form.jumpHost.privateKeyPath?.trim()) {
+        nextErrors.jumpHostPrivateKeyPath = t(
+          'connection.form.validation.privateKeyRequired',
+        );
+      }
+    }
+
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -190,9 +235,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     username: form.username.trim(),
     authMethod: form.authMethod,
     password: form.password.trim() || undefined,
-    privateKeyPath: form.privateKeyPath.trim() || undefined,
+    keychainKeyId: form.authMethod === 'keychainKey' ? form.keychainKeyId.trim() || undefined : undefined,
+    privateKeyPath: form.authMethod === 'keyPath' ? form.privateKeyPath.trim() || undefined : undefined,
     passphrase: form.passphrase.trim() || undefined,
-    jumpHost: form.useJumpHost ? form.jumpHost : undefined,
+    jumpHost: form.useJumpHost ? {
+      ...form.jumpHost,
+      password: form.jumpHost.password?.trim() || undefined,
+      keychainKeyId: form.jumpHost.authMethod === 'keychainKey' ? form.jumpHost.keychainKeyId?.trim() || undefined : undefined,
+      privateKeyPath: form.jumpHost.authMethod === 'keyPath' ? form.jumpHost.privateKeyPath?.trim() || undefined : undefined,
+      passphrase: form.jumpHost.passphrase?.trim() || undefined,
+    } : undefined,
   });
 
   const submit = async (
@@ -224,6 +276,29 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   const handleHostBlur = (): void => {
     if (!initial && !form.name.trim() && form.host.trim()) {
       updateField('name', form.host.trim());
+    }
+  };
+
+  const handleAuthMethodChange = (value: AuthMethod, target: 'main' | 'jump' = 'main'): void => {
+    if (target === 'main') {
+      setForm((prev) => ({
+        ...prev,
+        authMethod: value,
+        password: value === 'password' ? prev.password : '',
+        keychainKeyId: value === 'keychainKey' ? prev.keychainKeyId : '',
+        privateKeyPath: value === 'keyPath' ? prev.privateKeyPath : '',
+      }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        jumpHost: {
+          ...prev.jumpHost,
+          authMethod: value,
+          password: value === 'password' ? prev.jumpHost.password : '',
+          keychainKeyId: value === 'keychainKey' ? prev.jumpHost.keychainKeyId : '',
+          privateKeyPath: value === 'keyPath' ? prev.jumpHost.privateKeyPath : '',
+        },
+      }));
     }
   };
 
@@ -279,7 +354,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
           <FormSection icon={KeyRound} title={t('connection.form.section.auth')}>
             <AuthMethodToggle
               value={form.authMethod}
-              onChange={(value) => updateField('authMethod', value)}
+              onChange={(value) => handleAuthMethodChange(value, 'main')}
             />
             {form.authMethod === 'password' && (
               <FormRow label={t('common.password')} error={errors.password}>
@@ -295,7 +370,16 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                 />
               </FormRow>
             )}
-            {form.authMethod === 'key' && (
+            {form.authMethod === 'keychainKey' && (
+              <FormRow label={t('common.keychainKey')} error={errors.keychainKeyId}>
+                <KeychainKeySelector
+                  value={form.keychainKeyId}
+                  keys={keys}
+                  onChange={(value) => updateField('keychainKeyId', value)}
+                />
+              </FormRow>
+            )}
+            {form.authMethod === 'keyPath' && (
               <>
                 <FormRow label={t('common.privateKey')} error={errors.privateKeyPath}>
                   <PrivateKeyPicker
@@ -341,7 +425,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
               {form.useJumpHost && (
                 <div className="flex flex-col gap-2.5 border-t border-app-border px-3.5 py-3">
                   <div className="grid grid-cols-3 gap-3">
-                    <FormRow className="col-span-2" label={t('common.host')}>
+                    <FormRow className="col-span-2" label={t('common.host')} error={errors.jumpHostHost}>
                       <Input
                         value={form.jumpHost.host}
                         onChange={(e) => updateJumpHost('host', e.target.value)}
@@ -357,7 +441,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                       />
                     </FormRow>
                   </div>
-                  <FormRow label={t('common.username')}>
+                  <FormRow label={t('common.username')} error={errors.jumpHostUsername}>
                     <Input
                       value={form.jumpHost.username}
                       onChange={(e) => updateJumpHost('username', e.target.value)}
@@ -365,10 +449,10 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                   </FormRow>
                   <AuthMethodToggle
                     value={form.jumpHost.authMethod}
-                    onChange={(value) => updateJumpHost('authMethod', value)}
+                    onChange={(value) => handleAuthMethodChange(value, 'jump')}
                   />
                   {form.jumpHost.authMethod === 'password' && (
-                    <FormRow label={t('common.password')}>
+                    <FormRow label={t('common.password')} error={errors.jumpHostPassword}>
                       <Input
                         type="password"
                         value={form.jumpHost.password ?? ''}
@@ -376,9 +460,18 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                       />
                     </FormRow>
                   )}
-                  {form.jumpHost.authMethod === 'key' && (
+                  {form.jumpHost.authMethod === 'keychainKey' && (
+                    <FormRow label={t('common.keychainKey')} error={errors.jumpHostKeychainKeyId}>
+                      <KeychainKeySelector
+                        value={form.jumpHost.keychainKeyId ?? ''}
+                        keys={keys}
+                        onChange={(value) => updateJumpHost('keychainKeyId', value)}
+                      />
+                    </FormRow>
+                  )}
+                  {form.jumpHost.authMethod === 'keyPath' && (
                     <>
-                      <FormRow label={t('common.privateKey')}>
+                      <FormRow label={t('common.privateKey')} error={errors.jumpHostPrivateKeyPath}>
                         <PrivateKeyPicker
                           value={form.jumpHost.privateKeyPath ?? ''}
                           onChange={(value) =>
@@ -483,10 +576,53 @@ const AuthMethodToggle: React.FC<AuthMethodToggleProps> = ({ value, onChange }) 
       <ToggleGroupItem value="password" className="flex-1">
         {t('connection.form.auth.password')}
       </ToggleGroupItem>
-      <ToggleGroupItem value="key" className="flex-1">
-        {t('connection.form.auth.key')}
+      <ToggleGroupItem value="keychainKey" className="flex-1">
+        {t('connection.form.auth.keychainKey')}
+      </ToggleGroupItem>
+      <ToggleGroupItem value="keyPath" className="flex-1">
+        {t('connection.form.auth.keyPath')}
       </ToggleGroupItem>
     </ToggleGroup>
+  );
+};
+
+interface KeychainKeySelectorProps {
+  value: string;
+  keys: { id: string; label: string }[];
+  onChange: (value: string) => void;
+}
+
+const KeychainKeySelector: React.FC<KeychainKeySelectorProps> = ({
+  value,
+  keys,
+  onChange,
+}) => {
+  const { t } = useI18n();
+  const selectedLabel = value
+    ? keys.find((key) => key.id === value)?.label
+    : undefined;
+  if (keys.length === 0) {
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-dashed border-app-border px-3 py-2 text-sm text-muted-foreground">
+        <span>{t('connection.form.noKeychainKeys')}</span>
+      </div>
+    );
+  }
+  return (
+    <Select value={value || ''} onValueChange={(next) => onChange(next ?? '')}>
+      <SelectTrigger>
+        <SelectValue placeholder={t('connection.form.selectKeychainKey')}>
+          {selectedLabel}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {keys.map((key) => (
+          <SelectItem key={key.id} value={key.id}>
+            {key.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 };
 

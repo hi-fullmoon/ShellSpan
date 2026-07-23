@@ -16,6 +16,7 @@ pub(crate) struct ConnectionKey {
     username: String,
     auth_method: AuthMethod,
     password_hash: String,
+    private_key_data_hash: String,
     private_key_path_hash: String,
     passphrase_hash: String,
     jump_host: Option<JumpHostKey>,
@@ -28,6 +29,7 @@ pub(crate) struct JumpHostKey {
     username: String,
     auth_method: AuthMethod,
     password_hash: String,
+    private_key_data_hash: String,
     private_key_path_hash: String,
     passphrase_hash: String,
 }
@@ -152,6 +154,7 @@ impl ConnectionKey {
             username: jump_host.username.clone(),
             auth_method: jump_host.auth_method,
             password_hash: hash_secret(jump_host.password.as_deref()),
+            private_key_data_hash: hash_secret(jump_host.private_key_data.as_deref()),
             private_key_path_hash: hash_secret(jump_host.private_key_path.as_deref()),
             passphrase_hash: hash_secret(jump_host.passphrase.as_deref()),
         })
@@ -165,6 +168,7 @@ pub(crate) fn connection_key(request: &RemoteConnectionRequest) -> ConnectionKey
         username: request.username.clone(),
         auth_method: request.auth_method,
         password_hash: hash_secret(request.password.as_deref()),
+        private_key_data_hash: hash_secret(request.private_key_data.as_deref()),
         private_key_path_hash: hash_secret(request.private_key_path.as_deref()),
         passphrase_hash: hash_secret(request.passphrase.as_deref()),
         jump_host: ConnectionKey::jump_host_key(request.jump_host.as_ref()),
@@ -198,6 +202,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
@@ -221,6 +227,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
@@ -237,6 +245,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
@@ -255,12 +265,16 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
         };
         let with_none = RemoteConnectionRequest {
             password: None,
+            keychain_key_id: None,
+            private_key_data: None,
             ..with_empty.clone()
         };
 
@@ -277,12 +291,16 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("none".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
         };
         let with_none_password = RemoteConnectionRequest {
             password: None,
+            keychain_key_id: None,
+            private_key_data: None,
             ..base.clone()
         };
 
@@ -300,6 +318,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some(host_pass.to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: Some(host_key_path.to_string()),
             passphrase: Some(host_phrase.to_string()),
             jump_host: None,
@@ -332,6 +352,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("host-password".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: Some(JumpHostConfig {
@@ -340,7 +362,9 @@ mod tests {
                 username: "jump".to_string(),
                 auth_method: AuthMethod::Key,
                 password: Some(jump_pass.to_string()),
+                keychain_key_id: None,
                 private_key_path: Some(jump_key_path.to_string()),
+                private_key_data: None,
                 passphrase: Some(jump_phrase.to_string()),
             }),
         };
@@ -370,6 +394,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: Some("/path/to/key".to_string()),
             passphrase: Some("phrase".to_string()),
             jump_host: Some(JumpHostConfig {
@@ -378,7 +404,9 @@ mod tests {
                 username: "jump".to_string(),
                 auth_method: AuthMethod::Key,
                 password: Some("jump-secret".to_string()),
+                keychain_key_id: None,
                 private_key_path: Some("/path/to/jump/key".to_string()),
+                private_key_data: None,
                 passphrase: Some("jump-phrase".to_string()),
             }),
         };
@@ -397,6 +425,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
@@ -407,6 +437,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
@@ -420,6 +452,8 @@ mod tests {
             username: "alice:bob".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
@@ -430,6 +464,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("bob:secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: None,
@@ -449,6 +485,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: Some(JumpHostConfig {
@@ -457,7 +495,9 @@ mod tests {
                 username: "1:b".to_string(),
                 auth_method: AuthMethod::Password,
                 password: None,
+                keychain_key_id: None,
                 private_key_path: None,
+                private_key_data: None,
                 passphrase: None,
             }),
         };
@@ -467,6 +507,8 @@ mod tests {
             username: "alice".to_string(),
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
             private_key_path: None,
             passphrase: None,
             jump_host: Some(JumpHostConfig {
@@ -475,7 +517,9 @@ mod tests {
                 username: "b".to_string(),
                 auth_method: AuthMethod::Password,
                 password: None,
+                keychain_key_id: None,
                 private_key_path: None,
+                private_key_data: None,
                 passphrase: None,
             }),
         };

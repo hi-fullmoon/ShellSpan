@@ -26,12 +26,12 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       label: t('workbench.connections.title'),
     },
     {
-      key: 'knownHosts',
-      label: t('workbench.knownHosts.title'),
-    },
-    {
       key: 'credentials',
       label: t('workbench.credentials.title'),
+    },
+    {
+      key: 'knownHosts',
+      label: t('workbench.knownHosts.title'),
     },
     {
       key: 'logs',

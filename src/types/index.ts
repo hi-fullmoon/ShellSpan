@@ -29,7 +29,7 @@ export type ShortcutAction =
   | 'terminalSplitDown'
   | 'terminalClosePane';
 export type ShortcutBindings = Record<ShortcutAction, string>;
-export type AuthMethod = 'password' | 'key';
+export type AuthMethod = 'password' | 'keychainKey' | 'keyPath';
 export type RemoteFileKind = 'directory' | 'file' | 'symlink' | 'other';
 export type SessionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 export type ClosedReasonKind =
@@ -39,12 +39,24 @@ export type ClosedReasonKind =
   | 'transport_disconnect'
   | 'error';
 
+export interface KeychainKey {
+  id: string;
+  label: string;
+  privateKey: string;
+  publicKey?: string;
+  certificate?: string;
+  keyType?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface JumpHostConfig {
   host: string;
   port: number;
   username: string;
   authMethod: AuthMethod;
   password?: string;
+  keychainKeyId?: string;
   privateKeyPath?: string;
   passphrase?: string;
 }
@@ -58,6 +70,7 @@ export interface ConnectionProfile {
   authMethod: AuthMethod;
   password?: string;
   passwordStored?: boolean;
+  keychainKeyId?: string;
   privateKeyPath?: string;
   passphrase?: string;
   jumpHost?: JumpHostConfig;
@@ -80,6 +93,7 @@ export interface SessionCreateRequest {
   username: string;
   authMethod: AuthMethod;
   password?: string;
+  keychainKeyId?: string;
   privateKeyPath?: string;
   passphrase?: string;
   terminalCols: number;
@@ -93,6 +107,7 @@ export interface RemoteConnectionRequest {
   username: string;
   authMethod: AuthMethod;
   password?: string;
+  keychainKeyId?: string;
   privateKeyPath?: string;
   passphrase?: string;
   jumpHost?: JumpHostConfig;
@@ -347,6 +362,7 @@ export interface ProfileRow {
   username: string;
   authMethod: AuthMethod;
   passwordStored: boolean;
+  keychainKeyId?: string;
   privateKeyPath?: string;
   jumpHostConfig?: string; // JSON serialized JumpHostConfig
   createdAt: number;

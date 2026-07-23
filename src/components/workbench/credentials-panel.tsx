@@ -4,8 +4,10 @@ import {
   EraserIcon,
   EyeIcon,
   EyeOffIcon,
+  FileUpIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
+  PlusIcon,
   RefreshCwIcon,
   SearchIcon,
   SearchXIcon,
@@ -14,14 +16,17 @@ import {
   UserIcon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import {
   invokeClearCredentialCache,
   invokeListCachedCredentialProfileIds,
   invokeRetrievePassword,
+  invokeReadTextFile,
 } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import { useProfileStore } from '@/stores/profileStore';
-import type { ConnectionProfile } from '@/types';
+import { useKeychainStore } from '@/stores/keychainStore';
+import type { ConnectionProfile, KeychainKey } from '@/types';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,19 +38,41 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   Drawer,
   DrawerContent,
+  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import type { DragDropEvent } from '@tauri-apps/api/window';
+import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
+
+interface PasswordCredential {
+  type: 'password';
+  id: string;
+  profile: ConnectionProfile;
+}
+
+interface KeyCredential {
+  type: 'key';
+  id: string;
+  label: string;
+  keyId: string;
+}
+
+type CredentialItem = PasswordCredential | KeyCredential;
 
 function hasStoredPassword(profile: ConnectionProfile): boolean {
   return profile.passwordStored === true || Boolean(profile.password);
@@ -57,16 +84,24 @@ export const CredentialsPanel: React.FC = () => {
   const removeStoredPassword = useProfileStore(
     (state) => state.removeStoredPassword,
   );
+  const keys = useKeychainStore((state) => state.keys);
+  const hydrateKeys = useKeychainStore((state) => state.hydrate);
+  const removeKey = useKeychainStore((state) => state.removeKey);
   const [cachedProfileIds, setCachedProfileIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selected, setSelected] = useState<CredentialItem | undefined>();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string>();
-  const [removing, setRemoving] = useState<ConnectionProfile>();
+  const [removing, setRemoving] = useState<CredentialItem>();
+  const [keyDrawerOpen, setKeyDrawerOpen] = useState(false);
   const cacheRequestId = useRef(0);
+
+  useEffect(() => {
+    void hydrateKeys();
+  }, [hydrateKeys]);
 
   const loadCacheStatus = useCallback(async (): Promise<void> => {
     const requestId = ++cacheRequestId.current;
@@ -88,21 +123,38 @@ export const CredentialsPanel: React.FC = () => {
     void loadCacheStatus();
   }, [loadCacheStatus]);
 
-  const credentials = useMemo(
-    () => profiles.filter(hasStoredPassword),
+  const passwordCredentials = useMemo(
+    () => profiles.filter(hasStoredPassword).map((profile) => ({
+      type: 'password' as const,
+      id: `password:${profile.id}`,
+      profile,
+    })),
     [profiles],
   );
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredCredentials = credentials.filter((profile) => {
-    if (!normalizedQuery) return true;
-    return [profile.name, profile.host, profile.username, String(profile.port)]
-      .join(' ')
-      .toLowerCase()
-      .includes(normalizedQuery);
-  });
-  const selectedProfile = filteredCredentials.find(
-    (profile) => profile.id === selectedId,
+
+  const keyCredentials = useMemo(
+    () => keys.map((key) => ({ type: 'key' as const, id: `key:${key.id}`, label: key.label, keyId: key.id })),
+    [keys],
   );
+
+  const allCredentials = useMemo(
+    () => [...passwordCredentials, ...keyCredentials],
+    [passwordCredentials, keyCredentials],
+  );
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredCredentials = allCredentials.filter((item) => {
+    if (!normalizedQuery) return true;
+    if (item.type === 'password') {
+      return [item.profile.name, item.profile.host, item.profile.username, String(item.profile.port)]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedQuery);
+    }
+    return item.label.toLowerCase().includes(normalizedQuery);
+  });
+
+  const selectedProfile = selected?.type === 'password' ? selected.profile : undefined;
 
   const handleClearCache = async (): Promise<void> => {
     ++cacheRequestId.current;
@@ -132,13 +184,17 @@ export const CredentialsPanel: React.FC = () => {
     if (!removing) return;
     setError(undefined);
     try {
-      await removeStoredPassword(removing.id);
-      setCachedProfileIds((current) => {
-        const next = new Set(current);
-        next.delete(removing.id);
-        return next;
-      });
-      if (selectedId === removing.id) setSelectedId(undefined);
+      if (removing.type === 'password') {
+        await removeStoredPassword(removing.profile.id);
+        setCachedProfileIds((current) => {
+          const next = new Set(current);
+          next.delete(removing.profile.id);
+          return next;
+        });
+      } else {
+        await removeKey(removing.keyId);
+      }
+      if (selected?.id === removing.id) setSelected(undefined);
       setRemoving(undefined);
     } catch (removeError) {
       setError(
@@ -146,6 +202,12 @@ export const CredentialsPanel: React.FC = () => {
       );
     }
   };
+
+  const credentialCounts = useMemo(() => ({
+    password: passwordCredentials.length,
+    key: keyCredentials.length,
+    total: allCredentials.length,
+  }), [passwordCredentials, keyCredentials, allCredentials]);
 
   return (
     <TooltipProvider>
@@ -159,7 +221,7 @@ export const CredentialsPanel: React.FC = () => {
               <p className="text-[11px] text-muted-foreground">
                 {t('workbench.credentials.count', {
                   count: filteredCredentials.length,
-                  total: credentials.length,
+                  total: credentialCounts.total,
                 })}
               </p>
             </div>
@@ -173,6 +235,15 @@ export const CredentialsPanel: React.FC = () => {
                   className="h-8 pl-7"
                 />
               </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 px-2.5"
+                onClick={() => setKeyDrawerOpen(true)}
+              >
+                <PlusIcon className="size-3.5" />
+                <span className="hidden sm:inline">{t('workbench.credentials.newKey')}</span>
+              </Button>
               <IconActionButton
                 className="size-7 text-app-text hover:bg-app-text/10"
                 onClick={loadCacheStatus}
@@ -203,10 +274,10 @@ export const CredentialsPanel: React.FC = () => {
                 {t('workbench.credentials.operationFailed')}: {error}
               </div>
             )}
-            {loading && credentials.length === 0 && (
+            {loading && credentialCounts.total === 0 && (
               <PanelLoadingState />
             )}
-            {!loading && credentials.length === 0 && (
+            {!loading && credentialCounts.total === 0 && (
               <PanelEmptyState
                 title={t('workbench.credentials.empty')}
                 description={t('workbench.credentials.emptyDescription')}
@@ -214,7 +285,7 @@ export const CredentialsPanel: React.FC = () => {
               />
             )}
             {!loading &&
-              credentials.length > 0 &&
+              credentialCounts.total > 0 &&
               filteredCredentials.length === 0 && (
                 <PanelEmptyState
                   title={t('workbench.credentials.filteredEmpty')}
@@ -231,34 +302,36 @@ export const CredentialsPanel: React.FC = () => {
                 ]}
                 gap="0.375rem"
               >
-                {filteredCredentials.map((profile) => {
-                  const selected = selectedProfile?.id === profile.id;
+                {filteredCredentials.map((item) => {
+                  const selectedItem = selected?.id === item.id;
                   return (
                     <ManagementCard
-                      key={profile.id}
-                      selected={selected}
+                      key={item.id}
+                      selected={selectedItem}
                       className="flex-row items-center"
                     >
                       <button
                         type="button"
-                        onClick={() => setSelectedId(profile.id)}
-                        aria-pressed={selected}
+                        onClick={() => setSelected(item)}
+                        aria-pressed={selectedItem}
                         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <ManagementCardIcon>
-                          <KeyRoundIcon />
+                          {item.type === 'password' ? <KeyRoundIcon /> : <LockKeyholeIcon />}
                         </ManagementCardIcon>
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-sm font-medium text-app-text">
-                            {profile.name}
+                            {item.type === 'password' ? item.profile.name : item.label}
                           </span>
                           <span className="truncate text-xs text-muted-foreground">
-                            {profile.username}@{profile.host}:{profile.port}
+                            {item.type === 'password'
+                              ? `${item.profile.username}@${item.profile.host}:${item.profile.port}`
+                              : t('workbench.credentials.keyType', { type: item.keyType.toUpperCase() })}
                           </span>
                         </span>
                       </button>
                       <IconActionButton
-                        onClick={() => setRemoving(profile)}
+                        onClick={() => setRemoving(item)}
                         aria-label={t('common.delete')}
                         tooltip={t('common.delete')}
                         className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
@@ -279,18 +352,27 @@ export const CredentialsPanel: React.FC = () => {
         <Drawer
           open={Boolean(selectedProfile)}
           onOpenChange={(open) => {
-            if (!open) setSelectedId(undefined);
+            if (!open) setSelected(undefined);
           }}
         >
           {selectedProfile && (
             <DrawerContent>
-              <CredentialDetails
+              <PasswordCredentialDetails
                 profile={selectedProfile}
                 onCached={() => markCredentialCached(selectedProfile.id)}
               />
             </DrawerContent>
           )}
         </Drawer>
+
+        <KeyCredentialDrawer
+          open={selected?.type === 'key' || keyDrawerOpen}
+          item={selected?.type === 'key' ? selected : undefined}
+          onClose={() => {
+            setSelected(undefined);
+            setKeyDrawerOpen(false);
+          }}
+        />
 
         <AlertDialog
           open={!!removing}
@@ -301,15 +383,25 @@ export const CredentialsPanel: React.FC = () => {
           <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
             <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
               <AlertDialogTitle className="text-sm leading-5">
-                {t('workbench.credentials.removeTitle')}
+                {removing?.type === 'key'
+                  ? t('workbench.credentials.removeKeyTitle')
+                  : t('workbench.credentials.removeTitle')}
               </AlertDialogTitle>
             </AlertDialogHeader>
             <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
               <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
                 {removing
-                  ? t('workbench.credentials.removeConfirm', {
-                      name: removing.name,
-                    })
+                  ? t(
+                      removing.type === 'key'
+                        ? 'workbench.credentials.removeKeyConfirm'
+                        : 'workbench.credentials.removeConfirm',
+                      {
+                        name:
+                          removing.type === 'password'
+                            ? removing.profile.name
+                            : removing.label,
+                      },
+                    )
                   : ''}
               </AlertDialogDescription>
             </div>
@@ -332,12 +424,12 @@ export const CredentialsPanel: React.FC = () => {
   );
 };
 
-interface CredentialDetailsProps {
+interface PasswordCredentialDetailsProps {
   profile: ConnectionProfile;
   onCached: () => void;
 }
 
-const CredentialDetails: React.FC<CredentialDetailsProps> = ({
+const PasswordCredentialDetails: React.FC<PasswordCredentialDetailsProps> = ({
   profile,
   onCached,
 }) => {
@@ -464,6 +556,280 @@ const CredentialDetails: React.FC<CredentialDetailsProps> = ({
   );
 };
 
+interface KeyCredentialDrawerProps {
+  open: boolean;
+  item?: KeyCredential & { keyId: string };
+  onClose: () => void;
+}
+
+const KeyCredentialDrawer: React.FC<KeyCredentialDrawerProps> = ({
+  open,
+  item,
+  onClose,
+}) => {
+  const { t } = useI18n();
+  const { error: showError } = useToast();
+  const addKey = useKeychainStore((state) => state.addKey);
+  const updateKey = useKeychainStore((state) => state.updateKey);
+  const getKey = useKeychainStore((state) => state.getKey);
+  const [label, setLabel] = useState('');
+  const [privateKey, setPrivateKey] = useState('');
+  const [publicKey, setPublicKey] = useState('');
+  const [certificate, setCertificate] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setLabel('');
+      setPrivateKey('');
+      setPublicKey('');
+      setCertificate('');
+      return;
+    }
+
+    if (item) {
+      setLoading(true);
+      void getKey(item.keyId).then((key) => {
+        if (key) {
+          setLabel(key.label);
+          setPrivateKey(key.privateKey);
+          setPublicKey(key.publicKey ?? '');
+          setCertificate(key.certificate ?? '');
+        }
+        setLoading(false);
+      });
+    } else {
+      setLabel('');
+      setPrivateKey('');
+      setPublicKey('');
+      setCertificate('');
+    }
+  }, [open, item, getKey]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    const attach = async () => {
+      const window = getCurrentWindow();
+      unlisten = await window.onDragDropEvent((event: TauriEvent<DragDropEvent>) => {
+        const { payload } = event;
+        switch (payload.type) {
+          case 'enter':
+          case 'over': {
+            setDragActive(isOverDropArea(payload.position));
+            break;
+          }
+          case 'leave': {
+            setDragActive(false);
+            break;
+          }
+          case 'drop': {
+            setDragActive(false);
+            if (isOverDropArea(payload.position)) {
+              void handleFileDrop(payload.paths);
+            }
+            break;
+          }
+        }
+      });
+    };
+
+    if (open) {
+      void attach();
+    }
+
+    return () => {
+      unlisten?.();
+    };
+  }, [open]);
+
+  const isOverDropArea = (position: { x: number; y: number }): boolean => {
+    const rect = dropRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    return (
+      position.x >= rect.left &&
+      position.x <= rect.right &&
+      position.y >= rect.top &&
+      position.y <= rect.bottom
+    );
+  };
+
+  const handleFileDrop = async (paths: string[]): Promise<void> => {
+    for (const path of paths) {
+      try {
+        const content = await invokeReadTextFile(path);
+        const lowerPath = path.toLowerCase();
+        const detected = detectCredentialType(lowerPath, content);
+        switch (detected) {
+          case 'public':
+            setPublicKey(content);
+            break;
+          case 'certificate':
+            setCertificate(content);
+            break;
+          default:
+            setPrivateKey(content);
+            break;
+        }
+      } catch (err) {
+        showError(
+          `${t('workbench.credentials.readFileFailed')}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  };
+
+  const validate = (): boolean => {
+    if (!label.trim()) {
+      showError(t('workbench.credentials.labelRequired'));
+      return false;
+    }
+    if (!privateKey.trim()) {
+      showError(t('workbench.credentials.privateKeyRequired'));
+      return false;
+    }
+    return true;
+  };
+
+  const handleSave = async (): Promise<void> => {
+    if (!validate()) return;
+    setSaving(true);
+    try {
+      const keyData = {
+        label: label.trim(),
+        privateKey: privateKey.trim(),
+        publicKey: publicKey.trim() || undefined,
+        certificate: certificate.trim() || undefined,
+      };
+      if (item) {
+        await updateKey(item.keyId, keyData);
+      } else {
+        await addKey(keyData);
+      }
+      onClose();
+    } catch (err) {
+      showError(t('workbench.credentials.saveKeyFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Drawer open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DrawerContent className="w-[400px] gap-0 p-0">
+        <DrawerHeader className="border-b border-app-border px-5 py-4">
+          <DrawerTitle>
+            {item
+              ? t('workbench.credentials.editKey')
+              : t('workbench.credentials.newKey')}
+          </DrawerTitle>
+          <p className="text-xs text-muted-foreground">
+            {t('workbench.credentials.keyDrawerHint')}
+          </p>
+        </DrawerHeader>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
+          {loading ? (
+            <PanelLoadingState />
+          ) : (
+            <>
+              <FormRow label={t('workbench.credentials.label')}>
+                <Input
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  placeholder={t('workbench.credentials.labelPlaceholder')}
+                />
+              </FormRow>
+
+              <FormRow label={t('common.privateKey')}>
+                <Textarea
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                  placeholder={t('workbench.credentials.privateKeyPlaceholder')}
+                  className="min-h-[120px] font-mono text-xs"
+                />
+              </FormRow>
+
+              <FormRow label={t('workbench.credentials.publicKey')}>
+                <Textarea
+                  value={publicKey}
+                  onChange={(e) => setPublicKey(e.target.value)}
+                  placeholder={t('workbench.credentials.publicKeyPlaceholder')}
+                  className="min-h-[80px] font-mono text-xs"
+                />
+              </FormRow>
+
+              <FormRow label={t('workbench.credentials.certificate')}>
+                <Textarea
+                  value={certificate}
+                  onChange={(e) => setCertificate(e.target.value)}
+                  placeholder={t('workbench.credentials.certificatePlaceholder')}
+                  className="min-h-[80px] font-mono text-xs"
+                />
+              </FormRow>
+
+              <div
+                ref={dropRef}
+                className={cn(
+                  'flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 transition-colors',
+                  dragActive
+                    ? 'border-app-primary bg-app-primary/[0.06]'
+                    : 'border-app-border bg-muted/50',
+                )}
+              >
+                <FileUpIcon
+                  className={cn(
+                    'size-6',
+                    dragActive ? 'text-app-primary' : 'text-muted-foreground',
+                  )}
+                />
+                <span className="text-center text-xs text-muted-foreground">
+                  {t('workbench.credentials.dropFilesHere')}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
+          <div className="flex w-full items-center justify-end gap-2">
+            <Button variant="outline" onClick={onClose} disabled={saving}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={() => void handleSave()} disabled={saving || loading}>
+              {t('common.save')}
+            </Button>
+          </div>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
+  );
+};
+
+function detectCredentialType(lowerPath: string, content: string): 'private' | 'public' | 'certificate' {
+  if (
+    lowerPath.endsWith('.pub') ||
+    content.includes('ssh-') ||
+    content.includes('BEGIN PUBLIC KEY')
+  ) {
+    return 'public';
+  }
+  if (
+    lowerPath.endsWith('.pem') ||
+    lowerPath.endsWith('.crt') ||
+    lowerPath.endsWith('.cer') ||
+    content.includes('BEGIN CERTIFICATE')
+  ) {
+    return 'certificate';
+  }
+  return 'private';
+}
+
 interface DetailRowProps {
   icon: React.ReactNode;
   label: string;
@@ -479,5 +845,17 @@ const DetailRow: React.FC<DetailRowProps> = ({ icon, label, children }) => (
       <span className="text-[11px] text-muted-foreground">{label}</span>
       <span className="break-all text-xs font-medium text-app-text">{children}</span>
     </div>
+  </div>
+);
+
+interface FormRowProps {
+  label: string;
+  children: React.ReactNode;
+}
+
+const FormRow: React.FC<FormRowProps> = ({ label, children }) => (
+  <div className="flex flex-col gap-1.5">
+    <Label className="text-xs text-muted-foreground">{label}</Label>
+    {children}
   </div>
 );

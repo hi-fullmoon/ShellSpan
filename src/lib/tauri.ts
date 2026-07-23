@@ -2,14 +2,17 @@ import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/lib/logger';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
+  AuthMethod,
   ClosedEvent,
   ConnectionProfile,
   CopyRemotePathRequest,
+  KeychainKey,
   CreateRemoteEntryRequest,
   CreateSessionError,
   DataEvent,
   DownloadProgressEvent,
   HostKeyCheckResult,
+  JumpHostConfig,
   KnownHostEntry,
   LocalDirectoryListing,
   LogFileInfo,
@@ -295,6 +298,31 @@ export async function invokeClearCredentialCache(): Promise<void> {
   return invokeLogged('clear_credential_cache');
 }
 
+export async function invokeStoreKeyCredential(
+  key: Omit<KeychainKey, 'createdAt' | 'updatedAt'>,
+): Promise<void> {
+  return invokeLogged('store_key_credential', { request: key });
+}
+
+export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string }[]> {
+  return invokeLogged('list_key_credentials');
+}
+
+export async function invokeRetrieveKeyCredential(
+  id: string,
+): Promise<KeychainKey | undefined> {
+  const result = await invokeLogged<KeychainKey | null>('retrieve_key_credential', { id });
+  return result ?? undefined;
+}
+
+export async function invokeDeleteKeyCredential(id: string): Promise<void> {
+  return invokeLogged('delete_key_credential', { id });
+}
+
+export async function invokeReadTextFile(path: string): Promise<string> {
+  return invokeLogged<string>('read_text_file', { path });
+}
+
 export function buildRemoteConnectionRequest(
   profile: ConnectionProfile,
 ): RemoteConnectionRequest {
@@ -302,11 +330,12 @@ export function buildRemoteConnectionRequest(
     host: profile.host,
     port: profile.port,
     username: profile.username,
-    authMethod: profile.authMethod,
+    authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
+    keychainKeyId: profile.keychainKeyId,
     privateKeyPath: profile.privateKeyPath,
     passphrase: profile.passphrase,
-    jumpHost: profile.jumpHost,
+    jumpHost: profile.jumpHost ? mapJumpHostAuthMethod(profile.jumpHost) : undefined,
   };
 }
 
@@ -320,13 +349,26 @@ export function buildSessionCreateRequest(
     host: profile.host,
     port: profile.port,
     username: profile.username,
-    authMethod: profile.authMethod,
+    authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
+    keychainKeyId: profile.keychainKeyId,
     privateKeyPath: profile.privateKeyPath,
     passphrase: profile.passphrase,
     terminalCols: cols,
     terminalRows: rows,
-    jumpHost: profile.jumpHost,
+    jumpHost: profile.jumpHost ? mapJumpHostAuthMethod(profile.jumpHost) : undefined,
+  };
+}
+
+function mapAuthMethodForBackend(authMethod: AuthMethod): AuthMethod {
+  if (authMethod === 'password') return 'password';
+  return 'key' as AuthMethod;
+}
+
+function mapJumpHostAuthMethod(jumpHost: JumpHostConfig): JumpHostConfig {
+  return {
+    ...jumpHost,
+    authMethod: mapAuthMethodForBackend(jumpHost.authMethod),
   };
 }
 
