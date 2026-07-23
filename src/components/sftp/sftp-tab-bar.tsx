@@ -4,6 +4,7 @@ import {
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
+  type Modifier,
   PointerSensor,
   closestCenter,
   useSensor,
@@ -267,6 +268,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragPointerStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragOverlayOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const [draggingConnectionId, setDraggingConnectionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);

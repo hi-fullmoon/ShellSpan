@@ -332,6 +332,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     }),
   );
 
+  const snapOverlayTopLeftToCursor = React.useCallback<Modifier>(({ transform }) => {
+    const offset = dragOverlayOffsetRef.current;
+    return {
+      ...transform,
+      x: transform.x - offset.x,
+      y: transform.y - offset.y,
+    };
+  }, []);
+
   useEffect(() => {
     const container = scrollRef.current;
     if (!container || !activeSessionId) {
@@ -598,7 +607,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         {typeof document === 'undefined'
           ? null
           : createPortal(
-              <DragOverlay dropAnimation={null}>
+              <DragOverlay dropAnimation={null} modifiers={[snapOverlayTopLeftToCursor]}>
                 {draggingSession && (
                   <SessionTab
                     session={draggingSession}
