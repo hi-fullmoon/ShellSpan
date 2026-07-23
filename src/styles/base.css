@@ -131,11 +131,16 @@ body {
 
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--app-border) transparent;
+}
+
+*:hover {
+  scrollbar-color: var(--app-text-soft) transparent;
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
