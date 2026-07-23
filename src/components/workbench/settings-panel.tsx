@@ -3,7 +3,13 @@ import { FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Se
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
-import { getShortcutKeys, shortcutFromKeyboardEvent } from '@/lib/shortcuts';
+import {
+  findShortcutConflict,
+  getShortcutKeys,
+  isLeaderShortcutAction,
+  shortcutFromBareKeyEvent,
+  shortcutFromKeyboardEvent,
+} from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,18 +34,47 @@ import type {
   ThemeMode,
 } from '@/types';
 import { invokePickLocalFolder } from '@/lib/tauri';
+import type { LocaleKey } from '@/locales';
 
-const SHORTCUT_ACTIONS: ShortcutAction[] = [
-  'openWorkbench',
-  'openTerminal',
-  'openSftp',
-  'openSettings',
-  'newTerminalTab',
-  'closeTerminalTab',
-  'nextTerminalTab',
-  'previousTerminalTab',
-  'findTerminal',
+interface ShortcutGroup {
+  id: 'app' | 'terminal' | 'sftp';
+  actions: ShortcutAction[];
+}
+
+const SHORTCUT_GROUPS: ShortcutGroup[] = [
+  {
+    id: 'app',
+    actions: ['openWorkbench', 'openTerminal', 'openSftp', 'openSettings'],
+  },
+  {
+    id: 'terminal',
+    actions: [
+      'newTerminalTab',
+      'closeTerminalTab',
+      'nextTerminalTab',
+      'previousTerminalTab',
+      'findTerminal',
+      'terminalLeader',
+      'terminalFocusLeft',
+      'terminalFocusDown',
+      'terminalFocusUp',
+      'terminalFocusRight',
+      'terminalSplitRight',
+      'terminalSplitDown',
+      'terminalClosePane',
+    ],
+  },
+  {
+    id: 'sftp',
+    actions: ['newSftpConnection'],
+  },
 ];
+
+const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
+  app: 'settings.shortcuts.groupApp',
+  terminal: 'settings.shortcuts.groupTerminal',
+  sftp: 'settings.shortcuts.groupSftp',
+};
 
 interface SettingRowProps {
   description: string;
@@ -143,6 +178,15 @@ export const SettingsPanel: React.FC = () => {
       nextTerminalTab: t('settings.shortcuts.nextTerminalTab'),
       previousTerminalTab: t('settings.shortcuts.previousTerminalTab'),
       findTerminal: t('settings.shortcuts.findTerminal'),
+      newSftpConnection: t('settings.shortcuts.newSftpConnection'),
+      terminalLeader: t('settings.shortcuts.terminalLeader'),
+      terminalFocusLeft: t('settings.shortcuts.terminalFocusLeft'),
+      terminalFocusDown: t('settings.shortcuts.terminalFocusDown'),
+      terminalFocusUp: t('settings.shortcuts.terminalFocusUp'),
+      terminalFocusRight: t('settings.shortcuts.terminalFocusRight'),
+      terminalSplitRight: t('settings.shortcuts.terminalSplitRight'),
+      terminalSplitDown: t('settings.shortcuts.terminalSplitDown'),
+      terminalClosePane: t('settings.shortcuts.terminalClosePane'),
     }),
     [t],
   );
@@ -159,11 +203,21 @@ export const SettingsPanel: React.FC = () => {
       closeRecorder();
       return;
     }
+    if (!editingAction) return;
 
-    const shortcut = shortcutFromKeyboardEvent(event.nativeEvent);
-    if (!shortcut || !editingAction) return;
+    // Leader sub-keys are bare keys; everything else records a modifier chord.
+    // The leader binding keeps Control literal (ctrl stays off the Cmd/mod
+    // namespace so a tmux-style Ctrl+B never collides with Cmd shortcuts).
+    const shortcut = isLeaderShortcutAction(editingAction)
+      ? shortcutFromBareKeyEvent(event.nativeEvent)
+      : shortcutFromKeyboardEvent(event.nativeEvent, editingAction === 'terminalLeader');
+    if (!shortcut) return;
 
-    const conflict = SHORTCUT_ACTIONS.find((action) => action !== editingAction && shortcuts[action] === shortcut);
+    const conflict = findShortcutConflict(
+      { ...DEFAULT_SHORTCUTS, ...shortcuts },
+      editingAction,
+      shortcut,
+    );
     if (conflict) {
       setConflictAction(conflict);
       return;
@@ -675,41 +729,61 @@ export const SettingsPanel: React.FC = () => {
               </CardHeader>
               <CardContent className="p-0">
                 <Separator className="data-horizontal:border-border/40" />
-                {SHORTCUT_ACTIONS.map((action, index) => (
-                  <React.Fragment key={action}>
-                    {index > 0 && <Separator className="data-horizontal:border-border/40" />}
-                    <div className="flex min-h-12 items-center justify-between gap-3 px-3 py-2">
-                      <span className="text-sm font-medium">{shortcutLabels[action]}</span>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="min-w-24"
-                          onClick={() => {
-                            setConflictAction(null);
-                            setEditingAction(action);
-                          }}
-                        >
-                          <ShortcutKeys shortcut={shortcuts[action] ?? DEFAULT_SHORTCUTS[action]} />
-                        </Button>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                disabled={(shortcuts[action] ?? DEFAULT_SHORTCUTS[action]) === DEFAULT_SHORTCUTS[action]}
-                                aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
-                              />
-                            }
-                            onClick={() => resetShortcut(action)}
-                          >
-                            <RotateCcwIcon />
-                          </TooltipTrigger>
-                          <TooltipContent>{t('settings.shortcuts.reset')}</TooltipContent>
-                        </Tooltip>
-                      </div>
+                {SHORTCUT_GROUPS.map((group) => (
+                  <React.Fragment key={group.id}>
+                    <div className="px-3 pb-1 pt-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}
                     </div>
+                    {group.actions.map((action, index) => {
+                      const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
+                      const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
+                      return (
+                        <React.Fragment key={action}>
+                          {index > 0 && <Separator className="data-horizontal:border-border/40" />}
+                          <div className="flex min-h-12 items-center justify-between gap-3 px-3 py-2">
+                            <span className="text-sm font-medium">{shortcutLabels[action]}</span>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="min-w-24"
+                                onClick={() => {
+                                  setConflictAction(null);
+                                  setEditingAction(action);
+                                }}
+                              >
+                                {isLeaderShortcutAction(action) ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <ShortcutKeys shortcut={leaderBinding} />
+                                    <span aria-hidden="true" className="text-muted-foreground">→</span>
+                                    <ShortcutKeys shortcut={binding} />
+                                  </span>
+                                ) : (
+                                  <ShortcutKeys shortcut={binding} />
+                                )}
+                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      disabled={binding === DEFAULT_SHORTCUTS[action]}
+                                      aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
+                                    />
+                                  }
+                                  onClick={() => resetShortcut(action)}
+                                >
+                                  <RotateCcwIcon />
+                                </TooltipTrigger>
+                                <TooltipContent>{t('settings.shortcuts.reset')}</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+                        </React.Fragment>
+                      );
+                    })}
+                    <Separator className="data-horizontal:border-border/40" />
                   </React.Fragment>
                 ))}
               </CardContent>
@@ -737,7 +811,11 @@ export const SettingsPanel: React.FC = () => {
             >
               <KeyboardIcon className="size-6 text-muted-foreground" />
               <p className="text-sm font-medium">{t('settings.shortcuts.recordPrompt')}</p>
-              <p className="text-xs text-muted-foreground">{t('settings.shortcuts.recordHint')}</p>
+              <p className="text-xs text-muted-foreground">
+                {editingAction && isLeaderShortcutAction(editingAction)
+                  ? t('settings.shortcuts.recordHintBareKey')
+                  : t('settings.shortcuts.recordHint')}
+              </p>
             </div>
             {conflictAction && (
               <p role="alert" className="text-xs text-destructive">
