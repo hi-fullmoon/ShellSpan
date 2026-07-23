@@ -2,7 +2,6 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import Terminal from '../index';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { useAppStore } from '@/stores/appStore';
 import { terminalRegistry } from '../registry/terminal-registry';
 
 const mockConnect = vi.fn();
@@ -128,19 +127,19 @@ describe('Terminal', () => {
     expect(mockConnect).toHaveBeenCalledWith({ id: 'p1' });
   });
 
-  it('toggles the new tab menu with Ctrl/Cmd+K keyboard shortcut', () => {
-    useAppStore.setState({ activeSection: 'terminal' });
-
+  it('toggles the new tab menu via the new-terminal-tab event', () => {
     render(<Terminal />);
 
     expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
 
-    fireEvent.keyDown(document, { key: 'k', metaKey: true });
-
+    act(() => {
+      document.dispatchEvent(new Event('termbridge:new-terminal-tab'));
+    });
     expect(screen.getByTestId('new-tab-menu')).toBeInTheDocument();
 
-    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
-
+    act(() => {
+      document.dispatchEvent(new Event('termbridge:new-terminal-tab'));
+    });
     expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
   });
 
@@ -292,5 +291,64 @@ describe('Terminal', () => {
     expect(within(secondGroup).getAllByRole('tab')).toHaveLength(2);
     expect(within(secondGroup).getByRole('tab', { name: /s3/ })).toBeInTheDocument();
     expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s2', 's3']);
+  });
+
+  it('moves focus between split groups via the pane navigation event', async () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    const focus = vi.fn();
+    vi.spyOn(terminalRegistry, 'get').mockReturnValue({ focus } as never);
+
+    render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+    // s1 was moved into the right group, which now owns the focus.
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+
+    const navigate = (direction: string): void => {
+      act(() => {
+        document.dispatchEvent(new CustomEvent('termbridge:navigate-terminal-pane', {
+          detail: { direction },
+        }));
+      });
+    };
+
+    navigate('left');
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+
+    // No group further left: navigation is a no-op.
+    navigate('left');
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+
+    navigate('right');
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(focus).toHaveBeenCalled();
+  });
+
+  it('splits the focused tab via the pane split event', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    expect(screen.getAllByTestId('terminal-pane')).toHaveLength(1);
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent('termbridge:split-terminal-pane', {
+        detail: { direction: 'right' },
+      }));
+    });
+
+    expect(screen.getAllByTestId('terminal-pane')).toHaveLength(2);
+    expect(container.querySelector('[data-direction="horizontal"]')).toBeInTheDocument();
+    // The active session (s2, last added) moved into the new right group.
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s1', 's2']);
   });
 });

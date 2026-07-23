@@ -1,10 +1,11 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalPane } from '../terminal-pane';
+import { resetTerminalLeader } from '../terminal-leader';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
-import { useAppStore } from '@/stores/appStore';
+import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -47,12 +48,14 @@ function makeSession(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetTerminalLeader();
   useAppStore.setState({
     terminalCopyOnSelect: true,
     terminalMultiLinePasteWarning: true,
     terminalLargePasteWarning: true,
     terminalTrimTrailingWhitespace: true,
     terminalRightClickBehavior: 'paste',
+    shortcuts: { ...DEFAULT_SHORTCUTS },
   });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
   Object.assign(navigator, {
@@ -304,5 +307,74 @@ describe('TerminalPane', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
+  });
+
+  it('consumes the leader chord and lets the leader engine dispatch commands', () => {
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+    const handler = terminal.getCustomKeyEventHandlers()[0];
+
+    const navigate = vi.fn();
+    document.addEventListener('termbridge:navigate-terminal-pane', navigate);
+
+    const leader = new KeyboardEvent('keydown', {
+      key: 'b',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const leaderStop = vi.spyOn(leader, 'stopPropagation');
+    expect(handler(leader)).toBe(false);
+    expect(leader.defaultPrevented).toBe(true);
+    expect(leaderStop).toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+
+    const command = new KeyboardEvent('keydown', {
+      key: 'h',
+      bubbles: true,
+      cancelable: true,
+    });
+    expect(handler(command)).toBe(false);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect((navigate.mock.calls[0][0] as CustomEvent).detail.direction).toBe('left');
+
+    document.removeEventListener('termbridge:navigate-terminal-pane', navigate);
+  });
+
+  it('passes through keys that are not part of a leader chord', () => {
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+    const handler = terminal.getCustomKeyEventHandlers()[0];
+
+    // Bare control characters keep reaching the pty (e.g. Ctrl+L clears).
+    expect(handler(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true }))).toBe(true);
+    expect(handler(new KeyboardEvent('keydown', { key: 'h', ctrlKey: true }))).toBe(true);
+    expect(handler(new KeyboardEvent('keydown', { key: 'h' }))).toBe(true);
+  });
+
+  it('opens search via the configurable find binding', () => {
+    useAppStore.getState().setShortcut('findTerminal', 'ctrl+shift+f');
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+    const handler = terminal.getCustomKeyEventHandlers()[0];
+
+    // The old default no longer triggers search at the pane level.
+    expect(handler(new KeyboardEvent('keydown', { key: 'f', metaKey: true }))).toBe(true);
+    expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'f',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    let result: boolean | undefined;
+    act(() => {
+      result = handler(event);
+    });
+    expect(result).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(screen.getByPlaceholderText('terminal.search.placeholder')).toBeInTheDocument();
   });
 });

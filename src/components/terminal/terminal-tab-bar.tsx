@@ -4,6 +4,7 @@ import {
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
+  type Modifier,
   PointerSensor,
   closestCenter,
   useSensor,
@@ -19,6 +20,7 @@ import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -316,6 +318,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const tabBarRef = useRef<HTMLDivElement>(null);
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragPointerStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragOverlayOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
@@ -407,6 +410,10 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         dragStartPosRef.current = {
           x: rect.left + rect.width / 2,
           y: rect.top + rect.height / 2,
+        };
+        dragOverlayOffsetRef.current = {
+          x: dragPointerStartRef.current.x - rect.left,
+          y: dragPointerStartRef.current.y - rect.top,
         };
       }
     }
@@ -546,12 +553,16 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={sessions.map((s) => s.sessionId)} strategy={() => null}>
-          <div
-            ref={scrollRef}
+          <ScrollArea
+            viewportRef={scrollRef}
+            horizontal
+            vertical={false}
+            size="thin"
             onWheel={handleWheel}
-            className="flex h-[36px] min-w-0 items-start gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="h-[36px] min-w-0 flex-1"
           >
-            {sessions.map((session, index) => {
+            <div className="flex min-w-0 items-start gap-0">
+              {sessions.map((session, index) => {
               const isDragging = draggingSessionId === session.sessionId;
               const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
               const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
@@ -581,7 +592,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                 />
               );
             })}
-          </div>
+            </div>
+          </ScrollArea>
         </SortableContext>
         {typeof document === 'undefined'
           ? null
