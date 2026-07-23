@@ -46,7 +46,7 @@ function ScrollBar({ className, orientation = 'vertical', size = 'default', ...p
       orientation={orientation}
       className={cn(
         'flex touch-none select-none',
-        isHorizontal ? cn('w-full flex-row', isThin ? 'h-1' : 'h-1.5') : cn('h-full flex-col', isThin ? 'w-1' : 'w-1.5'),
+        isHorizontal ? cn('w-full flex-row', isThin ? 'h-1' : 'h-2') : cn('h-full flex-col', isThin ? 'w-1' : 'w-2'),
         isThin ? 'bg-transparent' : 'transition-colors',
         className,
       )}
