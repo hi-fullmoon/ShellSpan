@@ -137,8 +137,9 @@ describe('terminalStore', () => {
     expect(useTerminalStore.getState().sessions[0]?.reconnecting).toBe(false);
   });
 
-  it('restores saved profile tabs as disconnected sessions', () => {
+  it('restores saved profile tabs as disconnected sessions preserving ids', () => {
     useTerminalStore.getState().addRestoredSessions([{
+      sessionId: 'saved-1',
       title: 'Saved',
       host: 'example.com',
       port: 22,
@@ -147,10 +148,59 @@ describe('terminalStore', () => {
     }]);
 
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      sessionId: 'saved-1',
       title: 'Saved',
       status: 'disconnected',
       profileId: 'profile-1',
       closed: { retryable: true },
+    });
+  });
+
+  it('stores restored layout alongside restored sessions', () => {
+    const layout = {
+      kind: 'split' as const,
+      orientation: 'horizontal' as const,
+      first: {
+        kind: 'group' as const,
+        id: 'first',
+        sessionIds: ['saved-1'],
+        activeSessionId: 'saved-1',
+      },
+      second: {
+        kind: 'group' as const,
+        id: 'second',
+        sessionIds: [],
+        activeSessionId: '',
+      },
+    };
+    useTerminalStore.getState().addRestoredSessions([{
+      sessionId: 'saved-1',
+      title: 'Saved',
+      host: 'example.com',
+      port: 22,
+      username: 'tester',
+      profileId: 'profile-1',
+    }], layout);
+
+    expect(useTerminalStore.getState().restoredLayout).toEqual(layout);
+  });
+
+  it('inserts a duplicated session after the source tab', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' }, 'p1');
+    store.addSession({ sessionId: 's2', title: 'B', host: 'h', port: 22, username: 'u' }, 'p1');
+    store.addSession(
+      { sessionId: 's3', title: 'C', host: 'h', port: 22, username: 'u' },
+      'p1',
+      { insertAfterId: 's1', pinned: true, color: '#ef4444' },
+    );
+
+    const ids = useTerminalStore.getState().sessions.map((s) => s.sessionId);
+    expect(ids).toEqual(['s3', 's1', 's2']);
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      sessionId: 's3',
+      pinned: true,
+      color: '#ef4444',
     });
   });
 

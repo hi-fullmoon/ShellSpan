@@ -26,7 +26,8 @@ async function bootstrap(): Promise<void> {
   if (useAppStore.getState().restoreWorkspace) {
     try {
       const rawWorkspace = await invokeLoadTerminalWorkspace();
-      useTerminalStore.getState().addRestoredSessions(parseTerminalWorkspace(rawWorkspace));
+      const workspace = parseTerminalWorkspace(rawWorkspace);
+      useTerminalStore.getState().addRestoredSessions(workspace.sessions, workspace.layout);
     } catch {
       // Workspace restoration is best-effort and must not block application startup.
     }

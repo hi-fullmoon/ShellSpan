@@ -33,7 +33,10 @@ const CLOSED_DIALOG: HostKeyDialogState = {
 const logger = createLogger('connect');
 
 export function useConnectSession(): {
-  connect: (profile: ConnectionProfile) => Promise<void>;
+  connect: (
+    profile: ConnectionProfile,
+    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+  ) => Promise<void>;
   openLocal: () => Promise<void>;
   hostKeyDialog: HostKeyDialogState;
   closeHostKeyDialog: () => void;
@@ -44,7 +47,10 @@ export function useConnectSession(): {
   const [hostKeyDialog, setHostKeyDialog] = useState<HostKeyDialogState>(CLOSED_DIALOG);
   const pendingProfileRef = useRef<ConnectionProfile | null>(null);
 
-  const connect = async (profile: ConnectionProfile): Promise<void> => {
+  const connect = async (
+    profile: ConnectionProfile,
+    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+  ): Promise<void> => {
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
     const profileWithPassword = await promptForMissingPassword(profile);
     if (!profileWithPassword) {
@@ -56,7 +62,7 @@ export function useConnectSession(): {
       const summary = await invokeCreateSession(
         buildSessionCreateRequest(profileWithPassword, 120, 30),
       );
-      addSession(summary, profile.id);
+      addSession(summary, profile.id, options);
       logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
       useRecentProfilesStore.getState().touchProfile(profile.id);
       setActiveSection('terminal');
@@ -64,7 +70,7 @@ export function useConnectSession(): {
       handleConnectionError(error, () => {
         const pending = pendingProfileRef.current;
         if (pending) {
-          void connect(pending);
+          void connect(pending, options);
         }
       });
     }

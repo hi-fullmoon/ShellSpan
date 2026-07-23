@@ -127,7 +127,11 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const handleDuplicate = (): void => {
     const profile = target.profileId ? getProfile(target.profileId) : undefined;
     if (profile) {
-      void connect(profile);
+      void connect(profile, {
+        insertAfterId: target.sessionId,
+        pinned: target.pinned,
+        color: target.color,
+      });
     }
     onClose();
   };
