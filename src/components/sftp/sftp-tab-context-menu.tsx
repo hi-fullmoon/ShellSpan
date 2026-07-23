@@ -180,7 +180,10 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         port: profile.port,
         username: profile.username,
       };
-      addConnection(summary, target.connection, profile.id);
+      addConnection(summary, target.connection, profile.id, {
+        insertAfterId: target.id,
+        pinned: target.pinned,
+      });
     }
     onClose();
   };

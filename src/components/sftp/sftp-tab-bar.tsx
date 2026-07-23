@@ -20,6 +20,7 @@ import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import {
   AlertDialog,
@@ -436,12 +437,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={connections.map((c) => c.id)} strategy={() => null}>
-          <div
-            ref={scrollRef}
+          <ScrollArea
+            viewportRef={scrollRef}
+            horizontal
+            vertical={false}
+            size="thin"
             onWheel={handleWheel}
-            className="flex h-[36px] min-w-0 items-start gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="h-[36px] min-w-0 flex-1"
           >
-            {connections.map((connection, index) => {
+            <div className="flex min-w-0 items-start gap-0">
+              {connections.map((connection, index) => {
               const isDragging = draggingConnectionId === connection.id;
               const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
               const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
@@ -471,7 +476,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                 />
               );
             })}
-          </div>
+            </div>
+          </ScrollArea>
         </SortableContext>
         {typeof document === 'undefined'
           ? null
