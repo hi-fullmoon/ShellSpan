@@ -18,7 +18,16 @@ export type ShortcutAction =
   | 'closeTerminalTab'
   | 'nextTerminalTab'
   | 'previousTerminalTab'
-  | 'findTerminal';
+  | 'findTerminal'
+  | 'newSftpConnection'
+  | 'terminalLeader'
+  | 'terminalFocusLeft'
+  | 'terminalFocusDown'
+  | 'terminalFocusUp'
+  | 'terminalFocusRight'
+  | 'terminalSplitRight'
+  | 'terminalSplitDown'
+  | 'terminalClosePane';
 export type ShortcutBindings = Record<ShortcutAction, string>;
 export type AuthMethod = 'password' | 'key';
 export type RemoteFileKind = 'directory' | 'file' | 'symlink' | 'other';
