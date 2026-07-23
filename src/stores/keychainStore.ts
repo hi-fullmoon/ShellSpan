@@ -11,6 +11,23 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('keychainStore');
 
+function detectKeyType(privateKey: string): string {
+  const normalized = privateKey.toLowerCase();
+  if (normalized.includes('-----begin rsa private key-----') || normalized.includes('ssh-rsa')) {
+    return 'rsa';
+  }
+  if (normalized.includes('-----begin ec private key-----') || normalized.includes('ecdsa-sha2')) {
+    return 'ecdsa';
+  }
+  if (normalized.includes('ssh-ed25519')) {
+    return 'ed25519';
+  }
+  if (normalized.includes('-----begin dsa private key-----') || normalized.includes('ssh-dss')) {
+    return 'dsa';
+  }
+  return 'unknown';
+}
+
 export interface KeyCredentialSummary {
   id: string;
   label: string;
@@ -50,9 +67,11 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
   addKey: async (key) => {
     const id = generateId();
     const now = Date.now();
+    const keyType = detectKeyType(key.privateKey);
     const newKey: KeychainKey = {
       ...key,
       id,
+      keyType,
       createdAt: now,
       updatedAt: now,
     };
@@ -64,7 +83,7 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       certificate: newKey.certificate,
     });
     set((state) => ({
-      keys: [...state.keys, { id: newKey.id, label: newKey.label }],
+      keys: [...state.keys, { id: newKey.id, label: newKey.label, keyType }],
     }));
     return newKey;
   },
@@ -85,6 +104,10 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       updatedAt: Date.now(),
     };
 
+    const keyType = updated.privateKey !== undefined
+      ? detectKeyType(updated.privateKey)
+      : current.keyType;
+
     await invokeStoreKeyCredential({
       id: updated.id,
       label: updated.label,
@@ -95,7 +118,7 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
 
     set((state) => ({
       keys: state.keys.map((k) =>
-        k.id === id ? { id: updated.id, label: updated.label } : k,
+        k.id === id ? { id: updated.id, label: updated.label, keyType } : k,
       ),
     }));
   },
