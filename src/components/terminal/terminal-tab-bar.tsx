@@ -125,7 +125,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
         active ? 'h-9 bg-app-surface text-app-text' : 'h-9 bg-app-border/25 text-app-text-soft',
-        renaming ? 'cursor-text' : dragging ? 'cursor-grabbing opacity-80' : 'cursor-pointer',
+        renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
     >
@@ -201,7 +201,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
               }}
               className={cn(
                 'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-                active ? 'flex' : 'hidden group-hover:flex',
+                !dragging && active ? 'flex' : 'hidden group-hover:flex',
               )}
             >
               <XIcon className="h-3 w-3" />
@@ -336,8 +336,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     const offset = dragOverlayOffsetRef.current;
     return {
       ...transform,
-      x: transform.x - offset.x,
-      y: transform.y - offset.y,
+      x: transform.x + offset.x,
+      y: transform.y + offset.y,
     };
   }, []);
 
