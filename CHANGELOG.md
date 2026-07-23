@@ -3,6 +3,27 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.8](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.8) - 2026-07-23
+
+
+### Bug Fixes
+
+- **ui:** correct dragged tab overlay positioning and cursor
+
+### Features
+
+- **settings:** add configurable keyboard shortcuts settings
+- **lib:** add scope-aware keyboard shortcuts engine
+- **term:** add tmux-style leader key for pane navigation and splits
+- **sftp:** duplicate tabs, global shortcuts and shared ScrollArea integration
+- **ui:** enhance ScrollArea with orientation/size variants and scrollbar styling
+- **term:** persist workspace layout, restored ids and tab duplication options
+- **ui:** snap dragged tab overlay to cursor in tab bars
+
+### Style
+
+- **ui:** use slightly thicker default scrollbar size
+
 ## [v2.0.7](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7) - 2026-07-22
 
 
