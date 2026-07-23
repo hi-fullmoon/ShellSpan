@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getTerminalSplitDirection } from '../terminal-split';
+import {
+  findAdjacentTerminalGroup,
+  getTerminalSplitDirection,
+  type TerminalGroupState,
+  type TerminalLayoutNode,
+} from '../terminal-split';
 
 const rect = {
   left: 100,
@@ -30,5 +35,82 @@ describe('getTerminalSplitDirection', () => {
 
   it('uses the nearest edge when edge zones overlap near a corner', () => {
     expect(getTerminalSplitDirection(rect, 108, 70)).toBe('left');
+  });
+});
+
+const group = (id: string): TerminalGroupState => ({
+  kind: 'group',
+  id,
+  sessionIds: [id],
+  activeSessionId: id,
+});
+
+describe('findAdjacentTerminalGroup', () => {
+  it('moves left and right in a horizontal split', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: group('a'),
+      second: group('b'),
+    };
+    expect(findAdjacentTerminalGroup(layout, 'a', 'right')?.id).toBe('b');
+    expect(findAdjacentTerminalGroup(layout, 'b', 'left')?.id).toBe('a');
+    expect(findAdjacentTerminalGroup(layout, 'a', 'left')).toBeNull();
+    expect(findAdjacentTerminalGroup(layout, 'b', 'right')).toBeNull();
+    expect(findAdjacentTerminalGroup(layout, 'a', 'bottom')).toBeNull();
+  });
+
+  it('moves up and down in a vertical split', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'vertical',
+      first: group('a'),
+      second: group('b'),
+    };
+    expect(findAdjacentTerminalGroup(layout, 'a', 'bottom')?.id).toBe('b');
+    expect(findAdjacentTerminalGroup(layout, 'b', 'top')?.id).toBe('a');
+    expect(findAdjacentTerminalGroup(layout, 'a', 'top')).toBeNull();
+    expect(findAdjacentTerminalGroup(layout, 'b', 'right')).toBeNull();
+  });
+
+  it('resolves the nearest group across nested splits', () => {
+    // a | (b / c)
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: group('a'),
+      second: { kind: 'split', orientation: 'vertical', first: group('b'), second: group('c') },
+    };
+    expect(findAdjacentTerminalGroup(layout, 'b', 'bottom')?.id).toBe('c');
+    expect(findAdjacentTerminalGroup(layout, 'c', 'top')?.id).toBe('b');
+    expect(findAdjacentTerminalGroup(layout, 'b', 'left')?.id).toBe('a');
+    expect(findAdjacentTerminalGroup(layout, 'c', 'left')?.id).toBe('a');
+    expect(findAdjacentTerminalGroup(layout, 'a', 'right')?.id).toBe('b');
+    expect(findAdjacentTerminalGroup(layout, 'a', 'bottom')).toBeNull();
+    expect(findAdjacentTerminalGroup(layout, 'c', 'bottom')).toBeNull();
+  });
+
+  it('prefers the deepest matching split when moving across nested rows', () => {
+    // (a | b) / c
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'vertical',
+      first: { kind: 'split', orientation: 'horizontal', first: group('a'), second: group('b') },
+      second: group('c'),
+    };
+    expect(findAdjacentTerminalGroup(layout, 'a', 'right')?.id).toBe('b');
+    expect(findAdjacentTerminalGroup(layout, 'b', 'right')).toBeNull();
+    expect(findAdjacentTerminalGroup(layout, 'a', 'bottom')?.id).toBe('c');
+    expect(findAdjacentTerminalGroup(layout, 'c', 'top')?.id).toBe('b');
+  });
+
+  it('returns null for an unknown group', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: group('a'),
+      second: group('b'),
+    };
+    expect(findAdjacentTerminalGroup(layout, 'missing', 'right')).toBeNull();
   });
 });

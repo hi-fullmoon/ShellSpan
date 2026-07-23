@@ -66,6 +66,36 @@ export function pruneEmptyTerminalGroups(node: TerminalLayoutNode): TerminalLayo
   return { ...node, first, second };
 }
 
+export function findAdjacentTerminalGroup(
+  node: TerminalLayoutNode,
+  groupId: TerminalGroupSlot,
+  direction: TerminalSplitDirection,
+): TerminalGroupState | null {
+  if (node.kind === 'group') return null;
+
+  const inFirst = findTerminalGroup(node.first, groupId) !== null;
+  if (!inFirst && findTerminalGroup(node.second, groupId) === null) return null;
+
+  // The closest pane wins: resolve inside the subtree holding the focused
+  // group before crossing this split.
+  const nested = findAdjacentTerminalGroup(inFirst ? node.first : node.second, groupId, direction);
+  if (nested) return nested;
+
+  const matchesOrientation =
+    (node.orientation === 'horizontal' && (direction === 'left' || direction === 'right'))
+    || (node.orientation === 'vertical' && (direction === 'top' || direction === 'bottom'));
+  if (!matchesOrientation) return null;
+
+  if (inFirst && (direction === 'right' || direction === 'bottom')) {
+    return getTerminalGroups(node.second)[0] ?? null;
+  }
+  if (!inFirst && (direction === 'left' || direction === 'top')) {
+    const candidates = getTerminalGroups(node.first);
+    return candidates[candidates.length - 1] ?? null;
+  }
+  return null;
+}
+
 const SPLIT_EDGE_RATIO = 0.25;
 const MAX_SPLIT_EDGE_SIZE = 120;
 

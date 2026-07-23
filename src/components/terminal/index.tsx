@@ -18,6 +18,7 @@ import { NewTabMenu } from './new-tab-menu';
 import { TerminalContextMenu } from './terminal-context-menu';
 import { HostKeyDialog } from './host-key-dialog';
 import {
+  findAdjacentTerminalGroup,
   findTerminalGroup,
   getTerminalGroups,
   getTerminalSplitDirection,
@@ -43,7 +44,6 @@ const Terminal: React.FC = () => {
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
   const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
-  const activeSection = useAppStore((state) => state.activeSection);
   const { connect, openLocal, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
 
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
@@ -52,11 +52,15 @@ const Terminal: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
-  const [split, setSplit] = useState<TerminalSplitState | null>(null);
+  const [split, setSplit] = useState<TerminalSplitState | null>(() => {
+    const restored = useTerminalStore.getState().restoredLayout;
+    return restored?.kind === 'split' ? restored : null;
+  });
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const terminalAreaRef = useRef<HTMLDivElement>(null);
   const focusedGroupRef = useRef<TerminalGroupSlot>('first');
   const nextGroupIdRef = useRef(3);
+  const restoredLayoutAppliedRef = useRef(false);
 
   const createGroupId = useCallback((): TerminalGroupSlot => {
     const id = `group-${nextGroupIdRef.current}`;
@@ -71,6 +75,12 @@ const Terminal: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (restoredLayoutAppliedRef.current) return;
+    restoredLayoutAppliedRef.current = true;
+    useTerminalStore.getState().clearRestoredLayout();
+  }, []);
+
+  useEffect(() => {
     if (!restoreWorkspace) {
       void invokeClearTerminalWorkspace().catch((error) => {
         logger.error('failed to clear terminal workspace', error);
@@ -81,28 +91,15 @@ const Terminal: React.FC = () => {
   useEffect(() => {
     if (!restoreWorkspace) return;
     const timer = window.setTimeout(() => {
-      void invokeSaveTerminalWorkspace(serializeTerminalWorkspace(sessions)).catch((error) => {
+      void invokeSaveTerminalWorkspace(serializeTerminalWorkspace(sessions, split)).catch((error) => {
         logger.error('failed to save terminal workspace', error);
       });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [restoreWorkspace, sessions]);
+  }, [restoreWorkspace, sessions, split]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        if (activeSection !== 'terminal') return;
-        event.preventDefault();
-        if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
-        setNewTabMenuOpen((previous) => !previous);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeSection]);
-
-  useEffect(() => {
-    const handleNewTabRequest = (): void => setNewTabMenuOpen(true);
+    const handleNewTabRequest = (): void => setNewTabMenuOpen((previous) => !previous);
     document.addEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
     return () => document.removeEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
   }, []);
@@ -305,6 +302,20 @@ const Terminal: React.FC = () => {
     focusSession(sessionId);
   }, [focusSession]);
 
+  // Leader-key pane navigation, dispatched from the xterm key handler in
+  // TerminalPane (which already consumed the key, so nothing reaches the pty).
+  useEffect(() => {
+    const handlePaneNavigate = (event: Event): void => {
+      const { detail } = event as CustomEvent<{ direction: TerminalSplitDirection }>;
+      if (!split) return;
+      const target = findAdjacentTerminalGroup(split, focusedGroupRef.current, detail.direction);
+      if (!target) return;
+      activateGroupTab(target.id, target.activeSessionId);
+    };
+    document.addEventListener('termbridge:navigate-terminal-pane', handlePaneNavigate);
+    return () => document.removeEventListener('termbridge:navigate-terminal-pane', handlePaneNavigate);
+  }, [split, activateGroupTab]);
+
   const reorderGroupTabs = useCallback((slot: TerminalGroupSlot, sessionId: string, insertIndex: number): void => {
     setSplit((current) => {
       if (!current) return current;
@@ -402,6 +413,19 @@ const Terminal: React.FC = () => {
     setDropPreview(null);
     return direction ? createOrArrangeSplit(sessionId, direction) : false;
   }, [createOrArrangeSplit, getGroupRegionAtPoint, getTabInsertIndex, moveTabToGroup, split]);
+
+  // Leader-key split commands (v/s): split the focused group's active tab.
+  useEffect(() => {
+    const handlePaneSplit = (event: Event): void => {
+      const { detail } = event as CustomEvent<{ direction: TerminalSplitDirection }>;
+      const focusedGroup = split ? findTerminalGroup(split, focusedGroupRef.current) : null;
+      const sessionId = focusedGroup?.activeSessionId || activeSessionId;
+      if (!sessionId) return;
+      createOrArrangeSplit(sessionId, detail.direction);
+    };
+    document.addEventListener('termbridge:split-terminal-pane', handlePaneSplit);
+    return () => document.removeEventListener('termbridge:split-terminal-pane', handlePaneSplit);
+  }, [activeSessionId, createOrArrangeSplit, split]);
 
   const renderTerminalPane = (session: TerminalSession | null, isActive: boolean): React.ReactNode => (
     <TerminalPane activeSession={session} isActive={isActive} />

@@ -15,12 +15,20 @@ import {
 import { Input } from '@/components/ui/input';
 import { useActiveController } from '@/components/terminal/hooks/use-active-controller';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { handleTerminalLeaderKeydown } from '@/components/terminal/terminal-leader';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
+import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
-import { useAppStore } from '@/stores/appStore';
+import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
+import type { ShortcutBindings } from '@/types';
 import { ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
+
+const effectiveShortcuts = (): ShortcutBindings => ({
+  ...DEFAULT_SHORTCUTS,
+  ...useAppStore.getState().shortcuts,
+});
 
 const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
   <div
@@ -111,17 +119,27 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true;
 
+      // Leader-key chords (default Ctrl+B then a command key) are resolved
+      // before anything else and never reach the pty.
+      if (handleTerminalLeaderKeydown(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return false;
+      }
+
       const platform = getPlatform();
       const isCopyShortcut =
         (platform === 'macos' && event.metaKey && event.key.toLowerCase() === 'c') ||
         (platform !== 'macos' && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c');
 
-      const isFindShortcut =
-        (platform === 'macos' && event.metaKey && event.key.toLowerCase() === 'f') ||
-        (platform !== 'macos' && event.ctrlKey && event.key.toLowerCase() === 'f');
+      // Find follows the configurable binding so it cannot diverge from the
+      // app-level shortcut map. Copy stays hardcoded: it mirrors the OS
+      // clipboard convention whose default differs per platform.
+      const isFindShortcut = eventMatchesShortcut(event, effectiveShortcuts().findTerminal);
 
       if (isFindShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         handleOpenSearch();
         return false;
       }
