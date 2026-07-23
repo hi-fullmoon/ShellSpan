@@ -39,10 +39,44 @@ describe('useAppShortcuts', () => {
     document.addEventListener('termbridge:new-terminal-tab', listener);
     renderHook(() => useAppShortcuts());
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', ctrlKey: true, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
 
     expect(listener).toHaveBeenCalledOnce();
     document.removeEventListener('termbridge:new-terminal-tab', listener);
+  });
+
+  it('scopes the same chord by section: mod+k toggles terminal vs sftp menus', () => {
+    const terminalListener = vi.fn();
+    const sftpListener = vi.fn();
+    document.addEventListener('termbridge:new-terminal-tab', terminalListener);
+    document.addEventListener('termbridge:new-sftp-connection', sftpListener);
+    renderHook(() => useAppShortcuts());
+
+    useAppStore.setState({ activeSection: 'sftp' });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    expect(sftpListener).toHaveBeenCalledOnce();
+    expect(terminalListener).not.toHaveBeenCalled();
+
+    useAppStore.setState({ activeSection: 'terminal' });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    expect(terminalListener).toHaveBeenCalledOnce();
+    expect(sftpListener).toHaveBeenCalledOnce();
+
+    document.removeEventListener('termbridge:new-terminal-tab', terminalListener);
+    document.removeEventListener('termbridge:new-sftp-connection', sftpListener);
+  });
+
+  it('ignores leader bindings and leader sub-keys at the document level', () => {
+    useAppStore.setState({ activeSection: 'terminal' });
+    renderHook(() => useAppShortcuts());
+
+    const leaderEvent = new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(leaderEvent);
+    expect(leaderEvent.defaultPrevented).toBe(false);
+
+    const subKeyEvent = new KeyboardEvent('keydown', { key: 'h', bubbles: true, cancelable: true });
+    document.dispatchEvent(subKeyEvent);
+    expect(subKeyEvent.defaultPrevented).toBe(false);
   });
 
   it('cycles terminal tabs', () => {

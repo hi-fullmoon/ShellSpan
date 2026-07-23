@@ -1,8 +1,17 @@
 import { useEffect } from 'react';
-import { eventMatchesShortcut } from '@/lib/shortcuts';
+import {
+  eventMatchesShortcut,
+  isLeaderShortcutAction,
+  SHORTCUT_SCOPES,
+} from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutAction } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
+
+// The leader binding and its sub-keys live in the terminal input layer
+// (terminal-leader.ts), not at the document level.
+const isDocumentLevelAction = (action: ShortcutAction): boolean =>
+  action !== 'terminalLeader' && !isLeaderShortcutAction(action);
 
 export function useAppShortcuts(): void {
   const shortcuts = useAppStore((state) => state.shortcuts);
@@ -12,24 +21,26 @@ export function useAppShortcuts(): void {
       if (event.defaultPrevented || event.repeat) return;
 
       const effectiveShortcuts = { ...DEFAULT_SHORTCUTS, ...shortcuts };
+      const activeSection = useAppStore.getState().activeSection;
 
-      const action = (Object.keys(effectiveShortcuts) as ShortcutAction[]).find((candidate) =>
-        eventMatchesShortcut(event, effectiveShortcuts[candidate]),
+      // Scope eligibility is part of matching, not a post-check: two scoped
+      // actions may share one chord (e.g. mod+k in terminal and sftp), and
+      // only the one whose scope is active may win.
+      const action = (Object.keys(effectiveShortcuts) as ShortcutAction[]).find(
+        (candidate) => {
+          if (!isDocumentLevelAction(candidate)) return false;
+          const scope = SHORTCUT_SCOPES[candidate];
+          if (scope === 'terminal' && activeSection !== 'terminal') return false;
+          if (scope === 'sftp' && activeSection !== 'sftp') return false;
+          return eventMatchesShortcut(event, effectiveShortcuts[candidate]);
+        },
       );
       if (!action) return;
 
-      const terminalAction = [
-        'newTerminalTab',
-        'closeTerminalTab',
-        'nextTerminalTab',
-        'previousTerminalTab',
-        'findTerminal',
-      ].includes(action);
-      if (terminalAction && useAppStore.getState().activeSection !== 'terminal') return;
       if (
-        terminalAction &&
-        event.target instanceof Element &&
-        event.target.closest('[role="dialog"]')
+        SHORTCUT_SCOPES[action] !== 'global'
+        && event.target instanceof Element
+        && event.target.closest('[role="dialog"]')
       ) return;
 
       event.preventDefault();
@@ -57,6 +68,9 @@ export function useAppShortcuts(): void {
           break;
         case 'findTerminal':
           document.dispatchEvent(new Event('termbridge:find-terminal'));
+          break;
+        case 'newSftpConnection':
+          document.dispatchEvent(new Event('termbridge:new-sftp-connection'));
           break;
         case 'nextTerminalTab':
         case 'previousTerminalTab': {

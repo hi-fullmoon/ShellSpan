@@ -15,11 +15,20 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   openTerminal: 'mod+2',
   openSftp: 'mod+3',
   openSettings: 'mod+,',
-  newTerminalTab: 'mod+t',
+  newTerminalTab: 'mod+k',
   closeTerminalTab: 'mod+w',
   nextTerminalTab: 'mod+shift+]',
   previousTerminalTab: 'mod+shift+[',
   findTerminal: 'mod+f',
+  newSftpConnection: 'mod+k',
+  terminalLeader: 'ctrl+b',
+  terminalFocusLeft: 'h',
+  terminalFocusDown: 'j',
+  terminalFocusUp: 'k',
+  terminalFocusRight: 'l',
+  terminalSplitRight: 'v',
+  terminalSplitDown: 's',
+  terminalClosePane: 'x',
 };
 
 interface AppPreferences {
@@ -147,18 +156,25 @@ function getDefaultPreferences(): AppPreferences {
 
 const defaults = getDefaultPreferences();
 
+// Bindings whose default changed across versions. A stored value equal to the
+// old default is treated as uncustomized and upgraded to the new default.
+const LEGACY_DEFAULT_SHORTCUTS: Partial<Record<ShortcutAction, string>> = {
+  newTerminalTab: 'mod+t',
+};
+
 export function mergeShortcutBindings(value: unknown): ShortcutBindings {
   const stored = value && typeof value === 'object'
     ? value as Partial<Record<ShortcutAction, unknown>>
     : {};
   return Object.fromEntries(
     (Object.entries(DEFAULT_SHORTCUTS) as Array<[ShortcutAction, string]>).map(
-      ([action, fallback]) => [
-        action,
-        typeof stored[action] === 'string' && stored[action].length > 0
-          ? stored[action]
-          : fallback,
-      ],
+      ([action, fallback]) => {
+        const candidate = stored[action];
+        const usable = typeof candidate === 'string'
+          && candidate.length > 0
+          && candidate !== LEGACY_DEFAULT_SHORTCUTS[action];
+        return [action, usable ? candidate : fallback];
+      },
     ),
   ) as ShortcutBindings;
 }
