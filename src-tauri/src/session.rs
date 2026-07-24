@@ -17,9 +17,9 @@ use std::os::fd::AsRawFd;
 
 use crate::{
     connection::{connect_tcp_stream, connect_through_jump_host, open_authenticated_session, summarize_session_request, SSH_SESSION_KEEPALIVE_INTERVAL_SECS},
-    emit_data, emit_status,
+    emit_data, emit_session_error, emit_status,
     known_hosts::known_hosts_path,
-    models::{ClosedReasonKind, SessionCommand, SessionCreateRequest, SessionStatus},
+    models::{ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent, SessionStatus},
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
@@ -45,8 +45,8 @@ pub(crate) fn run_ssh_session(
     let mut _jump_session_holder: Option<Box<ssh2::Session>> = None;
     let known_hosts = known_hosts_path(app).ok();
     let known_hosts_ref = known_hosts.as_deref();
-    let session = if let Some(ref jump) = request.jump_host {
-        let (jump_session, target_session) = connect_through_jump_host(
+    let session_result = if let Some(ref jump) = request.jump_host {
+        connect_through_jump_host(
             jump,
             &request.host,
             request.port,
@@ -54,26 +54,61 @@ pub(crate) fn run_ssh_session(
             request.auth_method,
             request.password.as_deref(),
             request.private_key_data.as_deref(),
-            request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
             known_hosts_ref,
-        )?;
-        _jump_session_holder = Some(Box::new(jump_session));
-        target_session
+        )
+        .map(|(jump_session, target_session)| {
+            _jump_session_holder = Some(Box::new(jump_session));
+            target_session
+        })
     } else {
-        let tcp = connect_tcp_stream(&request.host, request.port)?;
-        open_authenticated_session(
-            tcp,
-            &request.username,
-            request.auth_method,
-            request.password.as_deref(),
-            request.private_key_data.as_deref(),
-            request.private_key_path.as_deref(),
-            request.passphrase.as_deref(),
-            &request.host,
-            request.port,
-            known_hosts_ref,
-        )?
+        connect_tcp_stream(&request.host, request.port)
+            .map_err(|message| ConnectionError::Other { message })
+            .and_then(|tcp| {
+                open_authenticated_session(
+                    tcp,
+                    &request.username,
+                    request.auth_method,
+                    request.password.as_deref(),
+                    request.private_key_data.as_deref(),
+                    request.passphrase.as_deref(),
+                    &request.host,
+                    request.port,
+                    known_hosts_ref,
+                )
+            })
+    };
+
+    let session = match session_result {
+        Ok(session) => session,
+        Err(connection_error) => {
+            let message = connection_error.message();
+            match connection_error {
+                ConnectionError::HostKeyUnknown { host, port, fingerprint } => {
+                    let _ = emit_session_error(
+                        app,
+                        SessionErrorEvent::HostKeyUnknown {
+                            session_id: session_id.to_string(),
+                            host,
+                            port,
+                            fingerprint,
+                        },
+                    );
+                }
+                ConnectionError::HostKeyMismatch { host, port } => {
+                    let _ = emit_session_error(
+                        app,
+                        SessionErrorEvent::HostKeyMismatch {
+                            session_id: session_id.to_string(),
+                            host,
+                            port,
+                        },
+                    );
+                }
+                ConnectionError::Other { .. } => {}
+            }
+            return Err(message);
+        }
     };
 
     let mut channel = session

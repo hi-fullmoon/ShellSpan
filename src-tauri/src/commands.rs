@@ -3,7 +3,7 @@ use crate::sftp_pool::SftpPool;
 use crate::db::Database;
 use crate::models::{
     AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest,
-    CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest,
+    CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, RemoteFsError,
     HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing,
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
@@ -31,9 +31,9 @@ use uuid::Uuid;
 pub(crate) struct KeyCredentialRequest {
     pub(crate) id: String,
     pub(crate) label: String,
-    pub(crate) private_key: String,
+    pub(crate) kind: crate::models::KeyCredentialKind,
+    pub(crate) private_key: Option<String>,
     pub(crate) public_key: Option<String>,
-    pub(crate) certificate: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,12 +41,13 @@ pub(crate) struct KeyCredentialRequest {
 pub(crate) struct KeyCredentialResponse {
     pub(crate) id: String,
     pub(crate) label: String,
-    pub(crate) private_key: String,
+    pub(crate) kind: crate::models::KeyCredentialKind,
+    pub(crate) private_key: Option<String>,
     pub(crate) public_key: Option<String>,
-    pub(crate) certificate: Option<String>,
     pub(crate) key_type: String,
     pub(crate) updated_at: i64,
 }
+
 
 #[tauri::command]
 pub(crate) async fn create_session(
@@ -437,8 +438,8 @@ pub(crate) async fn list_remote_directory(
     mut request: RemoteDirectoryRequest,
     pool: State<'_, SftpPool>,
     cache: State<'_, RemoteIdentityCache>,
-) -> Result<RemoteDirectoryListing, String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<RemoteDirectoryListing, RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
     debug!(
         "Listing remote directory path={} {}",
@@ -452,7 +453,7 @@ pub(crate) async fn list_remote_directory(
         list_remote_directory_blocking(request, Some(&pool), Some(&cache), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join directory listing task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join directory listing task: {error}") })?;
     match &result {
         Ok(listing) => {
             debug!(
@@ -462,7 +463,7 @@ pub(crate) async fn list_remote_directory(
             );
         }
         Err(error) => {
-            error!("List remote directory failed path={requested_path}: {error}");
+            error!("List remote directory failed path={requested_path}: {error:?}");
         }
     }
     result
@@ -474,8 +475,8 @@ pub(crate) async fn create_remote_entry(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: CreateRemoteEntryRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Creating remote entry parent_path={} name={} kind={:?} {}",
         request.parent_path,
@@ -489,9 +490,9 @@ pub(crate) async fn create_remote_entry(
         create_remote_entry_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join create entry task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join create entry task: {error}") })?;
     if let Err(error) = &result {
-        error!("Create remote entry failed: {error}");
+        error!("Create remote entry failed: {error:?}");
     } else {
         info!("Created remote entry successfully");
     }
@@ -504,8 +505,8 @@ pub(crate) async fn rename_remote_path(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: RenameRemotePathRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Renaming remote path path={} new_name={} {}",
         request.path,
@@ -518,9 +519,9 @@ pub(crate) async fn rename_remote_path(
         rename_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join rename task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join rename task: {error}") })?;
     if let Err(error) = &result {
-        error!("Rename remote path failed: {error}");
+        error!("Rename remote path failed: {error:?}");
     } else {
         info!("Renamed remote path successfully");
     }
@@ -533,8 +534,8 @@ pub(crate) async fn trash_remote_path(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: TrashRemotePathRequest,
     pool: State<'_, SftpPool>,
-) -> Result<TrashedRemotePath, String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<TrashedRemotePath, RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Moving remote path to trash path={} {}",
         request.path,
@@ -546,9 +547,9 @@ pub(crate) async fn trash_remote_path(
         trash_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join trash task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join trash task: {error}") })?;
     if let Err(error) = &result {
-        error!("Trash remote path failed: {error}");
+        error!("Trash remote path failed: {error:?}");
     }
     result
 }
@@ -559,8 +560,8 @@ pub(crate) async fn restore_remote_path(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: RestoreRemotePathRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Restoring remote path original_path={} trash_path={} {}",
         request.original_path,
@@ -573,9 +574,9 @@ pub(crate) async fn restore_remote_path(
         restore_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join restore task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join restore task: {error}") })?;
     if let Err(error) = &result {
-        error!("Restore remote path failed: {error}");
+        error!("Restore remote path failed: {error:?}");
     }
     result
 }
@@ -587,25 +588,25 @@ pub(crate) async fn delete_remote_path(
     deletes: State<'_, DeleteCancellationRegistry>,
     mut request: DeleteRemotePathRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Deleting remote path operation_id={} path={} {}",
         request.operation_id,
         request.path,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = deletes.register(request.operation_id.clone())?;
+    let cancel_flag = deletes.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         delete_remote_path_blocking(app, request, cancel_flag, Some(&pool))
     })
     .await
-    .map_err(|error| format!("failed to join delete task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join delete task: {error}") })?;
     let _ = deletes.remove(&operation_id);
     if let Err(error) = &result {
-        warn!("Delete remote path failed operation_id={operation_id}: {error}");
+        warn!("Delete remote path failed operation_id={operation_id}: {error:?}");
     } else {
         info!("Deleted remote path operation_id={operation_id}");
     }
@@ -618,8 +619,8 @@ pub(crate) async fn copy_remote_path(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: CopyRemotePathRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Copying remote path source_path={} destination_directory={} {}",
         request.source_path,
@@ -632,9 +633,9 @@ pub(crate) async fn copy_remote_path(
         copy_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join copy task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join copy task: {error}") })?;
     if let Err(error) = &result {
-        error!("Copy remote path failed: {error}");
+        error!("Copy remote path failed: {error:?}");
     } else {
         info!("Copied remote path successfully");
     }
@@ -648,10 +649,10 @@ pub(crate) async fn copy_remote_to_remote(
     copies: State<'_, RemoteCopyCancellationRegistry>,
     mut request: CopyRemoteToRemoteRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.source_connection)?;
-    resolve_keychain_key_for_remote(&credentials, &mut request.destination_connection)?;
-    let cancel_flag = copies.register(request.operation_id.clone())?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.source_connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.destination_connection).map_err(|message| RemoteFsError::Other { message })?;
+    let cancel_flag = copies.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
@@ -659,10 +660,10 @@ pub(crate) async fn copy_remote_to_remote(
         copy_remote_to_remote_blocking(app, request, cancel_flag, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .unwrap_or_else(|error| Err(format!("failed to join remote transfer task: {error}")));
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join remote transfer task: {error}") })?;
     let _ = copies.remove(&operation_id);
     if let Err(error) = &result {
-        error!("Copy remote to remote failed: {error}");
+        error!("Copy remote to remote failed: {error:?}");
     }
     result
 }
@@ -683,8 +684,8 @@ pub(crate) async fn upload_local_paths(
     uploads: State<'_, UploadCancellationRegistry>,
     mut request: UploadLocalPathsRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Uploading local paths operation_id={} count={} destination_directory={} {}",
         request.operation_id,
@@ -692,17 +693,17 @@ pub(crate) async fn upload_local_paths(
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = uploads.register(request.operation_id.clone())?;
+    let cancel_flag = uploads.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         upload_local_paths_blocking(app, request, cancel_flag, Some(&pool))
     })
     .await
-    .map_err(|error| format!("failed to join upload task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join upload task: {error}") })?;
     let _ = uploads.remove(&operation_id);
     if let Err(error) = &result {
-        warn!("Upload failed operation_id={operation_id}: {error}");
+        warn!("Upload failed operation_id={operation_id}: {error:?}");
     } else {
         info!("Upload completed operation_id={operation_id}");
     }
@@ -807,8 +808,8 @@ pub(crate) async fn download_remote_paths(
     downloads: State<'_, DownloadCancellationRegistry>,
     mut request: DownloadRemotePathsRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Downloading remote paths operation_id={} count={} destination_directory={} {}",
         request.operation_id,
@@ -816,17 +817,17 @@ pub(crate) async fn download_remote_paths(
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = downloads.register(request.operation_id.clone())?;
+    let cancel_flag = downloads.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         download_remote_paths_blocking(app, request, cancel_flag, Some(&pool))
     })
     .await
-    .map_err(|error| format!("failed to join download task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join download task: {error}") })?;
     let _ = downloads.remove(&operation_id);
     if let Err(error) = &result {
-        warn!("Download failed operation_id={operation_id}: {error}");
+        warn!("Download failed operation_id={operation_id}: {error:?}");
     } else {
         info!("Download completed operation_id={operation_id}");
     }
@@ -925,8 +926,8 @@ pub(crate) async fn open_remote_file(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: OpenRemoteFileRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Opening remote file path={} {}",
         request.path,
@@ -938,9 +939,9 @@ pub(crate) async fn open_remote_file(
         open_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join open file task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join open file task: {error}") })?;
     if let Err(error) = &result {
-        error!("Open remote file failed: {error}");
+        error!("Open remote file failed: {error:?}");
     } else {
         info!("Opened remote file successfully");
     }
@@ -953,8 +954,8 @@ pub(crate) async fn preview_remote_file(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: ReadRemoteFileRequest,
     pool: State<'_, SftpPool>,
-) -> Result<ReadRemoteFileResponse, String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<ReadRemoteFileResponse, RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Previewing remote file path={} {}",
         request.path,
@@ -966,7 +967,7 @@ pub(crate) async fn preview_remote_file(
         read_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join file preview task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join file preview task: {error}") })?;
     match &result {
         Ok(response) => {
             info!(
@@ -975,7 +976,7 @@ pub(crate) async fn preview_remote_file(
             );
         }
         Err(error) => {
-            error!("Preview remote file failed: {error}");
+            error!("Preview remote file failed: {error:?}");
         }
     }
     result
@@ -987,8 +988,8 @@ pub(crate) async fn update_remote_permissions(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: UpdateRemotePermissionsRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), String> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Updating remote permissions path={} permissions={:04o} {}",
         request.path,
@@ -1001,79 +1002,68 @@ pub(crate) async fn update_remote_permissions(
         update_remote_permissions_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| format!("failed to join permissions update task: {error}"))?;
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join permissions update task: {error}") })?;
     if let Err(error) = &result {
-        error!("Update remote permissions failed: {error}");
+        error!("Update remote permissions failed: {error:?}");
     } else {
         info!("Updated remote permissions successfully");
     }
     result
 }
 
-#[tauri::command]
-pub(crate) fn store_password(
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    profile_id: String,
-    password: String,
-) -> Result<(), String> {
-    credentials.set_password(&profile_id, &password)
-}
-
-#[tauri::command]
-pub(crate) fn retrieve_password(
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    profile_id: String,
-) -> Result<Option<String>, String> {
-    credentials.get_password(&profile_id)
-}
-
-#[tauri::command]
-pub(crate) fn remove_password(
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    profile_id: String,
-) -> Result<(), String> {
-    credentials.delete_password(&profile_id)
-}
-
-#[tauri::command]
-pub(crate) fn list_cached_credential_profile_ids(
-    credentials: State<'_, crate::keychain::CredentialManager>,
-) -> Result<Vec<String>, String> {
-    credentials.cached_profile_ids()
-}
-
-#[tauri::command]
-pub(crate) fn clear_credential_cache(
-    credentials: State<'_, crate::keychain::CredentialManager>,
-) -> Result<(), String> {
-    credentials.clear_cache()
-}
-
-#[tauri::command]
-pub(crate) fn migrate_passwords(
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    profiles: Vec<(String, String)>,
-) -> Result<Vec<(String, bool)>, String> {
-    Ok(credentials.migrate_passwords(&profiles))
-}
-
 fn detect_key_type(private_key: &str) -> &'static str {
     let normalized = private_key.to_lowercase();
     if normalized.contains("-----begin rsa private key-----") || normalized.contains("ssh-rsa") {
-        "rsa"
-    } else if normalized.contains("-----begin ec private key-----")
-        || normalized.contains("ecdsa-sha2")
-    {
-        "ecdsa"
-    } else if normalized.contains("ssh-ed25519") {
-        "ed25519"
-    } else if normalized.contains("-----begin dsa private key-----")
-        || normalized.contains("ssh-dss")
-    {
-        "dsa"
-    } else {
-        "unknown"
+        return "rsa";
     }
+    if normalized.contains("-----begin ec private key-----") || normalized.contains("ecdsa-sha2") {
+        return "ecdsa";
+    }
+    if normalized.contains("ssh-ed25519") {
+        return "ed25519";
+    }
+    if normalized.contains("-----begin dsa private key-----") || normalized.contains("ssh-dss") {
+        return "dsa";
+    }
+    if normalized.contains("-----begin openssh private key-----") {
+        let base64_body: String = private_key
+            .lines()
+            .map(str::trim)
+            .filter(|line| {
+                !line.is_empty()
+                    && !line.starts_with("-----BEGIN")
+                    && !line.starts_with("-----END")
+            })
+            .collect();
+        if let Ok(decoded) = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            base64_body,
+        ) {
+            if let Ok(text) = String::from_utf8(decoded) {
+                let lower = text.to_lowercase();
+                if lower.contains("ssh-ed25519") {
+                    return "ed25519";
+                }
+                if lower.contains("ssh-rsa") {
+                    return "rsa";
+                }
+                if lower.contains("ecdsa-sha2") {
+                    return "ecdsa";
+                }
+                if lower.contains("ssh-dss") {
+                    return "dsa";
+                }
+            }
+        }
+    }
+    "unknown"
+}
+
+#[tauri::command]
+pub(crate) fn derive_ecdsa_key_from_password(
+    password: String,
+) -> Result<(String, String), String> {
+    crate::ecdsa_key::derive_ecdsa_key_from_password(&password)
 }
 
 #[tauri::command]
@@ -1083,17 +1073,43 @@ pub(crate) fn store_key_credential(
     request: KeyCredentialRequest,
 ) -> Result<(), String> {
     let updated_at = crate::db::current_timestamp_ms();
-    let key_type = detect_key_type(&request.private_key);
+    let key_type = match request.kind {
+        crate::models::KeyCredentialKind::Password => "ecdsa".to_string(),
+        crate::models::KeyCredentialKind::KeyFile => {
+            detect_key_type(request.private_key.as_deref().unwrap_or("")).to_string()
+        }
+    };
     let payload = serde_json::json!({
+        "kind": request.kind.to_string(),
         "label": request.label,
         "privateKey": request.private_key,
         "publicKey": request.public_key,
-        "certificate": request.certificate,
         "keyType": key_type,
         "updatedAt": updated_at,
     });
-    credentials.store_key_credential(&request.id, &payload.to_string())?;
-    database.upsert_key_credential(&request.id, &request.label, key_type, updated_at)
+    database.upsert_key_credential(
+        &request.id,
+        &request.label,
+        &key_type,
+        &request.kind.to_string(),
+        request.public_key.as_deref(),
+        None,
+        updated_at,
+    )?;
+    if let Err(error) = credentials.store_key_credential(&request.id, &payload.to_string()) {
+        warn!(
+            "Failed to persist key credential value to database for id={}, rolling back: {}",
+            request.id, error
+        );
+        if let Err(rollback_error) = database.delete_key_credential(&request.id) {
+            warn!(
+                "Failed to roll back key credential metadata id={}: {}",
+                request.id, rollback_error
+            );
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1113,6 +1129,14 @@ pub(crate) fn retrieve_key_credential(
     };
     let value = serde_json::from_str::<serde_json::Value>(&json)
         .map_err(|e| format!("failed to parse key credential: {e}"))?;
+    let kind = value
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(|s| match s {
+            "password" => crate::models::KeyCredentialKind::Password,
+            _ => crate::models::KeyCredentialKind::KeyFile,
+        })
+        .unwrap_or(crate::models::KeyCredentialKind::KeyFile);
     Ok(Some(KeyCredentialResponse {
         id: id.clone(),
         label: value
@@ -1120,13 +1144,9 @@ pub(crate) fn retrieve_key_credential(
             .and_then(|v| v.as_str())
             .unwrap_or(&id)
             .to_string(),
-        private_key: value
-            .get("privateKey")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
+        kind,
+        private_key: value.get("privateKey").and_then(|v| v.as_str()).map(String::from),
         public_key: value.get("publicKey").and_then(|v| v.as_str()).map(String::from),
-        certificate: value.get("certificate").and_then(|v| v.as_str()).map(String::from),
         key_type: value
             .get("keyType")
             .and_then(|v| v.as_str())
@@ -1144,15 +1164,49 @@ pub(crate) fn delete_key_credential(
     credentials: State<'_, crate::keychain::CredentialManager>,
     database: State<'_, Database>,
     id: String,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
+    let referencing = database.list_profiles_referencing_key(&id)?;
     credentials.delete_key_credential(&id)?;
-    database.delete_key_credential(&id)
+    database.delete_key_credential(&id)?;
+    database.clear_keychain_key_id_references(&id)?;
+    if !referencing.is_empty() {
+        log::info!(
+            "Cleared keychain_key_id for {} profile(s) referencing deleted key {id}",
+            referencing.len()
+        );
+    }
+    Ok(referencing)
 }
 
 #[tauri::command]
 pub(crate) fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path)
         .map_err(|e| format!("failed to read file {}: {e}", std::path::Path::new(&path).display()))
+}
+
+#[tauri::command]
+pub(crate) fn store_profile_password(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+    password: String,
+) -> Result<(), String> {
+    credentials.store_profile_password(&profile_id, &password)
+}
+
+#[tauri::command]
+pub(crate) fn retrieve_profile_password(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+) -> Result<Option<String>, String> {
+    credentials.retrieve_profile_password(&profile_id)
+}
+
+#[tauri::command]
+pub(crate) fn delete_profile_password(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+) -> Result<(), String> {
+    credentials.delete_profile_password(&profile_id)
 }
 
 fn load_keychain_private_key(
@@ -1221,7 +1275,6 @@ pub(crate) fn start_port_forwards(
     auth_method: AuthMethod,
     password: Option<String>,
     keychain_key_id: Option<String>,
-    private_key_path: Option<String>,
     passphrase: Option<String>,
     jump_host: Option<JumpHostConfig>,
     forwards: Vec<PortForwardConfig>,
@@ -1251,7 +1304,7 @@ pub(crate) fn start_port_forwards(
         crate::port_forward::start_port_forwards(
             manager, operation_id,
             host, port, username, auth_method,
-            password, private_key_data, private_key_path, passphrase,
+            password, private_key_data, passphrase,
             jump_host, forwards, cancel_flag,
             known_hosts,
         );
@@ -1429,8 +1482,12 @@ pub(crate) fn list_known_hosts(app: AppHandle) -> Result<Vec<KnownHostEntry>, St
 
 #[tauri::command]
 pub(crate) fn remove_known_host(app: AppHandle, host: String, port: u16) -> Result<(), String> {
-    use crate::known_hosts::known_hosts_path;
+    use crate::known_hosts::{known_hosts_path, KNOWN_HOSTS_WRITE_LOCK};
     use std::fs;
+
+    let _lock = KNOWN_HOSTS_WRITE_LOCK
+        .lock()
+        .map_err(|_| "known hosts write lock poisoned".to_string())?;
 
     let path = known_hosts_path(&app)?;
     if !path.exists() {
@@ -1651,7 +1708,6 @@ fn remote_connection_request_from_session(
         auth_method: request.auth_method,
         password: request.password.clone(),
         keychain_key_id: request.keychain_key_id.clone(),
-        private_key_path: request.private_key_path.clone(),
         private_key_data: request.private_key_data.clone(),
         passphrase: request.passphrase.clone(),
         jump_host: request.jump_host.clone(),
@@ -1844,7 +1900,7 @@ pub(crate) fn clear_terminal_workspace(
 
 #[cfg(test)]
 mod tests {
-    use super::{configure_local_terminal_environment, is_termbridge_application_entry};
+    use super::{configure_local_terminal_environment, detect_key_type, is_termbridge_application_entry};
     use portable_pty::CommandBuilder;
     use std::ffi::OsStr;
 
@@ -1867,5 +1923,31 @@ mod tests {
             command.get_env("TERM_PROGRAM_VERSION"),
             Some(OsStr::new(env!("CARGO_PKG_VERSION"))),
         );
+    }
+
+    #[test]
+    fn detect_key_type_recognizes_openssh_ed25519_private_key() {
+        let body = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            b"openssh-key-v1\x00\x00\x00\x00\x00\x00\x00\x00ssh-ed25519",
+        );
+        let key = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n-----END OPENSSH PRIVATE KEY-----",
+            body
+        );
+        assert_eq!(detect_key_type(&key), "ed25519");
+    }
+
+    #[test]
+    fn detect_key_type_recognizes_openssh_rsa_private_key() {
+        let body = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            b"openssh-key-v1\x00\x00\x00\x00\x00\x00\x00\x00ssh-rsa",
+        );
+        let key = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n-----END OPENSSH PRIVATE KEY-----",
+            body
+        );
+        assert_eq!(detect_key_type(&key), "rsa");
     }
 }

@@ -1,14 +1,9 @@
-use keyring::Entry;
-use log::{debug, info, warn};
+use log::debug;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-const PASSWORD_SERVICE: &str = "com.termbridge.password";
 const KEY_SERVICE: &str = "com.termbridge.key";
-
-fn password_entry_key(profile_id: &str) -> String {
-    format!("com.termbridge.password.{profile_id}")
-}
+const PROFILE_PASSWORD_SERVICE: &str = "com.termbridge.profile-password";
 
 trait CredentialBackend: Send + Sync {
     fn set_credential(
@@ -21,39 +16,32 @@ trait CredentialBackend: Send + Sync {
     fn delete_credential(&self, service: &str, key: &str) -> Result<(), String>;
 }
 
-struct SystemKeychainBackend;
+struct LocalKeychainBackend {
+    database: crate::db::Database,
+}
 
-impl CredentialBackend for SystemKeychainBackend {
+impl LocalKeychainBackend {
+    fn new(database: crate::db::Database) -> Self {
+        Self { database }
+    }
+}
+
+impl CredentialBackend for LocalKeychainBackend {
     fn set_credential(
         &self,
-        service: &str,
+        _service: &str,
         key: &str,
         value: &str,
     ) -> Result<(), String> {
-        let entry = Entry::new(service, key)
-            .map_err(|e| format!("failed to create keyring entry: {e}"))?;
-        entry
-            .set_password(value)
-            .map_err(|e| format!("failed to store credential in keychain: {e}"))
+        self.database.store_key_credential_value(key, value)
     }
 
-    fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
-        let entry = Entry::new(service, key)
-            .map_err(|e| format!("failed to create keyring entry: {e}"))?;
-        match entry.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("failed to retrieve credential from keychain: {e}")),
-        }
+    fn get_credential(&self, _service: &str, key: &str) -> Result<Option<String>, String> {
+        self.database.retrieve_key_credential_value(key)
     }
 
-    fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
-        let entry = Entry::new(service, key)
-            .map_err(|e| format!("failed to create keyring entry: {e}"))?;
-        match entry.delete_password() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("failed to delete credential from keychain: {e}")),
-        }
+    fn delete_credential(&self, _service: &str, key: &str) -> Result<(), String> {
+        self.database.delete_key_credential(key)
     }
 }
 
@@ -62,89 +50,20 @@ pub(crate) struct CredentialManager {
     cache: Mutex<HashMap<String, String>>,
 }
 
-impl Default for CredentialManager {
-    fn default() -> Self {
+impl CredentialManager {
+    pub(crate) fn new(database: crate::db::Database) -> Self {
         Self {
-            backend: Arc::new(SystemKeychainBackend),
+            backend: Arc::new(LocalKeychainBackend::new(database)),
             cache: Mutex::new(HashMap::new()),
         }
     }
-}
 
-impl CredentialManager {
     #[cfg(test)]
     fn with_backend(backend: Arc<dyn CredentialBackend>) -> Self {
         Self {
             backend,
             cache: Mutex::new(HashMap::new()),
         }
-    }
-
-    // --- Password credentials (legacy, per-profile) ---
-
-    pub(crate) fn set_password(&self, profile_id: &str, password: &str) -> Result<(), String> {
-        self.set_credential(PASSWORD_SERVICE, &password_entry_key(profile_id), password)
-    }
-
-    pub(crate) fn get_password(&self, profile_id: &str) -> Result<Option<String>, String> {
-        self.get_credential(PASSWORD_SERVICE, &password_entry_key(profile_id))
-    }
-
-    pub(crate) fn delete_password(&self, profile_id: &str) -> Result<(), String> {
-        self.delete_credential(PASSWORD_SERVICE, &password_entry_key(profile_id))
-    }
-
-    pub(crate) fn cached_profile_ids(&self) -> Result<Vec<String>, String> {
-        let prefix = format!("{PASSWORD_SERVICE}:");
-        let password_key_prefix = format!("{PASSWORD_SERVICE}.",);
-        let mut profile_ids = self
-            .cache
-            .lock()
-            .map_err(|_| "credential cache lock poisoned".to_string())?
-            .keys()
-            .filter(|key| key.starts_with(&prefix))
-            .filter_map(|key| {
-                key.strip_prefix(&prefix)
-                    .and_then(|entry_key| entry_key.strip_prefix(&password_key_prefix))
-                    .map(String::from)
-            })
-            .collect::<Vec<_>>();
-        profile_ids.sort();
-        Ok(profile_ids)
-    }
-
-    pub(crate) fn clear_cache(&self) -> Result<(), String> {
-        self.cache
-            .lock()
-            .map_err(|_| "credential cache lock poisoned".to_string())?
-            .clear();
-        debug!("Cleared in-memory credential cache");
-        Ok(())
-    }
-
-    pub(crate) fn migrate_passwords(&self, profiles: &[(String, String)]) -> Vec<(String, bool)> {
-        let mut results = Vec::new();
-        for (profile_id, password) in profiles {
-            if password.is_empty() {
-                continue;
-            }
-            match self.set_password(profile_id, password) {
-                Ok(()) => {
-                    info!("Migrated password for profile {profile_id}");
-                    results.push((profile_id.clone(), true));
-                }
-                Err(e) => {
-                    warn!("Failed to migrate password for {profile_id}: {e}");
-                    results.push((profile_id.clone(), false));
-                }
-            }
-        }
-        let success_count = results.iter().filter(|(_, ok)| *ok).count();
-        info!(
-            "Migrated {success_count}/{} passwords to keychain",
-            results.len()
-        );
-        results
     }
 
     // --- Generic credentials ---
@@ -160,7 +79,7 @@ impl CredentialManager {
             .lock()
             .map_err(|_| "credential cache lock poisoned".to_string())?
             .insert(format!("{service}:{key}"), value.to_string());
-        debug!("Stored credential in keychain service={service} key={key}");
+        debug!("Stored credential in local keychain service={service} key={key}");
         Ok(())
     }
 
@@ -181,7 +100,7 @@ impl CredentialManager {
         let value = self.backend.get_credential(service, key)?;
         if let Some(ref value) = value {
             cache.insert(cache_key, value.clone());
-            debug!("Loaded credential from keychain service={service} key={key}");
+            debug!("Loaded credential from local keychain service={service} key={key}");
         }
         Ok(value)
     }
@@ -196,7 +115,7 @@ impl CredentialManager {
             .lock()
             .map_err(|_| "credential cache lock poisoned".to_string())?
             .remove(&format!("{service}:{key}"));
-        debug!("Deleted credential from keychain service={service} key={key}");
+        debug!("Deleted credential from local keychain service={service} key={key}");
         Ok(())
     }
 
@@ -219,6 +138,27 @@ impl CredentialManager {
 
     pub(crate) fn delete_key_credential(&self, key_id: &str) -> Result<(), String> {
         self.delete_credential(KEY_SERVICE, key_id)
+    }
+
+    // --- Profile passwords ---
+
+    pub(crate) fn store_profile_password(
+        &self,
+        profile_id: &str,
+        password: &str,
+    ) -> Result<(), String> {
+        self.set_credential(PROFILE_PASSWORD_SERVICE, profile_id, password)
+    }
+
+    pub(crate) fn retrieve_profile_password(
+        &self,
+        profile_id: &str,
+    ) -> Result<Option<String>, String> {
+        self.get_credential(PROFILE_PASSWORD_SERVICE, profile_id)
+    }
+
+    pub(crate) fn delete_profile_password(&self, profile_id: &str) -> Result<(), String> {
+        self.delete_credential(PROFILE_PASSWORD_SERVICE, profile_id)
     }
 }
 
@@ -274,67 +214,17 @@ mod tests {
     }
 
     #[test]
-    fn repeated_reads_use_the_in_memory_cache() {
+    fn key_credentials_use_local_backend() {
         let backend = Arc::new(MockBackend::default());
-        backend
-            .set_credential(PASSWORD_SERVICE, &password_entry_key("profile-1"), "secret")
+        let manager = CredentialManager::with_backend(backend.clone());
+
+        manager
+            .store_key_credential("key-1", "private-key-data")
             .unwrap();
-        let manager = CredentialManager::with_backend(backend.clone());
+        let loaded = manager.retrieve_key_credential("key-1").unwrap();
 
-        assert_eq!(
-            manager.get_password("profile-1").unwrap().as_deref(),
-            Some("secret")
-        );
-        assert_eq!(
-            manager.get_password("profile-1").unwrap().as_deref(),
-            Some("secret")
-        );
-        assert_eq!(backend.get_calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn stored_password_is_immediately_available_from_cache() {
-        let backend = Arc::new(MockBackend::default());
-        let manager = CredentialManager::with_backend(backend.clone());
-
-        manager.set_password("profile-1", "secret").unwrap();
-
-        assert_eq!(
-            manager.get_password("profile-1").unwrap().as_deref(),
-            Some("secret")
-        );
+        assert_eq!(loaded.as_deref(), Some("private-key-data"));
         assert_eq!(backend.set_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(backend.get_calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn deleting_password_invalidates_the_cache() {
-        let backend = Arc::new(MockBackend::default());
-        let manager = CredentialManager::with_backend(backend.clone());
-        manager.set_password("profile-1", "secret").unwrap();
-
-        manager.delete_password("profile-1").unwrap();
-
-        assert_eq!(manager.get_password("profile-1").unwrap(), None);
-        assert_eq!(backend.delete_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(backend.get_calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn cache_metadata_can_be_listed_and_cleared_without_backend_reads() {
-        let backend = Arc::new(MockBackend::default());
-        let manager = CredentialManager::with_backend(backend.clone());
-        manager.set_password("profile-2", "second").unwrap();
-        manager.set_password("profile-1", "first").unwrap();
-
-        assert_eq!(
-            manager.cached_profile_ids().unwrap(),
-            vec!["profile-1".to_string(), "profile-2".to_string()]
-        );
-
-        manager.clear_cache().unwrap();
-
-        assert!(manager.cached_profile_ids().unwrap().is_empty());
         assert_eq!(backend.get_calls.load(Ordering::SeqCst), 0);
     }
 }

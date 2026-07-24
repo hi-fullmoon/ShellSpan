@@ -17,7 +17,6 @@ pub(crate) struct ConnectionKey {
     auth_method: AuthMethod,
     password_hash: String,
     private_key_data_hash: String,
-    private_key_path_hash: String,
     passphrase_hash: String,
     jump_host: Option<JumpHostKey>,
 }
@@ -30,7 +29,6 @@ pub(crate) struct JumpHostKey {
     auth_method: AuthMethod,
     password_hash: String,
     private_key_data_hash: String,
-    private_key_path_hash: String,
     passphrase_hash: String,
 }
 
@@ -155,7 +153,6 @@ impl ConnectionKey {
             auth_method: jump_host.auth_method,
             password_hash: hash_secret(jump_host.password.as_deref()),
             private_key_data_hash: hash_secret(jump_host.private_key_data.as_deref()),
-            private_key_path_hash: hash_secret(jump_host.private_key_path.as_deref()),
             passphrase_hash: hash_secret(jump_host.passphrase.as_deref()),
         })
     }
@@ -169,7 +166,6 @@ pub(crate) fn connection_key(request: &RemoteConnectionRequest) -> ConnectionKey
         auth_method: request.auth_method,
         password_hash: hash_secret(request.password.as_deref()),
         private_key_data_hash: hash_secret(request.private_key_data.as_deref()),
-        private_key_path_hash: hash_secret(request.private_key_path.as_deref()),
         passphrase_hash: hash_secret(request.passphrase.as_deref()),
         jump_host: ConnectionKey::jump_host_key(request.jump_host.as_ref()),
     }
@@ -204,7 +200,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -229,7 +225,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -247,7 +243,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -267,7 +263,7 @@ mod tests {
             password: Some("".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -293,7 +289,7 @@ mod tests {
             password: Some("none".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -311,7 +307,7 @@ mod tests {
     fn connection_key_does_not_contain_raw_secrets() {
         let host_pass = "super-secret-password";
         let host_phrase = "super-secret-passphrase";
-        let host_key_path = "/home/alice/.ssh/id_rsa";
+        let host_key_data = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc123";
         let request = RemoteConnectionRequest {
             host: "example.com".to_string(),
             port: 22,
@@ -319,8 +315,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             password: Some(host_pass.to_string()),
             keychain_key_id: None,
-            private_key_data: None,
-            private_key_path: Some(host_key_path.to_string()),
+            private_key_data: Some(host_key_data.to_string()),
             passphrase: Some(host_phrase.to_string()),
             jump_host: None,
         };
@@ -336,8 +331,8 @@ mod tests {
             "key must not contain raw passphrase"
         );
         assert!(
-            !key.private_key_path_hash.contains(host_key_path),
-            "key must not contain raw private key path"
+            !key.private_key_data_hash.contains(host_key_data),
+            "key must not contain raw private key data"
         );
     }
 
@@ -345,7 +340,7 @@ mod tests {
     fn connection_key_does_not_contain_jump_host_raw_secrets() {
         let jump_pass = "jump-secret-password";
         let jump_phrase = "jump-secret-passphrase";
-        let jump_key_path = "/home/alice/.ssh/jump_id_rsa";
+        let jump_key_data = "-----BEGIN OPENSSH PRIVATE KEY-----\njump-key-data";
         let request = RemoteConnectionRequest {
             host: "example.com".to_string(),
             port: 22,
@@ -354,7 +349,6 @@ mod tests {
             password: Some("host-password".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
             passphrase: None,
             jump_host: Some(JumpHostConfig {
                 host: "jump.example.com".to_string(),
@@ -363,8 +357,7 @@ mod tests {
                 auth_method: AuthMethod::Key,
                 password: Some(jump_pass.to_string()),
                 keychain_key_id: None,
-                private_key_path: Some(jump_key_path.to_string()),
-                private_key_data: None,
+                private_key_data: Some(jump_key_data.to_string()),
                 passphrase: Some(jump_phrase.to_string()),
             }),
         };
@@ -381,8 +374,8 @@ mod tests {
             "key must not contain raw jump-host passphrase"
         );
         assert!(
-            !jump_host_key.private_key_path_hash.contains(jump_key_path),
-            "key must not contain raw jump-host private key path"
+            !jump_host_key.private_key_data_hash.contains(jump_key_data),
+            "key must not contain raw jump-host private key data"
         );
     }
 
@@ -395,8 +388,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             password: Some("secret".to_string()),
             keychain_key_id: None,
-            private_key_data: None,
-            private_key_path: Some("/path/to/key".to_string()),
+            private_key_data: Some("key-data".to_string()),
             passphrase: Some("phrase".to_string()),
             jump_host: Some(JumpHostConfig {
                 host: "jump.example.com".to_string(),
@@ -405,8 +397,7 @@ mod tests {
                 auth_method: AuthMethod::Key,
                 password: Some("jump-secret".to_string()),
                 keychain_key_id: None,
-                private_key_path: Some("/path/to/jump/key".to_string()),
-                private_key_data: None,
+                private_key_data: Some("jump-key-data".to_string()),
                 passphrase: Some("jump-phrase".to_string()),
             }),
         };
@@ -427,7 +418,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -439,7 +430,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -454,7 +445,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -466,7 +457,7 @@ mod tests {
             password: Some("bob:secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: None,
         };
@@ -487,7 +478,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: Some(JumpHostConfig {
                 host: "a".to_string(),
@@ -496,7 +487,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 password: None,
                 keychain_key_id: None,
-                private_key_path: None,
+                
                 private_key_data: None,
                 passphrase: None,
             }),
@@ -509,7 +500,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            private_key_path: None,
+            
             passphrase: None,
             jump_host: Some(JumpHostConfig {
                 host: "a:1".to_string(),
@@ -518,7 +509,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 password: None,
                 keychain_key_id: None,
-                private_key_path: None,
+                
                 private_key_data: None,
                 passphrase: None,
             }),
