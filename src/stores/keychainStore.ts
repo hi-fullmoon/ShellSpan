@@ -197,6 +197,7 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       kind: newKey.kind,
       privateKey: newKey.privateKey,
       publicKey: newKey.publicKey,
+      keyType,
     });
     set((state) => ({
       keys: [...state.keys, { id: newKey.id, label: newKey.label, keyType, kind: newKey.kind }],
@@ -228,6 +229,7 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       kind: updated.kind,
       privateKey: updated.privateKey,
       publicKey: updated.publicKey,
+      keyType,
     });
 
     set((state) => ({

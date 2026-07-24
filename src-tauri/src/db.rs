@@ -1235,6 +1235,7 @@ mod tests {
         let summaries = db.list_key_credentials().unwrap();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].id, "key-1");
+        assert_eq!(summaries[0].key_type, "rsa");
         assert_eq!(summaries[0].kind, crate::models::KeyCredentialKind::KeyFile);
 
         db.delete_key_credential("key-1").unwrap();
