@@ -1,0 +1,630 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  KeyRound,
+  Lock,
+  RefreshCwIcon,
+  SearchIcon,
+  SearchXIcon,
+  Trash2Icon,
+  PencilIcon,
+  CopyIcon,
+  FileKey,
+  UploadCloud,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
+import { useKeychainStore, type KeychainKeySummary } from '@/stores/keychainStore';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
+import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerFooter,
+} from '@/components/ui/drawer';
+import { IconActionButton } from './icon-action-button';
+import { ManagementCard, ManagementCardIcon } from './management-card';
+import { invokeDeriveEcdsaKeyFromPassword } from '@/lib/tauri';
+import type { KeychainKey, KeychainKeyKind } from '@/types';
+
+const KIND_BADGE_STYLES: Record<KeychainKeyKind, string> = {
+  password: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+  keyFile: 'bg-app-primary/10 text-app-primary',
+};
+
+const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
+  ECDSA: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+  RSA: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  ED25519: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  DSA: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
+};
+
+const keyTypeBadgeClass = (keyType: string): string =>
+  KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ??
+  'bg-app-surface-muted text-muted-foreground';
+
+interface KeyFormState {
+  kind: KeychainKeyKind;
+  label: string;
+  password: string;
+  privateKey: string;
+  publicKey: string;
+}
+
+const EMPTY_FORM: KeyFormState = {
+  kind: 'password',
+  label: '',
+  password: '',
+  privateKey: '',
+  publicKey: '',
+};
+
+function keyToForm(key: KeychainKey): KeyFormState {
+  return {
+    kind: key.kind,
+    label: key.label,
+    password: '',
+    privateKey: key.privateKey ?? '',
+    publicKey: key.publicKey ?? '',
+  };
+}
+
+export const KeychainPanel: React.FC = () => {
+  const { t } = useI18n();
+  const { success: showSuccess, error: showError } = useToast();
+  const { keys, initialized, hydrate, addKey, updateKey, removeKey } = useKeychainStore();
+  const [query, setQuery] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<KeychainKey | undefined>();
+  const [form, setForm] = useState<KeyFormState>(EMPTY_FORM);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeriving, setIsDeriving] = useState(false);
+  const [deleting, setDeleting] = useState<KeychainKeySummary | undefined>();
+
+  useEffect(() => {
+    if (!initialized) {
+      void hydrate();
+    }
+  }, [initialized, hydrate]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredKeys = useMemo(() => {
+    return keys.filter((key) => {
+      if (!normalizedQuery) return true;
+      return [key.label, key.keyType, key.kind]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedQuery);
+    });
+  }, [keys, normalizedQuery]);
+
+  const openCreate = (): void => {
+    setEditing(undefined);
+    setForm(EMPTY_FORM);
+    setErrors({});
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (key: KeychainKey): void => {
+    setEditing(key);
+    setForm(keyToForm(key));
+    setErrors({});
+    setDrawerOpen(true);
+  };
+
+  const updateField = <K extends keyof KeyFormState>(
+    key: K,
+    value: KeyFormState[K],
+  ): void => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    if (errors[key]) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
+  const deriveKeyPair = async (): Promise<void> => {
+    if (!form.password.trim()) {
+      setErrors((prev) => ({ ...prev, password: t('keychain.form.passwordRequired') }));
+      return;
+    }
+    setIsDeriving(true);
+    try {
+      const result = await invokeDeriveEcdsaKeyFromPassword(form.password);
+      setForm((prev) => ({
+        ...prev,
+        privateKey: result.privateKey,
+        publicKey: result.publicKey,
+      }));
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.publicKey;
+        return next;
+      });
+    } catch (error) {
+      showError(t('keychain.form.deriveFailed'));
+    } finally {
+      setIsDeriving(false);
+    }
+  };
+
+  const validate = (): boolean => {
+    const nextErrors: Record<string, string> = {};
+    if (!form.label.trim()) {
+      nextErrors.label = t('keychain.form.labelRequired');
+    }
+    if (form.kind === 'password') {
+      if (!editing && !form.password.trim()) {
+        nextErrors.password = t('keychain.form.passwordRequired');
+      }
+      if (!form.publicKey.trim()) {
+        nextErrors.publicKey = t('keychain.form.publicKeyRequired');
+      }
+    } else {
+      if (!form.privateKey.trim()) {
+        nextErrors.privateKey = t('keychain.form.privateKeyRequired');
+      }
+    }
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSave = async (): Promise<void> => {
+    if (isSubmitting || !validate()) return;
+
+    setIsSubmitting(true);
+    try {
+      const base = {
+        label: form.label.trim(),
+        publicKey: form.publicKey.trim() || undefined,
+      };
+
+      if (editing) {
+        await updateKey(editing.id, {
+          ...base,
+          kind: form.kind,
+          privateKey: form.privateKey.trim() || undefined,
+        });
+      } else {
+        await addKey({
+          ...base,
+          kind: form.kind,
+          privateKey: form.privateKey.trim() || undefined,
+        });
+      }
+      setDrawerOpen(false);
+      showSuccess(t('keychain.form.saveSuccess'));
+    } catch {
+      showError(t('keychain.form.saveFailed'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (): Promise<void> => {
+    if (!deleting) return;
+    try {
+      await removeKey(deleting.id);
+      setDeleting(undefined);
+      showSuccess(t('keychain.form.deleteSuccess'));
+    } catch {
+      showError(t('keychain.form.deleteFailed'));
+    }
+  };
+
+  const copyPublicKey = async (publicKey: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(publicKey);
+      showSuccess(t('keychain.form.copySuccess'));
+    } catch {
+      showError(t('keychain.form.copyFailed'));
+    }
+  };
+
+  return (
+    <TooltipProvider>
+      <div className="flex h-full flex-col">
+        <div className="flex shrink-0 flex-col gap-2 border-b border-app-border/50 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-app-text">
+              {t('workbench.keychain.title')}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {t('workbench.keychain.count', {
+                count: filteredKeys.length,
+                total: keys.length,
+              })}
+            </div>
+          </div>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <div className="relative min-w-0 flex-1 sm:w-64">
+              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('workbench.keychain.searchPlaceholder')}
+                className="h-8 pl-7"
+              />
+            </div>
+            <IconActionButton
+              className="size-7 text-app-text hover:bg-app-text/10"
+              aria-label={t('common.refresh')}
+              tooltip={t('common.refresh')}
+              onClick={hydrate}
+            >
+              <RefreshCwIcon
+                data-icon="inline-start"
+                className={cn(!initialized && 'animate-spin')}
+              />
+            </IconActionButton>
+            <Button size="sm" onClick={openCreate}>
+              {t('common.create')}
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2">
+          {!initialized && keys.length === 0 && <PanelLoadingState />}
+          {initialized && keys.length === 0 && (
+            <PanelEmptyState
+              title={t('workbench.keychain.empty')}
+              description={t('workbench.keychain.emptyDescription')}
+              icon={<KeyRound className="size-5" />}
+            />
+          )}
+          {initialized && keys.length > 0 && filteredKeys.length === 0 && (
+            <PanelEmptyState
+              title={t('workbench.keychain.filteredEmpty')}
+              description={t('common.noSearchResults')}
+              icon={<SearchXIcon className="size-5" />}
+            />
+          )}
+          {filteredKeys.length > 0 && (
+            <ResponsiveCardGrid
+              columns={1}
+              breakpoints={[
+                { minWidth: 800, columns: 2 },
+                { minWidth: 1100, columns: 3 },
+              ]}
+              gap="0.375rem"
+            >
+              {filteredKeys.map((key) => (
+                <ManagementCard key={key.id}>
+                  <div className="flex items-center gap-2.5">
+                    <ManagementCardIcon>
+                      {key.kind === 'password' ? <Lock /> : <FileKey />}
+                    </ManagementCardIcon>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="truncate text-[13px] font-medium leading-tight text-app-text">
+                        {key.label}
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span
+                          className={cn(
+                            'w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
+                            KIND_BADGE_STYLES[key.kind],
+                          )}
+                        >
+                          {t(`keychain.kind.${key.kind}`)}
+                        </span>
+                        <span
+                          className={cn(
+                            'w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
+                            keyTypeBadgeClass(key.keyType),
+                          )}
+                        >
+                          {key.keyType}
+                        </span>
+                      </div>
+                    </div>
+                    <IconActionButton
+                      onClick={() => {
+                        const fullKey = keys.find((k) => k.id === key.id);
+                        if (!fullKey) return;
+                        // Retrieve full key for editing.
+                        void useKeychainStore.getState().getKey(key.id).then((k) => {
+                          if (k) openEdit(k);
+                        });
+                      }}
+                      aria-label={t('common.edit')}
+                      tooltip={t('common.edit')}
+                      className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <PencilIcon data-icon="inline-start" className="text-app-primary" />
+                    </IconActionButton>
+                    <IconActionButton
+                      onClick={() => {
+                        const matched = keys.find((k) => k.id === key.id);
+                        if (matched) setDeleting(matched);
+                      }}
+                      aria-label={t('common.delete')}
+                      tooltip={t('common.delete')}
+                      className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Trash2Icon data-icon="inline-start" className="text-destructive" />
+                    </IconActionButton>
+                  </div>
+                </ManagementCard>
+              ))}
+            </ResponsiveCardGrid>
+          )}
+        </div>
+      </div>
+
+      <Drawer open={drawerOpen} onOpenChange={(open) => { if (!open) setDrawerOpen(false); }}>
+        <DrawerContent className="w-[420px] gap-0 p-0">
+          <DrawerHeader className="border-b border-app-border px-5 py-4">
+            <DrawerTitle>
+              {editing
+                ? t('workbench.keychain.edit')
+                : t('workbench.keychain.new')}
+            </DrawerTitle>
+          </DrawerHeader>
+          <div className="flex flex-col gap-5 px-5 py-4">
+            {!editing && (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">{t('keychain.form.kind')}</Label>
+                <ToggleGroup
+                  value={[form.kind]}
+                  onValueChange={(next) => {
+                    const selected = next[0] as KeychainKeyKind | undefined;
+                    if (selected) updateField('kind', selected);
+                  }}
+                  className="w-full"
+                >
+                  <ToggleGroupItem value="password" className="flex-1">
+                    {t('keychain.kind.password')}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="keyFile" className="flex-1">
+                    {t('keychain.kind.keyFile')}
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+            )}
+
+            <FormRow label={t('common.label')} error={errors.label}>
+              <Input
+                value={form.label}
+                onChange={(e) => updateField('label', e.target.value)}
+                placeholder={t('keychain.form.labelPlaceholder')}
+              />
+            </FormRow>
+
+            {form.kind === 'password' && (
+              <>
+                <FormRow label={t('common.password')} error={errors.password}>
+                  <div className="flex gap-2">
+                    <Input
+                      type="password"
+                      value={form.password}
+                      onChange={(e) => updateField('password', e.target.value)}
+                      placeholder={editing ? t('keychain.form.passwordEditPlaceholder') : t('keychain.form.passwordPlaceholder')}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={() => void deriveKeyPair()}
+                      disabled={isDeriving}
+                      className="shrink-0"
+                    >
+                      {isDeriving ? t('common.loading') : t('keychain.form.derive')}
+                    </Button>
+                  </div>
+                </FormRow>
+                <FormRow label={t('common.publicKey')} error={errors.publicKey}>
+                  <Textarea
+                    value={form.publicKey}
+                    onChange={(e) => updateField('publicKey', e.target.value)}
+                    placeholder={t('keychain.form.publicKeyPlaceholder')}
+                    rows={4}
+                    readOnly
+                  />
+                </FormRow>
+              </>
+            )}
+
+            {form.kind === 'keyFile' && (
+              <>
+                <FormRow label={t('common.privateKey')} error={errors.privateKey}>
+                  <Textarea
+                    value={form.privateKey}
+                    onChange={(e) => updateField('privateKey', e.target.value)}
+                    placeholder={t('keychain.form.privateKeyPlaceholder')}
+                    rows={6}
+                  />
+                </FormRow>
+                <FormRow label={t('common.publicKey')}>
+                  <Textarea
+                    value={form.publicKey}
+                    onChange={(e) => updateField('publicKey', e.target.value)}
+                    placeholder={t('keychain.form.publicKeyOptionalPlaceholder')}
+                    rows={4}
+                  />
+                </FormRow>
+                <FileDropZone
+                  onFileContent={(content) => {
+                    const detected = detectKeyContentType(content);
+                    if (detected === 'publicKey') {
+                      setForm((prev) => ({ ...prev, publicKey: content }));
+                    } else {
+                      setForm((prev) => ({ ...prev, privateKey: content }));
+                    }
+                  }}
+                />
+              </>
+            )}
+          </div>
+          <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
+            <Button
+              onClick={() => void handleSave()}
+              disabled={isSubmitting}
+              className="w-full"
+            >
+              {t('common.save')}
+            </Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
+
+      <AlertDialog
+        open={!!deleting}
+        onOpenChange={(open) => { if (!open) setDeleting(undefined); }}
+      >
+        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+            <AlertDialogTitle className="text-sm leading-5">
+              {t('workbench.keychain.deleteTitle')}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
+              {deleting
+                ? t('workbench.keychain.deleteConfirm', { name: deleting.label })
+                : ''}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+            <AlertDialogCancel size="sm" onClick={() => setDeleting(undefined)}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={() => void handleDelete()}>
+              {t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </TooltipProvider>
+  );
+};
+
+type KeyContentType = 'privateKey' | 'publicKey';
+
+function detectKeyContentType(content: string): KeyContentType {
+  const trimmed = content.trim().toLowerCase();
+  if (
+    trimmed.includes('-----begin') &&
+    trimmed.includes('private key-----')
+  ) {
+    return 'privateKey';
+  }
+  if (
+    trimmed.startsWith('ssh-rsa') ||
+    trimmed.startsWith('ssh-ed25519') ||
+    trimmed.startsWith('ecdsa-sha2-') ||
+    trimmed.startsWith('ssh-dss')
+  ) {
+    return 'publicKey';
+  }
+  return 'privateKey';
+}
+
+interface FileDropZoneProps {
+  onFileContent: (content: string) => void;
+}
+
+const FileDropZone: React.FC<FileDropZoneProps> = ({ onFileContent }) => {
+  const { t } = useI18n();
+  const [isDragging, setIsDragging] = useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const readFile = (file: File): void => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result;
+      if (typeof content === 'string') {
+        onFileContent(content);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setIsDragging(false);
+    const file = event.dataTransfer.files[0];
+    if (file) {
+      readFile(file);
+    }
+  };
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0];
+    if (file) {
+      readFile(file);
+    }
+  };
+
+  return (
+    <div
+      onClick={() => inputRef.current?.click()}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={cn(
+        'flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-5 text-center transition-colors',
+        isDragging
+          ? 'border-app-primary bg-app-primary/5 text-app-primary'
+          : 'border-app-border bg-app-surface-muted text-muted-foreground hover:border-app-primary/50 hover:text-app-text',
+      )}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pem,.key,.pub,.txt,text/*"
+        className="sr-only"
+        onChange={handleInputChange}
+      />
+      <UploadCloud className="size-5" />
+      <span className="text-xs font-medium">{t('keychain.form.dropFile')}</span>
+      <span className="text-[10px] text-muted-foreground">{t('keychain.form.dropFileHint')}</span>
+    </div>
+  );
+};
+
+interface FormRowProps {
+  label: string;
+  error?: string;
+  children: React.ReactNode;
+}
+
+const FormRow: React.FC<FormRowProps> = ({ label, error, children }) => {
+  return (
+    <div className="flex flex-col gap-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      {children}
+      {error && <span className="text-xs text-app-error">{error}</span>}
+    </div>
+  );
+};

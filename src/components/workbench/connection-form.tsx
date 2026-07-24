@@ -23,12 +23,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
-import { invokePickPrivateKeyFile } from '@/lib/tauri';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { invokePickPrivateKeyFile, invokeReadTextFile } from '@/lib/tauri';
 import type {
   AuthMethod,
   ConnectionProfile,
   JumpHostConfig,
 } from '@/types';
+
+interface JumpHostFormState extends JumpHostConfig {
+  privateKeyPath: string;
+}
 
 export interface ConnectionFormProps {
   open: boolean;
@@ -55,7 +60,7 @@ interface FormState {
   privateKeyPath: string;
   passphrase: string;
   useJumpHost: boolean;
-  jumpHost: JumpHostConfig;
+  jumpHost: JumpHostFormState;
 }
 
 const EMPTY_FORM: FormState = {
@@ -90,11 +95,20 @@ function profileToForm(profile: ConnectionProfile): FormState {
     authMethod: profile.authMethod,
     password: profile.password ?? '',
     keychainKeyId: profile.keychainKeyId ?? '',
-    privateKeyPath: profile.privateKeyPath ?? '',
+    privateKeyPath: '',
     passphrase: profile.passphrase ?? '',
     useJumpHost: !!profile.jumpHost,
-    jumpHost: profile.jumpHost ?? EMPTY_FORM.jumpHost,
+    jumpHost: profile.jumpHost
+      ? { ...profile.jumpHost, privateKeyPath: '' }
+      : EMPTY_FORM.jumpHost,
   };
+}
+
+function keyLabelFromPath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return 'Imported key';
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || 'Imported key';
 }
 
 export const ConnectionForm: React.FC<ConnectionFormProps> = ({
@@ -107,7 +121,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
 }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
-  const { keys, initialized, hydrate } = useKeychainStore();
+  const { keys, initialized, hydrate, addKey } = useKeychainStore();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -143,9 +157,9 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     }
   };
 
-  const updateJumpHost = <K extends keyof JumpHostConfig>(
+  const updateJumpHost = <K extends keyof JumpHostFormState>(
     key: K,
-    value: JumpHostConfig[K],
+    value: JumpHostFormState[K],
   ): void => {
     setForm((prev) => ({
       ...prev,
@@ -159,9 +173,18 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     const path = await invokePickPrivateKeyFile();
     if (!path) return;
     if (target === 'main') {
-      updateField('privateKeyPath', path);
+      setForm((prev) => ({
+        ...prev,
+        privateKeyPath: path,
+      }));
     } else {
-      updateJumpHost('privateKeyPath', path);
+      setForm((prev) => ({
+        ...prev,
+        jumpHost: {
+          ...prev.jumpHost,
+          privateKeyPath: path,
+        },
+      }));
     }
   };
 
@@ -181,24 +204,12 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     }
 
     if (form.authMethod === 'password') {
-      const canKeepStoredPassword = Boolean(
-        initial?.authMethod === 'password' &&
-          (initial.passwordStored || initial.password),
-      );
-      if (!form.password.trim() && !canKeepStoredPassword) {
+      if (!form.password.trim()) {
         nextErrors.password = t('connection.form.validation.passwordRequired');
       }
-    } else if (form.authMethod === 'keychainKey') {
-      if (!form.keychainKeyId.trim()) {
-        nextErrors.keychainKeyId = t(
-          'connection.form.validation.keychainKeyRequired',
-        );
-      }
-    } else if (form.authMethod === 'keyPath') {
-      if (!form.privateKeyPath.trim()) {
-        nextErrors.privateKeyPath = t(
-          'connection.form.validation.privateKeyRequired',
-        );
+    } else if (form.authMethod === 'key') {
+      if (!form.keychainKeyId.trim() && !form.privateKeyPath.trim()) {
+        nextErrors.keychainKeyId = t('connection.form.validation.keyRequired');
       }
     }
 
@@ -212,15 +223,10 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
       if (form.jumpHost.authMethod === 'password' && !form.jumpHost.password?.trim()) {
         nextErrors.jumpHostPassword = t('connection.form.validation.passwordRequired');
       }
-      if (form.jumpHost.authMethod === 'keychainKey' && !form.jumpHost.keychainKeyId?.trim()) {
-        nextErrors.jumpHostKeychainKeyId = t(
-          'connection.form.validation.keychainKeyRequired',
-        );
-      }
-      if (form.jumpHost.authMethod === 'keyPath' && !form.jumpHost.privateKeyPath?.trim()) {
-        nextErrors.jumpHostPrivateKeyPath = t(
-          'connection.form.validation.privateKeyRequired',
-        );
+      if (form.jumpHost.authMethod === 'key') {
+        if (!form.jumpHost.keychainKeyId?.trim() && !form.jumpHost.privateKeyPath?.trim()) {
+          nextErrors.jumpHostKeychainKeyId = t('connection.form.validation.keyRequired');
+        }
       }
     }
 
@@ -228,24 +234,57 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     return Object.keys(nextErrors).length === 0;
   };
 
-  const buildValues = (): Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'> => ({
-    name: form.name.trim(),
-    host: form.host.trim(),
-    port: Number(form.port),
-    username: form.username.trim(),
-    authMethod: form.authMethod,
-    password: form.password.trim() || undefined,
-    keychainKeyId: form.authMethod === 'keychainKey' ? form.keychainKeyId.trim() || undefined : undefined,
-    privateKeyPath: form.authMethod === 'keyPath' ? form.privateKeyPath.trim() || undefined : undefined,
-    passphrase: form.passphrase.trim() || undefined,
-    jumpHost: form.useJumpHost ? {
-      ...form.jumpHost,
-      password: form.jumpHost.password?.trim() || undefined,
-      keychainKeyId: form.jumpHost.authMethod === 'keychainKey' ? form.jumpHost.keychainKeyId?.trim() || undefined : undefined,
-      privateKeyPath: form.jumpHost.authMethod === 'keyPath' ? form.jumpHost.privateKeyPath?.trim() || undefined : undefined,
-      passphrase: form.jumpHost.passphrase?.trim() || undefined,
-    } : undefined,
-  });
+  const resolveKeyFromPath = async (path: string): Promise<string> => {
+    const content = await invokeReadTextFile(path);
+    const key = await addKey({
+      label: keyLabelFromPath(path),
+      kind: 'keyFile',
+      privateKey: content,
+    });
+    return key.id;
+  };
+
+  const buildValues = async (): Promise<Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>> => {
+    let keychainKeyId: string | undefined;
+    if (form.authMethod === 'key') {
+      if (form.privateKeyPath.trim()) {
+        keychainKeyId = await resolveKeyFromPath(form.privateKeyPath.trim());
+      } else if (form.keychainKeyId.trim()) {
+        keychainKeyId = form.keychainKeyId.trim();
+      }
+    }
+
+    let jumpHost: JumpHostConfig | undefined;
+    if (form.useJumpHost) {
+      let jumpKeychainKeyId: string | undefined;
+      if (form.jumpHost.authMethod === 'key') {
+        if (form.jumpHost.privateKeyPath?.trim()) {
+          jumpKeychainKeyId = await resolveKeyFromPath(form.jumpHost.privateKeyPath.trim());
+        } else if (form.jumpHost.keychainKeyId?.trim()) {
+          jumpKeychainKeyId = form.jumpHost.keychainKeyId.trim();
+        }
+      }
+      const { privateKeyPath: _jumpPrivateKeyPath, ...jumpHostRest } = form.jumpHost;
+      jumpHost = {
+        ...jumpHostRest,
+        password: form.jumpHost.authMethod === 'password' ? form.jumpHost.password?.trim() || undefined : undefined,
+        keychainKeyId: form.jumpHost.authMethod === 'key' ? jumpKeychainKeyId : undefined,
+        passphrase: form.jumpHost.authMethod === 'key' ? form.jumpHost.passphrase?.trim() || undefined : undefined,
+      };
+    }
+
+    return {
+      name: form.name.trim(),
+      host: form.host.trim(),
+      port: Number(form.port),
+      username: form.username.trim(),
+      authMethod: form.authMethod,
+      password: form.authMethod === 'password' ? form.password.trim() || undefined : undefined,
+      keychainKeyId,
+      passphrase: form.authMethod === 'key' ? form.passphrase.trim() || undefined : undefined,
+      jumpHost,
+    };
+  };
 
   const submit = async (
     action: ConnectionFormProps['onSubmit'],
@@ -255,7 +294,8 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     submissionInFlightRef.current = true;
     setIsSubmitting(true);
     try {
-      await action(buildValues());
+      const values = await buildValues();
+      await action(values);
       onClose();
     } catch {
       showError(t('connection.form.submitFailed'));
@@ -285,8 +325,8 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         ...prev,
         authMethod: value,
         password: value === 'password' ? prev.password : '',
-        keychainKeyId: value === 'keychainKey' ? prev.keychainKeyId : '',
-        privateKeyPath: value === 'keyPath' ? prev.privateKeyPath : '',
+        keychainKeyId: value === 'key' ? prev.keychainKeyId : '',
+        privateKeyPath: value === 'key' ? prev.privateKeyPath : '',
       }));
     } else {
       setForm((prev) => ({
@@ -295,8 +335,8 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
           ...prev.jumpHost,
           authMethod: value,
           password: value === 'password' ? prev.jumpHost.password : '',
-          keychainKeyId: value === 'keychainKey' ? prev.jumpHost.keychainKeyId : '',
-          privateKeyPath: value === 'keyPath' ? prev.jumpHost.privateKeyPath : '',
+          keychainKeyId: value === 'key' ? prev.jumpHost.keychainKeyId : '',
+          privateKeyPath: value === 'key' ? prev.jumpHost.privateKeyPath : '',
         },
       }));
     }
@@ -316,186 +356,181 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
           </p>
         </DrawerHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
-          <FormSection icon={Server} title={t('connection.form.section.general')}>
-            <FormRow label={t('common.name')} error={errors.name}>
-              <Input
-                value={form.name}
-                onChange={(e) => updateField('name', e.target.value)}
-                placeholder="My Server"
-              />
-            </FormRow>
-            <div className="grid grid-cols-3 gap-3">
-              <FormRow className="col-span-2" label={t('common.host')} error={errors.host}>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-col gap-5 px-5 py-4">
+            <FormSection icon={Server} title={t('connection.form.section.general')}>
+              <FormRow label={t('common.name')} error={errors.name}>
                 <Input
-                  value={form.host}
-                  onChange={(e) => updateField('host', e.target.value)}
-                  onBlur={handleHostBlur}
-                  placeholder="192.168.1.1"
+                  value={form.name}
+                  onChange={(e) => updateField('name', e.target.value)}
+                  placeholder="My Server"
                 />
               </FormRow>
-              <FormRow label={t('common.port')} error={errors.port}>
-                <Input
-                  value={form.port}
-                  onChange={(e) => updateField('port', e.target.value)}
-                  type="number"
-                />
-              </FormRow>
-            </div>
-            <FormRow label={t('common.username')} error={errors.username}>
-              <Input
-                value={form.username}
-                onChange={(e) => updateField('username', e.target.value)}
-                placeholder="root"
-              />
-            </FormRow>
-          </FormSection>
-
-          <FormSection icon={KeyRound} title={t('connection.form.section.auth')}>
-            <AuthMethodToggle
-              value={form.authMethod}
-              onChange={(value) => handleAuthMethodChange(value, 'main')}
-            />
-            {form.authMethod === 'password' && (
-              <FormRow label={t('common.password')} error={errors.password}>
-                <Input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => updateField('password', e.target.value)}
-                  placeholder={
-                    initial?.passwordStored
-                      ? t('connection.form.passwordStoredPlaceholder')
-                      : undefined
-                  }
-                />
-              </FormRow>
-            )}
-            {form.authMethod === 'keychainKey' && (
-              <FormRow label={t('common.keychainKey')} error={errors.keychainKeyId}>
-                <KeychainKeySelector
-                  value={form.keychainKeyId}
-                  keys={keys}
-                  onChange={(value) => updateField('keychainKeyId', value)}
-                />
-              </FormRow>
-            )}
-            {form.authMethod === 'keyPath' && (
-              <>
-                <FormRow label={t('common.privateKey')} error={errors.privateKeyPath}>
-                  <PrivateKeyPicker
-                    value={form.privateKeyPath}
-                    onChange={(value) => updateField('privateKeyPath', value)}
-                    onBrowse={() => pickPrivateKey('main')}
+              <div className="grid grid-cols-3 gap-2">
+                <FormRow className="col-span-2" label={t('common.host')} error={errors.host}>
+                  <Input
+                    value={form.host}
+                    onChange={(e) => updateField('host', e.target.value)}
+                    onBlur={handleHostBlur}
+                    placeholder="192.168.1.1"
                   />
                 </FormRow>
-                <FormRow label={t('common.passphrase')}>
+                <FormRow label={t('common.port')} error={errors.port}>
+                  <Input
+                    value={form.port}
+                    onChange={(e) => updateField('port', e.target.value)}
+                    type="number"
+                  />
+                </FormRow>
+              </div>
+              <FormRow label={t('common.username')} error={errors.username}>
+                <Input
+                  value={form.username}
+                  onChange={(e) => updateField('username', e.target.value)}
+                  placeholder="root"
+                />
+              </FormRow>
+            </FormSection>
+
+            <FormSection icon={KeyRound} title={t('connection.form.section.auth')}>
+              <AuthMethodToggle
+                value={form.authMethod}
+                onChange={(value) => handleAuthMethodChange(value, 'main')}
+              />
+              {form.authMethod === 'password' && (
+                <FormRow label={t('common.password')} error={errors.password}>
                   <Input
                     type="password"
-                    value={form.passphrase}
-                    onChange={(e) => updateField('passphrase', e.target.value)}
+                    value={form.password}
+                    onChange={(e) => updateField('password', e.target.value)}
                   />
                 </FormRow>
-              </>
-            )}
-          </FormSection>
-
-          <FormSection icon={Network} title={t('connection.form.jumpHost')}>
-            <div
-              className={cn(
-                'flex flex-col rounded-lg border border-app-border transition-colors',
-                form.useJumpHost && 'bg-muted/50',
               )}
-            >
-              <div className="flex items-center justify-between gap-3 px-3.5 py-3">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-sm font-medium text-app-text">
-                    {t('connection.form.useJumpHost')}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {t('connection.form.jumpHostHint')}
-                  </span>
-                </div>
-                <Switch
-                  checked={form.useJumpHost}
-                  onCheckedChange={(checked) =>
-                    updateField('useJumpHost', checked)
-                  }
-                />
-              </div>
-              {form.useJumpHost && (
-                <div className="flex flex-col gap-2.5 border-t border-app-border px-3.5 py-3">
-                  <div className="grid grid-cols-3 gap-3">
-                    <FormRow className="col-span-2" label={t('common.host')} error={errors.jumpHostHost}>
-                      <Input
-                        value={form.jumpHost.host}
-                        onChange={(e) => updateJumpHost('host', e.target.value)}
-                      />
-                    </FormRow>
-                    <FormRow label={t('common.port')}>
-                      <Input
-                        value={form.jumpHost.port}
-                        onChange={(e) =>
-                          updateJumpHost('port', Number(e.target.value))
-                        }
-                        type="number"
-                      />
-                    </FormRow>
-                  </div>
-                  <FormRow label={t('common.username')} error={errors.jumpHostUsername}>
+              {form.authMethod === 'key' && (
+                <>
+                  <KeyAuthInput
+                    keychainKeyId={form.keychainKeyId}
+                    privateKeyPath={form.privateKeyPath}
+                    keys={keys}
+                    errors={{
+                      keychainKeyId: errors.keychainKeyId,
+                      privateKeyPath: errors.privateKeyPath,
+                    }}
+                    onKeychainKeyIdChange={(value) =>
+                      setForm((prev) => ({ ...prev, keychainKeyId: value }))
+                    }
+                    onPrivateKeyPathChange={(value) =>
+                      setForm((prev) => ({ ...prev, privateKeyPath: value }))
+                    }
+                    onBrowse={() => pickPrivateKey('main')}
+                  />
+                  <FormRow label={t('common.passphrase')}>
                     <Input
-                      value={form.jumpHost.username}
-                      onChange={(e) => updateJumpHost('username', e.target.value)}
+                      type="password"
+                      value={form.passphrase}
+                      onChange={(e) => updateField('passphrase', e.target.value)}
                     />
                   </FormRow>
-                  <AuthMethodToggle
-                    value={form.jumpHost.authMethod}
-                    onChange={(value) => handleAuthMethodChange(value, 'jump')}
+                </>
+              )}
+            </FormSection>
+
+            <FormSection icon={Network} title={t('connection.form.jumpHost')}>
+              <div
+                className={cn(
+                  'flex flex-col rounded-lg border border-app-border transition-colors',
+                  form.useJumpHost && 'bg-muted/50',
+                )}
+              >
+                <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium text-app-text">
+                      {t('connection.form.useJumpHost')}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {t('connection.form.jumpHostHint')}
+                    </span>
+                  </div>
+                  <Switch
+                    checked={form.useJumpHost}
+                    onCheckedChange={(checked) =>
+                      updateField('useJumpHost', checked)
+                    }
                   />
-                  {form.jumpHost.authMethod === 'password' && (
-                    <FormRow label={t('common.password')} error={errors.jumpHostPassword}>
+                </div>
+                {form.useJumpHost && (
+                  <div className="flex flex-col gap-2.5 border-t border-app-border px-3.5 py-3">
+                    <div className="grid grid-cols-3 gap-3">
+                      <FormRow className="col-span-2" label={t('common.host')} error={errors.jumpHostHost}>
+                        <Input
+                          value={form.jumpHost.host}
+                          onChange={(e) => updateJumpHost('host', e.target.value)}
+                        />
+                      </FormRow>
+                      <FormRow label={t('common.port')}>
+                        <Input
+                          value={form.jumpHost.port}
+                          onChange={(e) =>
+                            updateJumpHost('port', Number(e.target.value))
+                          }
+                          type="number"
+                        />
+                      </FormRow>
+                    </div>
+                    <FormRow label={t('common.username')} error={errors.jumpHostUsername}>
                       <Input
-                        type="password"
-                        value={form.jumpHost.password ?? ''}
-                        onChange={(e) => updateJumpHost('password', e.target.value)}
+                        value={form.jumpHost.username}
+                        onChange={(e) => updateJumpHost('username', e.target.value)}
                       />
                     </FormRow>
-                  )}
-                  {form.jumpHost.authMethod === 'keychainKey' && (
-                    <FormRow label={t('common.keychainKey')} error={errors.jumpHostKeychainKeyId}>
-                      <KeychainKeySelector
-                        value={form.jumpHost.keychainKeyId ?? ''}
-                        keys={keys}
-                        onChange={(value) => updateJumpHost('keychainKeyId', value)}
-                      />
-                    </FormRow>
-                  )}
-                  {form.jumpHost.authMethod === 'keyPath' && (
-                    <>
-                      <FormRow label={t('common.privateKey')} error={errors.jumpHostPrivateKeyPath}>
-                        <PrivateKeyPicker
-                          value={form.jumpHost.privateKeyPath ?? ''}
-                          onChange={(value) =>
+                    <AuthMethodToggle
+                      value={form.jumpHost.authMethod}
+                      onChange={(value) => handleAuthMethodChange(value, 'jump')}
+                    />
+                    {form.jumpHost.authMethod === 'password' && (
+                      <FormRow label={t('common.password')} error={errors.jumpHostPassword}>
+                        <Input
+                          type="password"
+                          value={form.jumpHost.password ?? ''}
+                          onChange={(e) => updateJumpHost('password', e.target.value)}
+                        />
+                      </FormRow>
+                    )}
+                    {form.jumpHost.authMethod === 'key' && (
+                      <>
+                        <KeyAuthInput
+                          keychainKeyId={form.jumpHost.keychainKeyId ?? ''}
+                          privateKeyPath={form.jumpHost.privateKeyPath ?? ''}
+                          keys={keys}
+                          errors={{
+                            keychainKeyId: errors.jumpHostKeychainKeyId,
+                            privateKeyPath: errors.jumpHostPrivateKeyPath,
+                          }}
+                          onKeychainKeyIdChange={(value) =>
+                            updateJumpHost('keychainKeyId', value)
+                          }
+                          onPrivateKeyPathChange={(value) =>
                             updateJumpHost('privateKeyPath', value)
                           }
                           onBrowse={() => pickPrivateKey('jump')}
                         />
-                      </FormRow>
-                      <FormRow label={t('common.passphrase')}>
-                        <Input
-                          type="password"
-                          value={form.jumpHost.passphrase ?? ''}
-                          onChange={(e) =>
-                            updateJumpHost('passphrase', e.target.value)
-                          }
-                        />
-                      </FormRow>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </FormSection>
-        </div>
+                        <FormRow label={t('common.passphrase')}>
+                          <Input
+                            type="password"
+                            value={form.jumpHost.passphrase ?? ''}
+                            onChange={(e) =>
+                              updateJumpHost('passphrase', e.target.value)
+                            }
+                          />
+                        </FormRow>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </FormSection>
+          </div>
+        </ScrollArea>
 
         <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
           <div className="flex w-full">
@@ -576,80 +611,80 @@ const AuthMethodToggle: React.FC<AuthMethodToggleProps> = ({ value, onChange }) 
       <ToggleGroupItem value="password" className="flex-1">
         {t('connection.form.auth.password')}
       </ToggleGroupItem>
-      <ToggleGroupItem value="keychainKey" className="flex-1">
-        {t('connection.form.auth.keychainKey')}
-      </ToggleGroupItem>
-      <ToggleGroupItem value="keyPath" className="flex-1">
-        {t('connection.form.auth.keyPath')}
+      <ToggleGroupItem value="key" className="flex-1">
+        {t('connection.form.auth.key')}
       </ToggleGroupItem>
     </ToggleGroup>
   );
 };
 
-interface KeychainKeySelectorProps {
-  value: string;
+interface KeyAuthInputProps {
+  keychainKeyId: string;
+  privateKeyPath: string;
   keys: { id: string; label: string }[];
-  onChange: (value: string) => void;
-}
-
-const KeychainKeySelector: React.FC<KeychainKeySelectorProps> = ({
-  value,
-  keys,
-  onChange,
-}) => {
-  const { t } = useI18n();
-  const selectedLabel = value
-    ? keys.find((key) => key.id === value)?.label
-    : undefined;
-  if (keys.length === 0) {
-    return (
-      <div className="flex items-center justify-between rounded-lg border border-dashed border-app-border px-3 py-2 text-sm text-muted-foreground">
-        <span>{t('connection.form.noKeychainKeys')}</span>
-      </div>
-    );
-  }
-  return (
-    <Select value={value || ''} onValueChange={(next) => onChange(next ?? '')}>
-      <SelectTrigger>
-        <SelectValue placeholder={t('connection.form.selectKeychainKey')}>
-          {selectedLabel}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        {keys.map((key) => (
-          <SelectItem key={key.id} value={key.id}>
-            {key.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-};
-
-interface PrivateKeyPickerProps {
-  value: string;
-  onChange: (value: string) => void;
+  errors: {
+    keychainKeyId?: string;
+    privateKeyPath?: string;
+  };
+  onKeychainKeyIdChange: (value: string) => void;
+  onPrivateKeyPathChange: (value: string) => void;
   onBrowse: () => void;
 }
 
-const PrivateKeyPicker: React.FC<PrivateKeyPickerProps> = ({
-  value,
-  onChange,
+const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
+  keychainKeyId,
+  privateKeyPath,
+  keys,
+  errors,
+  onKeychainKeyIdChange,
+  onPrivateKeyPathChange,
   onBrowse,
 }) => {
   const { t } = useI18n();
   return (
-    <div className="flex gap-2">
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="/path/to/key"
-        className="flex-1"
-      />
-      <Button variant="outline" className="shrink-0" onClick={onBrowse}>
-        <FolderOpen />
-        {t('connection.form.browse')}
-      </Button>
+    <div className="flex flex-col gap-2.5">
+      <FormRow label={t('common.keychainKey')} error={errors.keychainKeyId}>
+        {keys.length === 0 ? (
+          <div className="flex items-center justify-between rounded-lg border border-dashed border-app-border px-3 py-2 text-sm text-muted-foreground">
+            <span>{t('connection.form.noKeychainKeys')}</span>
+          </div>
+        ) : (
+          <Select value={keychainKeyId} onValueChange={(next) => onKeychainKeyIdChange(next ?? '')}>
+            <SelectTrigger>
+              <SelectValue placeholder={t('connection.form.selectKeychainKey')}>
+                {keys.find((key) => key.id === keychainKeyId)?.label}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {keys.map((key) => (
+                <SelectItem key={key.id} value={key.id}>
+                  {key.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </FormRow>
+
+      <FormRow label={t('common.privateKey')} error={errors.privateKeyPath}>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex gap-2">
+            <Input
+              value={privateKeyPath}
+              onChange={(e) => onPrivateKeyPathChange(e.target.value)}
+              placeholder="/path/to/key"
+              className="flex-1"
+            />
+            <Button variant="outline" className="shrink-0" onClick={onBrowse}>
+              <FolderOpen />
+              {t('connection.form.browse')}
+            </Button>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {t('connection.form.privateKeyHint')}
+          </span>
+        </div>
+      </FormRow>
     </div>
   );
 };

@@ -2,37 +2,37 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProfileStore } from '../profileStore';
 
 const {
-  invokeRemovePassword,
-  invokeRetrievePassword,
-  invokeStorePassword,
   invokeAddProfile,
   invokeUpdateProfile,
   invokeRemoveProfile,
   invokeListProfiles,
   invokeHasExistingData,
   invokeMigrateProfiles,
+  invokeStoreProfilePassword,
+  invokeRetrieveProfilePassword,
+  invokeDeleteProfilePassword,
 } = vi.hoisted(() => ({
-  invokeRemovePassword: vi.fn(),
-  invokeRetrievePassword: vi.fn(),
-  invokeStorePassword: vi.fn(),
   invokeAddProfile: vi.fn(),
   invokeUpdateProfile: vi.fn(),
   invokeRemoveProfile: vi.fn(),
   invokeListProfiles: vi.fn().mockResolvedValue([]),
   invokeHasExistingData: vi.fn().mockResolvedValue(true),
   invokeMigrateProfiles: vi.fn().mockResolvedValue(undefined),
+  invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeDeleteProfilePassword: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/tauri', () => ({
-  invokeRemovePassword,
-  invokeRetrievePassword,
-  invokeStorePassword,
   invokeAddProfile,
   invokeUpdateProfile,
   invokeRemoveProfile,
   invokeListProfiles,
   invokeHasExistingData,
   invokeMigrateProfiles,
+  invokeStoreProfilePassword,
+  invokeRetrieveProfilePassword,
+  invokeDeleteProfilePassword,
 }));
 
 const profileValues = {
@@ -44,42 +44,34 @@ const profileValues = {
   password: 'secret',
 };
 
-describe('profileStore keychain lifecycle', () => {
+describe('profileStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    invokeStorePassword.mockResolvedValue(undefined);
-    invokeRemovePassword.mockResolvedValue(undefined);
-    invokeRetrievePassword.mockResolvedValue(null);
     invokeAddProfile.mockResolvedValue(undefined);
     invokeUpdateProfile.mockResolvedValue(undefined);
     invokeRemoveProfile.mockResolvedValue(undefined);
     invokeListProfiles.mockResolvedValue([]);
+    invokeStoreProfilePassword.mockResolvedValue(undefined);
+    invokeRetrieveProfilePassword.mockResolvedValue(undefined);
+    invokeDeleteProfilePassword.mockResolvedValue(undefined);
     useProfileStore.setState({ profiles: [], initialized: false });
   });
 
-  it('stores the secret before persisting only credential metadata', async () => {
+  it('adds a profile and stores the password in the keychain', async () => {
     const profile = await useProfileStore.getState().addProfile(profileValues);
 
-    expect(invokeStorePassword).toHaveBeenCalledWith(profile.id, 'secret');
     expect(invokeAddProfile).toHaveBeenCalledWith(expect.objectContaining({
       id: profile.id,
-      passwordStored: true,
     }));
-    expect(profile).toMatchObject({ passwordStored: true });
-    expect(profile.password).toBeUndefined();
-    expect(useProfileStore.getState().profiles[0].password).toBeUndefined();
+    expect(invokeAddProfile).toHaveBeenCalledWith(expect.not.objectContaining({
+      password: 'secret',
+    }));
+    expect(invokeStoreProfilePassword).toHaveBeenCalledWith(profile.id, 'secret');
+    expect(profile.password).toBe('secret');
+    expect(useProfileStore.getState().profiles[0].password).toBe('secret');
   });
 
-  it('does not persist a profile when secure storage fails', async () => {
-    invokeStorePassword.mockRejectedValue(new Error('keychain unavailable'));
-
-    await expect(
-      useProfileStore.getState().addProfile(profileValues),
-    ).rejects.toThrow('keychain unavailable');
-    expect(useProfileStore.getState().profiles).toHaveLength(0);
-  });
-
-  it('does not expose a profile when the database insert fails', async () => {
+  it('does not persist a profile when the database insert fails', async () => {
     invokeAddProfile.mockRejectedValue(new Error('database unavailable'));
 
     await expect(
@@ -87,16 +79,14 @@ describe('profileStore keychain lifecycle', () => {
     ).rejects.toThrow('database unavailable');
 
     expect(useProfileStore.getState().profiles).toHaveLength(0);
-    expect(invokeRemovePassword).toHaveBeenCalledTimes(1);
   });
 
-  it('removes an obsolete password when authentication changes to key', async () => {
+  it('updates a profile and clears password fields', async () => {
     useProfileStore.setState({
       profiles: [
         {
           ...profileValues,
-          password: undefined,
-          passwordStored: true,
+          password: 'secret',
           id: 'profile-1',
           createdAt: 1,
           updatedAt: 1,
@@ -105,23 +95,23 @@ describe('profileStore keychain lifecycle', () => {
     });
 
     await useProfileStore.getState().updateProfile('profile-1', {
-      authMethod: 'keyPath',
-      privateKeyPath: '/keys/id_ed25519',
+      authMethod: 'key',
+      keychainKeyId: 'key-1',
     });
 
-    expect(invokeRemovePassword).toHaveBeenCalledWith('profile-1');
     expect(useProfileStore.getState().profiles[0]).toMatchObject({
-      authMethod: 'keyPath',
-      passwordStored: false,
+      authMethod: 'key',
+      keychainKeyId: 'key-1',
+      password: undefined,
     });
+    expect(invokeDeleteProfilePassword).toHaveBeenCalledWith('profile-1');
   });
 
-  it('keeps profile and keychain state unchanged when a database update fails', async () => {
+  it('keeps profile state unchanged when a database update fails', async () => {
     useProfileStore.setState({
       profiles: [{
         ...profileValues,
         password: undefined,
-        passwordStored: true,
         id: 'profile-1',
         createdAt: 1,
         updatedAt: 1,
@@ -130,35 +120,11 @@ describe('profileStore keychain lifecycle', () => {
     invokeUpdateProfile.mockRejectedValue(new Error('database unavailable'));
 
     await expect(
-      useProfileStore.getState().updateProfile('profile-1', { authMethod: 'keyPath' }),
+      useProfileStore.getState().updateProfile('profile-1', { authMethod: 'key' }),
     ).rejects.toThrow('database unavailable');
 
-    expect(invokeRemovePassword).not.toHaveBeenCalled();
     expect(useProfileStore.getState().profiles[0]).toMatchObject({
       authMethod: 'password',
-      passwordStored: true,
     });
-  });
-
-  it('persists passwordStored=false when removing a stored password', async () => {
-    useProfileStore.setState({
-      profiles: [{
-        ...profileValues,
-        password: undefined,
-        passwordStored: true,
-        id: 'profile-1',
-        createdAt: 1,
-        updatedAt: 1,
-      }],
-    });
-
-    await useProfileStore.getState().removeStoredPassword('profile-1');
-
-    expect(invokeUpdateProfile).toHaveBeenCalledWith(
-      'profile-1',
-      expect.objectContaining({ passwordStored: false }),
-    );
-    expect(invokeRemovePassword).toHaveBeenCalledWith('profile-1');
-    expect(useProfileStore.getState().profiles[0].passwordStored).toBe(false);
   });
 });

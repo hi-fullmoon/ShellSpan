@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, fireEvent, screen } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { ConnectionForm } from '../connection-form';
 import type { ConnectionProfile } from '@/types';
 
@@ -14,6 +14,8 @@ vi.mock('@/hooks/useI18n', () => ({
 
 vi.mock('@/lib/tauri', () => ({
   invokePickPrivateKeyFile: vi.fn(),
+  invokeReadTextFile: vi.fn(() => Promise.resolve('')),
+  invokeListKeyCredentials: vi.fn(() => Promise.resolve([])),
 }));
 
 const profile: ConnectionProfile = {
@@ -72,12 +74,16 @@ describe('ConnectionForm', () => {
   it('renders the form body as a constrained scrollable region', () => {
     render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
 
-    const formBody = document.body.querySelector(
-      '[data-slot="drawer-content"] > div.overflow-y-auto',
+    const scrollArea = document.body.querySelector(
+      '[data-slot="drawer-content"] > [data-slot="scroll-area"]',
     );
+    expect(scrollArea).toBeInTheDocument();
+    expect(scrollArea).toHaveClass('flex-1');
+    expect(scrollArea).toHaveClass('min-h-0');
+
+    const formBody = scrollArea?.querySelector('[data-slot="scroll-area-viewport"] > div');
     expect(formBody).toBeInTheDocument();
-    expect(formBody).toHaveClass('flex-1');
-    expect(formBody).toHaveClass('min-h-0');
+    expect(formBody).toHaveClass('flex-col');
     expect(formBody).toHaveClass('gap-5');
   });
 
@@ -124,12 +130,11 @@ describe('ConnectionForm', () => {
     expect(nameInput.value).toBe('Other Server');
   });
 
-  it('keeps an existing keychain password when the field is left blank', () => {
+  it('requires a password when password auth is selected', () => {
     const onSubmit = vi.fn();
     const storedProfile: ConnectionProfile = {
       ...profile,
       password: undefined,
-      passwordStored: true,
     };
     render(
       <ConnectionForm
@@ -142,15 +147,13 @@ describe('ConnectionForm', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
 
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ password: undefined }),
-    );
+    expect(onSubmit).not.toHaveBeenCalled();
     expect(
-      screen.queryByText('connection.form.validation.passwordRequired'),
-    ).not.toBeInTheDocument();
+      screen.getByText('connection.form.validation.passwordRequired'),
+    ).toBeInTheDocument();
   });
 
-  it('calls onConnect instead of onSubmit when the primary action is clicked', () => {
+  it('calls onConnect instead of onSubmit when the primary action is clicked', async () => {
     const onSubmit = vi.fn();
     const onConnect = vi.fn();
     render(
@@ -165,13 +168,15 @@ describe('ConnectionForm', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
 
-    expect(onConnect).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'My Server' }),
-    );
+    await waitFor(() => {
+      expect(onConnect).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'My Server' }),
+      );
+    });
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('submits only once when the primary action is clicked repeatedly', () => {
+  it('submits only once when the primary action is clicked repeatedly', async () => {
     const onConnect = vi.fn(() => new Promise<void>(() => {}));
     render(
       <ConnectionForm
@@ -187,7 +192,9 @@ describe('ConnectionForm', () => {
     fireEvent.click(connectButton);
     fireEvent.click(connectButton);
 
-    expect(onConnect).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(onConnect).toHaveBeenCalledTimes(1);
+    });
     expect(connectButton).toBeDisabled();
     expect(
       screen.getByRole('button', { name: 'connection.form.moreActions' }),

@@ -7,7 +7,7 @@ export type TerminalColorScheme = 'app' | 'oneDark' | 'solarizedDark' | 'light';
 export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'credentials' | 'logs' | 'settings';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'logs' | 'settings';
 export type LogSource = 'frontend' | 'backend';
 export type ShortcutAction =
   | 'openWorkbench'
@@ -29,7 +29,8 @@ export type ShortcutAction =
   | 'terminalSplitDown'
   | 'terminalClosePane';
 export type ShortcutBindings = Record<ShortcutAction, string>;
-export type AuthMethod = 'password' | 'keychainKey' | 'keyPath';
+export type AuthMethod = 'password' | 'key';
+export type KeychainKeyKind = 'password' | 'keyFile';
 export type RemoteFileKind = 'directory' | 'file' | 'symlink' | 'other';
 export type SessionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 export type ClosedReasonKind =
@@ -42,9 +43,9 @@ export type ClosedReasonKind =
 export interface KeychainKey {
   id: string;
   label: string;
-  privateKey: string;
+  kind: KeychainKeyKind;
+  privateKey?: string;
   publicKey?: string;
-  certificate?: string;
   keyType?: string;
   createdAt: number;
   updatedAt: number;
@@ -57,7 +58,7 @@ export interface JumpHostConfig {
   authMethod: AuthMethod;
   password?: string;
   keychainKeyId?: string;
-  privateKeyPath?: string;
+  privateKeyData?: string;
   passphrase?: string;
 }
 
@@ -69,9 +70,8 @@ export interface ConnectionProfile {
   username: string;
   authMethod: AuthMethod;
   password?: string;
-  passwordStored?: boolean;
   keychainKeyId?: string;
-  privateKeyPath?: string;
+  privateKeyData?: string;
   passphrase?: string;
   jumpHost?: JumpHostConfig;
   createdAt: number;
@@ -94,7 +94,7 @@ export interface SessionCreateRequest {
   authMethod: AuthMethod;
   password?: string;
   keychainKeyId?: string;
-  privateKeyPath?: string;
+  privateKeyData?: string;
   passphrase?: string;
   terminalCols: number;
   terminalRows: number;
@@ -108,7 +108,7 @@ export interface RemoteConnectionRequest {
   authMethod: AuthMethod;
   password?: string;
   keychainKeyId?: string;
-  privateKeyPath?: string;
+  privateKeyData?: string;
   passphrase?: string;
   jumpHost?: JumpHostConfig;
 }
@@ -211,6 +211,58 @@ export interface ClosedEvent {
   reasonKind: ClosedReasonKind;
   retryable: boolean;
 }
+
+export interface SessionErrorEventHostKeyUnknown {
+  type: 'HostKeyUnknown';
+  payload: {
+    sessionId: string;
+    host: string;
+    port: number;
+    fingerprint?: string;
+  };
+}
+
+export interface SessionErrorEventHostKeyMismatch {
+  type: 'HostKeyMismatch';
+  payload: {
+    sessionId: string;
+    host: string;
+    port: number;
+  };
+}
+
+export type SessionErrorEvent =
+  | SessionErrorEventHostKeyUnknown
+  | SessionErrorEventHostKeyMismatch;
+
+export interface RemoteFsErrorHostKeyUnknown {
+  type: 'HostKeyUnknown';
+  payload: {
+    host: string;
+    port: number;
+    fingerprint?: string;
+  };
+}
+
+export interface RemoteFsErrorHostKeyMismatch {
+  type: 'HostKeyMismatch';
+  payload: {
+    host: string;
+    port: number;
+  };
+}
+
+export interface RemoteFsErrorOther {
+  type: 'Other';
+  payload: {
+    message: string;
+  };
+}
+
+export type RemoteFsError =
+  | RemoteFsErrorHostKeyUnknown
+  | RemoteFsErrorHostKeyMismatch
+  | RemoteFsErrorOther;
 
 export interface UploadProgressEvent {
   operationId: string;
@@ -361,9 +413,7 @@ export interface ProfileRow {
   port: number;
   username: string;
   authMethod: AuthMethod;
-  passwordStored: boolean;
   keychainKeyId?: string;
-  privateKeyPath?: string;
   jumpHostConfig?: string; // JSON serialized JumpHostConfig
   createdAt: number;
   updatedAt: number;

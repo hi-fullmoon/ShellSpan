@@ -3,14 +3,6 @@ import { CircleAlertIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { createLogger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 
 const logger = createLogger('error-boundary');
 
@@ -45,37 +37,39 @@ const AppErrorFallback: React.FC<AppErrorFallbackProps> = ({
       role="alert"
       className="flex h-full min-h-screen w-full items-center justify-center bg-app-bg p-4"
     >
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <span className="flex size-10 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+      <div className="w-full max-w-md overflow-hidden rounded-lg border border-app-border bg-app-surface shadow-[var(--shadow-dialog)]">
+        <div className="px-4 py-2.5 pr-11">
+          <div className="mb-2 inline-flex size-10 items-center justify-center rounded-md bg-app-error/10 text-app-error">
             <CircleAlertIcon className="size-5" />
-          </span>
-          <CardTitle>{t('app.errorBoundary.title')}</CardTitle>
-          <CardDescription>
+          </div>
+          <h2 className="font-heading text-sm font-medium leading-5 text-app-text">
+            {t('app.errorBoundary.title')}
+          </h2>
+          <p className="text-sm leading-5 text-app-text-soft">
             {t('app.errorBoundary.description')}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none font-medium text-foreground">
+          </p>
+        </div>
+        <div className="flex min-w-0 flex-col gap-3 px-4 py-3">
+          <details className="text-xs text-app-text-soft">
+            <summary className="cursor-pointer select-none font-medium text-app-text">
               {t('app.errorBoundary.details')}
             </summary>
-            <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-[11px] leading-4">
+            <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md bg-app-surface-muted p-3 font-mono text-[11px] leading-4">
               {error.message}
             </pre>
           </details>
-        </CardContent>
-        <CardFooter className="justify-end gap-2">
-          <Button variant="outline" onClick={onRetry}>
+        </div>
+        <div className="flex flex-row justify-end gap-2 bg-app-surface px-4 py-2.5">
+          <Button variant="outline" size="sm" onClick={onRetry}>
             <RotateCcwIcon data-icon="inline-start" />
             {t('common.retry')}
           </Button>
-          <Button onClick={onReload}>
+          <Button size="sm" onClick={onReload}>
             <RefreshCwIcon data-icon="inline-start" />
             {t('app.errorBoundary.reload')}
           </Button>
-        </CardFooter>
-      </Card>
+        </div>
+      </div>
     </main>
   );
 };

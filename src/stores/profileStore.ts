@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import type { AuthMethod, ConnectionProfile, JumpHostConfig, ProfileRow } from '@/types';
 import {
-  invokeRemovePassword,
-  invokeRetrievePassword,
-  invokeStorePassword,
   invokeListProfiles,
   invokeAddProfile,
   invokeUpdateProfile,
   invokeRemoveProfile,
+  invokeStoreProfilePassword,
+  invokeRetrieveProfilePassword,
+  invokeDeleteProfilePassword,
 } from '@/lib/tauri';
 import { generateId } from '@/lib/utils';
 import { useRecentProfilesStore } from './recentProfilesStore';
@@ -26,7 +26,6 @@ interface ProfileState {
   ) => Promise<void>;
   removeProfile: (id: string) => Promise<void>;
   duplicateProfile: (id: string) => Promise<void>;
-  removeStoredPassword: (id: string) => Promise<void>;
   getProfile: (id: string) => ConnectionProfile | undefined;
   ensurePassword: (profile: ConnectionProfile) => Promise<ConnectionProfile>;
 }
@@ -39,9 +38,7 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
     port: profile.port,
     username: profile.username,
     authMethod: profile.authMethod,
-    passwordStored: profile.passwordStored ?? false,
     keychainKeyId: profile.keychainKeyId,
-    privateKeyPath: profile.privateKeyPath,
     jumpHostConfig: profile.jumpHost ? JSON.stringify(profile.jumpHost) : undefined,
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
@@ -56,9 +53,7 @@ function rowToProfile(row: ProfileRow): ConnectionProfile {
     port: row.port,
     username: row.username,
     authMethod: row.authMethod,
-    passwordStored: row.passwordStored,
     keychainKeyId: row.keychainKeyId,
-    privateKeyPath: row.privateKeyPath,
     jumpHost: row.jumpHostConfig ? JSON.parse(row.jumpHostConfig) : undefined,
     password: undefined,
     createdAt: row.createdAt,
@@ -73,7 +68,20 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   hydrateFromDb: async () => {
     try {
       const rows = await invokeListProfiles();
-      const profiles = rows.map(rowToProfile);
+      const profiles = await Promise.all(
+        rows.map(async (row) => {
+          const profile = rowToProfile(row);
+          if (profile.authMethod === 'password') {
+            try {
+              profile.password = await invokeRetrieveProfilePassword(profile.id);
+            } catch (error) {
+              logger.error(`failed to retrieve password for profile ${profile.id}`, error);
+              profile.password = undefined;
+            }
+          }
+          return profile;
+        }),
+      );
       set({ profiles, initialized: true });
       logger.info(`loaded ${profiles.length} profiles from database`);
     } catch (error) {
@@ -85,29 +93,21 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   addProfile: async (profile) => {
     const id = generateId();
     const now = Date.now();
-    const passwordStored = Boolean(profile.password);
-    if (profile.password) {
-      await invokeStorePassword(id, profile.password);
-    }
+    const password = profile.authMethod === 'password' ? profile.password : undefined;
     const newProfile: ConnectionProfile = {
       ...profile,
-      password: undefined,
-      passwordStored,
+      password,
       id,
       createdAt: now,
       updatedAt: now,
     };
-    try {
-      await invokeAddProfile(profileToRow(newProfile));
-    } catch (error) {
-      if (passwordStored) {
-        try {
-          await invokeRemovePassword(id);
-        } catch (cleanupError) {
-          logger.error('failed to clean up password after profile insert failed', cleanupError);
-        }
+    await invokeAddProfile(profileToRow(newProfile));
+    if (password) {
+      try {
+        await invokeStoreProfilePassword(id, password);
+      } catch (error) {
+        logger.error(`failed to store password for profile ${id}`, error);
       }
-      throw error;
     }
 
     set((state) => ({
@@ -120,45 +120,34 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   updateProfile: async (id, updates) => {
     const current = get().profiles.find((p) => p.id === id);
     if (!current) return;
-    const password = updates.password;
+
     const nextAuthMethod = updates.authMethod ?? current.authMethod;
-    let passwordStored = current.passwordStored ?? Boolean(current.password);
+    const passwordChanged = 'password' in updates;
+    const nextPassword = passwordChanged ? updates.password : current.password;
 
-    const shouldStorePassword = password !== undefined && Boolean(password);
-    const shouldRemovePassword = password !== undefined
-      ? !password
-      : nextAuthMethod !== 'password' && passwordStored;
-    if (shouldStorePassword) passwordStored = true;
-    if (shouldRemovePassword) passwordStored = false;
-
-    const updated = {
+    const updated: ConnectionProfile = {
       ...current,
       ...updates,
       id: current.id,
       createdAt: current.createdAt,
       updatedAt: Date.now(),
-      password: undefined,
-      passwordStored,
-      keychainKeyId: nextAuthMethod === 'keychainKey' ? updates.keychainKeyId ?? current.keychainKeyId : undefined,
-      privateKeyPath: nextAuthMethod === 'keyPath' ? updates.privateKeyPath ?? current.privateKeyPath : undefined,
-      passphrase: nextAuthMethod === 'keyPath' ? updates.passphrase ?? current.passphrase : undefined,
+      password: nextAuthMethod === 'password' ? nextPassword : undefined,
     };
 
     await invokeUpdateProfile(id, profileToRow(updated));
 
     try {
-      if (shouldStorePassword) {
-        await invokeStorePassword(id, password!);
-      } else if (shouldRemovePassword) {
-        await invokeRemovePassword(id);
+      if (nextAuthMethod !== 'password') {
+        await invokeDeleteProfilePassword(id);
+      } else if (passwordChanged) {
+        if (nextPassword) {
+          await invokeStoreProfilePassword(id, nextPassword);
+        } else {
+          await invokeDeleteProfilePassword(id);
+        }
       }
     } catch (error) {
-      try {
-        await invokeUpdateProfile(id, profileToRow(current));
-      } catch (rollbackError) {
-        logger.error('failed to roll back profile after keychain update failed', rollbackError);
-      }
-      throw error;
+      logger.error(`failed to update stored password for profile ${id}`, error);
     }
 
     set((state) => ({
@@ -169,9 +158,9 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   removeProfile: async (id) => {
     await invokeRemoveProfile(id);
     try {
-      await invokeRemovePassword(id);
+      await invokeDeleteProfilePassword(id);
     } catch (error) {
-      logger.error('profile removed but its stored password could not be deleted', error);
+      logger.error(`failed to delete stored password for profile ${id}`, error);
     }
     set((state) => ({
       profiles: state.profiles.filter((p) => p.id !== id),
@@ -187,66 +176,27 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       name,
       createdAt,
       updatedAt,
-      passwordStored: _passwordStored,
       ...rest
     } = original;
     const duplicateId = generateId();
-    const password = await invokeRetrievePassword(id);
-    if (password) {
-      await invokeStorePassword(duplicateId, password);
-    }
     const duplicate: ConnectionProfile = {
       ...rest,
       id: duplicateId,
       name: `${name} (copy)`,
       password: undefined,
-      passwordStored: Boolean(password),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    try {
-      await invokeAddProfile(profileToRow(duplicate));
-    } catch (error) {
-      if (password) {
-        try {
-          await invokeRemovePassword(duplicateId);
-        } catch (cleanupError) {
-          logger.error('failed to clean up duplicated password after insert failed', cleanupError);
-        }
-      }
-      throw error;
-    }
+    await invokeAddProfile(profileToRow(duplicate));
 
     set((state) => ({
       profiles: [...state.profiles, duplicate],
     }));
   },
 
-  removeStoredPassword: async (id) => {
-    await get().updateProfile(id, { password: '' });
-  },
-
   getProfile: (id) => get().profiles.find((p) => p.id === id),
 
-  ensurePassword: async (profile) => {
-    if (profile.authMethod === 'password' && !profile.password) {
-      const password = await invokeRetrievePassword(profile.id);
-      if (password) {
-        set((state) => ({
-          profiles: state.profiles.map((p) =>
-            p.id === profile.id ? { ...p, passwordStored: true } : p,
-          ),
-        }));
-        return { ...profile, password };
-      }
-      set((state) => ({
-        profiles: state.profiles.map((p) =>
-          p.id === profile.id ? { ...p, passwordStored: false } : p,
-        ),
-      }));
-    }
-    return profile;
-  },
+  ensurePassword: async (profile) => profile,
 }));
 
 export const DEFAULT_PROFILE_VALUES = {
@@ -264,7 +214,6 @@ export function createJumpHostConfig(
     authMethod: values.authMethod ?? 'password',
     password: values.password,
     keychainKeyId: values.keychainKeyId,
-    privateKeyPath: values.privateKeyPath,
     passphrase: values.passphrase,
   };
 }

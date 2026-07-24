@@ -8,8 +8,11 @@ import {
 } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import { useAppStore } from '@/stores/appStore';
+import { useProfileStore } from '@/stores/profileStore';
+import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
 
 const tauri = vi.hoisted(() => ({
+  buildRemoteConnectionRequest: vi.fn((connection: SftpConnection['connection']) => connection),
   invokeCopyRemotePath: vi.fn().mockResolvedValue(undefined),
   invokeCancelDownload: vi.fn().mockResolvedValue(undefined),
   invokeCreateRemoteEntry: vi.fn().mockResolvedValue(undefined),
@@ -32,6 +35,31 @@ const tauri = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/tauri', () => tauri);
+
+vi.mock('@/lib/keychain-key-prompt', () => ({
+  promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock('@/lib/error', () => ({
+  getErrorMessage: vi.fn().mockImplementation((error: unknown) => {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    if (typeof error === 'object' && error !== null && 'payload' in error) {
+      const typed = error as { payload?: { message?: string } };
+      return typed.payload?.message ?? String(error);
+    }
+    return String(error);
+  }),
+  getLocalizedErrorMessage: vi.fn().mockImplementation((error: unknown) => {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    if (typeof error === 'object' && error !== null && 'payload' in error) {
+      const typed = error as { payload?: { message?: string } };
+      return typed.payload?.message ?? String(error);
+    }
+    return String(error);
+  }),
+}));
 
 const file = {
   path: '/remote/draft.txt',
@@ -194,5 +222,69 @@ describe('useSftpConnection downloads', () => {
     rejectDownload(new Error('download cancelled'));
     await act(() => download);
     expect(useTransferStore.getState().operations[0]?.status).toBe('cancelled');
+  });
+});
+
+describe('useSftpConnection keychain key recovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useTransferStore.setState({ operations: [] });
+    useAppStore.setState({ sftpRetryCount: 0 });
+    vi.mocked(promptForMissingKeychainKey).mockReset();
+    vi.mocked(promptForMissingKeychainKey).mockResolvedValue(null);
+  });
+
+  it('prompts for replacement key when listing fails due to missing keychain key', async () => {
+    const profileId = 'profile-1';
+    const keychainConnection: SftpConnection = {
+      ...createConnection(),
+      profileId,
+      connection: {
+        host: 'example.com',
+        port: 22,
+        username: 'tester',
+        authMethod: 'key',
+        keychainKeyId: 'old-key',
+      },
+    };
+    useProfileStore.setState({
+      profiles: [
+        {
+          id: profileId,
+          name: 'Test',
+          host: 'example.com',
+          port: 22,
+          username: 'tester',
+          authMethod: 'key',
+          keychainKeyId: 'old-key',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    });
+    useSftpStore.setState({
+      connections: [keychainConnection],
+      activeConnectionId: keychainConnection.id,
+    });
+
+    const recoveredProfile = {
+      ...useProfileStore.getState().profiles[0]!,
+      keychainKeyId: 'new-key',
+    };
+    vi.mocked(promptForMissingKeychainKey).mockResolvedValueOnce(recoveredProfile);
+    tauri.invokeListRemoteDirectory
+      .mockRejectedValueOnce({ type: 'Other', payload: { message: 'keychain key not found: old-key' } })
+      .mockResolvedValueOnce({ path: '/remote', entries: [file] });
+
+    const { result } = renderHook(() => useSftpConnection(keychainConnection));
+
+    await act(() => result.current.loadRemoteDirectory());
+
+    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(
+      expect.objectContaining({ id: profileId, keychainKeyId: 'old-key' }),
+    );
+    expect(tauri.invokeListRemoteDirectory).toHaveBeenCalledTimes(2);
+    expect(useSftpStore.getState().connections[0]?.connection.keychainKeyId).toBe('new-key');
+    expect(useSftpStore.getState().connections[0]?.remoteEntries).toEqual([file]);
   });
 });

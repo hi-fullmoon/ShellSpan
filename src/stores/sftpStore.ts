@@ -139,6 +139,11 @@ interface SftpState {
   ) => void;
   setLoading: (id: string, side: SftpSide, loading: boolean) => void;
   setError: (id: string, side: SftpSide, error?: string) => void;
+  updateConnectionRequest: (
+    id: string,
+    side: SftpSide,
+    request: RemoteConnectionRequest,
+  ) => void;
   setPaneState: (
     id: string,
     side: SftpSide,
@@ -420,6 +425,16 @@ export const useSftpStore = create<SftpState>()((set) => ({
       connections: updateConnection(state, id, (connection) => ({
         ...connection,
         [getErrorKey(side)]: error,
+      })),
+    })),
+
+  updateConnectionRequest: (id, side, request) =>
+    set((state) => ({
+      connections: updateConnection(state, id, (connection) => ({
+        ...connection,
+        ...(side === 'local'
+          ? { leftConnection: request }
+          : { connection: request }),
       })),
     })),
 

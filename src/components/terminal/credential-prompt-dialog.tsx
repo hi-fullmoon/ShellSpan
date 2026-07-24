@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,12 +12,10 @@ export const CredentialPromptDialog: React.FC = () => {
   const pending = usePasswordPromptStore((state) => state.pending);
   const resolvePassword = usePasswordPromptStore((state) => state.resolvePassword);
   const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(false);
 
   useEffect(() => {
     if (pending) {
       setPassword('');
-      setRemember(false);
     }
   }, [pending]);
 
@@ -28,7 +25,7 @@ export const CredentialPromptDialog: React.FC = () => {
 
   const handleConfirm = (): void => {
     if (!password) return;
-    resolvePassword({ password, remember });
+    resolvePassword({ password });
   };
 
   return (
@@ -67,10 +64,6 @@ export const CredentialPromptDialog: React.FC = () => {
                 autoFocus
               />
             </div>
-            <label className="flex items-center gap-2 text-xs text-app-text-soft cursor-pointer select-none">
-              <Checkbox id="remember-password" checked={remember} onCheckedChange={(checked) => setRemember(Boolean(checked))} className="p-0" />
-              <span className="leading-5">{t('dialog.credentialPrompt.rememberPassword')}</span>
-            </label>
           </div>
         </CompactDialogBody>
         <CompactDialogFooter>
