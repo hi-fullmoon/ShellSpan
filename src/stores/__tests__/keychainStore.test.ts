@@ -85,3 +85,29 @@ describe('keychainStore hydrate', () => {
     ]);
   });
 });
+
+describe('keychainStore addKey', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useKeychainStore.setState({ keys: [], initialized: true });
+  });
+
+  it('passes detected keyType to the backend when adding a key', async () => {
+    invokeStoreKeyCredential.mockResolvedValue(undefined);
+
+    await useKeychainStore.getState().addKey({
+      label: 'Server key',
+      kind: 'keyFile',
+      privateKey: RSA_KEY,
+    });
+
+    expect(invokeStoreKeyCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: 'Server key',
+        kind: 'keyFile',
+        privateKey: RSA_KEY,
+        keyType: 'rsa',
+      }),
+    );
+  });
+});

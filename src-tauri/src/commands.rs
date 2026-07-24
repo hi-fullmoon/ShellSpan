@@ -34,6 +34,8 @@ pub(crate) struct KeyCredentialRequest {
     pub(crate) kind: crate::models::KeyCredentialKind,
     pub(crate) private_key: Option<String>,
     pub(crate) public_key: Option<String>,
+    #[serde(default)]
+    pub(crate) key_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1073,12 +1075,15 @@ pub(crate) fn store_key_credential(
     request: KeyCredentialRequest,
 ) -> Result<(), String> {
     let updated_at = crate::db::current_timestamp_ms();
-    let key_type = match request.kind {
-        crate::models::KeyCredentialKind::Password => "ecdsa".to_string(),
-        crate::models::KeyCredentialKind::KeyFile => {
-            detect_key_type(request.private_key.as_deref().unwrap_or("")).to_string()
-        }
-    };
+    let key_type = request
+        .key_type
+        .filter(|t| !t.is_empty() && t != "unknown")
+        .unwrap_or_else(|| match request.kind {
+            crate::models::KeyCredentialKind::Password => "ecdsa".to_string(),
+            crate::models::KeyCredentialKind::KeyFile => {
+                detect_key_type(request.private_key.as_deref().unwrap_or("")).to_string()
+            }
+        });
     let payload = serde_json::json!({
         "kind": request.kind.to_string(),
         "label": request.label,
