@@ -45,7 +45,6 @@ pub(crate) struct JumpHostConfig {
     pub(crate) auth_method: AuthMethod,
     pub(crate) password: Option<String>,
     pub(crate) keychain_key_id: Option<String>,
-    pub(crate) private_key_path: Option<String>,
     #[serde(default)]
     pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
@@ -61,7 +60,6 @@ pub(crate) struct SessionCreateRequest {
     pub(crate) auth_method: AuthMethod,
     pub(crate) password: Option<String>,
     pub(crate) keychain_key_id: Option<String>,
-    pub(crate) private_key_path: Option<String>,
     #[serde(default)]
     pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
@@ -79,7 +77,6 @@ pub(crate) struct RemoteConnectionRequest {
     pub(crate) auth_method: AuthMethod,
     pub(crate) password: Option<String>,
     pub(crate) keychain_key_id: Option<String>,
-    pub(crate) private_key_path: Option<String>,
     #[serde(default)]
     pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
@@ -295,6 +292,87 @@ pub(crate) enum CreateSessionError {
     },
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "type", content = "payload")]
+pub(crate) enum SessionErrorEvent {
+    HostKeyUnknown {
+        session_id: String,
+        host: String,
+        port: u16,
+        fingerprint: Option<String>,
+    },
+    HostKeyMismatch {
+        session_id: String,
+        host: String,
+        port: u16,
+    },
+}
+
+/// Structured connection failure that preserves host-key metadata so callers
+/// can emit trust dialogs instead of plain error strings.
+#[derive(Debug, Clone)]
+pub(crate) enum ConnectionError {
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        fingerprint: Option<String>,
+    },
+    HostKeyMismatch {
+        host: String,
+        port: u16,
+    },
+    Other {
+        message: String,
+    },
+}
+
+impl ConnectionError {
+    pub(crate) fn message(&self) -> String {
+        match self {
+            ConnectionError::HostKeyUnknown { host, port, .. } => {
+                format!("host key for {host}:{port} is not known — trust this host before connecting")
+            }
+            ConnectionError::HostKeyMismatch { host, port } => {
+                format!("host key for {host}:{port} does not match the known key — possible man-in-the-middle attack")
+            }
+            ConnectionError::Other { message } => message.clone(),
+        }
+    }
+}
+
+/// Structured remote filesystem error. Serialization matches `CreateSessionError`
+/// so the frontend can reuse the same host-key dialog handling.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", content = "payload")]
+pub(crate) enum RemoteFsError {
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        fingerprint: Option<String>,
+    },
+    HostKeyMismatch {
+        host: String,
+        port: u16,
+    },
+    Other {
+        message: String,
+    },
+}
+
+impl RemoteFsError {
+    pub(crate) fn from_connection_error(error: ConnectionError) -> Self {
+        match error {
+            ConnectionError::HostKeyUnknown { host, port, fingerprint } => {
+                RemoteFsError::HostKeyUnknown { host, port, fingerprint }
+            }
+            ConnectionError::HostKeyMismatch { host, port } => {
+                RemoteFsError::HostKeyMismatch { host, port }
+            }
+            ConnectionError::Other { message } => RemoteFsError::Other { message },
+        }
+    }
+}
+
 #[cfg(test)]
 mod create_session_error_tests {
     use super::CreateSessionError;
@@ -352,16 +430,14 @@ impl AuthMethod {
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ProfileAuthMethod {
     Password,
-    KeychainKey,
-    KeyPath,
+    Key,
 }
 
 impl ProfileAuthMethod {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             ProfileAuthMethod::Password => "password",
-            ProfileAuthMethod::KeychainKey => "keychainKey",
-            ProfileAuthMethod::KeyPath => "keyPath",
+            ProfileAuthMethod::Key => "key",
         }
     }
 }
@@ -492,12 +568,29 @@ pub(crate) enum RemoteFileKind {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum KeyCredentialKind {
+    Password,
+    KeyFile,
+}
+
+impl std::fmt::Display for KeyCredentialKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KeyCredentialKind::Password => write!(f, "password"),
+            KeyCredentialKind::KeyFile => write!(f, "keyFile"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct KeyCredentialSummary {
     pub(crate) id: String,
     pub(crate) label: String,
     pub(crate) key_type: String,
+    pub(crate) kind: KeyCredentialKind,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1045,8 +1138,7 @@ pub(crate) struct ProfileRow {
     pub(crate) port: u16,
     pub(crate) username: String,
     pub(crate) auth_method: ProfileAuthMethod,
-    pub(crate) password_stored: bool,
-    pub(crate) private_key_path: Option<String>,
+    pub(crate) keychain_key_id: Option<String>,
     pub(crate) jump_host_config: Option<String>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,

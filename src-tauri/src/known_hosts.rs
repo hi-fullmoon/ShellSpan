@@ -1,6 +1,7 @@
 use log::{debug, error, info, warn};
 use ssh2::{CheckResult, HostKeyType, KnownHostFileKind, KnownHostKeyFormat, Session};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 
 use crate::connection::{open_session_for_host_key, validate_host};
@@ -25,6 +26,10 @@ pub(crate) fn classify_host_key_error(message: &str) -> Option<HostKeyErrorKind>
 
 const KNOWN_HOSTS_FILENAME: &str = "known_hosts";
 
+/// Serializes writes to the known_hosts file to prevent corruption when multiple
+/// operations trust or remove hosts concurrently.
+pub(crate) static KNOWN_HOSTS_WRITE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
 pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
     let home = app
         .path()
@@ -37,19 +42,29 @@ fn get_known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
     known_hosts_path(app)
 }
 
-pub(crate) fn verify_session_host_key(
+pub(crate) fn check_host_key_against_file(
     session: &Session,
     host: &str,
     port: u16,
     known_hosts_file: &Path,
-) -> Result<(), String> {
-    let (key, _key_type) = session
+) -> Result<HostKeyCheckResult, HostKeyCheckResult> {
+    let (key, key_type) = session
         .host_key()
-        .ok_or_else(|| "failed to retrieve host key from ssh session".to_string())?;
+        .ok_or_else(|| HostKeyCheckResult {
+            status: HostKeyCheckStatus::Failure,
+            fingerprint: None,
+            message: Some("failed to retrieve host key from ssh session".to_string()),
+        })?;
+
+    let fingerprint = compute_fingerprint(key, key_type);
 
     let mut known_hosts = session
         .known_hosts()
-        .map_err(|error| format!("failed to initialize known hosts: {error}"))?;
+        .map_err(|error| HostKeyCheckResult {
+            status: HostKeyCheckStatus::Failure,
+            fingerprint: Some(fingerprint.clone()),
+            message: Some(format!("failed to initialize known hosts: {error}")),
+        })?;
 
     if known_hosts_file.exists() {
         match known_hosts.read_file(known_hosts_file, KnownHostFileKind::OpenSSH) {
@@ -67,17 +82,40 @@ pub(crate) fn verify_session_host_key(
     match check_result {
         CheckResult::Match => {
             debug!("Host key matches known hosts for {host}:{port}");
-            Ok(())
+            Ok(HostKeyCheckResult {
+                status: HostKeyCheckStatus::Match,
+                fingerprint: Some(fingerprint),
+                message: None,
+            })
         }
-        CheckResult::Mismatch => Err(format!(
-            "host key for {host}:{port} does not match the known key — possible man-in-the-middle attack"
-        )),
-        CheckResult::NotFound => Err(format!(
-            "host key for {host}:{port} is not known — trust this host before connecting"
-        )),
-        CheckResult::Failure => Err(format!(
-            "failed to verify host key for {host}:{port}"
-        )),
+        CheckResult::Mismatch => {
+            let message = format!(
+                "host key for {host}:{port} does not match the known key — possible man-in-the-middle attack"
+            );
+            Err(HostKeyCheckResult {
+                status: HostKeyCheckStatus::Mismatch,
+                fingerprint: Some(fingerprint),
+                message: Some(message),
+            })
+        }
+        CheckResult::NotFound => {
+            let message = format!(
+                "host key for {host}:{port} is not known — trust this host before connecting"
+            );
+            Err(HostKeyCheckResult {
+                status: HostKeyCheckStatus::NotFound,
+                fingerprint: Some(fingerprint),
+                message: Some(message),
+            })
+        }
+        CheckResult::Failure => {
+            let message = format!("failed to verify host key for {host}:{port}");
+            Err(HostKeyCheckResult {
+                status: HostKeyCheckStatus::Failure,
+                fingerprint: Some(fingerprint),
+                message: Some(message),
+            })
+        }
     }
 }
 
@@ -208,6 +246,10 @@ pub(crate) fn trust_host_blocking(
 
     info!("Trusting host {host}:{port}");
     validate_host(host)?;
+
+    let _lock = KNOWN_HOSTS_WRITE_LOCK
+        .lock()
+        .map_err(|_| "known hosts write lock poisoned".to_string())?;
 
     let session = open_session_for_host_key(host, port)?;
 

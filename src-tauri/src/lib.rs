@@ -1,6 +1,7 @@
 mod commands;
 mod connection;
 mod db;
+mod ecdsa_key;
 mod identity_cache;
 mod keychain;
 mod local_fs;
@@ -18,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
 
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
-use models::{DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
+use models::{DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionErrorEvent, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
 use crate::sftp_pool::SftpPool;
 
 pub(crate) use connection::{
@@ -41,6 +42,7 @@ pub(crate) use session::{
 pub(crate) const SSH_DATA_EVENT: &str = "ssh-data";
 pub(crate) const SSH_STATUS_EVENT: &str = "ssh-status";
 pub(crate) const SSH_CLOSED_EVENT: &str = "ssh-closed";
+pub(crate) const SSH_SESSION_ERROR_EVENT: &str = "ssh-session-error";
 pub(crate) const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
 pub(crate) const DELETE_PROGRESS_EVENT: &str = "delete-progress";
 pub(crate) const DOWNLOAD_PROGRESS_EVENT: &str = "download-progress";
@@ -94,6 +96,14 @@ pub(crate) fn emit_closed(
     .map_err(|error| format!("failed to emit closed event: {error}"))
 }
 
+pub(crate) fn emit_session_error(
+    app: &AppHandle,
+    event: SessionErrorEvent,
+) -> Result<(), String> {
+    app.emit(SSH_SESSION_ERROR_EVENT, event)
+        .map_err(|error| format!("failed to emit session error event: {error}"))
+}
+
 pub fn run() {
     let log_level = if cfg!(debug_assertions) {
         LevelFilter::Debug
@@ -132,7 +142,8 @@ pub fn run() {
                 .map_err(|e| format!("failed to resolve home dir: {e}"))?
                 .join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
-            _app.manage(database);
+            _app.manage(database.clone());
+            _app.manage(keychain::CredentialManager::new(database));
             Ok(())
         })
         .plugin(
@@ -153,7 +164,6 @@ pub fn run() {
         .manage(port_forward::PortForwardManager::default())
         .manage(SftpPool::default())
         .manage(RemoteIdentityCache::default())
-        .manage(keychain::CredentialManager::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::create_local_session,
@@ -196,16 +206,14 @@ pub fn run() {
             commands::read_log_file,
             commands::export_log_file,
             commands::list_local_directory,
-            commands::store_password,
-            commands::retrieve_password,
-            commands::remove_password,
-            commands::list_cached_credential_profile_ids,
-            commands::clear_credential_cache,
-            commands::migrate_passwords,
+            commands::derive_ecdsa_key_from_password,
             commands::store_key_credential,
             commands::list_key_credentials,
             commands::retrieve_key_credential,
             commands::delete_key_credential,
+            commands::store_profile_password,
+            commands::retrieve_profile_password,
+            commands::delete_profile_password,
             commands::read_text_file,
             commands::start_port_forwards,
             commands::stop_port_forwards,

@@ -1,5 +1,5 @@
-use crate::known_hosts::verify_session_host_key;
-use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest, SessionCreateRequest};
+use crate::known_hosts::check_host_key_against_file;
+use crate::models::{AuthMethod, ConnectedSftp, ConnectionError, HostKeyCheckStatus, JumpHostConfig, RemoteConnectionRequest, RemoteFsError, SessionCreateRequest};
 use crate::sftp_pool::{connection_key, SftpPool};
 use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
@@ -45,8 +45,18 @@ pub(crate) fn connect_sftp(
     request: &RemoteConnectionRequest,
     pool: Option<&SftpPool>,
     known_hosts_path: Option<&Path>,
-) -> Result<Arc<Mutex<ConnectedSftp>>, String> {
-    validate_connection_fields(&request.host, &request.username)?;
+) -> Result<Arc<Mutex<ConnectedSftp>>, RemoteFsError> {
+    connect_sftp_inner(request, pool, known_hosts_path)
+        .map_err(RemoteFsError::from_connection_error)
+}
+
+fn connect_sftp_inner(
+    request: &RemoteConnectionRequest,
+    pool: Option<&SftpPool>,
+    known_hosts_path: Option<&Path>,
+) -> Result<Arc<Mutex<ConnectedSftp>>, ConnectionError> {
+    validate_connection_fields(&request.host, &request.username)
+        .map_err(|message| ConnectionError::Other { message })?;
     debug!(
         "Connecting SFTP {}",
         summarize_remote_connection_request(request)
@@ -71,7 +81,7 @@ pub(crate) fn connect_sftp(
 fn create_sftp_connection(
     request: &RemoteConnectionRequest,
     known_hosts_path: Option<&Path>,
-) -> Result<Arc<Mutex<ConnectedSftp>>, String> {
+) -> Result<Arc<Mutex<ConnectedSftp>>, ConnectionError> {
     let (session, jump_session) = if let Some(ref jump) = request.jump_host {
         let (jump_session, target_session) = connect_through_jump_host(
             jump,
@@ -81,20 +91,19 @@ fn create_sftp_connection(
             request.auth_method,
             request.password.as_deref(),
             request.private_key_data.as_deref(),
-            request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
             known_hosts_path,
         )?;
         (target_session, Some(jump_session))
     } else {
-        let tcp = connect_tcp_stream(&request.host, request.port)?;
+        let tcp = connect_tcp_stream(&request.host, request.port)
+            .map_err(|message| ConnectionError::Other { message })?;
         let session = open_authenticated_session(
             tcp,
             &request.username,
             request.auth_method,
             request.password.as_deref(),
             request.private_key_data.as_deref(),
-            request.private_key_path.as_deref(),
             request.passphrase.as_deref(),
             &request.host,
             request.port,
@@ -105,7 +114,9 @@ fn create_sftp_connection(
 
     let sftp = session
         .sftp()
-        .map_err(|error| format!("failed to open sftp subsystem: {error}"))?;
+        .map_err(|error| ConnectionError::Other {
+            message: format!("failed to open sftp subsystem: {error}"),
+        })?;
 
     let connected = Arc::new(Mutex::new(ConnectedSftp {
         session,
@@ -189,18 +200,16 @@ fn summarize_connection_fields(
     auth_method: AuthMethod,
     password: Option<&str>,
     private_key_data: Option<&str>,
-    private_key_path: Option<&str>,
     passphrase: Option<&str>,
 ) -> String {
     format!(
-        "host={} port={} username={} auth_method={} has_password={} has_private_key_data={} has_private_key_path={} has_passphrase={}",
+        "host={} port={} username={} auth_method={} has_password={} has_private_key_data={} has_passphrase={}",
         host.trim(),
         port,
         username.trim(),
         auth_method.as_str(),
         has_secret_value(password),
         has_secret_value(private_key_data),
-        has_secret_value(private_key_path),
         has_secret_value(passphrase),
     )
 }
@@ -213,7 +222,6 @@ pub(crate) fn summarize_session_request(request: &SessionCreateRequest) -> Strin
         request.auth_method,
         request.password.as_deref(),
         request.private_key_data.as_deref(),
-        request.private_key_path.as_deref(),
         request.passphrase.as_deref(),
     )
 }
@@ -226,7 +234,6 @@ pub(crate) fn summarize_remote_connection_request(request: &RemoteConnectionRequ
         request.auth_method,
         request.password.as_deref(),
         request.private_key_data.as_deref(),
-        request.private_key_path.as_deref(),
         request.passphrase.as_deref(),
     )
 }
@@ -266,27 +273,49 @@ pub(crate) fn open_authenticated_session(
     auth_method: AuthMethod,
     password: Option<&str>,
     private_key_data: Option<&str>,
-    private_key_path: Option<&str>,
     passphrase: Option<&str>,
     host: &str,
     port: u16,
     known_hosts_path: Option<&Path>,
-) -> Result<Session, String> {
+) -> Result<Session, ConnectionError> {
     debug!(
         "Opening authenticated SSH session username={} auth_method={}",
         username,
         auth_method.as_str()
     );
-    let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
+    let mut session = Session::new()
+        .map_err(|error| ConnectionError::Other {
+            message: format!("session init failed: {error}"),
+        })?;
     session.set_tcp_stream(tcp);
     session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
     session.handshake().map_err(|error| {
         error!("SSH handshake failed remote={host}:{port}: {error}");
-        format!("ssh handshake failed: {error}")
+        ConnectionError::Other {
+            message: format!("ssh handshake failed: {error}"),
+        }
     })?;
 
     if let Some(path) = known_hosts_path {
-        verify_session_host_key(&session, host, port, path)?;
+        match check_host_key_against_file(&session, host, port, path) {
+            Ok(_) => {}
+            Err(result) => {
+                return match result.status {
+                    HostKeyCheckStatus::NotFound => Err(ConnectionError::HostKeyUnknown {
+                        host: host.to_string(),
+                        port,
+                        fingerprint: result.fingerprint,
+                    }),
+                    HostKeyCheckStatus::Mismatch => Err(ConnectionError::HostKeyMismatch {
+                        host: host.to_string(),
+                        port,
+                    }),
+                    _ => Err(ConnectionError::Other {
+                        message: result.message.unwrap_or_else(|| "host key check failed".to_string()),
+                    }),
+                };
+            }
+        }
     }
 
     authenticate(
@@ -295,9 +324,9 @@ pub(crate) fn open_authenticated_session(
         auth_method,
         password,
         private_key_data,
-        private_key_path,
         passphrase,
-    )?;
+    )
+    .map_err(|message| ConnectionError::Other { message })?;
 
     debug!(
         "SSH authentication succeeded username={} auth_method={}",
@@ -328,24 +357,23 @@ pub(crate) fn connect_through_jump_host(
     target_auth_method: AuthMethod,
     target_password: Option<&str>,
     target_private_key_data: Option<&str>,
-    target_private_key_path: Option<&str>,
     target_passphrase: Option<&str>,
     known_hosts_path: Option<&Path>,
-) -> Result<(Session, Session), String> {
+) -> Result<(Session, Session), ConnectionError> {
     debug!(
         "Connecting through jump host {}:{} to target {}:{}",
         jump.host, jump.port, target_host, target_port
     );
 
     // 1. Connect to jump host
-    let jump_tcp = connect_tcp_stream(&jump.host, jump.port)?;
+    let jump_tcp = connect_tcp_stream(&jump.host, jump.port)
+        .map_err(|message| ConnectionError::Other { message })?;
     let jump_session = open_authenticated_session(
         jump_tcp,
         &jump.username,
         jump.auth_method,
         jump.password.as_deref(),
         jump.private_key_data.as_deref(),
-        jump.private_key_path.as_deref(),
         jump.passphrase.as_deref(),
         &jump.host,
         jump.port,
@@ -354,19 +382,19 @@ pub(crate) fn connect_through_jump_host(
 
     // 2. Create a local TCP socket pair for bridging
     let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("failed to bind local bridge socket: {e}"))?;
+        .map_err(|e| ConnectionError::Other { message: format!("failed to bind local bridge socket: {e}") })?;
     let local_port = listener
         .local_addr()
-        .map_err(|e| format!("failed to get local bridge address: {e}"))?
+        .map_err(|e| ConnectionError::Other { message: format!("failed to get local bridge address: {e}") })?
         .port();
     listener
         .set_nonblocking(true)
-        .map_err(|e| format!("failed to set bridge listener nonblocking: {e}"))?;
+        .map_err(|e| ConnectionError::Other { message: format!("failed to set bridge listener nonblocking: {e}") })?;
 
     // 3. Open direct-tcpip channel through jump host to target
     let channel = jump_session
         .channel_direct_tcpip(target_host, target_port, Some(("127.0.0.1", local_port)))
-        .map_err(|e| format!("failed to open direct-tcpip through jump host: {e}"))?;
+        .map_err(|e| ConnectionError::Other { message: format!("failed to open direct-tcpip through jump host: {e}") })?;
 
     // 4. Spawn a thread that accepts the bridge connection and bridges data
     //    between the jump channel and the server side. The accept must run
@@ -387,9 +415,9 @@ pub(crate) fn connect_through_jump_host(
 
     // 5. Connect client side of the bridge (this will be the target session's TCP stream)
     let client_stream = TcpStream::connect(("127.0.0.1", local_port))
-        .map_err(|e| format!("failed to connect to bridge socket: {e}"))?;
+        .map_err(|e| ConnectionError::Other { message: format!("failed to connect to bridge socket: {e}") })?;
     configure_tcp_stream(&client_stream)
-        .map_err(|e| format!("failed to configure bridge client socket: {e}"))?;
+        .map_err(|e| ConnectionError::Other { message: format!("failed to configure bridge client socket: {e}") })?;
 
     // 6. Open authenticated session on the client stream
     let target_session = open_authenticated_session(
@@ -398,7 +426,6 @@ pub(crate) fn connect_through_jump_host(
         target_auth_method,
         target_password,
         target_private_key_data,
-        target_private_key_path,
         target_passphrase,
         target_host,
         target_port,
@@ -467,7 +494,6 @@ fn authenticate(
     auth_method: AuthMethod,
     password: Option<&str>,
     private_key_data: Option<&str>,
-    private_key_path: Option<&str>,
     passphrase: Option<&str>,
 ) -> Result<(), String> {
     match auth_method {
@@ -486,31 +512,18 @@ fn authenticate(
                 })?;
         }
         AuthMethod::Key => {
-            if let Some(key_data) = private_key_data {
-                session
-                    .userauth_pubkey_memory(username, None, key_data, passphrase)
-                    .map_err(|error| {
-                        warn!(
-                            "SSH authentication failed username={} method={} source=keychain: {error}",
-                            username,
-                            auth_method.as_str()
-                        );
-                        format!("private key auth failed: {error}")
-                    })?;
-            } else {
-                let private_key_path = private_key_path
-                    .ok_or_else(|| "private key auth selected, but no key path provided".to_string())?;
-                session
-                    .userauth_pubkey_file(username, None, Path::new(private_key_path), passphrase)
-                    .map_err(|error| {
-                        warn!(
-                            "SSH authentication failed username={} method={} source=file: {error}",
-                            username,
-                            auth_method.as_str()
-                        );
-                        format!("private key auth failed: {error}")
-                    })?;
-            }
+            let key_data = private_key_data
+                .ok_or_else(|| "private key auth selected, but no key data provided".to_string())?;
+            session
+                .userauth_pubkey_memory(username, None, key_data, passphrase)
+                .map_err(|error| {
+                    warn!(
+                        "SSH authentication failed username={} method={} source=keychain: {error}",
+                        username,
+                        auth_method.as_str()
+                    );
+                    format!("private key auth failed: {error}")
+                })?;
         }
     }
 
@@ -538,7 +551,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             password: Some("super-secret".to_string()),
             keychain_key_id: None,
-            private_key_path: Some("/Users/alice/.ssh/id_ed25519".to_string()),
             private_key_data: None,
             passphrase: Some("keep-me-out-of-logs".to_string()),
             terminal_cols: 120,
@@ -552,17 +564,15 @@ mod tests {
         assert!(summary.contains("username=alice"));
         assert!(summary.contains("auth_method=password"));
         assert!(summary.contains("has_password=true"));
-        assert!(summary.contains("has_private_key_path=true"));
         assert!(summary.contains("has_passphrase=true"));
         assert!(!summary.contains("super-secret"));
         assert!(!summary.contains("keep-me-out-of-logs"));
-        assert!(!summary.contains("/Users/alice/.ssh/id_ed25519"));
     }
 
     #[test]
     fn connect_sftp_returns_shared_connection() {
         use crate::sftp_pool::SftpPool;
-        fn expect_shared(_result: Result<std::sync::Arc<std::sync::Mutex<crate::models::ConnectedSftp>>, String>) {}
+        fn expect_shared(_result: Result<std::sync::Arc<std::sync::Mutex<crate::models::ConnectedSftp>>, crate::models::RemoteFsError>) {}
         fn dummy_call(request: &crate::models::RemoteConnectionRequest, pool: &SftpPool) {
             expect_shared(connect_sftp(request, Some(pool), None));
         }
