@@ -21,12 +21,14 @@ vi.mock('@/lib/tauri', () => ({
 
 vi.mock('@/lib/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
+  ensurePasswordKeychain: vi.fn().mockImplementation((p) => Promise.resolve(p)),
   prepareKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
 }));
 
 import { invokeCheckHostKey, invokeListSftpBookmarks, invokeTrustHost } from '@/lib/tauri';
 import {
   ensureKeychainKeyForProfile,
+  ensurePasswordKeychain,
   prepareKeychainKeyForProfile,
 } from '@/lib/keychain-key-prompt';
 
@@ -57,6 +59,8 @@ describe('useSftpConnectionOpener', () => {
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((p) => Promise.resolve(p));
+    vi.mocked(ensurePasswordKeychain).mockReset();
+    vi.mocked(ensurePasswordKeychain).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(prepareKeychainKeyForProfile).mockReset();
     vi.mocked(prepareKeychainKeyForProfile).mockImplementation((p) => Promise.resolve(p));
   });

@@ -344,7 +344,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DrawerContent className="w-[400px] gap-0 p-0">
+      <DrawerContent className="w-100 gap-0 p-0">
         <DrawerHeader className="border-b border-app-border px-5 py-4">
           <DrawerTitle>
             {initial

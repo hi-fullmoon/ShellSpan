@@ -87,8 +87,11 @@ export default {
   'workbench.keychain.count': '{count}/{total} keys',
   'workbench.keychain.deleteTitle': 'Delete key?',
   'workbench.keychain.deleteConfirm': 'Delete key "{name}"? Profiles using this key will need to select a new authentication method.',
+  'workbench.keychain.newSubtitle': 'Create a key file credential',
+  'workbench.keychain.editSubtitle': 'Edit a key file credential',
 
   'keychain.kind.password': 'Password',
+  'keychain.kind.profilePassword': 'Password',
   'keychain.kind.keyFile': 'Key File',
 
   'keychain.form.kind': 'Key Kind',

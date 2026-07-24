@@ -1,7 +1,9 @@
 import { useKeychainKeyPromptStore } from '@/stores/keychainKeyPromptStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useKeychainStore } from '@/stores/keychainStore';
+import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
+import { getLocalizedErrorMessage } from '@/lib/error';
 import type { ConnectionProfile } from '@/types';
 
 const logger = createLogger('keychain-key-prompt');
@@ -111,4 +113,67 @@ export async function prepareKeychainKeyForProfile(
   }
 
   return profile;
+}
+
+/**
+ * Ensures a password-authenticated profile has a derived ECDSA keychain.
+ *
+ * On first connect the password is used to derive a deterministic ECDSA key
+ * pair, which is stored as a password-kind keychain and bound to the profile.
+ * Subsequent connects load the private key from the keychain. If the keychain
+ * has been deleted, the connection cannot proceed.
+ *
+ * @returns The profile with a guaranteed keychainKeyId, or null if the
+ *          keychain could not be created or was deleted.
+ */
+export async function ensurePasswordKeychain(
+  profile: ConnectionProfile,
+): Promise<ConnectionProfile | null> {
+  if (profile.authMethod !== 'password') {
+    return profile;
+  }
+
+  if (profile.keychainKeyId) {
+    const { initialized, hydrate, getKey } = useKeychainStore.getState();
+    if (!initialized) {
+      await hydrate();
+    }
+    const key = await getKey(profile.keychainKeyId);
+    if (!key || !key.privateKey) {
+      logger.warn(`Password keychain missing for profile ${profile.id}`);
+      useToastStore.getState().addToast(
+        getLocalizedErrorMessage(new Error('Stored password is missing')),
+        'error',
+      );
+      return null;
+    }
+    return {
+      ...profile,
+      password: key.privateKey,
+    };
+  }
+
+  if (!profile.password) {
+    return profile;
+  }
+
+  try {
+    const key = await useKeychainStore.getState().addKey({
+      label: `${profile.name} password`,
+      kind: 'password',
+      privateKey: profile.password,
+    });
+    logger.info(`Stored password keychain ${key.id} for profile ${profile.id}`);
+    await useProfileStore.getState().updateProfile(profile.id, {
+      keychainKeyId: key.id,
+    });
+    return {
+      ...profile,
+      keychainKeyId: key.id,
+    };
+  } catch (error) {
+    logger.error('Failed to store password keychain', error);
+    useToastStore.getState().addToast(getLocalizedErrorMessage(error), 'error');
+    return null;
+  }
 }

@@ -1092,6 +1092,7 @@ pub(crate) fn store_key_credential(
         &request.label,
         &key_type,
         &request.kind.to_string(),
+        crate::keychain::KEY_SERVICE,
         request.public_key.as_deref(),
         None,
         updated_at,
@@ -1187,10 +1188,35 @@ pub(crate) fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 pub(crate) fn store_profile_password(
     credentials: State<'_, crate::keychain::CredentialManager>,
+    database: State<'_, Database>,
     profile_id: String,
     password: String,
 ) -> Result<(), String> {
-    credentials.store_profile_password(&profile_id, &password)
+    let updated_at = crate::db::current_timestamp_ms();
+    let profile_name = database
+        .get_profile(&profile_id)?
+        .map(|p| p.name)
+        .unwrap_or_else(|| profile_id.clone());
+    database.upsert_key_credential(
+        &profile_id,
+        &profile_name,
+        "profile",
+        "password",
+        crate::keychain::PROFILE_PASSWORD_SERVICE,
+        None,
+        None,
+        updated_at,
+    )?;
+    if let Err(error) = credentials.store_profile_password(&profile_id, &password) {
+        if let Err(rollback_error) = database.delete_key_credential(&profile_id) {
+            warn!(
+                "Failed to roll back profile password metadata id={}: {}",
+                profile_id, rollback_error
+            );
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[tauri::command]

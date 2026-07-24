@@ -1,7 +1,7 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 
@@ -68,7 +68,7 @@
   --sidebar-ring: var(--app-primary);
 }
 
-[data-theme="dark"] {
+[data-theme='dark'] {
   --app-bg: #020617;
   --app-surface: #0f172a;
   --app-surface-muted: #1e293b;

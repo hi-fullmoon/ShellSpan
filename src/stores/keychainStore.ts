@@ -122,11 +122,14 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
   hydrate: async () => {
     try {
       const keySummaries = await invokeListKeyCredentials();
+      const keys = keySummaries.map((summary) =>
+        summary.kind === 'password' ? { ...summary, keyType: 'ecdsa' } : summary,
+      );
       set({
-        keys: keySummaries,
+        keys,
         initialized: true,
       });
-      logger.info(`loaded ${keySummaries.length} key credentials`);
+      logger.info(`loaded ${keys.length} key credentials`);
     } catch (error) {
       logger.error('failed to load key credentials', error);
       set({ keys: [], initialized: true });

@@ -25,6 +25,10 @@ export async function promptForMissingPassword(
     return profile;
   }
 
+  if (profile.keychainKeyId) {
+    return profile;
+  }
+
   logger.info(`Prompting for password for ${profile.host}:${profile.port}`);
   const result = await usePasswordPromptStore
     .getState()
