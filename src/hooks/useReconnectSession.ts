@@ -8,6 +8,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { promptForMissingPassword } from '@/lib/password-prompt';
+import { getLocalizedErrorMessage } from '@/lib/error';
 
 const logger = createLogger('reconnect');
 
@@ -54,7 +55,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
       setStatus(sessionId, {
         sessionId,
         status: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message: getLocalizedErrorMessage(error),
       });
     }
   };

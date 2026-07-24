@@ -5,7 +5,7 @@ import { useAppStore } from '@/stores/appStore';
 import { ConnectionForm } from './connection-form';
 import { ConnectionList } from './connection-list';
 import { KnownHostsPanel } from './known-hosts-panel';
-import { CredentialsPanel } from './credentials-panel';
+import { KeychainPanel } from './keychain-panel';
 import { LogPanel } from './log-panel';
 import { SettingsPanel } from './settings-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
@@ -114,9 +114,7 @@ const Workbench: React.FC = () => {
           {activeTab === 'knownHosts' && (
             <KnownHostsPanel onCreateConnection={handleCreateFromKnownHost} />
           )}
-          {activeTab === 'credentials' && (
-            <CredentialsPanel />
-          )}
+          {activeTab === 'keychain' && <KeychainPanel />}
           {activeTab === 'logs' && <LogPanel />}
           {activeTab === 'settings' && <SettingsPanel />}
         </div>

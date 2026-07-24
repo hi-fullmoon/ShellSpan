@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import {
+  buildRemoteConnectionRequest,
   invokeCopyRemotePath,
   invokeCancelDownload,
   invokeCreateRemoteEntry,
@@ -22,7 +23,10 @@ import {
 } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
+import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
+import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
 import { useAppStore } from '@/stores/appStore';
+import { useProfileStore } from '@/stores/profileStore';
 import type { SftpSide } from '@/stores/sftpStore';
 import type {
   ReadRemoteFileResponse,
@@ -78,6 +82,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   const setEntries = useSftpStore((state) => state.setEntries);
   const setLoading = useSftpStore((state) => state.setLoading);
   const setError = useSftpStore((state) => state.setError);
+  const updateConnectionRequest = useSftpStore((state) => state.updateConnectionRequest);
   const addOperation = useTransferStore((state) => state.addOperation);
   const markOperationRunning = useTransferStore(
     (state) => state.markOperationRunning,
@@ -101,16 +106,42 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         setEntries(connection.id, side, listing.entries);
       } catch (error) {
         logger.error(`Failed to list remote directory${path ? `: ${path}` : ''}`, error);
+
+        const message = getErrorMessage(error);
+        const profileId = side === 'local' ? connection.leftProfileId : connection.profileId;
+        if (
+          profileId &&
+          remoteConnection.authMethod === 'key' &&
+          remoteConnection.keychainKeyId &&
+          message.toLowerCase().startsWith('keychain key not found:')
+        ) {
+          const profile = useProfileStore.getState().getProfile(profileId);
+          if (profile) {
+            const recovered = await promptForMissingKeychainKey(profile);
+            if (recovered) {
+              const newRequest = buildRemoteConnectionRequest(recovered);
+              updateConnectionRequest(connection.id, side, newRequest);
+              const retryListing = await invokeListRemoteDirectory({
+                ...newRequest,
+                path,
+              });
+              setPath(connection.id, side, retryListing.path);
+              setEntries(connection.id, side, retryListing.entries);
+              return;
+            }
+          }
+        }
+
         setError(
           connection.id,
           side,
-          error instanceof Error ? error.message : String(error),
+          getLocalizedErrorMessage(error),
         );
       } finally {
         setLoading(connection.id, side, false);
       }
     },
-    [connection.id, remoteConnection, setPath, setEntries, setLoading, setError, side],
+    [connection.id, connection.leftProfileId, connection.profileId, remoteConnection, setPath, setEntries, setLoading, setError, updateConnectionRequest, side],
   );
 
   const createRemoteEntry = useCallback(
@@ -231,7 +262,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         }
         markOperationFailed(
           operationId,
-          error instanceof Error ? error.message : String(error),
+          getLocalizedErrorMessage(error),
         );
         await loadRemoteDirectory(panePath);
         throw error;
@@ -279,7 +310,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         } catch (error) {
           markOperationFailed(
             operationId,
-            error instanceof Error ? error.message : String(error),
+            getLocalizedErrorMessage(error),
           );
           throw error;
         }
@@ -337,7 +368,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           }
           markOperationFailed(
             operationId,
-            error instanceof Error ? error.message : String(error),
+            getLocalizedErrorMessage(error),
           );
           throw error;
         }

@@ -2,15 +2,22 @@ import { useCallback, useState } from 'react';
 import {
   buildRemoteConnectionRequest,
   invokeCheckHostKey,
+  invokeListRemoteDirectory,
   invokeTrustHost,
+  parseRemoteFsError,
 } from '@/lib/tauri';
 import { generateId } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
-import type { ConnectionProfile } from '@/types';
+import type { ConnectionProfile, RemoteFsError } from '@/types';
 import { promptForMissingPassword } from '@/lib/password-prompt';
+import { getLocalizedErrorMessage } from '@/lib/error';
+import {
+  ensureKeychainKeyForProfile,
+  prepareKeychainKeyForProfile,
+} from '@/lib/keychain-key-prompt';
 
 interface SftpHostKeyDialogState {
   open: boolean;
@@ -100,7 +107,7 @@ export function useSftpConnectionOpener(): {
                 .catch((error: unknown) => {
                   useToastStore
                     .getState()
-                    .addToast(error instanceof Error ? error.message : String(error), 'error');
+                    .addToast(getLocalizedErrorMessage(error), 'error');
                 });
             },
           });
@@ -113,7 +120,7 @@ export function useSftpConnectionOpener(): {
       } catch (error) {
         useToastStore
           .getState()
-          .addToast(error instanceof Error ? error.message : String(error), 'error');
+          .addToast(getLocalizedErrorMessage(error), 'error');
       }
     },
     [],
@@ -126,18 +133,78 @@ export function useSftpConnectionOpener(): {
         return;
       }
 
-      // The current host-key probe opens a direct TCP connection. Jump-host
-      // sessions are still verified by the backend while establishing SFTP.
-      if (profileWithPassword.jumpHost) {
-        finishOpen(profileWithPassword, targetConnectionId, targetSide);
+      const profileWithKey = await ensureKeychainKeyForProfile(profileWithPassword);
+      if (!profileWithKey) {
         return;
       }
 
-      await verifyHostKey(
-        profileWithPassword.host,
-        profileWithPassword.port,
-        () => finishOpen(profileWithPassword, targetConnectionId, targetSide),
-      );
+      const preparedProfile = await prepareKeychainKeyForProfile(profileWithKey);
+      if (!preparedProfile) {
+        return;
+      }
+
+      // Non-jump-host sessions can be pre-probed with a direct TCP connection.
+      if (!preparedProfile.jumpHost) {
+        await verifyHostKey(
+          preparedProfile.host,
+          preparedProfile.port,
+          () => finishOpen(preparedProfile, targetConnectionId, targetSide),
+        );
+        return;
+      }
+
+      // Jump-host sessions cannot be pre-probed from the frontend. We attempt
+      // a lightweight SFTP operation so the backend can surface host-key errors.
+      const attemptSftpConnection = async () => {
+        const request = buildRemoteConnectionRequest(preparedProfile);
+        await invokeListRemoteDirectory({ ...request });
+      };
+
+      const handleRemoteFsError = (error: RemoteFsError): boolean => {
+        if (error.type === 'HostKeyUnknown' || error.type === 'HostKeyMismatch') {
+          setHostKeyDialog({
+            open: true,
+            host: error.payload.host,
+            port: error.payload.port,
+            fingerprint: error.type === 'HostKeyUnknown' ? error.payload.fingerprint : undefined,
+            mismatch: error.type === 'HostKeyMismatch',
+            onTrust: () => {
+              void invokeTrustHost(error.payload.host, error.payload.port)
+                .then(() => {
+                  setHostKeyDialog(CLOSED_DIALOG);
+                  return attemptSftpConnection();
+                })
+                .then(() => {
+                  finishOpen(preparedProfile, targetConnectionId, targetSide);
+                })
+                .catch((retryError: unknown) => {
+                  const parsed = parseRemoteFsError(retryError);
+                  if (parsed && handleRemoteFsError(parsed)) {
+                    return;
+                  }
+                  useToastStore
+                    .getState()
+                    .addToast(getLocalizedErrorMessage(retryError), 'error');
+                });
+            },
+          });
+          return true;
+        }
+        return false;
+      };
+
+      try {
+        await attemptSftpConnection();
+        finishOpen(preparedProfile, targetConnectionId, targetSide);
+      } catch (error) {
+        const parsed = parseRemoteFsError(error);
+        if (parsed && handleRemoteFsError(parsed)) {
+          return;
+        }
+        useToastStore
+          .getState()
+          .addToast(getLocalizedErrorMessage(error), 'error');
+      }
     },
     [finishOpen, verifyHostKey],
   );

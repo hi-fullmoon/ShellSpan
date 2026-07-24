@@ -22,6 +22,7 @@ import { useUpdateFlow } from '@/hooks/useUpdateFlow';
 import { createLogger } from '@/lib/logger';
 import { useAppShortcuts } from '@/hooks/useAppShortcuts';
 import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-dialog';
+import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prompt-dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -192,6 +193,7 @@ export const App: React.FC = () => {
       />
 
       <CredentialPromptDialog />
+      <KeychainKeyPromptDialog />
 
       <Toaster />
     </AppShell>

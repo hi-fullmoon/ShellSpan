@@ -21,7 +21,6 @@ vi.mock('@/lib/tauri', () => ({
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
-  invokeRetrievePassword: vi.fn().mockResolvedValue(null),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
   listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),

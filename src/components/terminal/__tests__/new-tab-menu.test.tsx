@@ -17,11 +17,7 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
-vi.mock('@/lib/tauri', () => ({
-  invokeRetrievePassword: vi.fn().mockResolvedValue(null),
-  invokeStorePassword: vi.fn().mockResolvedValue(undefined),
-  invokeRemovePassword: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('@/lib/tauri', () => ({}));
 
 const initialProfile = useProfileStore.getState();
 const initialApp = useAppStore.getState();

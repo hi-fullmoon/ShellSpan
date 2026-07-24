@@ -7,6 +7,7 @@ import type {
   ConnectionProfile,
   CopyRemotePathRequest,
   KeychainKey,
+  KeychainKeyKind,
   CreateRemoteEntryRequest,
   CreateSessionError,
   DataEvent,
@@ -20,6 +21,7 @@ import type {
   RemoteConnectionRequest,
   RemoteDirectoryListing,
   RemoteDirectoryRequest,
+  RemoteFsError,
   RenameRemotePathRequest,
   DeleteRemotePathRequest,
   RestoreRemotePathRequest,
@@ -35,6 +37,7 @@ import type {
   CopyLocalPathsRequest,
   CopyRemoteToRemoteRequest,
   SessionCreateRequest,
+  SessionErrorEvent,
   SessionSummary,
   StatusEvent,
   UploadProgressEvent,
@@ -49,6 +52,37 @@ async function invokeLogged<T>(cmd: string, args?: Record<string, unknown>): Pro
     logger.error(`invoke ${cmd} failed`, error);
     throw error;
   }
+}
+
+export function parseRemoteFsError(error: unknown): RemoteFsError | null {
+  if (typeof error !== 'object' || error === null) {
+    return null;
+  }
+
+  const payload = (error as { type?: string; payload?: unknown }).type
+    ? error
+    : (() => {
+        const message = (error as { message?: string }).message;
+        if (!message) return null;
+        try {
+          return JSON.parse(message);
+        } catch {
+          return null;
+        }
+      })();
+
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'type' in payload &&
+    (payload.type === 'HostKeyUnknown' ||
+      payload.type === 'HostKeyMismatch' ||
+      payload.type === 'Other')
+  ) {
+    return payload as RemoteFsError;
+  }
+
+  return null;
 }
 
 export async function invokeCreateSession(
@@ -273,29 +307,11 @@ export async function invokeOpenPath(path: string): Promise<void> {
   return invokeLogged('open_path', { path });
 }
 
-export async function invokeStorePassword(
-  profileId: string,
+export async function invokeDeriveEcdsaKeyFromPassword(
   password: string,
-): Promise<void> {
-  return invokeLogged('store_password', { profileId, password });
-}
-
-export async function invokeRetrievePassword(
-  profileId: string,
-): Promise<string | null> {
-  return invokeLogged('retrieve_password', { profileId });
-}
-
-export async function invokeRemovePassword(profileId: string): Promise<void> {
-  return invokeLogged('remove_password', { profileId });
-}
-
-export async function invokeListCachedCredentialProfileIds(): Promise<string[]> {
-  return invokeLogged('list_cached_credential_profile_ids');
-}
-
-export async function invokeClearCredentialCache(): Promise<void> {
-  return invokeLogged('clear_credential_cache');
+): Promise<{ privateKey: string; publicKey: string }> {
+  const [privateKey, publicKey] = await invokeLogged<[string, string]>('derive_ecdsa_key_from_password', { password });
+  return { privateKey, publicKey };
 }
 
 export async function invokeStoreKeyCredential(
@@ -304,7 +320,7 @@ export async function invokeStoreKeyCredential(
   return invokeLogged('store_key_credential', { request: key });
 }
 
-export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string }[]> {
+export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind }[]> {
   return invokeLogged('list_key_credentials');
 }
 
@@ -315,8 +331,24 @@ export async function invokeRetrieveKeyCredential(
   return result ?? undefined;
 }
 
-export async function invokeDeleteKeyCredential(id: string): Promise<void> {
-  return invokeLogged('delete_key_credential', { id });
+export async function invokeDeleteKeyCredential(id: string): Promise<string[]> {
+  return invokeLogged<string[]>('delete_key_credential', { id });
+}
+
+export async function invokeStoreProfilePassword(
+  profileId: string,
+  password: string,
+): Promise<void> {
+  return invokeLogged('store_profile_password', { profileId, password });
+}
+
+export async function invokeRetrieveProfilePassword(profileId: string): Promise<string | undefined> {
+  const result = await invokeLogged<string | null>('retrieve_profile_password', { profileId });
+  return result ?? undefined;
+}
+
+export async function invokeDeleteProfilePassword(profileId: string): Promise<void> {
+  return invokeLogged('delete_profile_password', { profileId });
 }
 
 export async function invokeReadTextFile(path: string): Promise<string> {
@@ -333,7 +365,7 @@ export function buildRemoteConnectionRequest(
     authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
     keychainKeyId: profile.keychainKeyId,
-    privateKeyPath: profile.privateKeyPath,
+    privateKeyData: profile.privateKeyData,
     passphrase: profile.passphrase,
     jumpHost: profile.jumpHost ? mapJumpHostAuthMethod(profile.jumpHost) : undefined,
   };
@@ -352,7 +384,7 @@ export function buildSessionCreateRequest(
     authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
     keychainKeyId: profile.keychainKeyId,
-    privateKeyPath: profile.privateKeyPath,
+    privateKeyData: profile.privateKeyData,
     passphrase: profile.passphrase,
     terminalCols: cols,
     terminalRows: rows,
@@ -362,13 +394,14 @@ export function buildSessionCreateRequest(
 
 function mapAuthMethodForBackend(authMethod: AuthMethod): AuthMethod {
   if (authMethod === 'password') return 'password';
-  return 'key' as AuthMethod;
+  return 'key';
 }
 
 function mapJumpHostAuthMethod(jumpHost: JumpHostConfig): JumpHostConfig {
   return {
     ...jumpHost,
     authMethod: mapAuthMethodForBackend(jumpHost.authMethod),
+    privateKeyData: jumpHost.privateKeyData,
   };
 }
 
@@ -402,6 +435,14 @@ export async function listenToSshClosed(
     if (event.payload.sessionId === sessionId) {
       callback(event);
     }
+  });
+}
+
+export async function listenToSessionError(
+  callback: EventCallback<SessionErrorEvent>,
+): Promise<UnlistenFn> {
+  return listen<SessionErrorEvent>('ssh-session-error', (event) => {
+    callback(event);
   });
 }
 

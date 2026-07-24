@@ -8,7 +8,6 @@ export interface PasswordPromptRequest {
 
 export interface PasswordPromptResult {
   password: string;
-  remember: boolean;
 }
 
 interface PendingPrompt {
