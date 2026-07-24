@@ -1,5 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { detectKeyType } from '../keychainStore';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useKeychainStore, detectKeyType } from '../keychainStore';
+
+const { invokeListKeyCredentials, invokeStoreKeyCredential, invokeRetrieveKeyCredential, invokeDeleteKeyCredential } = vi.hoisted(() => ({
+  invokeListKeyCredentials: vi.fn(),
+  invokeStoreKeyCredential: vi.fn(),
+  invokeRetrieveKeyCredential: vi.fn(),
+  invokeDeleteKeyCredential: vi.fn(),
+}));
+
+vi.mock('@/lib/tauri', () => ({
+  invokeListKeyCredentials,
+  invokeStoreKeyCredential,
+  invokeRetrieveKeyCredential,
+  invokeDeleteKeyCredential,
+}));
 
 const PKCS8_ECDSA_KEY = `-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg54Gkuxt07x1huApu
@@ -48,5 +62,26 @@ describe('detectKeyType', () => {
 
   it('returns unknown for PKCS#8 keys without a recognized algorithm', () => {
     expect(detectKeyType('-----BEGIN PRIVATE KEY-----\nMIIBBQIBAD==\n-----END PRIVATE KEY-----')).toBe('unknown');
+  });
+});
+
+describe('keychainStore hydrate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useKeychainStore.setState({ keys: [], initialized: false });
+  });
+
+  it('maps password-kind credentials to ecdsa key type on hydrate', async () => {
+    invokeListKeyCredentials.mockResolvedValue([
+      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password' },
+      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile' },
+    ]);
+
+    await useKeychainStore.getState().hydrate();
+
+    expect(useKeychainStore.getState().keys).toEqual([
+      { id: 'profile-1', label: 'Server password', keyType: 'ecdsa', kind: 'password' },
+      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile' },
+    ]);
   });
 });

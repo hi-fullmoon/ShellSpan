@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 12;
+const CURRENT_SCHEMA_VERSION: i32 = 13;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -206,6 +206,16 @@ const SCHEMA_V12: &str = "
 ALTER TABLE key_credentials ADD COLUMN value TEXT;
 ";
 
+const SCHEMA_V13: &str = "
+ALTER TABLE key_credentials ADD COLUMN service TEXT NOT NULL DEFAULT 'com.termbridge.key';
+UPDATE key_credentials
+SET service = 'com.termbridge.profile-password',
+    kind = 'password',
+    key_type = 'profile',
+    label = COALESCE((SELECT name FROM profiles WHERE profiles.id = key_credentials.id), key_credentials.label)
+WHERE id IN (SELECT id FROM profiles WHERE auth_method = 'password');
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -332,6 +342,13 @@ impl Database {
                 .map_err(|e| format!("migration v12 version insert failed: {e}"))?;
         }
 
+        if current < 13 {
+            conn.execute_batch(SCHEMA_V13)
+                .map_err(|e| format!("migration v13 failed: {e}"))?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (13)", [])
+                .map_err(|e| format!("migration v13 version insert failed: {e}"))?;
+        }
+
         Ok(())
     }
 
@@ -383,6 +400,56 @@ impl Database {
             .map_err(|e| format!("failed to query profiles: {e}"))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("failed to collect profiles: {e}"))
+    }
+
+    pub(crate) fn get_profile(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::models::ProfileRow>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        let row = conn
+            .query_row(
+                "SELECT id, name, host, port, username, auth_method, \
+                 keychain_key_id, jump_host_config, created_at, updated_at \
+                 FROM profiles WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(crate::models::ProfileRow {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        host: row.get(2)?,
+                        port: row.get(3)?,
+                        username: row.get(4)?,
+                        auth_method: {
+                            let s: String = row.get(5)?;
+                            match s.as_str() {
+                                "password" => crate::models::ProfileAuthMethod::Password,
+                                "key" | "keychainKey" | "keyPath" => {
+                                    crate::models::ProfileAuthMethod::Key
+                                }
+                                other => Err(rusqlite::Error::FromSqlConversionFailure(
+                                    5,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        format!("unknown auth_method: {other}"),
+                                    )),
+                                ))?,
+                            }
+                        },
+                        keychain_key_id: row.get(6)?,
+                        jump_host_config: row.get(7)?,
+                        created_at: row.get(8)?,
+                        updated_at: row.get(9)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| format!("failed to get profile: {e}"))?;
+        Ok(row)
     }
 
     pub(crate) fn insert_profile(&self, profile: &crate::models::ProfileRow) -> Result<(), String> {
@@ -491,6 +558,7 @@ impl Database {
         label: &str,
         key_type: &str,
         kind: &str,
+        service: &str,
         public_key: Option<&str>,
         certificate: Option<&str>,
         updated_at: i64,
@@ -500,9 +568,9 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         conn.execute(
-            "INSERT INTO key_credentials (id, label, key_type, kind, public_key, certificate, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
-             ON CONFLICT(id) DO UPDATE SET label=excluded.label, key_type=excluded.key_type, kind=excluded.kind, public_key=excluded.public_key, certificate=excluded.certificate, updated_at=excluded.updated_at",
-            params![id, label, key_type, kind, public_key, certificate, updated_at],
+            "INSERT INTO key_credentials (id, label, key_type, kind, service, public_key, certificate, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+             ON CONFLICT(id) DO UPDATE SET label=excluded.label, key_type=excluded.key_type, kind=excluded.kind, service=excluded.service, public_key=excluded.public_key, certificate=excluded.certificate, updated_at=excluded.updated_at",
+            params![id, label, key_type, kind, service, public_key, certificate, updated_at],
         )
         .map_err(|e| format!("failed to upsert key credential: {e}"))?;
         Ok(())
@@ -522,15 +590,16 @@ impl Database {
         &self,
         id: &str,
         value: &str,
+        service: &str,
     ) -> Result<(), String> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         conn.execute(
-            "INSERT INTO key_credentials (id, label, value, updated_at) VALUES (?1, ?1, ?2, 0) \
-             ON CONFLICT(id) DO UPDATE SET value=excluded.value",
-            params![id, value],
+            "INSERT INTO key_credentials (id, label, value, service, updated_at) VALUES (?1, ?1, ?2, ?3, 0) \
+             ON CONFLICT(id) DO UPDATE SET value=excluded.value, service=excluded.service",
+            params![id, value, service],
         )
         .map_err(|e| format!("failed to store key credential value: {e}"))?;
         Ok(())
@@ -1155,9 +1224,9 @@ mod tests {
     #[test]
     fn key_credential_value_storage_roundtrip() {
         let db = test_db();
-        db.upsert_key_credential("key-1", "Test Key", "rsa", "keyFile", None, None, 1000)
+        db.upsert_key_credential("key-1", "Test Key", "rsa", "keyFile", "com.termbridge.key", None, None, 1000)
             .unwrap();
-        db.store_key_credential_value("key-1", "private-key-data")
+        db.store_key_credential_value("key-1", "private-key-data", "com.termbridge.key")
             .unwrap();
 
         let value = db.retrieve_key_credential_value("key-1").unwrap();
@@ -1170,6 +1239,44 @@ mod tests {
 
         db.delete_key_credential("key-1").unwrap();
         assert!(db.retrieve_key_credential_value("key-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn profile_password_is_listed_with_password_kind_and_profile_key_type() {
+        let db = test_db();
+        let profile = ProfileRow {
+            id: "profile-1".to_string(),
+            name: "Server".to_string(),
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: ProfileAuthMethod::Password,
+            keychain_key_id: None,
+            jump_host_config: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        db.insert_profile(&profile).unwrap();
+        db.upsert_key_credential(
+            "profile-1",
+            "Server",
+            "profile",
+            "password",
+            "com.termbridge.profile-password",
+            None,
+            None,
+            1000,
+        )
+        .unwrap();
+        db.store_key_credential_value("profile-1", "secret-password", "com.termbridge.profile-password")
+            .unwrap();
+
+        let summaries = db.list_key_credentials().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "profile-1");
+        assert_eq!(summaries[0].label, "Server");
+        assert_eq!(summaries[0].key_type, "profile");
+        assert_eq!(summaries[0].kind, crate::models::KeyCredentialKind::Password);
     }
 
     #[test]

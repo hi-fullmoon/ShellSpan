@@ -19,7 +19,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -42,7 +41,6 @@ import {
 } from '@/components/ui/drawer';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
-import { invokeDeriveEcdsaKeyFromPassword } from '@/lib/tauri';
 import type { KeychainKey, KeychainKeyKind } from '@/types';
 
 const KIND_BADGE_STYLES: Record<KeychainKeyKind, string> = {
@@ -64,15 +62,13 @@ const keyTypeBadgeClass = (keyType: string): string =>
 interface KeyFormState {
   kind: KeychainKeyKind;
   label: string;
-  password: string;
   privateKey: string;
   publicKey: string;
 }
 
 const EMPTY_FORM: KeyFormState = {
-  kind: 'password',
+  kind: 'keyFile',
   label: '',
-  password: '',
   privateKey: '',
   publicKey: '',
 };
@@ -81,7 +77,6 @@ function keyToForm(key: KeychainKey): KeyFormState {
   return {
     kind: key.kind,
     label: key.label,
-    password: '',
     privateKey: key.privateKey ?? '',
     publicKey: key.publicKey ?? '',
   };
@@ -97,7 +92,6 @@ export const KeychainPanel: React.FC = () => {
   const [form, setForm] = useState<KeyFormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isDeriving, setIsDeriving] = useState(false);
   const [deleting, setDeleting] = useState<KeychainKeySummary | undefined>();
 
   useEffect(() => {
@@ -145,47 +139,13 @@ export const KeychainPanel: React.FC = () => {
     }
   };
 
-  const deriveKeyPair = async (): Promise<void> => {
-    if (!form.password.trim()) {
-      setErrors((prev) => ({ ...prev, password: t('keychain.form.passwordRequired') }));
-      return;
-    }
-    setIsDeriving(true);
-    try {
-      const result = await invokeDeriveEcdsaKeyFromPassword(form.password);
-      setForm((prev) => ({
-        ...prev,
-        privateKey: result.privateKey,
-        publicKey: result.publicKey,
-      }));
-      setErrors((prev) => {
-        const next = { ...prev };
-        delete next.publicKey;
-        return next;
-      });
-    } catch (error) {
-      showError(t('keychain.form.deriveFailed'));
-    } finally {
-      setIsDeriving(false);
-    }
-  };
-
   const validate = (): boolean => {
     const nextErrors: Record<string, string> = {};
     if (!form.label.trim()) {
       nextErrors.label = t('keychain.form.labelRequired');
     }
-    if (form.kind === 'password') {
-      if (!editing && !form.password.trim()) {
-        nextErrors.password = t('keychain.form.passwordRequired');
-      }
-      if (!form.publicKey.trim()) {
-        nextErrors.publicKey = t('keychain.form.publicKeyRequired');
-      }
-    } else {
-      if (!form.privateKey.trim()) {
-        nextErrors.privateKey = t('keychain.form.privateKeyRequired');
-      }
+    if (!form.privateKey.trim()) {
+      nextErrors.privateKey = t('keychain.form.privateKeyRequired');
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -310,7 +270,9 @@ export const KeychainPanel: React.FC = () => {
               ]}
               gap="0.375rem"
             >
-              {filteredKeys.map((key) => (
+              {filteredKeys.map((key) => {
+                const isProfilePassword = key.kind === 'password';
+                return (
                 <ManagementCard key={key.id}>
                   <div className="flex items-center gap-2.5">
                     <ManagementCardIcon>
@@ -327,7 +289,9 @@ export const KeychainPanel: React.FC = () => {
                             KIND_BADGE_STYLES[key.kind],
                           )}
                         >
-                          {t(`keychain.kind.${key.kind}`)}
+                          {isProfilePassword
+                            ? t('keychain.kind.profilePassword')
+                            : t(`keychain.kind.${key.kind}`)}
                         </span>
                         <span
                           className={cn(
@@ -339,21 +303,23 @@ export const KeychainPanel: React.FC = () => {
                         </span>
                       </div>
                     </div>
-                    <IconActionButton
-                      onClick={() => {
-                        const fullKey = keys.find((k) => k.id === key.id);
-                        if (!fullKey) return;
-                        // Retrieve full key for editing.
-                        void useKeychainStore.getState().getKey(key.id).then((k) => {
-                          if (k) openEdit(k);
-                        });
-                      }}
-                      aria-label={t('common.edit')}
-                      tooltip={t('common.edit')}
-                      className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                    >
-                      <PencilIcon data-icon="inline-start" className="text-app-primary" />
-                    </IconActionButton>
+                    {!isProfilePassword && (
+                      <IconActionButton
+                        onClick={() => {
+                          const fullKey = keys.find((k) => k.id === key.id);
+                          if (!fullKey) return;
+                          // Retrieve full key for editing.
+                          void useKeychainStore.getState().getKey(key.id).then((k) => {
+                            if (k) openEdit(k);
+                          });
+                        }}
+                        aria-label={t('common.edit')}
+                        tooltip={t('common.edit')}
+                        className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <PencilIcon data-icon="inline-start" className="text-app-primary" />
+                      </IconActionButton>
+                    )}
                     <IconActionButton
                       onClick={() => {
                         const matched = keys.find((k) => k.id === key.id);
@@ -367,7 +333,7 @@ export const KeychainPanel: React.FC = () => {
                     </IconActionButton>
                   </div>
                 </ManagementCard>
-              ))}
+              );})}
             </ResponsiveCardGrid>
           )}
         </div>
@@ -381,29 +347,13 @@ export const KeychainPanel: React.FC = () => {
                 ? t('workbench.keychain.edit')
                 : t('workbench.keychain.new')}
             </DrawerTitle>
+            <p className="text-xs text-muted-foreground">
+              {editing
+                ? t('workbench.keychain.editSubtitle')
+                : t('workbench.keychain.newSubtitle')}
+            </p>
           </DrawerHeader>
           <div className="flex flex-col gap-5 px-5 py-4">
-            {!editing && (
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs text-muted-foreground">{t('keychain.form.kind')}</Label>
-                <ToggleGroup
-                  value={[form.kind]}
-                  onValueChange={(next) => {
-                    const selected = next[0] as KeychainKeyKind | undefined;
-                    if (selected) updateField('kind', selected);
-                  }}
-                  className="w-full"
-                >
-                  <ToggleGroupItem value="password" className="flex-1">
-                    {t('keychain.kind.password')}
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="keyFile" className="flex-1">
-                    {t('keychain.kind.keyFile')}
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </div>
-            )}
-
             <FormRow label={t('common.label')} error={errors.label}>
               <Input
                 value={form.label}
@@ -412,69 +362,32 @@ export const KeychainPanel: React.FC = () => {
               />
             </FormRow>
 
-            {form.kind === 'password' && (
-              <>
-                <FormRow label={t('common.password')} error={errors.password}>
-                  <div className="flex gap-2">
-                    <Input
-                      type="password"
-                      value={form.password}
-                      onChange={(e) => updateField('password', e.target.value)}
-                      placeholder={editing ? t('keychain.form.passwordEditPlaceholder') : t('keychain.form.passwordPlaceholder')}
-                      className="flex-1"
-                    />
-                    <Button
-                      variant="outline"
-                      onClick={() => void deriveKeyPair()}
-                      disabled={isDeriving}
-                      className="shrink-0"
-                    >
-                      {isDeriving ? t('common.loading') : t('keychain.form.derive')}
-                    </Button>
-                  </div>
-                </FormRow>
-                <FormRow label={t('common.publicKey')} error={errors.publicKey}>
-                  <Textarea
-                    value={form.publicKey}
-                    onChange={(e) => updateField('publicKey', e.target.value)}
-                    placeholder={t('keychain.form.publicKeyPlaceholder')}
-                    rows={4}
-                    readOnly
-                  />
-                </FormRow>
-              </>
-            )}
-
-            {form.kind === 'keyFile' && (
-              <>
-                <FormRow label={t('common.privateKey')} error={errors.privateKey}>
-                  <Textarea
-                    value={form.privateKey}
-                    onChange={(e) => updateField('privateKey', e.target.value)}
-                    placeholder={t('keychain.form.privateKeyPlaceholder')}
-                    rows={6}
-                  />
-                </FormRow>
-                <FormRow label={t('common.publicKey')}>
-                  <Textarea
-                    value={form.publicKey}
-                    onChange={(e) => updateField('publicKey', e.target.value)}
-                    placeholder={t('keychain.form.publicKeyOptionalPlaceholder')}
-                    rows={4}
-                  />
-                </FormRow>
-                <FileDropZone
-                  onFileContent={(content) => {
-                    const detected = detectKeyContentType(content);
-                    if (detected === 'publicKey') {
-                      setForm((prev) => ({ ...prev, publicKey: content }));
-                    } else {
-                      setForm((prev) => ({ ...prev, privateKey: content }));
-                    }
-                  }}
-                />
-              </>
-            )}
+            <FormRow label={t('common.privateKey')} error={errors.privateKey}>
+              <Textarea
+                value={form.privateKey}
+                onChange={(e) => updateField('privateKey', e.target.value)}
+                placeholder={t('keychain.form.privateKeyPlaceholder')}
+                rows={6}
+              />
+            </FormRow>
+            <FormRow label={t('common.publicKey')}>
+              <Textarea
+                value={form.publicKey}
+                onChange={(e) => updateField('publicKey', e.target.value)}
+                placeholder={t('keychain.form.publicKeyOptionalPlaceholder')}
+                rows={4}
+              />
+            </FormRow>
+            <FileDropZone
+              onFileContent={(content) => {
+                const detected = detectKeyContentType(content);
+                if (detected === 'publicKey') {
+                  setForm((prev) => ({ ...prev, publicKey: content }));
+                } else {
+                  setForm((prev) => ({ ...prev, privateKey: content }));
+                }
+              }}
+            />
           </div>
           <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
             <Button

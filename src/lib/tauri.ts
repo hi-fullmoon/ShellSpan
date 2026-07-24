@@ -314,14 +314,28 @@ export async function invokeDeriveEcdsaKeyFromPassword(
   return { privateKey, publicKey };
 }
 
+function toBackendKeychainKind(kind: KeychainKeyKind): string {
+  return kind === 'keyFile' ? 'keyfile' : kind;
+}
+
+function fromBackendKeychainKind(kind: string): KeychainKeyKind {
+  return kind === 'keyfile' ? 'keyFile' : 'password';
+}
+
 export async function invokeStoreKeyCredential(
   key: Omit<KeychainKey, 'createdAt' | 'updatedAt'>,
 ): Promise<void> {
-  return invokeLogged('store_key_credential', { request: key });
+  return invokeLogged('store_key_credential', {
+    request: { ...key, kind: toBackendKeychainKind(key.kind) },
+  });
 }
 
 export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind }[]> {
-  return invokeLogged('list_key_credentials');
+  const credentials = await invokeLogged<Array<{ id: string; label: string; keyType: string; kind: string }>>('list_key_credentials');
+  return credentials.map((credential) => ({
+    ...credential,
+    kind: fromBackendKeychainKind(credential.kind),
+  }));
 }
 
 export async function invokeRetrieveKeyCredential(

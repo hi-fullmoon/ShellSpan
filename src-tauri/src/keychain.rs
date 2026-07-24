@@ -2,8 +2,8 @@ use log::debug;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-const KEY_SERVICE: &str = "com.termbridge.key";
-const PROFILE_PASSWORD_SERVICE: &str = "com.termbridge.profile-password";
+pub(crate) const KEY_SERVICE: &str = "com.termbridge.key";
+pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.termbridge.profile-password";
 
 trait CredentialBackend: Send + Sync {
     fn set_credential(
@@ -29,11 +29,11 @@ impl LocalKeychainBackend {
 impl CredentialBackend for LocalKeychainBackend {
     fn set_credential(
         &self,
-        _service: &str,
+        service: &str,
         key: &str,
         value: &str,
     ) -> Result<(), String> {
-        self.database.store_key_credential_value(key, value)
+        self.database.store_key_credential_value(key, value, service)
     }
 
     fn get_credential(&self, _service: &str, key: &str) -> Result<Option<String>, String> {

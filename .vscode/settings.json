@@ -1,3 +1,4 @@
 {
-  "cSpell.words": ["chakra", "tauri", "termbridge"]
+  "cSpell.words": ["chakra", "tauri", "termbridge"],
+  "tailwindCSS.lint.suggestCanonicalClasses": "ignore"
 }

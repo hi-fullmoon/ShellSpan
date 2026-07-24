@@ -16,6 +16,7 @@ import { promptForMissingPassword } from '@/lib/password-prompt';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
+  ensurePasswordKeychain,
   prepareKeychainKeyForProfile,
 } from '@/lib/keychain-key-prompt';
 
@@ -138,7 +139,12 @@ export function useSftpConnectionOpener(): {
         return;
       }
 
-      const preparedProfile = await prepareKeychainKeyForProfile(profileWithKey);
+      const passwordStoredProfile = await ensurePasswordKeychain(profileWithKey);
+      if (!passwordStoredProfile) {
+        return;
+      }
+
+      const preparedProfile = await prepareKeychainKeyForProfile(passwordStoredProfile);
       if (!preparedProfile) {
         return;
       }

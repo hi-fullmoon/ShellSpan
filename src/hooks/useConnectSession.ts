@@ -16,6 +16,7 @@ import { promptForMissingPassword } from '@/lib/password-prompt';
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
+  ensurePasswordKeychain,
   prepareKeychainKeyForProfile,
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
@@ -86,19 +87,7 @@ export function useConnectSession(): {
   ): Promise<void> => {
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
 
-    const ensuredProfile = await ensureKeychainKeyForProfile(profile);
-    if (!ensuredProfile) {
-      logger.info('Connection cancelled by user (key prompt dismissed)');
-      return;
-    }
-
-    const preparedProfile = await prepareKeychainKeyForProfile(ensuredProfile);
-    if (!preparedProfile) {
-      logger.info('Connection cancelled by user (keychain password prompt dismissed)');
-      return;
-    }
-
-    let currentProfile = preparedProfile;
+    let currentProfile = profile;
     let keyPromptShown = false;
 
     while (true) {
@@ -107,11 +96,30 @@ export function useConnectSession(): {
         logger.info('Connection cancelled by user (password dialog dismissed)');
         return;
       }
-      pendingProfileRef.current = profileWithPassword;
+
+      const ensuredProfile = await ensureKeychainKeyForProfile(profileWithPassword);
+      if (!ensuredProfile) {
+        logger.info('Connection cancelled by user (key prompt dismissed)');
+        return;
+      }
+
+      const passwordStoredProfile = await ensurePasswordKeychain(ensuredProfile);
+      if (!passwordStoredProfile) {
+        logger.info('Connection cancelled (password keychain unavailable)');
+        return;
+      }
+
+      const preparedProfile = await prepareKeychainKeyForProfile(passwordStoredProfile);
+      if (!preparedProfile) {
+        logger.info('Connection cancelled by user (keychain password prompt dismissed)');
+        return;
+      }
+
+      pendingProfileRef.current = preparedProfile;
 
       try {
         const summary = await invokeCreateSession(
-          buildSessionCreateRequest(profileWithPassword, 120, 30),
+          buildSessionCreateRequest(preparedProfile, 120, 30),
         );
         addSession(summary, profile.id, options);
         logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
@@ -122,10 +130,10 @@ export function useConnectSession(): {
         const message = getErrorMessage(error);
         if (
           !keyPromptShown &&
-          profileWithPassword.authMethod === 'key' &&
+          preparedProfile.authMethod === 'key' &&
           message.toLowerCase().startsWith('keychain key not found:')
         ) {
-          const recovered = await promptForMissingKeychainKey(profileWithPassword);
+          const recovered = await promptForMissingKeychainKey(preparedProfile);
           if (!recovered) {
             logger.info('Connection cancelled by user (key prompt dismissed)');
             return;

@@ -36,6 +36,7 @@ vi.mock('../useReconnectSession', () => ({
 vi.mock('@/lib/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
+  ensurePasswordKeychain: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
   prepareKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
 }));
 
@@ -45,6 +46,7 @@ import {
 } from '@/lib/tauri';
 import {
   ensureKeychainKeyForProfile,
+  ensurePasswordKeychain,
   prepareKeychainKeyForProfile,
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
@@ -86,6 +88,8 @@ describe('useConnectSession', () => {
     vi.mocked(promptForMissingKeychainKey).mockResolvedValue(null);
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
+    vi.mocked(ensurePasswordKeychain).mockReset();
+    vi.mocked(ensurePasswordKeychain).mockImplementation((profile) => Promise.resolve(profile));
     vi.mocked(prepareKeychainKeyForProfile).mockReset();
     vi.mocked(prepareKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
   });

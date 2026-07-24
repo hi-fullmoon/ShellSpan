@@ -8,7 +8,6 @@ const {
   invokeListProfiles,
   invokeHasExistingData,
   invokeMigrateProfiles,
-  invokeStoreProfilePassword,
   invokeRetrieveProfilePassword,
   invokeDeleteProfilePassword,
 } = vi.hoisted(() => ({
@@ -18,7 +17,6 @@ const {
   invokeListProfiles: vi.fn().mockResolvedValue([]),
   invokeHasExistingData: vi.fn().mockResolvedValue(true),
   invokeMigrateProfiles: vi.fn().mockResolvedValue(undefined),
-  invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
   invokeRetrieveProfilePassword: vi.fn().mockResolvedValue(undefined),
   invokeDeleteProfilePassword: vi.fn().mockResolvedValue(undefined),
 }));
@@ -30,7 +28,6 @@ vi.mock('@/lib/tauri', () => ({
   invokeListProfiles,
   invokeHasExistingData,
   invokeMigrateProfiles,
-  invokeStoreProfilePassword,
   invokeRetrieveProfilePassword,
   invokeDeleteProfilePassword,
 }));
@@ -51,13 +48,12 @@ describe('profileStore', () => {
     invokeUpdateProfile.mockResolvedValue(undefined);
     invokeRemoveProfile.mockResolvedValue(undefined);
     invokeListProfiles.mockResolvedValue([]);
-    invokeStoreProfilePassword.mockResolvedValue(undefined);
     invokeRetrieveProfilePassword.mockResolvedValue(undefined);
     invokeDeleteProfilePassword.mockResolvedValue(undefined);
     useProfileStore.setState({ profiles: [], initialized: false });
   });
 
-  it('adds a profile and stores the password in the keychain', async () => {
+  it('adds a password profile without persisting the password to legacy storage', async () => {
     const profile = await useProfileStore.getState().addProfile(profileValues);
 
     expect(invokeAddProfile).toHaveBeenCalledWith(expect.objectContaining({
@@ -66,7 +62,6 @@ describe('profileStore', () => {
     expect(invokeAddProfile).toHaveBeenCalledWith(expect.not.objectContaining({
       password: 'secret',
     }));
-    expect(invokeStoreProfilePassword).toHaveBeenCalledWith(profile.id, 'secret');
     expect(profile.password).toBe('secret');
     expect(useProfileStore.getState().profiles[0].password).toBe('secret');
   });

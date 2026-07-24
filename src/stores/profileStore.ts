@@ -5,7 +5,6 @@ import {
   invokeAddProfile,
   invokeUpdateProfile,
   invokeRemoveProfile,
-  invokeStoreProfilePassword,
   invokeRetrieveProfilePassword,
   invokeDeleteProfilePassword,
 } from '@/lib/tauri';
@@ -102,13 +101,6 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       updatedAt: now,
     };
     await invokeAddProfile(profileToRow(newProfile));
-    if (password) {
-      try {
-        await invokeStoreProfilePassword(id, password);
-      } catch (error) {
-        logger.error(`failed to store password for profile ${id}`, error);
-      }
-    }
 
     set((state) => ({
       profiles: [...state.profiles, newProfile],
@@ -123,7 +115,7 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
 
     const nextAuthMethod = updates.authMethod ?? current.authMethod;
     const passwordChanged = 'password' in updates;
-    const nextPassword = passwordChanged ? updates.password : current.password;
+    const needsNewPasswordKeychain = passwordChanged && nextAuthMethod === 'password';
 
     const updated: ConnectionProfile = {
       ...current,
@@ -131,23 +123,20 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       id: current.id,
       createdAt: current.createdAt,
       updatedAt: Date.now(),
-      password: nextAuthMethod === 'password' ? nextPassword : undefined,
+      password: nextAuthMethod === 'password' ? updates.password ?? current.password : undefined,
+      keychainKeyId: needsNewPasswordKeychain
+        ? undefined
+        : (updates.keychainKeyId ?? current.keychainKeyId),
     };
 
     await invokeUpdateProfile(id, profileToRow(updated));
 
     try {
-      if (nextAuthMethod !== 'password') {
+      if (nextAuthMethod !== 'password' || passwordChanged) {
         await invokeDeleteProfilePassword(id);
-      } else if (passwordChanged) {
-        if (nextPassword) {
-          await invokeStoreProfilePassword(id, nextPassword);
-        } else {
-          await invokeDeleteProfilePassword(id);
-        }
       }
     } catch (error) {
-      logger.error(`failed to update stored password for profile ${id}`, error);
+      logger.error(`failed to clean up legacy stored password for profile ${id}`, error);
     }
 
     set((state) => ({

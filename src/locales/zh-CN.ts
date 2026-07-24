@@ -87,8 +87,11 @@ export default {
   'workbench.keychain.count': '{count}/{total} 个密钥',
   'workbench.keychain.deleteTitle': '删除密钥？',
   'workbench.keychain.deleteConfirm': '确定要删除密钥"{name}"吗？引用该密钥的连接将需要重新选择认证方式。',
+  'workbench.keychain.newSubtitle': '创建密钥文件凭据',
+  'workbench.keychain.editSubtitle': '编辑密钥文件凭据',
 
   'keychain.kind.password': '密码派生',
+  'keychain.kind.profilePassword': '连接密码',
   'keychain.kind.keyFile': '密钥文件',
 
   'keychain.form.kind': '密钥类型',
