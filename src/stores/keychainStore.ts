@@ -27,15 +27,12 @@ export function detectKeyType(privateKey: string): string {
   }
   if (normalized.includes('-----begin openssh private key-----')) {
     const base64Body = extractPemBase64Body(privateKey);
-    try {
-      const decoded = atob(base64Body);
-      const lower = decoded.toLowerCase();
-      if (lower.includes('ssh-ed25519')) return 'ed25519';
-      if (lower.includes('ssh-rsa')) return 'rsa';
-      if (lower.includes('ecdsa-sha2')) return 'ecdsa';
-      if (lower.includes('ssh-dss')) return 'dsa';
-    } catch {
-      // ignore invalid base64
+    const openSshType = parseOpenSshKeyType(base64Body);
+    if (openSshType) {
+      if (openSshType.startsWith('ssh-ed25519')) return 'ed25519';
+      if (openSshType.startsWith('ssh-rsa')) return 'rsa';
+      if (openSshType.startsWith('ecdsa-sha2')) return 'ecdsa';
+      if (openSshType.startsWith('ssh-dss')) return 'dsa';
     }
   }
   if (normalized.includes('-----begin private key-----')) {
@@ -65,6 +62,53 @@ function extractPemBase64Body(pem: string): string {
         line && !line.startsWith('-----BEGIN') && !line.startsWith('-----END'),
     )
     .join('');
+}
+
+function parseOpenSshKeyType(base64Body: string): string | undefined {
+  try {
+    const decoded = atob(base64Body);
+    const bytes = new Uint8Array(decoded.length);
+    for (let i = 0; i < decoded.length; i++) {
+      bytes[i] = decoded.charCodeAt(i);
+    }
+
+    const magic = 'openssh-key-v1\0';
+    if (bytes.length < magic.length) return undefined;
+    for (let i = 0; i < magic.length; i++) {
+      if (bytes[i] !== magic.charCodeAt(i)) return undefined;
+    }
+
+    let offset = magic.length;
+    const readUint32 = (): number => {
+      const value =
+        (bytes[offset] << 24) |
+        (bytes[offset + 1] << 16) |
+        (bytes[offset + 2] << 8) |
+        bytes[offset + 3];
+      offset += 4;
+      return value >>> 0;
+    };
+    const readString = (): string => {
+      const len = readUint32();
+      const value = new TextDecoder().decode(bytes.subarray(offset, offset + len));
+      offset += len;
+      return value;
+    };
+
+    readString(); // ciphername
+    readString(); // kdfname
+    readString(); // kdfoptions
+    const numKeys = readUint32();
+    if (numKeys !== 1) return undefined;
+    const pubKeyLen = readUint32();
+    const pubKeyEnd = offset + pubKeyLen;
+    if (pubKeyEnd > bytes.length) return undefined;
+    const algoLen = readUint32();
+    if (offset + algoLen > pubKeyEnd) return undefined;
+    return new TextDecoder().decode(bytes.subarray(offset, offset + algoLen));
+  } catch {
+    return undefined;
+  }
 }
 
 function containsByteSequence(bytes: Uint8Array, sequence: number[]): boolean {
