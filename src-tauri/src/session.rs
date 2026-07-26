@@ -24,11 +24,14 @@ use crate::{
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 
-pub(crate) fn run_ssh_session(
+pub(crate) fn run_ssh_session<
+    F: FnOnce() + Send,
+>(
     app: &AppHandle,
     session_id: &str,
     request: &SessionCreateRequest,
     rx: Receiver<SessionCommand>,
+    on_connected: F,
 ) -> Result<Option<String>, String> {
     info!(
         "SSH session connecting session_id={} {}",
@@ -80,7 +83,10 @@ pub(crate) fn run_ssh_session(
     };
 
     let session = match session_result {
-        Ok(session) => session,
+        Ok(session) => {
+            on_connected();
+            session
+        }
         Err(connection_error) => {
             let message = connection_error.message();
             match connection_error {

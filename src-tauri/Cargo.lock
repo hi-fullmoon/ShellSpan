@@ -8,6 +8,7 @@ version = "2.0.8"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
+ "dirs",
  "hmac",
  "libc",
  "log",

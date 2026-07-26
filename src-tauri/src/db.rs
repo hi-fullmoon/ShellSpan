@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 13;
+const CURRENT_SCHEMA_VERSION: i32 = 1;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -17,9 +17,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     port INTEGER NOT NULL DEFAULT 22,
     username TEXT NOT NULL,
     auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'key')),
-    password_stored INTEGER NOT NULL DEFAULT 0,
     keychain_key_id TEXT,
-    private_key_path TEXT,
     jump_host_config TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -47,173 +45,24 @@ CREATE TABLE IF NOT EXISTS sftp_bookmarks (
     label TEXT,
     created_at INTEGER NOT NULL
 );
-";
 
-const SCHEMA_V2: &str = "
 CREATE TABLE IF NOT EXISTS terminal_workspace (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     sessions_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
-";
 
-const SCHEMA_V3: &str = "
 CREATE TABLE IF NOT EXISTS key_credentials (
     id TEXT PRIMARY KEY,
     label TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    key_type TEXT DEFAULT 'unknown',
+    kind TEXT NOT NULL DEFAULT 'keyFile',
+    public_key TEXT,
+    certificate TEXT,
+    value TEXT,
+    service TEXT NOT NULL DEFAULT 'com.termbridge.key'
 );
-";
-
-const SCHEMA_V4: &str = "
-PRAGMA foreign_keys=OFF;
-
-CREATE TABLE profiles_new (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    host TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 22,
-    username TEXT NOT NULL,
-    auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'keychainKey', 'keyPath')),
-    password_stored INTEGER NOT NULL DEFAULT 0,
-    private_key_path TEXT,
-    jump_host_config TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-INSERT INTO profiles_new
-SELECT id, name, host, port, username,
-       CASE auth_method WHEN 'key' THEN 'keyPath' ELSE auth_method END,
-       password_stored, private_key_path, jump_host_config, created_at, updated_at
-FROM profiles;
-
-DROP TABLE profiles;
-ALTER TABLE profiles_new RENAME TO profiles;
-
-PRAGMA foreign_keys=ON;
-";
-
-const SCHEMA_V5: &str = "
-ALTER TABLE key_credentials ADD COLUMN key_type TEXT DEFAULT 'unknown';
-UPDATE key_credentials SET key_type = 'unknown' WHERE key_type IS NULL;
-";
-
-const SCHEMA_V6: &str = "
-ALTER TABLE profiles ADD COLUMN keychain_key_id TEXT;
-";
-
-const SCHEMA_V7: &str = "
-CREATE TABLE IF NOT EXISTS password_credentials (
-    profile_id TEXT PRIMARY KEY,
-    encrypted_blob TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-";
-
-const SCHEMA_V8: &str = "
-PRAGMA foreign_keys=OFF;
-
-CREATE TABLE profiles_new (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    host TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 22,
-    username TEXT NOT NULL,
-    auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'key')),
-    password_stored INTEGER NOT NULL DEFAULT 0,
-    keychain_key_id TEXT,
-    private_key_path TEXT,
-    jump_host_config TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-INSERT INTO profiles_new
-SELECT id, name, host, port, username,
-       CASE auth_method WHEN 'password' THEN 'password' ELSE 'key' END,
-       password_stored, keychain_key_id, private_key_path, jump_host_config, created_at, updated_at
-FROM profiles;
-
-DROP TABLE profiles;
-ALTER TABLE profiles_new RENAME TO profiles;
-
-PRAGMA foreign_keys=ON;
-";
-
-const SCHEMA_V9: &str = "
-PRAGMA foreign_keys=OFF;
-
-CREATE TABLE profiles_new (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    host TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 22,
-    username TEXT NOT NULL,
-    auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'key')),
-    keychain_key_id TEXT,
-    private_key_path TEXT,
-    jump_host_config TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-INSERT INTO profiles_new
-SELECT id, name, host, port, username, auth_method, keychain_key_id, private_key_path, jump_host_config, created_at, updated_at
-FROM profiles;
-
-DROP TABLE profiles;
-ALTER TABLE profiles_new RENAME TO profiles;
-
-DROP TABLE IF EXISTS password_credentials;
-
-PRAGMA foreign_keys=ON;
-";
-
-const SCHEMA_V10: &str = "
-PRAGMA foreign_keys=OFF;
-
-CREATE TABLE profiles_new (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    host TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 22,
-    username TEXT NOT NULL,
-    auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'key')),
-    keychain_key_id TEXT,
-    jump_host_config TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-INSERT INTO profiles_new
-SELECT id, name, host, port, username, auth_method, keychain_key_id, jump_host_config, created_at, updated_at
-FROM profiles;
-
-DROP TABLE profiles;
-ALTER TABLE profiles_new RENAME TO profiles;
-
-PRAGMA foreign_keys=ON;
-";
-
-const SCHEMA_V11: &str = "
-ALTER TABLE key_credentials ADD COLUMN kind TEXT NOT NULL DEFAULT 'keyFile';
-ALTER TABLE key_credentials ADD COLUMN public_key TEXT;
-ALTER TABLE key_credentials ADD COLUMN certificate TEXT;
-";
-
-const SCHEMA_V12: &str = "
-ALTER TABLE key_credentials ADD COLUMN value TEXT;
-";
-
-const SCHEMA_V13: &str = "
-ALTER TABLE key_credentials ADD COLUMN service TEXT NOT NULL DEFAULT 'com.termbridge.key';
-UPDATE key_credentials
-SET service = 'com.termbridge.profile-password',
-    kind = 'password',
-    key_type = 'profile',
-    label = COALESCE((SELECT name FROM profiles WHERE profiles.id = key_credentials.id), key_credentials.label)
-WHERE id IN (SELECT id FROM profiles WHERE auth_method = 'password');
 ";
 
 #[derive(Clone)]
@@ -263,90 +112,6 @@ impl Database {
                 .map_err(|e| format!("migration v1 failed: {e}"))?;
             conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
                 .map_err(|e| format!("migration v1 version insert failed: {e}"))?;
-        }
-
-        if current < 2 {
-            conn.execute_batch(SCHEMA_V2)
-                .map_err(|e| format!("migration v2 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])
-                .map_err(|e| format!("migration v2 version insert failed: {e}"))?;
-        }
-
-        if current < 3 {
-            conn.execute_batch(SCHEMA_V3)
-                .map_err(|e| format!("migration v3 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
-                .map_err(|e| format!("migration v3 version insert failed: {e}"))?;
-        }
-
-        if current < 4 {
-            conn.execute_batch(SCHEMA_V4)
-                .map_err(|e| format!("migration v4 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
-                .map_err(|e| format!("migration v4 version insert failed: {e}"))?;
-        }
-
-        if current < 5 {
-            conn.execute_batch(SCHEMA_V5)
-                .map_err(|e| format!("migration v5 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (5)", [])
-                .map_err(|e| format!("migration v5 version insert failed: {e}"))?;
-        }
-
-        if current < 6 {
-            conn.execute_batch(SCHEMA_V6)
-                .map_err(|e| format!("migration v6 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])
-                .map_err(|e| format!("migration v6 version insert failed: {e}"))?;
-        }
-
-        if current < 7 {
-            conn.execute_batch(SCHEMA_V7)
-                .map_err(|e| format!("migration v7 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
-                .map_err(|e| format!("migration v7 version insert failed: {e}"))?;
-        }
-
-        if current < 8 {
-            conn.execute_batch(SCHEMA_V8)
-                .map_err(|e| format!("migration v8 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (8)", [])
-                .map_err(|e| format!("migration v8 version insert failed: {e}"))?;
-        }
-
-        if current < 9 {
-            conn.execute_batch(SCHEMA_V9)
-                .map_err(|e| format!("migration v9 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (9)", [])
-                .map_err(|e| format!("migration v9 version insert failed: {e}"))?;
-        }
-
-        if current < 10 {
-            conn.execute_batch(SCHEMA_V10)
-                .map_err(|e| format!("migration v10 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (10)", [])
-                .map_err(|e| format!("migration v10 version insert failed: {e}"))?;
-        }
-
-        if current < 11 {
-            conn.execute_batch(SCHEMA_V11)
-                .map_err(|e| format!("migration v11 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])
-                .map_err(|e| format!("migration v11 version insert failed: {e}"))?;
-        }
-
-        if current < 12 {
-            conn.execute_batch(SCHEMA_V12)
-                .map_err(|e| format!("migration v12 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (12)", [])
-                .map_err(|e| format!("migration v12 version insert failed: {e}"))?;
-        }
-
-        if current < 13 {
-            conn.execute_batch(SCHEMA_V13)
-                .map_err(|e| format!("migration v13 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (13)", [])
-                .map_err(|e| format!("migration v13 version insert failed: {e}"))?;
         }
 
         Ok(())
@@ -924,46 +689,6 @@ mod tests {
     }
 
     #[test]
-    fn migration_upgrades_v1_database_to_v9() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_V1).unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
-            .unwrap();
-        conn.execute(
-            "INSERT INTO profiles (id, name, host, port, username, auth_method, password_stored, created_at, updated_at) \
-             VALUES ('p1', 'Test', 'host', 22, 'user', 'key', 0, 1, 2)",
-            [],
-        )
-        .unwrap();
-        let db = Database {
-            conn: Arc::new(Mutex::new(conn)),
-        };
-
-        db.migrate().unwrap();
-
-        let conn = db.conn.lock().unwrap();
-        let version: i32 = conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(version, CURRENT_SCHEMA_VERSION);
-        conn.execute("SELECT 1 FROM terminal_workspace LIMIT 0", [])
-            .unwrap();
-        conn.execute("SELECT 1 FROM key_credentials LIMIT 0", [])
-            .unwrap();
-
-        let auth_method: String = conn
-            .query_row(
-                "SELECT auth_method FROM profiles LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(auth_method, "key");
-    }
-
-    #[test]
     fn migration_rejects_newer_database_without_modifying_it() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_V1).unwrap();
@@ -987,7 +712,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(workspace_table_count, 0);
+        assert_eq!(workspace_table_count, 1);
     }
 
     #[test]

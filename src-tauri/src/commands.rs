@@ -158,6 +158,7 @@ pub(crate) async fn create_session(
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
+    let (connection_result_tx, connection_result_rx) = mpsc::channel::<Result<(), String>>();
     state.insert(session_id.clone(), ManagedSession {
         sender: tx,
         status: StatusEvent {
@@ -175,8 +176,39 @@ pub(crate) async fn create_session(
         session_id, summary.title, summary.host, summary.port, summary.username
     );
     let connection_request = remote_connection_request_from_session(&request);
-    spawn_ssh_thread(app, session_id, request, rx, pool.inner().clone(), connection_request);
-    Ok(summary)
+    spawn_ssh_thread(
+        app,
+        session_id.clone(),
+        request,
+        rx,
+        pool.inner().clone(),
+        connection_request,
+        Some(connection_result_tx),
+    );
+
+    let connection_result = match tauri::async_runtime::spawn_blocking(move || {
+        connection_result_rx.recv_timeout(Duration::from_secs(10))
+    })
+    .await
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(_timeout)) => {
+            warn!("Timeout waiting for connection result session_id={session_id}; falling back to async status updates");
+            return Ok(summary);
+        }
+        Err(_) => {
+            warn!("Connection result task cancelled session_id={session_id}; falling back to async status updates");
+            return Ok(summary);
+        }
+    };
+
+    match connection_result {
+        Ok(()) => Ok(summary),
+        Err(message) => {
+            error!("SSH session connection failed session_id={session_id}: {message}");
+            Err(CreateSessionError::Other { message })
+        }
+    }
 }
 
 #[tauri::command]
@@ -1763,6 +1795,7 @@ pub(crate) fn spawn_ssh_thread(
     rx: std::sync::mpsc::Receiver<SessionCommand>,
     pool: SftpPool,
     connection_request: RemoteConnectionRequest,
+    connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), String>>>,
 ) {
     thread::spawn(move || {
         debug!("Spawned SSH worker session_id={session_id}");
@@ -1770,7 +1803,20 @@ pub(crate) fn spawn_ssh_thread(
             pool: &pool,
             connection_request: &connection_request,
         };
-        let run_result = run_ssh_session(&app, &session_id, &request, rx);
+
+        let tx_for_connected = connection_result_tx.clone();
+        let on_connected = move || {
+            if let Some(tx) = tx_for_connected.as_ref() {
+                let _ = tx.send(Ok(()));
+            }
+        };
+        let run_result = run_ssh_session(&app, &session_id, &request, rx, on_connected);
+
+        if let Some(tx) = connection_result_tx.as_ref() {
+            if let Err(ref error) = run_result {
+                let _ = tx.send(Err(error.clone()));
+            }
+        }
 
         match run_result {
             Ok(message) => {

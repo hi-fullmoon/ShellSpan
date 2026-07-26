@@ -153,6 +153,35 @@ describe('ConnectionForm', () => {
     ).toBeInTheDocument();
   });
 
+  it('preserves password when toggling auth method away and back', () => {
+    render(
+      <ConnectionForm
+        open={true}
+        onClose={() => {}}
+        onSubmit={() => {}}
+        initial={profile}
+      />,
+    );
+
+    const authItems = document.body.querySelectorAll(
+      '[data-slot="toggle-group-item"]',
+    );
+    const keyItem = Array.from(authItems).find(
+      (item) => item.textContent === 'connection.form.auth.key',
+    );
+    const passwordItem = Array.from(authItems).find(
+      (item) => item.textContent === 'connection.form.auth.password',
+    );
+
+    fireEvent.click(keyItem!);
+    fireEvent.click(passwordItem!);
+
+    const passwordInput = document.body.querySelector(
+      'input[type="password"]',
+    ) as HTMLInputElement;
+    expect(passwordInput.value).toBe('secret');
+  });
+
   it('calls onConnect instead of onSubmit when the primary action is clicked', async () => {
     const onSubmit = vi.fn();
     const onConnect = vi.fn();

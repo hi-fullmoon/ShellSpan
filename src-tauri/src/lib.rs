@@ -4,8 +4,8 @@ mod db;
 mod ecdsa_key;
 mod identity_cache;
 mod keychain;
-mod local_fs;
 mod known_hosts;
+mod local_fs;
 mod menu;
 mod models;
 mod path_utils;
@@ -18,21 +18,27 @@ use log::LevelFilter;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
 
-use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
-use models::{DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionErrorEvent, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry};
 use crate::sftp_pool::SftpPool;
+use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
+use models::{
+    DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionErrorEvent,
+    SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry,
+};
 
 pub(crate) use connection::{
     summarize_remote_connection_request, summarize_session_request, validate_connection_fields,
 };
 pub(crate) use identity_cache::RemoteIdentityCache;
-pub(crate) use local_fs::{copy_local_paths_blocking, paste_local_paths_blocking, rename_local_path_blocking, trash_local_paths_blocking};
+pub(crate) use local_fs::{
+    copy_local_paths_blocking, paste_local_paths_blocking, rename_local_path_blocking,
+    trash_local_paths_blocking,
+};
 pub(crate) use path_utils::portable_local_path;
 pub(crate) use remote_fs::{
-    copy_remote_path_blocking, copy_remote_to_remote_blocking, create_remote_entry_blocking, delete_remote_path_blocking,
-    download_remote_paths_blocking, list_remote_directory_blocking, open_remote_file_blocking,
-    read_remote_file_blocking, rename_remote_path_blocking, restore_remote_path_blocking,
-    trash_remote_path_blocking, update_remote_permissions_blocking,
+    copy_remote_path_blocking, copy_remote_to_remote_blocking, create_remote_entry_blocking,
+    delete_remote_path_blocking, download_remote_paths_blocking, list_remote_directory_blocking,
+    open_remote_file_blocking, read_remote_file_blocking, rename_remote_path_blocking,
+    restore_remote_path_blocking, trash_remote_path_blocking, update_remote_permissions_blocking,
     upload_local_paths_blocking,
 };
 pub(crate) use session::{
@@ -63,7 +69,7 @@ pub(crate) fn emit_status(
         let _ = sessions.set_status(session_id, event.clone());
     }
     app.emit(SSH_STATUS_EVENT, event)
-    .map_err(|error| format!("failed to emit status event: {error}"))
+        .map_err(|error| format!("failed to emit status event: {error}"))
 }
 
 pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Result<(), String> {
@@ -96,10 +102,7 @@ pub(crate) fn emit_closed(
     .map_err(|error| format!("failed to emit closed event: {error}"))
 }
 
-pub(crate) fn emit_session_error(
-    app: &AppHandle,
-    event: SessionErrorEvent,
-) -> Result<(), String> {
+pub(crate) fn emit_session_error(app: &AppHandle, event: SessionErrorEvent) -> Result<(), String> {
     app.emit(SSH_SESSION_ERROR_EVENT, event)
         .map_err(|error| format!("failed to emit session error event: {error}"))
 }
@@ -110,6 +113,13 @@ pub fn run() {
     } else {
         LevelFilter::Info
     };
+
+    let termbridge_dir = dirs::home_dir()
+        .map(|home| home.join(".termbridge"))
+        .expect("failed to resolve home directory");
+    let database =
+        db::Database::open(&termbridge_dir.join("termbridge.db")).expect("failed to open database");
+    let credentials = keychain::CredentialManager::new(database.clone());
     let backend_log_target = Target::new(TargetKind::LogDir {
         file_name: Some("backend".into()),
     })
@@ -136,16 +146,10 @@ pub fn run() {
                     window.set_title("").ok();
                 }
             }
-            let termbridge_dir = _app
-                .path()
-                .home_dir()
-                .map_err(|e| format!("failed to resolve home dir: {e}"))?
-                .join(".termbridge");
-            let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
-            _app.manage(database.clone());
-            _app.manage(keychain::CredentialManager::new(database));
             Ok(())
         })
+        .manage(credentials)
+        .manage(database)
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level)

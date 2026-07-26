@@ -1,16 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  KeyRound,
-  Lock,
-  RefreshCwIcon,
-  SearchIcon,
-  SearchXIcon,
-  Trash2Icon,
-  PencilIcon,
-  CopyIcon,
-  FileKey,
-  UploadCloud,
-} from 'lucide-react';
+import { KeyRound, Lock, RefreshCwIcon, SearchIcon, SearchXIcon, Trash2Icon, PencilIcon, CopyIcon, FileKey, UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -32,21 +21,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerFooter,
-} from '@/components/ui/drawer';
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import type { KeychainKey, KeychainKeyKind } from '@/types';
-
-const KIND_BADGE_STYLES: Record<KeychainKeyKind, string> = {
-  password: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  keyFile: 'bg-app-primary/10 text-app-primary',
-};
 
 const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
   ECDSA: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
@@ -55,9 +33,7 @@ const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
   DSA: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
 };
 
-const keyTypeBadgeClass = (keyType: string): string =>
-  KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ??
-  'bg-app-surface-muted text-muted-foreground';
+const keyTypeBadgeClass = (keyType: string): string => KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ?? 'bg-app-surface-muted text-muted-foreground';
 
 interface KeyFormState {
   kind: KeychainKeyKind;
@@ -104,10 +80,7 @@ export const KeychainPanel: React.FC = () => {
   const filteredKeys = useMemo(() => {
     return keys.filter((key) => {
       if (!normalizedQuery) return true;
-      return [key.label, key.keyType, key.kind]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedQuery);
+      return [key.label, key.keyType, key.kind].join(' ').toLowerCase().includes(normalizedQuery);
     });
   }, [keys, normalizedQuery]);
 
@@ -125,10 +98,7 @@ export const KeychainPanel: React.FC = () => {
     setDrawerOpen(true);
   };
 
-  const updateField = <K extends keyof KeyFormState>(
-    key: K,
-    value: KeyFormState[K],
-  ): void => {
+  const updateField = <K extends keyof KeyFormState>(key: K, value: KeyFormState[K]): void => {
     setForm((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) {
       setErrors((prev) => {
@@ -208,9 +178,7 @@ export const KeychainPanel: React.FC = () => {
       <div className="flex h-full flex-col">
         <div className="flex shrink-0 flex-col gap-2 border-b border-app-border/50 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-app-text">
-              {t('workbench.keychain.title')}
-            </div>
+            <div className="text-sm font-medium text-app-text">{t('workbench.keychain.title')}</div>
             <div className="text-[11px] text-muted-foreground">
               {t('workbench.keychain.count', {
                 count: filteredKeys.length,
@@ -234,10 +202,7 @@ export const KeychainPanel: React.FC = () => {
               tooltip={t('common.refresh')}
               onClick={hydrate}
             >
-              <RefreshCwIcon
-                data-icon="inline-start"
-                className={cn(!initialized && 'animate-spin')}
-              />
+              <RefreshCwIcon data-icon="inline-start" className={cn(!initialized && 'animate-spin')} />
             </IconActionButton>
             <Button size="sm" onClick={openCreate}>
               {t('common.create')}
@@ -266,100 +231,83 @@ export const KeychainPanel: React.FC = () => {
               columns={1}
               breakpoints={[
                 { minWidth: 800, columns: 2 },
-                { minWidth: 1100, columns: 3 },
+                { minWidth: 900, columns: 3 },
               ]}
               gap="0.375rem"
             >
               {filteredKeys.map((key) => {
                 const isProfilePassword = key.kind === 'password';
                 return (
-                <ManagementCard key={key.id}>
-                  <div className="flex items-center gap-2.5">
-                    <ManagementCardIcon>
-                      {key.kind === 'password' ? <Lock /> : <FileKey />}
-                    </ManagementCardIcon>
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <span className="truncate text-[13px] font-medium leading-tight text-app-text">
-                        {key.label}
-                      </span>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span
-                          className={cn(
-                            'w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
-                            KIND_BADGE_STYLES[key.kind],
-                          )}
-                        >
-                          {isProfilePassword
-                            ? t('keychain.kind.profilePassword')
-                            : t(`keychain.kind.${key.kind}`)}
-                        </span>
-                        <span
-                          className={cn(
-                            'w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
-                            keyTypeBadgeClass(key.keyType),
-                          )}
-                        >
-                          {key.keyType}
-                        </span>
+                  <ManagementCard key={key.id}>
+                    <div className="flex items-center gap-2.5">
+                      <ManagementCardIcon>{key.kind === 'password' ? <Lock /> : <FileKey />}</ManagementCardIcon>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <span className="truncate text-[13px] font-medium leading-tight text-app-text">{key.label}</span>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span
+                            className={cn(
+                              'w-fit rounded-sm px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
+                              keyTypeBadgeClass(key.keyType),
+                            )}
+                          >
+                            {key.keyType}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                    {!isProfilePassword && (
+                      {!isProfilePassword && (
+                        <IconActionButton
+                          onClick={() => {
+                            const fullKey = keys.find((k) => k.id === key.id);
+                            if (!fullKey) return;
+                            // Retrieve full key for editing.
+                            void useKeychainStore
+                              .getState()
+                              .getKey(key.id)
+                              .then((k) => {
+                                if (k) openEdit(k);
+                              });
+                          }}
+                          aria-label={t('common.edit')}
+                          tooltip={t('common.edit')}
+                          className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                        >
+                          <PencilIcon data-icon="inline-start" className="text-app-primary" />
+                        </IconActionButton>
+                      )}
                       <IconActionButton
                         onClick={() => {
-                          const fullKey = keys.find((k) => k.id === key.id);
-                          if (!fullKey) return;
-                          // Retrieve full key for editing.
-                          void useKeychainStore.getState().getKey(key.id).then((k) => {
-                            if (k) openEdit(k);
-                          });
+                          const matched = keys.find((k) => k.id === key.id);
+                          if (matched) setDeleting(matched);
                         }}
-                        aria-label={t('common.edit')}
-                        tooltip={t('common.edit')}
+                        aria-label={t('common.delete')}
+                        tooltip={t('common.delete')}
                         className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
                       >
-                        <PencilIcon data-icon="inline-start" className="text-app-primary" />
+                        <Trash2Icon data-icon="inline-start" className="text-destructive" />
                       </IconActionButton>
-                    )}
-                    <IconActionButton
-                      onClick={() => {
-                        const matched = keys.find((k) => k.id === key.id);
-                        if (matched) setDeleting(matched);
-                      }}
-                      aria-label={t('common.delete')}
-                      tooltip={t('common.delete')}
-                      className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                    >
-                      <Trash2Icon data-icon="inline-start" className="text-destructive" />
-                    </IconActionButton>
-                  </div>
-                </ManagementCard>
-              );})}
+                    </div>
+                  </ManagementCard>
+                );
+              })}
             </ResponsiveCardGrid>
           )}
         </div>
       </div>
 
-      <Drawer open={drawerOpen} onOpenChange={(open) => { if (!open) setDrawerOpen(false); }}>
+      <Drawer
+        open={drawerOpen}
+        onOpenChange={(open) => {
+          if (!open) setDrawerOpen(false);
+        }}
+      >
         <DrawerContent className="w-[420px] gap-0 p-0">
           <DrawerHeader className="border-b border-app-border px-5 py-4">
-            <DrawerTitle>
-              {editing
-                ? t('workbench.keychain.edit')
-                : t('workbench.keychain.new')}
-            </DrawerTitle>
-            <p className="text-xs text-muted-foreground">
-              {editing
-                ? t('workbench.keychain.editSubtitle')
-                : t('workbench.keychain.newSubtitle')}
-            </p>
+            <DrawerTitle>{editing ? t('workbench.keychain.edit') : t('workbench.keychain.new')}</DrawerTitle>
+            <p className="text-xs text-muted-foreground">{editing ? t('workbench.keychain.editSubtitle') : t('workbench.keychain.newSubtitle')}</p>
           </DrawerHeader>
           <div className="flex flex-col gap-5 px-5 py-4">
             <FormRow label={t('common.label')} error={errors.label}>
-              <Input
-                value={form.label}
-                onChange={(e) => updateField('label', e.target.value)}
-                placeholder={t('keychain.form.labelPlaceholder')}
-              />
+              <Input value={form.label} onChange={(e) => updateField('label', e.target.value)} placeholder={t('keychain.form.labelPlaceholder')} />
             </FormRow>
 
             <FormRow label={t('common.privateKey')} error={errors.privateKey}>
@@ -390,11 +338,7 @@ export const KeychainPanel: React.FC = () => {
             />
           </div>
           <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
-            <Button
-              onClick={() => void handleSave()}
-              disabled={isSubmitting}
-              className="w-full"
-            >
+            <Button onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
               {t('common.save')}
             </Button>
           </DrawerFooter>
@@ -403,19 +347,17 @@ export const KeychainPanel: React.FC = () => {
 
       <AlertDialog
         open={!!deleting}
-        onOpenChange={(open) => { if (!open) setDeleting(undefined); }}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(undefined);
+        }}
       >
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
           <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('workbench.keychain.deleteTitle')}
-            </AlertDialogTitle>
+            <AlertDialogTitle className="text-sm leading-5">{t('workbench.keychain.deleteTitle')}</AlertDialogTitle>
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {deleting
-                ? t('workbench.keychain.deleteConfirm', { name: deleting.label })
-                : ''}
+              {deleting ? t('workbench.keychain.deleteConfirm', { name: deleting.label }) : ''}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
@@ -436,18 +378,10 @@ type KeyContentType = 'privateKey' | 'publicKey';
 
 function detectKeyContentType(content: string): KeyContentType {
   const trimmed = content.trim().toLowerCase();
-  if (
-    trimmed.includes('-----begin') &&
-    trimmed.includes('private key-----')
-  ) {
+  if (trimmed.includes('-----begin') && trimmed.includes('private key-----')) {
     return 'privateKey';
   }
-  if (
-    trimmed.startsWith('ssh-rsa') ||
-    trimmed.startsWith('ssh-ed25519') ||
-    trimmed.startsWith('ecdsa-sha2-') ||
-    trimmed.startsWith('ssh-dss')
-  ) {
+  if (trimmed.startsWith('ssh-rsa') || trimmed.startsWith('ssh-ed25519') || trimmed.startsWith('ecdsa-sha2-') || trimmed.startsWith('ssh-dss')) {
     return 'publicKey';
   }
   return 'privateKey';
@@ -512,13 +446,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ onFileContent }) => {
           : 'border-app-border bg-app-surface-muted text-muted-foreground hover:border-app-primary/50 hover:text-app-text',
       )}
     >
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".pem,.key,.pub,.txt,text/*"
-        className="sr-only"
-        onChange={handleInputChange}
-      />
+      <input ref={inputRef} type="file" accept=".pem,.key,.pub,.txt,text/*" className="sr-only" onChange={handleInputChange} />
       <UploadCloud className="size-5" />
       <span className="text-xs font-medium">{t('keychain.form.dropFile')}</span>
       <span className="text-[10px] text-muted-foreground">{t('keychain.form.dropFileHint')}</span>

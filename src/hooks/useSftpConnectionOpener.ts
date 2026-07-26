@@ -16,8 +16,9 @@ import { promptForMissingPassword } from '@/lib/password-prompt';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
-  ensurePasswordKeychain,
   prepareKeychainKeyForProfile,
+  preparePasswordKeychain,
+  storePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
 
 interface SftpHostKeyDialogState {
@@ -139,12 +140,12 @@ export function useSftpConnectionOpener(): {
         return;
       }
 
-      const passwordStoredProfile = await ensurePasswordKeychain(profileWithKey);
-      if (!passwordStoredProfile) {
+      const passwordPreparedProfile = await preparePasswordKeychain(profileWithKey);
+      if (!passwordPreparedProfile) {
         return;
       }
 
-      const preparedProfile = await prepareKeychainKeyForProfile(passwordStoredProfile);
+      const preparedProfile = await prepareKeychainKeyForProfile(passwordPreparedProfile);
       if (!preparedProfile) {
         return;
       }
@@ -154,7 +155,11 @@ export function useSftpConnectionOpener(): {
         await verifyHostKey(
           preparedProfile.host,
           preparedProfile.port,
-          () => finishOpen(preparedProfile, targetConnectionId, targetSide),
+          () => {
+            void storePasswordKeychain(preparedProfile).then((storedProfile) => {
+              finishOpen(storedProfile, targetConnectionId, targetSide);
+            });
+          },
         );
         return;
       }
@@ -180,8 +185,9 @@ export function useSftpConnectionOpener(): {
                   setHostKeyDialog(CLOSED_DIALOG);
                   return attemptSftpConnection();
                 })
-                .then(() => {
-                  finishOpen(preparedProfile, targetConnectionId, targetSide);
+                .then(() => storePasswordKeychain(preparedProfile))
+                .then((storedProfile) => {
+                  finishOpen(storedProfile, targetConnectionId, targetSide);
                 })
                 .catch((retryError: unknown) => {
                   const parsed = parseRemoteFsError(retryError);
@@ -201,7 +207,8 @@ export function useSftpConnectionOpener(): {
 
       try {
         await attemptSftpConnection();
-        finishOpen(preparedProfile, targetConnectionId, targetSide);
+        const storedProfile = await storePasswordKeychain(preparedProfile);
+        finishOpen(storedProfile, targetConnectionId, targetSide);
       } catch (error) {
         const parsed = parseRemoteFsError(error);
         if (parsed && handleRemoteFsError(parsed)) {

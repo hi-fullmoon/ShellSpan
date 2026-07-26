@@ -18,7 +18,6 @@ import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
 import { useLogStore } from '@/stores/logStore';
 import type { LogSource } from '@/types';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -396,9 +395,16 @@ export const LogPanel: React.FC = () => {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-col gap-2 border-b border-app-border/50 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-sm font-medium text-app-text">
-            {t('workbench.logs.title')}
-          </span>
+          <div className="min-w-0">
+            <h1 className="text-sm font-medium text-app-text">
+              {t('workbench.logs.title')}
+            </h1>
+            {activeFileName && (
+              <p className="truncate text-[11px] text-muted-foreground font-mono">
+                {activeFileName}
+              </p>
+            )}
+          </div>
           <ToggleGroup
             value={[activeSource]}
             onValueChange={(value) => {
@@ -416,14 +422,6 @@ export const LogPanel: React.FC = () => {
               {t('workbench.logs.backend')}
             </ToggleGroupItem>
           </ToggleGroup>
-          {activeFileName && (
-            <Badge
-              variant="secondary"
-              className="max-w-44 truncate font-mono text-[10px]"
-            >
-              {activeFileName}
-            </Badge>
-          )}
         </div>
         <div className="flex w-full items-center gap-1.5 sm:w-auto">
           <div className="relative min-w-0 flex-1 sm:w-52">
