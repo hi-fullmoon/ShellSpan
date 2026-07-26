@@ -25,11 +25,14 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { invokePickPrivateKeyFile, invokeReadTextFile } from '@/lib/tauri';
+import { createLogger } from '@/lib/logger';
 import type {
   AuthMethod,
   ConnectionProfile,
   JumpHostConfig,
 } from '@/types';
+
+const logger = createLogger('connectionForm');
 
 interface JumpHostFormState extends JumpHostConfig {
   privateKeyPath: string;
@@ -297,7 +300,8 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
       const values = await buildValues();
       await action(values);
       onClose();
-    } catch {
+    } catch (error) {
+      logger.error('failed to submit connection form', error);
       showError(t('connection.form.submitFailed'));
     } finally {
       submissionInFlightRef.current = false;
@@ -324,9 +328,6 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
       setForm((prev) => ({
         ...prev,
         authMethod: value,
-        password: value === 'password' ? prev.password : '',
-        keychainKeyId: value === 'key' ? prev.keychainKeyId : '',
-        privateKeyPath: value === 'key' ? prev.privateKeyPath : '',
       }));
     } else {
       setForm((prev) => ({
@@ -334,9 +335,6 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         jumpHost: {
           ...prev.jumpHost,
           authMethod: value,
-          password: value === 'password' ? prev.jumpHost.password : '',
-          keychainKeyId: value === 'key' ? prev.jumpHost.keychainKeyId : '',
-          privateKeyPath: value === 'key' ? prev.jumpHost.privateKeyPath : '',
         },
       }));
     }
@@ -680,7 +678,7 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
               {t('connection.form.browse')}
             </Button>
           </div>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-muted-foreground/70">
             {t('connection.form.privateKeyHint')}
           </span>
         </div>

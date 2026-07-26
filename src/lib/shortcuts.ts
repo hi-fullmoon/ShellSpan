@@ -69,7 +69,7 @@ export function findShortcutConflict(
 }
 
 export function shortcutFromKeyboardEvent(event: KeyboardEvent, preserveCtrl = false): string | null {
-  if (MODIFIER_KEYS.has(event.key)) return null;
+  if (!event.key || MODIFIER_KEYS.has(event.key)) return null;
 
   const key = event.key.toLowerCase() === ' ' ? 'space' : event.key.toLowerCase();
   const parts: string[] = [];
@@ -89,14 +89,14 @@ export function shortcutFromKeyboardEvent(event: KeyboardEvent, preserveCtrl = f
 // Captures a leader sub-key binding: a single printable key without
 // ctrl/alt/meta (shift folds into the key itself, e.g. Shift+H records "h").
 export function shortcutFromBareKeyEvent(event: KeyboardEvent): string | null {
-  if (MODIFIER_KEYS.has(event.key)) return null;
+  if (!event.key || MODIFIER_KEYS.has(event.key)) return null;
   if (event.ctrlKey || event.metaKey || event.altKey) return null;
   if (event.key.length !== 1) return null;
   return event.key === ' ' ? 'space' : event.key.toLowerCase();
 }
 
 export function eventMatchesShortcut(event: KeyboardEvent, shortcut?: string): boolean {
-  if (!shortcut) return false;
+  if (!shortcut || !event.key) return false;
   const parts = shortcut.split('+');
   const key = parts[parts.length - 1];
   const eventKey = event.key.toLowerCase() === ' ' ? 'space' : event.key.toLowerCase();
