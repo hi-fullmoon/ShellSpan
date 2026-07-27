@@ -3,6 +3,27 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.9](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.9) - 2026-07-27
+
+
+### Bug Fixes
+
+- **store:** correctly detect OpenSSH private key algorithm
+- **tauri:** pass detected key type from frontend to backend
+
+### Features
+
+- **tauri:** add keychain credential integration, password-derived keys and profile passwords
+- **tauri:** add keychain-backed SSH key credential management
+- **tauri:** derive ECDSA keychain for password profiles and unify credential service
+- **ui:** integrate keychain credentials into connection form and add key prompt flow
+- **keychain:** refine password credential lifecycle and connection feedback
+
+### Refactoring
+
+- **keychain:** migrate to native OS keychain and extract connection form drawer
+- **ui:** polish keychain credentials panel and store
+
 ## [v2.0.8](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.8) - 2026-07-23
 
 
