@@ -19,7 +19,6 @@ import {
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
   promptForMissingKeychainKey,
-  storePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
 import { useReconnectSession } from './useReconnectSession';
 
@@ -122,7 +121,6 @@ export function useConnectSession(): {
         const summary = await invokeCreateSession(
           buildSessionCreateRequest(preparedProfile, 120, 30),
         );
-        await storePasswordKeychain(preparedProfile);
         addSession(summary, profile.id, options);
         logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
         useRecentProfilesStore.getState().touchProfile(profile.id);

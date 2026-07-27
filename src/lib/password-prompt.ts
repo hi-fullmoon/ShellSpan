@@ -7,9 +7,9 @@ const logger = createLogger('password-prompt');
 /**
  * Ensures a password is available for the given profile.
  *
- * Passwords are no longer persisted. If the profile does not already contain a
- * password, the user is prompted to enter one. The dialog does not offer a
- * "remember" option.
+ * Passwords are persisted via the OS-level credential store (macOS Keychain,
+ * Windows Credential Manager, or Linux Secret Service). If the profile does
+ * not already contain a password, the user is prompted to enter one.
  *
  * @returns A copy of `profile` with `password` populated, or `null` if the
  *          user cancelled the dialog.

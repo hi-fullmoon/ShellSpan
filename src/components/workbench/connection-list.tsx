@@ -200,7 +200,9 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
           </div>
         </div>
         <div className="flex flex-wrap gap-1">
-          <span className="rounded-md bg-app-primary/10 px-2 py-1 text-[10px] text-app-primary">
+          <span className={profile.authMethod === 'password'
+            ? 'rounded-md bg-amber-500/10 px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400'
+            : 'rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-600 dark:text-emerald-400'}>
             {profile.authMethod === 'password'
               ? t('connection.form.auth.password')
               : t('connection.form.auth.key')}

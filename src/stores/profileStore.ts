@@ -7,6 +7,7 @@ import {
   invokeRemoveProfile,
   invokeRetrieveProfilePassword,
   invokeDeleteProfilePassword,
+  invokeStoreProfilePassword,
 } from '@/lib/tauri';
 import { generateId } from '@/lib/utils';
 import { useRecentProfilesStore } from './recentProfilesStore';
@@ -27,6 +28,7 @@ interface ProfileState {
   duplicateProfile: (id: string) => Promise<void>;
   getProfile: (id: string) => ConnectionProfile | undefined;
   ensurePassword: (profile: ConnectionProfile) => Promise<ConnectionProfile>;
+  clearKeychainKeyIds: (profileIds: string[]) => void;
 }
 
 function profileToRow(profile: ConnectionProfile): ProfileRow {
@@ -102,6 +104,14 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     };
     await invokeAddProfile(profileToRow(newProfile));
 
+    if (password) {
+      try {
+        await invokeStoreProfilePassword(id, password);
+      } catch (error) {
+        logger.error(`failed to store password for profile ${id}`, error);
+      }
+    }
+
     set((state) => ({
       profiles: [...state.profiles, newProfile],
     }));
@@ -135,8 +145,11 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       if (nextAuthMethod !== 'password' || passwordChanged) {
         await invokeDeleteProfilePassword(id);
       }
+      if (nextAuthMethod === 'password' && updates.password) {
+        await invokeStoreProfilePassword(id, updates.password);
+      }
     } catch (error) {
-      logger.error(`failed to clean up legacy stored password for profile ${id}`, error);
+      logger.error(`failed to persist password for profile ${id}`, error);
     }
 
     set((state) => ({
@@ -186,6 +199,16 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   getProfile: (id) => get().profiles.find((p) => p.id === id),
 
   ensurePassword: async (profile) => profile,
+
+  clearKeychainKeyIds: (profileIds) => {
+    if (profileIds.length === 0) return;
+    const idSet = new Set(profileIds);
+    set((state) => ({
+      profiles: state.profiles.map((p) =>
+        idSet.has(p.id) ? { ...p, keychainKeyId: undefined } : p,
+      ),
+    }));
+  },
 }));
 
 export const DEFAULT_PROFILE_VALUES = {

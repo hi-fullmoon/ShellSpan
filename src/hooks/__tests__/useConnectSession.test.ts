@@ -38,7 +38,6 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
   preparePasswordKeychain: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
   prepareKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
-  storePasswordKeychain: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
 }));
 
 import {
@@ -50,7 +49,6 @@ import {
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
   promptForMissingKeychainKey,
-  storePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
 
 const SUMMARY = {
@@ -94,8 +92,6 @@ describe('useConnectSession', () => {
     vi.mocked(preparePasswordKeychain).mockImplementation((profile) => Promise.resolve(profile));
     vi.mocked(prepareKeychainKeyForProfile).mockReset();
     vi.mocked(prepareKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
-    vi.mocked(storePasswordKeychain).mockReset();
-    vi.mocked(storePasswordKeychain).mockImplementation((profile) => Promise.resolve(profile));
   });
 
   afterEach(() => {
@@ -118,43 +114,6 @@ describe('useConnectSession', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
     expect(useRecentProfilesStore.getState().recentIds).toEqual(['p1']);
     expect(result.current.hostKeyDialog.open).toBe(false);
-  });
-
-  it('stores the password keychain only after a successful connection', async () => {
-    const passwordProfile: ConnectionProfile = {
-      ...profile,
-      authMethod: 'password',
-      password: 'secret',
-    };
-    vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
-
-    const { result } = renderHook(() => useConnectSession());
-
-    await act(async () => {
-      await result.current.connect(passwordProfile);
-    });
-
-    expect(vi.mocked(storePasswordKeychain)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(storePasswordKeychain)).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'p1', password: 'secret' }),
-    );
-  });
-
-  it('does not store the password keychain when the connection fails', async () => {
-    const passwordProfile: ConnectionProfile = {
-      ...profile,
-      authMethod: 'password',
-      password: 'secret',
-    };
-    vi.mocked(invokeCreateSession).mockRejectedValueOnce(new Error('auth failed'));
-
-    const { result } = renderHook(() => useConnectSession());
-
-    await act(async () => {
-      await result.current.connect(passwordProfile);
-    });
-
-    expect(vi.mocked(storePasswordKeychain)).not.toHaveBeenCalled();
   });
 
   it('opens dialog on HostKeyUnknown and trusts then retries', async () => {

@@ -18,7 +18,6 @@ import {
   ensureKeychainKeyForProfile,
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
-  storePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
 
 interface SftpHostKeyDialogState {
@@ -156,9 +155,7 @@ export function useSftpConnectionOpener(): {
           preparedProfile.host,
           preparedProfile.port,
           () => {
-            void storePasswordKeychain(preparedProfile).then((storedProfile) => {
-              finishOpen(storedProfile, targetConnectionId, targetSide);
-            });
+            finishOpen(preparedProfile, targetConnectionId, targetSide);
           },
         );
         return;
@@ -185,9 +182,8 @@ export function useSftpConnectionOpener(): {
                   setHostKeyDialog(CLOSED_DIALOG);
                   return attemptSftpConnection();
                 })
-                .then(() => storePasswordKeychain(preparedProfile))
-                .then((storedProfile) => {
-                  finishOpen(storedProfile, targetConnectionId, targetSide);
+                .then(() => {
+                  finishOpen(preparedProfile, targetConnectionId, targetSide);
                 })
                 .catch((retryError: unknown) => {
                   const parsed = parseRemoteFsError(retryError);
@@ -207,8 +203,7 @@ export function useSftpConnectionOpener(): {
 
       try {
         await attemptSftpConnection();
-        const storedProfile = await storePasswordKeychain(preparedProfile);
-        finishOpen(storedProfile, targetConnectionId, targetSide);
+        finishOpen(preparedProfile, targetConnectionId, targetSide);
       } catch (error) {
         const parsed = parseRemoteFsError(error);
         if (parsed && handleRemoteFsError(parsed)) {
