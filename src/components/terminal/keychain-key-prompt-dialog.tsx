@@ -3,19 +3,8 @@ import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import {
-  CompactDialogBody,
-  CompactDialogContent,
-  CompactDialogFooter,
-  CompactDialogHeader,
-} from '@/components/ui/compact-dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { CompactDialogBody, CompactDialogContent, CompactDialogFooter, CompactDialogHeader } from '@/components/ui/compact-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useKeychainKeyPromptStore } from '@/stores/keychainKeyPromptStore';
 import { useKeychainStore } from '@/stores/keychainStore';
 
@@ -23,7 +12,8 @@ export const KeychainKeyPromptDialog: React.FC = () => {
   const { t } = useI18n();
   const pending = useKeychainKeyPromptStore((state) => state.pending);
   const resolveKey = useKeychainKeyPromptStore((state) => state.resolveKey);
-  const { keys, initialized, hydrate } = useKeychainStore();
+  const { keys: allKeys, initialized, hydrate } = useKeychainStore();
+  const keys = allKeys.filter((k) => k.kind === 'keyFile');
   const [selectedKeyId, setSelectedKeyId] = useState('');
 
   useEffect(() => {
@@ -85,9 +75,6 @@ export const KeychainKeyPromptDialog: React.FC = () => {
                       <SelectItem key={key.id} value={key.id}>
                         <span className="flex items-center gap-2">
                           <span>{key.label}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            ({t(`keychain.kind.${key.kind}`)})
-                          </span>
                         </span>
                       </SelectItem>
                     ))}

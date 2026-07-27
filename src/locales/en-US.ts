@@ -169,6 +169,7 @@ export default {
   'connection.form.validation.usernameRequired': 'Username is required',
   'connection.form.validation.passwordRequired': 'Password is required',
   'connection.form.validation.keyRequired': 'Please select or enter a private key',
+  'connection.form.validation.keyNotFound': 'The saved key has been deleted',
   'connection.form.validation.jumpHostHostRequired': 'Jump host is required',
   'connection.form.validation.jumpHostUsernameRequired': 'Jump host username is required',
 

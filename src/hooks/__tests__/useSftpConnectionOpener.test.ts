@@ -23,7 +23,6 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
   preparePasswordKeychain: vi.fn().mockImplementation((p) => Promise.resolve(p)),
   prepareKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
-  storePasswordKeychain: vi.fn().mockImplementation((p) => Promise.resolve(p)),
 }));
 
 import { invokeCheckHostKey, invokeListSftpBookmarks, invokeTrustHost } from '@/lib/tauri';
@@ -31,7 +30,6 @@ import {
   ensureKeychainKeyForProfile,
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
-  storePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
 
 const profile: ConnectionProfile = {
@@ -65,8 +63,6 @@ describe('useSftpConnectionOpener', () => {
     vi.mocked(preparePasswordKeychain).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(prepareKeychainKeyForProfile).mockReset();
     vi.mocked(prepareKeychainKeyForProfile).mockImplementation((p) => Promise.resolve(p));
-    vi.mocked(storePasswordKeychain).mockReset();
-    vi.mocked(storePasswordKeychain).mockImplementation((p) => Promise.resolve(p));
   });
 
   it('opens SFTP immediately when the host key matches', async () => {
@@ -117,26 +113,6 @@ describe('useSftpConnectionOpener', () => {
     });
     expect(invokeTrustHost).toHaveBeenCalledWith('175.178.66.45', 22);
     expect(result.current.hostKeyDialog.open).toBe(false);
-  });
-
-  it('stores the password keychain after a successful SFTP connection', async () => {
-    vi.mocked(invokeCheckHostKey).mockResolvedValue({ status: 'match' });
-    const passwordProfile: ConnectionProfile = {
-      ...profile,
-      authMethod: 'password',
-      password: 'secret',
-    };
-
-    const { result } = renderHook(() => useSftpConnectionOpener());
-
-    await act(async () => {
-      await result.current.open(passwordProfile);
-    });
-
-    expect(vi.mocked(storePasswordKeychain)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(storePasswordKeychain)).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'p1', password: 'secret' }),
-    );
   });
 
   it('ensures the keychain key before opening SFTP and uses the recovered profile', async () => {

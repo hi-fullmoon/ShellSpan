@@ -8,29 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { invokePickPrivateKeyFile, invokeReadTextFile } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
-import type {
-  AuthMethod,
-  ConnectionProfile,
-  JumpHostConfig,
-} from '@/types';
+import type { AuthMethod, ConnectionProfile, JumpHostConfig } from '@/types';
 
 const logger = createLogger('connectionForm');
 
@@ -38,15 +23,11 @@ interface JumpHostFormState extends JumpHostConfig {
   privateKeyPath: string;
 }
 
-export interface ConnectionFormProps {
+export interface ConnectionFormDrawerProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (
-    profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
-  ) => void | Promise<void>;
-  onConnect?: (
-    profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
-  ) => void | Promise<void>;
+  onSubmit: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void | Promise<void>;
+  onConnect?: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void | Promise<void>;
   initial?: ConnectionProfile;
   /** Partial pre-fill values (e.g. host + port from a known-host entry). */
   initialValues?: Pick<FormState, 'host' | 'port'>;
@@ -101,9 +82,7 @@ function profileToForm(profile: ConnectionProfile): FormState {
     privateKeyPath: '',
     passphrase: profile.passphrase ?? '',
     useJumpHost: !!profile.jumpHost,
-    jumpHost: profile.jumpHost
-      ? { ...profile.jumpHost, privateKeyPath: '' }
-      : EMPTY_FORM.jumpHost,
+    jumpHost: profile.jumpHost ? { ...profile.jumpHost, privateKeyPath: '' } : EMPTY_FORM.jumpHost,
   };
 }
 
@@ -114,14 +93,7 @@ function keyLabelFromPath(path: string): string {
   return parts[parts.length - 1] || 'Imported key';
 }
 
-export const ConnectionForm: React.FC<ConnectionFormProps> = ({
-  open,
-  onClose,
-  onSubmit,
-  onConnect,
-  initial,
-  initialValues,
-}) => {
+export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open, onClose, onSubmit, onConnect, initial, initialValues }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
   const { keys, initialized, hydrate, addKey } = useKeychainStore();
@@ -146,10 +118,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     }
   }, [initial, initialValues, open, initialized, hydrate]);
 
-  const updateField = <K extends keyof FormState>(
-    key: K,
-    value: FormState[K],
-  ): void => {
+  const updateField = <K extends keyof FormState>(key: K, value: FormState[K]): void => {
     setForm((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) {
       setErrors((prev) => {
@@ -160,19 +129,14 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     }
   };
 
-  const updateJumpHost = <K extends keyof JumpHostFormState>(
-    key: K,
-    value: JumpHostFormState[K],
-  ): void => {
+  const updateJumpHost = <K extends keyof JumpHostFormState>(key: K, value: JumpHostFormState[K]): void => {
     setForm((prev) => ({
       ...prev,
       jumpHost: { ...prev.jumpHost, [key]: value },
     }));
   };
 
-  const pickPrivateKey = async (
-    target: 'main' | 'jump' = 'main',
-  ): Promise<void> => {
+  const pickPrivateKey = async (target: 'main' | 'jump' = 'main'): Promise<void> => {
     const path = await invokePickPrivateKeyFile();
     if (!path) return;
     if (target === 'main') {
@@ -206,13 +170,18 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
       nextErrors.username = t('connection.form.validation.usernameRequired');
     }
 
+    const keyFileKeys = keys.filter((k) => k.kind === 'keyFile');
+
     if (form.authMethod === 'password') {
       if (!form.password.trim()) {
         nextErrors.password = t('connection.form.validation.passwordRequired');
       }
     } else if (form.authMethod === 'key') {
-      if (!form.keychainKeyId.trim() && !form.privateKeyPath.trim()) {
-        nextErrors.keychainKeyId = t('connection.form.validation.keyRequired');
+      const hasSelectedKey = form.keychainKeyId.trim() && keyFileKeys.some((k) => k.id === form.keychainKeyId.trim());
+      if (!hasSelectedKey && !form.privateKeyPath.trim()) {
+        nextErrors.keychainKeyId = form.keychainKeyId.trim()
+          ? t('connection.form.validation.keyNotFound')
+          : t('connection.form.validation.keyRequired');
       }
     }
 
@@ -227,8 +196,11 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         nextErrors.jumpHostPassword = t('connection.form.validation.passwordRequired');
       }
       if (form.jumpHost.authMethod === 'key') {
-        if (!form.jumpHost.keychainKeyId?.trim() && !form.jumpHost.privateKeyPath?.trim()) {
-          nextErrors.jumpHostKeychainKeyId = t('connection.form.validation.keyRequired');
+        const hasJumpKey = form.jumpHost.keychainKeyId?.trim() && keyFileKeys.some((k) => k.id === form.jumpHost.keychainKeyId!.trim());
+        if (!hasJumpKey && !form.jumpHost.privateKeyPath?.trim()) {
+          nextErrors.jumpHostKeychainKeyId = form.jumpHost.keychainKeyId?.trim()
+            ? t('connection.form.validation.keyNotFound')
+            : t('connection.form.validation.keyRequired');
         }
       }
     }
@@ -253,7 +225,10 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
       if (form.privateKeyPath.trim()) {
         keychainKeyId = await resolveKeyFromPath(form.privateKeyPath.trim());
       } else if (form.keychainKeyId.trim()) {
-        keychainKeyId = form.keychainKeyId.trim();
+        const trimmedId = form.keychainKeyId.trim();
+        if (keys.some((k) => k.kind === 'keyFile' && k.id === trimmedId)) {
+          keychainKeyId = trimmedId;
+        }
       }
     }
 
@@ -264,7 +239,10 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         if (form.jumpHost.privateKeyPath?.trim()) {
           jumpKeychainKeyId = await resolveKeyFromPath(form.jumpHost.privateKeyPath.trim());
         } else if (form.jumpHost.keychainKeyId?.trim()) {
-          jumpKeychainKeyId = form.jumpHost.keychainKeyId.trim();
+          const trimmedJumpId = form.jumpHost.keychainKeyId.trim();
+          if (keys.some((k) => k.kind === 'keyFile' && k.id === trimmedJumpId)) {
+            jumpKeychainKeyId = trimmedJumpId;
+          }
         }
       }
       const { privateKeyPath: _jumpPrivateKeyPath, ...jumpHostRest } = form.jumpHost;
@@ -289,9 +267,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     };
   };
 
-  const submit = async (
-    action: ConnectionFormProps['onSubmit'],
-  ): Promise<void> => {
+  const submit = async (action: ConnectionFormDrawerProps['onSubmit']): Promise<void> => {
     if (submissionInFlightRef.current || !validate()) return;
 
     submissionInFlightRef.current = true;
@@ -340,68 +316,45 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     }
   };
 
+  const keyFileKeys = keys.filter((k) => k.kind === 'keyFile');
+
   return (
-    <Drawer open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Drawer
+      open={open}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DrawerContent className="w-100 gap-0 p-0">
         <DrawerHeader className="border-b border-app-border px-5 py-4">
-          <DrawerTitle>
-            {initial
-              ? t('connection.form.title.edit')
-              : t('connection.form.title.new')}
-          </DrawerTitle>
-          <p className="text-xs text-muted-foreground">
-            {t('connection.form.subtitle')}
-          </p>
+          <DrawerTitle>{initial ? t('connection.form.title.edit') : t('connection.form.title.new')}</DrawerTitle>
+          <p className="text-xs text-muted-foreground">{t('connection.form.subtitle')}</p>
         </DrawerHeader>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-5 px-5 py-4">
             <FormSection icon={Server} title={t('connection.form.section.general')}>
               <FormRow label={t('common.name')} error={errors.name}>
-                <Input
-                  value={form.name}
-                  onChange={(e) => updateField('name', e.target.value)}
-                  placeholder="My Server"
-                />
+                <Input value={form.name} onChange={(e) => updateField('name', e.target.value)} placeholder="My Server" />
               </FormRow>
               <div className="grid grid-cols-3 gap-2">
                 <FormRow className="col-span-2" label={t('common.host')} error={errors.host}>
-                  <Input
-                    value={form.host}
-                    onChange={(e) => updateField('host', e.target.value)}
-                    onBlur={handleHostBlur}
-                    placeholder="192.168.1.1"
-                  />
+                  <Input value={form.host} onChange={(e) => updateField('host', e.target.value)} onBlur={handleHostBlur} placeholder="192.168.1.1" />
                 </FormRow>
                 <FormRow label={t('common.port')} error={errors.port}>
-                  <Input
-                    value={form.port}
-                    onChange={(e) => updateField('port', e.target.value)}
-                    type="number"
-                  />
+                  <Input value={form.port} onChange={(e) => updateField('port', e.target.value)} type="number" placeholder="22" />
                 </FormRow>
               </div>
               <FormRow label={t('common.username')} error={errors.username}>
-                <Input
-                  value={form.username}
-                  onChange={(e) => updateField('username', e.target.value)}
-                  placeholder="root"
-                />
+                <Input value={form.username} onChange={(e) => updateField('username', e.target.value)} placeholder="root" />
               </FormRow>
             </FormSection>
 
             <FormSection icon={KeyRound} title={t('connection.form.section.auth')}>
-              <AuthMethodToggle
-                value={form.authMethod}
-                onChange={(value) => handleAuthMethodChange(value, 'main')}
-              />
+              <AuthMethodToggle value={form.authMethod} onChange={(value) => handleAuthMethodChange(value, 'main')} />
               {form.authMethod === 'password' && (
                 <FormRow label={t('common.password')} error={errors.password}>
-                  <Input
-                    type="password"
-                    value={form.password}
-                    onChange={(e) => updateField('password', e.target.value)}
-                  />
+                  <Input type="password" value={form.password} onChange={(e) => updateField('password', e.target.value)} placeholder={t('common.password')} />
                 </FormRow>
               )}
               {form.authMethod === 'key' && (
@@ -409,89 +362,48 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                   <KeyAuthInput
                     keychainKeyId={form.keychainKeyId}
                     privateKeyPath={form.privateKeyPath}
-                    keys={keys}
+                    keys={keyFileKeys}
                     errors={{
                       keychainKeyId: errors.keychainKeyId,
                       privateKeyPath: errors.privateKeyPath,
                     }}
-                    onKeychainKeyIdChange={(value) =>
-                      setForm((prev) => ({ ...prev, keychainKeyId: value }))
-                    }
-                    onPrivateKeyPathChange={(value) =>
-                      setForm((prev) => ({ ...prev, privateKeyPath: value }))
-                    }
+                    onKeychainKeyIdChange={(value) => setForm((prev) => ({ ...prev, keychainKeyId: value }))}
+                    onPrivateKeyPathChange={(value) => setForm((prev) => ({ ...prev, privateKeyPath: value }))}
                     onBrowse={() => pickPrivateKey('main')}
                   />
                   <FormRow label={t('common.passphrase')}>
-                    <Input
-                      type="password"
-                      value={form.passphrase}
-                      onChange={(e) => updateField('passphrase', e.target.value)}
-                    />
+                    <Input type="password" value={form.passphrase} onChange={(e) => updateField('passphrase', e.target.value)} placeholder={t('common.passphrase')} />
                   </FormRow>
                 </>
               )}
             </FormSection>
 
             <FormSection icon={Network} title={t('connection.form.jumpHost')}>
-              <div
-                className={cn(
-                  'flex flex-col rounded-lg border border-app-border transition-colors',
-                  form.useJumpHost && 'bg-muted/50',
-                )}
-              >
+              <div className={cn('flex flex-col rounded-lg border border-app-border transition-colors', form.useJumpHost && 'bg-muted/50')}>
                 <div className="flex items-center justify-between gap-3 px-3.5 py-3">
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium text-app-text">
-                      {t('connection.form.useJumpHost')}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {t('connection.form.jumpHostHint')}
-                    </span>
+                    <span className="text-sm font-medium text-app-text">{t('connection.form.useJumpHost')}</span>
+                    <span className="text-xs text-muted-foreground">{t('connection.form.jumpHostHint')}</span>
                   </div>
-                  <Switch
-                    checked={form.useJumpHost}
-                    onCheckedChange={(checked) =>
-                      updateField('useJumpHost', checked)
-                    }
-                  />
+                  <Switch checked={form.useJumpHost} onCheckedChange={(checked) => updateField('useJumpHost', checked)} />
                 </div>
                 {form.useJumpHost && (
                   <div className="flex flex-col gap-2.5 border-t border-app-border px-3.5 py-3">
                     <div className="grid grid-cols-3 gap-3">
                       <FormRow className="col-span-2" label={t('common.host')} error={errors.jumpHostHost}>
-                        <Input
-                          value={form.jumpHost.host}
-                          onChange={(e) => updateJumpHost('host', e.target.value)}
-                        />
+                        <Input value={form.jumpHost.host} onChange={(e) => updateJumpHost('host', e.target.value)} placeholder="192.168.1.1" />
                       </FormRow>
                       <FormRow label={t('common.port')}>
-                        <Input
-                          value={form.jumpHost.port}
-                          onChange={(e) =>
-                            updateJumpHost('port', Number(e.target.value))
-                          }
-                          type="number"
-                        />
+                        <Input value={form.jumpHost.port} onChange={(e) => updateJumpHost('port', Number(e.target.value))} type="number" placeholder="22" />
                       </FormRow>
                     </div>
                     <FormRow label={t('common.username')} error={errors.jumpHostUsername}>
-                      <Input
-                        value={form.jumpHost.username}
-                        onChange={(e) => updateJumpHost('username', e.target.value)}
-                      />
+                      <Input value={form.jumpHost.username} onChange={(e) => updateJumpHost('username', e.target.value)} placeholder="root" />
                     </FormRow>
-                    <AuthMethodToggle
-                      value={form.jumpHost.authMethod}
-                      onChange={(value) => handleAuthMethodChange(value, 'jump')}
-                    />
+                    <AuthMethodToggle value={form.jumpHost.authMethod} onChange={(value) => handleAuthMethodChange(value, 'jump')} />
                     {form.jumpHost.authMethod === 'password' && (
                       <FormRow label={t('common.password')} error={errors.jumpHostPassword}>
-                        <Input
-                          type="password"
-                          value={form.jumpHost.password ?? ''}
-                          onChange={(e) => updateJumpHost('password', e.target.value)}
-                        />
+                        <Input type="password" value={form.jumpHost.password ?? ''} onChange={(e) => updateJumpHost('password', e.target.value)} placeholder={t('common.password')} />
                       </FormRow>
                     )}
                     {form.jumpHost.authMethod === 'key' && (
@@ -499,26 +411,21 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                         <KeyAuthInput
                           keychainKeyId={form.jumpHost.keychainKeyId ?? ''}
                           privateKeyPath={form.jumpHost.privateKeyPath ?? ''}
-                          keys={keys}
+                          keys={keyFileKeys}
                           errors={{
                             keychainKeyId: errors.jumpHostKeychainKeyId,
                             privateKeyPath: errors.jumpHostPrivateKeyPath,
                           }}
-                          onKeychainKeyIdChange={(value) =>
-                            updateJumpHost('keychainKeyId', value)
-                          }
-                          onPrivateKeyPathChange={(value) =>
-                            updateJumpHost('privateKeyPath', value)
-                          }
+                          onKeychainKeyIdChange={(value) => updateJumpHost('keychainKeyId', value)}
+                          onPrivateKeyPathChange={(value) => updateJumpHost('privateKeyPath', value)}
                           onBrowse={() => pickPrivateKey('jump')}
                         />
                         <FormRow label={t('common.passphrase')}>
                           <Input
                             type="password"
                             value={form.jumpHost.passphrase ?? ''}
-                            onChange={(e) =>
-                              updateJumpHost('passphrase', e.target.value)
-                            }
+                            onChange={(e) => updateJumpHost('passphrase', e.target.value)}
+                            placeholder={t('common.passphrase')}
                           />
                         </FormRow>
                       </>
@@ -532,12 +439,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
 
         <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
           <div className="flex w-full">
-            <Button
-              variant="default"
-              className="flex-1 rounded-r-none"
-              onClick={handleConnect}
-              disabled={isSubmitting}
-            >
+            <Button variant="default" className="flex-1 rounded-r-none" onClick={handleConnect} disabled={isSubmitting}>
               {t('common.connect')}
             </Button>
             <DropdownMenu>
@@ -554,10 +456,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
                 <ChevronDown />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="top" className="w-40 rounded-md">
-                <DropdownMenuItem
-                  onClick={handleSaveOnly}
-                  disabled={isSubmitting}
-                >
+                <DropdownMenuItem onClick={handleSaveOnly} disabled={isSubmitting}>
                   {t('connection.form.saveOnly')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -580,9 +479,7 @@ const FormSection: React.FC<FormSectionProps> = ({ icon: Icon, title, children }
     <section className="flex flex-col gap-2.5">
       <div className="flex items-center gap-1.5">
         <Icon className="size-3.5 text-muted-foreground" />
-        <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-          {title}
-        </span>
+        <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{title}</span>
       </div>
       {children}
     </section>
@@ -639,18 +536,21 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
   onBrowse,
 }) => {
   const { t } = useI18n();
+  const isKeyMissing = keychainKeyId !== '' && !keys.some((k) => k.id === keychainKeyId);
+  const displayError = isKeyMissing ? t('connection.form.validation.keyNotFound') : errors.keychainKeyId;
+
   return (
     <div className="flex flex-col gap-2.5">
-      <FormRow label={t('common.keychainKey')} error={errors.keychainKeyId}>
-        {keys.length === 0 ? (
+      <FormRow label={t('common.keychainKey')} error={displayError}>
+        {keys.length === 0 && !isKeyMissing ? (
           <div className="flex items-center justify-between rounded-lg border border-dashed border-app-border px-3 py-2 text-sm text-muted-foreground">
             <span>{t('connection.form.noKeychainKeys')}</span>
           </div>
         ) : (
-          <Select value={keychainKeyId} onValueChange={(next) => onKeychainKeyIdChange(next ?? '')}>
+          <Select value={(!isKeyMissing && keychainKeyId) || undefined} onValueChange={(next) => onKeychainKeyIdChange(next ?? '')}>
             <SelectTrigger>
-              <SelectValue placeholder={t('connection.form.selectKeychainKey')}>
-                {keys.find((key) => key.id === keychainKeyId)?.label}
+              <SelectValue placeholder={isKeyMissing ? t('connection.form.validation.keyNotFound') : t('connection.form.selectKeychainKey')}>
+                {(!isKeyMissing && keys.find((key) => key.id === keychainKeyId)?.label) || undefined}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -667,20 +567,13 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
       <FormRow label={t('common.privateKey')} error={errors.privateKeyPath}>
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-2">
-            <Input
-              value={privateKeyPath}
-              onChange={(e) => onPrivateKeyPathChange(e.target.value)}
-              placeholder="/path/to/key"
-              className="flex-1"
-            />
+            <Input value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="flex-1" />
             <Button variant="outline" className="shrink-0" onClick={onBrowse}>
               <FolderOpen />
               {t('connection.form.browse')}
             </Button>
           </div>
-          <span className="text-xs text-muted-foreground/70">
-            {t('connection.form.privateKeyHint')}
-          </span>
+          <span className="text-xs text-muted-foreground/70">{t('connection.form.privateKeyHint')}</span>
         </div>
       </FormRow>
     </div>
@@ -694,19 +587,12 @@ interface FormRowProps {
   className?: string;
 }
 
-const FormRow: React.FC<FormRowProps> = ({
-  label,
-  error,
-  children,
-  className,
-}) => {
+const FormRow: React.FC<FormRowProps> = ({ label, error, children, className }) => {
   return (
     <div className={cn('flex flex-col gap-1', className)}>
       <Label className="text-xs text-muted-foreground">{label}</Label>
       {children}
-      {error && (
-        <span className="text-xs text-app-error">{error}</span>
-      )}
+      {error && <span className="text-xs text-app-error">{error}</span>}
     </div>
   );
 };

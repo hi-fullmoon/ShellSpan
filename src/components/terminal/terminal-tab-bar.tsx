@@ -188,7 +188,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
               }}
               className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
             >
-              <PinIcon className="size-3" />
+              <PinIcon className="size-3" strokeWidth={1.5} />
             </button>
           ) : (
             <button
@@ -204,7 +204,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
                 !dragging && active ? 'flex' : 'hidden group-hover:flex',
               )}
             >
-              <XIcon className="h-3 w-3" />
+              <XIcon className="h-3 w-3" strokeWidth={1.5} />
             </button>
           )}
         </>
@@ -631,7 +631,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
           aria-label={t('terminal.newTab')}
           className="h-[36px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
         >
-          <PlusIcon />
+          <PlusIcon strokeWidth={1.5} />
         </Button>
       )}
       <AlertDialog

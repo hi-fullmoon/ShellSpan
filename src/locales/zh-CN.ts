@@ -169,6 +169,7 @@ export default {
   'connection.form.validation.usernameRequired': '请输入用户名',
   'connection.form.validation.passwordRequired': '请输入密码',
   'connection.form.validation.keyRequired': '请选择或输入私钥',
+  'connection.form.validation.keyNotFound': '已保存的密钥已被删除',
   'connection.form.validation.jumpHostHostRequired': '请输入跳板机主机',
   'connection.form.validation.jumpHostUsernameRequired': '请输入跳板机用户名',
 

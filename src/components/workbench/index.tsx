@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
-import { ConnectionForm } from './connection-form';
+import { ConnectionFormDrawer } from './connection-form-drawer';
 import { ConnectionList } from './connection-list';
 import { KnownHostsPanel } from './known-hosts-panel';
 import { KeychainPanel } from './keychain-panel';
@@ -120,7 +120,7 @@ const Workbench: React.FC = () => {
         </div>
       </div>
 
-      <ConnectionForm
+      <ConnectionFormDrawer
         open={formOpen}
         onClose={() => setFormOpen(false)}
         onSubmit={handleSubmit}

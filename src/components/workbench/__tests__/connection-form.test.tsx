@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/react';
-import { ConnectionForm } from '../connection-form';
+import { ConnectionFormDrawer } from '../connection-form-drawer';
 import type { ConnectionProfile } from '@/types';
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -30,9 +30,9 @@ const profile: ConnectionProfile = {
   updatedAt: Date.now(),
 };
 
-describe('ConnectionForm', () => {
+describe('ConnectionFormDrawer', () => {
   it('fills an empty name from the host when the host loses focus', () => {
-    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
 
     const nameInput = screen.getByPlaceholderText('My Server');
     const hostInput = screen.getByPlaceholderText('192.168.1.1');
@@ -43,7 +43,7 @@ describe('ConnectionForm', () => {
   });
 
   it('does not overwrite an existing name when the host loses focus', () => {
-    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
 
     const nameInput = screen.getByPlaceholderText('My Server');
     const hostInput = screen.getByPlaceholderText('192.168.1.1');
@@ -56,7 +56,7 @@ describe('ConnectionForm', () => {
 
   it('does not fill the name while editing an existing connection', () => {
     render(
-      <ConnectionForm
+      <ConnectionFormDrawer
         open={true}
         onClose={() => {}}
         onSubmit={() => {}}
@@ -72,7 +72,7 @@ describe('ConnectionForm', () => {
   });
 
   it('renders the form body as a constrained scrollable region', () => {
-    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
 
     const scrollArea = document.body.querySelector(
       '[data-slot="drawer-content"] > [data-slot="scroll-area"]',
@@ -88,7 +88,7 @@ describe('ConnectionForm', () => {
   });
 
   it('renders the auth method as a segmented toggle with the translated label', () => {
-    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
 
     const pressedItem = document.body.querySelector(
       '[data-slot="toggle-group-item"][aria-pressed="true"]',
@@ -97,7 +97,7 @@ describe('ConnectionForm', () => {
   });
 
   it('renders the translated jump-host auth method label when enabled', () => {
-    render(<ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
 
     const jumpHostSwitch = document.body.querySelector('[data-slot="switch"]');
     expect(jumpHostSwitch).toBeInTheDocument();
@@ -113,7 +113,7 @@ describe('ConnectionForm', () => {
 
   it('resets form values when opening with a new profile', () => {
     const { rerender } = render(
-      <ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} initial={profile} />,
+      <ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} initial={profile} />,
     );
 
     const nameInput = document.body.querySelector('[data-slot="input"]') as HTMLInputElement;
@@ -124,7 +124,7 @@ describe('ConnectionForm', () => {
 
     const nextProfile: ConnectionProfile = { ...profile, id: 'p2', name: 'Other Server' };
     rerender(
-      <ConnectionForm open={true} onClose={() => {}} onSubmit={() => {}} initial={nextProfile} />,
+      <ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} initial={nextProfile} />,
     );
 
     expect(nameInput.value).toBe('Other Server');
@@ -137,7 +137,7 @@ describe('ConnectionForm', () => {
       password: undefined,
     };
     render(
-      <ConnectionForm
+      <ConnectionFormDrawer
         open={true}
         onClose={() => {}}
         onSubmit={onSubmit}
@@ -155,7 +155,7 @@ describe('ConnectionForm', () => {
 
   it('preserves password when toggling auth method away and back', () => {
     render(
-      <ConnectionForm
+      <ConnectionFormDrawer
         open={true}
         onClose={() => {}}
         onSubmit={() => {}}
@@ -186,7 +186,7 @@ describe('ConnectionForm', () => {
     const onSubmit = vi.fn();
     const onConnect = vi.fn();
     render(
-      <ConnectionForm
+      <ConnectionFormDrawer
         open={true}
         onClose={() => {}}
         onSubmit={onSubmit}
@@ -208,7 +208,7 @@ describe('ConnectionForm', () => {
   it('submits only once when the primary action is clicked repeatedly', async () => {
     const onConnect = vi.fn(() => new Promise<void>(() => {}));
     render(
-      <ConnectionForm
+      <ConnectionFormDrawer
         open={true}
         onClose={() => {}}
         onSubmit={() => {}}

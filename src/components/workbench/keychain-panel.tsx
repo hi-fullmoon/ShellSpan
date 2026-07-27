@@ -246,11 +246,11 @@ export const KeychainPanel: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-1">
                           <span
                             className={cn(
-                              'w-fit rounded-sm px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
+                              'w-fit rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none tracking-wide',
                               keyTypeBadgeClass(key.keyType),
                             )}
                           >
-                            {key.keyType}
+                            {key.keyType.toUpperCase()}
                           </span>
                         </div>
                       </div>
