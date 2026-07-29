@@ -124,7 +124,8 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     if (!current) return;
 
     const nextAuthMethod = updates.authMethod ?? current.authMethod;
-    const passwordChanged = 'password' in updates;
+    const passwordChanged =
+      'password' in updates && (updates.password ?? '') !== (current.password ?? '');
     const needsNewPasswordKeychain = passwordChanged && nextAuthMethod === 'password';
 
     const updated: ConnectionProfile = {
@@ -145,7 +146,7 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
       if (nextAuthMethod !== 'password' || passwordChanged) {
         await invokeDeleteProfilePassword(id);
       }
-      if (nextAuthMethod === 'password' && updates.password) {
+      if (nextAuthMethod === 'password' && passwordChanged && updates.password) {
         await invokeStoreProfilePassword(id, updates.password);
       }
     } catch (error) {
@@ -203,11 +204,21 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   clearKeychainKeyIds: (profileIds) => {
     if (profileIds.length === 0) return;
     const idSet = new Set(profileIds);
+    const affected = get().profiles.filter((p) => idSet.has(p.id) && p.keychainKeyId);
     set((state) => ({
       profiles: state.profiles.map((p) =>
         idSet.has(p.id) ? { ...p, keychainKeyId: undefined } : p,
       ),
     }));
+    // Persist the cleared references so dangling ids do not come back on the
+    // next hydrate. update_profile overwrites the full row, so an undefined
+    // keychainKeyId is stored as NULL.
+    for (const profile of affected) {
+      invokeUpdateProfile(profile.id, profileToRow({ ...profile, keychainKeyId: undefined })).catch(
+        (error) =>
+          logger.error(`failed to clear keychain key reference for profile ${profile.id}`, error),
+      );
+    }
   },
 }));
 

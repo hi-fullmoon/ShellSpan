@@ -11,6 +11,7 @@ vi.mock('@/lib/tauri', () => ({
   buildRemoteConnectionRequest: vi.fn((profile: ConnectionProfile) => profile),
   invokeCheckHostKey: vi.fn(),
   invokeTrustHost: vi.fn(),
+  invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
   invokeTouchRecentProfile: vi.fn().mockResolvedValue(undefined),
   invokeRemoveRecentProfile: vi.fn().mockResolvedValue(undefined),
   invokeListRecentProfiles: vi.fn().mockResolvedValue([]),
@@ -19,13 +20,22 @@ vi.mock('@/lib/tauri', () => ({
   invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('@/lib/password-prompt', async (importActual) => {
+  const actual = await importActual<typeof import('@/lib/password-prompt')>();
+  return {
+    ...actual,
+    promptForMissingPassword: vi.fn((p: ConnectionProfile) => Promise.resolve(p)),
+  };
+});
+
 vi.mock('@/lib/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
   preparePasswordKeychain: vi.fn().mockImplementation((p) => Promise.resolve(p)),
   prepareKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
 }));
 
-import { invokeCheckHostKey, invokeListSftpBookmarks, invokeTrustHost } from '@/lib/tauri';
+import { invokeCheckHostKey, invokeListSftpBookmarks, invokeStoreProfilePassword, invokeTrustHost } from '@/lib/tauri';
+import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
   ensureKeychainKeyForProfile,
   prepareKeychainKeyForProfile,
@@ -57,6 +67,10 @@ describe('useSftpConnectionOpener', () => {
     vi.mocked(invokeCheckHostKey).mockReset();
     vi.mocked(invokeTrustHost).mockReset();
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
+    vi.mocked(invokeStoreProfilePassword).mockReset();
+    vi.mocked(invokeStoreProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(promptForMissingPassword).mockReset();
+    vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(preparePasswordKeychain).mockReset();
@@ -137,5 +151,46 @@ describe('useSftpConnectionOpener', () => {
     expect(ensureKeychainKeyForProfile).toHaveBeenCalledWith(keychainProfile);
     expect(useSftpStore.getState().connections).toHaveLength(1);
     expect(useSftpStore.getState().connections[0]?.connection.keychainKeyId).toBe('new-key');
+  });
+
+  it('persists a password entered via the prompt after opening SFTP', async () => {
+    vi.mocked(invokeCheckHostKey).mockResolvedValue({ status: 'match' });
+    const passwordProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+    };
+    vi.mocked(promptForMissingPassword).mockResolvedValueOnce({
+      ...passwordProfile,
+      password: 'entered-secret',
+    });
+
+    const { result } = renderHook(() => useSftpConnectionOpener());
+
+    await act(async () => {
+      await result.current.open(passwordProfile);
+    });
+
+    await waitFor(() => {
+      expect(invokeStoreProfilePassword).toHaveBeenCalledWith('p1', 'entered-secret');
+    });
+    expect(useSftpStore.getState().connections).toHaveLength(1);
+  });
+
+  it('does not persist a password the profile already had', async () => {
+    vi.mocked(invokeCheckHostKey).mockResolvedValue({ status: 'match' });
+    const passwordProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+      password: 'saved-secret',
+    };
+
+    const { result } = renderHook(() => useSftpConnectionOpener());
+
+    await act(async () => {
+      await result.current.open(passwordProfile);
+    });
+
+    expect(invokeStoreProfilePassword).not.toHaveBeenCalled();
+    expect(useSftpStore.getState().connections).toHaveLength(1);
   });
 });

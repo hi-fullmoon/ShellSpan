@@ -90,10 +90,6 @@ export default {
   'workbench.keychain.newSubtitle': 'Create a key file credential',
   'workbench.keychain.editSubtitle': 'Edit a key file credential',
 
-  'keychain.kind.password': 'Password',
-  'keychain.kind.profilePassword': 'Password',
-  'keychain.kind.keyFile': 'Key File',
-
   'keychain.form.kind': 'Key Kind',
   'keychain.form.labelRequired': 'Label is required',
   'keychain.form.labelPlaceholder': 'e.g. dev server key',
@@ -383,6 +379,7 @@ export default {
   'dialog.credentialPrompt.description': 'Enter the password for {username}@{host}',
 
   'error.keychainKeyNotFound': 'The saved key for this profile no longer exists. Please select another key.',
+  'error.storedPasswordMissing': 'The stored password for this connection is no longer available.',
 
   'dialog.keychainKeyPrompt.title': 'Select SSH Key',
   'dialog.keychainKeyPrompt.description': 'The saved key for {username}@{host} is no longer available',

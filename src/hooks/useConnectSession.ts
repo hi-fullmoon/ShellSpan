@@ -12,7 +12,7 @@ import {
 } from '@/lib/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
-import { promptForMissingPassword } from '@/lib/password-prompt';
+import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
@@ -121,6 +121,7 @@ export function useConnectSession(): {
         const summary = await invokeCreateSession(
           buildSessionCreateRequest(preparedProfile, 120, 30),
         );
+        await persistPromptedPassword(profile, preparedProfile);
         addSession(summary, profile.id, options);
         logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
         useRecentProfilesStore.getState().touchProfile(profile.id);

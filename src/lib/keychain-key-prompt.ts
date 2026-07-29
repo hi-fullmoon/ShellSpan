@@ -4,6 +4,7 @@ import { useKeychainStore } from '@/stores/keychainStore';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
 import { getLocalizedErrorMessage } from '@/lib/error';
+import { promptForMissingPassword } from '@/lib/password-prompt';
 import type { ConnectionProfile } from '@/types';
 
 const logger = createLogger('keychain-key-prompt');
@@ -119,11 +120,13 @@ export async function prepareKeychainKeyForProfile(
  * Loads an existing password keychain for a password-authenticated profile.
  *
  * If the profile already references a password keychain, the password is
- * loaded from it. Otherwise the profile is returned unchanged so the caller
- * can attempt authentication with the password currently in the profile.
+ * loaded from it. When the referenced entry is missing, the dangling
+ * keychain reference is cleared: the profile's own password is used if
+ * present, otherwise the user is prompted for a password so the connection
+ * can still proceed.
  *
- * @returns The profile with the stored password loaded, or null if the
- *          referenced keychain is missing.
+ * @returns The profile ready for authentication, or null if the user
+ *          cancelled the password prompt.
  */
 export async function preparePasswordKeychain(
   profile: ConnectionProfile,
@@ -143,7 +146,12 @@ export async function preparePasswordKeychain(
       getLocalizedErrorMessage(new Error('Stored password is missing')),
       'error',
     );
-    return null;
+    if (profile.password) {
+      useProfileStore.getState().clearKeychainKeyIds([profile.id]);
+      return { ...profile, keychainKeyId: undefined };
+    }
+    useProfileStore.getState().clearKeychainKeyIds([profile.id]);
+    return promptForMissingPassword({ ...profile, keychainKeyId: undefined });
   }
   return {
     ...profile,

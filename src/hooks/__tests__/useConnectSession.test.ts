@@ -10,6 +10,7 @@ import type { ConnectionProfile } from '@/types';
 vi.mock('@/lib/tauri', () => ({
   invokeCreateSession: vi.fn(),
   invokeTrustHost: vi.fn(),
+  invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
   buildSessionCreateRequest: vi.fn((p: ConnectionProfile) => p),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
@@ -33,6 +34,14 @@ vi.mock('../useReconnectSession', () => ({
   useReconnectSession: vi.fn().mockReturnValue(vi.fn()),
 }));
 
+vi.mock('@/lib/password-prompt', async (importActual) => {
+  const actual = await importActual<typeof import('@/lib/password-prompt')>();
+  return {
+    ...actual,
+    promptForMissingPassword: vi.fn((p: ConnectionProfile) => Promise.resolve(p)),
+  };
+});
+
 vi.mock('@/lib/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
@@ -43,7 +52,9 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
 import {
   invokeCreateSession,
   invokeTrustHost,
+  invokeStoreProfilePassword,
 } from '@/lib/tauri';
+import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
   ensureKeychainKeyForProfile,
   prepareKeychainKeyForProfile,
@@ -84,6 +95,10 @@ describe('useConnectSession', () => {
     vi.mocked(invokeCreateSession).mockReset();
     vi.mocked(invokeTrustHost).mockReset();
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
+    vi.mocked(invokeStoreProfilePassword).mockReset();
+    vi.mocked(invokeStoreProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(promptForMissingPassword).mockReset();
+    vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(promptForMissingKeychainKey).mockReset();
     vi.mocked(promptForMissingKeychainKey).mockResolvedValue(null);
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
@@ -311,5 +326,67 @@ describe('useConnectSession', () => {
       mismatch: false,
     });
     expect(result.current.hostKeyDialog.onTrust).toBeInstanceOf(Function);
+  });
+
+  it('persists a password entered via the prompt after a successful connection', async () => {
+    const passwordProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+    };
+    vi.mocked(promptForMissingPassword).mockResolvedValueOnce({
+      ...passwordProfile,
+      password: 'entered-secret',
+    });
+    vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
+
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(passwordProfile);
+    });
+
+    expect(invokeStoreProfilePassword).toHaveBeenCalledWith('p1', 'entered-secret');
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+  });
+
+  it('does not persist a password the profile already had', async () => {
+    const passwordProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+      password: 'saved-secret',
+    };
+    vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
+
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(passwordProfile);
+    });
+
+    expect(invokeStoreProfilePassword).not.toHaveBeenCalled();
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+  });
+
+  it('keeps the connection when persisting the prompted password fails', async () => {
+    const passwordProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+    };
+    vi.mocked(promptForMissingPassword).mockResolvedValueOnce({
+      ...passwordProfile,
+      password: 'entered-secret',
+    });
+    vi.mocked(invokeStoreProfilePassword).mockRejectedValueOnce(new Error('keyring unavailable'));
+    vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
+
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(passwordProfile);
+    });
+
+    expect(invokeStoreProfilePassword).toHaveBeenCalledWith('p1', 'entered-secret');
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+    expect(useAppStore.getState().activeSection).toBe('terminal');
   });
 });

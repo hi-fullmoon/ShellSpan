@@ -112,8 +112,8 @@ impl CredentialBackend for DatabaseBackend {
 // ---------------------------------------------------------------------------
 
 struct CompositeBackend {
-    native: NativeKeychainBackend,
-    fallback: DatabaseBackend,
+    native: Arc<dyn CredentialBackend>,
+    fallback: Arc<dyn CredentialBackend>,
 }
 
 impl CredentialBackend for CompositeBackend {
@@ -124,7 +124,17 @@ impl CredentialBackend for CompositeBackend {
         value: &str,
     ) -> Result<(), String> {
         match self.native.set_credential(service, key, value) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // Keep both stores in sync: remove any stale copy from the
+                // database fallback so a later native outage can't serve an
+                // outdated value. Best-effort — failure only logs.
+                if let Err(e) = self.fallback.delete_credential(service, key) {
+                    warn!(
+                        "Failed to remove stale fallback credential service={service} key={key}: {e}"
+                    );
+                }
+                Ok(())
+            }
             Err(native_err) => {
                 warn!(
                     "Native keychain set failed for service={service} key={key}, falling back to database: {native_err}"
@@ -162,7 +172,19 @@ impl CredentialBackend for CompositeBackend {
         // Return the first error if both failed; succeed if either succeeded.
         match (&native_result, &fallback_result) {
             (Err(_), Err(fallback_err)) => Err(fallback_err.clone()),
-            _ => {
+            (Err(native_err), Ok(())) => {
+                warn!(
+                    "Native keychain delete failed for service={service} key={key}, fallback delete succeeded; OS keychain may retain an orphan credential: {native_err}"
+                );
+                Ok(())
+            }
+            (Ok(()), Err(fallback_err)) => {
+                warn!(
+                    "Fallback delete failed for service={service} key={key}, native keychain delete succeeded; database may retain an orphan credential: {fallback_err}"
+                );
+                Ok(())
+            }
+            (Ok(()), Ok(())) => {
                 debug!("Deleted credential service={service} key={key} (native+fallback)");
                 Ok(())
             }
@@ -186,8 +208,8 @@ impl CredentialManager {
     /// keychain is unavailable.
     pub(crate) fn new(database: crate::db::Database) -> Self {
         let backend = CompositeBackend {
-            native: NativeKeychainBackend,
-            fallback: DatabaseBackend::new(database),
+            native: Arc::new(NativeKeychainBackend),
+            fallback: Arc::new(DatabaseBackend::new(database)),
         };
         Self {
             backend: Arc::new(backend),
@@ -225,17 +247,24 @@ impl CredentialManager {
         key: &str,
     ) -> Result<Option<String>, String> {
         let cache_key = format!("{service}:{key}");
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| "credential cache lock poisoned".to_string())?;
-        if let Some(value) = cache.get(&cache_key).cloned() {
-            return Ok(Some(value));
+        {
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| "credential cache lock poisoned".to_string())?;
+            if let Some(value) = cache.get(&cache_key).cloned() {
+                return Ok(Some(value));
+            }
         }
 
+        // Cache miss: do the (potentially blocking) backend I/O without
+        // holding the cache lock so other credentials stay accessible.
         let value = self.backend.get_credential(service, key)?;
         if let Some(ref value) = value {
-            cache.insert(cache_key, value.clone());
+            self.cache
+                .lock()
+                .map_err(|_| "credential cache lock poisoned".to_string())?
+                .insert(cache_key, value.clone());
         }
         Ok(value)
     }
@@ -299,7 +328,7 @@ impl CredentialManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[derive(Default)]
     struct MockBackend {
@@ -307,6 +336,8 @@ mod tests {
         get_calls: AtomicUsize,
         set_calls: AtomicUsize,
         delete_calls: AtomicUsize,
+        fail_set: AtomicBool,
+        fail_delete: AtomicBool,
     }
 
     impl CredentialBackend for MockBackend {
@@ -317,6 +348,9 @@ mod tests {
             value: &str,
         ) -> Result<(), String> {
             self.set_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail_set.load(Ordering::SeqCst) {
+                return Err("mock set failure".to_string());
+            }
             let mut creds = self.credentials.lock().unwrap();
             creds
                 .entry(service.to_string())
@@ -338,6 +372,9 @@ mod tests {
 
         fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
             self.delete_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail_delete.load(Ordering::SeqCst) {
+                return Err("mock delete failure".to_string());
+            }
             self.credentials
                 .lock()
                 .unwrap()
@@ -403,5 +440,156 @@ mod tests {
         // After delete, cache is cleared. Next get hits backend (which is empty).
         let val = manager.get_credential("svc", "k").unwrap();
         assert_eq!(val, None);
+    }
+
+    #[test]
+    fn composite_set_removes_stale_fallback_copy() {
+        let native = Arc::new(MockBackend::default());
+        let fallback = Arc::new(MockBackend::default());
+        let composite = CompositeBackend {
+            native: native.clone(),
+            fallback: fallback.clone(),
+        };
+
+        // Stale value left in the fallback from an earlier native outage.
+        fallback.set_credential("svc", "k", "old").unwrap();
+
+        composite.set_credential("svc", "k", "new").unwrap();
+
+        // Native holds the new value and the stale fallback copy is gone,
+        // so a later native outage cannot serve "old".
+        assert_eq!(
+            native.get_credential("svc", "k").unwrap().as_deref(),
+            Some("new")
+        );
+        assert_eq!(fallback.get_credential("svc", "k").unwrap(), None);
+    }
+
+    #[test]
+    fn composite_set_fallback_delete_failure_is_best_effort() {
+        let native = Arc::new(MockBackend::default());
+        let fallback = Arc::new(MockBackend::default());
+        fallback.fail_delete.store(true, Ordering::SeqCst);
+        let composite = CompositeBackend {
+            native: native.clone(),
+            fallback: fallback.clone(),
+        };
+
+        // The set still succeeds even though the fallback cleanup fails.
+        composite.set_credential("svc", "k", "new").unwrap();
+        assert_eq!(
+            native.get_credential("svc", "k").unwrap().as_deref(),
+            Some("new")
+        );
+    }
+
+    #[test]
+    fn composite_set_falls_back_to_database_when_native_fails() {
+        let native = Arc::new(MockBackend::default());
+        native.fail_set.store(true, Ordering::SeqCst);
+        let fallback = Arc::new(MockBackend::default());
+        let composite = CompositeBackend {
+            native: native.clone(),
+            fallback: fallback.clone(),
+        };
+
+        composite.set_credential("svc", "k", "v").unwrap();
+
+        assert_eq!(
+            fallback.get_credential("svc", "k").unwrap().as_deref(),
+            Some("v")
+        );
+        assert_eq!(native.get_credential("svc", "k").unwrap(), None);
+    }
+
+    #[test]
+    fn composite_delete_single_side_failure_still_succeeds() {
+        let native = Arc::new(MockBackend::default());
+        native.fail_delete.store(true, Ordering::SeqCst);
+        let fallback = Arc::new(MockBackend::default());
+        fallback.set_credential("svc", "k", "v").unwrap();
+        let composite = CompositeBackend {
+            native: native.clone(),
+            fallback: fallback.clone(),
+        };
+
+        // Native delete fails but fallback succeeds — overall still Ok
+        // (and a warn is logged about the possible orphan).
+        composite.delete_credential("svc", "k").unwrap();
+        assert_eq!(fallback.get_credential("svc", "k").unwrap(), None);
+    }
+
+    #[test]
+    fn composite_delete_fails_only_when_both_sides_fail() {
+        let native = Arc::new(MockBackend::default());
+        native.fail_delete.store(true, Ordering::SeqCst);
+        let fallback = Arc::new(MockBackend::default());
+        fallback.fail_delete.store(true, Ordering::SeqCst);
+        let composite = CompositeBackend {
+            native: native.clone(),
+            fallback: fallback.clone(),
+        };
+
+        assert!(composite.delete_credential("svc", "k").is_err());
+    }
+
+    #[test]
+    fn get_credential_does_not_hold_cache_lock_during_backend_io() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+
+        struct BlockingBackend {
+            entered: std::sync::mpsc::Sender<()>,
+            release: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+
+        impl CredentialBackend for BlockingBackend {
+            fn set_credential(
+                &self,
+                _service: &str,
+                _key: &str,
+                _value: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn get_credential(&self, _service: &str, _key: &str) -> Result<Option<String>, String> {
+                self.entered.send(()).map_err(|e| e.to_string())?;
+                self.release
+                    .lock()
+                    .map_err(|_| "release lock poisoned".to_string())?
+                    .recv()
+                    .map_err(|e| e.to_string())?;
+                Ok(Some("slow".to_string()))
+            }
+
+            fn delete_credential(&self, _service: &str, _key: &str) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let (entered_tx, entered_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let backend = Arc::new(BlockingBackend {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        });
+        let manager = Arc::new(CredentialManager::with_backend(backend));
+
+        let worker = {
+            let manager = manager.clone();
+            std::thread::spawn(move || manager.get_credential("svc", "k"))
+        };
+        // Wait until the worker is inside the blocking backend I/O.
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("backend I/O never started");
+        // The cache lock must be free while the backend I/O is in flight.
+        assert!(
+            manager.cache.try_lock().is_ok(),
+            "cache lock must not be held during backend I/O"
+        );
+        release_tx.send(()).unwrap();
+        assert_eq!(worker.join().unwrap().unwrap().as_deref(), Some("slow"));
     }
 }
