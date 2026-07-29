@@ -206,6 +206,12 @@ pub(crate) async fn create_session(
         Ok(()) => Ok(summary),
         Err(message) => {
             error!("SSH session connection failed session_id={session_id}: {message}");
+            // The frontend never receives this session id and will not call
+            // close_session, so drop the registry entry here to avoid leaking
+            // it. The worker thread has already sent its result; its later
+            // emit_status calls tolerate the missing entry (set_status error
+            // is ignored in emit_status).
+            let _ = state.remove(&session_id);
             Err(CreateSessionError::Other { message })
         }
     }
@@ -1124,6 +1130,7 @@ pub(crate) fn store_key_credential(
         "keyType": key_type,
         "updatedAt": updated_at,
     });
+    let is_new = !database.key_credential_exists(&request.id)?;
     database.upsert_key_credential(
         &request.id,
         &request.label,
@@ -1136,14 +1143,18 @@ pub(crate) fn store_key_credential(
     )?;
     if let Err(error) = credentials.store_key_credential(&request.id, &payload.to_string()) {
         warn!(
-            "Failed to persist key credential value to database for id={}, rolling back: {}",
+            "Failed to persist key credential for id={}, rolling back: {}",
             request.id, error
         );
-        if let Err(rollback_error) = database.delete_key_credential(&request.id) {
-            warn!(
-                "Failed to roll back key credential metadata id={}: {}",
-                request.id, rollback_error
-            );
+        // Only roll back rows created by this call — deleting a pre-existing
+        // row would destroy metadata the user already had.
+        if is_new {
+            if let Err(rollback_error) = database.delete_key_credential(&request.id) {
+                warn!(
+                    "Failed to roll back key credential metadata id={}: {}",
+                    request.id, rollback_error
+                );
+            }
         }
         return Err(error);
     }

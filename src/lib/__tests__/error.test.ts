@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getErrorMessage } from '../error';
+import { getErrorMessage, getLocalizedErrorMessage } from '../error';
+import { t } from '@/locales';
 
 describe('getErrorMessage', () => {
   it('returns message from Error instances', () => {
@@ -27,5 +28,17 @@ describe('getErrorMessage', () => {
     expect(getErrorMessage(123)).toBe('123');
     expect(getErrorMessage(null)).toBe('null');
     expect(getErrorMessage(undefined)).toBe('undefined');
+  });
+});
+
+describe('getLocalizedErrorMessage', () => {
+  it('localizes the stored-password-missing message', () => {
+    expect(getLocalizedErrorMessage(new Error('Stored password is missing'))).toBe(
+      t('error.storedPasswordMissing'),
+    );
+  });
+
+  it('leaves unknown messages untouched', () => {
+    expect(getLocalizedErrorMessage(new Error('something else'))).toBe('something else');
   });
 });

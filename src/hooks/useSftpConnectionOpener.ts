@@ -12,7 +12,7 @@ import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile, RemoteFsError } from '@/types';
-import { promptForMissingPassword } from '@/lib/password-prompt';
+import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
@@ -149,13 +149,20 @@ export function useSftpConnectionOpener(): {
         return;
       }
 
+      // Persist a password entered via the prompt once the connection
+      // succeeds; failures are swallowed inside persistPromptedPassword.
+      const finish = (): void => {
+        void persistPromptedPassword(profile, preparedProfile);
+        finishOpen(preparedProfile, targetConnectionId, targetSide);
+      };
+
       // Non-jump-host sessions can be pre-probed with a direct TCP connection.
       if (!preparedProfile.jumpHost) {
         await verifyHostKey(
           preparedProfile.host,
           preparedProfile.port,
           () => {
-            finishOpen(preparedProfile, targetConnectionId, targetSide);
+            finish();
           },
         );
         return;
@@ -183,7 +190,7 @@ export function useSftpConnectionOpener(): {
                   return attemptSftpConnection();
                 })
                 .then(() => {
-                  finishOpen(preparedProfile, targetConnectionId, targetSide);
+                  finish();
                 })
                 .catch((retryError: unknown) => {
                   const parsed = parseRemoteFsError(retryError);
@@ -203,7 +210,7 @@ export function useSftpConnectionOpener(): {
 
       try {
         await attemptSftpConnection();
-        finishOpen(preparedProfile, targetConnectionId, targetSide);
+        finish();
       } catch (error) {
         const parsed = parseRemoteFsError(error);
         if (parsed && handleRemoteFsError(parsed)) {

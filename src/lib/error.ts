@@ -1,6 +1,7 @@
 import { t } from '@/locales';
 
 const KEYCHAIN_KEY_NOT_FOUND_PREFIX = 'keychain key not found:';
+const STORED_PASSWORD_MISSING_MESSAGE = 'stored password is missing';
 
 /**
  * Extracts a human-readable message from an error value.
@@ -41,6 +42,9 @@ export function getLocalizedErrorMessage(error: unknown): string {
   const raw = getErrorMessage(error);
   if (raw.toLowerCase().startsWith(KEYCHAIN_KEY_NOT_FOUND_PREFIX)) {
     return t('error.keychainKeyNotFound');
+  }
+  if (raw.toLowerCase() === STORED_PASSWORD_MISSING_MESSAGE) {
+    return t('error.storedPasswordMissing');
   }
   return raw;
 }

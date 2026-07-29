@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { KeychainPanel } from '../keychain-panel';
 import { useKeychainStore } from '@/stores/keychainStore';
+import { useProfileStore } from '@/stores/profileStore';
+import type { ConnectionProfile } from '@/types';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -20,7 +22,12 @@ vi.mock('@/hooks/useToast', () => ({
 }));
 
 describe('KeychainPanel', () => {
+  const initialKeychain = useKeychainStore.getState();
+  const initialProfiles = useProfileStore.getState();
+
   beforeEach(() => {
+    useKeychainStore.setState(initialKeychain, true);
+    useProfileStore.setState(initialProfiles, true);
     useKeychainStore.setState({
       keys: [
         { id: 'profile-1', label: 'Server password', keyType: 'ecdsa', kind: 'password' },
@@ -77,5 +84,47 @@ describe('KeychainPanel', () => {
     expect(
       screen.getByText('workbench.keychain.newSubtitle'),
     ).toBeInTheDocument();
+  });
+
+  it('clears dangling keychain references on profiles after deleting a key', async () => {
+    const removeKey = vi.fn().mockResolvedValue(['p1', 'p2']);
+    useKeychainStore.setState({ removeKey });
+
+    const makeProfile = (id: string, keychainKeyId?: string): ConnectionProfile => ({
+      id,
+      name: id,
+      host: 'h',
+      port: 22,
+      username: 'u',
+      authMethod: 'key',
+      keychainKeyId,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    useProfileStore.setState({
+      profiles: [
+        makeProfile('p1', 'key-1'),
+        makeProfile('p2', 'key-1'),
+        makeProfile('p3', 'other-key'),
+      ],
+    });
+
+    render(<KeychainPanel />);
+
+    const deleteButtons = screen.getAllByRole('button', {
+      name: 'common.delete',
+      hidden: true,
+    });
+    fireEvent.click(deleteButtons[1]);
+
+    const confirmButton = await screen.findByRole('button', { name: 'common.delete' });
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(useProfileStore.getState().getProfile('p1')?.keychainKeyId).toBeUndefined();
+    });
+    expect(removeKey).toHaveBeenCalledWith('key-1');
+    expect(useProfileStore.getState().getProfile('p2')?.keychainKeyId).toBeUndefined();
+    expect(useProfileStore.getState().getProfile('p3')?.keychainKeyId).toBe('other-key');
   });
 });

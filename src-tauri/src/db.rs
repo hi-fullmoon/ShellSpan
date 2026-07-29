@@ -351,6 +351,19 @@ impl Database {
         Ok(())
     }
 
+    pub(crate) fn key_credential_exists(&self, id: &str) -> Result<bool, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM key_credentials WHERE id=?1)",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("failed to check key credential existence: {e}"))
+    }
+
     pub(crate) fn store_key_credential_value(
         &self,
         id: &str,
@@ -362,9 +375,9 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         conn.execute(
-            "INSERT INTO key_credentials (id, label, value, service, updated_at) VALUES (?1, ?1, ?2, ?3, 0) \
-             ON CONFLICT(id) DO UPDATE SET value=excluded.value, service=excluded.service",
-            params![id, value, service],
+            "INSERT INTO key_credentials (id, label, value, service, updated_at) VALUES (?1, ?1, ?2, ?3, ?4) \
+             ON CONFLICT(id) DO UPDATE SET value=excluded.value, service=excluded.service, updated_at=excluded.updated_at",
+            params![id, value, service, current_timestamp_ms()],
         )
         .map_err(|e| format!("failed to store key credential value: {e}"))?;
         Ok(())
@@ -1032,5 +1045,70 @@ mod tests {
         profile.keychain_key_id = None;
         db.update_profile("profile-1", &profile).unwrap();
         assert_eq!(db.clear_keychain_key_id_references("key-1").unwrap(), 0);
+    }
+
+    #[test]
+    fn store_key_credential_value_insert_uses_real_timestamp() {
+        let db = test_db();
+        db.store_key_credential_value("key-1", "private-key-data", "com.termbridge.key")
+            .unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let updated_at: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM key_credentials WHERE id='key-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(updated_at > 0);
+    }
+
+    #[test]
+    fn store_key_credential_value_conflict_updates_timestamp_and_keeps_metadata() {
+        let db = test_db();
+        db.upsert_key_credential(
+            "key-1",
+            "My Key",
+            "rsa",
+            "keyFile",
+            "com.termbridge.key",
+            None,
+            None,
+            1000,
+        )
+        .unwrap();
+        db.store_key_credential_value("key-1", "new-value", "com.termbridge.key")
+            .unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let (label, updated_at): (String, i64) = conn
+            .query_row(
+                "SELECT label, updated_at FROM key_credentials WHERE id='key-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        // Conflict branch must refresh updated_at without clobbering metadata.
+        assert_eq!(label, "My Key");
+        assert!(updated_at > 1000);
+    }
+
+    #[test]
+    fn key_credential_exists_reports_presence() {
+        let db = test_db();
+        assert!(!db.key_credential_exists("key-1").unwrap());
+        db.upsert_key_credential(
+            "key-1",
+            "My Key",
+            "rsa",
+            "keyFile",
+            "com.termbridge.key",
+            None,
+            None,
+            1000,
+        )
+        .unwrap();
+        assert!(db.key_credential_exists("key-1").unwrap());
     }
 }

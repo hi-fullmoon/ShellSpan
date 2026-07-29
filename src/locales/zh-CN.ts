@@ -90,10 +90,6 @@ export default {
   'workbench.keychain.newSubtitle': '创建密钥文件凭据',
   'workbench.keychain.editSubtitle': '编辑密钥文件凭据',
 
-  'keychain.kind.password': '密码派生',
-  'keychain.kind.profilePassword': '连接密码',
-  'keychain.kind.keyFile': '密钥文件',
-
   'keychain.form.kind': '密钥类型',
   'keychain.form.labelRequired': '请输入名称',
   'keychain.form.labelPlaceholder': '例如：开发机密钥',
@@ -383,6 +379,7 @@ export default {
   'dialog.credentialPrompt.description': '输入 {username}@{host} 的登录密码',
 
   'error.keychainKeyNotFound': '该连接配置的已保存密钥已不存在，请选择其他密钥。',
+  'error.storedPasswordMissing': '该连接存储的密码已不可用。',
 
   'dialog.keychainKeyPrompt.title': '选择密钥',
   'dialog.keychainKeyPrompt.description': '{username}@{host} 使用的已保存密钥已不存在',

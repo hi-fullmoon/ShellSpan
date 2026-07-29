@@ -114,12 +114,6 @@ pub fn run() {
         LevelFilter::Info
     };
 
-    let termbridge_dir = dirs::home_dir()
-        .map(|home| home.join(".termbridge"))
-        .expect("failed to resolve home directory");
-    let database =
-        db::Database::open(&termbridge_dir.join("termbridge.db")).expect("failed to open database");
-    let credentials = keychain::CredentialManager::new(database.clone());
     let backend_log_target = Target::new(TargetKind::LogDir {
         file_name: Some("backend".into()),
     })
@@ -139,17 +133,19 @@ pub fn run() {
     };
 
     let builder = tauri::Builder::default()
-        .setup(|_app| {
+        .setup(|app| {
             #[cfg(target_os = "macos")]
             {
-                if let Some(window) = _app.get_webview_window("main") {
+                if let Some(window) = app.get_webview_window("main") {
                     window.set_title("").ok();
                 }
             }
+            let termbridge_dir = app.path().home_dir()?.join(".termbridge");
+            let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
+            app.manage(keychain::CredentialManager::new(database.clone()));
+            app.manage(database);
             Ok(())
         })
-        .manage(credentials)
-        .manage(database)
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level)

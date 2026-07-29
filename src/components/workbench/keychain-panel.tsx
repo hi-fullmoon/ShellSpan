@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useKeychainStore, type KeychainKeySummary } from '@/stores/keychainStore';
+import { useProfileStore } from '@/stores/profileStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -156,7 +157,8 @@ export const KeychainPanel: React.FC = () => {
   const handleDelete = async (): Promise<void> => {
     if (!deleting) return;
     try {
-      await removeKey(deleting.id);
+      const affectedProfileIds = await removeKey(deleting.id);
+      useProfileStore.getState().clearKeychainKeyIds(affectedProfileIds);
       setDeleting(undefined);
       showSuccess(t('keychain.form.deleteSuccess'));
     } catch {
