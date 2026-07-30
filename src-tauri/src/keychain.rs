@@ -4,6 +4,38 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) const KEY_SERVICE: &str = "com.termbridge.key";
 pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.termbridge.profile-password";
+pub(crate) const PROFILE_SECRET_SERVICE: &str = "com.termbridge.profile-secret";
+
+/// Kinds of per-profile secrets other than the main login password.
+///
+/// The main password keeps using [`PROFILE_PASSWORD_SERVICE`] keyed by the
+/// bare profile id; these secrets live in [`PROFILE_SECRET_SERVICE`] keyed by
+/// `{profile_id}:{suffix}` so one profile can hold several secrets without
+/// collisions.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ProfileSecretKind {
+    /// Passphrase of the profile's own private key.
+    Passphrase,
+    /// Password of the jump host (password auth).
+    JumpPassword,
+    /// Passphrase of the jump host's private key.
+    JumpPassphrase,
+}
+
+impl ProfileSecretKind {
+    fn suffix(self) -> &'static str {
+        match self {
+            ProfileSecretKind::Passphrase => "passphrase",
+            ProfileSecretKind::JumpPassword => "jump-password",
+            ProfileSecretKind::JumpPassphrase => "jump-passphrase",
+        }
+    }
+
+    fn key_for(self, profile_id: &str) -> String {
+        format!("{profile_id}:{}", self.suffix())
+    }
+}
 
 /// Abstraction over credential storage backends.
 trait CredentialBackend: Send + Sync {
@@ -323,6 +355,58 @@ impl CredentialManager {
     pub(crate) fn delete_profile_password(&self, profile_id: &str) -> Result<(), String> {
         self.delete_credential(PROFILE_PASSWORD_SERVICE, profile_id)
     }
+
+    // --- Profile secrets (key passphrases, jump-host credentials) ---
+
+    pub(crate) fn store_profile_secret(
+        &self,
+        profile_id: &str,
+        kind: ProfileSecretKind,
+        value: &str,
+    ) -> Result<(), String> {
+        self.set_credential(PROFILE_SECRET_SERVICE, &kind.key_for(profile_id), value)
+    }
+
+    pub(crate) fn retrieve_profile_secret(
+        &self,
+        profile_id: &str,
+        kind: ProfileSecretKind,
+    ) -> Result<Option<String>, String> {
+        self.get_credential(PROFILE_SECRET_SERVICE, &kind.key_for(profile_id))
+    }
+
+    /// Deletes every secret belonging to a profile: the main password plus
+    /// all [`ProfileSecretKind`] entries. Best-effort per entry — a failure
+    /// on one kind does not prevent deleting the others; the first error is
+    /// returned after all deletes were attempted.
+    pub(crate) fn delete_all_profile_secrets(&self, profile_id: &str) -> Result<(), String> {
+        let mut first_error = self
+            .delete_profile_password(profile_id)
+            .err();
+        for kind in [
+            ProfileSecretKind::Passphrase,
+            ProfileSecretKind::JumpPassword,
+            ProfileSecretKind::JumpPassphrase,
+        ] {
+            if let Err(e) = self.delete_profile_secret(profile_id, kind) {
+                if first_error.is_none() {
+                    first_error = Some(e);
+                }
+            }
+        }
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn delete_profile_secret(
+        &self,
+        profile_id: &str,
+        kind: ProfileSecretKind,
+    ) -> Result<(), String> {
+        self.delete_credential(PROFILE_SECRET_SERVICE, &kind.key_for(profile_id))
+    }
 }
 
 #[cfg(test)]
@@ -415,6 +499,87 @@ mod tests {
         // After delete, both cache and backend are cleared.
         let after_delete = manager.retrieve_profile_password("profile-1").unwrap();
         assert_eq!(after_delete, None);
+    }
+
+    #[test]
+    fn profile_secret_roundtrip() {
+        let backend = Arc::new(MockBackend::default());
+        let manager = CredentialManager::with_backend(backend);
+
+        manager
+            .store_profile_secret("profile-1", ProfileSecretKind::Passphrase, "pp")
+            .unwrap();
+        manager
+            .store_profile_secret("profile-1", ProfileSecretKind::JumpPassword, "jp")
+            .unwrap();
+        manager
+            .store_profile_secret("profile-1", ProfileSecretKind::JumpPassphrase, "jpp")
+            .unwrap();
+
+        assert_eq!(
+            manager
+                .retrieve_profile_secret("profile-1", ProfileSecretKind::Passphrase)
+                .unwrap()
+                .as_deref(),
+            Some("pp")
+        );
+        assert_eq!(
+            manager
+                .retrieve_profile_secret("profile-1", ProfileSecretKind::JumpPassword)
+                .unwrap()
+                .as_deref(),
+            Some("jp")
+        );
+        assert_eq!(
+            manager
+                .retrieve_profile_secret("profile-1", ProfileSecretKind::JumpPassphrase)
+                .unwrap()
+                .as_deref(),
+            Some("jpp")
+        );
+        // Different profiles do not collide.
+        assert_eq!(
+            manager
+                .retrieve_profile_secret("profile-2", ProfileSecretKind::Passphrase)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn delete_all_profile_secrets_clears_password_and_secrets() {
+        let backend = Arc::new(MockBackend::default());
+        let manager = CredentialManager::with_backend(backend);
+
+        manager
+            .store_profile_password("profile-1", "secret123")
+            .unwrap();
+        manager
+            .store_profile_secret("profile-1", ProfileSecretKind::Passphrase, "pp")
+            .unwrap();
+        manager
+            .store_profile_secret("profile-1", ProfileSecretKind::JumpPassword, "jp")
+            .unwrap();
+        manager
+            .store_profile_secret("profile-1", ProfileSecretKind::JumpPassphrase, "jpp")
+            .unwrap();
+
+        manager.delete_all_profile_secrets("profile-1").unwrap();
+
+        assert_eq!(
+            manager.retrieve_profile_password("profile-1").unwrap(),
+            None
+        );
+        for kind in [
+            ProfileSecretKind::Passphrase,
+            ProfileSecretKind::JumpPassword,
+            ProfileSecretKind::JumpPassphrase,
+        ] {
+            assert_eq!(
+                manager.retrieve_profile_secret("profile-1", kind).unwrap(),
+                None
+            );
+        }
     }
 
     #[test]

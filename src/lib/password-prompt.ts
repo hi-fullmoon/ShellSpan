@@ -1,7 +1,9 @@
 import { createLogger } from '@/lib/logger';
 import { usePasswordPromptStore } from '@/stores/passwordPromptStore';
 import { useProfileStore } from '@/stores/profileStore';
+import { useToastStore } from '@/stores/toastStore';
 import { invokeStoreProfilePassword } from '@/lib/tauri';
+import { t } from '@/locales';
 import type { ConnectionProfile } from '@/types';
 
 const logger = createLogger('password-prompt');
@@ -82,5 +84,6 @@ export async function persistPromptedPassword(
     }));
   } catch (error) {
     logger.error(`Failed to store prompted password for profile ${original.id}`, error);
+    useToastStore.getState().addToast(t('error.secretStoreFailed'), 'error');
   }
 }

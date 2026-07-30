@@ -380,6 +380,7 @@ export default {
 
   'error.keychainKeyNotFound': '该连接配置的已保存密钥已不存在，请选择其他密钥。',
   'error.storedPasswordMissing': '该连接存储的密码已不可用。',
+  'error.secretStoreFailed': '密码保存到系统钥匙串失败，下次连接时需要重新输入。',
 
   'dialog.keychainKeyPrompt.title': '选择密钥',
   'dialog.keychainKeyPrompt.description': '{username}@{host} 使用的已保存密钥已不存在',

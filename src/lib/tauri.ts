@@ -18,6 +18,7 @@ import type {
   LocalDirectoryListing,
   LogFileInfo,
   ProfileRow,
+  ProfileSecretKind,
   RemoteConnectionRequest,
   RemoteDirectoryListing,
   RemoteDirectoryRequest,
@@ -363,6 +364,33 @@ export async function invokeRetrieveProfilePassword(profileId: string): Promise<
 
 export async function invokeDeleteProfilePassword(profileId: string): Promise<void> {
   return invokeLogged('delete_profile_password', { profileId });
+}
+
+export async function invokeStoreProfileSecret(
+  profileId: string,
+  kind: ProfileSecretKind,
+  value: string,
+): Promise<void> {
+  return invokeLogged('store_profile_secret', { profileId, kind, value });
+}
+
+export async function invokeRetrieveProfileSecret(
+  profileId: string,
+  kind: ProfileSecretKind,
+): Promise<string | undefined> {
+  const result = await invokeLogged<string | null>('retrieve_profile_secret', { profileId, kind });
+  return result ?? undefined;
+}
+
+export async function invokeDeleteProfileSecrets(profileId: string): Promise<void> {
+  return invokeLogged('delete_profile_secrets', { profileId });
+}
+
+export async function invokeDeleteProfileSecret(
+  profileId: string,
+  kind: ProfileSecretKind,
+): Promise<void> {
+  return invokeLogged('delete_profile_secret', { profileId, kind });
 }
 
 export async function invokeReadTextFile(path: string): Promise<string> {

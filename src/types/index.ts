@@ -31,6 +31,8 @@ export type ShortcutAction =
 export type ShortcutBindings = Record<ShortcutAction, string>;
 export type AuthMethod = 'password' | 'key';
 export type KeychainKeyKind = 'password' | 'keyFile';
+/** Per-profile secrets stored in the OS keychain besides the main password. */
+export type ProfileSecretKind = 'passphrase' | 'jump-password' | 'jump-passphrase';
 export type RemoteFileKind = 'directory' | 'file' | 'symlink' | 'other';
 export type SessionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 export type ClosedReasonKind =
