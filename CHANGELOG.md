@@ -3,6 +3,18 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.10](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.10) - 2026-07-30
+
+
+### Bug Fixes
+
+- **cred:** improve credential storage, session cleanup, and keychain sync
+
+### Features
+
+- **keychain:** add per-profile secrets management for passphrase and jump host credentials
+- **tauri:** add tray show window on click and menu item for non-macOS
+
 ## [v2.0.9](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.9) - 2026-07-27
 
 
