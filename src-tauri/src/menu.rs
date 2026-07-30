@@ -11,6 +11,8 @@ const MENU_ABOUT_ID: &str = "menu.about";
 const APP_QUIT_MENU_ID: &str = "menu.app_quit";
 
 #[cfg(not(target_os = "macos"))]
+const TRAY_SHOW_WINDOW_ID: &str = "tray.show_window";
+#[cfg(not(target_os = "macos"))]
 const TRAY_OPEN_SETTINGS_ID: &str = "tray.open_settings";
 #[cfg(not(target_os = "macos"))]
 const TRAY_CHECK_UPDATE_ID: &str = "tray.check_update";
@@ -47,9 +49,22 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
                 let tray_menu = build_tray_menu(app.handle())
                     .map_err(|error| format!("failed to create tray menu: {error}"))?;
                 let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main")
+                    .tooltip("TermBridge")
                     .menu(&tray_menu)
                     .on_menu_event(|app, event| {
                         handle_menu_event(app, event.id.as_ref());
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let tauri::tray::TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            if let Err(error) = show_main_window(tray.app_handle()) {
+                                error!("failed to show main window on tray click: {error}");
+                            }
+                        }
                     });
 
                 if let Some(icon) = app.default_window_icon().cloned() {
@@ -136,6 +151,13 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
 
     #[cfg(not(target_os = "macos"))]
     {
+        if menu_id == TRAY_SHOW_WINDOW_ID {
+            if let Err(error) = show_main_window(app) {
+                error!("failed to show main window for show-window event: {error}");
+            }
+            return;
+        }
+
         if menu_id == TRAY_ABOUT_ID {
             if let Err(error) = emit_system_about(app) {
                 error!("failed to handle about menu event: {error}");
@@ -279,6 +301,13 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem};
 
+    let show_window_item = MenuItem::with_id(
+        app,
+        TRAY_SHOW_WINDOW_ID,
+        "Show TermBridge",
+        true,
+        None::<&str>,
+    )?;
     let open_settings_item =
         MenuItem::with_id(app, TRAY_OPEN_SETTINGS_ID, "Settings", true, None::<&str>)?;
     let check_update_item = MenuItem::with_id(
@@ -294,6 +323,7 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     Menu::with_items(
         app,
         &[
+            &show_window_item,
             &open_settings_item,
             &check_update_item,
             &about_item,
