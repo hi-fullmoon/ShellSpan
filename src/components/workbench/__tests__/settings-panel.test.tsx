@@ -25,36 +25,57 @@ describe('SettingsPanel', () => {
     useAppStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS } });
   });
 
-  it('renders appearance, terminal, general, and shortcut sections', async () => {
+  const openSection = (titleKey: string): void => {
+    fireEvent.click(screen.getByRole('button', { name: titleKey }));
+  };
+
+  it('renders one section at a time with sidebar navigation', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
     expect(screen.getByText('workbench.settings.title')).toBeInTheDocument();
-    expect(screen.getByText('settings.appearance.title')).toBeInTheDocument();
+    for (const titleKey of [
+      'settings.appearance.title',
+      'settings.general.title',
+      'settings.terminal.title',
+      'settings.sftp.title',
+      'settings.shortcuts.title',
+    ]) {
+      expect(screen.getByRole('button', { name: titleKey })).toBeInTheDocument();
+    }
+
+    // Appearance is the default section.
     expect(screen.getByText('settings.appearance.theme')).toBeInTheDocument();
     expect(screen.getByText('settings.appearance.language')).toBeInTheDocument();
-    expect(screen.getByText('settings.general.title')).toBeInTheDocument();
-    expect(screen.getByText('settings.terminal.title')).toBeInTheDocument();
-    expect(screen.getByText('settings.terminal.fontSize')).toBeInTheDocument();
-    expect(screen.getByText('settings.terminal.fontFamily')).toBeInTheDocument();
-    expect(screen.getByText('settings.terminal.cursorStyle')).toBeInTheDocument();
-    expect(screen.getByText('settings.terminal.cursorBlink')).toBeInTheDocument();
-    expect(screen.getByText('settings.terminal.copyOnSelect')).toBeInTheDocument();
-    expect(screen.getByText('settings.terminal.scrollback')).toBeInTheDocument();
-    expect(screen.getByText('settings.shortcuts.title')).toBeInTheDocument();
-    expect(screen.getByText('settings.general.startupSection')).toBeInTheDocument();
-    expect(screen.getByText('settings.sftp.title')).toBeInTheDocument();
-    expect(screen.getByText('settings.sftp.showHiddenFiles')).toBeInTheDocument();
+    expect(screen.queryByText('settings.terminal.fontSize')).not.toBeInTheDocument();
     expect(
       screen.getByRole('combobox', { name: 'settings.appearance.theme' }),
     ).toHaveTextContent('theme.system');
     expect(
       screen.getByRole('combobox', { name: 'settings.appearance.language' }),
     ).toHaveTextContent('locale.zh-CN');
-    expect(
-      screen.getByText('settings.general.startupUpdateCheck'),
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(14);
+
+    openSection('settings.general.title');
+    expect(screen.getByText('settings.general.startupSection')).toBeInTheDocument();
+    expect(screen.getByText('settings.general.startupUpdateCheck')).toBeInTheDocument();
+    expect(screen.queryByText('settings.appearance.theme')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(3);
+
+    openSection('settings.terminal.title');
+    expect(screen.getByText('settings.terminal.fontSize')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.fontFamily')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.cursorStyle')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.cursorBlink')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.copyOnSelect')).toBeInTheDocument();
+    expect(screen.getByText('settings.terminal.scrollback')).toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(8);
+
+    openSection('settings.sftp.title');
+    expect(screen.getByText('settings.sftp.showHiddenFiles')).toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(3);
+
+    openSection('settings.shortcuts.title');
+    expect(screen.getByText('settings.shortcuts.resetAll')).toBeInTheDocument();
   });
 
   it('renders when persisted shortcuts come from an older version', async () => {
@@ -69,10 +90,12 @@ describe('SettingsPanel', () => {
 
     expect(() => render(<SettingsPanel />)).not.toThrow();
     await waitFor(() => {});
+    openSection('settings.shortcuts.title');
     expect(screen.getByText('settings.shortcuts.newTerminalTab')).toBeInTheDocument();
   });
 
   const openRecorder = async (actionLabel: string): Promise<HTMLElement> => {
+    openSection('settings.shortcuts.title');
     const row = screen.getByText(actionLabel).parentElement!;
     fireEvent.click(within(row).getAllByRole('button')[0]);
     const prompt = await screen.findByText('settings.shortcuts.recordPrompt');

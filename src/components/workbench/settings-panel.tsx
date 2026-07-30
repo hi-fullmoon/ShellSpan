@@ -12,7 +12,6 @@ import {
 } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Label } from '@/components/ui/label';
@@ -35,6 +34,7 @@ import type {
 } from '@/types';
 import { invokePickLocalFolder } from '@/lib/tauri';
 import type { LocaleKey } from '@/locales';
+import { cn } from '@/lib/utils';
 
 interface ShortcutGroup {
   id: 'app' | 'terminal' | 'sftp';
@@ -75,6 +75,16 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
   terminal: 'settings.shortcuts.groupTerminal',
   sftp: 'settings.shortcuts.groupSftp',
 };
+
+type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'shortcuts';
+
+const SETTINGS_SECTIONS: { id: SettingsSection; icon: React.ElementType; titleKey: LocaleKey }[] = [
+  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title' },
+  { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title' },
+  { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title' },
+  { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title' },
+  { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title' },
+];
 
 interface SettingRowProps {
   description: string;
@@ -166,6 +176,7 @@ export const SettingsPanel: React.FC = () => {
   const resetShortcuts = useAppStore((state) => state.resetShortcuts);
   const [editingAction, setEditingAction] = useState<ShortcutAction | null>(null);
   const [conflictAction, setConflictAction] = useState<ShortcutAction | null>(null);
+  const [activeSection, setActiveSection] = useState<SettingsSection>('appearance');
 
   const shortcutLabels = useMemo<Record<ShortcutAction, string>>(
     () => ({
@@ -237,22 +248,40 @@ export const SettingsPanel: React.FC = () => {
           </div>
         </header>
 
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="mx-auto flex max-w-3xl flex-col gap-2 p-2">
-            <Card size="sm" className="rounded-lg pb-0">
-              <CardHeader>
-                <div className="flex items-start gap-2.5">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <PaletteIcon />
+        <div className="flex min-h-0 flex-1">
+          <nav className="flex w-48 shrink-0 flex-col gap-0.5 border-r border-app-border/50 p-2">
+            {SETTINGS_SECTIONS.map((section) => {
+              const Icon = section.icon;
+              const isActive = activeSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => setActiveSection(section.id)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors',
+                    isActive
+                      ? 'bg-primary/15 font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                  )}
+                >
+                  <Icon className="size-4" />
+                  {t(section.titleKey)}
+                </button>
+              );
+            })}
+          </nav>
+
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="flex flex-col gap-2 p-2">
+              {activeSection === 'appearance' && (
+                <div>
+                  <div className="px-3 pb-2 pt-1">
+                    <h2 className="text-sm font-medium text-foreground">{t('settings.appearance.title')}</h2>
+                    <p className="text-xs text-muted-foreground">{t('settings.appearance.description')}</p>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <CardTitle>{t('settings.appearance.title')}</CardTitle>
-                    <CardDescription>{t('settings.appearance.description')}</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Separator className="data-horizontal:border-border/40" />
+                  <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
                   <Select value={theme} onValueChange={(value) => setTheme(value as ThemeMode)}>
                     <SelectTrigger size="sm" aria-label={t('settings.appearance.theme')}>
@@ -282,23 +311,16 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-              </CardContent>
-            </Card>
-
-            <Card size="sm" className="rounded-lg pb-0">
-              <CardHeader>
-                <div className="flex items-start gap-2.5">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <Settings2Icon />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <CardTitle>{t('settings.general.title')}</CardTitle>
-                    <CardDescription>{t('settings.general.description')}</CardDescription>
-                  </div>
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Separator className="data-horizontal:border-border/40" />
+              )}
+
+              {activeSection === 'general' && (
+                <div>
+                  <div className="px-3 pb-2 pt-1">
+                    <h2 className="text-sm font-medium text-foreground">{t('settings.general.title')}</h2>
+                    <p className="text-xs text-muted-foreground">{t('settings.general.description')}</p>
+                  </div>
+                  <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
                   <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
                     <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
@@ -337,23 +359,16 @@ export const SettingsPanel: React.FC = () => {
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
                   </div>
                 </SettingRow>
-              </CardContent>
-            </Card>
-
-            <Card size="sm" className="rounded-lg pb-0">
-              <CardHeader>
-                <div className="flex items-start gap-2.5">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <SquareTerminalIcon />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <CardTitle>{t('settings.terminal.title')}</CardTitle>
-                    <CardDescription>{t('settings.terminal.description')}</CardDescription>
-                  </div>
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Separator className="data-horizontal:border-border/40" />
+              )}
+
+              {activeSection === 'terminal' && (
+                <div>
+                  <div className="px-3 pb-2 pt-1">
+                    <h2 className="text-sm font-medium text-foreground">{t('settings.terminal.title')}</h2>
+                    <p className="text-xs text-muted-foreground">{t('settings.terminal.description')}</p>
+                  </div>
+                  <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
                   <Select value={terminalFontFamily} onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.fontFamily')}>
@@ -598,23 +613,16 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-              </CardContent>
-            </Card>
-
-            <Card size="sm" className="rounded-lg pb-0">
-              <CardHeader>
-                <div className="flex items-start gap-2.5">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <FolderCogIcon />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <CardTitle>{t('settings.sftp.title')}</CardTitle>
-                    <CardDescription>{t('settings.sftp.description')}</CardDescription>
-                  </div>
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Separator className="data-horizontal:border-border/40" />
+              )}
+
+              {activeSection === 'sftp' && (
+                <div>
+                  <div className="px-3 pb-2 pt-1">
+                    <h2 className="text-sm font-medium text-foreground">{t('settings.sftp.title')}</h2>
+                    <p className="text-xs text-muted-foreground">{t('settings.sftp.description')}</p>
+                  </div>
+                  <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.showHiddenFiles')} description={t('settings.sftp.showHiddenFilesDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.sftp.showHiddenFiles')} checked={sftpShowHiddenFiles} onCheckedChange={setSftpShowHiddenFiles} />
@@ -706,28 +714,21 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-              </CardContent>
-            </Card>
-
-            <Card size="sm" className="rounded-lg pb-0">
-              <CardHeader>
-                <div className="flex items-start gap-2.5">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <KeyboardIcon />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <CardTitle>{t('settings.shortcuts.title')}</CardTitle>
-                    <CardDescription>{t('settings.shortcuts.description')}</CardDescription>
-                  </div>
                 </div>
-                <CardAction>
-                  <Button variant="ghost" size="sm" onClick={resetShortcuts}>
-                    <RotateCcwIcon data-icon="inline-start" />
-                    {t('settings.shortcuts.resetAll')}
-                  </Button>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="p-0">
+              )}
+
+              {activeSection === 'shortcuts' && (
+                <div>
+                  <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <h2 className="text-sm font-medium text-foreground">{t('settings.shortcuts.title')}</h2>
+                      <p className="text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
+                    </div>
+                    <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
+                      <RotateCcwIcon data-icon="inline-start" />
+                      {t('settings.shortcuts.resetAll')}
+                    </Button>
+                  </div>
                 <Separator className="data-horizontal:border-border/40" />
                 {SHORTCUT_GROUPS.map((group) => (
                   <React.Fragment key={group.id}>
@@ -786,10 +787,11 @@ export const SettingsPanel: React.FC = () => {
                     <Separator className="data-horizontal:border-border/40" />
                   </React.Fragment>
                 ))}
-              </CardContent>
-            </Card>
-          </div>
-        </ScrollArea>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
 
         <Dialog
           open={editingAction !== null}
