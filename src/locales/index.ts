@@ -30,7 +30,7 @@ export function changeLocale(locale: Locale): Promise<void> {
 }
 
 export function t(key: LocaleKey, variables?: Record<string, string | number>): string {
-  return intl.get(key, variables).d(String(key));
+  return variables ? intl.get(key, variables).d(String(key)) : intl.get(key).d(String(key));
 }
 
 export { intl };
