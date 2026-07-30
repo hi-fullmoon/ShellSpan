@@ -11,6 +11,11 @@ const {
   invokeRetrieveProfilePassword,
   invokeDeleteProfilePassword,
   invokeStoreProfilePassword,
+  invokeStoreProfileSecret,
+  invokeRetrieveProfileSecret,
+  invokeDeleteProfileSecret,
+  invokeDeleteProfileSecrets,
+  invokeRemoveRecentProfile,
 } = vi.hoisted(() => ({
   invokeAddProfile: vi.fn(),
   invokeUpdateProfile: vi.fn(),
@@ -21,6 +26,11 @@ const {
   invokeRetrieveProfilePassword: vi.fn().mockResolvedValue(undefined),
   invokeDeleteProfilePassword: vi.fn().mockResolvedValue(undefined),
   invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeStoreProfileSecret: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfileSecret: vi.fn().mockResolvedValue(undefined),
+  invokeDeleteProfileSecret: vi.fn().mockResolvedValue(undefined),
+  invokeDeleteProfileSecrets: vi.fn().mockResolvedValue(undefined),
+  invokeRemoveRecentProfile: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/tauri', () => ({
@@ -33,6 +43,11 @@ vi.mock('@/lib/tauri', () => ({
   invokeRetrieveProfilePassword,
   invokeDeleteProfilePassword,
   invokeStoreProfilePassword,
+  invokeStoreProfileSecret,
+  invokeRetrieveProfileSecret,
+  invokeDeleteProfileSecret,
+  invokeDeleteProfileSecrets,
+  invokeRemoveRecentProfile,
 }));
 
 const profileValues = {
@@ -54,6 +69,10 @@ describe('profileStore', () => {
     invokeRetrieveProfilePassword.mockResolvedValue(undefined);
     invokeDeleteProfilePassword.mockResolvedValue(undefined);
     invokeStoreProfilePassword.mockResolvedValue(undefined);
+    invokeStoreProfileSecret.mockResolvedValue(undefined);
+    invokeRetrieveProfileSecret.mockResolvedValue(undefined);
+    invokeDeleteProfileSecret.mockResolvedValue(undefined);
+    invokeDeleteProfileSecrets.mockResolvedValue(undefined);
     useProfileStore.setState({ profiles: [], initialized: false });
   });
 
@@ -193,5 +212,142 @@ describe('profileStore', () => {
       id: 'profile-1',
       keychainKeyId: undefined,
     }));
+  });
+
+  it('persists passphrases and jump-host secrets to the keychain on add', async () => {
+    const profile = await useProfileStore.getState().addProfile({
+      name: 'Jump',
+      host: 'internal.example.com',
+      port: 22,
+      username: 'bob',
+      authMethod: 'key',
+      keychainKeyId: 'key-1',
+      passphrase: 'main-pp',
+      jumpHost: {
+        host: 'jump.example.com',
+        port: 22,
+        username: 'jumpuser',
+        authMethod: 'password',
+        password: 'jump-secret',
+      },
+    });
+
+    expect(invokeStoreProfileSecret).toHaveBeenCalledWith(profile.id, 'passphrase', 'main-pp');
+    expect(invokeStoreProfileSecret).toHaveBeenCalledWith(profile.id, 'jump-password', 'jump-secret');
+
+    // Secrets must never land in the database row.
+    const row = invokeAddProfile.mock.calls[0][0];
+    const parsedJumpHost = JSON.parse(row.jumpHostConfig);
+    expect(parsedJumpHost.password).toBeUndefined();
+    expect(parsedJumpHost.passphrase).toBeUndefined();
+  });
+
+  it('syncs secrets on update: stores changed values and deletes cleared ones', async () => {
+    useProfileStore.setState({
+      profiles: [{
+        name: 'Key',
+        host: 'h',
+        port: 22,
+        username: 'u',
+        authMethod: 'key' as const,
+        keychainKeyId: 'key-1',
+        passphrase: 'old-pp',
+        jumpHost: {
+          host: 'j',
+          port: 22,
+          username: 'ju',
+          authMethod: 'password' as const,
+          password: 'old-jump',
+        },
+        id: 'profile-1',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    });
+
+    await useProfileStore.getState().updateProfile('profile-1', {
+      passphrase: 'new-pp',
+      jumpHost: {
+        host: 'j',
+        port: 22,
+        username: 'ju',
+        authMethod: 'key',
+        keychainKeyId: 'key-2',
+        passphrase: 'jump-pp',
+      },
+    });
+
+    expect(invokeStoreProfileSecret).toHaveBeenCalledWith('profile-1', 'passphrase', 'new-pp');
+    expect(invokeDeleteProfileSecret).toHaveBeenCalledWith('profile-1', 'jump-password');
+    expect(invokeStoreProfileSecret).toHaveBeenCalledWith('profile-1', 'jump-passphrase', 'jump-pp');
+  });
+
+  it('deletes all profile secrets on remove', async () => {
+    useProfileStore.setState({
+      profiles: [{ ...profileValues, id: 'profile-1', createdAt: 1, updatedAt: 1 }],
+    });
+
+    await useProfileStore.getState().removeProfile('profile-1');
+
+    expect(invokeDeleteProfileSecrets).toHaveBeenCalledWith('profile-1');
+  });
+
+  it('hydrates passphrases and jump-host secrets from the keychain', async () => {
+    invokeListProfiles.mockResolvedValue([{
+      id: 'profile-1',
+      name: 'Key',
+      host: 'h',
+      port: 22,
+      username: 'u',
+      authMethod: 'key',
+      keychainKeyId: 'key-1',
+      jumpHostConfig: JSON.stringify({
+        host: 'j',
+        port: 22,
+        username: 'ju',
+        authMethod: 'password',
+      }),
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
+    invokeRetrieveProfileSecret.mockImplementation((_id: string, kind: string) => {
+      if (kind === 'passphrase') return Promise.resolve('main-pp');
+      if (kind === 'jump-password') return Promise.resolve('jump-secret');
+      return Promise.resolve(undefined);
+    });
+
+    await useProfileStore.getState().hydrateFromDb();
+
+    const profile = useProfileStore.getState().profiles[0];
+    expect(profile.passphrase).toBe('main-pp');
+    expect(profile.jumpHost?.password).toBe('jump-secret');
+  });
+
+  it('migrates plaintext jump-host secrets from legacy rows into the keychain', async () => {
+    invokeListProfiles.mockResolvedValue([{
+      id: 'profile-1',
+      name: 'Jump',
+      host: 'h',
+      port: 22,
+      username: 'u',
+      authMethod: 'password',
+      jumpHostConfig: JSON.stringify({
+        host: 'j',
+        port: 22,
+        username: 'ju',
+        authMethod: 'password',
+        password: 'legacy-jump',
+      }),
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
+
+    await useProfileStore.getState().hydrateFromDb();
+
+    expect(invokeStoreProfileSecret).toHaveBeenCalledWith('profile-1', 'jump-password', 'legacy-jump');
+    const scrubbedRow = invokeUpdateProfile.mock.calls[0][1];
+    expect(JSON.parse(scrubbedRow.jumpHostConfig).password).toBeUndefined();
+    // The in-memory profile keeps the secret so it can connect right away.
+    expect(useProfileStore.getState().profiles[0].jumpHost?.password).toBe('legacy-jump');
   });
 });

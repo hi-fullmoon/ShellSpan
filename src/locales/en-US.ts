@@ -380,6 +380,7 @@ export default {
 
   'error.keychainKeyNotFound': 'The saved key for this profile no longer exists. Please select another key.',
   'error.storedPasswordMissing': 'The stored password for this connection is no longer available.',
+  'error.secretStoreFailed': 'Failed to save the password to the system keychain; you will be asked to enter it again next time.',
 
   'dialog.keychainKeyPrompt.title': 'Select SSH Key',
   'dialog.keychainKeyPrompt.description': 'The saved key for {username}@{host} is no longer available',

@@ -1283,6 +1283,42 @@ pub(crate) fn delete_profile_password(
     credentials.delete_profile_password(&profile_id)
 }
 
+#[tauri::command]
+pub(crate) fn store_profile_secret(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+    kind: crate::keychain::ProfileSecretKind,
+    value: String,
+) -> Result<(), String> {
+    credentials.store_profile_secret(&profile_id, kind, &value)
+}
+
+#[tauri::command]
+pub(crate) fn retrieve_profile_secret(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+    kind: crate::keychain::ProfileSecretKind,
+) -> Result<Option<String>, String> {
+    credentials.retrieve_profile_secret(&profile_id, kind)
+}
+
+#[tauri::command]
+pub(crate) fn delete_profile_secrets(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+) -> Result<(), String> {
+    credentials.delete_all_profile_secrets(&profile_id)
+}
+
+#[tauri::command]
+pub(crate) fn delete_profile_secret(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    profile_id: String,
+    kind: crate::keychain::ProfileSecretKind,
+) -> Result<(), String> {
+    credentials.delete_profile_secret(&profile_id, kind)
+}
+
 fn load_keychain_private_key(
     credentials: &crate::keychain::CredentialManager,
     key_id: &str,
