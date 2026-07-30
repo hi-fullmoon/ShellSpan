@@ -2,9 +2,7 @@
 
 All notable changes to TermBridge are documented in this file.
 
-
 ## [v2.0.10](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.10) - 2026-07-30
-
 
 ### Bug Fixes
 
@@ -16,7 +14,6 @@ All notable changes to TermBridge are documented in this file.
 - **tauri:** add tray show window on click and menu item for non-macOS
 
 ## [v2.0.9](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.9) - 2026-07-27
-
 
 ### Bug Fixes
 
@@ -38,7 +35,6 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.8](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.8) - 2026-07-23
 
-
 ### Bug Fixes
 
 - **ui:** correct dragged tab overlay positioning and cursor
@@ -59,89 +55,12 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.7](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7) - 2026-07-22
 
-
 ### Style
 
 - **ui:** polish sftp bookmark menu and tab bar
 - **ui:** refine split pane subtle divider styling
 
-## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
-
-
-### CI/CD
-
-- **build:** add NSIS and EXE installer artifacts to release upload
-
-### Testing
-
-- eliminate act() warnings in settings-panel and useI18n tests
-
-## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
-
-
-### CI/CD
-
-- **build:** add NSIS and EXE installer artifacts to release upload
-
-### Testing
-
-- eliminate act() warnings in settings-panel and useI18n tests
-
-## [v2.0.6-test.3](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.6-test.3) - 2026-07-22
-
-
-## [v2.0.7-test.2](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.2) - 2026-07-22
-
-
-### Bug Fixes
-
-- **test:** add missing scroll-area and tauri mocks
-
-## [v2.0.7-test.1](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.1) - 2026-07-22
-
-
-### CI/CD
-
-- **build:** overhaul release pipeline with preflight validation and asset verification
-
-## [v2.0.7-test.5](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.5) - 2026-07-22
-
-
-### CI/CD
-
-- **deps:** upgrade actions/setup-node v5 -> v6
-
-## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
-
-
-### CI/CD
-
-- **deps:** upgrade actions/setup-node v5 -> v6
-
-## [v2.0.7-test.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.4) - 2026-07-22
-
-
-### CI/CD
-
-- **deps:** upgrade GitHub Actions to latest major versions
-
-### Chore
-
-- **scripts:** fix auto-bump for pre-release versions
-
-## [v2.0.7-test.2](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7-test.2) - 2026-07-22
-
-
-### CI/CD
-
-- **build:** harden release pipeline with preflight validation and asset verification
-
-### Chore
-
-- **scripts:** extend version validation to support semver pre-release/build suffixes
-
 ## [v2.0.6](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.6) - 2026-07-22
-
 
 ### Chore
 
@@ -157,7 +76,6 @@ All notable changes to TermBridge are documented in this file.
 - **ui:** use compact dialog in update restart dialog
 
 ## [v2.0.5](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.5) - 2026-07-22
-
 
 ### Bug Fixes
 
@@ -180,7 +98,6 @@ All notable changes to TermBridge are documented in this file.
 - **term:** simplify terminal tab bar styles
 
 ## [v2.0.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.4) - 2026-07-21
-
 
 ### Bug Fixes
 
@@ -206,14 +123,12 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.3](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.3) - 2026-07-21
 
-
 ### Bug Fixes
 
 - **ui:** align SFTP transfer progress track to bottom edge with 3px height
 - **ui:** prevent double-click activation across menus and buttons
 
 ## [v2.0.2](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.2) - 2026-07-20
-
 
 ### Features
 
@@ -222,7 +137,6 @@ All notable changes to TermBridge are documented in this file.
 - **sftp:** persist split pane ratio in store with controlled SplitPane
 
 ## [v2.0.1](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.1) - 2026-07-20
-
 
 ### Bug Fixes
 
@@ -258,7 +172,6 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.0](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.0) - 2026-07-20
 
-
 ### Bug Fixes
 
 - **ui:** TaskBlocks overflow closure, tests, and dead code
@@ -274,7 +187,7 @@ All notable changes to TermBridge are documented in this file.
 - **sftp:** avoid double refresh on remote uploads
 - **sftp:** collapse breadcrumb to root + ellipsis + last in narrow containers
 - **ui:** compact width, padding, and footer spacing
-- **test:** correct relative imports after moving tests to __tests__
+- **test:** correct relative imports after moving tests to **tests**
 - **sftp:** honor direction when sorting by kind column
 - **sftp:** ignore system drops onto the same local directory
 - **store:** improve password lifecycle in profile store
@@ -307,7 +220,7 @@ All notable changes to TermBridge are documented in this file.
 - modernize Tailwind CSS v4, shadcn, and base component setup
 - remove obsolete migrate-radix-to-base skill docs
 - update skills-lock.json after removing migrate-radix-to-base skill
-- **deps:** upgrade dependencies and move tests to __tests__ directories
+- **deps:** upgrade dependencies and move tests to **tests** directories
 
 ### Documentation
 
