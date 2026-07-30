@@ -2,6 +2,26 @@
 
 All notable changes to TermBridge are documented in this file.
 
+
+## [v2.0.11](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.11) - 2026-07-30
+
+
+### Bug Fixes
+
+- **i18n:** pass variables only when provided to intl.get
+
+### Chore
+
+- **changelog:** clean up duplicate pre-release entries and formatting
+- **deps:** update multiple dependencies to latest versions
+
+### Documentation
+
+- update LICENSE copyright holder
+
+### Features
+
+- **settings:** add sidebar navigation for settings panel
 ## [v2.0.10](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.10) - 2026-07-30
 
 ### Bug Fixes
