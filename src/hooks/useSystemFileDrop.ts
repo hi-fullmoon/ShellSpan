@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { DragDropEvent } from '@tauri-apps/api/window';
-import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event';
+import type { Event as TauriEvent } from '@tauri-apps/api/event';
 
 export interface UseSystemFileDropOptions {
   leftPaneRef: React.RefObject<HTMLElement | null>;
@@ -23,56 +23,53 @@ export function useSystemFileDrop(options: UseSystemFileDropOptions): UseSystemF
   optionsRef.current = options;
 
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
     let cancelled = false;
 
-    const attach = async () => {
-      const window = getCurrentWindow();
-      unlisten = await window.onDragDropEvent((event: TauriEvent<DragDropEvent>) => {
-        if (cancelled) return;
-        const { payload } = event;
-        switch (payload.type) {
-          case 'enter':
-          case 'over': {
-            setDragActive(true);
-            const side = resolveSideFromPosition(
-              payload.position,
-              optionsRef.current.leftPaneRef.current,
-              optionsRef.current.rightPaneRef.current,
-            );
-            setHoveredSide(side);
-            break;
-          }
-          case 'leave': {
-            setDragActive(false);
-            setHoveredSide(null);
-            break;
-          }
-          case 'drop': {
-            setDragActive(false);
-            setHoveredSide(null);
-            const side = resolveSideFromPosition(
-              payload.position,
-              optionsRef.current.leftPaneRef.current,
-              optionsRef.current.rightPaneRef.current,
-            );
-            if (side) {
-              if (!optionsRef.current.canDrop || optionsRef.current.canDrop(side)) {
-                optionsRef.current.onDrop(payload.paths, side);
-              } else {
-                optionsRef.current.onDropRejected?.(side);
-              }
-            }
-            break;
-          }
+    const unlistenPromise = getCurrentWindow().onDragDropEvent((event: TauriEvent<DragDropEvent>) => {
+      if (cancelled) return;
+      const { payload } = event;
+      switch (payload.type) {
+        case 'enter':
+        case 'over': {
+          setDragActive(true);
+          const side = resolveSideFromPosition(
+            payload.position,
+            optionsRef.current.leftPaneRef.current,
+            optionsRef.current.rightPaneRef.current,
+          );
+          setHoveredSide(side);
+          break;
         }
-      });
-    };
+        case 'leave': {
+          setDragActive(false);
+          setHoveredSide(null);
+          break;
+        }
+        case 'drop': {
+          setDragActive(false);
+          setHoveredSide(null);
+          const side = resolveSideFromPosition(
+            payload.position,
+            optionsRef.current.leftPaneRef.current,
+            optionsRef.current.rightPaneRef.current,
+          );
+          if (side) {
+            if (!optionsRef.current.canDrop || optionsRef.current.canDrop(side)) {
+              optionsRef.current.onDrop(payload.paths, side);
+            } else {
+              optionsRef.current.onDropRejected?.(side);
+            }
+          }
+          break;
+        }
+      }
+    });
 
-    void attach();
     return () => {
       cancelled = true;
-      unlisten?.();
+      // The listener may still be registering when we unmount; wait for the
+      // registration promise so the unlisten function is never dropped.
+      void unlistenPromise.then((unlisten) => unlisten?.());
     };
   }, []);
 

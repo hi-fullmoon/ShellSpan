@@ -642,9 +642,12 @@ pub(crate) async fn delete_remote_path(
     let result = tauri::async_runtime::spawn_blocking(move || {
         delete_remote_path_blocking(app, request, cancel_flag, Some(&pool))
     })
-    .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join delete task: {error}") })?;
+    .await;
+    // Remove the registry entry before propagating a JoinError so the
+    // operation id does not leak on task failure.
     let _ = deletes.remove(&operation_id);
+    let result = result
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to join delete task: {error}") })?;
     if let Err(error) = &result {
         warn!("Delete remote path failed operation_id={operation_id}: {error:?}");
     } else {
@@ -699,9 +702,12 @@ pub(crate) async fn copy_remote_to_remote(
     let result = tauri::async_runtime::spawn_blocking(move || {
         copy_remote_to_remote_blocking(app, request, cancel_flag, Some(&pool), known_hosts.as_deref())
     })
-    .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join remote transfer task: {error}") })?;
+    .await;
+    // Remove the registry entry before propagating a JoinError so the
+    // operation id does not leak on task failure.
     let _ = copies.remove(&operation_id);
+    let result = result
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to join remote transfer task: {error}") })?;
     if let Err(error) = &result {
         error!("Copy remote to remote failed: {error:?}");
     }
@@ -739,9 +745,12 @@ pub(crate) async fn upload_local_paths(
     let result = tauri::async_runtime::spawn_blocking(move || {
         upload_local_paths_blocking(app, request, cancel_flag, Some(&pool))
     })
-    .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join upload task: {error}") })?;
+    .await;
+    // Remove the registry entry before propagating a JoinError so the
+    // operation id does not leak on task failure.
     let _ = uploads.remove(&operation_id);
+    let result = result
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to join upload task: {error}") })?;
     if let Err(error) = &result {
         warn!("Upload failed operation_id={operation_id}: {error:?}");
     } else {
@@ -863,9 +872,12 @@ pub(crate) async fn download_remote_paths(
     let result = tauri::async_runtime::spawn_blocking(move || {
         download_remote_paths_blocking(app, request, cancel_flag, Some(&pool))
     })
-    .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join download task: {error}") })?;
+    .await;
+    // Remove the registry entry before propagating a JoinError so the
+    // operation id does not leak on task failure.
     let _ = downloads.remove(&operation_id);
+    let result = result
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to join download task: {error}") })?;
     if let Err(error) = &result {
         warn!("Download failed operation_id={operation_id}: {error:?}");
     } else {
@@ -881,6 +893,28 @@ pub(crate) fn cancel_download(
 ) -> Result<(), String> {
     info!("Cancelling download operation_id={operation_id}");
     downloads.cancel(&operation_id)
+}
+
+#[tauri::command]
+pub(crate) async fn disconnect_sftp(
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RemoteConnectionRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), RemoteFsError> {
+    // The pool key hashes the resolved credentials, so keychain references
+    // must be resolved here exactly as the connecting commands do.
+    resolve_keychain_key_for_remote(&credentials, &mut request).map_err(|message| RemoteFsError::Other { message })?;
+    info!(
+        "Disconnecting pooled SFTP connection {}",
+        summarize_remote_connection_request(&request)
+    );
+    let pool = pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        pool.invalidate(&request);
+    })
+    .await
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join disconnect task: {error}") })?;
+    Ok(())
 }
 
 #[tauri::command]

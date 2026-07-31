@@ -11,9 +11,12 @@ import {
   invokeListSftpBookmarks,
   invokeAddSftpBookmark,
   invokeRemoveSftpBookmark,
+  invokeDisconnectSftp,
 } from '@/lib/tauri';
 import { safeInvoke } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
+import { hasActivePathOperation, useTransferStore } from './transferStore';
+import type { FileEntry } from '@/components/sftp/file-entry-formatters';
 
 const logger = createLogger('sftpStore');
 
@@ -111,6 +114,10 @@ function createDefaultConnection(
 interface SftpState {
   connections: SftpConnection[];
   activeConnectionId: string | null;
+  // Local files live in the one shared filesystem, so unlike remoteClipboard
+  // this is app-global: copy in one local pane, paste in any other.
+  localClipboard: FileEntry[];
+  setLocalClipboard: (entries: FileEntry[]) => void;
   addConnection: (
     summary: SessionSummary,
     connection: RemoteConnectionRequest,
@@ -227,9 +234,48 @@ export function getSftpPaneConnectionKey(
   ]);
 }
 
+// True while any tracked transfer still holds paths on this connection. The
+// connection's own paths are fed back into hasActivePathOperation so its
+// overlap check reduces to "any active transfer on this connection".
+function hasActiveTransfer(connectionKey: string): boolean {
+  const operations = useTransferStore.getState().operations;
+  const paths = operations.flatMap((operation) => {
+    const scopes: Array<{ connectionId?: string; paths: string[] }> =
+      operation.pathScopes ?? [
+        { connectionId: operation.connectionId, paths: operation.paths ?? [] },
+      ];
+    return scopes
+      .filter((scope) => scope.connectionId === connectionKey)
+      .flatMap((scope) => scope.paths);
+  });
+  return hasActivePathOperation(connectionKey, paths, operations);
+}
+
+// Disconnect the pooled backend SFTP session of every distinct remote pane of
+// a closing tab. Fire-and-forget so closing never blocks on network teardown;
+// a pane with an in-flight transfer is left to the backend idle TTL instead.
+function disconnectRemotePanes(connection: SftpConnection): void {
+  const seen = new Set<string>();
+  for (const side of ['remote', 'local'] as SftpSide[]) {
+    if (getSftpPaneSource(connection, side) !== 'remote') continue;
+    const connectionKey = getSftpPaneConnectionKey(connection, side);
+    if (seen.has(connectionKey)) continue;
+    seen.add(connectionKey);
+    if (hasActiveTransfer(connectionKey)) continue;
+    invokeDisconnectSftp(getSftpPaneConnection(connection, side)).catch(
+      (error) => {
+        logger.error('failed to disconnect SFTP connection', error);
+      },
+    );
+  }
+}
+
 export const useSftpStore = create<SftpState>()((set) => ({
   connections: [],
   activeConnectionId: null,
+  localClipboard: [],
+
+  setLocalClipboard: (entries) => set({ localClipboard: entries }),
 
   addConnection: (summary, connection, profileId, options) =>
     set((state) => {
@@ -279,8 +325,18 @@ export const useSftpStore = create<SftpState>()((set) => ({
               leftConnection: undefined,
               leftTitle: undefined,
               leftProfileId: undefined,
+              // The tab title follows the remaining remote pane; without one
+              // the tab is local-only and must not keep a stale host name.
+              ...(getSftpPaneSource(current, 'remote') === 'remote'
+                ? {}
+                : { title: 'Local' }),
             }
-          : { rightSource: 'local' as const, title: 'Local' }),
+          : {
+              rightSource: 'local' as const,
+              // Keep the left pane's remote title when it is the only remote
+              // pane left, so the tab does not lose the host name.
+              title: current.leftTitle ?? 'Local',
+            }),
         localOnly:
           side === 'local'
             ? getSftpPaneSource(current, 'remote') !== 'remote'
@@ -334,11 +390,15 @@ export const useSftpStore = create<SftpState>()((set) => ({
 
   removeConnection: (id) =>
     set((state) => {
+      const closing = state.connections.find((conn) => conn.id === id);
       const connections = state.connections.filter((conn) => conn.id !== id);
       const activeConnectionId =
         state.activeConnectionId === id
           ? connections[connections.length - 1]?.id ?? null
           : state.activeConnectionId;
+      if (closing) {
+        disconnectRemotePanes(closing);
+      }
       return { connections, activeConnectionId };
     }),
 
@@ -388,7 +448,11 @@ export const useSftpStore = create<SftpState>()((set) => ({
 
       const pinnedCount = state.connections.filter((c) => c.pinned).length;
       const minIndex = active.pinned ? 0 : pinnedCount;
-      const targetIndex = Math.max(minIndex, insertIndex);
+      // Pinned tabs must stay inside the pinned group at the front.
+      const maxIndex = active.pinned
+        ? pinnedCount - 1
+        : state.connections.length - 1;
+      const targetIndex = Math.min(Math.max(minIndex, insertIndex), maxIndex);
 
       const others = state.connections.filter((c) => c.id !== activeId);
       others.splice(targetIndex, 0, active);
@@ -496,12 +560,13 @@ export const useSftpStore = create<SftpState>()((set) => ({
     }));
     // Write-through to SQLite (fire-and-forget)
     if (connection) {
+      const paneConnection = getSftpPaneConnection(connection, side);
       const now = Date.now();
       safeInvoke(invokeAddSftpBookmark, {
-        id: `${connection.connection.host}:${connection.connection.port}:${connection.connection.username}:${side}:${path}`,
-        host: connection.connection.host,
-        port: connection.connection.port,
-        username: connection.connection.username,
+        id: `${paneConnection.host}:${paneConnection.port}:${paneConnection.username}:${side}:${path}`,
+        host: paneConnection.host,
+        port: paneConnection.port,
+        username: paneConnection.username,
         path,
         side,
         createdAt: now,
@@ -522,7 +587,8 @@ export const useSftpStore = create<SftpState>()((set) => ({
     }));
     // Write-through to SQLite (fire-and-forget)
     if (connection) {
-      const bookmarkId = `${connection.connection.host}:${connection.connection.port}:${connection.connection.username}:${side}:${path}`;
+      const paneConnection = getSftpPaneConnection(connection, side);
+      const bookmarkId = `${paneConnection.host}:${paneConnection.port}:${paneConnection.username}:${side}:${path}`;
       safeInvoke(invokeRemoveSftpBookmark, bookmarkId);
     }
   },

@@ -33,7 +33,7 @@ pub(crate) use local_fs::{
     copy_local_paths_blocking, paste_local_paths_blocking, rename_local_path_blocking,
     trash_local_paths_blocking,
 };
-pub(crate) use path_utils::portable_local_path;
+pub(crate) use path_utils::{portable_local_path, posix_join};
 pub(crate) use remote_fs::{
     copy_remote_path_blocking, copy_remote_to_remote_blocking, create_remote_entry_blocking,
     delete_remote_path_blocking, download_remote_paths_blocking, list_remote_directory_blocking,
@@ -191,6 +191,7 @@ pub fn run() {
             commands::cancel_delete,
             commands::download_remote_paths,
             commands::cancel_download,
+            commands::disconnect_sftp,
             commands::pick_local_files,
             commands::pick_local_folder,
             commands::open_path,

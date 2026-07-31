@@ -1,11 +1,22 @@
-import { describe, expect, it, beforeEach } from 'vitest';
-import { useSftpStore } from '../sftpStore';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { getSftpPaneConnectionKey, useSftpStore } from '../sftpStore';
+import { useTransferStore } from '../transferStore';
+import { invokeAddSftpBookmark, invokeDisconnectSftp, invokeRemoveSftpBookmark } from '@/lib/tauri';
+
+vi.mock('@/lib/tauri', () => ({
+  invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
+  invokeAddSftpBookmark: vi.fn().mockResolvedValue(undefined),
+  invokeRemoveSftpBookmark: vi.fn().mockResolvedValue(undefined),
+  invokeDisconnectSftp: vi.fn().mockResolvedValue(undefined),
+}));
 
 const initialState = useSftpStore.getState();
 
 describe('sftpStore', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     useSftpStore.setState(initialState, true);
+    useTransferStore.setState({ operations: [] });
   });
 
   const baseConnection = {
@@ -194,5 +205,249 @@ describe('sftpStore', () => {
       local: ['/left-only'],
       remote: ['/right-only'],
     });
+  });
+
+  it('persists bookmarks with the pane-specific connection key in dual-remote mode', () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c1',
+        title: 'Right',
+        host: 'right.example.com',
+        port: 22,
+        username: 'u',
+      },
+      { ...baseConnection.connection, host: 'right.example.com' },
+    );
+    const id = useSftpStore.getState().connections[0]!.id;
+
+    useSftpStore.getState().attachRemoteConnection(
+      id,
+      'local',
+      {
+        sessionId: 'left-session',
+        title: 'Left',
+        host: 'left.example.com',
+        port: 2222,
+        username: 'deploy',
+      },
+      {
+        host: 'left.example.com',
+        port: 2222,
+        username: 'deploy',
+        authMethod: 'password',
+      },
+      'profile-left',
+    );
+
+    useSftpStore.getState().addRemoteBookmark(id, 'local', '/left');
+    expect(invokeAddSftpBookmark).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'left.example.com:2222:deploy:local:/left',
+        host: 'left.example.com',
+        port: 2222,
+        username: 'deploy',
+      }),
+    );
+
+    useSftpStore.getState().removeRemoteBookmark(id, 'local', '/left');
+    expect(invokeRemoveSftpBookmark).toHaveBeenCalledWith(
+      'left.example.com:2222:deploy:local:/left',
+    );
+
+    useSftpStore.getState().addRemoteBookmark(id, 'remote', '/right');
+    expect(invokeAddSftpBookmark).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'right.example.com:22:u:remote:/right',
+      }),
+    );
+  });
+
+  it('stores the local clipboard at the store root', () => {
+    expect(useSftpStore.getState().localClipboard).toEqual([]);
+
+    const entries = [
+      { path: '/local/a.txt', name: 'a.txt', kind: 'file' as const, size: 10 },
+    ];
+    useSftpStore.getState().setLocalClipboard(entries);
+    expect(useSftpStore.getState().localClipboard).toEqual(entries);
+
+    useSftpStore.getState().setLocalClipboard([]);
+    expect(useSftpStore.getState().localClipboard).toEqual([]);
+  });
+
+  it('keeps pinned tabs inside the pinned group when reordering', () => {
+    const summary = (sessionId: string) => ({
+      sessionId,
+      title: sessionId,
+      host: 'h',
+      port: 22,
+      username: 'u',
+    });
+    useSftpStore.getState().addConnection(summary('a'), baseConnection.connection);
+    useSftpStore.getState().addConnection(summary('b'), baseConnection.connection);
+    useSftpStore.getState().addConnection(summary('c'), baseConnection.connection);
+    const [a, b, c] = useSftpStore.getState().connections.map((conn) => conn.id);
+
+    useSftpStore.getState().togglePin(a!);
+    useSftpStore.getState().togglePin(b!);
+
+    // Dragging a pinned tab past the pinned group clamps it to the group's end.
+    useSftpStore.getState().reorderConnections(a!, 5);
+    expect(useSftpStore.getState().connections.map((conn) => conn.id)).toEqual([b, a, c]);
+
+    // Dragging an unpinned tab into the pinned group clamps it to the first
+    // unpinned slot.
+    useSftpStore.getState().reorderConnections(c!, 0);
+    expect(useSftpStore.getState().connections.map((conn) => conn.id)).toEqual([b, a, c]);
+  });
+
+  it('keeps the left remote title on the tab when the right pane switches to local', () => {
+    useSftpStore.getState().addLocalConnection();
+    const id = useSftpStore.getState().connections[0]!.id;
+
+    useSftpStore.getState().attachRemoteConnection(
+      id,
+      'remote',
+      {
+        sessionId: 'right-session',
+        title: 'Production',
+        host: 'prod.example.com',
+        port: 22,
+        username: 'deploy',
+      },
+      {
+        host: 'prod.example.com',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+      },
+      'profile-1',
+    );
+    useSftpStore.getState().attachRemoteConnection(
+      id,
+      'local',
+      {
+        sessionId: 'left-session',
+        title: 'Staging',
+        host: 'staging.example.com',
+        port: 22,
+        username: 'deploy',
+      },
+      {
+        host: 'staging.example.com',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+      },
+      'profile-2',
+    );
+
+    useSftpStore.getState().setPaneLocal(id, 'remote');
+    let connection = useSftpStore.getState().connections[0]!;
+    expect(connection.rightSource).toBe('local');
+    expect(connection.title).toBe('Staging');
+
+    // With no remote pane left the tab falls back to the local title.
+    useSftpStore.getState().setPaneLocal(id, 'local');
+    connection = useSftpStore.getState().connections[0]!;
+    expect(connection.title).toBe('Local');
+  });
+
+  it('disconnects each distinct remote pane connection when closing a tab', () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c1',
+        title: 'Right',
+        host: 'right.example.com',
+        port: 22,
+        username: 'u',
+      },
+      { host: 'right.example.com', port: 22, username: 'u', authMethod: 'password' },
+    );
+    const id = useSftpStore.getState().connections[0]!.id;
+    useSftpStore.getState().attachRemoteConnection(
+      id,
+      'local',
+      {
+        sessionId: 'left-session',
+        title: 'Left',
+        host: 'left.example.com',
+        port: 2222,
+        username: 'deploy',
+      },
+      { host: 'left.example.com', port: 2222, username: 'deploy', authMethod: 'password' },
+    );
+
+    useSftpStore.getState().removeConnection(id);
+
+    expect(invokeDisconnectSftp).toHaveBeenCalledTimes(2);
+    expect(invokeDisconnectSftp).toHaveBeenCalledWith(
+      expect.objectContaining({ host: 'right.example.com', port: 22 }),
+    );
+    expect(invokeDisconnectSftp).toHaveBeenCalledWith(
+      expect.objectContaining({ host: 'left.example.com', port: 2222 }),
+    );
+  });
+
+  it('disconnects a shared remote connection only once when both panes use it', () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c1',
+        title: 'Test',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+    );
+    const id = useSftpStore.getState().connections[0]!.id;
+    useSftpStore.getState().attachRemoteConnection(
+      id,
+      'local',
+      {
+        sessionId: 'left-session',
+        title: 'Test',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+    );
+
+    useSftpStore.getState().removeConnection(id);
+
+    expect(invokeDisconnectSftp).toHaveBeenCalledTimes(1);
+    expect(invokeDisconnectSftp).toHaveBeenCalledWith(baseConnection.connection);
+  });
+
+  it('leaves the pooled connection to the backend TTL while a transfer is active', () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c1',
+        title: 'Test',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+    );
+    const id = useSftpStore.getState().connections[0]!.id;
+    const connection = useSftpStore.getState().connections[0]!;
+    useTransferStore.getState().addOperation({
+      operationId: 'download-1',
+      kind: 'download',
+      connectionId: getSftpPaneConnectionKey(connection, 'remote'),
+      paths: ['/remote/archive'],
+      totalBytes: 100,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+
+    useSftpStore.getState().removeConnection(id);
+
+    expect(invokeDisconnectSftp).not.toHaveBeenCalled();
+    expect(useSftpStore.getState().connections).toHaveLength(0);
   });
 });

@@ -96,6 +96,34 @@ export function findAdjacentTerminalGroup(
   return null;
 }
 
+// Pinned tabs always occupy the front of a group. The layout's sessionIds are
+// the source of truth for tab order while split, so every mutation path keeps
+// this invariant instead of relying on the global sessions array order.
+export function partitionSessionIdsPinnedFirst(
+  sessionIds: string[],
+  isPinned: (sessionId: string) => boolean,
+): string[] {
+  const pinned = sessionIds.filter(isPinned);
+  if (pinned.length === 0 || pinned.length === sessionIds.length) return sessionIds;
+  const partitioned = [...pinned, ...sessionIds.filter((id) => !isPinned(id))];
+  // Keep referential equality when the order already satisfies the invariant,
+  // so callers can bail out of state updates.
+  return partitioned.every((id, index) => id === sessionIds[index]) ? sessionIds : partitioned;
+}
+
+export function repartitionTerminalLayoutPinnedFirst(
+  node: TerminalLayoutNode,
+  isPinned: (sessionId: string) => boolean,
+): TerminalLayoutNode {
+  if (node.kind === 'group') {
+    const sessionIds = partitionSessionIdsPinnedFirst(node.sessionIds, isPinned);
+    return sessionIds === node.sessionIds ? node : { ...node, sessionIds };
+  }
+  const first = repartitionTerminalLayoutPinnedFirst(node.first, isPinned);
+  const second = repartitionTerminalLayoutPinnedFirst(node.second, isPinned);
+  return first === node.first && second === node.second ? node : { ...node, first, second };
+}
+
 const SPLIT_EDGE_RATIO = 0.25;
 const MAX_SPLIT_EDGE_SIZE = 120;
 

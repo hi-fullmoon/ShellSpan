@@ -52,6 +52,7 @@ interface MenuItemProps {
 const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }) => (
   <button
     type="button"
+    role="menuitem"
     onClick={onClick}
     disabled={disabled}
     className={cn(
@@ -119,6 +120,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
   return createPortal(
     <div
       ref={menuRef}
+      role="menu"
       className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
       style={position}
     >

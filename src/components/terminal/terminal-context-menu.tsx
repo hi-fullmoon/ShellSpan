@@ -59,6 +59,13 @@ export interface TerminalContextMenuProps {
   x: number;
   y: number;
   session: TerminalSession | null;
+  /**
+   * Tab order of the tab bar this menu was opened from. When split, this is the
+   * source group's sessionIds so positional actions (close others / close to
+   * the right) only affect tabs the user actually sees in that group. Defaults
+   * to the global sessions order.
+   */
+  orderedSessionIds?: string[];
   onClose: () => void;
   canSplit?: boolean;
   isSplit?: boolean;
@@ -71,6 +78,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   x,
   y,
   session,
+  orderedSessionIds,
   onClose,
   canSplit = false,
   isSplit = false,
@@ -109,14 +117,18 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
   const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
 
-  const closeOthersCount = sessions.filter(
-    (s) => s.sessionId !== target.sessionId && !s.pinned,
-  ).length;
+  const orderedIds = orderedSessionIds ?? sessions.map((s) => s.sessionId);
+  const isUnpinned = (sessionId: string): boolean =>
+    !sessions.find((s) => s.sessionId === sessionId)?.pinned;
 
-  const closeToRightCount = (() => {
-    const idx = sessions.findIndex((s) => s.sessionId === target.sessionId);
-    if (idx === -1) return 0;
-    return sessions.slice(idx + 1).filter((s) => !s.pinned).length;
+  const closeOthersIds = orderedIds.filter(
+    (id) => id !== target.sessionId && isUnpinned(id),
+  );
+
+  const closeToRightIds = (() => {
+    const idx = orderedIds.indexOf(target.sessionId);
+    if (idx === -1) return [];
+    return orderedIds.slice(idx + 1).filter(isUnpinned);
   })();
 
   const closeSession = (sessionId: string): void => {
@@ -175,23 +187,12 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   };
 
   const confirmCloseOthers = (): void => {
-    sessions.forEach((s) => {
-      if (s.sessionId !== target.sessionId && !s.pinned) {
-        closeSession(s.sessionId);
-      }
-    });
+    closeOthersIds.forEach(closeSession);
     dismissCloseOthersConfirm();
   };
 
   const confirmCloseToRight = (): void => {
-    const idx = sessions.findIndex((s) => s.sessionId === target.sessionId);
-    if (idx > -1) {
-      sessions.slice(idx + 1).forEach((s) => {
-        if (!s.pinned) {
-          closeSession(s.sessionId);
-        }
-      });
-    }
+    closeToRightIds.forEach(closeSession);
     dismissCloseToRightConfirm();
   };
 
@@ -334,7 +335,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {t('terminal.tab.closeOthersConfirmMessage', { count: closeOthersCount })}
+              {t('terminal.tab.closeOthersConfirmMessage', { count: closeOthersIds.length })}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
@@ -354,7 +355,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {t('terminal.tab.closeToRightConfirmMessage', { count: closeToRightCount })}
+              {t('terminal.tab.closeToRightConfirmMessage', { count: closeToRightIds.length })}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">

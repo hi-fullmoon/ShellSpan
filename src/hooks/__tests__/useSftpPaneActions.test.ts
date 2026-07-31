@@ -83,6 +83,7 @@ function addConnection(): SftpConnection {
 
 describe('useSftpPaneActions', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     useSftpStore.setState(initialState, true);
     useTransferStore.setState({ operations: [] });
   });
@@ -231,16 +232,114 @@ describe('useSftpPaneActions', () => {
     });
   });
 
-  it('copies local entries into the local clipboard', () => {
+  function setupCrossServerPaste() {
+    const connection = addConnection();
+    useSftpStore.getState().attachRemoteConnection(
+      connection.id,
+      'local',
+      {
+        sessionId: 'left',
+        title: 'Source',
+        host: 'source.example.com',
+        port: 22,
+        username: 'source-user',
+      },
+      {
+        host: 'source.example.com',
+        port: 22,
+        username: 'source-user',
+        authMethod: 'password',
+      },
+    );
+    useSftpStore.getState().setPath(connection.id, 'local', '/source');
+    useSftpStore.getState().setPath(connection.id, 'remote', '/destination');
+    useSftpStore.getState().setEntries(connection.id, 'local', [{
+      path: '/source/report.txt',
+      name: 'report.txt',
+      kind: 'file',
+      size: 10,
+    }]);
+
+    const dualRemote = useSftpStore.getState().connections[0]!;
+    const { result: sourceActions } = renderHook(() =>
+      useSftpPaneActions(dualRemote, 'local', false),
+    );
+    act(() => sourceActions.current.onCopy(dualRemote.localEntries[0]));
+
+    const withClipboard = useSftpStore.getState().connections[0]!;
+    const { result: destinationActions } = renderHook(() =>
+      useSftpPaneActions(withClipboard, 'remote', false),
+    );
+    return destinationActions;
+  }
+
+  it('skips paste when the source path has an active operation', async () => {
+    const destinationActions = setupCrossServerPaste();
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-source',
+      kind: 'download',
+      connectionId: JSON.stringify(['source.example.com', 22, 'source-user', '', 0, '']),
+      paths: ['/source/report.txt'],
+      totalBytes: 0,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+
+    await act(() => destinationActions.current.onPaste());
+
+    expect(vi.mocked(invokeCopyRemoteToRemote)).not.toHaveBeenCalled();
+  });
+
+  it('skips paste when the destination path has an active operation', async () => {
+    const destinationActions = setupCrossServerPaste();
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-destination',
+      kind: 'upload',
+      connectionId: JSON.stringify(['h', 22, 'u', '', 0, '']),
+      paths: ['/destination/report.txt'],
+      totalBytes: 0,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+
+    await act(() => destinationActions.current.onPaste());
+
+    expect(vi.mocked(invokeCopyRemoteToRemote)).not.toHaveBeenCalled();
+  });
+
+  it('copies local entries into the local clipboard', async () => {
     const connection = addConnection();
     const localEntry = { path: '/local/a.txt', name: 'a.txt', kind: 'file' as const, size: 10 };
 
     const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
     expect(result.current.hasLocalClipboard).toBe(false);
 
-    act(() => result.current.onCopy(localEntry));
+    await act(async () => result.current.onCopy(localEntry));
 
+    expect(useSftpStore.getState().localClipboard).toEqual([localEntry]);
     expect(result.current.hasLocalClipboard).toBe(true);
+  });
+
+  it('shares the local clipboard across hook instances', async () => {
+    const firstConnection = addConnection();
+    const localEntry = { path: '/local/a.txt', name: 'a.txt', kind: 'file' as const, size: 10 };
+
+    const { result: firstPane } = renderHook(() =>
+      useSftpPaneActions(firstConnection, 'local', true),
+    );
+    const { result: secondPane } = renderHook(() =>
+      useSftpPaneActions(firstConnection, 'local', true),
+    );
+    expect(secondPane.current.hasLocalClipboard).toBe(false);
+
+    await act(async () => firstPane.current.onCopy(localEntry));
+
+    expect(secondPane.current.hasLocalClipboard).toBe(true);
+    expect(useSftpStore.getState().localClipboard).toEqual([localEntry]);
   });
 
   it('pastes local clipboard entries into the current directory', async () => {
@@ -251,7 +350,7 @@ describe('useSftpPaneActions', () => {
     ];
 
     const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
-    act(() => result.current.onCopy());
+    await act(async () => result.current.onCopy());
     await act(() => result.current.onPaste());
 
     expect(vi.mocked(invokePasteLocalPaths)).toHaveBeenCalledWith(

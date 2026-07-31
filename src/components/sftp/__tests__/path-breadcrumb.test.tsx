@@ -3,6 +3,13 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { act } from 'react';
 import { PathBreadcrumb } from '../path-breadcrumb';
 
+vi.mock('@/hooks/useI18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => key,
+    locale: 'en-US',
+  }),
+}));
+
 let resizeCallback: ResizeObserverCallback | null = null;
 let originalResizeObserver: typeof window.ResizeObserver | undefined;
 
@@ -129,7 +136,7 @@ describe('PathBreadcrumb', () => {
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(3);
     expect(buttons[0]).toHaveTextContent('/');
-    expect(buttons[1]).toHaveAccessibleName('显示隐藏的路径');
+    expect(buttons[1]).toHaveAccessibleName('sftp.breadcrumb.showHiddenSegments');
     expect(buttons[1]).toHaveTextContent('...');
     expect(buttons[2]).toHaveTextContent('j');
     expect(screen.queryByRole('button', { name: 'a' })).not.toBeInTheDocument();
@@ -148,7 +155,7 @@ describe('PathBreadcrumb', () => {
       );
     });
 
-    const ellipsis = screen.getByRole('button', { name: '显示隐藏的路径' });
+    const ellipsis = screen.getByRole('button', { name: 'sftp.breadcrumb.showHiddenSegments' });
     fireEvent.mouseEnter(ellipsis);
 
     const hiddenSegment = await screen.findByRole('button', { name: 'b' });

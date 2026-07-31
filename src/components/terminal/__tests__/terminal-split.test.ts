@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   findAdjacentTerminalGroup,
+  findTerminalGroup,
   getTerminalSplitDirection,
+  partitionSessionIdsPinnedFirst,
+  repartitionTerminalLayoutPinnedFirst,
   type TerminalGroupState,
   type TerminalLayoutNode,
 } from '../terminal-split';
@@ -112,5 +115,53 @@ describe('findAdjacentTerminalGroup', () => {
       second: group('b'),
     };
     expect(findAdjacentTerminalGroup(layout, 'missing', 'right')).toBeNull();
+  });
+});
+
+describe('partitionSessionIdsPinnedFirst', () => {
+  const isPinned = (id: string): boolean => id === 'b' || id === 'd';
+
+  it('moves pinned ids to the front while preserving relative order', () => {
+    expect(partitionSessionIdsPinnedFirst(['a', 'b', 'c', 'd', 'e'], isPinned))
+      .toEqual(['b', 'd', 'a', 'c', 'e']);
+  });
+
+  it('returns the same array reference when the order already satisfies the invariant', () => {
+    const ids = ['b', 'd', 'a', 'c'];
+    expect(partitionSessionIdsPinnedFirst(ids, isPinned)).toBe(ids);
+  });
+
+  it('returns the same array reference when nothing or everything is pinned', () => {
+    const ids = ['a', 'c'];
+    expect(partitionSessionIdsPinnedFirst(ids, () => false)).toBe(ids);
+    expect(partitionSessionIdsPinnedFirst(ids, () => true)).toBe(ids);
+  });
+});
+
+describe('repartitionTerminalLayoutPinnedFirst', () => {
+  it('reorders every group in the layout', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: { kind: 'group', id: 'g1', sessionIds: ['a', 'b', 'c'], activeSessionId: 'a' },
+      second: { kind: 'group', id: 'g2', sessionIds: ['d', 'e'], activeSessionId: 'd' },
+    };
+
+    const next = repartitionTerminalLayoutPinnedFirst(layout, (id) => id === 'c' || id === 'd');
+
+    expect(findTerminalGroup(next, 'g1')?.sessionIds).toEqual(['c', 'a', 'b']);
+    expect(findTerminalGroup(next, 'g2')?.sessionIds).toEqual(['d', 'e']);
+    expect(findTerminalGroup(next, 'g1')?.activeSessionId).toBe('a');
+  });
+
+  it('returns the same reference when every group already satisfies the invariant', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: { kind: 'group', id: 'g1', sessionIds: ['b', 'a'], activeSessionId: 'a' },
+      second: { kind: 'group', id: 'g2', sessionIds: ['c'], activeSessionId: 'c' },
+    };
+
+    expect(repartitionTerminalLayoutPinnedFirst(layout, (id) => id === 'b')).toBe(layout);
   });
 });

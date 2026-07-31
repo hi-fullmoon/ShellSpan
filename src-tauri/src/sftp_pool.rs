@@ -1,9 +1,9 @@
-use crate::models::{AuthMethod, ConnectedSftp, JumpHostConfig, RemoteConnectionRequest};
+use crate::models::{AuthMethod, ConnectedSftp, ConnectionError, JumpHostConfig, RemoteConnectionRequest};
 use log::{debug, info, warn};
 use sha2::{Digest, Sha256};
 use std::collections::hash_map::{Entry, HashMap};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 const SFTP_POOL_IDLE_TTL: Duration = Duration::from_secs(300);
@@ -35,11 +35,59 @@ pub(crate) struct JumpHostKey {
 #[derive(Default, Clone)]
 pub(crate) struct SftpPool {
     sessions: Arc<Mutex<HashMap<ConnectionKey, PooledEntry>>>,
+    in_flight: Arc<Mutex<HashMap<ConnectionKey, Arc<ConnectSlot>>>>,
 }
 
 struct PooledEntry {
     connection: Arc<Mutex<ConnectedSftp>>,
     last_used: Instant,
+    last_verified: Instant,
+}
+
+impl PooledEntry {
+    /// Gracefully close the SSH session before the entry is dropped; failures
+    /// are ignored because the connection is being discarded anyway.
+    fn disconnect(self) {
+        let connected = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = connected.session.disconnect(None, "", None);
+    }
+}
+
+fn disconnect_entries(entries: Vec<PooledEntry>) {
+    for entry in entries {
+        entry.disconnect();
+    }
+}
+
+/// Outcome of claiming the right to establish a pooled connection: exactly one
+/// caller becomes the leader and handshakes; concurrent callers become
+/// followers waiting on the shared slot instead of handshaking themselves.
+pub(crate) enum ConnectClaim {
+    Leader,
+    Follower(Arc<ConnectSlot>),
+}
+
+pub(crate) struct ConnectSlot {
+    state: Mutex<ConnectState>,
+    ready: Condvar,
+}
+
+enum ConnectState {
+    Pending,
+    Ready(Arc<Mutex<ConnectedSftp>>),
+    Failed(String),
+}
+
+impl ConnectSlot {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(ConnectState::Pending),
+            ready: Condvar::new(),
+        }
+    }
 }
 
 impl SftpPool {
@@ -48,32 +96,49 @@ impl SftpPool {
         request: &RemoteConnectionRequest,
     ) -> Option<Arc<Mutex<ConnectedSftp>>> {
         let key = connection_key(request);
-        let (connection, idle_for) = {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let entry = match sessions.get_mut(&key) {
-                Some(entry) => entry,
-                None => {
-                    debug!("SFTP pool miss {}", key.label());
-                    return None;
+        let mut evicted = Vec::new();
+        let found = {
+            let mut sessions = self.lock_sessions();
+            // Opportunistic full-table sweep: evict every entry past the idle
+            // TTL so stale connections do not linger until their own key is
+            // requested again.
+            let expired_keys: Vec<ConnectionKey> = sessions
+                .iter()
+                .filter(|(_, entry)| entry.last_used.elapsed() > SFTP_POOL_IDLE_TTL)
+                .map(|(key, _)| key.clone())
+                .collect();
+            for expired_key in expired_keys {
+                if let Some(entry) = sessions.remove(&expired_key) {
+                    debug!("SFTP pool entry evicted after idle TTL {}", expired_key.label());
+                    evicted.push(entry);
                 }
-            };
-            let idle_for = entry.last_used.elapsed();
-            if idle_for > SFTP_POOL_IDLE_TTL {
-                sessions.remove(&key);
-                debug!("SFTP pool entry evicted after idle TTL {}", key.label());
+            }
+            sessions.get_mut(&key).map(|entry| {
+                entry.last_used = Instant::now();
+                (entry.connection.clone(), entry.last_verified.elapsed())
+            })
+        };
+        // Evicted entries are disconnected and dropped outside the pool lock
+        // so their teardown never blocks other pool users.
+        disconnect_entries(evicted);
+
+        let (connection, verified_idle) = match found {
+            Some(found) => found,
+            None => {
+                debug!("SFTP pool miss {}", key.label());
                 return None;
             }
-            entry.last_used = Instant::now();
-            (entry.connection.clone(), idle_for)
         };
 
-        if should_health_check(idle_for) && !connection_is_healthy(&connection) {
-            warn!("SFTP pool health check failed {}", key.label());
-            self.remove_if_same(&key, &connection);
-            return None;
+        // Throttle health checks: an entry verified inside the recent window
+        // is trusted without a realpath round-trip on the get() hot path.
+        if should_health_check(verified_idle) {
+            if !connection_is_healthy(&connection) {
+                warn!("SFTP pool health check failed {}", key.label());
+                self.remove_if_same(&key, &connection);
+                return None;
+            }
+            self.mark_verified(&key, &connection);
         }
 
         debug!("SFTP pool hit {}", key.label());
@@ -85,17 +150,16 @@ impl SftpPool {
         key: &ConnectionKey,
         new_connection: Arc<Mutex<ConnectedSftp>>,
     ) -> Arc<Mutex<ConnectedSftp>> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut sessions = self.lock_sessions();
         let entry = match sessions.entry(key.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 info!("SFTP pool connection inserted {}", key.label());
+                let now = Instant::now();
                 entry.insert(PooledEntry {
                     connection: new_connection,
-                    last_used: Instant::now(),
+                    last_used: now,
+                    last_verified: now,
                 })
             }
         };
@@ -105,39 +169,130 @@ impl SftpPool {
 
     pub(crate) fn invalidate(&self, request: &RemoteConnectionRequest) {
         let key = connection_key(request);
-        let removed = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&key);
+        let removed = self.lock_sessions().remove(&key);
         if removed.is_some() {
             debug!("SFTP pool connection invalidated {}", key.label());
+        }
+        // Disconnect and drop outside the pool lock.
+        disconnect_entries(removed.into_iter().collect());
+    }
+
+    /// Claim the right to establish a connection for `key`. Concurrent callers
+    /// receive [`ConnectClaim::Follower`] and must wait on the slot instead of
+    /// running their own handshake (prevents duplicate handshakes from the
+    /// get()-miss/get_or_insert race).
+    pub(crate) fn begin_connect(&self, key: &ConnectionKey) -> ConnectClaim {
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match in_flight.entry(key.clone()) {
+            Entry::Occupied(entry) => ConnectClaim::Follower(entry.get().clone()),
+            Entry::Vacant(entry) => {
+                entry.insert(Arc::new(ConnectSlot::new()));
+                ConnectClaim::Leader
+            }
+        }
+    }
+
+    /// Leader-side completion: publish the outcome to waiting followers and
+    /// release the in-flight slot. On success the connection is also inserted
+    /// into the pool.
+    pub(crate) fn finish_connect(
+        &self,
+        key: &ConnectionKey,
+        result: Result<Arc<Mutex<ConnectedSftp>>, ConnectionError>,
+    ) -> Result<Arc<Mutex<ConnectedSftp>>, ConnectionError> {
+        let slot = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(key);
+        if let Some(slot) = slot {
+            {
+                let mut state = slot
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *state = match &result {
+                    Ok(connection) => ConnectState::Ready(connection.clone()),
+                    Err(error) => ConnectState::Failed(error.message()),
+                };
+            }
+            slot.ready.notify_all();
+        }
+        result.map(|connection| self.get_or_insert(key, connection))
+    }
+
+    /// Follower-side wait: block until the leader publishes the outcome.
+    pub(crate) fn wait_connect(
+        &self,
+        slot: Arc<ConnectSlot>,
+    ) -> Result<Arc<Mutex<ConnectedSftp>>, String> {
+        let mut state = slot
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            match &*state {
+                ConnectState::Pending => {
+                    state = slot
+                        .ready
+                        .wait(state)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+                ConnectState::Ready(connection) => return Ok(connection.clone()),
+                ConnectState::Failed(message) => return Err(message.clone()),
+            }
+        }
+    }
+
+    fn mark_verified(&self, key: &ConnectionKey, expected: &Arc<Mutex<ConnectedSftp>>) {
+        let mut sessions = self.lock_sessions();
+        if let Some(entry) = sessions
+            .get_mut(key)
+            .filter(|entry| Arc::ptr_eq(&entry.connection, expected))
+        {
+            entry.last_verified = Instant::now();
         }
     }
 
     fn remove_if_same(&self, key: &ConnectionKey, expected: &Arc<Mutex<ConnectedSftp>>) {
-        let mut sessions = self
-            .sessions
+        let removed = {
+            let mut sessions = self.lock_sessions();
+            if sessions
+                .get(key)
+                .is_some_and(|entry| Arc::ptr_eq(&entry.connection, expected))
+            {
+                sessions.remove(key)
+            } else {
+                None
+            }
+        };
+        // Disconnect and drop outside the pool lock.
+        disconnect_entries(removed.into_iter().collect());
+    }
+
+    fn lock_sessions(&self) -> MutexGuard<'_, HashMap<ConnectionKey, PooledEntry>> {
+        self.sessions
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if sessions
-            .get(key)
-            .is_some_and(|entry| Arc::ptr_eq(&entry.connection, expected))
-        {
-            sessions.remove(key);
-        }
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
-fn should_health_check(idle_for: Duration) -> bool {
-    idle_for >= SFTP_POOL_HEALTH_CHECK_IDLE
+/// A pooled connection is re-verified only once it has not been successfully
+/// verified within this window; recently used entries skip the round-trip.
+fn should_health_check(since_last_verified: Duration) -> bool {
+    since_last_verified >= SFTP_POOL_HEALTH_CHECK_IDLE
 }
 
 fn connection_is_healthy(connection: &Arc<Mutex<ConnectedSftp>>) -> bool {
     let connected = connection
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    connected.session.authenticated() && connected.sftp.realpath(Path::new(".")).is_ok()
+    // Probe the root directory: realpath(".") fails on restricted servers
+    // whose SFTP subsystem cannot resolve the user's home-relative cwd.
+    connected.session.authenticated() && connected.sftp.realpath(Path::new("/")).is_ok()
 }
 
 impl ConnectionKey {
@@ -189,6 +344,20 @@ mod tests {
     use super::*;
     use crate::models::{AuthMethod, RemoteConnectionRequest};
 
+    fn sample_request() -> RemoteConnectionRequest {
+        RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("secret".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        }
+    }
+
     #[test]
     fn invalidate_does_not_panic_on_empty_pool() {
         let pool = SftpPool::default();
@@ -210,9 +379,57 @@ mod tests {
     }
 
     #[test]
-    fn health_check_is_only_required_after_idle_threshold() {
+    fn health_check_is_only_required_after_verification_threshold() {
+        // Freshly verified entries skip the realpath round-trip; entries last
+        // verified at or beyond the window are re-checked.
         assert!(!should_health_check(Duration::from_secs(29)));
         assert!(should_health_check(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn begin_connect_grants_leadership_to_only_one_caller() {
+        let pool = SftpPool::default();
+        let request = sample_request();
+        let key = connection_key(&request);
+
+        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader));
+        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Follower(_)));
+
+        // Once the leader finishes, the slot is released and the next caller
+        // becomes the leader again.
+        pool.finish_connect(
+            &key,
+            Err(crate::models::ConnectionError::Other {
+                message: "boom".to_string(),
+            }),
+        )
+        .ok();
+        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader));
+    }
+
+    #[test]
+    fn wait_connect_follower_receives_leader_failure() {
+        let pool = SftpPool::default();
+        let key = connection_key(&sample_request());
+
+        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader));
+        let slot = match pool.begin_connect(&key) {
+            ConnectClaim::Follower(slot) => slot,
+            ConnectClaim::Leader => panic!("second claim must be a follower"),
+        };
+
+        let waiter_pool = pool.clone();
+        let waiter = std::thread::spawn(move || waiter_pool.wait_connect(slot));
+        pool.finish_connect(
+            &key,
+            Err(crate::models::ConnectionError::Other {
+                message: "handshake failed".to_string(),
+            }),
+        )
+        .ok();
+
+        let result = waiter.join().expect("follower thread should finish");
+        assert_eq!(result.err().as_deref(), Some("handshake failed"));
     }
 
     #[test]

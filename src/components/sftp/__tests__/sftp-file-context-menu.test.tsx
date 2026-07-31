@@ -120,7 +120,34 @@ describe('SftpFileContextMenu', () => {
     fireEvent.click(screen.getByText('common.delete'));
 
     expect(onAction).toHaveBeenCalledTimes(1);
-    expect(onAction).toHaveBeenCalledWith('delete');
+    expect(onAction).toHaveBeenCalledWith('delete', [createRemoteFileEntry('test.txt')]);
+  });
+
+  it('deletes the snapshot taken when the dialog opened, not the live selection', () => {
+    const { onAction, rerender } = renderMenu({
+      selectedEntries: [createRemoteFileEntry('first.txt')],
+    });
+
+    fireEvent.click(screen.getByText('common.delete'));
+
+    // The selection changes while the confirmation dialog is open.
+    rerender(
+      <SftpFileContextMenu
+        open={false}
+        x={100}
+        y={100}
+        side="remote"
+        currentPath="/home"
+        selectedEntries={[createRemoteFileEntry('second.txt')]}
+        isBookmarked={false}
+        batchMode={false}
+        onClose={vi.fn()}
+        onAction={onAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('common.delete'));
+    expect(onAction).toHaveBeenCalledWith('delete', [createRemoteFileEntry('first.txt')]);
   });
 
   it('uses the multi-item confirmation for a batch selection', () => {

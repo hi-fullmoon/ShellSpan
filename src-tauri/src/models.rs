@@ -1,12 +1,16 @@
+use log::warn;
 use serde::{Deserialize, Serialize};
 use ssh2::{Session, Sftp};
 use std::{
+    cell::Cell,
     collections::HashMap,
+    fmt,
     sync::{
         atomic::{AtomicBool, Ordering as AtomicOrdering},
         mpsc::Sender,
         Arc, Mutex,
     },
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter};
 
@@ -36,7 +40,7 @@ pub(crate) struct PortForwardConfig {
     pub(crate) remote_port: u16,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct JumpHostConfig {
     pub(crate) host: String,
@@ -48,6 +52,27 @@ pub(crate) struct JumpHostConfig {
     #[serde(default)]
     pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
+}
+
+// Hand-written Debug that redacts secrets, mirroring the redaction used by
+// summarize_remote_connection_request (secrets reported as "***" when set).
+impl fmt::Debug for JumpHostConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JumpHostConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth_method", &self.auth_method)
+            .field("password", &redact_secret(&self.password))
+            .field("keychain_key_id", &self.keychain_key_id)
+            .field("private_key_data", &redact_secret(&self.private_key_data))
+            .field("passphrase", &redact_secret(&self.passphrase))
+            .finish()
+    }
+}
+
+fn redact_secret(value: &Option<String>) -> Option<&'static str> {
+    value.as_ref().map(|_| "***")
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,7 +93,7 @@ pub(crate) struct SessionCreateRequest {
     pub(crate) jump_host: Option<JumpHostConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RemoteConnectionRequest {
     pub(crate) host: String,
@@ -81,6 +106,24 @@ pub(crate) struct RemoteConnectionRequest {
     pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
     pub(crate) jump_host: Option<JumpHostConfig>,
+}
+
+// Hand-written Debug that redacts secrets, mirroring the redaction used by
+// summarize_remote_connection_request (secrets reported as "***" when set).
+impl fmt::Debug for RemoteConnectionRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RemoteConnectionRequest")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth_method", &self.auth_method)
+            .field("password", &redact_secret(&self.password))
+            .field("keychain_key_id", &self.keychain_key_id)
+            .field("private_key_data", &redact_secret(&self.private_key_data))
+            .field("passphrase", &redact_secret(&self.passphrase))
+            .field("jump_host", &self.jump_host)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -668,6 +711,12 @@ impl CancellationRegistry {
             .operations
             .lock()
             .map_err(|_| format!("{} cancellation registry poisoned", self.kind))?;
+        if guard.contains_key(&operation_id) {
+            warn!(
+                "{} cancellation registry: duplicate operation_id {operation_id}, replacing previous registration",
+                self.kind
+            );
+        }
         guard.insert(operation_id, flag.clone());
         Ok(flag)
     }
@@ -745,6 +794,16 @@ pub(crate) struct DownloadProgressTracker {
     downloaded_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
+    last_emitted_at: Cell<Option<Instant>>,
+}
+
+/// Minimum interval between byte-progress events. Step boundaries, path
+/// changes, and completion still emit immediately.
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+
+fn should_emit_progress(last_emitted_at: Option<Instant>) -> bool {
+    last_emitted_at
+        .map_or(true, |instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
 }
 
 impl DownloadProgressTracker {
@@ -763,6 +822,7 @@ impl DownloadProgressTracker {
             downloaded_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
+            last_emitted_at: Cell::new(None),
         }
     }
 
@@ -773,7 +833,13 @@ impl DownloadProgressTracker {
 
     pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
         self.downloaded_bytes += count;
-        self.emit()
+        // Throttled: byte progress emits at most once per
+        // PROGRESS_EMIT_INTERVAL, except when the transfer just completed.
+        let completed = self.total_bytes > 0 && self.downloaded_bytes >= self.total_bytes;
+        if completed || should_emit_progress(self.last_emitted_at.get()) {
+            self.emit()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
@@ -789,19 +855,22 @@ impl DownloadProgressTracker {
     }
 
     pub(crate) fn emit(&self) -> Result<(), String> {
-        self.app
-            .emit(
-                super::DOWNLOAD_PROGRESS_EVENT,
-                DownloadProgressEvent {
-                    operation_id: self.operation_id.clone(),
-                    current_path: self.current_path.clone(),
-                    total_bytes: self.total_bytes,
-                    downloaded_bytes: self.downloaded_bytes,
-                    total_steps: self.total_steps,
-                    completed_steps: self.completed_steps,
-                },
-            )
-            .map_err(|error| format!("failed to emit download progress event: {error}"))
+        self.last_emitted_at.set(Some(Instant::now()));
+        // A failed progress emit must not abort the transfer; log and continue.
+        if let Err(error) = self.app.emit(
+            super::DOWNLOAD_PROGRESS_EVENT,
+            DownloadProgressEvent {
+                operation_id: self.operation_id.clone(),
+                current_path: self.current_path.clone(),
+                total_bytes: self.total_bytes,
+                downloaded_bytes: self.downloaded_bytes,
+                total_steps: self.total_steps,
+                completed_steps: self.completed_steps,
+            },
+        ) {
+            warn!("failed to emit download progress event: {error}");
+        }
+        Ok(())
     }
 }
 
@@ -830,6 +899,7 @@ pub(crate) struct RemoteCopyProgressTracker {
     copied_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
+    last_emitted_at: Cell<Option<Instant>>,
 }
 
 impl RemoteCopyProgressTracker {
@@ -848,6 +918,7 @@ impl RemoteCopyProgressTracker {
             copied_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
+            last_emitted_at: Cell::new(None),
         }
     }
 
@@ -858,7 +929,13 @@ impl RemoteCopyProgressTracker {
 
     pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
         self.copied_bytes += count;
-        self.emit()
+        // Throttled: byte progress emits at most once per
+        // PROGRESS_EMIT_INTERVAL, except when the transfer just completed.
+        let completed = self.total_bytes > 0 && self.copied_bytes >= self.total_bytes;
+        if completed || should_emit_progress(self.last_emitted_at.get()) {
+            self.emit()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
@@ -874,23 +951,26 @@ impl RemoteCopyProgressTracker {
     }
 
     pub(crate) fn emit(&self) -> Result<(), String> {
-        self.app
-            .emit(
-                super::REMOTE_COPY_PROGRESS_EVENT,
-                RemoteCopyProgressEvent {
-                    operation_id: self.operation_id.clone(),
-                    current_path: self.current_path.clone(),
-                    total_bytes: self.total_bytes,
-                    copied_bytes: self.copied_bytes,
-                    total_steps: self.total_steps,
-                    completed_steps: self.completed_steps,
-                },
-            )
-            .map_err(|error| format!("failed to emit remote copy progress event: {error}"))
+        self.last_emitted_at.set(Some(Instant::now()));
+        // A failed progress emit must not abort the transfer; log and continue.
+        if let Err(error) = self.app.emit(
+            super::REMOTE_COPY_PROGRESS_EVENT,
+            RemoteCopyProgressEvent {
+                operation_id: self.operation_id.clone(),
+                current_path: self.current_path.clone(),
+                total_bytes: self.total_bytes,
+                copied_bytes: self.copied_bytes,
+                total_steps: self.total_steps,
+                completed_steps: self.completed_steps,
+            },
+        ) {
+            warn!("failed to emit remote copy progress event: {error}");
+        }
+        Ok(())
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct UploadScanStats {
     pub(crate) total_bytes: u64,
     pub(crate) total_steps: u64,
@@ -912,6 +992,7 @@ pub(crate) struct UploadProgressTracker {
     uploaded_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
+    last_emitted_at: Cell<Option<Instant>>,
 }
 
 pub(crate) struct DeleteProgressTracker {
@@ -939,6 +1020,7 @@ impl UploadProgressTracker {
             uploaded_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
+            last_emitted_at: Cell::new(None),
         }
     }
 
@@ -949,7 +1031,13 @@ impl UploadProgressTracker {
 
     pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
         self.uploaded_bytes += count;
-        self.emit()
+        // Throttled: byte progress emits at most once per
+        // PROGRESS_EMIT_INTERVAL, except when the transfer just completed.
+        let completed = self.total_bytes > 0 && self.uploaded_bytes >= self.total_bytes;
+        if completed || should_emit_progress(self.last_emitted_at.get()) {
+            self.emit()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
@@ -965,19 +1053,22 @@ impl UploadProgressTracker {
     }
 
     pub(crate) fn emit(&self) -> Result<(), String> {
-        self.app
-            .emit(
-                super::UPLOAD_PROGRESS_EVENT,
-                UploadProgressEvent {
-                    operation_id: self.operation_id.clone(),
-                    current_path: self.current_path.clone(),
-                    total_bytes: self.total_bytes,
-                    uploaded_bytes: self.uploaded_bytes,
-                    total_steps: self.total_steps,
-                    completed_steps: self.completed_steps,
-                },
-            )
-            .map_err(|error| format!("failed to emit upload progress event: {error}"))
+        self.last_emitted_at.set(Some(Instant::now()));
+        // A failed progress emit must not abort the transfer; log and continue.
+        if let Err(error) = self.app.emit(
+            super::UPLOAD_PROGRESS_EVENT,
+            UploadProgressEvent {
+                operation_id: self.operation_id.clone(),
+                current_path: self.current_path.clone(),
+                total_bytes: self.total_bytes,
+                uploaded_bytes: self.uploaded_bytes,
+                total_steps: self.total_steps,
+                completed_steps: self.completed_steps,
+            },
+        ) {
+            warn!("failed to emit upload progress event: {error}");
+        }
+        Ok(())
     }
 }
 
@@ -1124,6 +1215,79 @@ mod session_manager_tests {
         let status = manager.status("local-1").unwrap();
         assert_eq!(status.status, SessionStatus::Connected);
         assert_eq!(status.message.as_deref(), Some("ready"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        should_emit_progress, CancellationRegistry, JumpHostConfig, RemoteConnectionRequest,
+        AuthMethod, PROGRESS_EMIT_INTERVAL,
+    };
+    use std::sync::atomic::Ordering as AtomicOrdering;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn remote_connection_request_debug_redacts_secrets() {
+        let request = RemoteConnectionRequest {
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("super-secret-password".to_string()),
+            keychain_key_id: None,
+            private_key_data: Some("private-key-body".to_string()),
+            passphrase: Some("secret-passphrase".to_string()),
+            jump_host: Some(JumpHostConfig {
+                host: "jump.example.com".to_string(),
+                port: 22,
+                username: "jump".to_string(),
+                auth_method: AuthMethod::Key,
+                password: Some("jump-secret-password".to_string()),
+                keychain_key_id: None,
+                private_key_data: Some("jump-key-body".to_string()),
+                passphrase: Some("jump-secret-passphrase".to_string()),
+            }),
+        };
+
+        let debug = format!("{request:?}");
+
+        for secret in [
+            "super-secret-password",
+            "private-key-body",
+            "secret-passphrase",
+            "jump-secret-password",
+            "jump-key-body",
+            "jump-secret-passphrase",
+        ] {
+            assert!(!debug.contains(secret), "debug output leaks {secret}");
+        }
+        assert!(debug.contains("***"));
+        assert!(debug.contains("example.com"));
+    }
+
+    #[test]
+    fn register_duplicate_operation_id_replaces_without_failing() {
+        let registry = CancellationRegistry::new("test");
+        let first = registry.register("op-1".to_string()).unwrap();
+        let second = registry.register("op-1".to_string()).unwrap();
+
+        // The duplicate registration wins; the stale flag stays untouched.
+        registry.cancel("op-1").unwrap();
+        assert!(second.load(AtomicOrdering::SeqCst));
+        assert!(!first.load(AtomicOrdering::SeqCst));
+    }
+
+    #[test]
+    fn progress_emit_is_throttled_by_interval() {
+        assert!(should_emit_progress(None));
+        assert!(!should_emit_progress(Some(Instant::now())));
+        assert!(!should_emit_progress(Some(
+            Instant::now() - (PROGRESS_EMIT_INTERVAL - Duration::from_millis(10))
+        )));
+        assert!(should_emit_progress(Some(
+            Instant::now() - (PROGRESS_EMIT_INTERVAL + Duration::from_millis(10))
+        )));
     }
 }
 

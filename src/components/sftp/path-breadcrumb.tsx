@@ -5,7 +5,12 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/hooks/useI18n';
+import type { LocaleKey } from '@/locales';
 import { normalizePortablePath, parsePortablePath, type PortablePathSegment } from '@/lib/path-utils';
+
+const SHOW_HIDDEN_SEGMENTS_KEY: LocaleKey = 'sftp.breadcrumb.showHiddenSegments';
+const HIDDEN_SEGMENTS_KEY: LocaleKey = 'sftp.breadcrumb.hiddenSegments';
 
 export interface PathBreadcrumbProps {
   path: string;
@@ -21,6 +26,7 @@ const ChevronIcon: React.FC = () => (
 );
 
 export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate, normalizeInputPath = false, className }) => {
+  const { t } = useI18n();
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(path);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -187,7 +193,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
                         <Button
                           variant="ghost"
                           size="sm"
-                          aria-label="显示隐藏的路径"
+                          aria-label={t(SHOW_HIDDEN_SEGMENTS_KEY)}
                           className="h-6 px-1 text-muted-foreground hover:text-app-text"
                         />
                       }
@@ -195,7 +201,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
                       <span className="leading-none">...</span>
                     </HoverCardTrigger>
                     <HoverCardContent side="bottom" align="start" className="w-auto min-w-40 max-w-80 p-1">
-                      <div className="flex flex-col gap-0.5" aria-label="隐藏的路径">
+                      <div className="flex flex-col gap-0.5" aria-label={t(HIDDEN_SEGMENTS_KEY)}>
                         {hiddenSegments.map((segment) => (
                           <Button
                             key={segment.path}

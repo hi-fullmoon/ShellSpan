@@ -33,8 +33,8 @@ export const SftpBookmarkMenu: React.FC<SftpBookmarkMenuProps> = ({
 
   if (!open) return null;
 
-  const left = Math.min(x, window.innerWidth - 224);
-  const top = Math.min(y, window.innerHeight - 280);
+  const left = Math.max(0, Math.min(x, window.innerWidth - 224));
+  const top = Math.max(0, Math.min(y, window.innerHeight - 280));
 
   return createPortal(
     <>

@@ -34,6 +34,7 @@ vi.mock('@tanstack/react-virtual', () => ({
         lane: 0,
       })),
     getTotalSize: () => count * estimateSize(),
+    scrollToIndex: vi.fn(),
   }),
 }));
 
@@ -49,6 +50,10 @@ interface RenderOptions {
   filterQuery?: string;
   side?: 'local' | 'remote';
   batchMode?: boolean;
+  selectedPaths?: string[];
+  onSelect?: (paths: string[]) => void;
+  onDoubleClick?: (entry: FileEntry) => void;
+  onParentDirectory?: () => void;
 }
 
 function renderFileList(options: RenderOptions = {}) {
@@ -58,21 +63,25 @@ function renderFileList(options: RenderOptions = {}) {
     filterQuery = '',
     side = 'local',
     batchMode = false,
+    selectedPaths = [],
+    onSelect = vi.fn(),
+    onDoubleClick = vi.fn(),
+    onParentDirectory = vi.fn(),
   } = options;
 
   return render(
     <SftpFileList
       entries={entries}
       side={side}
-      selectedPaths={[]}
+      selectedPaths={selectedPaths}
       filterQuery={filterQuery}
       batchMode={batchMode}
       currentPath={currentPath}
-      onSelect={vi.fn()}
-      onDoubleClick={vi.fn()}
+      onSelect={onSelect}
+      onDoubleClick={onDoubleClick}
       onContextMenu={vi.fn()}
       onBlankContextMenu={vi.fn()}
-      onParentDirectory={vi.fn()}
+      onParentDirectory={onParentDirectory}
     />,
   );
 }
@@ -266,5 +275,265 @@ describe('SftpFileList', () => {
     fireEvent.click(screen.getByText('a.txt'));
     firstRowCells.forEach((cell) => expect(cell).not.toHaveClass('bg-app-primary/10'));
     secondRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10'));
+  });
+
+  it('resets the shift-range anchor when the directory changes', () => {
+    const onSelect = vi.fn();
+    const firstEntries: FileEntry[] = [
+      { path: '/a/first.txt', name: 'first.txt', kind: 'file' },
+      { path: '/a/second.txt', name: 'second.txt', kind: 'file' },
+    ];
+    const secondEntries: FileEntry[] = [
+      { path: '/b/x.txt', name: 'x.txt', kind: 'file' },
+      { path: '/b/y.txt', name: 'y.txt', kind: 'file' },
+      { path: '/b/z.txt', name: 'z.txt', kind: 'file' },
+    ];
+
+    const { rerender } = render(
+      <SftpFileList
+        entries={firstEntries}
+        side="local"
+        selectedPaths={[]}
+        filterQuery=""
+        batchMode
+        currentPath="/a"
+        onSelect={onSelect}
+        onDoubleClick={vi.fn()}
+        onContextMenu={vi.fn()}
+        onBlankContextMenu={vi.fn()}
+        onParentDirectory={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('first.txt'));
+
+    rerender(
+      <SftpFileList
+        entries={secondEntries}
+        side="local"
+        selectedPaths={[]}
+        filterQuery=""
+        batchMode
+        currentPath="/b"
+        onSelect={onSelect}
+        onDoubleClick={vi.fn()}
+        onContextMenu={vi.fn()}
+        onBlankContextMenu={vi.fn()}
+        onParentDirectory={vi.fn()}
+      />,
+    );
+
+    // With a stale anchor (index 0 from /a), this shift-click would select the
+    // whole x..z range; after the reset it toggles only z.txt.
+    fireEvent.click(screen.getByText('z.txt'), { shiftKey: true });
+    expect(onSelect).toHaveBeenLastCalledWith(['/b/z.txt']);
+  });
+
+  it('resets the shift-range anchor when the filter changes', () => {
+    const onSelect = vi.fn();
+    const entries: FileEntry[] = [
+      { path: '/a/apple.txt', name: 'apple.txt', kind: 'file' },
+      { path: '/a/banana.txt', name: 'banana.txt', kind: 'file' },
+      { path: '/a/cherry.txt', name: 'cherry.txt', kind: 'file' },
+    ];
+
+    const renderList = (filterQuery: string) => (
+      <SftpFileList
+        entries={entries}
+        side="local"
+        selectedPaths={[]}
+        filterQuery={filterQuery}
+        batchMode
+        currentPath="/a"
+        onSelect={onSelect}
+        onDoubleClick={vi.fn()}
+        onContextMenu={vi.fn()}
+        onBlankContextMenu={vi.fn()}
+        onParentDirectory={vi.fn()}
+      />
+    );
+
+    const { rerender } = render(renderList(''));
+    fireEvent.click(screen.getByText('cherry.txt'));
+
+    // The stale anchor (index 2 of the unfiltered list) would extend the
+    // shift-range over apple..banana; after the reset only apple is toggled.
+    rerender(renderList('a'));
+    fireEvent.click(screen.getByText('apple.txt'), { shiftKey: true });
+    expect(onSelect).toHaveBeenLastCalledWith(['/a/apple.txt']);
+  });
+
+  it('moves keyboard focus with arrow keys and scrolls it into view', () => {
+    renderFileList();
+    const listbox = screen.getByRole('listbox');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    const options = screen.getAllByRole('option');
+    expect(options[0]).toHaveTextContent('a.txt');
+    expect(options[0]).toHaveClass('ring-1', 'ring-app-primary');
+    expect(options[1]).not.toHaveClass('ring-1');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    expect(options[0]).not.toHaveClass('ring-1');
+    expect(options[1]).toHaveClass('ring-1', 'ring-app-primary');
+
+    // Clamped at the last row.
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    expect(options[2]).toHaveClass('ring-1', 'ring-app-primary');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowUp' });
+    expect(options[1]).toHaveClass('ring-1', 'ring-app-primary');
+  });
+
+  it('opens the focused entry with Enter like a double-click', () => {
+    const onDoubleClick = vi.fn();
+    renderFileList({ onDoubleClick });
+    const listbox = screen.getByRole('listbox');
+
+    fireEvent.keyDown(listbox, { key: 'Enter' });
+    expect(onDoubleClick).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    fireEvent.keyDown(listbox, { key: 'Enter' });
+    expect(onDoubleClick).toHaveBeenCalledTimes(1);
+    expect(onDoubleClick).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/home/user/a.txt' }),
+    );
+  });
+
+  it('navigates to the parent directory with Enter on the parent row', () => {
+    const onDoubleClick = vi.fn();
+    const onParentDirectory = vi.fn();
+    renderFileList({ currentPath: '/home/user', onDoubleClick, onParentDirectory });
+    const listbox = screen.getByRole('listbox');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    fireEvent.keyDown(listbox, { key: 'Enter' });
+
+    expect(onParentDirectory).toHaveBeenCalledTimes(1);
+    expect(onDoubleClick).not.toHaveBeenCalled();
+  });
+
+  it('selects the focused entry with Space in non-batch mode', () => {
+    const onSelect = vi.fn();
+    renderFileList({ onSelect });
+    const listbox = screen.getByRole('listbox');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    fireEvent.keyDown(listbox, { key: ' ' });
+
+    expect(onSelect).toHaveBeenCalledWith(['/home/user/a.txt']);
+  });
+
+  it('toggles the focused entry with Space in batch mode', () => {
+    const Harness = () => {
+      const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+      return (
+        <SftpFileList
+          entries={sampleEntries}
+          side="local"
+          selectedPaths={selectedPaths}
+          filterQuery=""
+          batchMode
+          onSelect={setSelectedPaths}
+          onDoubleClick={vi.fn()}
+          onContextMenu={vi.fn()}
+          onBlankContextMenu={vi.fn()}
+          onParentDirectory={vi.fn()}
+        />
+      );
+    };
+
+    render(<Harness />);
+    const listbox = screen.getByRole('listbox');
+    const options = screen.getAllByRole('option');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    fireEvent.keyDown(listbox, { key: ' ' });
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(listbox, { key: ' ' });
+    expect(options[0]).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('clears the selection with Escape', () => {
+    const onSelect = vi.fn();
+    renderFileList({ selectedPaths: ['/home/user/a.txt'], onSelect });
+    const listbox = screen.getByRole('listbox');
+
+    fireEvent.keyDown(listbox, { key: 'Escape' });
+
+    expect(onSelect).toHaveBeenCalledWith([]);
+  });
+
+  it('extends the selection range with Shift+Arrow from the anchor', () => {
+    const Harness = () => {
+      const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+      return (
+        <SftpFileList
+          entries={sampleEntries}
+          side="local"
+          selectedPaths={selectedPaths}
+          filterQuery=""
+          batchMode
+          onSelect={setSelectedPaths}
+          onDoubleClick={vi.fn()}
+          onContextMenu={vi.fn()}
+          onBlankContextMenu={vi.fn()}
+          onParentDirectory={vi.fn()}
+        />
+      );
+    };
+
+    render(<Harness />);
+    const listbox = screen.getByRole('listbox');
+    const options = screen.getAllByRole('option');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    fireEvent.keyDown(listbox, { key: ' ' });
+    fireEvent.keyDown(listbox, { key: 'ArrowDown', shiftKey: true });
+
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+    expect(options[1]).toHaveAttribute('aria-selected', 'true');
+    expect(options[2]).toHaveAttribute('aria-selected', 'false');
+
+    fireEvent.keyDown(listbox, { key: 'ArrowDown', shiftKey: true });
+    expect(options[2]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('ignores keys pressed in the filter input outside the list', () => {
+    const onSelect = vi.fn();
+    const onDoubleClick = vi.fn();
+    render(
+      <div>
+        <input data-testid="filter-input" />
+        <SftpFileList
+          entries={sampleEntries}
+          side="local"
+          selectedPaths={[]}
+          filterQuery=""
+          batchMode={false}
+          onSelect={onSelect}
+          onDoubleClick={onDoubleClick}
+          onContextMenu={vi.fn()}
+          onBlankContextMenu={vi.fn()}
+          onParentDirectory={vi.fn()}
+        />
+      </div>,
+    );
+
+    const filterInput = screen.getByTestId('filter-input');
+    fireEvent.keyDown(filterInput, { key: 'ArrowDown' });
+    fireEvent.keyDown(filterInput, { key: 'Enter' });
+    fireEvent.keyDown(filterInput, { key: ' ' });
+    fireEvent.keyDown(filterInput, { key: 'Escape' });
+
+    screen.getAllByRole('option').forEach((option) => {
+      expect(option).not.toHaveClass('ring-1');
+      expect(option).toHaveAttribute('aria-selected', 'false');
+    });
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onDoubleClick).not.toHaveBeenCalled();
   });
 });
