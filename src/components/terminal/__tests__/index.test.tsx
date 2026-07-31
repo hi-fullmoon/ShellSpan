@@ -330,6 +330,31 @@ describe('Terminal', () => {
     expect(focus).toHaveBeenCalled();
   });
 
+  it('moves a pinned tab to the front of its split group', () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    const tabOrder = (): (string | null)[] => within(firstGroup)
+      .getAllByRole('tab')
+      .map((tab) => tab.getAttribute('data-session-tab'));
+    expect(tabOrder()).toEqual(['s2', 's3']);
+
+    act(() => useTerminalStore.getState().togglePin('s3'));
+    expect(tabOrder()).toEqual(['s3', 's2']);
+
+    // Unpinning keeps the stable order, matching the single-tab-bar behavior.
+    act(() => useTerminalStore.getState().togglePin('s3'));
+    expect(tabOrder()).toEqual(['s3', 's2']);
+  });
+
   it('splits the focused tab via the pane split event', () => {
     ['s1', 's2'].forEach((sessionId) => {
       useTerminalStore.getState().addSession({

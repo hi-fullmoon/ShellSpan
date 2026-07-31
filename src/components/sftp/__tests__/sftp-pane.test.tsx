@@ -1,9 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { SftpPane } from '../sftp-pane';
 import { useSftpStore } from '@/stores/sftpStore';
 import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import { useAppStore } from '@/stores/appStore';
+import { invokeListLocalDirectory } from '@/lib/tauri';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -12,26 +14,31 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
+const fileListRenderProps = vi.hoisted(() => ({
+  selectedPathsHistory: [] as unknown[],
+}));
+
 vi.mock('../sftp-file-list', () => ({
-  SftpFileList: ({
-    entries,
-    onDoubleClick,
-  }: {
+  SftpFileList: (props: {
     entries: Array<{ path: string; name: string; kind: string }>;
+    selectedPaths?: string[];
     onDoubleClick?: (entry: { path: string; name: string; kind: string }) => void;
-  }) => (
-    <div data-testid="mock-file-list">
-      {entries.map((entry) => (
-        <div
-          key={entry.path}
-          data-testid={`entry-${entry.name}`}
-          onDoubleClick={() => onDoubleClick?.(entry)}
-        >
-          {entry.name}
-        </div>
-      ))}
-    </div>
-  ),
+  }) => {
+    fileListRenderProps.selectedPathsHistory.push(props.selectedPaths);
+    return (
+      <div data-testid="mock-file-list">
+        {props.entries.map((entry) => (
+          <div
+            key={entry.path}
+            data-testid={`entry-${entry.name}`}
+            onDoubleClick={() => props.onDoubleClick?.(entry)}
+          >
+            {entry.name}
+          </div>
+        ))}
+      </div>
+    );
+  },
 }));
 
 vi.mock('@/lib/tauri', () => ({
@@ -54,7 +61,6 @@ function createMockActions(): UseSftpPaneActionsResult {
     permissionsTarget: undefined,
     propertiesTarget: undefined,
     previewContent: undefined,
-    uploadConflict: undefined,
     hasLocalClipboard: false,
     onOpen: vi.fn(),
     onOpenWithDefaultEditor: vi.fn().mockResolvedValue(undefined),
@@ -85,7 +91,6 @@ function createMockActions(): UseSftpPaneActionsResult {
     setPermissionsTarget: vi.fn(),
     setPropertiesTarget: vi.fn(),
     setPreviewContent: vi.fn(),
-    setUploadConflict: vi.fn(),
     handleCreate: vi.fn().mockResolvedValue(undefined),
     handleRename: vi.fn().mockResolvedValue(undefined),
     handlePermissions: vi.fn().mockResolvedValue(undefined),
@@ -96,6 +101,7 @@ describe('SftpPane', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
     useAppStore.setState({ sftpShowHiddenFiles: true });
+    fileListRenderProps.selectedPathsHistory.length = 0;
   });
 
   const createConnection = (): ReturnType<typeof useSftpStore.getState>['connections'][number] => {
@@ -284,5 +290,85 @@ describe('SftpPane', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(actions.onToggleBatchMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes a referentially stable selectedPaths array to the file list', () => {
+    const connection = createConnection();
+    const selected = new Set(['/home/a.txt']);
+    const { rerender } = render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={selected}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={selected}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    const history = fileListRenderProps.selectedPathsHistory;
+    expect(history.length).toBeGreaterThan(1);
+    history.forEach((entry) => expect(entry).toBe(history[0]));
+  });
+
+  it('syncs the initial history entry and navigates back and forward exactly once', async () => {
+    vi.mocked(invokeListLocalDirectory).mockImplementation((path?: string) =>
+      Promise.resolve({
+        path: path || '/home',
+        entries:
+          !path || path === '/home'
+            ? [{ path: '/home/docs', name: 'docs', kind: 'directory' as const }]
+            : [],
+      }),
+    );
+
+    const connection = createConnection();
+    const renderPane = (conn: typeof connection) => (
+      <StrictMode>
+        <SftpPane
+          connection={conn}
+          side="local"
+          actions={createMockActions()}
+          selectedPaths={new Set()}
+          onSelectedPathsChange={vi.fn()}
+        />
+      </StrictMode>
+    );
+    const { container, rerender } = render(renderPane(connection));
+
+    // The first load resolves the real path; once it lands on the connection
+    // it must replace the empty mount-time history entry.
+    await waitFor(() =>
+      expect(useSftpStore.getState().connections[0]?.localPath).toBe('/home'),
+    );
+    rerender(renderPane(useSftpStore.getState().connections[0]!));
+
+    fireEvent.doubleClick(screen.getByTestId('entry-docs'));
+    await waitFor(() =>
+      expect(vi.mocked(invokeListLocalDirectory)).toHaveBeenCalledWith('/home/docs'),
+    );
+
+    const backButton = container.querySelector('.lucide-chevron-left')!.closest('button')!;
+    const forwardButton = container.querySelector('.lucide-chevron-right')!.closest('button')!;
+
+    vi.mocked(invokeListLocalDirectory).mockClear();
+    fireEvent.click(backButton);
+    // Back lands on the real first path — not '' — and StrictMode does not
+    // fire the navigation twice.
+    expect(invokeListLocalDirectory).toHaveBeenCalledTimes(1);
+    expect(invokeListLocalDirectory).toHaveBeenCalledWith('/home');
+
+    fireEvent.click(forwardButton);
+    expect(invokeListLocalDirectory).toHaveBeenCalledTimes(2);
+    expect(invokeListLocalDirectory).toHaveBeenLastCalledWith('/home/docs');
   });
 });

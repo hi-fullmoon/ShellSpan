@@ -252,6 +252,8 @@ export default {
   'sftp.remotePath': '远程路径',
   'sftp.path.home': '主目录',
   'sftp.path.root': '根目录',
+  'sftp.breadcrumb.showHiddenSegments': '显示隐藏的路径',
+  'sftp.breadcrumb.hiddenSegments': '隐藏的路径',
   'sftp.parentDirectory': '上级目录',
   'sftp.filter': '筛选',
   'sftp.dropHint': '拖拽文件到此处',

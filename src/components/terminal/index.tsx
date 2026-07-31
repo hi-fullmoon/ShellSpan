@@ -22,7 +22,9 @@ import {
   findTerminalGroup,
   getTerminalGroups,
   getTerminalSplitDirection,
+  partitionSessionIdsPinnedFirst,
   pruneEmptyTerminalGroups,
+  repartitionTerminalLayoutPinnedFirst,
   replaceTerminalGroup,
   updateTerminalGroup,
   type TerminalGroupSlot,
@@ -51,6 +53,7 @@ const Terminal: React.FC = () => {
     session: TerminalSession;
     x: number;
     y: number;
+    slot: TerminalGroupSlot | null;
   } | null>(null);
   const [split, setSplit] = useState<TerminalSplitState | null>(() => {
     const restored = useTerminalStore.getState().restoredLayout;
@@ -59,8 +62,16 @@ const Terminal: React.FC = () => {
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const terminalAreaRef = useRef<HTMLDivElement>(null);
   const focusedGroupRef = useRef<TerminalGroupSlot>('first');
+  // Mirror of focusedGroupRef for rendering: mutating a ref does not trigger a
+  // re-render, so the focus ring and activeGroup props read this state instead.
+  const [focusedSlot, setFocusedSlot] = useState<TerminalGroupSlot>('first');
   const nextGroupIdRef = useRef(3);
   const restoredLayoutAppliedRef = useRef(false);
+
+  const focusGroup = useCallback((slot: TerminalGroupSlot): void => {
+    focusedGroupRef.current = slot;
+    setFocusedSlot(slot);
+  }, []);
 
   const createGroupId = useCallback((): TerminalGroupSlot => {
     const id = `group-${nextGroupIdRef.current}`;
@@ -152,15 +163,28 @@ const Terminal: React.FC = () => {
     setSplit(pruned);
   }, [sessions]);
 
+  // The layout's sessionIds are the source of truth for tab order while split,
+  // so pin toggles (which only reorder the global sessions array) are mirrored
+  // into every group to keep pinned tabs at the front.
+  useEffect(() => {
+    if (!split) return;
+    const pinnedIds = new Set(
+      sessions.filter((session) => session.pinned).map((session) => session.sessionId),
+    );
+    setSplit((current) => (current
+      ? repartitionTerminalLayoutPinnedFirst(current, (id) => pinnedIds.has(id)) as TerminalSplitState
+      : current));
+  }, [sessions, split]);
+
   // Shortcut-based tab changes target the active group, just like VS Code editor groups.
   useEffect(() => {
     if (!split || !activeSessionId) return;
     const group = getTerminalGroups(split).find((candidate) => candidate.sessionIds.includes(activeSessionId));
     if (!group) return;
-    focusedGroupRef.current = group.id;
+    focusGroup(group.id);
     if (group.activeSessionId === activeSessionId) return;
     setSplit(updateTerminalGroup(split, group.id, (current) => ({ ...current, activeSessionId })) as TerminalSplitState);
-  }, [activeSessionId]);
+  }, [activeSessionId, focusGroup]);
 
   const getGroupRegionAtPoint = useCallback((x: number, y: number): {
     slot: TerminalGroupSlot;
@@ -190,6 +214,25 @@ const Terminal: React.FC = () => {
     }
     return tabs.length;
   }, []);
+
+  // Cross-group drops keep the pinned-first invariant of the target group, so
+  // the insert index (and its indicator) is clamped the same way the drop will
+  // behave: pinned tabs land inside the pinned region, unpinned tabs after it.
+  const getCrossGroupInsertIndex = useCallback((
+    sessionId: string,
+    targetSlot: TerminalGroupSlot,
+    element: HTMLElement,
+    x: number,
+  ): number => {
+    const rawIndex = getTabInsertIndex(element, x);
+    const targetGroup = split ? findTerminalGroup(split, targetSlot) : null;
+    if (!targetGroup) return rawIndex;
+    const pinnedCount = targetGroup.sessionIds.filter(
+      (id) => sessions.find((session) => session.sessionId === id)?.pinned,
+    ).length;
+    const draggedPinned = sessions.find((session) => session.sessionId === sessionId)?.pinned;
+    return draggedPinned ? Math.min(rawIndex, pinnedCount) : Math.max(rawIndex, pinnedCount);
+  }, [getTabInsertIndex, sessions, split]);
 
   const createOrArrangeSplit = useCallback((
     sessionId: string,
@@ -230,7 +273,7 @@ const Terminal: React.FC = () => {
           orientation,
         };
         nextLayout = replaceTerminalGroup(nextLayout, sourceGroup.id, nestedSplit);
-        focusedGroupRef.current = newGroup.id;
+        focusGroup(newGroup.id);
       } else {
         nextLayout = updateTerminalGroup(nextLayout, sourceGroup.id, (group) => ({
           ...group,
@@ -257,7 +300,7 @@ const Terminal: React.FC = () => {
           orientation,
         };
         nextLayout = replaceTerminalGroup(nextLayout, currentTarget.id, nestedSplit);
-        focusedGroupRef.current = newGroup.id;
+        focusGroup(newGroup.id);
       }
       if (nextLayout.kind !== 'split') return false;
       setSplit(nextLayout);
@@ -281,7 +324,7 @@ const Terminal: React.FC = () => {
       kind: 'group', id: incomingFirst ? 'second' : 'first', sessionIds: remainingIds, activeSessionId: baseActiveId,
     };
 
-    focusedGroupRef.current = targetGroup.id;
+    focusGroup(targetGroup.id);
     setSplit({
       kind: 'split',
       first: incomingFirst ? targetGroup : baseGroup,
@@ -291,16 +334,16 @@ const Terminal: React.FC = () => {
     useTerminalStore.getState().setActiveSession(sessionId);
     setDropPreview(null);
     return true;
-  }, [activeSessionId, createGroupId, sessions, split]);
+  }, [activeSessionId, createGroupId, focusGroup, sessions, split]);
 
   const activateGroupTab = useCallback((slot: TerminalGroupSlot, sessionId: string): void => {
-    focusedGroupRef.current = slot;
+    focusGroup(slot);
     setSplit((current) => current
       ? updateTerminalGroup(current, slot, (group) => ({ ...group, activeSessionId: sessionId })) as TerminalSplitState
       : current);
     useTerminalStore.getState().setActiveSession(sessionId);
     focusSession(sessionId);
-  }, [focusSession]);
+  }, [focusGroup, focusSession]);
 
   // Leader-key pane navigation, dispatched from the xterm key handler in
   // TerminalPane (which already consumed the key, so nothing reaches the pty).
@@ -321,9 +364,15 @@ const Terminal: React.FC = () => {
       if (!current) return current;
       const group = findTerminalGroup(current, slot);
       if (!group) return current;
+      const pinnedIds = new Set(
+        useTerminalStore.getState().sessions
+          .filter((session) => session.pinned)
+          .map((session) => session.sessionId),
+      );
       const ids = group.sessionIds.filter((id) => id !== sessionId);
       ids.splice(Math.max(0, Math.min(insertIndex, ids.length)), 0, sessionId);
-      return updateTerminalGroup(current, slot, (value) => ({ ...value, sessionIds: ids })) as TerminalSplitState;
+      const ordered = partitionSessionIdsPinnedFirst(ids, (id) => pinnedIds.has(id));
+      return updateTerminalGroup(current, slot, (value) => ({ ...value, sessionIds: ordered })) as TerminalSplitState;
     });
   }, []);
 
@@ -336,10 +385,10 @@ const Terminal: React.FC = () => {
     const sourceIds = sourceGroup.sessionIds.filter((id) => id !== sessionId);
     const targetIds = targetGroup.sessionIds.filter((id) => id !== sessionId);
     targetIds.splice(Math.max(0, Math.min(insertIndex, targetIds.length)), 0, sessionId);
-    const orderedTargetIds = [
-      ...targetIds.filter((id) => sessions.find((session) => session.sessionId === id)?.pinned),
-      ...targetIds.filter((id) => !sessions.find((session) => session.sessionId === id)?.pinned),
-    ];
+    const orderedTargetIds = partitionSessionIdsPinnedFirst(
+      targetIds,
+      (id) => Boolean(sessions.find((session) => session.sessionId === id)?.pinned),
+    );
     let nextLayout = updateTerminalGroup(current, source, (group) => ({
       ...group,
       sessionIds: sourceIds,
@@ -363,11 +412,11 @@ const Terminal: React.FC = () => {
     } else {
       setSplit(pruned);
     }
-    focusedGroupRef.current = target;
+    focusGroup(target);
     useTerminalStore.getState().setActiveSession(sessionId);
     setDropPreview(null);
     return true;
-  }, [sessions, split]);
+  }, [focusGroup, sessions, split]);
 
   const handleTabDragMove = useCallback((sessionId: string, source: TerminalGroupSlot | null, x: number, y: number): void => {
     if (split && source) {
@@ -378,7 +427,7 @@ const Terminal: React.FC = () => {
       }
       if (target.region === 'tab-bar') {
         setDropPreview(target.slot !== source
-          ? { kind: 'tab-bar', slot: target.slot, insertIndex: getTabInsertIndex(target.element, x) }
+          ? { kind: 'tab-bar', slot: target.slot, insertIndex: getCrossGroupInsertIndex(sessionId, target.slot, target.element, x) }
           : null);
         return;
       }
@@ -391,7 +440,7 @@ const Terminal: React.FC = () => {
       ? getTerminalSplitDirection(content.getBoundingClientRect(), x, y)
       : null;
     setDropPreview(direction && sessions.length > 1 ? { kind: 'split', direction, slot: null } : null);
-  }, [getGroupRegionAtPoint, getTabInsertIndex, sessions.length, split]);
+  }, [getCrossGroupInsertIndex, getGroupRegionAtPoint, sessions.length, split]);
 
   const handleTabDragEnd = useCallback((sessionId: string, source: TerminalGroupSlot | null, x: number, y: number): boolean => {
     if (split && source) {
@@ -400,7 +449,7 @@ const Terminal: React.FC = () => {
       if (!target) return false;
       if (target.region === 'tab-bar') {
         return target.slot !== source
-          ? moveTabToGroup(sessionId, source, target.slot, getTabInsertIndex(target.element, x))
+          ? moveTabToGroup(sessionId, source, target.slot, getCrossGroupInsertIndex(sessionId, target.slot, target.element, x))
           : false;
       }
       const direction = getTerminalSplitDirection(target.element.getBoundingClientRect(), x, y);
@@ -412,7 +461,7 @@ const Terminal: React.FC = () => {
       : null;
     setDropPreview(null);
     return direction ? createOrArrangeSplit(sessionId, direction) : false;
-  }, [createOrArrangeSplit, getGroupRegionAtPoint, getTabInsertIndex, moveTabToGroup, split]);
+  }, [createOrArrangeSplit, getCrossGroupInsertIndex, getGroupRegionAtPoint, moveTabToGroup, split]);
 
   // Leader-key split commands (v/s): split the focused group's active tab.
   useEffect(() => {
@@ -441,7 +490,7 @@ const Terminal: React.FC = () => {
     const groupActiveSession = groupSessions.find(
       (session) => session.sessionId === group.activeSessionId,
     ) ?? groupSessions[0] ?? null;
-    const focused = focusedGroupRef.current === slot;
+    const focused = focusedSlot === slot;
 
     return (
       <div
@@ -451,7 +500,7 @@ const Terminal: React.FC = () => {
           focused && 'ring-1 ring-inset ring-app-primary/70',
         )}
         onPointerDown={() => {
-          focusedGroupRef.current = slot;
+          focusGroup(slot);
           if (groupActiveSession) {
             useTerminalStore.getState().setActiveSession(groupActiveSession.sessionId);
             focusSession(groupActiveSession.sessionId);
@@ -464,10 +513,10 @@ const Terminal: React.FC = () => {
           forceVisible
           activeGroup={focused}
           onNewTabClick={() => {
-            focusedGroupRef.current = slot;
+            focusGroup(slot);
             setNewTabMenuOpen(true);
           }}
-          onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y })}
+          onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot })}
           onTabActivate={(sessionId) => activateGroupTab(slot, sessionId)}
           onTabReorder={(sessionId, index) => reorderGroupTabs(slot, sessionId, index)}
           onTabDragMove={(sessionId, x, y) => handleTabDragMove(sessionId, slot, x, y)}
@@ -516,7 +565,7 @@ const Terminal: React.FC = () => {
       {sessions.length > 0 && !split && (
         <TerminalTabBar
           onNewTabClick={() => setNewTabMenuOpen(true)}
-          onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y })}
+          onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot: null })}
           onTabActivate={(sessionId) => {
             useTerminalStore.getState().setActiveSession(sessionId);
             focusSession(sessionId);
@@ -571,6 +620,9 @@ const Terminal: React.FC = () => {
         x={contextMenu?.x ?? 0}
         y={contextMenu?.y ?? 0}
         session={contextMenu?.session ?? null}
+        orderedSessionIds={contextMenu?.slot && split
+          ? findTerminalGroup(split, contextMenu.slot)?.sessionIds
+          : undefined}
         onClose={() => setContextMenu(null)}
         canSplit={sessions.length > 1}
         isSplit={Boolean(split)}

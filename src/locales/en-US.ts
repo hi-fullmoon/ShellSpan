@@ -252,6 +252,8 @@ export default {
   'sftp.remotePath': 'Remote Path',
   'sftp.path.home': 'Home',
   'sftp.path.root': 'Root',
+  'sftp.breadcrumb.showHiddenSegments': 'Show hidden path segments',
+  'sftp.breadcrumb.hiddenSegments': 'Hidden path segments',
   'sftp.parentDirectory': 'Parent Directory',
   'sftp.filter': 'Filter',
   'sftp.dropHint': 'Drop files here',

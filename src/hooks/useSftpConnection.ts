@@ -2,7 +2,9 @@ import { useCallback } from 'react';
 import {
   buildRemoteConnectionRequest,
   invokeCopyRemotePath,
+  invokeCancelDelete,
   invokeCancelDownload,
+  invokeCancelUpload,
   invokeCreateRemoteEntry,
   invokeDeleteRemotePath,
   invokeDownloadRemotePaths,
@@ -42,6 +44,21 @@ function createOperationId(connectionId: string, kind: string): string {
   return `${connectionId}-${kind}-${crypto.randomUUID()}`;
 }
 
+// Per-pane monotonically increasing request ids for directory listings. Only
+// the latest request is allowed to write results back or clear the loading
+// flag, so a slow stale response cannot clobber a newer listing.
+const directoryListRequestIds = new Map<string, number>();
+
+function nextDirectoryListRequestId(key: string): number {
+  const next = (directoryListRequestIds.get(key) ?? 0) + 1;
+  directoryListRequestIds.set(key, next);
+  return next;
+}
+
+function isLatestDirectoryListRequest(key: string, requestId: number): boolean {
+  return directoryListRequestIds.get(key) === requestId;
+}
+
 async function runWithConfiguredRetries(
   task: () => Promise<void>,
   shouldRetry: () => boolean = () => true,
@@ -56,7 +73,16 @@ async function runWithConfiguredRetries(
       lastError = error;
       if (!shouldRetry()) throw error;
       if (attempt < retryCount) {
-        await new Promise((resolve) => window.setTimeout(resolve, 750 * (attempt + 1)));
+        // Sleep in short slices so a cancellation observed by shouldRetry
+        // interrupts the backoff instead of waiting out the full delay.
+        const delayMs = 750 * (attempt + 1);
+        const sliceMs = 100;
+        for (let elapsed = 0; elapsed < delayMs; elapsed += sliceMs) {
+          if (!shouldRetry()) throw lastError;
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, Math.min(sliceMs, delayMs - elapsed)),
+          );
+        }
       }
     }
   }
@@ -90,11 +116,20 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   const markOperationFailed = useTransferStore(
     (state) => state.markOperationFailed,
   );
+  const markOperationCompleted = useTransferStore(
+    (state) => state.markOperationCompleted,
+  );
+  const markOperationCancelled = useTransferStore(
+    (state) => state.markOperationCancelled,
+  );
   const updateDelete = useTransferStore((state) => state.updateDelete);
   const setOperationUndo = useTransferStore((state) => state.setOperationUndo);
 
   const loadRemoteDirectory = useCallback(
     async (path?: string) => {
+      const requestKey = `${connection.id}:${side}`;
+      const requestId = nextDirectoryListRequestId(requestKey);
+      const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId);
       setLoading(connection.id, side, true);
       setError(connection.id, side);
       try {
@@ -102,6 +137,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           ...remoteConnection,
           path,
         });
+        if (!isLatest()) return;
         setPath(connection.id, side, listing.path);
         setEntries(connection.id, side, listing.entries);
       } catch (error) {
@@ -121,24 +157,40 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
             if (recovered) {
               const newRequest = buildRemoteConnectionRequest(recovered);
               updateConnectionRequest(connection.id, side, newRequest);
-              const retryListing = await invokeListRemoteDirectory({
-                ...newRequest,
-                path,
-              });
-              setPath(connection.id, side, retryListing.path);
-              setEntries(connection.id, side, retryListing.entries);
-              return;
+              try {
+                const retryListing = await invokeListRemoteDirectory({
+                  ...newRequest,
+                  path,
+                });
+                if (!isLatest()) return;
+                setPath(connection.id, side, retryListing.path);
+                setEntries(connection.id, side, retryListing.entries);
+                return;
+              } catch (retryError) {
+                // Fall through to the shared error path instead of letting the
+                // retry failure escape as an unhandled rejection.
+                if (!isLatest()) return;
+                setError(
+                  connection.id,
+                  side,
+                  getLocalizedErrorMessage(retryError),
+                );
+                return;
+              }
             }
           }
         }
 
+        if (!isLatest()) return;
         setError(
           connection.id,
           side,
           getLocalizedErrorMessage(error),
         );
       } finally {
-        setLoading(connection.id, side, false);
+        if (isLatest()) {
+          setLoading(connection.id, side, false);
+        }
       }
     },
     [connection.id, connection.leftProfileId, connection.profileId, remoteConnection, setPath, setEntries, setLoading, setError, updateConnectionRequest, side],
@@ -195,6 +247,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         totalSteps: paths.length,
         completedSteps: 0,
         status: 'running',
+        cancel: () => invokeCancelDelete(operationId),
       });
       const trashedPaths: TrashedRemotePath[] = [];
 
@@ -238,15 +291,32 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           }
 
           useTransferStore.getState().removeOperation(operationId);
+          // Read the latest connection from the store: the pane may have been
+          // reconnected with different credentials since the delete started.
+          const latestConnection = useSftpStore
+            .getState()
+            .connections.find((item) => item.id === connection.id);
+          const cleanupConnection = latestConnection
+            ? getSftpPaneConnection(latestConnection, side)
+            : remoteConnection;
           void Promise.allSettled(
             trashedPaths.map((trashedPath, index) =>
               invokeDeleteRemotePath({
-                ...remoteConnection,
+                ...cleanupConnection,
                 path: trashedPath.trashPath,
                 operationId: `${operationId}-cleanup-${index}`,
               }),
             ),
-          );
+          ).then((results) => {
+            results.forEach((result, index) => {
+              if (result.status === 'rejected') {
+                logger.error(
+                  `Failed to purge trashed path ${trashedPaths[index]?.trashPath}`,
+                  result.reason,
+                );
+              }
+            });
+          });
         }, DELETE_UNDO_WINDOW_MS);
         await loadRemoteDirectory(panePath);
       } catch (error) {
@@ -278,6 +348,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       markOperationFailed,
       setOperationUndo,
       updateDelete,
+      side,
     ],
   );
 
@@ -294,7 +365,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   );
 
   const uploadLocalPaths = useCallback(
-    async (localPaths: string[], destinationDirectory: string, operationId = `${connection.id}-upload-${Date.now()}`, conflictPolicies: UploadConflictPolicy[] = []) => {
+    async (localPaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'upload'), conflictPolicies: UploadConflictPolicy[] = []) => {
       const runUpload = async (): Promise<void> => {
         markOperationRunning(operationId);
         try {
@@ -307,6 +378,17 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
               operationId,
             }),
           );
+          // The backend's final progress event is the only other completion
+          // signal; mark completion explicitly in case that event is lost.
+          const operation = useTransferStore.getState().operations.find(
+            (item) => item.operationId === operationId,
+          );
+          if (operation?.status === 'cancelling') {
+            // The upload finished before the cancel request took effect.
+            markOperationCancelled(operationId);
+          } else {
+            markOperationCompleted(operationId);
+          }
         } catch (error) {
           markOperationFailed(
             operationId,
@@ -328,6 +410,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         completedSteps: 0,
         status: 'running',
         retry: runUpload,
+        cancel: () => invokeCancelUpload(operationId),
       });
       await runUpload();
     },
@@ -339,6 +422,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       addOperation,
       markOperationFailed,
       markOperationRunning,
+      markOperationCompleted,
+      markOperationCancelled,
     ],
   );
 
@@ -358,6 +443,17 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
                 (item) => item.operationId === operationId,
               )?.status !== 'cancelling',
           );
+          // The backend's final progress event is the only other completion
+          // signal; mark completion explicitly in case that event is lost.
+          const operation = useTransferStore.getState().operations.find(
+            (item) => item.operationId === operationId,
+          );
+          if (operation?.status === 'cancelling') {
+            // The download finished before the cancel request took effect.
+            markOperationCancelled(operationId);
+          } else {
+            markOperationCompleted(operationId);
+          }
         } catch (error) {
           const operation = useTransferStore.getState().operations.find(
             (item) => item.operationId === operationId,
@@ -389,7 +485,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       });
       await runDownload();
     },
-    [remoteConnection, remoteConnectionKey, connection.id, addOperation, markOperationFailed],
+    [remoteConnection, remoteConnectionKey, connection.id, addOperation, markOperationFailed, markOperationCompleted, markOperationCancelled],
   );
 
   const openRemoteFile = useCallback(

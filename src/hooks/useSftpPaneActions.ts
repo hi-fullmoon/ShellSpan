@@ -44,7 +44,6 @@ export interface UseSftpPaneActionsResult {
   permissionsTarget?: RemoteFileEntry;
   propertiesTarget?: FileEntry;
   previewContent?: ReadRemoteFileResponse;
-  uploadConflict?: PendingUploadConflict;
   hasLocalClipboard: boolean;
   onOpen: (entry: FileEntry) => void;
   onOpenWithDefaultEditor: (entry?: FileEntry) => Promise<void>;
@@ -75,7 +74,6 @@ export interface UseSftpPaneActionsResult {
   setPermissionsTarget: (entry?: RemoteFileEntry) => void;
   setPropertiesTarget: (entry?: FileEntry) => void;
   setPreviewContent: (content?: ReadRemoteFileResponse) => void;
-  setUploadConflict: (conflict?: PendingUploadConflict) => void;
   handleCreate: (name: string, kind: 'file' | 'directory') => Promise<void>;
   handleRename: (newName: string) => Promise<void>;
   handlePermissions: (permissions: number) => Promise<void>;
@@ -89,7 +87,7 @@ function writeClipboardText(value: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(value);
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const textarea = document.createElement('textarea');
     textarea.value = value;
     textarea.style.position = 'fixed';
@@ -97,9 +95,18 @@ function writeClipboardText(value: string): Promise<void> {
     textarea.style.pointerEvents = 'none';
     document.body.append(textarea);
     textarea.select();
-    document.execCommand('copy');
+    let succeeded = false;
+    try {
+      succeeded = document.execCommand('copy');
+    } catch {
+      succeeded = false;
+    }
     textarea.remove();
-    resolve();
+    if (succeeded) {
+      resolve();
+    } else {
+      reject(new Error('Copy to clipboard failed'));
+    }
   });
 }
 
@@ -144,14 +151,15 @@ export function useSftpPaneActions(
   const setRemoteClipboard = useSftpStore((state) => state.setRemoteClipboard);
   const addRemoteBookmark = useSftpStore((state) => state.addRemoteBookmark);
   const removeRemoteBookmark = useSftpStore((state) => state.removeRemoteBookmark);
+  // App-global local clipboard: copy in one local pane, paste in any other.
+  const localClipboard = useSftpStore((state) => state.localClipboard);
+  const setLocalClipboard = useSftpStore((state) => state.setLocalClipboard);
 
   const [createMode, setCreateMode] = useState<'file' | 'folder' | null>(null);
   const [renameTarget, setRenameTarget] = useState<FileEntry | undefined>(undefined);
   const [permissionsTarget, setPermissionsTarget] = useState<RemoteFileEntry | undefined>(undefined);
   const [propertiesTarget, setPropertiesTarget] = useState<FileEntry | undefined>(undefined);
   const [previewContent, setPreviewContent] = useState<ReadRemoteFileResponse | undefined>(undefined);
-  const [uploadConflict, setUploadConflict] = useState<PendingUploadConflict | undefined>(undefined);
-  const [localClipboard, setLocalClipboard] = useState<FileEntry[]>([]);
 
   const selectedPaths = pane.selectedPaths;
   const selectedEntries = useMemo(
@@ -317,21 +325,29 @@ export function useSftpPaneActions(
       return;
     }
     if (!connection.remoteClipboard) return;
+    const clipboard = connection.remoteClipboard;
+    const destinationBase = path === '/' ? '' : path.replace(/\/+$/, '');
+    const destinationPath = `${destinationBase}/${clipboard.sourceName}`;
+    if (
+      hasActivePathOperation(clipboard.sourceConnectionKey, [clipboard.sourcePath]) ||
+      pathsAreBusy([destinationPath])
+    ) {
+      reportBusyPaths();
+      return;
+    }
     try {
-      if (connection.remoteClipboard.sourceConnectionKey === remoteConnectionKey) {
-        await copyRemotePath(connection.remoteClipboard.sourcePath, path);
+      if (clipboard.sourceConnectionKey === remoteConnectionKey) {
+        await copyRemotePath(clipboard.sourcePath, path);
       } else {
         const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
         const request = {
-          sourceConnection: connection.remoteClipboard.sourceConnection,
+          sourceConnection: clipboard.sourceConnection,
           destinationConnection: remoteConnection,
-          sourcePaths: [connection.remoteClipboard.sourcePath],
+          sourcePaths: [clipboard.sourcePath],
           destinationDirectory: path,
           conflictPolicies: ['fail'] as UploadConflictPolicy[],
           operationId,
         };
-        const destinationBase = path === '/' ? '' : path.replace(/\/+$/, '');
-        const destinationPath = `${destinationBase}/${connection.remoteClipboard.sourceName}`;
         const runRemoteCopy = async (): Promise<void> => {
           markOperationRunning(operationId);
           try {
@@ -356,16 +372,16 @@ export function useSftpPaneActions(
         addOperation({
           operationId,
           kind: 'remote-copy',
-          connectionId: connection.remoteClipboard.sourceConnectionKey,
-          paths: [connection.remoteClipboard.sourcePath],
+          connectionId: clipboard.sourceConnectionKey,
+          paths: [clipboard.sourcePath],
           pathScopes: [
             {
-              connectionId: connection.remoteClipboard.sourceConnectionKey,
-              paths: [connection.remoteClipboard.sourcePath],
+              connectionId: clipboard.sourceConnectionKey,
+              paths: [clipboard.sourcePath],
             },
             { connectionId: remoteConnectionKey, paths: [destinationPath] },
           ],
-          currentPath: connection.remoteClipboard.sourcePath,
+          currentPath: clipboard.sourcePath,
           totalBytes: 0,
           processedBytes: 0,
           totalSteps: 1,
@@ -376,13 +392,12 @@ export function useSftpPaneActions(
         });
         await runRemoteCopy();
       }
-      await reload();
       clearSelection();
     } catch (err) {
       logger.warn('Paste failed', err);
       error(err instanceof Error ? err.message : String(err));
     }
-  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, reload, remoteConnection, remoteConnectionKey, t, error]);
+  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, pathsAreBusy, reload, remoteConnection, remoteConnectionKey, reportBusyPaths, t, error]);
 
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
@@ -456,7 +471,6 @@ export function useSftpPaneActions(
       if (isLocal) return;
       try {
         await createRemoteEntry(path, name, kind);
-        await reload();
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to create ${kind}: ${name}`, err);
@@ -465,7 +479,7 @@ export function useSftpPaneActions(
         setCreateMode(null);
       }
     },
-    [clearSelection, createRemoteEntry, isLocal, path, reload, error],
+    [clearSelection, createRemoteEntry, isLocal, path, error],
   );
 
   const onRename = useCallback(
@@ -483,6 +497,7 @@ export function useSftpPaneActions(
       try {
         if (isLocal) {
           await invokeRenameLocalPath(renameTarget.path, newName);
+          await reload();
         } else {
           if (pathsAreBusy([renameTarget.path])) {
             reportBusyPaths();
@@ -491,7 +506,6 @@ export function useSftpPaneActions(
           }
           await renameRemotePath(renameTarget.path, newName);
         }
-        await reload();
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to rename: ${renameTarget.path}`, err);
@@ -524,14 +538,13 @@ export function useSftpPaneActions(
       }
       try {
         await deleteRemotePaths(targets.map((e) => e.path));
-        await reload();
         clearSelection();
       } catch (err) {
         logger.warn('Failed to delete remote paths', err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
-    [clearSelection, deleteRemotePaths, isLocal, pathsAreBusy, reload, reportBusyPaths, selectedEntries, error],
+    [clearSelection, deleteRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
   );
 
   const onUploadFiles = useCallback(async () => {
@@ -539,78 +552,48 @@ export function useSftpPaneActions(
     try {
       const files = await invokePickLocalFiles();
       if (!files.length) return;
-      const operationId = `${connection.id}-upload-${Date.now()}`;
-      addOperation({
-        operationId,
-        kind: 'upload',
-        currentPath: files[0],
-        totalBytes: 0,
-        processedBytes: 0,
-        totalSteps: files.length,
-        completedSteps: 0,
-      });
       const defaultPolicy = useAppStore.getState().sftpConflictPolicy;
       const policies: UploadConflictPolicy[] = files.map(() =>
         defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
       );
-      await uploadLocalPaths(files, path, operationId, policies);
+      await uploadLocalPaths(files, path, undefined, policies);
       await reload();
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload files', err);
       error(err instanceof Error ? err.message : String(err));
     }
-  }, [addOperation, connection.id, clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
+  }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
 
   const onUploadFolders = useCallback(async () => {
     if (isLocal) return;
     try {
       const folders = await invokePickLocalFolder();
       if (!folders.length) return;
-      const operationId = `${connection.id}-upload-${Date.now()}`;
-      addOperation({
-        operationId,
-        kind: 'upload',
-        currentPath: folders[0],
-        totalBytes: 0,
-        processedBytes: 0,
-        totalSteps: folders.length,
-        completedSteps: 0,
-      });
       const defaultPolicy = useAppStore.getState().sftpConflictPolicy;
       const policies: UploadConflictPolicy[] = folders.map(() =>
         defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
       );
-      await uploadLocalPaths(folders, path, operationId, policies);
+      await uploadLocalPaths(folders, path, undefined, policies);
       await reload();
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload folders', err);
       error(err instanceof Error ? err.message : String(err));
     }
-  }, [addOperation, connection.id, clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
+  }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
 
   const uploadWithPolicies = useCallback(
     async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
       if (isLocal) return;
       try {
-        const operationId = `${connection.id}-upload-${Date.now()}`;
-        addOperation({
-          operationId,
-          kind: 'upload',
-          currentPath: localPaths[0],
-          totalBytes: 0,
-          processedBytes: 0,
-          totalSteps: localPaths.length,
-          completedSteps: 0,
-        });
-        await uploadLocalPaths(localPaths, destinationDirectory, operationId, policies);
+        await uploadLocalPaths(localPaths, destinationDirectory, undefined, policies);
       } catch (err) {
         logger.warn('Upload with conflict policies failed', err);
         error(err instanceof Error ? err.message : String(err));
       }
     },
-    [addOperation, connection.id, isLocal, uploadLocalPaths, error],
+    [isLocal, uploadLocalPaths, error],
   );
 
   const copyWithPolicies = useCallback(
@@ -671,7 +654,6 @@ export function useSftpPaneActions(
       if (isLocal || !permissionsTarget) return;
       try {
         await updateRemotePermissions(permissionsTarget.path, permissions);
-        await reload();
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to update permissions: ${permissionsTarget.path}`, err);
@@ -680,7 +662,7 @@ export function useSftpPaneActions(
         setPermissionsTarget(undefined);
       }
     },
-    [clearSelection, isLocal, permissionsTarget, reload, updateRemotePermissions, error],
+    [clearSelection, isLocal, permissionsTarget, updateRemotePermissions, error],
   );
 
   const onProperties = useCallback(
@@ -729,7 +711,6 @@ export function useSftpPaneActions(
     permissionsTarget,
     propertiesTarget,
     previewContent,
-    uploadConflict,
     hasLocalClipboard: localClipboard.length > 0,
     onOpen,
     onOpenWithDefaultEditor,
@@ -759,7 +740,6 @@ export function useSftpPaneActions(
     setPermissionsTarget,
     setPropertiesTarget,
     setPreviewContent,
-    setUploadConflict,
     handleCreate,
     handleRename,
     handlePermissions,

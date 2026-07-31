@@ -72,7 +72,7 @@ export interface SftpFileContextMenuProps {
   batchMode: boolean;
   selectionBusy?: boolean;
   onClose: () => void;
-  onAction: (action: SftpFileContextMenuAction) => void;
+  onAction: (action: SftpFileContextMenuAction, targets?: FileEntry[]) => void;
 }
 
 interface MenuItemProps {
@@ -86,6 +86,7 @@ interface MenuItemProps {
 const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children, danger }) => (
   <button
     type="button"
+    role="menuitem"
     onClick={onClick}
     disabled={disabled}
     className={cn(
@@ -165,7 +166,9 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   };
 
   const confirmDelete = (): void => {
-    onAction('delete');
+    // Hand the snapshot taken when the dialog opened to the delete action, so
+    // a selection change while the dialog was open cannot retarget the delete.
+    onAction('delete', deleteTargets);
     setDeleteTargets([]);
   };
 
@@ -178,6 +181,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
       {open && deleteTargets.length === 0 && (
       <div
         ref={menuRef}
+        role="menu"
         className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
         style={position}
       >

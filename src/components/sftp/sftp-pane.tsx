@@ -96,6 +96,27 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       stack: [path],
       index: 0,
     });
+    // Mirror of `history` for event handlers: reading the ref keeps back /
+    // forward navigation out of setState updaters, so StrictMode's double
+    // invocation cannot fire the directory load twice.
+    const historyRef = useRef(history);
+    const updateHistory = useCallback((next: HistoryState): void => {
+      historyRef.current = next;
+      setHistory(next);
+    }, []);
+
+    // The pane mounts with an empty path and the real path only arrives once
+    // the first directory load resolves. Sync that first entry so navigating
+    // back can never land on the empty path.
+    const initialPathSyncedRef = useRef(false);
+    useEffect(() => {
+      if (initialPathSyncedRef.current || !path) return;
+      initialPathSyncedRef.current = true;
+      const current = historyRef.current;
+      if (current.index === 0 && current.stack.length === 1 && current.stack[0] !== path) {
+        updateHistory({ stack: [path], index: 0 });
+      }
+    }, [path, updateHistory]);
     const [fileContextMenu, setFileContextMenu] = useState<{
       x: number;
       y: number;
@@ -137,33 +158,31 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
         onSelectedPathsChange(new Set());
 
         if (pushHistory) {
-          setHistory((prev) => {
-            const stack = prev.stack.slice(0, prev.index + 1);
-            if (stack[stack.length - 1] === target) return prev;
-            return { stack: [...stack, target], index: stack.length };
-          });
+          const current = historyRef.current;
+          const stack = current.stack.slice(0, current.index + 1);
+          if (stack[stack.length - 1] !== target) {
+            updateHistory({ stack: [...stack, target], index: stack.length });
+          }
         }
       },
-      [isLocal, loadLocalDirectory, loadRemoteDirectory, onSelectedPathsChange],
+      [isLocal, loadLocalDirectory, loadRemoteDirectory, onSelectedPathsChange, updateHistory],
     );
 
     const goBack = useCallback((): void => {
-      setHistory((prev) => {
-        if (prev.index <= 0) return prev;
-        const nextIndex = prev.index - 1;
-        navigateTo(prev.stack[nextIndex], false);
-        return { ...prev, index: nextIndex };
-      });
-    }, [navigateTo]);
+      const current = historyRef.current;
+      if (current.index <= 0) return;
+      const nextIndex = current.index - 1;
+      navigateTo(current.stack[nextIndex], false);
+      updateHistory({ ...current, index: nextIndex });
+    }, [navigateTo, updateHistory]);
 
     const goForward = useCallback((): void => {
-      setHistory((prev) => {
-        if (prev.index >= prev.stack.length - 1) return prev;
-        const nextIndex = prev.index + 1;
-        navigateTo(prev.stack[nextIndex], false);
-        return { ...prev, index: nextIndex };
-      });
-    }, [navigateTo]);
+      const current = historyRef.current;
+      if (current.index >= current.stack.length - 1) return;
+      const nextIndex = current.index + 1;
+      navigateTo(current.stack[nextIndex], false);
+      updateHistory({ ...current, index: nextIndex });
+    }, [navigateTo, updateHistory]);
 
     const handleParentDirectory = useCallback((): void => {
       navigateTo(parentPortablePath(path));
@@ -178,7 +197,9 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
 
     const handleDoubleClick = useCallback(
       (entry: FileEntry): void => {
-        if (entry.kind === 'directory') {
+        // Symlinks may point at a directory; try navigating and let a failure
+        // surface through the pane's existing error state.
+        if (entry.kind === 'directory' || entry.kind === 'symlink') {
           navigateTo(entry.path);
         }
       },
@@ -210,6 +231,9 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const paneTitle = isLocal ? t('sftp.local') : side === 'local' ? (connection.leftTitle ?? connection.title) : connection.title;
 
     const selectedEntries = useMemo(() => visibleEntries.filter((entry) => selectedPaths.has(entry.path)), [visibleEntries, selectedPaths]);
+    // Stable array for SftpFileList: a fresh Array.from on every render would
+    // defeat its memoized selection set on each transfer progress update.
+    const selectedPathList = useMemo(() => Array.from(selectedPaths), [selectedPaths]);
     const transferOperations = useTransferStore((state) => state.operations);
     const selectionBusy =
       !isLocal &&
@@ -244,11 +268,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, [blankContextMenu, bookmarkMenu, fileContextMenu, handleExitBatchMode, pane.batchMode]);
 
     const handleFileContextMenuAction = useCallback(
-      (action: SftpFileContextMenuAction): void => {
+      (action: SftpFileContextMenuAction, targets?: FileEntry[]): void => {
         switch (action) {
-          case 'open':
-            actions.onOpen(selectedEntries[0]!);
+          case 'open': {
+            const target = selectedEntries[0];
+            if (target) actions.onOpen(target);
             break;
+          }
           case 'openWithDefaultEditor':
             void actions.onOpenWithDefaultEditor(singleSelection);
             break;
@@ -268,7 +294,9 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             actions.onCopy(singleSelection);
             break;
           case 'delete':
-            void actions.onDelete(selectedEntries);
+            // The confirmation dialog snapshots its targets while open; prefer
+            // that snapshot over the live selection, which may have changed.
+            void actions.onDelete(targets?.length ? targets : selectedEntries);
             break;
           case 'copyName':
             void actions.onCopyName(singleSelection);
@@ -528,7 +556,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               entries={visibleEntries}
               side={side}
               localMode={isLocal}
-              selectedPaths={Array.from(selectedPaths)}
+              selectedPaths={selectedPathList}
               filterQuery={searchQuery}
               batchMode={pane.batchMode}
               currentPath={path}

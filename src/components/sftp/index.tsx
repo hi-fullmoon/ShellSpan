@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderIcon, ServerIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
@@ -197,8 +197,14 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   const markTransferFailed = useTransferStore((state) => state.markOperationFailed);
   const markTransferCancelled = useTransferStore((state) => state.markOperationCancelled);
 
-  const selectedRemotePaths = new Set(connection.remotePane.selectedPaths);
-  const selectedLocalPaths = new Set(connection.localPane.selectedPaths);
+  const selectedRemotePaths = useMemo(
+    () => new Set(connection.remotePane.selectedPaths),
+    [connection.remotePane.selectedPaths],
+  );
+  const selectedLocalPaths = useMemo(
+    () => new Set(connection.localPane.selectedPaths),
+    [connection.localPane.selectedPaths],
+  );
 
   const uploadQueueRef = useRef<UploadQueue | null>(null);
   const [uploadConflict, setUploadConflict] = useState<PendingUploadConflict | undefined>(undefined);
@@ -234,12 +240,27 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     const queue = uploadQueueRef.current;
     if (!queue) return;
 
-    const entries = queue.side === 'local' ? connection.localEntries : connection.remoteEntries;
-    const existingByName = new Map(
-      entries.map((entry) => [entry.name, entry]),
-    );
-
     while (queue.index < queue.paths.length) {
+      // Read the latest entries on every conflict check: a refresh landing
+      // while the queue waits on a conflict dialog must not be judged against
+      // the snapshot taken when the queue started.
+      const latestConnection = useSftpStore
+        .getState()
+        .connections.find((candidate) => candidate.id === connection.id);
+      const latestEntries =
+        (queue.side === 'local' ? latestConnection?.localEntries : latestConnection?.remoteEntries) ?? [];
+      const existingByName = new Map(latestEntries.map((entry) => [entry.name, entry]));
+      // Names claimed earlier in this batch are not in the listing yet, but
+      // they will be once the upload runs. Count them as conflicts too,
+      // otherwise a second same-name file would be dispatched with a 'fail'
+      // policy and silently never arrive.
+      for (const acceptedPath of queue.accepted) {
+        const acceptedName = localPathName(acceptedPath);
+        if (!existingByName.has(acceptedName)) {
+          existingByName.set(acceptedName, { path: acceptedPath, name: acceptedName, kind: 'file' });
+        }
+      }
+
       const path = queue.paths[queue.index];
       const name = localPathName(path);
       const targetLocal = queue.side === 'local' ? leftIsLocal : rightIsLocal;
@@ -303,93 +324,101 @@ export const SftpContent: React.FC<SftpContentProps> = ({
       return;
     }
 
-    if (queue.accepted.length > 0) {
-      const targetLocal = queue.side === 'local' ? leftIsLocal : rightIsLocal;
-      if (targetLocal && queue.sourceLocal) {
-        const targetActions = queue.side === 'local' ? localActions : remoteActions;
-        await targetActions.copyWithPolicies(
-          queue.accepted,
-          queue.destination,
-          queue.policies,
-        );
-      } else if (targetLocal && queue.sourceSide) {
-        const sourceRemote = queue.sourceSide === 'local' ? leftRemote : rightRemote;
-        await sourceRemote.downloadRemotePaths(queue.accepted, queue.destination);
-      } else if (queue.sourceLocal) {
-        const targetActions = queue.side === 'local' ? localActions : remoteActions;
-        await targetActions.uploadWithPolicies(
-          queue.accepted,
-          queue.destination,
-          queue.policies,
-        );
-      } else if (queue.sourceSide) {
-        const sourceConnectionKey = getSftpPaneConnectionKey(connection, queue.sourceSide);
-        const destinationConnectionKey = getSftpPaneConnectionKey(connection, queue.side);
-        const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
-        const request = {
-          sourceConnection: getSftpPaneConnection(connection, queue.sourceSide),
-          destinationConnection: getSftpPaneConnection(connection, queue.side),
-          sourcePaths: queue.accepted,
-          destinationDirectory: queue.destination,
-          conflictPolicies: queue.policies,
-          operationId,
-        };
-        const targetRemote = queue.side === 'local' ? leftRemote : rightRemote;
-        const runRemoteCopy = async (): Promise<void> => {
-          markTransferRunning(operationId);
-          try {
-            await invokeCopyRemoteToRemote(request);
-            markTransferCompleted(operationId);
-            void targetRemote.loadRemoteDirectory(queue.destination);
-          } catch (copyError) {
-            const operation = useTransferStore.getState().operations.find(
-              (item) => item.operationId === operationId,
-            );
-            if (operation?.status === 'cancelling') {
-              markTransferCancelled(operationId);
-              return;
+    try {
+      if (queue.accepted.length > 0) {
+        const targetLocal = queue.side === 'local' ? leftIsLocal : rightIsLocal;
+        if (targetLocal && queue.sourceLocal) {
+          const targetActions = queue.side === 'local' ? localActions : remoteActions;
+          await targetActions.copyWithPolicies(
+            queue.accepted,
+            queue.destination,
+            queue.policies,
+          );
+        } else if (targetLocal && queue.sourceSide) {
+          const sourceRemote = queue.sourceSide === 'local' ? leftRemote : rightRemote;
+          await sourceRemote.downloadRemotePaths(queue.accepted, queue.destination);
+        } else if (queue.sourceLocal) {
+          const targetActions = queue.side === 'local' ? localActions : remoteActions;
+          await targetActions.uploadWithPolicies(
+            queue.accepted,
+            queue.destination,
+            queue.policies,
+          );
+        } else if (queue.sourceSide) {
+          const sourceConnectionKey = getSftpPaneConnectionKey(connection, queue.sourceSide);
+          const destinationConnectionKey = getSftpPaneConnectionKey(connection, queue.side);
+          const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
+          const request = {
+            sourceConnection: getSftpPaneConnection(connection, queue.sourceSide),
+            destinationConnection: getSftpPaneConnection(connection, queue.side),
+            sourcePaths: queue.accepted,
+            destinationDirectory: queue.destination,
+            conflictPolicies: queue.policies,
+            operationId,
+          };
+          const targetRemote = queue.side === 'local' ? leftRemote : rightRemote;
+          const runRemoteCopy = async (): Promise<void> => {
+            markTransferRunning(operationId);
+            try {
+              await invokeCopyRemoteToRemote(request);
+              markTransferCompleted(operationId);
+              void targetRemote.loadRemoteDirectory(queue.destination);
+            } catch (copyError) {
+              const operation = useTransferStore.getState().operations.find(
+                (item) => item.operationId === operationId,
+              );
+              if (operation?.status === 'cancelling') {
+                markTransferCancelled(operationId);
+                return;
+              }
+              markTransferFailed(
+                operationId,
+                copyError instanceof Error ? copyError.message : String(copyError),
+              );
+              throw copyError;
             }
-            markTransferFailed(
-              operationId,
-              copyError instanceof Error ? copyError.message : String(copyError),
-            );
-            throw copyError;
+          };
+          addTransferOperation({
+            operationId,
+            kind: 'remote-copy',
+            connectionId: sourceConnectionKey,
+            paths: queue.accepted,
+            pathScopes: [
+              { connectionId: sourceConnectionKey, paths: queue.accepted },
+              {
+                connectionId: destinationConnectionKey,
+                paths: queue.accepted.map((path) =>
+                  remoteDestinationPath(queue.destination, path),
+                ),
+              },
+            ],
+            currentPath: queue.accepted[0],
+            totalBytes: 0,
+            processedBytes: 0,
+            totalSteps: queue.accepted.length,
+            completedSteps: 0,
+            status: 'running',
+            retry: runRemoteCopy,
+            cancel: () => invokeCancelRemoteCopy(operationId),
+          });
+          try {
+            await runRemoteCopy();
+          } catch {
+            // The task row keeps the failure and retry action visible.
           }
-        };
-        addTransferOperation({
-          operationId,
-          kind: 'remote-copy',
-          connectionId: sourceConnectionKey,
-          paths: queue.accepted,
-          pathScopes: [
-            { connectionId: sourceConnectionKey, paths: queue.accepted },
-            {
-              connectionId: destinationConnectionKey,
-              paths: queue.accepted.map((path) =>
-                remoteDestinationPath(queue.destination, path),
-              ),
-            },
-          ],
-          currentPath: queue.accepted[0],
-          totalBytes: 0,
-          processedBytes: 0,
-          totalSteps: queue.accepted.length,
-          completedSteps: 0,
-          status: 'running',
-          retry: runRemoteCopy,
-          cancel: () => invokeCancelRemoteCopy(operationId),
-        });
-        try {
-          await runRemoteCopy();
-        } catch {
-          // The task row keeps the failure and retry action visible.
         }
       }
+    } catch {
+      // The remote-to-local download branch rethrows on failure (unlike the
+      // other branches, which report through the transfer store). Surface it
+      // here so the rejection is never unhandled; the finally block below
+      // still releases the queue so later drops are not blocked forever.
+      error(t('sftp.transfer.downloadFailed'));
+    } finally {
+      uploadQueueRef.current = null;
+      setUploadConflict(undefined);
     }
-
-    uploadQueueRef.current = null;
-    setUploadConflict(undefined);
-  }, [addTransferOperation, connection, connection.localEntries, connection.remoteEntries, leftIsLocal, leftRemote, localActions, markTransferCancelled, markTransferCompleted, markTransferFailed, markTransferRunning, remoteActions, rightIsLocal, rightRemote]);
+  }, [addTransferOperation, connection, error, leftIsLocal, leftRemote, localActions, markTransferCancelled, markTransferCompleted, markTransferFailed, markTransferRunning, remoteActions, rightIsLocal, rightRemote, t]);
 
   const refreshAfterQueue = useCallback(
     async (side: 'local' | 'remote') => {

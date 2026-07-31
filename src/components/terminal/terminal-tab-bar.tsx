@@ -4,6 +4,7 @@ import {
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
+  KeyboardSensor,
   type Modifier,
   PointerSensor,
   closestCenter,
@@ -11,7 +12,7 @@ import {
   useSensors,
   DragOverlay,
 } from '@dnd-kit/core';
-import { SortableContext, useSortable } from '@dnd-kit/sortable';
+import { SortableContext, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
@@ -319,6 +320,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragPointerStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragOverlayOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const keyboardDragRef = useRef(false);
+  const autoScrollSpeedRef = useRef(0);
 
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
@@ -329,6 +332,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
 
@@ -369,6 +375,20 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     return () => document.removeEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
   }, [activeGroup, activeSessionId, sessions]);
 
+  // Auto-scroll the overflowed tab bar while dragging near its edges. Runs on
+  // an interval so holding the pointer still at the edge keeps scrolling.
+  useEffect(() => {
+    if (!draggingSessionId) return;
+    const timer = window.setInterval(() => {
+      const container = scrollRef.current;
+      const speed = autoScrollSpeedRef.current;
+      if (container && speed !== 0) {
+        container.scrollLeft += speed;
+      }
+    }, 16);
+    return () => window.clearInterval(timer);
+  }, [draggingSessionId]);
+
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
     const container = scrollRef.current;
     if (!container) {
@@ -397,6 +417,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const finishDrag = (): void => {
     setDraggingSessionId(null);
     setInsertIndex(null);
+    keyboardDragRef.current = false;
+    autoScrollSpeedRef.current = 0;
   };
 
   const handleDragStart = (event: DragStartEvent): void => {
@@ -405,6 +427,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     }
     const nextId = String(event.active.id);
     setDraggingSessionId(nextId);
+    const isKeyboardDrag = typeof KeyboardEvent !== 'undefined'
+      && event.activatorEvent instanceof KeyboardEvent;
+    keyboardDragRef.current = isKeyboardDrag;
     const activatorEvent = event.activatorEvent as PointerEvent;
     dragPointerStartRef.current = {
       x: activatorEvent.clientX ?? 0,
@@ -420,10 +445,14 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
           x: rect.left + rect.width / 2,
           y: rect.top + rect.height / 2,
         };
-        dragOverlayOffsetRef.current = {
-          x: dragPointerStartRef.current.x - rect.left,
-          y: dragPointerStartRef.current.y - rect.top,
-        };
+        // Keyboard drags have no pointer to follow; keep the overlay anchored
+        // to the tab itself.
+        dragOverlayOffsetRef.current = isKeyboardDrag
+          ? { x: 0, y: 0 }
+          : {
+            x: dragPointerStartRef.current.x - rect.left,
+            y: dragPointerStartRef.current.y - rect.top,
+          };
       }
     }
   };
@@ -433,31 +462,47 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       return;
     }
 
+    const isKeyboardDrag = keyboardDragRef.current;
     const currentX = dragStartPosRef.current.x + event.delta.x;
-    onTabDragMove?.(
-      draggingSessionId,
-      dragPointerStartRef.current.x + event.delta.x,
-      dragPointerStartRef.current.y + event.delta.y,
-    );
-    const container = scrollRef.current;
-    const tabBarRect = tabBarRef.current?.getBoundingClientRect();
     const pointerX = dragPointerStartRef.current.x + event.delta.x;
     const pointerY = dragPointerStartRef.current.y + event.delta.y;
+    const container = scrollRef.current;
+
+    if (isKeyboardDrag) {
+      autoScrollSpeedRef.current = 0;
+    } else {
+      onTabDragMove?.(draggingSessionId, pointerX, pointerY);
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        const edgeSize = 48;
+        if (pointerX < containerRect.left + edgeSize) {
+          autoScrollSpeedRef.current = -Math.max(2, Math.ceil((containerRect.left + edgeSize - pointerX) / 4));
+        } else if (pointerX > containerRect.right - edgeSize) {
+          autoScrollSpeedRef.current = Math.max(2, Math.ceil((pointerX - (containerRect.right - edgeSize)) / 4));
+        } else {
+          autoScrollSpeedRef.current = 0;
+        }
+      }
+    }
+
+    const tabBarRect = tabBarRef.current?.getBoundingClientRect();
     const tabs = container
       ? Array.from(container.querySelectorAll<HTMLElement>('[data-session-tab]'))
       : [];
     const tabRects = tabs.map((tab) => tab.getBoundingClientRect());
-    const isInsideTabBar = tabBarRect && tabBarRect.width > 0 && tabBarRect.height > 0
-      ? pointerX >= tabBarRect.left
-        && pointerX <= tabBarRect.right
-        && pointerY >= tabBarRect.top
-        && pointerY <= tabBarRect.bottom
-      : tabRects.some((rect) => (
-        pointerX >= rect.left
-        && pointerX <= rect.right
-        && pointerY >= rect.top
-        && pointerY <= rect.bottom
-      ));
+    const isInsideTabBar = isKeyboardDrag
+      ? true
+      : tabBarRect && tabBarRect.width > 0 && tabBarRect.height > 0
+        ? pointerX >= tabBarRect.left
+          && pointerX <= tabBarRect.right
+          && pointerY >= tabBarRect.top
+          && pointerY <= tabBarRect.bottom
+        : tabRects.some((rect) => (
+          pointerX >= rect.left
+          && pointerX <= rect.right
+          && pointerY >= rect.top
+          && pointerY <= rect.bottom
+        ));
     if (
       !container
       || !isInsideTabBar
@@ -493,11 +538,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const handleDragEnd = (event: DragEndEvent): void => {
     const activeId = String(event.active.id);
-    const splitHandled = onTabDragEnd?.(
-      activeId,
-      dragPointerStartRef.current.x + event.delta.x,
-      dragPointerStartRef.current.y + event.delta.y,
-    ) ?? false;
+    // Keyboard drags only reorder within this tab bar; pointer coordinates are
+    // meaningless there, so split/cross-group handling is skipped.
+    const splitHandled = keyboardDragRef.current
+      ? false
+      : onTabDragEnd?.(
+        activeId,
+        dragPointerStartRef.current.x + event.delta.x,
+        dragPointerStartRef.current.y + event.delta.y,
+      ) ?? false;
     if (!splitHandled && insertIndex !== null) {
       const draggedSession = sessions.find((s) => s.sessionId === activeId);
       const pinnedCount = sessions.filter((s) => s.pinned).length;
@@ -556,6 +605,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        autoScroll={false}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}

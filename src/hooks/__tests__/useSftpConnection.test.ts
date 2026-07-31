@@ -14,7 +14,9 @@ import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
 const tauri = vi.hoisted(() => ({
   buildRemoteConnectionRequest: vi.fn((connection: SftpConnection['connection']) => connection),
   invokeCopyRemotePath: vi.fn().mockResolvedValue(undefined),
+  invokeCancelDelete: vi.fn().mockResolvedValue(undefined),
   invokeCancelDownload: vi.fn().mockResolvedValue(undefined),
+  invokeCancelUpload: vi.fn().mockResolvedValue(undefined),
   invokeCreateRemoteEntry: vi.fn().mockResolvedValue(undefined),
   invokeDeleteRemotePath: vi.fn().mockResolvedValue(undefined),
   invokeDownloadRemotePaths: vi.fn().mockResolvedValue(undefined),
@@ -174,6 +176,100 @@ describe('useSftpConnection delete undo window', () => {
     );
     expect(useTransferStore.getState().operations).toHaveLength(0);
   });
+
+  it('binds backend cancellation to the delete operation', async () => {
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() => result.current.deleteRemotePaths([file.path]));
+    const operation = useTransferStore.getState().operations[0]!;
+    expect(operation.cancel).toBeTypeOf('function');
+
+    await act(() => operation.cancel!());
+    expect(tauri.invokeCancelDelete).toHaveBeenCalledWith(operation.operationId);
+  });
+});
+
+describe('useSftpConnection directory listing race', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const connection = createConnection();
+    useSftpStore.setState({
+      connections: [connection],
+      activeConnectionId: connection.id,
+    });
+    useTransferStore.setState({ operations: [] });
+  });
+
+  it('ignores a stale listing that resolves after a newer one', async () => {
+    let resolveStale!: (listing: { path: string; entries: unknown[] }) => void;
+    tauri.invokeListRemoteDirectory
+      .mockImplementationOnce(
+        () => new Promise((resolve) => { resolveStale = resolve; }),
+      )
+      .mockResolvedValueOnce({ path: '/new', entries: [file] });
+
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    let staleLoad!: Promise<void>;
+    act(() => {
+      staleLoad = result.current.loadRemoteDirectory('/old');
+    });
+    await act(() => result.current.loadRemoteDirectory('/new'));
+    await act(async () => {
+      resolveStale({ path: '/old', entries: [] });
+      await staleLoad;
+    });
+
+    const state = useSftpStore.getState().connections[0]!;
+    expect(state.remotePath).toBe('/new');
+    expect(state.remoteEntries).toEqual([file]);
+    expect(state.remoteLoading).toBe(false);
+  });
+});
+
+describe('useSftpConnection uploads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const connection = createConnection();
+    useSftpStore.setState({
+      connections: [connection],
+      activeConnectionId: connection.id,
+    });
+    useTransferStore.setState({ operations: [] });
+    useAppStore.setState({ sftpRetryCount: 0 });
+  });
+
+  it('marks a successful upload as completed and generates unique operation ids', async () => {
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() => result.current.uploadLocalPaths(['/local/a.txt'], '/remote'));
+    await act(() => result.current.uploadLocalPaths(['/local/b.txt'], '/remote'));
+
+    const operations = useTransferStore.getState().operations;
+    expect(operations).toHaveLength(2);
+    expect(operations[0]!.operationId).not.toBe(operations[1]!.operationId);
+    expect(operations[0]).toMatchObject({
+      kind: 'upload',
+      completedSteps: 1,
+      totalSteps: 1,
+      error: undefined,
+    });
+  });
+
+  it('binds backend cancellation to a running upload', async () => {
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() => result.current.uploadLocalPaths(['/local/a.txt'], '/remote'));
+    const operation = useTransferStore.getState().operations[0]!;
+    expect(operation.cancel).toBeTypeOf('function');
+
+    await act(() => operation.cancel!());
+    expect(tauri.invokeCancelUpload).toHaveBeenCalledWith(operation.operationId);
+  });
 });
 
 describe('useSftpConnection downloads', () => {
@@ -286,5 +382,56 @@ describe('useSftpConnection keychain key recovery', () => {
     expect(tauri.invokeListRemoteDirectory).toHaveBeenCalledTimes(2);
     expect(useSftpStore.getState().connections[0]?.connection.keychainKeyId).toBe('new-key');
     expect(useSftpStore.getState().connections[0]?.remoteEntries).toEqual([file]);
+  });
+
+  it('surfaces a failed recovery retry through the pane error state', async () => {
+    const profileId = 'profile-1';
+    const keychainConnection: SftpConnection = {
+      ...createConnection(),
+      profileId,
+      connection: {
+        host: 'example.com',
+        port: 22,
+        username: 'tester',
+        authMethod: 'key',
+        keychainKeyId: 'old-key',
+      },
+    };
+    useProfileStore.setState({
+      profiles: [
+        {
+          id: profileId,
+          name: 'Test',
+          host: 'example.com',
+          port: 22,
+          username: 'tester',
+          authMethod: 'key',
+          keychainKeyId: 'old-key',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    });
+    useSftpStore.setState({
+      connections: [keychainConnection],
+      activeConnectionId: keychainConnection.id,
+    });
+
+    const recoveredProfile = {
+      ...useProfileStore.getState().profiles[0]!,
+      keychainKeyId: 'new-key',
+    };
+    vi.mocked(promptForMissingKeychainKey).mockResolvedValueOnce(recoveredProfile);
+    tauri.invokeListRemoteDirectory
+      .mockRejectedValueOnce({ type: 'Other', payload: { message: 'keychain key not found: old-key' } })
+      .mockRejectedValueOnce(new Error('still broken'));
+
+    const { result } = renderHook(() => useSftpConnection(keychainConnection));
+
+    await act(() => result.current.loadRemoteDirectory());
+
+    const state = useSftpStore.getState().connections[0]!;
+    expect(state.remoteError).toBe('still broken');
+    expect(state.remoteLoading).toBe(false);
   });
 });

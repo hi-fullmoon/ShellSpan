@@ -223,6 +223,12 @@ export async function invokeCancelDownload(operationId: string): Promise<void> {
   return invokeLogged('cancel_download', { operationId });
 }
 
+export async function invokeDisconnectSftp(
+  request: RemoteConnectionRequest,
+): Promise<void> {
+  return invokeLogged('disconnect_sftp', { request });
+}
+
 export async function invokeOpenRemoteFile(
   request: OpenRemoteFileRequest,
 ): Promise<void> {

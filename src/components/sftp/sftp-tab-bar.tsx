@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, type WheelEvent as ReactWheelEvent } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   DndContext,
   type DragEndEvent,
@@ -92,6 +92,20 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onActivate(connection.id);
+        }
+        if (
+          (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+          e.target === e.currentTarget
+        ) {
+          e.preventDefault();
+          const tabs = Array.from(
+            e.currentTarget
+              .closest('[role="tablist"]')
+              ?.querySelectorAll<HTMLElement>('[data-sftp-tab]') ?? [],
+          );
+          const index = tabs.indexOf(e.currentTarget);
+          const next = tabs[e.key === 'ArrowLeft' ? index - 1 : index + 1];
+          next?.focus();
         }
       }}
       className={cn(
@@ -307,18 +321,25 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     }
   }, [activeConnectionId, connections.length]);
 
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
+  // React attaches root-level wheel listeners as passive, so preventDefault
+  // inside an onWheel prop is ignored. Bind a non-passive native listener on
+  // the scroll viewport instead.
+  useEffect(() => {
     const container = scrollRef.current;
     if (!container) {
       return;
     }
-    const hasHorizontalOverflow = container.scrollWidth > container.clientWidth + 4;
-    if (!hasHorizontalOverflow || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
-      return;
-    }
-    container.scrollBy({ left: event.deltaY, behavior: 'auto' });
-    event.preventDefault();
-  };
+    const handleWheel = (event: WheelEvent): void => {
+      const hasHorizontalOverflow = container.scrollWidth > container.clientWidth + 4;
+      if (!hasHorizontalOverflow || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+        return;
+      }
+      container.scrollBy({ left: event.deltaY, behavior: 'auto' });
+      event.preventDefault();
+    };
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [connections.length]);
 
   const finishDrag = (): void => {
     setDraggingConnectionId(null);
@@ -388,13 +409,25 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     const draggedConnection = connections.find((c) => c.id === draggingConnectionId);
     const pinnedCount = connections.filter((c) => c.pinned).length;
     const minInsertIndex = draggedConnection?.pinned ? 0 : pinnedCount;
-    setInsertIndex(Math.max(minInsertIndex, newInsertIndex));
+    // A pinned tab must stay inside the pinned region; a regular tab must not
+    // move ahead of it. Clamp on the component side too instead of relying on
+    // the store to defend the bounds.
+    const maxInsertIndex = draggedConnection?.pinned
+      ? Math.max(minInsertIndex, pinnedCount - 1)
+      : visibleTabs.length;
+    setInsertIndex(Math.min(maxInsertIndex, Math.max(minInsertIndex, newInsertIndex)));
   };
 
   const handleDragEnd = (event: DragEndEvent): void => {
     const activeId = String(event.active.id);
     if (insertIndex !== null) {
-      reorderConnections(activeId, insertIndex);
+      const dragged = connections.find((c) => c.id === activeId);
+      const pinnedCount = connections.filter((c) => c.pinned).length;
+      const minIndex = dragged?.pinned ? 0 : pinnedCount;
+      const maxIndex = dragged?.pinned
+        ? Math.max(minIndex, pinnedCount - 1)
+        : connections.length - 1;
+      reorderConnections(activeId, Math.min(maxIndex, Math.max(minIndex, insertIndex)));
     }
     finishDrag();
   };
@@ -463,10 +496,9 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
             horizontal
             vertical={false}
             size="thin"
-            onWheel={handleWheel}
             className="h-[36px] min-w-0 flex-1"
           >
-            <div className="flex min-w-0 items-start gap-0">
+            <div role="tablist" className="flex min-w-0 items-start gap-0">
               {connections.map((connection, index) => {
               const isDragging = draggingConnectionId === connection.id;
               const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;

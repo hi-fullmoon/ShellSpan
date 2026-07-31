@@ -356,6 +356,65 @@ describe('TerminalContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('close to the right only affects tabs within the provided tab order', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    addSession('s4', 'D');
+    addSession('s5', 'E');
+    const session = makeSession('s1', 'A');
+
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        orderedSessionIds={['s1', 's3', 's5']}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.closeToRight'));
+
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByText('common.close'));
+
+    // s2 and s4 belong to other split groups and survive.
+    expect(
+      useTerminalStore.getState().sessions.map((s) => s.sessionId),
+    ).toEqual(['s1', 's2', 's4']);
+  });
+
+  it('close others only affects tabs within the provided tab order', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    addSession('s4', 'D');
+    addSession('s5', 'E');
+    const session = makeSession('s2', 'B');
+
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        orderedSessionIds={['s2', 's4']}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.closeOthers'));
+
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByText('common.close'));
+
+    expect(
+      useTerminalStore.getState().sessions.map((s) => s.sessionId),
+    ).toEqual(['s1', 's2', 's3', 's5']);
+  });
+
   it('toggle pin pins and unpins the target session', () => {
     addSession('s1', 'A');
     const session = makeSession('s1', 'A');

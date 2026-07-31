@@ -100,11 +100,11 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
     }
   }, [open, defaultValue]);
 
+  const isValidOctal = /^[0-7]{3,4}$/.test(value.trim());
+
   const handleConfirm = (): void => {
-    const parsed = parseInt(value, 8);
-    if (!Number.isNaN(parsed)) {
-      onConfirm(parsed);
-    }
+    if (!isValidOctal) return;
+    onConfirm(parseInt(value.trim(), 8));
     onClose();
   };
 
@@ -121,6 +121,7 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
               id="sftp-permissions-input"
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              aria-invalid={!isValidOctal}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   handleConfirm();
@@ -134,7 +135,7 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
           <Button variant="outline" size="sm" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button size="sm" onClick={handleConfirm}>
+          <Button size="sm" onClick={handleConfirm} disabled={!isValidOctal}>
             {t('common.save')}
           </Button>
         </SftpDialogFooter>

@@ -35,9 +35,11 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
   if (!conflict) return null;
 
   const handleAction = (action: UploadConflictAction): void => {
+    // Do not call onClose here: onResolve may synchronously queue the next
+    // conflict, and onClose dismisses the whole batch. The parent closes the
+    // dialog by clearing the conflict state once the resolution is handled.
     onResolve(action, applyToRemaining);
     setApplyToRemaining(false);
-    onClose();
   };
 
   return (

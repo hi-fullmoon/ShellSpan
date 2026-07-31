@@ -1,12 +1,11 @@
 use crate::known_hosts::check_host_key_against_file;
 use crate::models::{AuthMethod, ConnectedSftp, ConnectionError, HostKeyCheckStatus, JumpHostConfig, RemoteConnectionRequest, RemoteFsError, SessionCreateRequest};
-use crate::sftp_pool::{connection_key, SftpPool};
+use crate::sftp_pool::{connection_key, ConnectClaim, SftpPool};
 use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
 use std::{
-    io::copy,
-    net::{TcpListener, TcpStream, ToSocketAddrs},
+    net::{IpAddr, Ipv6Addr, TcpListener, TcpStream, ToSocketAddrs},
     path::Path,
     sync::{Arc, Mutex},
     thread,
@@ -57,6 +56,12 @@ fn connect_sftp_inner(
 ) -> Result<Arc<Mutex<ConnectedSftp>>, ConnectionError> {
     validate_connection_fields(&request.host, &request.username)
         .map_err(|message| ConnectionError::Other { message })?;
+    if let Some(ref jump) = request.jump_host {
+        // The jump host is a network endpoint too: apply the same field and
+        // blocked-host validation as the target host.
+        validate_connection_fields(&jump.host, &jump.username)
+            .map_err(|message| ConnectionError::Other { message })?;
+    }
     debug!(
         "Connecting SFTP {}",
         summarize_remote_connection_request(request)
@@ -66,16 +71,20 @@ fn connect_sftp_inner(
         if let Some(cached) = pool.get(request) {
             return Ok(cached);
         }
-    }
-
-    let connected = create_sftp_connection(request, known_hosts_path)?;
-
-    if let Some(pool) = pool {
+        // Deduplicate concurrent handshakes: one caller leads, the rest wait.
         let key = connection_key(request);
-        return Ok(pool.get_or_insert(&key, connected));
+        return match pool.begin_connect(&key) {
+            ConnectClaim::Leader => {
+                let result = create_sftp_connection(request, known_hosts_path);
+                pool.finish_connect(&key, result)
+            }
+            ConnectClaim::Follower(slot) => pool
+                .wait_connect(slot)
+                .map_err(|message| ConnectionError::Other { message }),
+        };
     }
 
-    Ok(connected)
+    create_sftp_connection(request, known_hosts_path)
 }
 
 fn create_sftp_connection(
@@ -165,13 +174,43 @@ fn is_blocked_host(host: &str) -> bool {
     let candidate = lower.trim_start_matches("http://").trim_start_matches("https://");
     let candidate = candidate.split('/').next().unwrap_or(candidate);
     let candidate = strip_port(candidate);
-    let blocked_literals = [
-        "169.254.169.254",
-        "fd00:ec2::254",
-        "0.0.0.0",
-        "::",
-    ];
-    blocked_literals.contains(&candidate)
+    // AWS metadata endpoint: an IPv6 unique-local address that falls outside
+    // the standard blocked ranges below.
+    if candidate == "fd00:ec2::254" {
+        return true;
+    }
+    match candidate.parse::<IpAddr>() {
+        Ok(ip) => is_blocked_ip(normalize_ip(ip)),
+        Err(_) => false,
+    }
+}
+
+/// Collapse IPv4-mapped IPv6 addresses (e.g. ::ffff:169.254.169.254) so the
+/// range checks cannot be bypassed with a mapped spelling.
+fn normalize_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => IpAddr::V6(v6),
+        },
+        v4 => v4,
+    }
+}
+
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    // Link-local covers the cloud metadata endpoints (169.254.0.0/16,
+    // fe80::/10). Loopback is intentionally allowed: this is a user-driven
+    // desktop SSH/SFTP client, and connecting to 127.0.0.1 / ::1 is a
+    // legitimate use case (local VMs, tunnels, dev servers).
+    match ip {
+        IpAddr::V4(v4) => v4.is_link_local() || v4.is_unspecified(),
+        IpAddr::V6(v6) => v6.is_unspecified() || is_ipv6_link_local(&v6),
+    }
+}
+
+/// fe80::/10 — `Ipv6Addr::is_unicast_link_local` is not stable yet.
+fn is_ipv6_link_local(addr: &Ipv6Addr) -> bool {
+    (addr.segments()[0] & 0xffc0) == 0xfe80
 }
 
 fn strip_port(host: &str) -> &str {
@@ -241,19 +280,36 @@ pub(crate) fn summarize_remote_connection_request(request: &RemoteConnectionRequ
 pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, String> {
     let address = format!("{host}:{port}");
     debug!("Opening TCP connection address={address}");
-    let socket_addr = address
+    let socket_addrs: Vec<_> = address
         .to_socket_addrs()
         .map_err(|error| format!("failed to resolve {address}: {error}"))?
-        .next()
-        .ok_or_else(|| format!("no socket address found for {address}"))?;
+        .collect();
+    if socket_addrs.is_empty() {
+        return Err(format!("no socket address found for {address}"));
+    }
 
-    let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(12))
-        .map_err(|error| format!("failed to connect to {address}: {error}"))?;
+    // Try every resolved address (e.g. IPv6 then IPv4) instead of giving up
+    // on the first one.
+    let mut last_error = None;
+    for socket_addr in socket_addrs {
+        match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(12)) {
+            Ok(tcp) => {
+                configure_tcp_stream(&tcp).map_err(|error| {
+                    format!("failed to configure TCP socket for {address}: {error}")
+                })?;
+                return Ok(tcp);
+            }
+            Err(error) => {
+                debug!("TCP connect to {socket_addr} failed: {error}");
+                last_error = Some(error);
+            }
+        }
+    }
 
-    configure_tcp_stream(&tcp)
-        .map_err(|error| format!("failed to configure TCP socket for {address}: {error}"))?;
-
-    Ok(tcp)
+    Err(format!(
+        "failed to connect to {address}: {}",
+        last_error.expect("at least one address was attempted")
+    ))
 }
 
 fn configure_tcp_stream(tcp: &TcpStream) -> std::io::Result<()> {
@@ -432,8 +488,10 @@ pub(crate) fn connect_through_jump_host(
         known_hosts_path,
     )?;
 
-    // Detach the bridge thread — it runs until the channel closes.
-    std::mem::forget(bridge_handle);
+    // Dropping the JoinHandle detaches the bridge thread: it keeps copying
+    // data until the jump channel closes (i.e. when the sessions are dropped)
+    // or the bridge copy fails, and then exits on its own.
+    drop(bridge_handle);
 
     debug!("Connected to target through jump host successfully");
     Ok((jump_session, target_session))
@@ -472,13 +530,13 @@ fn bridge_channel_tcp(
     let mut channel_clone = channel.stream(0);
 
     let t1 = thread::spawn(move || {
-        if let Err(error) = copy(&mut tcp_clone, &mut channel_clone) {
+        if let Err(error) = bridge_copy(&mut tcp_clone, &mut channel_clone) {
             warn!("Jump host bridge copy (tcp -> channel) failed: {error}");
         }
     });
 
     let t2 = thread::spawn(move || {
-        if let Err(error) = copy(&mut channel, &mut tcp) {
+        if let Err(error) = bridge_copy(&mut channel, &mut tcp) {
             warn!("Jump host bridge copy (channel -> tcp) failed: {error}");
         }
     });
@@ -486,6 +544,51 @@ fn bridge_channel_tcp(
     let _ = t1.join();
     let _ = t2.join();
     Ok(())
+}
+
+// The jump session runs with a blocking I/O timeout (SSH_SESSION_IO_TIMEOUT_MS),
+// so a bridged channel read/write that stays idle longer than the timeout
+// surfaces as ErrorKind::TimedOut instead of blocking forever. That timeout is
+// expected while the target session is idle (e.g. SFTP request/response with no
+// traffic), so it must not tear down the bridge — retry it and only stop on a
+// real EOF or unrecoverable error.
+fn is_bridge_retryable(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+    )
+}
+
+fn bridge_copy<R, W>(reader: &mut R, writer: &mut W) -> std::io::Result<()>
+where
+    R: std::io::Read,
+    W: std::io::Write,
+{
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(read) => read,
+            Err(error) if is_bridge_retryable(&error) => continue,
+            Err(error) => return Err(error),
+        };
+
+        let mut written = 0;
+        while written < read {
+            match writer.write(&buffer[written..read]) {
+                Ok(0) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "bridge write returned zero bytes",
+                    ));
+                }
+                Ok(count) => written += count,
+                Err(error) if is_bridge_retryable(&error) => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        writer.flush()?;
+    }
 }
 
 fn authenticate(
@@ -607,6 +710,38 @@ mod tests {
     fn validate_connection_fields_allows_normal_hosts() {
         assert!(validate_connection_fields("example.com", "alice").is_ok());
         assert!(validate_connection_fields("192.168.1.1", "alice").is_ok());
+    }
+
+    #[test]
+    fn is_blocked_host_covers_blocked_ip_ranges() {
+        // Link-local ranges beyond the well-known metadata literal.
+        assert!(is_blocked_host("169.254.0.1"));
+        assert!(is_blocked_host("fe80::1"));
+        // Unspecified addresses.
+        assert!(is_blocked_host("0.0.0.0"));
+        assert!(is_blocked_host("::"));
+        // IPv4-mapped IPv6 spellings must not bypass the range checks.
+        assert!(is_blocked_host("::ffff:169.254.169.254"));
+        // Blocked ranges still match when a port is attached.
+        assert!(is_blocked_host("[fe80::1]:22"));
+    }
+
+    #[test]
+    fn is_blocked_host_allows_loopback() {
+        // SSH to localhost is a legitimate use case (VMs, tunnels, dev).
+        assert!(!is_blocked_host("127.0.0.1"));
+        assert!(!is_blocked_host("::1"));
+        assert!(!is_blocked_host("127.0.0.1:2222"));
+        assert!(!is_blocked_host("::ffff:127.0.0.1"));
+    }
+
+    #[test]
+    fn is_blocked_host_allows_public_and_private_addresses() {
+        assert!(!is_blocked_host("8.8.8.8"));
+        assert!(!is_blocked_host("192.168.1.1"));
+        assert!(!is_blocked_host("10.0.0.5"));
+        assert!(!is_blocked_host("2606:4700:4700::1111"));
+        assert!(!is_blocked_host("example.com"));
     }
 
     #[test]
