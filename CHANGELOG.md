@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.12](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.12) - 2026-07-31
+
+
+### Features
+
+- **sftp:** harden transfers and pool lifecycle
+
 ## [v2.0.11](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.11) - 2026-07-30
 
 
