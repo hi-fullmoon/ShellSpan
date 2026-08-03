@@ -3,6 +3,7 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import {
   buildSessionCreateRequest,
   invokeCloseSession,
+  invokeCreateLocalSession,
   invokeCreateSession,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
@@ -22,7 +23,31 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
     const session = useTerminalStore
       .getState()
       .sessions.find((s) => s.sessionId === sessionId);
-    if (!session?.profileId) {
+    if (!session) {
+      return;
+    }
+
+    // Sessions without a profile are local shells; recreate them directly.
+    if (!session.profileId) {
+      setReconnecting(sessionId, true);
+      logger.info(`Reconnecting local session ${sessionId}`);
+      try {
+        const summary = await invokeCreateLocalSession(120, 30);
+
+        terminalRegistry.rebindSession(sessionId, summary.sessionId);
+        reconnectSession(sessionId, summary);
+        logger.info(`Reconnected local session ${sessionId} as session ${summary.sessionId}`);
+        invokeCloseSession(sessionId).catch((error) => {
+          logger.warn(`Failed to close replaced session ${sessionId}`, error);
+        });
+      } catch (error) {
+        logger.error(`Failed to reconnect local session ${sessionId}`, error);
+        setStatus(sessionId, {
+          sessionId,
+          status: 'error',
+          message: getLocalizedErrorMessage(error),
+        });
+      }
       return;
     }
 
