@@ -41,42 +41,6 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
     #[cfg(not(target_os = "macos"))]
     {
         builder = builder
-            .setup(|app| {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.set_decorations(false).ok();
-                }
-
-                let tray_menu = build_tray_menu(app.handle())
-                    .map_err(|error| format!("failed to create tray menu: {error}"))?;
-                let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main")
-                    .tooltip("TermBridge")
-                    .menu(&tray_menu)
-                    .on_menu_event(|app, event| {
-                        handle_menu_event(app, event.id.as_ref());
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let tauri::tray::TrayIconEvent::Click {
-                            button: tauri::tray::MouseButton::Left,
-                            button_state: tauri::tray::MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            if let Err(error) = show_main_window(tray.app_handle()) {
-                                error!("failed to show main window on tray click: {error}");
-                            }
-                        }
-                    });
-
-                if let Some(icon) = app.default_window_icon().cloned() {
-                    tray_builder = tray_builder.icon(icon);
-                }
-
-                tray_builder
-                    .build(app)
-                    .map_err(|error| format!("failed to initialize tray icon: {error}"))?;
-
-                Ok(())
-            })
             .on_window_event(|window, event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     if window.label() == "main" {
@@ -104,6 +68,47 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
     }
 
     builder
+}
+
+// Called from the single `setup` closure in lib.rs. Tauri's `Builder::setup`
+// keeps only the LAST registered closure, so registering a second one here
+// would silently drop the database/credential state registered in lib.rs.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn initialize_tray(app: &tauri::App) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.set_decorations(false).ok();
+    }
+
+    let tray_menu = build_tray_menu(app.handle())
+        .map_err(|error| format!("failed to create tray menu: {error}"))?;
+    let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main")
+        .tooltip("TermBridge")
+        .menu(&tray_menu)
+        .on_menu_event(|app, event| {
+            handle_menu_event(app, event.id.as_ref());
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let tauri::tray::TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Err(error) = show_main_window(tray.app_handle()) {
+                    error!("failed to show main window on tray click: {error}");
+                }
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+    }
+
+    tray_builder
+        .build(app)
+        .map_err(|error| format!("failed to initialize tray icon: {error}"))?;
+
+    Ok(())
 }
 
 fn handle_menu_event(app: &AppHandle, menu_id: &str) {

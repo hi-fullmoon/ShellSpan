@@ -14,6 +14,7 @@ import {
 import {
   formatTerminalNoticeLine,
   formatTerminalStatusLine,
+  shouldDisableTerminalInput,
   shouldReconnectFromInput,
 } from '@/lib/terminal';
 import { t } from '@/locales';
@@ -238,6 +239,13 @@ class TerminalControllerImpl implements TerminalController {
           ),
         );
       });
+      return;
+    }
+
+    // While the session is still connecting the pane shows a connecting
+    // overlay, so stray keystrokes are dropped silently instead of printing a
+    // misleading "disconnected" hint.
+    if (shouldDisableTerminalInput(status)) {
       return;
     }
 
