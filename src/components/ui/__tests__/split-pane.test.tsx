@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { SplitPane } from '../split-pane';
 
 describe('SplitPane', () => {
@@ -55,5 +55,32 @@ describe('SplitPane', () => {
     expect(container.firstChild).toHaveClass('flex-col');
     expect(container.querySelector('[data-slot="split-pane-divider"]')).toHaveClass('border-t');
     expect(container.querySelector('[data-slot="split-pane-handle"]')).toHaveClass('cursor-row-resize');
+  });
+
+  it('disables text selection while dragging and restores it afterwards', () => {
+    const { container } = render(
+      <SplitPane left={<div>Left</div>} right={<div>Right</div>} />,
+    );
+    const handle = container.querySelector('[data-slot="split-pane-handle"]')!;
+
+    fireEvent.mouseDown(handle);
+    expect(document.body.style.userSelect).toBe('none');
+    expect(document.body.style.cursor).toBe('col-resize');
+
+    fireEvent.mouseUp(document);
+    expect(document.body.style.userSelect).toBe('');
+    expect(document.body.style.cursor).toBe('');
+  });
+
+  it('restores global styles when unmounted mid-drag', () => {
+    const { container, unmount } = render(
+      <SplitPane left={<div>Left</div>} right={<div>Right</div>} />,
+    );
+    const handle = container.querySelector('[data-slot="split-pane-handle"]')!;
+
+    fireEvent.mouseDown(handle);
+    unmount();
+    expect(document.body.style.userSelect).toBe('');
+    expect(document.body.style.cursor).toBe('');
   });
 });
