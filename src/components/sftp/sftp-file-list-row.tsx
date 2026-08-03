@@ -7,13 +7,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { RemoteFileKind } from '@/types';
 import type { SftpSide } from '@/stores/sftpStore';
-import type { FileEntry } from './file-entry-formatters';
+import type { FileEntry } from './utils';
 import {
   formatGroup,
   formatOwner,
   formatPermissionSymbolic,
   isRemoteEntry,
-} from './file-entry-formatters';
+} from './utils';
 import type { SftpDndPayload } from './sftp-dnd-context';
 
 export interface SftpFileListRowProps {

@@ -74,12 +74,15 @@ fn connect_sftp_inner(
         // Deduplicate concurrent handshakes: one caller leads, the rest wait.
         let key = connection_key(request);
         return match pool.begin_connect(&key) {
-            ConnectClaim::Leader => {
+            // The guard must stay bound across the handshake: if
+            // create_sftp_connection panics, dropping it fails the slot so
+            // followers do not wait forever.
+            ConnectClaim::Leader(_guard) => {
                 let result = create_sftp_connection(request, known_hosts_path);
                 pool.finish_connect(&key, result)
             }
             ConnectClaim::Follower(slot) => pool
-                .wait_connect(slot)
+                .wait_connect(&key, slot)
                 .map_err(|message| ConnectionError::Other { message }),
         };
     }

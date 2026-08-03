@@ -29,6 +29,10 @@ import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
+import {
+  isLatestDirectoryListRequest,
+  nextDirectoryListRequestId,
+} from '@/hooks/utils';
 import type { SftpSide } from '@/stores/sftpStore';
 import type {
   ReadRemoteFileResponse,
@@ -42,21 +46,6 @@ const DELETE_UNDO_WINDOW_MS = 30_000;
 
 function createOperationId(connectionId: string, kind: string): string {
   return `${connectionId}-${kind}-${crypto.randomUUID()}`;
-}
-
-// Per-pane monotonically increasing request ids for directory listings. Only
-// the latest request is allowed to write results back or clear the loading
-// flag, so a slow stale response cannot clobber a newer listing.
-const directoryListRequestIds = new Map<string, number>();
-
-function nextDirectoryListRequestId(key: string): number {
-  const next = (directoryListRequestIds.get(key) ?? 0) + 1;
-  directoryListRequestIds.set(key, next);
-  return next;
-}
-
-function isLatestDirectoryListRequest(key: string, requestId: number): boolean {
-  return directoryListRequestIds.get(key) === requestId;
 }
 
 async function runWithConfiguredRetries(
@@ -369,14 +358,19 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       const runUpload = async (): Promise<void> => {
         markOperationRunning(operationId);
         try {
-          await runWithConfiguredRetries(() =>
-            invokeUploadLocalPaths({
-              ...remoteConnection,
-              destinationDirectory,
-              localPaths,
-              conflictPolicies,
-              operationId,
-            }),
+          await runWithConfiguredRetries(
+            () =>
+              invokeUploadLocalPaths({
+                ...remoteConnection,
+                destinationDirectory,
+                localPaths,
+                conflictPolicies,
+                operationId,
+              }),
+            () =>
+              useTransferStore.getState().operations.find(
+                (item) => item.operationId === operationId,
+              )?.status !== 'cancelling',
           );
           // The backend's final progress event is the only other completion
           // signal; mark completion explicitly in case that event is lost.
@@ -390,6 +384,13 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
             markOperationCompleted(operationId);
           }
         } catch (error) {
+          const operation = useTransferStore.getState().operations.find(
+            (item) => item.operationId === operationId,
+          );
+          if (operation?.status === 'cancelling') {
+            markOperationCancelled(operationId);
+            return;
+          }
           markOperationFailed(
             operationId,
             getLocalizedErrorMessage(error),

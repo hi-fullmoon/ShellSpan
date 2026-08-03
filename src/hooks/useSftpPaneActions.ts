@@ -23,7 +23,7 @@ import {
 } from '@/stores/sftpStore';
 import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
-import type { FileEntry } from '@/components/sftp/file-entry-formatters';
+import type { FileEntry } from '@/components/sftp/utils';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 import { useAppStore } from '@/stores/appStore';
 

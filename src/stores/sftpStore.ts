@@ -16,7 +16,7 @@ import {
 import { safeInvoke } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 import { hasActivePathOperation, useTransferStore } from './transferStore';
-import type { FileEntry } from '@/components/sftp/file-entry-formatters';
+import type { FileEntry } from '@/components/sftp/utils';
 
 const logger = createLogger('sftpStore');
 
