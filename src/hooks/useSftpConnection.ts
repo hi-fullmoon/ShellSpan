@@ -4,6 +4,7 @@ import {
   invokeCopyRemotePath,
   invokeCancelDelete,
   invokeCancelDownload,
+  invokeCancelRemoteCopy,
   invokeCancelUpload,
   invokeCreateRemoteEntry,
   invokeDeleteRemotePath,
@@ -212,14 +213,59 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const copyRemotePath = useCallback(
     async (sourcePath: string, destinationDirectory: string) => {
-      await invokeCopyRemotePath({
-        ...remoteConnection,
-        sourcePath,
-        destinationDirectory,
+      const operationId = createOperationId(connection.id, 'copy');
+      const runCopy = async (): Promise<void> => {
+        markOperationRunning(operationId);
+        try {
+          await invokeCopyRemotePath({
+            ...remoteConnection,
+            sourcePath,
+            destinationDirectory,
+            operationId,
+          });
+          markOperationCompleted(operationId);
+          await loadRemoteDirectory(panePath);
+        } catch (copyError) {
+          const operation = useTransferStore.getState().operations.find(
+            (item) => item.operationId === operationId,
+          );
+          if (operation?.status === 'cancelling') {
+            // The backend observed the cancel flag, removed the staged
+            // `.part` file and reported the copy as cancelled.
+            markOperationCancelled(operationId);
+            return;
+          }
+          markOperationFailed(
+            operationId,
+            getLocalizedErrorMessage(copyError),
+          );
+          throw copyError;
+        }
+      };
+      const sourceName = sourcePath.replace(/\\/g, '/').split('/').pop() ?? sourcePath;
+      const destinationBase = destinationDirectory === '/' ? '' : destinationDirectory.replace(/\/+$/, '');
+      const destinationPath = `${destinationBase}/${sourceName}`;
+      addOperation({
+        operationId,
+        kind: 'remote-copy',
+        connectionId: remoteConnectionKey,
+        paths: [sourcePath],
+        pathScopes: [
+          { connectionId: remoteConnectionKey, paths: [sourcePath] },
+          { connectionId: remoteConnectionKey, paths: [destinationPath] },
+        ],
+        currentPath: sourcePath,
+        totalBytes: 0,
+        processedBytes: 0,
+        totalSteps: 1,
+        completedSteps: 0,
+        status: 'running',
+        retry: runCopy,
+        cancel: () => invokeCancelRemoteCopy(operationId),
       });
-      await loadRemoteDirectory(panePath);
+      await runCopy();
     },
-    [remoteConnection, panePath, loadRemoteDirectory],
+    [remoteConnection, remoteConnectionKey, connection.id, panePath, loadRemoteDirectory, addOperation, markOperationRunning, markOperationFailed, markOperationCompleted, markOperationCancelled],
   );
 
   const deleteRemotePaths = useCallback(

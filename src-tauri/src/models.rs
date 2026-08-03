@@ -200,6 +200,7 @@ pub(crate) struct CopyRemotePathRequest {
     pub(crate) connection: RemoteConnectionRequest,
     pub(crate) source_path: String,
     pub(crate) destination_directory: String,
+    pub(crate) operation_id: String,
 }
 
 #[derive(Debug, Deserialize)]
