@@ -49,7 +49,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={resolvedTheme as ToasterProps["theme"]}
       className="toaster group"
-      position="top-center"
+      position="top-right"
       gap={8}
       visibleToasts={1}
       offset={{ top: 48 }}
