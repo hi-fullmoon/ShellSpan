@@ -238,6 +238,14 @@ body {
   stroke: var(--popover);
 }
 
+/* visibleToasts=1 hides non-front toasts via [data-visible='false'] regardless of
+   the expanded state, so hovering never reveals them. Undo that once the stack
+   expands on hover (3 attribute selectors outrank sonner's 2). */
+[data-sonner-toast][data-expanded='true'][data-visible='false'][data-mounted='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* Toast enter animation: slide in horizontally from the edge matching data-x-position.
    Sonner only animates vertically by default; we append a --x custom property to its
    transform so the existing --y behavior (stacking, swipe, dismiss) is preserved. */

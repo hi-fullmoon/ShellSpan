@@ -42,17 +42,25 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
     [onSplitChange],
   );
 
-  const handleMouseDown = useCallback(() => {
-    draggingRef.current = true;
-    setDragging(true);
-    document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize';
-  }, [direction]);
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      // Prevent the browser from starting a text selection when the drag
+      // carries the pointer over pane content.
+      e.preventDefault();
+      draggingRef.current = true;
+      setDragging(true);
+      document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize';
+      document.body.style.userSelect = 'none';
+    },
+    [direction],
+  );
 
   const handleMouseUp = useCallback(() => {
     draggingRef.current = false;
     setDragging(false);
     setSuppressGroup(true);
     document.body.style.cursor = '';
+    document.body.style.userSelect = '';
   }, []);
 
   const handleMouseEnter = useCallback(() => {
@@ -77,6 +85,9 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
     return () => {
       document.removeEventListener('mouseup', handleMouseUp);
       document.removeEventListener('mousemove', handleMouseMove);
+      // Restore global styles if the component unmounts mid-drag.
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
   }, [handleMouseUp, handleMouseMove]);
 

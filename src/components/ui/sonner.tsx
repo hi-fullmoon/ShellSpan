@@ -51,6 +51,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       className="toaster group"
       position="top-center"
       gap={8}
+      visibleToasts={1}
       offset={{ top: 48 }}
       icons={{
         success: (
