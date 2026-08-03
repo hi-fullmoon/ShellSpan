@@ -37,7 +37,7 @@ import {
 import { useI18n } from '@/hooks/useI18n';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
-import type { FileEntry } from './file-entry-formatters';
+import type { FileEntry } from './utils';
 
 export type SftpFileContextMenuAction =
   | 'open'

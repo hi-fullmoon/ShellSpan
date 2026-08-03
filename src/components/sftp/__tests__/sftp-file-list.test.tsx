@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpFileList } from '../sftp-file-list';
-import type { FileEntry } from '../file-entry-formatters';
+import type { FileEntry } from '../utils';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({

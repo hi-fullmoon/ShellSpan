@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 
 const SFTP_POOL_IDLE_TTL: Duration = Duration::from_secs(300);
 const SFTP_POOL_HEALTH_CHECK_IDLE: Duration = Duration::from_secs(30);
+/// Backstop for followers waiting on a leader's handshake; the leader guard
+/// normally resolves the slot much earlier, this only catches stuck slots.
+const SFTP_CONNECT_WAIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(crate) struct ConnectionKey {
@@ -66,8 +69,44 @@ fn disconnect_entries(entries: Vec<PooledEntry>) {
 /// caller becomes the leader and handshakes; concurrent callers become
 /// followers waiting on the shared slot instead of handshaking themselves.
 pub(crate) enum ConnectClaim {
-    Leader,
+    Leader(ConnectLeaderGuard),
     Follower(Arc<ConnectSlot>),
+}
+
+/// Leader-side RAII guard. If the leader panics (or otherwise exits early)
+/// between `begin_connect` and `finish_connect`, dropping the guard resolves
+/// the slot as failed so followers never wait on it forever. After a normal
+/// `finish_connect` the slot is already gone from `in_flight`, so the drop is
+/// a no-op.
+pub(crate) struct ConnectLeaderGuard {
+    in_flight: Arc<Mutex<HashMap<ConnectionKey, Arc<ConnectSlot>>>>,
+    key: ConnectionKey,
+}
+
+impl Drop for ConnectLeaderGuard {
+    fn drop(&mut self) {
+        let slot = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.key);
+        if let Some(slot) = slot {
+            let mut state = slot
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if matches!(*state, ConnectState::Pending) {
+                warn!(
+                    "SFTP connect leader for {} dropped before finishing; failing slot",
+                    self.key.label()
+                );
+                *state =
+                    ConnectState::Failed("connection attempt aborted".to_string());
+                drop(state);
+                slot.ready.notify_all();
+            }
+        }
+    }
 }
 
 pub(crate) struct ConnectSlot {
@@ -190,7 +229,10 @@ impl SftpPool {
             Entry::Occupied(entry) => ConnectClaim::Follower(entry.get().clone()),
             Entry::Vacant(entry) => {
                 entry.insert(Arc::new(ConnectSlot::new()));
-                ConnectClaim::Leader
+                ConnectClaim::Leader(ConnectLeaderGuard {
+                    in_flight: self.in_flight.clone(),
+                    key: key.clone(),
+                })
             }
         }
     }
@@ -224,11 +266,15 @@ impl SftpPool {
         result.map(|connection| self.get_or_insert(key, connection))
     }
 
-    /// Follower-side wait: block until the leader publishes the outcome.
+    /// Follower-side wait: block until the leader publishes the outcome. Times
+    /// out after [`SFTP_CONNECT_WAIT_TIMEOUT`] as a backstop: the stuck slot is
+    /// released so the next caller can become the leader and retry.
     pub(crate) fn wait_connect(
         &self,
+        key: &ConnectionKey,
         slot: Arc<ConnectSlot>,
     ) -> Result<Arc<Mutex<ConnectedSftp>>, String> {
+        let deadline = Instant::now() + SFTP_CONNECT_WAIT_TIMEOUT;
         let mut state = slot
             .state
             .lock()
@@ -236,15 +282,36 @@ impl SftpPool {
         loop {
             match &*state {
                 ConnectState::Pending => {
-                    state = slot
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    let (new_state, timeout) = slot
                         .ready
-                        .wait(state)
+                        .wait_timeout(state, remaining)
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    state = new_state;
+                    if timeout.timed_out() && matches!(*state, ConnectState::Pending) {
+                        break;
+                    }
                 }
                 ConnectState::Ready(connection) => return Ok(connection.clone()),
                 ConnectState::Failed(message) => return Err(message.clone()),
             }
         }
+        drop(state);
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if in_flight
+            .get(key)
+            .is_some_and(|current| Arc::ptr_eq(current, &slot))
+        {
+            warn!("SFTP connect wait timed out {}; releasing slot", key.label());
+            in_flight.remove(key);
+        }
+        Err("timed out waiting for the concurrent connection attempt".to_string())
     }
 
     fn mark_verified(&self, key: &ConnectionKey, expected: &Arc<Mutex<ConnectedSftp>>) {
@@ -392,7 +459,9 @@ mod tests {
         let request = sample_request();
         let key = connection_key(&request);
 
-        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader));
+        // The leader guard must stay bound: dropping it aborts the slot.
+        let leader = pool.begin_connect(&key);
+        assert!(matches!(leader, ConnectClaim::Leader(_)));
         assert!(matches!(pool.begin_connect(&key), ConnectClaim::Follower(_)));
 
         // Once the leader finishes, the slot is released and the next caller
@@ -404,7 +473,38 @@ mod tests {
             }),
         )
         .ok();
-        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader));
+        drop(leader);
+        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader(_)));
+    }
+
+    #[test]
+    fn leader_guard_drop_fails_pending_slot() {
+        // Simulates a leader panicking between begin_connect and
+        // finish_connect: dropping the guard must wake followers with a
+        // failure instead of letting them wait forever.
+        let pool = SftpPool::default();
+        let key = connection_key(&sample_request());
+
+        let guard = match pool.begin_connect(&key) {
+            ConnectClaim::Leader(guard) => guard,
+            ConnectClaim::Follower(_) => panic!("first claim must be the leader"),
+        };
+        let slot = match pool.begin_connect(&key) {
+            ConnectClaim::Follower(slot) => slot,
+            ConnectClaim::Leader(_) => panic!("second claim must be a follower"),
+        };
+
+        let waiter_pool = pool.clone();
+        let waiter_key = key.clone();
+        let waiter =
+            std::thread::spawn(move || waiter_pool.wait_connect(&waiter_key, slot));
+        drop(guard);
+
+        let result = waiter.join().expect("follower thread should finish");
+        assert_eq!(result.err().as_deref(), Some("connection attempt aborted"));
+
+        // The slot is released, so the next caller becomes the leader again.
+        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader(_)));
     }
 
     #[test]
@@ -412,14 +512,17 @@ mod tests {
         let pool = SftpPool::default();
         let key = connection_key(&sample_request());
 
-        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Leader));
+        let leader = pool.begin_connect(&key);
+        assert!(matches!(leader, ConnectClaim::Leader(_)));
         let slot = match pool.begin_connect(&key) {
             ConnectClaim::Follower(slot) => slot,
-            ConnectClaim::Leader => panic!("second claim must be a follower"),
+            ConnectClaim::Leader(_) => panic!("second claim must be a follower"),
         };
 
         let waiter_pool = pool.clone();
-        let waiter = std::thread::spawn(move || waiter_pool.wait_connect(slot));
+        let waiter_key = key.clone();
+        let waiter =
+            std::thread::spawn(move || waiter_pool.wait_connect(&waiter_key, slot));
         pool.finish_connect(
             &key,
             Err(crate::models::ConnectionError::Other {
@@ -430,6 +533,7 @@ mod tests {
 
         let result = waiter.join().expect("follower thread should finish");
         assert_eq!(result.err().as_deref(), Some("handshake failed"));
+        drop(leader);
     }
 
     #[test]

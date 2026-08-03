@@ -14,7 +14,7 @@ import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { getSftpPaneConnectionKey, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
 import { type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
-import type { FileEntry } from './file-entry-formatters';
+import type { FileEntry } from './utils';
 import type { SftpDndPayload } from './sftp-dnd-context';
 import { parentPortablePath } from '@/lib/path-utils';
 import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
@@ -409,51 +409,64 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            {/* Search — animated expand from icon */}
+            {/* Search — animated expand from icon. The inner row keeps a fixed
+                width so the container clip-reveals it instead of squishing the
+                input and buttons during the width transition. */}
             <div
               className={cn(
-                'flex items-center gap-0 rounded-md h-[30px] overflow-hidden transition-all duration-300 ease-out',
-                showSearch ? 'w-56 bg-app-surface-muted px-[0_6px]' : 'w-7 border-transparent bg-transparent',
+                'h-[30px] overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-out',
+                showSearch ? 'w-56 bg-app-surface-muted' : 'w-7 bg-transparent',
               )}
             >
-              <button
-                type="button"
-                onClick={() => {
-                  if (showSearch) {
-                    setShowSearch(false);
-                    setSearchQuery('');
-                  } else {
-                    setShowSearch(true);
-                  }
-                }}
-                className={cn(
-                  'h-[30px] w-7 shrink-0 flex items-center justify-center rounded text-app-text-soft',
-                  !showSearch && 'hover:bg-app-border/50 hover:text-app-text',
-                )}
-                aria-label={showSearch ? t('sftp.hideFilter') : t('sftp.showFilter')}
-              >
-                <SearchIcon className="h-3.5 w-3.5" />
-              </button>
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('sftp.filter')}
-                className="h-full min-w-0 flex-1 bg-transparent text-sm text-app-text placeholder:text-app-text-soft/50 outline-none"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  setShowSearch(false);
-                  setSearchQuery('');
-                }}
-                className="h-4 w-4 shrink-0"
-                aria-label={t('sftp.hideFilter')}
-              >
-                <XIcon className="text-app-text-soft/40" />
-              </Button>
+              <div className="flex h-full w-56 items-center pr-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (showSearch) {
+                      setShowSearch(false);
+                      setSearchQuery('');
+                    } else {
+                      setShowSearch(true);
+                    }
+                  }}
+                  className={cn(
+                    'h-[30px] w-7 shrink-0 flex items-center justify-center rounded text-app-text-soft',
+                    !showSearch && 'hover:bg-app-border/50 hover:text-app-text',
+                  )}
+                  aria-label={showSearch ? t('sftp.hideFilter') : t('sftp.showFilter')}
+                >
+                  <SearchIcon className="h-3.5 w-3.5" />
+                </button>
+                <div
+                  className={cn(
+                    'flex min-w-0 flex-1 items-center transition-opacity duration-150',
+                    showSearch ? 'opacity-100 delay-100' : 'opacity-0',
+                  )}
+                >
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={t('sftp.filter')}
+                    tabIndex={showSearch ? 0 : -1}
+                    className="h-full min-w-0 flex-1 bg-transparent text-sm text-app-text placeholder:text-app-text-soft/50 outline-none"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    tabIndex={showSearch ? 0 : -1}
+                    onClick={() => {
+                      setShowSearch(false);
+                      setSearchQuery('');
+                    }}
+                    className="h-4 w-4 shrink-0"
+                    aria-label={t('sftp.hideFilter')}
+                  >
+                    <XIcon className="text-app-text-soft/40" />
+                  </Button>
+                </div>
+              </div>
             </div>
             {!isLocal && remoteBookmarks.length > 0 && (
               <Button

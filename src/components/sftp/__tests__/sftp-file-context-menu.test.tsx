@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { SftpFileContextMenu, type SftpFileContextMenuAction } from '../sftp-file-context-menu';
 import { useSftpStore } from '@/stores/sftpStore';
-import type { FileEntry } from '../file-entry-formatters';
+import type { FileEntry } from '../utils';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({

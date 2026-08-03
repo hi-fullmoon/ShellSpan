@@ -6,8 +6,8 @@ import {
   SftpDialogContent,
   SftpDialogHeader,
 } from './sftp-dialog-layout';
-import type { FileEntry } from '@/components/sftp/file-entry-formatters';
-import { isRemoteEntry } from '@/components/sftp/file-entry-formatters';
+import type { FileEntry } from '@/components/sftp/utils';
+import { isRemoteEntry } from '@/components/sftp/utils';
 import {
   formatSize,
   formatModified,

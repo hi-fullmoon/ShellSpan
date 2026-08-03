@@ -373,14 +373,19 @@ fn update_remote_permissions_inner(
     let connected = connect_sftp(&request.connection, pool, known_hosts)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = std::path::Path::new(&request.path);
-    let mut stat = connected
-        .sftp
-        .stat(path)
-        .map_err(|error| RemoteFsError::Other { message: format!("failed to stat remote path: {error}") })?;
-    stat.perm = Some(request.permissions);
+    // Only send the permission bits: a full FileStat would make the server
+    // apply size/uid/gid/atime/mtime as well (truncate fails on directories
+    // and chown/utimes fail for non-owners).
     connected
         .sftp
-        .setstat(path, stat)
+        .setstat(path, FileStat {
+            size: None,
+            uid: None,
+            gid: None,
+            perm: Some(request.permissions),
+            atime: None,
+            mtime: None,
+        })
         .map_err(|error| RemoteFsError::Other { message: format!("failed to update remote permissions: {error}") })
 }
 
@@ -1951,7 +1956,8 @@ fn resolve_remote_identity_names(
 }
 
 fn build_remote_identity_lookup_command(ids: &[u32], kind: RemoteIdentityKind) -> String {
-    let ids_text = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+    // Space-separated: POSIX `for id in ...` splits on IFS (spaces), not commas.
+    let ids_text = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
 
     let (python_module, python_lookup, python_field, getent_database) = match kind {
         RemoteIdentityKind::User => ("pwd", "getpwuid", "pw_name", "passwd"),

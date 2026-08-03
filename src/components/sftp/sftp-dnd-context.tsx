@@ -13,7 +13,7 @@ import { getEventCoordinates } from '@dnd-kit/utilities';
 import { FileIcon, FolderIcon, LinkIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import type { FileEntry } from './file-entry-formatters';
+import type { FileEntry } from './utils';
 
 export interface SftpDndPayload {
   side: 'local' | 'remote';
