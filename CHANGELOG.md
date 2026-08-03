@@ -3,6 +3,17 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.15](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.15) - 2026-08-03
+
+
+### Bug Fixes
+
+- **ui:** position toast notifications to top-right
+
+### Features
+
+- **sftp:** support conflict policies for remote-to-local downloads
+
 ## [v2.0.14](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.14) - 2026-08-03
 
 
