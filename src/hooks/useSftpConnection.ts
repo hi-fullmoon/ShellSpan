@@ -87,7 +87,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   deleteRemotePaths: (paths: string[]) => Promise<void>;
   updateRemotePermissions: (path: string, permissions: number) => Promise<void>;
   uploadLocalPaths: (localPaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[]) => Promise<void>;
-  downloadRemotePaths: (remotePaths: string[], destinationDirectory: string, operationId?: string) => Promise<void>;
+  downloadRemotePaths: (remotePaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[]) => Promise<void>;
   openRemoteFile: (path: string) => Promise<void>;
   previewRemoteFile: (path: string) => Promise<ReadRemoteFileResponse>;
 } {
@@ -475,7 +475,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   );
 
   const downloadRemotePaths = useCallback(
-    async (remotePaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'download')) => {
+    async (remotePaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'download'), conflictPolicies: UploadConflictPolicy[] = []) => {
       const runDownload = async (): Promise<void> => {
         try {
           await runWithConfiguredRetries(
@@ -483,6 +483,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
               ...remoteConnection,
               remotePaths,
               destinationDirectory,
+              conflictPolicies,
               operationId,
             }),
             () =>

@@ -705,6 +705,11 @@ fn download_remote_paths_inner(
     if request.remote_paths.is_empty() {
         return Err(RemoteFsError::Other { message: "no remote paths were provided for download".to_string() });
     }
+    if !request.conflict_policies.is_empty()
+        && request.conflict_policies.len() != request.remote_paths.len()
+    {
+        return Err(RemoteFsError::Other { message: "download conflict policy count does not match remote paths".to_string() });
+    }
 
     // Downloads hold the connection for the whole transfer, so they must not
     // share the pooled connection: passing `pool: None` opens a dedicated
@@ -756,7 +761,7 @@ fn download_remote_paths_inner(
     let mut reserved_names = local_entry_names(destination_directory);
     let mut failures: Vec<String> = Vec::new();
     let mut cancel_message: Option<String> = None;
-    for remote_path in &request.remote_paths {
+    for (index, remote_path) in request.remote_paths.iter().enumerate() {
         if let Err(message) = progress.ensure_not_cancelled() {
             cancel_message = Some(message);
             break;
@@ -768,7 +773,12 @@ fn download_remote_paths_inner(
                 .ok_or_else(|| RemoteFsError::Other { message: format!("invalid remote path: {}", remote_path.display()) })?
                 .to_string_lossy()
                 .to_string();
-            let destination_name = unique_local_download_name(&reserved_names, &file_name)?;
+            let destination_name =
+                match resolve_local_download_name(&reserved_names, &file_name, request.conflict_policies.get(index).copied())? {
+                    Some(name) => name,
+                    // Skip policy: leave the existing local entry untouched.
+                    None => return Ok(()),
+                };
             reserved_names.insert(destination_name.clone());
             let destination_path = destination_directory.join(&destination_name);
             info!(
@@ -849,6 +859,36 @@ fn unique_local_download_name(
     Err(RemoteFsError::Other { message: format!(
         "failed to find an available download name for {base_name}"
     ) })
+}
+
+// Mirrors resolve_upload_target_name on the local side. `None` policy keeps
+// the historical rename-to-unique behavior used by downloads that never show
+// a conflict dialog; an explicit policy honors the user's choice instead.
+fn resolve_local_download_name(
+    reserved_names: &HashSet<String>,
+    base_name: &str,
+    policy: Option<UploadConflictPolicy>,
+) -> Result<Option<String>, RemoteFsError> {
+    match policy {
+        None => unique_local_download_name(reserved_names, base_name).map(Some),
+        Some(UploadConflictPolicy::Overwrite) | Some(UploadConflictPolicy::Replace) => {
+            Ok(Some(base_name.to_string()))
+        }
+        Some(UploadConflictPolicy::Skip) => {
+            if reserved_names.contains(base_name) {
+                Ok(None)
+            } else {
+                Ok(Some(base_name.to_string()))
+            }
+        }
+        Some(UploadConflictPolicy::Fail) => {
+            if reserved_names.contains(base_name) {
+                Err(RemoteFsError::Other { message: format!("local path already exists: {base_name}") })
+            } else {
+                Ok(Some(base_name.to_string()))
+            }
+        }
+    }
 }
 
 fn scan_remote_download_path(
@@ -3003,6 +3043,75 @@ mod tests {
         let resolved =
             resolve_upload_target_name(&existing_names, "report.txt", UploadConflictPolicy::Fail)
                 .expect("new names should upload without additional confirmation");
+
+        assert_eq!(resolved, Some(String::from("report.txt")));
+    }
+
+    #[test]
+    fn download_name_overwrites_existing_entry_when_requested() {
+        let reserved_names = HashSet::from([String::from("report.txt")]);
+
+        let resolved = resolve_local_download_name(
+            &reserved_names,
+            "report.txt",
+            Some(UploadConflictPolicy::Overwrite),
+        )
+        .expect("overwrite policy should allow replacing the existing target");
+
+        assert_eq!(resolved, Some(String::from("report.txt")));
+    }
+
+    #[test]
+    fn download_name_skips_existing_entry_when_requested() {
+        let reserved_names = HashSet::from([String::from("report.txt")]);
+
+        let resolved = resolve_local_download_name(
+            &reserved_names,
+            "report.txt",
+            Some(UploadConflictPolicy::Skip),
+        )
+        .expect("skip policy should be treated as a valid decision");
+
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn download_name_rejects_existing_entry_without_explicit_resolution() {
+        let reserved_names = HashSet::from([String::from("report.txt")]);
+
+        let error = resolve_local_download_name(
+            &reserved_names,
+            "report.txt",
+            Some(UploadConflictPolicy::Fail),
+        )
+        .expect_err("fail policy should reject the conflicting download target");
+
+        assert!(
+            matches!(error, RemoteFsError::Other { ref message } if message.contains("report.txt")),
+            "expected error to mention the conflicting file name, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn download_name_renames_to_unique_without_policy() {
+        let reserved_names = HashSet::from([String::from("report.txt")]);
+
+        let resolved = resolve_local_download_name(&reserved_names, "report.txt", None)
+            .expect("downloads without a policy should keep the rename-to-unique behavior");
+
+        assert_eq!(resolved, Some(String::from("report copy.txt")));
+    }
+
+    #[test]
+    fn download_name_allows_new_entry_without_conflict() {
+        let reserved_names = HashSet::<String>::new();
+
+        let resolved = resolve_local_download_name(
+            &reserved_names,
+            "report.txt",
+            Some(UploadConflictPolicy::Fail),
+        )
+        .expect("new names should download without additional confirmation");
 
         assert_eq!(resolved, Some(String::from("report.txt")));
     }

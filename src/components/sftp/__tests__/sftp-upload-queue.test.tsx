@@ -229,6 +229,38 @@ describe('SftpContent upload queue', () => {
     );
   });
 
+  it('passes the overwrite policy through to remote-to-local downloads', async () => {
+    connectionMocks.downloadRemotePaths.mockResolvedValue(undefined);
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions());
+
+    const connection = createConnection();
+    useSftpStore.getState().setEntries(connection.id, 'local', [
+      { path: '/local/file.txt', name: 'file.txt', kind: 'file' },
+    ]);
+    renderContent(connection);
+
+    const onDragEnd = lastDragEnd();
+    await onDragEnd(
+      {
+        side: 'remote',
+        entries: [{ path: '/remote/file.txt', name: 'file.txt', kind: 'file' }],
+      },
+      'local',
+    );
+
+    expect(await screen.findByTitle('file.txt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
+
+    await waitFor(() =>
+      expect(connectionMocks.downloadRemotePaths).toHaveBeenCalledWith(
+        ['/remote/file.txt'],
+        '/local',
+        undefined,
+        ['overwrite'],
+      ),
+    );
+  });
+
   it('recovers the queue when a remote-to-local download fails', async () => {
     connectionMocks.downloadRemotePaths.mockRejectedValue(new Error('boom'));
     vi.mocked(useSftpPaneActions).mockReturnValue(createActions());
