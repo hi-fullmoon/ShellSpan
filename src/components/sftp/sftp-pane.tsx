@@ -418,7 +418,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 showSearch ? 'w-56 bg-app-surface-muted' : 'w-7 bg-transparent',
               )}
             >
-              <div className="flex h-full w-56 items-center pr-1">
+              <div className="flex h-full w-56 items-center pr-1.5">
                 <button
                   type="button"
                   onClick={() => {
