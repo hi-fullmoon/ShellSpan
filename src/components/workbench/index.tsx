@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
 import { ConnectionFormDrawer } from './connection-form-drawer';
@@ -9,7 +10,7 @@ import { KeychainPanel } from './keychain-panel';
 import { LogPanel } from './log-panel';
 import { SettingsPanel } from './settings-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useConnectSession } from '@/hooks/useConnectSession';
@@ -17,6 +18,7 @@ import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 
 const Workbench: React.FC = () => {
   const { t } = useI18n();
+  const { error: showError } = useToast();
   const activeTab = useAppStore((state) => state.activeWorkbenchTab);
   const setActiveTab = useAppStore((state) => state.setActiveWorkbenchTab);
   const [formOpen, setFormOpen] = useState(false);
@@ -33,6 +35,7 @@ const Workbench: React.FC = () => {
   } = useSftpConnectionOpener();
 
   const profiles = useProfileStore((state) => state.profiles);
+  const profilesInitialized = useProfileStore((state) => state.initialized);
   const addProfile = useProfileStore((state) => state.addProfile);
   const updateProfile = useProfileStore((state) => state.updateProfile);
   const removeProfile = useProfileStore((state) => state.removeProfile);
@@ -45,17 +48,17 @@ const Workbench: React.FC = () => {
     setFormOpen(true);
   };
 
-  const handleAdd = (): void => {
+  const handleAdd = useCallback((): void => {
     setEditing(undefined);
     setInitialValues(undefined);
     setFormOpen(true);
-  };
+  }, []);
 
-  const handleEdit = (profile: ConnectionProfile): void => {
+  const handleEdit = useCallback((profile: ConnectionProfile): void => {
     setEditing(profile);
     setInitialValues(undefined);
     setFormOpen(true);
-  };
+  }, []);
 
   const handleSubmit = async (
     values: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
@@ -82,17 +85,21 @@ const Workbench: React.FC = () => {
 
   const handleDelete = async (): Promise<void> => {
     if (!deleting) return;
-    await removeProfile(deleting.id);
-    setDeleting(undefined);
+    try {
+      await removeProfile(deleting.id);
+      setDeleting(undefined);
+    } catch {
+      showError(t('workbench.connections.deleteFailed'));
+    }
   };
 
-  const handleDuplicate = async (profile: ConnectionProfile): Promise<void> => {
+  const handleDuplicate = useCallback(async (profile: ConnectionProfile): Promise<void> => {
     await duplicateProfile(profile.id);
-  };
+  }, [duplicateProfile]);
 
-  const connectSftp = async (profile: ConnectionProfile): Promise<void> => {
+  const connectSftp = useCallback(async (profile: ConnectionProfile): Promise<void> => {
     await openSftpConnection(profile);
-  };
+  }, [openSftpConnection]);
 
   return (
     <div className="flex h-full w-full">
@@ -103,6 +110,7 @@ const Workbench: React.FC = () => {
           {activeTab === 'connections' && (
             <ConnectionList
               profiles={profiles}
+              initialized={profilesInitialized}
               onAdd={handleAdd}
               onEdit={handleEdit}
               onDelete={setDeleting}
@@ -129,26 +137,13 @@ const Workbench: React.FC = () => {
         initialValues={initialValues}
       />
 
-      <AlertDialog open={!!deleting} onOpenChange={(open) => { if (!open) setDeleting(undefined); }}>
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
-            <AlertDialogTitle className="text-sm leading-5">{t('workbench.connections.deleteTitle')}</AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {deleting ? t('workbench.connections.deleteConfirm', { name: deleting.name }) : ''}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
-            <AlertDialogCancel size="sm" onClick={() => setDeleting(undefined)}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={handleDelete}>
-              {t('common.delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDeleteDialog
+        open={!!deleting}
+        onOpenChange={(open) => { if (!open) setDeleting(undefined); }}
+        title={t('workbench.connections.deleteTitle')}
+        description={deleting ? t('workbench.connections.deleteConfirm', { name: deleting.name }) : ''}
+        onConfirm={handleDelete}
+      />
 
       <HostKeyDialog
         open={hostKeyDialog.open}

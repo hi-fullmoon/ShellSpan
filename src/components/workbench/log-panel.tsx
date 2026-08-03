@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
+import { useAppStore } from '@/stores/appStore';
 import { useLogStore } from '@/stores/logStore';
 import type { LogSource } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -251,14 +252,17 @@ export const LogPanel: React.FC = () => {
   const [query, setQuery] = useState('');
   const [isAtBottom, setIsAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The workbench stays mounted (CSS-hidden) in other sections, so polling
+  // must be gated on the active section to avoid needless backend calls.
+  const activeSection = useAppStore((state) => state.activeSection);
 
   const parsedLines = useMemo(() => parseLogContent(content), [content]);
-
-  const today = useMemo(() => new Date(), []);
 
   const normalizedQuery = query.trim().toLowerCase();
 
   const searchFilteredLines = useMemo(() => {
+    // Computed at filter time so relative date filters stay correct across midnight.
+    const today = new Date();
     return parsedLines
       .map((line, index) => ({
         line,
@@ -273,7 +277,7 @@ export const LogPanel: React.FC = () => {
         }
         return true;
       });
-  }, [parsedLines, dateFilter, today, normalizedQuery]);
+  }, [parsedLines, dateFilter, normalizedQuery]);
 
   const levelCounts = useMemo(() => {
     const counts: Partial<Record<LogLevel, number>> = {};
@@ -340,18 +344,18 @@ export const LogPanel: React.FC = () => {
   );
 
   useEffect(() => {
-    if (!activeFileName) return;
+    if (!activeFileName || activeSection !== 'workbench') return;
     const timer = setInterval(() => {
       refreshActiveFile();
     }, 2000);
     return () => clearInterval(timer);
-  }, [activeFileName, refreshActiveFile]);
+  }, [activeFileName, activeSection, refreshActiveFile]);
 
   useEffect(() => {
-    if (autoScroll && filteredLines.length > 0) {
+    if (autoScroll && isAtBottom && filteredLines.length > 0) {
       virtualizer.scrollToIndex(filteredLines.length - 1, { align: 'end' });
     }
-  }, [filteredLines.length, autoScroll, virtualizer]);
+  }, [filteredLines.length, autoScroll, isAtBottom, virtualizer]);
 
   const handleScrollToBottom = (): void => {
     if (filteredLines.length === 0) return;

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FolderOpen, ChevronDown, KeyRound, Network, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
@@ -11,8 +11,8 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
-import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { FormRow } from './shared';
 import { invokePickPrivateKeyFile, invokeReadTextFile } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import type { AuthMethod, ConnectionProfile, JumpHostConfig } from '@/types';
@@ -112,11 +112,14 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
         setForm(EMPTY_FORM);
       }
       setErrors({});
-      if (!initialized) {
-        void hydrate();
-      }
     }
-  }, [initial, initialValues, open, initialized, hydrate]);
+  }, [initial, initialValues, open]);
+
+  useEffect(() => {
+    if (open && !initialized) {
+      void hydrate();
+    }
+  }, [open, initialized, hydrate]);
 
   const updateField = <K extends keyof FormState>(key: K, value: FormState[K]): void => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -155,6 +158,8 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
     }
   };
 
+  const keyFileKeys = useMemo(() => keys.filter((k) => k.kind === 'keyFile'), [keys]);
+
   const validate = (): boolean => {
     const nextErrors: Record<string, string> = {};
     if (!form.name.trim()) {
@@ -169,8 +174,6 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
     if (!form.username.trim()) {
       nextErrors.username = t('connection.form.validation.usernameRequired');
     }
-
-    const keyFileKeys = keys.filter((k) => k.kind === 'keyFile');
 
     if (form.authMethod === 'password') {
       if (!form.password.trim()) {
@@ -209,13 +212,23 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
     return Object.keys(nextErrors).length === 0;
   };
 
-  const resolveKeyFromPath = async (path: string): Promise<string> => {
+  const resolveKeyFromPath = async (path: string, target: 'main' | 'jump'): Promise<string> => {
     const content = await invokeReadTextFile(path);
     const key = await addKey({
       label: keyLabelFromPath(path),
       kind: 'keyFile',
       privateKey: content,
     });
+    // Link the imported key in the form so a retried submit reuses it
+    // instead of importing a duplicate into the keychain.
+    if (target === 'main') {
+      setForm((prev) => ({ ...prev, privateKeyPath: '', keychainKeyId: key.id }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        jumpHost: { ...prev.jumpHost, privateKeyPath: '', keychainKeyId: key.id },
+      }));
+    }
     return key.id;
   };
 
@@ -223,7 +236,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
     let keychainKeyId: string | undefined;
     if (form.authMethod === 'key') {
       if (form.privateKeyPath.trim()) {
-        keychainKeyId = await resolveKeyFromPath(form.privateKeyPath.trim());
+        keychainKeyId = await resolveKeyFromPath(form.privateKeyPath.trim(), 'main');
       } else if (form.keychainKeyId.trim()) {
         const trimmedId = form.keychainKeyId.trim();
         if (keys.some((k) => k.kind === 'keyFile' && k.id === trimmedId)) {
@@ -237,7 +250,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
       let jumpKeychainKeyId: string | undefined;
       if (form.jumpHost.authMethod === 'key') {
         if (form.jumpHost.privateKeyPath?.trim()) {
-          jumpKeychainKeyId = await resolveKeyFromPath(form.jumpHost.privateKeyPath.trim());
+          jumpKeychainKeyId = await resolveKeyFromPath(form.jumpHost.privateKeyPath.trim(), 'jump');
         } else if (form.jumpHost.keychainKeyId?.trim()) {
           const trimmedJumpId = form.jumpHost.keychainKeyId.trim();
           if (keys.some((k) => k.kind === 'keyFile' && k.id === trimmedJumpId)) {
@@ -315,8 +328,6 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
       }));
     }
   };
-
-  const keyFileKeys = keys.filter((k) => k.kind === 'keyFile');
 
   return (
     <Drawer
@@ -576,23 +587,6 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
           <span className="text-xs text-muted-foreground/70">{t('connection.form.privateKeyHint')}</span>
         </div>
       </FormRow>
-    </div>
-  );
-};
-
-interface FormRowProps {
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-  className?: string;
-}
-
-const FormRow: React.FC<FormRowProps> = ({ label, error, children, className }) => {
-  return (
-    <div className={cn('flex flex-col gap-1', className)}>
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {children}
-      {error && <span className="text-xs text-app-error">{error}</span>}
     </div>
   );
 };

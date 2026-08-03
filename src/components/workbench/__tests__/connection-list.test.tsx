@@ -31,6 +31,7 @@ describe('ConnectionList', () => {
     render(
       <ConnectionList
         profiles={[]}
+        initialized={true}
         onAdd={onAdd}
         onEdit={() => {}}
         onDelete={() => {}}
@@ -54,6 +55,7 @@ describe('ConnectionList', () => {
     render(
       <ConnectionList
         profiles={[]}
+        initialized={true}
         onAdd={onAdd}
         onEdit={() => {}}
         onDelete={() => {}}
@@ -74,6 +76,7 @@ describe('ConnectionList', () => {
     render(
       <ConnectionList
         profiles={[makeProfile()]}
+        initialized={true}
         onAdd={() => {}}
         onEdit={() => {}}
         onDelete={() => {}}
@@ -99,6 +102,7 @@ describe('ConnectionList', () => {
     render(
       <ConnectionList
         profiles={[makeProfile()]}
+        initialized={true}
         onAdd={() => {}}
         onEdit={onEdit}
         onDelete={onDelete}

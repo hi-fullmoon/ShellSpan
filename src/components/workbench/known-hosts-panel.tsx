@@ -1,20 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import { useKnownHostsStore } from '@/stores/knownHostsStore';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import {
   FingerprintIcon,
   PlusIcon,
@@ -27,16 +19,7 @@ import {
 import { cn } from '@/lib/utils';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
-
-const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
-  ED25519: 'bg-app-primary/10 text-app-primary',
-  ECDSA: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  RSA: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-};
-
-const keyTypeBadgeClass = (keyType: string): string =>
-  KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ??
-  'bg-app-surface-muted text-muted-foreground';
+import { CARD_GRID_BREAKPOINTS, keyTypeBadgeClass } from './shared';
 
 export interface KnownHostsPanelProps {
   onCreateConnection?: (host: string, port: number) => void;
@@ -46,6 +29,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
   onCreateConnection,
 }) => {
   const { t } = useI18n();
+  const { error: showError } = useToast();
   const { hosts, loading, error, loadHosts, removeHost } = useKnownHostsStore();
   const [removing, setRemoving] = React.useState<{
     host: string;
@@ -63,8 +47,12 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
 
   const handleRemove = async (): Promise<void> => {
     if (!removing) return;
-    await removeHost(removing.host, removing.port);
-    setRemoving(null);
+    try {
+      await removeHost(removing.host, removing.port);
+      setRemoving(null);
+    } catch {
+      showError(t('workbench.knownHosts.removeFailed'));
+    }
   };
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -98,6 +86,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('workbench.knownHosts.searchPlaceholder')}
+              aria-label={t('workbench.knownHosts.searchPlaceholder')}
               className="h-8 pl-7"
             />
           </div>
@@ -140,10 +129,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
         {filteredHosts.length > 0 && (
           <ResponsiveCardGrid
             columns={1}
-            breakpoints={[
-              { minWidth: 800, columns: 2 },
-              { minWidth: 900, columns: 3 },
-            ]}
+            breakpoints={CARD_GRID_BREAKPOINTS}
             gap="0.375rem"
           >
             {filteredHosts.map((host) => (
@@ -206,42 +192,22 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
           </ResponsiveCardGrid>
         )}
       </div>
-      <AlertDialog
+      <ConfirmDeleteDialog
         open={!!removing}
         onOpenChange={(open) => {
           if (!open) setRemoving(null);
         }}
-      >
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('workbench.knownHosts.removeTitle')}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {removing
-                ? t('workbench.knownHosts.removeConfirm', {
-                    host: removing.host,
-                    port: removing.port,
-                  })
-                : ''}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
-            <AlertDialogCancel size="sm">
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              size="sm"
-              onClick={handleRemove}
-            >
-              {t('common.delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t('workbench.knownHosts.removeTitle')}
+        description={
+          removing
+            ? t('workbench.knownHosts.removeConfirm', {
+                host: removing.host,
+                port: removing.port,
+              })
+            : ''
+        }
+        onConfirm={handleRemove}
+      />
       </div>
     </TooltipProvider>
   );

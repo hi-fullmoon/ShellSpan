@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
+import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
 import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
 import {
@@ -306,46 +307,46 @@ export const useAppStore = create<AppState>()(
   })),
 );
 
-// Subscribe to preference changes and persist to database
-let previousPrefs: AppPreferences | null = null;
+// Subscribe to preference changes and persist to database. The selector plus
+// shallow equality ensure the comparison/save only runs when a persisted
+// preference key actually changes (not on activeSection/activeWorkbenchTab).
 useAppStore.subscribe(
-  (state) => {
+  (state): AppPreferences => ({
+    theme: state.theme,
+    locale: state.locale,
+    startupUpdateCheck: state.startupUpdateCheck,
+    startupSection: state.startupSection,
+    terminalFontSize: state.terminalFontSize,
+    terminalFontFamily: state.terminalFontFamily,
+    terminalCursorBlink: state.terminalCursorBlink,
+    terminalCursorStyle: state.terminalCursorStyle,
+    terminalCopyOnSelect: state.terminalCopyOnSelect,
+    terminalScrollback: state.terminalScrollback,
+    terminalColorScheme: state.terminalColorScheme,
+    terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
+    terminalLargePasteWarning: state.terminalLargePasteWarning,
+    terminalAutoReconnect: state.terminalAutoReconnect,
+    terminalLineHeight: state.terminalLineHeight,
+    terminalLetterSpacing: state.terminalLetterSpacing,
+    terminalUrlDetection: state.terminalUrlDetection,
+    terminalTrimTrailingWhitespace: state.terminalTrimTrailingWhitespace,
+    terminalRightClickBehavior: state.terminalRightClickBehavior,
+    terminalBellStyle: state.terminalBellStyle,
+    confirmBeforeExit: state.confirmBeforeExit,
+    restoreWorkspace: state.restoreWorkspace,
+    sftpShowHiddenFiles: state.sftpShowHiddenFiles,
+    sftpConflictPolicy: state.sftpConflictPolicy,
+    sftpRetryCount: state.sftpRetryCount,
+    sftpDownloadDirectory: state.sftpDownloadDirectory,
+    sftpCompletionNotification: state.sftpCompletionNotification,
+    terminalHideSingleTabBar: state.terminalHideSingleTabBar,
+    sftpHideSingleTabBar: state.sftpHideSingleTabBar,
+    shortcuts: state.shortcuts,
+  }),
+  (currentPrefs) => {
     // Only save after initialization is complete
-    if (!state.initialized) return;
-    const currentPrefs: AppPreferences = {
-      theme: state.theme,
-      locale: state.locale,
-      startupUpdateCheck: state.startupUpdateCheck,
-      startupSection: state.startupSection,
-      terminalFontSize: state.terminalFontSize,
-      terminalFontFamily: state.terminalFontFamily,
-      terminalCursorBlink: state.terminalCursorBlink,
-      terminalCursorStyle: state.terminalCursorStyle,
-      terminalCopyOnSelect: state.terminalCopyOnSelect,
-      terminalScrollback: state.terminalScrollback,
-      terminalColorScheme: state.terminalColorScheme,
-      terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
-      terminalLargePasteWarning: state.terminalLargePasteWarning,
-      terminalAutoReconnect: state.terminalAutoReconnect,
-      terminalLineHeight: state.terminalLineHeight,
-      terminalLetterSpacing: state.terminalLetterSpacing,
-      terminalUrlDetection: state.terminalUrlDetection,
-      terminalTrimTrailingWhitespace: state.terminalTrimTrailingWhitespace,
-      terminalRightClickBehavior: state.terminalRightClickBehavior,
-      terminalBellStyle: state.terminalBellStyle,
-      confirmBeforeExit: state.confirmBeforeExit,
-      restoreWorkspace: state.restoreWorkspace,
-      sftpShowHiddenFiles: state.sftpShowHiddenFiles,
-      sftpConflictPolicy: state.sftpConflictPolicy,
-      sftpRetryCount: state.sftpRetryCount,
-      sftpDownloadDirectory: state.sftpDownloadDirectory,
-      sftpCompletionNotification: state.sftpCompletionNotification,
-      terminalHideSingleTabBar: state.terminalHideSingleTabBar,
-      sftpHideSingleTabBar: state.sftpHideSingleTabBar,
-      shortcuts: state.shortcuts,
-    };
-    if (previousPrefs && JSON.stringify(previousPrefs) === JSON.stringify(currentPrefs)) return;
-    previousPrefs = currentPrefs;
+    if (!useAppStore.getState().initialized) return;
     debouncedSaveToDb(currentPrefs);
   },
+  { equalityFn: shallow },
 );

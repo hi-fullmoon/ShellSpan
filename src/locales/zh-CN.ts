@@ -62,6 +62,7 @@ export default {
   'workbench.connections.filteredEmpty': '没有匹配的连接',
   'workbench.connections.deleteTitle': '删除连接？',
   'workbench.connections.deleteConfirm': '确定要删除连接"{name}"吗？删除后配置无法恢复。',
+  'workbench.connections.deleteFailed': '删除连接失败',
 
   'workbench.knownHosts.title': 'Known Hosts',
   'workbench.knownHosts.empty': '暂无 known hosts 记录',
@@ -75,6 +76,7 @@ export default {
   'workbench.knownHosts.fingerprint': '指纹',
   'workbench.knownHosts.keyType': '密钥类型',
   'workbench.knownHosts.loadFailed': '加载失败',
+  'workbench.knownHosts.removeFailed': '删除 Known Host 失败',
   'workbench.knownHosts.createConnection': '创建连接',
 
   'workbench.keychain.title': '密钥管理',
@@ -87,6 +89,7 @@ export default {
   'workbench.keychain.count': '{count}/{total} 个密钥',
   'workbench.keychain.deleteTitle': '删除密钥？',
   'workbench.keychain.deleteConfirm': '确定要删除密钥"{name}"吗？引用该密钥的连接将需要重新选择认证方式。',
+  'workbench.keychain.loadFailed': '加载密钥失败',
   'workbench.keychain.newSubtitle': '创建密钥文件凭据',
   'workbench.keychain.editSubtitle': '编辑密钥文件凭据',
 
