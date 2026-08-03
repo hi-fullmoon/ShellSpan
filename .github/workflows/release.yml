@@ -89,6 +89,20 @@ jobs:
 
           NOTES="$RELEASE_NOTES"
           if [[ -z "$NOTES" ]]; then
+            # 从 CHANGELOG.md 中提取当前版本对应的段落，并去掉首尾空行
+            NOTES="$(awk -v tag="$RELEASE_TAG" '
+              BEGIN { header = "## [" tag "]" }
+              index($0, header) == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found {
+                if ($0 ~ /^[[:space:]]*$/) { if (started) pending = pending "\n"; next }
+                started = 1
+                printf "%s%s\n", pending, $0
+                pending = ""
+              }
+            ' CHANGELOG.md)"
+          fi
+          if [[ -z "$NOTES" ]]; then
             NOTES="Release $RELEASE_TAG"
           fi
 
@@ -151,11 +165,6 @@ jobs:
           - platform: darwin-aarch64
             runner: macos-15
             rust_target: aarch64-apple-darwin
-            bundle_args: --bundles app,dmg
-            updater_suffix: .app.tar.gz
-          - platform: darwin-x86_64
-            runner: macos-15-intel
-            rust_target: x86_64-apple-darwin
             bundle_args: --bundles app,dmg
             updater_suffix: .app.tar.gz
           - platform: windows-x86_64
@@ -269,9 +278,6 @@ jobs:
 
             archs="$(lipo -archs "$app_binary")"
             expected_arch="arm64"
-            if [[ "$PLATFORM" == "darwin-x86_64" ]]; then
-              expected_arch="x86_64"
-            fi
 
             if [[ " $archs " != *" $expected_arch "* ]]; then
               echo "Unexpected macOS app architecture for $PLATFORM: $archs" >&2
@@ -439,7 +445,7 @@ jobs:
           const fs = require('fs');
           const [manifestPath, tag] = process.argv.slice(2);
           const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-          const expectedPlatforms = ['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64'];
+          const expectedPlatforms = ['darwin-aarch64', 'windows-x86_64'];
 
           if (manifest.version !== tag) {
             throw new Error(`Unexpected updater version: ${manifest.version}, expected ${tag}`);
