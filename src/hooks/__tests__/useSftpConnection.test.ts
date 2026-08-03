@@ -16,6 +16,7 @@ const tauri = vi.hoisted(() => ({
   invokeCopyRemotePath: vi.fn().mockResolvedValue(undefined),
   invokeCancelDelete: vi.fn().mockResolvedValue(undefined),
   invokeCancelDownload: vi.fn().mockResolvedValue(undefined),
+  invokeCancelRemoteCopy: vi.fn().mockResolvedValue(undefined),
   invokeCancelUpload: vi.fn().mockResolvedValue(undefined),
   invokeCreateRemoteEntry: vi.fn().mockResolvedValue(undefined),
   invokeDeleteRemotePath: vi.fn().mockResolvedValue(undefined),
@@ -272,7 +273,7 @@ describe('useSftpConnection uploads', () => {
   });
 });
 
-describe('useSftpConnection downloads', () => {
+describe('useSftpConnection same-host copy', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     const connection = createConnection();
@@ -284,6 +285,74 @@ describe('useSftpConnection downloads', () => {
     useAppStore.setState({ sftpRetryCount: 0 });
   });
 
+  it('tracks the copy as a transfer operation with an operation id', async () => {
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() => result.current.copyRemotePath(file.path, '/remote/archive'));
+
+    expect(tauri.invokeCopyRemotePath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourcePath: file.path,
+        destinationDirectory: '/remote/archive',
+        operationId: expect.stringContaining('-copy-'),
+      }),
+    );
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'remote-copy',
+      totalSteps: 1,
+      completedSteps: 1,
+      error: undefined,
+    });
+    expect(useTransferStore.getState().operations[0]?.cancel).toBeTypeOf('function');
+  });
+
+  it('marks a cancelled same-host copy as cancelled instead of failed', async () => {
+    let rejectCopy!: (reason: Error) => void;
+    tauri.invokeCopyRemotePath.mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectCopy = reject; }),
+    );
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+    const copy = result.current.copyRemotePath(file.path, '/remote/archive');
+    const operationId = useTransferStore.getState().operations[0]!.operationId;
+
+    await act(() => useTransferStore.getState().cancelOperation(operationId));
+    expect(tauri.invokeCancelRemoteCopy).toHaveBeenCalledWith(operationId);
+
+    rejectCopy(new Error('remote copy cancelled'));
+    await act(() => copy);
+    expect(useTransferStore.getState().operations[0]?.status).toBe('cancelled');
+  });
+
+  it('marks a failed same-host copy and retains the error', async () => {
+    tauri.invokeCopyRemotePath.mockRejectedValueOnce(new Error('disk full'));
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await expect(
+      act(() => result.current.copyRemotePath(file.path, '/remote/archive')),
+    ).rejects.toThrow('disk full');
+
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'remote-copy',
+      status: 'failed',
+      error: 'disk full',
+    });
+  });
+});
+
+describe('useSftpConnection downloads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const connection = createConnection();
+    useSftpStore.setState({
+      connections: [connection],
+      activeConnectionId: connection.id,
+    });
+    useTransferStore.setState({ operations: [] });
+    useAppStore.setState({ sftpRetryCount: 0 });
+  });
   it('marks a failed download and retains its affected paths', async () => {
     tauri.invokeDownloadRemotePaths.mockRejectedValueOnce(new Error('offline'));
     const connection = useSftpStore.getState().connections[0]!;

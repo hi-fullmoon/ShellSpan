@@ -660,23 +660,31 @@ pub(crate) async fn delete_remote_path(
 pub(crate) async fn copy_remote_path(
     app: AppHandle,
     credentials: State<'_, crate::keychain::CredentialManager>,
+    copies: State<'_, RemoteCopyCancellationRegistry>,
     mut request: CopyRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
     resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
-        "Copying remote path source_path={} destination_directory={} {}",
+        "Copying remote path operation_id={} source_path={} destination_directory={} {}",
+        request.operation_id,
         request.source_path,
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
+    let cancel_flag = copies.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
+    let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        copy_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
+        copy_remote_path_blocking(request, cancel_flag, Some(&pool), known_hosts.as_deref())
     })
-    .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join copy task: {error}") })?;
+    .await;
+    // Remove the registry entry before propagating a JoinError so the
+    // operation id does not leak on task failure.
+    let _ = copies.remove(&operation_id);
+    let result = result
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to join copy task: {error}") })?;
     if let Err(error) = &result {
         error!("Copy remote path failed: {error:?}");
     } else {

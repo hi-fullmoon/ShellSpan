@@ -328,6 +328,7 @@ export interface RestoreRemotePathRequest extends RemoteConnectionRequest {
 export interface CopyRemotePathRequest extends RemoteConnectionRequest {
   sourcePath: string;
   destinationDirectory: string;
+  operationId: string;
 }
 
 export interface OpenRemoteFileRequest extends RemoteConnectionRequest {
