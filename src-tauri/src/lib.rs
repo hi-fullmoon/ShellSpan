@@ -144,6 +144,8 @@ pub fn run() {
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
             app.manage(keychain::CredentialManager::new(database.clone()));
             app.manage(database);
+            #[cfg(not(target_os = "macos"))]
+            menu::initialize_tray(app)?;
             Ok(())
         })
         .plugin(

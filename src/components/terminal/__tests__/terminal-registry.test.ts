@@ -249,6 +249,32 @@ describe('terminalRegistry', () => {
     });
   });
 
+  it('drops input silently while connecting without a disconnected hint', async () => {
+    const { invokeWriteSession } = await import('@/lib/tauri');
+    const requestReconnect = vi.fn();
+    const getStatus = vi.fn().mockReturnValue('connecting');
+    const controller = terminalRegistry.create(
+      's1',
+      vi.fn(),
+      vi.fn(),
+      getStatus,
+      requestReconnect,
+    );
+    controller.attach(document.createElement('div'));
+
+    controller.simulateInput('a');
+    controller.simulateInput('\r');
+
+    expect(invokeWriteSession).not.toHaveBeenCalled();
+    expect(requestReconnect).not.toHaveBeenCalled();
+    const buffer = controller.terminal.buffer.active;
+    const content = Array.from(
+      { length: buffer.length },
+      (_, index) => buffer.getLine(index)?.translateToString(true) ?? '',
+    ).join('\n');
+    expect(content).not.toContain('terminal.notice.disconnectedHint');
+  });
+
   it('shows disconnected hint and triggers reconnect on Enter', async () => {
     const { invokeWriteSession } = await import('@/lib/tauri');
     const requestReconnect = vi.fn();
