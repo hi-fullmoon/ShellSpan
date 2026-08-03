@@ -3,6 +3,21 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.14](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.14) - 2026-08-03
+
+
+### Bug Fixes
+
+- **ui:** prevent text selection during split-pane drag and cap visible toasts
+
+### CI/CD
+
+- **release:** add changelog fallback for notes and drop Intel Mac builds
+
+### Features
+
+- **workbench:** add loading state and error feedback for connection management
+
 ## [v2.0.13](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.13) - 2026-08-03
 
 
