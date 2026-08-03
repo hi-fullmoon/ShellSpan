@@ -336,7 +336,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           );
         } else if (targetLocal && queue.sourceSide) {
           const sourceRemote = queue.sourceSide === 'local' ? leftRemote : rightRemote;
-          await sourceRemote.downloadRemotePaths(queue.accepted, queue.destination);
+          await sourceRemote.downloadRemotePaths(queue.accepted, queue.destination, undefined, queue.policies);
         } else if (queue.sourceLocal) {
           const targetActions = queue.side === 'local' ? localActions : remoteActions;
           await targetActions.uploadWithPolicies(

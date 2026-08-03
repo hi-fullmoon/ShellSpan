@@ -356,6 +356,7 @@ export interface UpdateRemotePermissionsRequest
 export interface DownloadRemotePathsRequest extends RemoteConnectionRequest {
   remotePaths: string[];
   destinationDirectory: string;
+  conflictPolicies: UploadConflictPolicy[];
   operationId: string;
 }
 

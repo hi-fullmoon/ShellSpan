@@ -245,6 +245,8 @@ pub(crate) struct DownloadRemotePathsRequest {
     pub(crate) connection: RemoteConnectionRequest,
     pub(crate) remote_paths: Vec<String>,
     pub(crate) destination_directory: String,
+    #[serde(default)]
+    pub(crate) conflict_policies: Vec<UploadConflictPolicy>,
     pub(crate) operation_id: String,
 }
 
