@@ -18,6 +18,13 @@ vi.mock('@/lib/tauri', () => ({
     port: 22,
     username: 'u',
   }),
+  invokeCreateLocalSession: vi.fn().mockResolvedValue({
+    sessionId: 's3',
+    title: 'powershell',
+    host: 'local',
+    port: 0,
+    username: 'u',
+  }),
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
@@ -52,20 +59,53 @@ describe('useReconnectSession', () => {
     useProfileStore.setState(initialProfile, true);
   });
 
-  it('does nothing when the session has no profileId', async () => {
+  it('recreates a local session when the session has no profileId', async () => {
     useTerminalStore.getState().addSession({
       sessionId: 's1',
-      title: 'A',
-      host: 'h',
-      port: 22,
+      title: 'powershell',
+      host: 'local',
+      port: 0,
       username: 'u',
     });
+    const controller = terminalRegistry.create(
+      's1',
+      vi.fn(),
+      vi.fn(),
+      () => 'disconnected',
+      vi.fn(),
+    );
+    const terminal = controller.terminal;
+
+    const { invokeCreateLocalSession, invokeCreateSession, invokeCloseSession } =
+      await import('@/lib/tauri');
+    const { result } = renderHook(() => useReconnectSession());
+    await result.current('s1');
+
+    expect(invokeCreateLocalSession).toHaveBeenCalledTimes(1);
+    expect(invokeCreateSession).not.toHaveBeenCalled();
+    expect(invokeCloseSession).toHaveBeenCalledWith('s1');
+    expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s3');
+    expect(terminalRegistry.get('s3')?.terminal).toBe(terminal);
+  });
+
+  it('sets status to error when local session creation fails', async () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 's1',
+      title: 'powershell',
+      host: 'local',
+      port: 0,
+      username: 'u',
+    });
+
+    const { invokeCreateLocalSession } = await import('@/lib/tauri');
+    vi.mocked(invokeCreateLocalSession).mockRejectedValueOnce(new Error('boom'));
 
     const { result } = renderHook(() => useReconnectSession());
     await result.current('s1');
 
-    expect(useTerminalStore.getState().sessions).toHaveLength(1);
-    expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s1');
+    const session = useTerminalStore.getState().sessions[0];
+    expect(session?.status).toBe('error');
+    expect(session?.statusMessage).toBe('boom');
   });
 
   it('creates a new session and replaces the old one on success', async () => {
