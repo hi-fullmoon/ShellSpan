@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
@@ -81,7 +81,66 @@ export function useConnectSession(): {
     };
   }, [reconnect]);
 
-  const connect = async (
+  const handleConnectionError = useCallback((
+    error: unknown,
+    retry: () => void,
+  ): void => {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'type' in error
+    ) {
+      const typed = error as { type: string; payload?: Record<string, unknown> };
+      if (typed.type === 'HostKeyUnknown') {
+        const payload = typed.payload ?? {};
+        const host = String(payload.host ?? '');
+        const port = Number(payload.port ?? 22);
+        logger.warn(`Host key verification prompt (${typed.type}) for ${host}:${port}`);
+        setHostKeyDialog({
+          open: true,
+          host,
+          port,
+          fingerprint: payload.fingerprint
+            ? String(payload.fingerprint)
+            : undefined,
+          mismatch: false,
+          onTrust: () => {
+            invokeTrustHost(host, port).then(() => {
+              setHostKeyDialog(CLOSED_DIALOG);
+              retry();
+            });
+          },
+        });
+        return;
+      }
+      if (typed.type === 'HostKeyMismatch') {
+        const payload = typed.payload ?? {};
+        const host = String(payload.host ?? '');
+        const port = Number(payload.port ?? 22);
+        logger.warn(`Host key verification prompt (${typed.type}) for ${host}:${port}`);
+        setHostKeyDialog({
+          open: true,
+          host,
+          port,
+          mismatch: true,
+          onTrust: () => {
+            invokeTrustHost(host, port).then(() => {
+              setHostKeyDialog(CLOSED_DIALOG);
+              retry();
+            });
+          },
+        });
+        return;
+      }
+    }
+    useToastStore.getState().addToast(getLocalizedErrorMessage(error), 'error');
+    logger.error('Connection failed', error);
+  }, []);
+
+  const connect: (
+    profile: ConnectionProfile,
+    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+  ) => Promise<void> = useCallback(async (
     profile: ConnectionProfile,
     options?: { insertAfterId?: string; pinned?: boolean; color?: string },
   ): Promise<void> => {
@@ -153,7 +212,7 @@ export function useConnectSession(): {
         return;
       }
     }
-  };
+  }, [addSession, handleConnectionError, setActiveSection]);
 
   const openLocal = async (): Promise<void> => {
     try {
@@ -204,62 +263,6 @@ export function useConnectSession(): {
           });
       },
     });
-  };
-
-  const handleConnectionError = (
-    error: unknown,
-    retry: () => void,
-  ): void => {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'type' in error
-    ) {
-      const typed = error as { type: string; payload?: Record<string, unknown> };
-      if (typed.type === 'HostKeyUnknown') {
-        const payload = typed.payload ?? {};
-        const host = String(payload.host ?? '');
-        const port = Number(payload.port ?? 22);
-        logger.warn(`Host key verification prompt (${typed.type}) for ${host}:${port}`);
-        setHostKeyDialog({
-          open: true,
-          host,
-          port,
-          fingerprint: payload.fingerprint
-            ? String(payload.fingerprint)
-            : undefined,
-          mismatch: false,
-          onTrust: () => {
-            invokeTrustHost(host, port).then(() => {
-              setHostKeyDialog(CLOSED_DIALOG);
-              retry();
-            });
-          },
-        });
-        return;
-      }
-      if (typed.type === 'HostKeyMismatch') {
-        const payload = typed.payload ?? {};
-        const host = String(payload.host ?? '');
-        const port = Number(payload.port ?? 22);
-        logger.warn(`Host key verification prompt (${typed.type}) for ${host}:${port}`);
-        setHostKeyDialog({
-          open: true,
-          host,
-          port,
-          mismatch: true,
-          onTrust: () => {
-            invokeTrustHost(host, port).then(() => {
-              setHostKeyDialog(CLOSED_DIALOG);
-              retry();
-            });
-          },
-        });
-        return;
-      }
-    }
-    useToastStore.getState().addToast(getLocalizedErrorMessage(error), 'error');
-    logger.error('Connection failed', error);
   };
 
   const closeHostKeyDialog = (): void => {

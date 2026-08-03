@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
-import { PanelEmptyState } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
+import { CARD_GRID_BREAKPOINTS } from './shared';
 import type { ConnectionProfile } from '@/types';
 import {
   CopyIcon,
@@ -25,6 +26,7 @@ const CARD_ACTION_DEBOUNCE_MS = 500;
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];
+  initialized: boolean;
   onAdd: () => void;
   onEdit: (profile: ConnectionProfile) => void;
   onDelete: (profile: ConnectionProfile) => void;
@@ -35,6 +37,7 @@ export interface ConnectionListProps {
 
 export const ConnectionList: React.FC<ConnectionListProps> = ({
   profiles,
+  initialized,
   onAdd,
   onEdit,
   onDelete,
@@ -46,24 +49,29 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [query, setQuery] = useState('');
 
   const normalizedQuery = query.trim().toLowerCase();
-  const filteredProfiles = profiles.filter((profile) => {
-    if (!normalizedQuery) return true;
-    const haystack = [
-      profile.name,
-      profile.host,
-      profile.username,
-      String(profile.port),
-      profile.jumpHost?.host,
-      profile.jumpHost?.username,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
+  const filteredProfiles = useMemo(() => {
+    return profiles.filter((profile) => {
+      if (!normalizedQuery) return true;
+      const haystack = [
+        profile.name,
+        profile.host,
+        profile.username,
+        String(profile.port),
+        profile.jumpHost?.host,
+        profile.jumpHost?.username,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
 
-    return haystack.includes(normalizedQuery);
-  });
+      return haystack.includes(normalizedQuery);
+    });
+  }, [profiles, normalizedQuery]);
 
   if (profiles.length === 0) {
+    if (!initialized) {
+      return <PanelLoadingState />;
+    }
     return (
       <PanelEmptyState
         title={t('workbench.connections.empty')}
@@ -106,6 +114,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.connections.searchPlaceholder')}
+                aria-label={t('workbench.connections.searchPlaceholder')}
                 className="h-8 pl-7"
               />
             </div>
@@ -125,21 +134,18 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           ) : (
             <ResponsiveCardGrid
               columns={1}
-              breakpoints={[
-                { minWidth: 800, columns: 2 },
-                { minWidth: 900, columns: 3 },
-              ]}
+              breakpoints={CARD_GRID_BREAKPOINTS}
               gap="0.375rem"
             >
               {filteredProfiles.map((profile) => (
                 <ConnectionCard
                   key={profile.id}
                   profile={profile}
-                  onEdit={() => onEdit(profile)}
-                  onDelete={() => onDelete(profile)}
-                  onConnectTerminal={() => onConnectTerminal(profile)}
-                  onConnectSftp={() => onConnectSftp(profile)}
-                  onDuplicate={() => onDuplicate(profile)}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onConnectTerminal={onConnectTerminal}
+                  onConnectSftp={onConnectSftp}
+                  onDuplicate={onDuplicate}
                 />
               ))}
             </ResponsiveCardGrid>
@@ -152,14 +158,14 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
 
 interface ConnectionCardProps {
   profile: ConnectionProfile;
-  onEdit: () => void;
-  onDelete: () => void;
-  onConnectTerminal: () => void;
-  onConnectSftp: () => void;
-  onDuplicate: () => void;
+  onEdit: (profile: ConnectionProfile) => void;
+  onDelete: (profile: ConnectionProfile) => void;
+  onConnectTerminal: (profile: ConnectionProfile) => void;
+  onConnectSftp: (profile: ConnectionProfile) => void;
+  onDuplicate: (profile: ConnectionProfile) => void;
 }
 
-const ConnectionCard: React.FC<ConnectionCardProps> = ({
+const ConnectionCard = React.memo<ConnectionCardProps>(({
   profile,
   onEdit,
   onDelete,
@@ -169,19 +175,19 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
 }) => {
   const { t } = useI18n();
   const handleConnectTerminal = useDebouncedCallback(
-    onConnectTerminal,
+    () => onConnectTerminal(profile),
     CARD_ACTION_DEBOUNCE_MS,
   );
   const handleConnectSftp = useDebouncedCallback(
-    onConnectSftp,
+    () => onConnectSftp(profile),
     CARD_ACTION_DEBOUNCE_MS,
   );
-  const handleEdit = useDebouncedCallback(onEdit, CARD_ACTION_DEBOUNCE_MS);
+  const handleEdit = useDebouncedCallback(() => onEdit(profile), CARD_ACTION_DEBOUNCE_MS);
   const handleDuplicate = useDebouncedCallback(
-    onDuplicate,
+    () => onDuplicate(profile),
     CARD_ACTION_DEBOUNCE_MS,
   );
-  const handleDelete = useDebouncedCallback(onDelete, CARD_ACTION_DEBOUNCE_MS);
+  const handleDelete = useDebouncedCallback(() => onDelete(profile), CARD_ACTION_DEBOUNCE_MS);
 
   return (
     <ManagementCard>
@@ -265,4 +271,4 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
       </div>
     </ManagementCard>
   );
-};
+});

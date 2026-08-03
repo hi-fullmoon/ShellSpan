@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -26,13 +26,22 @@ export const IconActionButton: React.FC<IconActionButtonProps> = ({
   ...props
 }) => {
   const clickGuardRef = useRef(false);
+  const guardResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (guardResetTimerRef.current !== null) {
+        clearTimeout(guardResetTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleClick = useCallback(
     (e: Parameters<NonNullable<typeof onClick>>[0]) => {
       if (clickGuardRef.current) return;
       clickGuardRef.current = true;
       onClick?.(e);
-      setTimeout(() => {
+      guardResetTimerRef.current = setTimeout(() => {
         clickGuardRef.current = false;
       }, 0);
     },

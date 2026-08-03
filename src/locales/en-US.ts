@@ -62,6 +62,7 @@ export default {
   'workbench.connections.filteredEmpty': 'No matching connections',
   'workbench.connections.deleteTitle': 'Delete connection?',
   'workbench.connections.deleteConfirm': 'Delete connection "{name}"? This action cannot be undone.',
+  'workbench.connections.deleteFailed': 'Failed to delete connection',
 
   'workbench.knownHosts.title': 'Known Hosts',
   'workbench.knownHosts.empty': 'No known hosts entries',
@@ -75,6 +76,7 @@ export default {
   'workbench.knownHosts.fingerprint': 'Fingerprint',
   'workbench.knownHosts.keyType': 'Key Type',
   'workbench.knownHosts.loadFailed': 'Failed to load',
+  'workbench.knownHosts.removeFailed': 'Failed to delete known host',
   'workbench.knownHosts.createConnection': 'Create connection',
 
   'workbench.keychain.title': 'Keychain',
@@ -87,6 +89,7 @@ export default {
   'workbench.keychain.count': '{count}/{total} keys',
   'workbench.keychain.deleteTitle': 'Delete key?',
   'workbench.keychain.deleteConfirm': 'Delete key "{name}"? Profiles using this key will need to select a new authentication method.',
+  'workbench.keychain.loadFailed': 'Failed to load key',
   'workbench.keychain.newSubtitle': 'Create a key file credential',
   'workbench.keychain.editSubtitle': 'Edit a key file credential',
 

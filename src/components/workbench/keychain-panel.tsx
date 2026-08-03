@@ -7,34 +7,16 @@ import { useKeychainStore, type KeychainKeySummary } from '@/stores/keychainStor
 import { useProfileStore } from '@/stores/profileStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
+import { CARD_GRID_BREAKPOINTS, FormRow, keyTypeBadgeClass } from './shared';
 import type { KeychainKey, KeychainKeyKind } from '@/types';
-
-const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
-  ECDSA: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  RSA: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-  ED25519: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-  DSA: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
-};
-
-const keyTypeBadgeClass = (keyType: string): string => KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ?? 'bg-app-surface-muted text-muted-foreground';
 
 interface KeyFormState {
   kind: KeychainKeyKind;
@@ -195,6 +177,7 @@ export const KeychainPanel: React.FC = () => {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.keychain.searchPlaceholder')}
+                aria-label={t('workbench.keychain.searchPlaceholder')}
                 className="h-8 pl-7"
               />
             </div>
@@ -231,10 +214,7 @@ export const KeychainPanel: React.FC = () => {
           {filteredKeys.length > 0 && (
             <ResponsiveCardGrid
               columns={1}
-              breakpoints={[
-                { minWidth: 800, columns: 2 },
-                { minWidth: 900, columns: 3 },
-              ]}
+              breakpoints={CARD_GRID_BREAKPOINTS}
               gap="0.375rem"
             >
               {filteredKeys.map((key) => {
@@ -259,14 +239,16 @@ export const KeychainPanel: React.FC = () => {
                       {!isProfilePassword && (
                         <IconActionButton
                           onClick={() => {
-                            const fullKey = keys.find((k) => k.id === key.id);
-                            if (!fullKey) return;
                             // Retrieve full key for editing.
                             void useKeychainStore
                               .getState()
                               .getKey(key.id)
                               .then((k) => {
-                                if (k) openEdit(k);
+                                if (k) {
+                                  openEdit(k);
+                                } else {
+                                  showError(t('workbench.keychain.loadFailed'));
+                                }
                               });
                           }}
                           aria-label={t('common.edit')}
@@ -277,10 +259,7 @@ export const KeychainPanel: React.FC = () => {
                         </IconActionButton>
                       )}
                       <IconActionButton
-                        onClick={() => {
-                          const matched = keys.find((k) => k.id === key.id);
-                          if (matched) setDeleting(matched);
-                        }}
+                        onClick={() => setDeleting(key)}
                         aria-label={t('common.delete')}
                         tooltip={t('common.delete')}
                         className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
@@ -302,7 +281,7 @@ export const KeychainPanel: React.FC = () => {
           if (!open) setDrawerOpen(false);
         }}
       >
-        <DrawerContent className="w-[420px] gap-0 p-0">
+        <DrawerContent className="w-100 gap-0 p-0">
           <DrawerHeader className="border-b border-app-border px-5 py-4">
             <DrawerTitle>{editing ? t('workbench.keychain.edit') : t('workbench.keychain.new')}</DrawerTitle>
             <p className="text-xs text-muted-foreground">{editing ? t('workbench.keychain.editSubtitle') : t('workbench.keychain.newSubtitle')}</p>
@@ -347,31 +326,15 @@ export const KeychainPanel: React.FC = () => {
         </DrawerContent>
       </Drawer>
 
-      <AlertDialog
+      <ConfirmDeleteDialog
         open={!!deleting}
         onOpenChange={(open) => {
           if (!open) setDeleting(undefined);
         }}
-      >
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
-            <AlertDialogTitle className="text-sm leading-5">{t('workbench.keychain.deleteTitle')}</AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {deleting ? t('workbench.keychain.deleteConfirm', { name: deleting.label }) : ''}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
-            <AlertDialogCancel size="sm" onClick={() => setDeleting(undefined)}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={() => void handleDelete()}>
-              {t('common.delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t('workbench.keychain.deleteTitle')}
+        description={deleting ? t('workbench.keychain.deleteConfirm', { name: deleting.label }) : ''}
+        onConfirm={() => void handleDelete()}
+      />
     </TooltipProvider>
   );
 };
@@ -452,22 +415,6 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ onFileContent }) => {
       <UploadCloud className="size-5" />
       <span className="text-xs font-medium">{t('keychain.form.dropFile')}</span>
       <span className="text-[10px] text-muted-foreground">{t('keychain.form.dropFileHint')}</span>
-    </div>
-  );
-};
-
-interface FormRowProps {
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-}
-
-const FormRow: React.FC<FormRowProps> = ({ label, error, children }) => {
-  return (
-    <div className="flex flex-col gap-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {children}
-      {error && <span className="text-xs text-app-error">{error}</span>}
     </div>
   );
 };
