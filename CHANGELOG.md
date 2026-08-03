@@ -3,6 +3,25 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.13](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.13) - 2026-08-03
+
+
+### Bug Fixes
+
+- **sftp:** correct permission updates, connect wait, and upload cancel
+
+### Chore
+
+- **deps:** enable keyring native features
+
+### Features
+
+- **sftp:** add cancellable crash-safe remote copy
+
+### Style
+
+- **ui:** adjust SFTP pane search icon padding-right
+
 ## [v2.0.12](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.12) - 2026-07-31
 
 
