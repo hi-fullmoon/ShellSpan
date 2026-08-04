@@ -515,7 +515,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </div>
           )}
           {loading && entries.length === 0 && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
+            // top-8 keeps the file-list header (h-8) visible while loading.
+            <div className="absolute inset-x-0 bottom-0 top-8 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
               <Spinner />
               <span className="text-xs text-app-text-soft">{t('common.loading')}</span>
             </div>

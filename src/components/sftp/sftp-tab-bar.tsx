@@ -123,10 +123,10 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         />
       )}
       {showDropIndicatorLeft && (
-        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary" />
       )}
       {showDropIndicatorRight && (
-        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -284,6 +284,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragPointerStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragOverlayOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragStartScrollLeftRef = useRef(0);
 
   const [draggingConnectionId, setDraggingConnectionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
@@ -360,6 +361,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
 
     const container = scrollRef.current;
     if (container) {
+      dragStartScrollLeftRef.current = container.scrollLeft;
       const tab = container.querySelector<HTMLElement>(`[data-sftp-tab="${nextId}"]`);
       if (tab) {
         const rect = tab.getBoundingClientRect();
@@ -380,11 +382,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
       return;
     }
 
-    const currentX = dragStartPosRef.current.x + event.delta.x;
     const container = scrollRef.current;
     if (!container) {
       return;
     }
+    // dnd-kit's event.delta is scroll-adjusted: it includes the tab bar's
+    // scrollLeft change since drag start. Tab rects read below live in screen
+    // space, so subtract that scroll delta to compare in the same space —
+    // otherwise the insert indicator drifts while the bar scrolls mid-drag.
+    const scrollDeltaX = container.scrollLeft - dragStartScrollLeftRef.current;
+    const currentX = dragStartPosRef.current.x + event.delta.x - scrollDeltaX;
 
     const tabs = Array.from(container.querySelectorAll<HTMLElement>('[data-sftp-tab]'));
     const visibleTabs = tabs.filter((tab) => tab.dataset.sftpTab !== draggingConnectionId);
@@ -472,6 +479,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
   const visibleConnections = draggingConnectionId ? connections.filter((connection) => connection.id !== draggingConnectionId) : connections;
 
+  // Dropping back into the dragged tab's own slot is a no-op, so suppress the
+  // indicator that would otherwise sit between the dragged tab and its right
+  // neighbor.
+  const draggedOriginalIndex = draggingConnectionId
+    ? connections.findIndex((c) => c.id === draggingConnectionId)
+    : -1;
+  const effectiveInsertIndex = insertIndex !== null && insertIndex === draggedOriginalIndex
+    ? null
+    : insertIndex;
+
   if (connections.length === 0) {
     return null;
   }
@@ -481,7 +498,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   }
 
   return (
-    <div className="flex h-8 items-start gap-0 border-b border-app-border/50 bg-app-surface-muted px-0">
+    <div className="group/tabbar relative flex h-8 items-start gap-0 border-b border-app-border/50 bg-app-surface-muted px-0">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -523,8 +540,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                   onRenameChange={setRenameValue}
                   onRenameCommit={handleRenameCommit}
                   onRenameCancel={handleRenameCancel}
-                  showDropIndicatorLeft={insertIndex !== null && visibleIndex >= 0 && insertIndex === visibleIndex}
-                  showDropIndicatorRight={insertIndex !== null && isLastVisible && insertIndex === visibleTabCount}
+                  showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
+                  showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
                   showSeparatorAfter={showSeparatorAfter}
                 />
               );
@@ -552,12 +569,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
             )}
       </DndContext>
       {connections.length > 0 && onNewTabClick && (
+        // Overlays the tab strip instead of taking layout space, so scrollable
+        // tabs never leave an empty block at the right edge. The gradient keeps
+        // the icon readable over the last tab; pointer events pass through
+        // while hidden.
         <Button
           variant="ghost"
           size="icon"
           onClick={onNewTabClick}
           aria-label={t('sftp.newTab')}
-          className="h-[32px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
+          className="pointer-events-none absolute inset-y-0 right-0 z-10 h-[32px] w-11 rounded-none bg-gradient-to-l from-app-surface-muted from-60% to-transparent pl-4 opacity-0 transition-opacity hover:bg-transparent hover:text-app-primary focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tabbar:pointer-events-auto group-hover/tabbar:opacity-100"
         >
           <PlusIcon strokeWidth={1.5} />
         </Button>

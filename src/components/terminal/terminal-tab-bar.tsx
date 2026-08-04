@@ -139,10 +139,10 @@ const SessionTab: React.FC<SessionTabProps> = ({
         />
       )}
       {showDropIndicatorLeft && (
-        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary" />
       )}
       {showDropIndicatorRight && (
-        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -322,6 +322,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const dragOverlayOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const keyboardDragRef = useRef(false);
   const autoScrollSpeedRef = useRef(0);
+  const dragStartScrollLeftRef = useRef(0);
 
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
@@ -438,6 +439,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
     const container = scrollRef.current;
     if (container) {
+      dragStartScrollLeftRef.current = container.scrollLeft;
       const tab = container.querySelector<HTMLElement>(`[data-session-tab="${nextId}"]`);
       if (tab) {
         const rect = tab.getBoundingClientRect();
@@ -463,10 +465,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     }
 
     const isKeyboardDrag = keyboardDragRef.current;
-    const currentX = dragStartPosRef.current.x + event.delta.x;
-    const pointerX = dragPointerStartRef.current.x + event.delta.x;
-    const pointerY = dragPointerStartRef.current.y + event.delta.y;
     const container = scrollRef.current;
+    // dnd-kit's event.delta is scroll-adjusted: it includes the tab bar's
+    // scrollLeft change since drag start. Tab rects read below live in screen
+    // space, so subtract that scroll delta to compare in the same space —
+    // otherwise the insert indicator drifts while the bar auto-scrolls.
+    const scrollDeltaX = container ? container.scrollLeft - dragStartScrollLeftRef.current : 0;
+    const currentX = dragStartPosRef.current.x + event.delta.x - scrollDeltaX;
+    const pointerX = dragPointerStartRef.current.x + event.delta.x - scrollDeltaX;
+    const pointerY = dragPointerStartRef.current.y + event.delta.y;
 
     if (isKeyboardDrag) {
       autoScrollSpeedRef.current = 0;
@@ -540,11 +547,14 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     const activeId = String(event.active.id);
     // Keyboard drags only reorder within this tab bar; pointer coordinates are
     // meaningless there, so split/cross-group handling is skipped.
+    // Same scroll compensation as handleDragMove: drop coordinates must be in
+    // screen space for split/cross-group hit-testing.
+    const scrollDeltaX = (scrollRef.current?.scrollLeft ?? dragStartScrollLeftRef.current) - dragStartScrollLeftRef.current;
     const splitHandled = keyboardDragRef.current
       ? false
       : onTabDragEnd?.(
         activeId,
-        dragPointerStartRef.current.x + event.delta.x,
+        dragPointerStartRef.current.x + event.delta.x - scrollDeltaX,
         dragPointerStartRef.current.y + event.delta.y,
       ) ?? false;
     if (!splitHandled && insertIndex !== null) {
@@ -593,6 +603,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
   const visibleSessions = draggingSessionId ? sessions.filter((session) => session.sessionId !== draggingSessionId) : sessions;
   const displayedInsertIndex = externalInsertIndex ?? insertIndex;
+  // Dropping back into the dragged tab's own slot is a no-op, so suppress the
+  // indicator that would otherwise sit between the dragged tab and its right
+  // neighbor.
+  const draggedOriginalIndex = draggingSessionId
+    ? sessions.findIndex((s) => s.sessionId === draggingSessionId)
+    : -1;
+  const effectiveInsertIndex = displayedInsertIndex !== null && displayedInsertIndex === draggedOriginalIndex
+    ? null
+    : displayedInsertIndex;
 
   const shouldHide = !forceVisible && sessions.length === 1 && terminalHideSingleTabBar;
 
@@ -600,7 +619,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     <div
       ref={tabBarRef}
       data-terminal-tab-bar
-      className={cn('flex h-8 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
+      className={cn('group/tabbar relative flex h-8 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
     >
       <DndContext
         sensors={sensors}
@@ -645,8 +664,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                   onRenameChange={setRenameValue}
                   onRenameCommit={handleRenameCommit}
                   onRenameCancel={handleRenameCancel}
-                  showDropIndicatorLeft={displayedInsertIndex !== null && visibleIndex >= 0 && displayedInsertIndex === visibleIndex}
-                  showDropIndicatorRight={displayedInsertIndex !== null && isLastVisible && displayedInsertIndex === visibleTabCount}
+                  showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
+                  showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
                   showSeparatorAfter={showSeparatorAfter}
                 />
               );
@@ -674,12 +693,16 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             )}
       </DndContext>
       {sessions.length > 0 && onNewTabClick && (
+        // Overlays the tab strip instead of taking layout space, so scrollable
+        // tabs never leave an empty block at the right edge. The gradient keeps
+        // the icon readable over the last tab; pointer events pass through
+        // while hidden.
         <Button
           variant="ghost"
           size="icon"
           onClick={onNewTabClick}
           aria-label={t('terminal.newTab')}
-          className="h-[32px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
+          className="pointer-events-none absolute inset-y-0 right-0 z-10 h-[32px] w-11 rounded-none bg-gradient-to-l from-app-surface-muted from-60% to-transparent pl-4 opacity-0 transition-opacity hover:bg-transparent hover:text-app-primary focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tabbar:pointer-events-auto group-hover/tabbar:opacity-100"
         >
           <PlusIcon strokeWidth={1.5} />
         </Button>
