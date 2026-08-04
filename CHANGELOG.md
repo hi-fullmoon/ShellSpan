@@ -3,6 +3,22 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.16](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.16) - 2026-08-04
+
+
+### Bug Fixes
+
+- **term:** buffer early local session output until frontend is ready
+- **app:** restore database state clobbered by duplicate setup and drop misleading connecting hint
+
+### Features
+
+- **hook:** support reconnecting local sessions without a profile
+
+### Testing
+
+- **hook:** add invokeMarkSessionReady mock to useReconnectSession tests
+
 ## [v2.0.15](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.15) - 2026-08-03
 
 
