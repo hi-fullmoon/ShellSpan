@@ -17,6 +17,7 @@ vi.mock('@/lib/tauri', () => ({
     status: 'connected',
     message: 'ready',
   }),
+  invokeMarkSessionReady: vi.fn().mockResolvedValue(undefined),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),

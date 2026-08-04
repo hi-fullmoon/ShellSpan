@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import {
   invokeGetSessionStatus,
+  invokeMarkSessionReady,
   invokeResizeSession,
   invokeWriteSession,
   invokeOpenUrl,
@@ -433,6 +434,13 @@ class TerminalControllerImpl implements TerminalController {
         logger.warn(`Failed to reconcile session ${sessionId} status`, error);
       }
     }
+
+    // All listeners are attached; tell the backend it may release any
+    // output it buffered while we were subscribing. On Windows this also
+    // delivers ConPTY's startup cursor query so the shell can proceed.
+    void invokeMarkSessionReady(sessionId).catch((error) => {
+      logger.warn(`Failed to mark session ${sessionId} ready`, error);
+    });
   }
 
   attach(host: HTMLElement): void {
