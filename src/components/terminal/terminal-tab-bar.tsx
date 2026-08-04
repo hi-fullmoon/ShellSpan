@@ -125,7 +125,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       }}
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
-        active ? 'h-9 bg-app-surface text-app-text' : 'h-9 bg-app-border/25 text-app-text-soft',
+        active ? 'h-8 bg-app-surface text-app-text' : 'h-8 bg-app-border/25 text-app-text-soft',
         renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
@@ -139,10 +139,10 @@ const SessionTab: React.FC<SessionTabProps> = ({
         />
       )}
       {showDropIndicatorLeft && (
-        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
       )}
       {showDropIndicatorRight && (
-        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
       )}
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -600,7 +600,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     <div
       ref={tabBarRef}
       data-terminal-tab-bar
-      className={cn('flex h-9 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
+      className={cn('flex h-8 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
     >
       <DndContext
         sensors={sensors}
@@ -618,7 +618,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             vertical={false}
             size="thin"
             onWheel={handleWheel}
-            className="h-[36px] min-w-0 flex-1"
+            className="h-[32px] min-w-0 flex-1"
           >
             <div className="flex min-w-0 items-start gap-0">
               {sessions.map((session, index) => {
@@ -679,7 +679,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
           size="icon"
           onClick={onNewTabClick}
           aria-label={t('terminal.newTab')}
-          className="h-[36px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
+          className="h-[32px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
         >
           <PlusIcon strokeWidth={1.5} />
         </Button>
