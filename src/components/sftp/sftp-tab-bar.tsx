@@ -110,7 +110,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       }}
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
-        active ? 'h-9 bg-app-surface text-app-text' : 'h-9 bg-app-border/25 text-app-text-soft',
+        active ? 'h-8 bg-app-surface text-app-text' : 'h-8 bg-app-border/25 text-app-text-soft',
         renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
@@ -123,10 +123,10 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         />
       )}
       {showDropIndicatorLeft && (
-        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
       )}
       {showDropIndicatorRight && (
-        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[24px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
+        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 rounded-full bg-app-primary shadow-[0_0_4px_var(--color-app-primary)]" />
       )}
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -481,7 +481,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   }
 
   return (
-    <div className="flex h-9 items-start gap-0 border-b border-app-border/50 bg-app-surface-muted px-0">
+    <div className="flex h-8 items-start gap-0 border-b border-app-border/50 bg-app-surface-muted px-0">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -496,7 +496,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
             horizontal
             vertical={false}
             size="thin"
-            className="h-[36px] min-w-0 flex-1"
+            className="h-[32px] min-w-0 flex-1"
           >
             <div role="tablist" className="flex min-w-0 items-start gap-0">
               {connections.map((connection, index) => {
@@ -557,7 +557,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           size="icon"
           onClick={onNewTabClick}
           aria-label={t('sftp.newTab')}
-          className="h-[36px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
+          className="h-[32px] w-8 shrink-0 rounded-none hover:bg-app-surface hover:text-app-primary"
         >
           <PlusIcon strokeWidth={1.5} />
         </Button>
