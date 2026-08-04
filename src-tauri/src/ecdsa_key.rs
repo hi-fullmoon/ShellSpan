@@ -1,5 +1,5 @@
 use base64::Engine;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::pkcs8::{EncodePrivateKey, LineEnding};
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
@@ -26,7 +26,7 @@ pub(crate) fn derive_ecdsa_key_from_password(password: &str) -> Result<(String, 
         .to_string();
 
     let public_key = secret_key.public_key();
-    let encoded_point = public_key.to_encoded_point(false);
+    let encoded_point = public_key.to_sec1_point(false);
     let public_openssh = encode_ecdsa_openssh_public_key(encoded_point.as_bytes());
 
     Ok((private_pem, public_openssh))

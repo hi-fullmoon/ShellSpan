@@ -1,6 +1,36 @@
 use log::{debug, warn};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Initializes the platform's native credential store as the keyring-core
+/// default store. Runs once; the result is cached so a permanent failure
+/// (e.g. no Secret Service on a headless Linux box) is reported consistently
+/// and callers keep falling back to the database backend.
+fn ensure_native_store() -> Result<(), String> {
+    static RESULT: OnceLock<Result<(), String>> = OnceLock::new();
+    RESULT
+        .get_or_init(|| {
+            #[cfg(target_os = "macos")]
+            let store = apple_native_keyring_store::keychain::Store::new();
+            #[cfg(target_os = "windows")]
+            let store = windows_native_keyring_store::Store::new();
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            let store = dbus_secret_service_keyring_store::Store::new();
+            #[cfg(not(any(
+                target_os = "macos",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "freebsd"
+            )))]
+            let store: Result<Arc<keyring_core::CredentialStore>, keyring_core::Error> =
+                Err(keyring_core::Error::NotSupportedByStore(
+                    "no native credential store for this platform".to_string(),
+                ));
+            keyring_core::set_default_store(store.map_err(|e| format!("keyring store init: {e}"))?);
+            Ok(())
+        })
+        .clone()
+}
 
 pub(crate) const KEY_SERVICE: &str = "com.termbridge.key";
 pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.termbridge.profile-password";
@@ -51,7 +81,8 @@ trait CredentialBackend: Send + Sync {
 
 // ---------------------------------------------------------------------------
 // Native OS-level keychain backend (macOS Keychain / Windows Credential
-// Manager / Linux Secret Service) via the `keyring` crate.
+// Manager / Linux Secret Service) via `keyring-core` plus the per-platform
+// store crates.
 // ---------------------------------------------------------------------------
 
 struct NativeKeychainBackend;
@@ -63,8 +94,9 @@ impl CredentialBackend for NativeKeychainBackend {
         key: &str,
         value: &str,
     ) -> Result<(), String> {
+        ensure_native_store()?;
         let entry =
-            keyring::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
+            keyring_core::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
         entry
             .set_password(value)
             .map_err(|e| format!("keyring set_password: {e}"))?;
@@ -73,14 +105,15 @@ impl CredentialBackend for NativeKeychainBackend {
     }
 
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
+        ensure_native_store()?;
         let entry =
-            keyring::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
+            keyring_core::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
         match entry.get_password() {
             Ok(password) => {
                 debug!("Loaded credential from OS keychain service={service} key={key}");
                 Ok(Some(password))
             }
-            Err(keyring::Error::NoEntry) => {
+            Err(keyring_core::Error::NoEntry) => {
                 debug!("No credential in OS keychain for service={service} key={key}");
                 Ok(None)
             }
@@ -89,14 +122,15 @@ impl CredentialBackend for NativeKeychainBackend {
     }
 
     fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
+        ensure_native_store()?;
         let entry =
-            keyring::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
+            keyring_core::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
         match entry.delete_credential() {
             Ok(()) => {
                 debug!("Deleted credential from OS keychain service={service} key={key}");
                 Ok(())
             }
-            Err(keyring::Error::NoEntry) => {
+            Err(keyring_core::Error::NoEntry) => {
                 debug!("No credential to delete in OS keychain for service={service} key={key}");
                 Ok(())
             }

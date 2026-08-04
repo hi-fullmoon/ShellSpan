@@ -14,29 +14,35 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-ssh2 = { version = "0.9.5", features = ["vendored-openssl"] }
-tauri = { version = "2.11.3", features = ["tray-icon", "macos-private-api"] }
-uuid = { version = "1.23.0", features = ["v4", "serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+ssh2 = { version = "0.9.6", features = ["vendored-openssl"] }
+tauri = { version = "2.11.5", features = ["tray-icon", "macos-private-api"] }
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
 rfd = "0.17.2"
-log = "0.4.29"
+log = "0.4.33"
 tauri-plugin-log = "2.9.0"
 tauri-plugin-updater = "2.10.1"
-socket2 = "0.6.3"
-libc = "0.2.184"
-sha2 = "0.10"
-p256 = "0.13"
-pbkdf2 = "0.12"
-hmac = "0.12"
+socket2 = "0.6.5"
+libc = "0.2.189"
+sha2 = "0.11"
+p256 = "0.14"
+pbkdf2 = "0.13"
 
-aes-gcm = "0.10"
-rand = "0.8"
-base64 = "0.22"
+base64 = "0.23"
 portable-pty = "0.9"
 trash = "5"
-rusqlite = { version = "0.31", features = ["bundled"] }
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+keyring-core = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1"
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 [dev-dependencies]
 tempfile = "3.14.0"
