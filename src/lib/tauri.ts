@@ -109,6 +109,10 @@ export async function invokeGetSessionStatus(sessionId: string): Promise<StatusE
   return invokeLogged<StatusEvent>('get_session_status', { sessionId });
 }
 
+export async function invokeMarkSessionReady(sessionId: string): Promise<void> {
+  return invokeLogged('mark_session_ready', { sessionId });
+}
+
 export async function invokeResizeSession(
   sessionId: string,
   cols: number,

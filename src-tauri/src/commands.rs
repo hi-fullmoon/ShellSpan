@@ -17,11 +17,11 @@ use log::{debug, error, info, warn};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
 use std::sync::{
-    atomic::AtomicBool,
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
     Arc, mpsc,
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
@@ -166,6 +166,10 @@ pub(crate) async fn create_session(
             status: SessionStatus::Connecting,
             message: Some("connecting".to_string()),
         },
+        // SSH output trickles in over the network, so by the time the
+        // frontend listeners attach nothing has been emitted yet; keep the
+        // SSH worker ungated.
+        output_ready: Arc::new(AtomicBool::new(true)),
     }).map_err(|message| {
         error!("Failed to register SSH session session_id={session_id}: {message}");
         CreateSessionError::Other { message }
@@ -288,6 +292,7 @@ pub(crate) fn create_local_session(
         })?;
     let master = pair.master;
     let (tx, rx) = mpsc::channel::<SessionCommand>();
+    let output_ready = Arc::new(AtomicBool::new(false));
     state
         .insert(session_id.clone(), ManagedSession {
             sender: tx,
@@ -296,6 +301,7 @@ pub(crate) fn create_local_session(
                 status: SessionStatus::Connected,
                 message: Some("local shell ready".to_string()),
             },
+            output_ready: output_ready.clone(),
         })
         .map_err(|message| {
             error!("Failed to register local session session_id={session_id}: {message}");
@@ -303,6 +309,7 @@ pub(crate) fn create_local_session(
         })?;
 
     let worker_id = session_id.clone();
+    let worker_output_ready = output_ready;
     thread::spawn(move || {
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
         let reader_id = worker_id.clone();
@@ -330,10 +337,37 @@ pub(crate) fn create_local_session(
             SessionStatus::Connected,
             Some("local shell ready".to_string()),
         );
+        // The frontend attaches its event listeners asynchronously after the
+        // session is created. On Windows, ConPTY emits a cursor position
+        // query (ESC[6n) almost immediately and stalls the shell until the
+        // terminal answers it; output emitted before the frontend is
+        // listening would be lost and the shell would deadlock. Buffer
+        // output until the frontend signals it is ready; the conservative
+        // timeout keeps output flowing if the signal never arrives.
+        let mut buffered_output: Vec<String> = Vec::new();
+        let mut buffered_bytes = 0_usize;
+        let output_wait_started = Instant::now();
+        let mut output_live = false;
         let mut closed_by_user = false;
         loop {
+            if !output_live
+                && (worker_output_ready.load(AtomicOrdering::Relaxed)
+                    || output_wait_started.elapsed() > Duration::from_secs(5)
+                    || buffered_bytes > 1_000_000)
+            {
+                output_live = true;
+                for chunk in buffered_output.drain(..) {
+                    let _ = emit_data(&app, &worker_id, chunk);
+                }
+            }
             while let Ok(bytes) = output_rx.try_recv() {
-                let _ = emit_data(&app, &worker_id, String::from_utf8_lossy(&bytes).into_owned());
+                let chunk = String::from_utf8_lossy(&bytes).into_owned();
+                if output_live {
+                    let _ = emit_data(&app, &worker_id, chunk);
+                } else {
+                    buffered_bytes += chunk.len();
+                    buffered_output.push(chunk);
+                }
             }
             match rx.recv_timeout(Duration::from_millis(16)) {
                 Ok(SessionCommand::Write(data)) => {
@@ -369,6 +403,9 @@ pub(crate) fn create_local_session(
             if matches!(child.try_wait(), Ok(Some(_))) {
                 break;
             }
+        }
+        for chunk in buffered_output.drain(..) {
+            let _ = emit_data(&app, &worker_id, chunk);
         }
         while let Ok(bytes) = output_rx.try_recv() {
             let _ = emit_data(&app, &worker_id, String::from_utf8_lossy(&bytes).into_owned());
@@ -419,6 +456,14 @@ pub(crate) fn get_session_status(
     session_id: String,
 ) -> Result<StatusEvent, String> {
     state.status(&session_id)
+}
+
+#[tauri::command]
+pub(crate) fn mark_session_ready(
+    state: State<'_, SessionManager>,
+    session_id: String,
+) -> Result<(), String> {
+    state.mark_output_ready(&session_id)
 }
 
 #[tauri::command]

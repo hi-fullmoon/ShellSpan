@@ -682,6 +682,9 @@ pub(crate) enum SessionCommand {
 pub(crate) struct ManagedSession {
     pub(crate) sender: Sender<SessionCommand>,
     pub(crate) status: StatusEvent,
+    /// Signals that the frontend has attached its event listeners, so the
+    /// session worker may emit output live instead of buffering it.
+    pub(crate) output_ready: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -1171,6 +1174,18 @@ impl SessionManager {
         Ok(())
     }
 
+    pub(crate) fn mark_output_ready(&self, session_id: &str) -> Result<(), String> {
+        let guard = self
+            .sessions
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        let managed = guard
+            .get(session_id)
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        managed.output_ready.store(true, AtomicOrdering::Relaxed);
+        Ok(())
+    }
+
     pub(crate) fn remove(&self, session_id: &str) -> Result<(), String> {
         let mut guard = self
             .sessions
@@ -1184,24 +1199,27 @@ impl SessionManager {
 #[cfg(test)]
 mod session_manager_tests {
     use super::{ManagedSession, SessionCommand, SessionManager, SessionStatus, StatusEvent};
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+    use std::sync::{mpsc, Arc};
+
+    fn managed_session(sender: mpsc::Sender<SessionCommand>) -> ManagedSession {
+        ManagedSession {
+            sender,
+            status: StatusEvent {
+                session_id: "local-1".to_string(),
+                status: SessionStatus::Connecting,
+                message: None,
+            },
+            output_ready: Arc::new(AtomicBool::new(false)),
+        }
+    }
 
     #[test]
     fn stores_and_updates_latest_session_status() {
         let manager = SessionManager::default();
         let (sender, _receiver) = mpsc::channel::<SessionCommand>();
         manager
-            .insert(
-                "local-1".to_string(),
-                ManagedSession {
-                    sender,
-                    status: StatusEvent {
-                        session_id: "local-1".to_string(),
-                        status: SessionStatus::Connecting,
-                        message: None,
-                    },
-                },
-            )
+            .insert("local-1".to_string(), managed_session(sender))
             .unwrap();
 
         manager
@@ -1218,6 +1236,20 @@ mod session_manager_tests {
         let status = manager.status("local-1").unwrap();
         assert_eq!(status.status, SessionStatus::Connected);
         assert_eq!(status.message.as_deref(), Some("ready"));
+    }
+
+    #[test]
+    fn mark_output_ready_flips_the_session_flag() {
+        let manager = SessionManager::default();
+        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let managed = managed_session(sender);
+        let flag = managed.output_ready.clone();
+        manager.insert("local-1".to_string(), managed).unwrap();
+
+        assert!(!flag.load(AtomicOrdering::Relaxed));
+        manager.mark_output_ready("local-1").unwrap();
+        assert!(flag.load(AtomicOrdering::Relaxed));
+        assert!(manager.mark_output_ready("missing").is_err());
     }
 }
 
