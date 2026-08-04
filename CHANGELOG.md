@@ -3,6 +3,18 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.17](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.17) - 2026-08-04
+
+
+### Chore
+
+- **deps:** migrate to keyring-core and upgrade dependencies for v2.0.16
+- **deps:** remove unused pnpm allowBuilds config
+
+### Features
+
+- **ui:** reduce terminal and sftp tab bar height
+
 ## [v2.0.16](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.16) - 2026-08-04
 
 
