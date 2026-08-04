@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.18](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.18) - 2026-08-04
+
+
+### Bug Fixes
+
+- **ui:** improve tab bar drag behavior and new tab button
+
 ## [v2.0.17](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.17) - 2026-08-04
 
 
