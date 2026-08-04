@@ -403,7 +403,12 @@ fn hash_secret(value: Option<&str>) -> String {
             hasher.update(v.as_bytes());
         }
     }
-    format!("{:x}", hasher.finalize())
+    // digest 0.11 的 Array 不再实现 LowerHex，手动做 hex 编码。
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[cfg(test)]

@@ -6,6 +6,10 @@ All notable changes to TermBridge are documented in this file.
 ## [v2.0.16](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.16) - 2026-08-04
 
 
+### Chore
+
+- **deps:** remove unused pnpm allowBuilds config
+
 ### Bug Fixes
 
 - **term:** buffer early local session output until frontend is ready
@@ -13,6 +17,7 @@ All notable changes to TermBridge are documented in this file.
 
 ### Features
 
+- **ui:** reduce terminal and sftp tab bar height
 - **hook:** support reconnecting local sessions without a profile
 
 ### Testing
