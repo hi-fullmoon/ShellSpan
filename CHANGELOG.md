@@ -3,6 +3,20 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.21](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.21) - 2026-08-05
+
+
+### Features
+
+- **error:** extend error utilities and tests for remote copy failures
+- **sftp:** handle overwrite and replace conflict policies for remote copies
+- **ui:** preserve file extension with middle-elided SFTP file names
+- **sftp:** stage remote-to-remote copies through temp file with resume
+
+### Refactoring
+
+- **transfer-store:** surface conflict policies in transfer state
+
 ## [v2.0.20](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.20) - 2026-08-05
 
 
