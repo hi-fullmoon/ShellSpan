@@ -29,9 +29,30 @@ describe('getErrorMessage', () => {
     expect(getErrorMessage(null)).toBe('null');
     expect(getErrorMessage(undefined)).toBe('undefined');
   });
+
+  it('serializes message-less objects as JSON instead of [object Object]', () => {
+    expect(
+      getErrorMessage({ type: 'HostKeyMismatch', payload: { host: 'example.com', port: 22 } }),
+    ).toBe('{"type":"HostKeyMismatch","payload":{"host":"example.com","port":22}}');
+  });
 });
 
 describe('getLocalizedErrorMessage', () => {
+  it('localizes structured host-key errors', () => {
+    expect(
+      getLocalizedErrorMessage({
+        type: 'HostKeyUnknown',
+        payload: { host: 'example.com', port: 22, fingerprint: 'SHA256:abc' },
+      }),
+    ).toBe(t('dialog.hostKeyUnknown.message', { host: 'example.com', port: 22 }));
+    expect(
+      getLocalizedErrorMessage({
+        type: 'HostKeyMismatch',
+        payload: { host: 'example.com', port: 22 },
+      }),
+    ).toBe(t('dialog.hostKeyMismatch.message', { host: 'example.com', port: 22 }));
+  });
+
   it('localizes the stored-password-missing message', () => {
     expect(getLocalizedErrorMessage(new Error('Stored password is missing'))).toBe(
       t('error.storedPasswordMissing'),
