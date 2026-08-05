@@ -1187,7 +1187,7 @@ fn copy_remote_entry_between(
     progress.finish_step().map_err(|message| RemoteFsError::Other { message })
 }
 
-/// Stages a single file copy through a `<name>.tb-part` temp file that is
+/// Stages a single file copy through a `.<name>.tb-part` temp file that is
 /// renamed into place only after every byte is written: an interrupted copy
 /// never leaves a partial file under the real name, and a leftover temp file
 /// doubles as the resume point for retries and later copies of the same name.
@@ -1393,9 +1393,22 @@ fn remote_copy_resume(temp_size: Option<u64>, source_size: u64) -> RemoteCopyRes
 }
 
 fn remote_copy_temp_path(destination_path: &Path) -> PathBuf {
-    let mut temp_name = destination_path.as_os_str().to_owned();
+    let Some(file_name) = destination_path.file_name() else {
+        // No file name component (e.g. a filesystem root); fall back to
+        // appending the suffix to the whole path.
+        let mut temp_name = destination_path.as_os_str().to_owned();
+        temp_name.push(REMOTE_COPY_TEMP_SUFFIX);
+        return PathBuf::from(temp_name);
+    };
+    // Dot-prefix the temp file so it stays hidden from `ls`, shell globs,
+    // and file browsers; skip the prefix when the name is already hidden.
+    let mut temp_name = std::ffi::OsString::new();
+    if !file_name.as_encoded_bytes().starts_with(b".") {
+        temp_name.push(".");
+    }
+    temp_name.push(file_name);
     temp_name.push(REMOTE_COPY_TEMP_SUFFIX);
-    PathBuf::from(temp_name)
+    destination_path.with_file_name(temp_name)
 }
 
 fn remove_remote_entry_simple(sftp: &Sftp, path: &Path) -> Result<(), RemoteFsError> {
@@ -2537,14 +2550,22 @@ mod tests {
     }
 
     #[test]
-    fn remote_copy_temp_path_appends_suffix_to_full_name() {
+    fn remote_copy_temp_path_dot_prefixes_name_and_appends_suffix() {
         assert_eq!(
             remote_copy_temp_path(Path::new("/srv/report.txt")),
-            PathBuf::from("/srv/report.txt.tb-part")
+            PathBuf::from("/srv/.report.txt.tb-part")
         );
         assert_eq!(
             remote_copy_temp_path(Path::new("/srv/archive")),
-            PathBuf::from("/srv/archive.tb-part")
+            PathBuf::from("/srv/.archive.tb-part")
+        );
+    }
+
+    #[test]
+    fn remote_copy_temp_path_keeps_hidden_names_hidden_without_double_dot() {
+        assert_eq!(
+            remote_copy_temp_path(Path::new("/home/user/.bashrc")),
+            PathBuf::from("/home/user/.bashrc.tb-part")
         );
     }
 
