@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createLogger } from '@/lib/logger';
+import { getLocalizedErrorMessage } from '@/lib/error';
 import type {
   DeleteProgressEvent,
   DownloadProgressEvent,
@@ -185,7 +186,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     } catch (error) {
       useTransferStore.getState().markOperationFailed(
         operationId,
-        error instanceof Error ? error.message : String(error),
+        getLocalizedErrorMessage(error),
       );
     }
   },
@@ -209,7 +210,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     } catch (error) {
       useTransferStore.getState().markOperationFailed(
         operationId,
-        error instanceof Error ? error.message : String(error),
+        getLocalizedErrorMessage(error),
       );
     }
   },
