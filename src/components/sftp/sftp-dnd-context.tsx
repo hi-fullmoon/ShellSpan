@@ -152,6 +152,11 @@ export const SftpDndContext: React.FC<SftpDndContextProps> = ({
   return (
     <DndContext
       sensors={sensors}
+      // Cross-pane drags carry the pointer over the source list's edge, which
+      // would make autoScroll scroll the source list horizontally as a side
+      // effect. Drops target whole panes, not individual rows, so autoScroll
+      // has no purpose here — keep lists still while dragging.
+      autoScroll={false}
       onDragEnd={handleDragEnd}
     >
       {children}

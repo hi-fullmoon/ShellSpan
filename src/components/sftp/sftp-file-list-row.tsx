@@ -211,6 +211,18 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      onMouseDownCapture={(e) => {
+        // Tauri's WebView (WebKit) starts a native mouse-drag autoscroll when a
+        // drag gesture crosses a scrollable edge — this is what makes the source
+        // list scroll horizontally during a cross-pane drag. The drag itself is
+        // driven by dnd-kit via pointer events, so cancelling the mouse gesture
+        // here (and restoring the focus preventDefault would otherwise swallow)
+        // suppresses that autoscroll without affecting click, drag, or focus.
+        if (e.button === 0) {
+          e.preventDefault();
+          e.currentTarget.focus();
+        }
+      }}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}

@@ -30,6 +30,7 @@ import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { useSystemFileDrop } from '@/hooks/useSystemFileDrop';
 import { useToast } from '@/hooks/useToast';
 import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote } from '@/lib/tauri';
+import { getLocalizedErrorMessage } from '@/lib/error';
 import { normalizePortablePath, parentPortablePath } from '@/lib/path-utils';
 import { useTransferStore } from '@/stores/transferStore';
 import type { ConnectionProfile, UploadConflictPolicy } from '@/types';
@@ -373,7 +374,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
               }
               markTransferFailed(
                 operationId,
-                copyError instanceof Error ? copyError.message : String(copyError),
+                getLocalizedErrorMessage(copyError),
               );
               throw copyError;
             }
