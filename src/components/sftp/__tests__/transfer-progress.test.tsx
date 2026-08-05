@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TransferProgress } from '@/components/sftp/transfer-progress';
 import { useTransferStore, type TransferOperation } from '@/stores/transferStore';
 
@@ -132,6 +132,76 @@ describe('TransferProgress', () => {
     render(<TransferProgress />);
 
     expect(screen.getByText('sftp.transfer.remoteCopyFailed')).toBeInTheDocument();
+  });
+
+  it('shows a muted transfer speed while bytes are flowing', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      useTransferStore.setState({
+        operations: [{
+          ...failedUpload,
+          status: 'running',
+          error: undefined,
+          retry: undefined,
+          processedBytes: 0,
+          totalBytes: 4096,
+        }],
+      });
+      render(<TransferProgress />);
+      expect(screen.queryByText('/s', { exact: false })).not.toBeInTheDocument();
+
+      vi.setSystemTime(3_000);
+      act(() => {
+        useTransferStore.setState((state) => ({
+          operations: state.operations.map((op) => ({
+            ...op,
+            processedBytes: 2048,
+          })),
+        }));
+      });
+
+      const speed = screen.getByText('1.0 KB/s');
+      expect(speed).toHaveClass('text-muted-foreground/60');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides the transfer speed once the transfer completes', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      useTransferStore.setState({
+        operations: [{
+          ...failedUpload,
+          status: 'running',
+          error: undefined,
+          retry: undefined,
+          processedBytes: 0,
+          totalBytes: 2048,
+        }],
+      });
+      render(<TransferProgress />);
+
+      vi.setSystemTime(3_000);
+      act(() => {
+        useTransferStore.setState((state) => ({
+          operations: state.operations.map((op) => ({
+            ...op,
+            processedBytes: 2048,
+          })),
+        }));
+      });
+      expect(screen.getByText('1.0 KB/s')).toBeInTheDocument();
+
+      act(() => {
+        useTransferStore.getState().markOperationCompleted('upload-1');
+      });
+      expect(screen.queryByText('1.0 KB/s')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps successful deletes until they are closed manually', () => {
