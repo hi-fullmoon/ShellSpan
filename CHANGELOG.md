@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.22](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.22) - 2026-08-05
+
+
+### Chore
+
+- **tauri:** update application icons
+
 ## [v2.0.21](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.21) - 2026-08-05
 
 
