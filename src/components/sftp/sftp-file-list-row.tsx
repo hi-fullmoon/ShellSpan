@@ -1,7 +1,8 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { FolderIcon, LinkIcon, FileIcon as LucideFileIcon } from 'lucide-react';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
+import { elideMiddle, measureTextWidth } from '@/lib/elide-middle';
 import { useI18n } from '@/hooks/useI18n';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -38,6 +39,24 @@ export const FileIcon: React.FC<{ kind: RemoteFileKind; selected?: boolean }> = 
   return <LucideFileIcon className={cn('h-4 w-4 shrink-0', selected ? 'text-app-primary' : 'text-app-text-soft')} />;
 };
 
+// Split a file name into stem + extension so the extension can stay pinned
+// visible while only the stem truncates (like Finder/Explorer file lists).
+// Dotfiles (".gitignore"), names ending with a dot, and overly long
+// "extensions" are treated as having none.
+function splitFileName(
+  name: string,
+  kind: RemoteFileKind,
+): { stem: string; extension: string } {
+  if (kind === 'directory') return { stem: name, extension: '' };
+  const dotIndex = name.lastIndexOf('.');
+  if (dotIndex <= 0 || dotIndex === name.length - 1) {
+    return { stem: name, extension: '' };
+  }
+  const extension = name.slice(dotIndex);
+  if (extension.length > 10) return { stem: name, extension: '' };
+  return { stem: name.slice(0, dotIndex), extension };
+}
+
 function getKindLabel(
   kind: RemoteFileKind,
   t: ReturnType<typeof useI18n>['t'],
@@ -67,27 +86,81 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
   onContextMenu,
 }) => {
   const { t } = useI18n();
+  const { stem: nameStem, extension: nameExtension } = splitFileName(
+    entry.name,
+    entry.kind,
+  );
+  const containerRef = useRef<HTMLSpanElement>(null);
   const fileNameRef = useRef<HTMLSpanElement>(null);
+  const fontRef = useRef('');
+  const [displayStem, setDisplayStem] = useState(nameStem);
   const [isFileNameTruncated, setIsFileNameTruncated] = useState(false);
 
-  const updateFileNameTruncation = useCallback(() => {
-    const element = fileNameRef.current;
-    if (!element) return;
-    const nextIsTruncated = element.scrollWidth > element.clientWidth;
+  const updateFileNameDisplay = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    // The font string only changes with theme/density switches, so cache it
+    // instead of forcing a style recalculation on every resize callback.
+    let font = fontRef.current;
+    if (!font) {
+      const style = window.getComputedStyle(container);
+      font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      fontRef.current = font;
+    }
+    const extensionWidth = nameExtension ? measureTextWidth(nameExtension, font) : 0;
+    const fullWidth = measureTextWidth(nameStem, font);
+    if (fullWidth === null || extensionWidth === null) {
+      // Canvas measurement unavailable (e.g. jsdom): plain CSS truncation.
+      setDisplayStem(nameStem);
+      const element = fileNameRef.current;
+      if (element) {
+        const nextIsTruncated = element.scrollWidth > element.clientWidth;
+        setIsFileNameTruncated((current) =>
+          current === nextIsTruncated ? current : nextIsTruncated,
+        );
+      }
+      return;
+    }
+    // Canvas is available past this point; the fallback only narrows the type.
+    const measure = (s: string): number => measureTextWidth(s, font) ?? 0;
+    // 1px safety margin: canvas metrics can differ from real DOM layout by
+    // subpixel amounts, which would otherwise add a second, CSS ellipsis.
+    const maxStemWidth = container.clientWidth - extensionWidth - 1;
+    const nextIsTruncated = fullWidth > maxStemWidth;
+    const nextDisplayStem = nextIsTruncated
+      ? elideMiddle(nameStem, maxStemWidth, measure)
+      : nameStem;
+    setDisplayStem((current) =>
+      current === nextDisplayStem ? current : nextDisplayStem,
+    );
     setIsFileNameTruncated((current) =>
       current === nextIsTruncated ? current : nextIsTruncated,
     );
-  }, []);
+  }, [nameStem, nameExtension]);
 
   useLayoutEffect(() => {
-    updateFileNameTruncation();
-    const element = fileNameRef.current;
+    updateFileNameDisplay();
+    const element = containerRef.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
 
-    const observer = new ResizeObserver(updateFileNameTruncation);
+    const observer = new ResizeObserver(updateFileNameDisplay);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [entry.name, updateFileNameTruncation]);
+  }, [updateFileNameDisplay]);
+
+  // Web fonts may load after the first measurement; re-measure once they are
+  // ready so elision is computed against the real font metrics.
+  useEffect(() => {
+    const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+    if (!fonts) return;
+    let cancelled = false;
+    void fonts.ready.then(() => {
+      if (!cancelled) updateFileNameDisplay();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [updateFileNameDisplay]);
 
   const dragPayload: SftpDndPayload = useMemo(() => {
     const entries = selected ? selectedEntries : [entry];
@@ -164,19 +237,24 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
           <Checkbox checked={selected} className="h-3.5 w-3.5 shrink-0" />
         )}
         <FileIcon kind={entry.kind} selected={selected} />
-        <div className="flex min-w-0 flex-col justify-center leading-tight">
+        {/* flex-1 keeps this box at full available width even after the stem
+            is elided, so the ResizeObserver on the name container still sees
+            real layout width changes instead of the shrunken content width. */}
+        <div className="flex min-w-0 flex-1 flex-col justify-center leading-tight">
           <Tooltip disabled={!isFileNameTruncated}>
             <TooltipTrigger
-              delay={0}
               render={
                 <span
-                  ref={fileNameRef}
-                  className="truncate text-[13px] font-medium"
-                  onMouseEnter={updateFileNameTruncation}
+                  ref={containerRef}
+                  className="flex min-w-0 text-[13px] font-medium"
+                  onMouseEnter={updateFileNameDisplay}
                 />
               }
             >
-              {entry.name}
+              <span ref={fileNameRef} className="truncate">
+                {displayStem}
+              </span>
+              {nameExtension && <span className="shrink-0">{nameExtension}</span>}
             </TooltipTrigger>
             <TooltipContent className="break-all">{entry.name}</TooltipContent>
           </Tooltip>
