@@ -19,10 +19,11 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs,
-    io::{copy, Read, Write},
+    io::{copy, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::{atomic::{AtomicBool, Ordering as AtomicOrdering}, Arc},
+    thread,
     time::{Duration, SystemTime},
 };
 use tauri::AppHandle;
@@ -31,6 +32,12 @@ use uuid::Uuid;
 const OPEN_TEMP_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
 const MAX_REMOTE_RECURSION_DEPTH: u32 = 512;
 const OPEN_FILE_SIZE_LIMIT: u64 = 200 * 1024 * 1024;
+/// Suffix of the temp file remote-to-remote file copies are staged through.
+const REMOTE_COPY_TEMP_SUFFIX: &str = ".tb-part";
+/// Attempts per file before a remote copy gives up; retries resume from the
+/// temp file, so they only re-send what never reached the destination.
+const REMOTE_COPY_MAX_ATTEMPTS: u32 = 3;
+const REMOTE_COPY_RETRY_BACKOFF_BASE_MS: u64 = 500;
 
 pub(crate) fn is_connection_error(error: &RemoteFsError) -> bool {
     let message = match error {
@@ -938,6 +945,7 @@ pub(crate) fn copy_remote_to_remote_blocking(
 struct RemoteCopyTask {
     source_path: PathBuf,
     destination_path: PathBuf,
+    allow_overwrite: bool,
 }
 
 fn copy_remote_to_remote_with_sftp(
@@ -977,6 +985,7 @@ fn copy_remote_to_remote_with_sftp(
             .get(index)
             .copied()
             .unwrap_or(UploadConflictPolicy::Fail);
+        let mut allow_overwrite = false;
         if remote_path_exists(destination, &destination_path) {
             match policy {
                 UploadConflictPolicy::Skip => continue,
@@ -986,13 +995,24 @@ fn copy_remote_to_remote_with_sftp(
                         destination_path.display()
                     ) });
                 }
-                UploadConflictPolicy::Overwrite | UploadConflictPolicy::Replace => {}
+                UploadConflictPolicy::Overwrite => {
+                    // Overwrite renames the staged temp file over existing
+                    // files and merges into existing directories.
+                    allow_overwrite = true;
+                }
+                UploadConflictPolicy::Replace => {
+                    // Replace policy: remove the existing remote entry first,
+                    // then copy fresh. A failed or cancelled copy leaves the
+                    // destination missing; there is no rollback.
+                    remove_remote_entry_simple(destination, &destination_path)?;
+                }
             }
         }
         scan_stats.combine(scan_remote_copy_path(source, source_path, &cancel_flag, 0)?);
         tasks.push(RemoteCopyTask {
             source_path: source_path.to_path_buf(),
             destination_path,
+            allow_overwrite,
         });
     }
 
@@ -1004,14 +1024,16 @@ fn copy_remote_to_remote_with_sftp(
     );
     progress.emit().map_err(|message| RemoteFsError::Other { message })?;
 
-    // Each task copies straight to its destination: an interrupted copy may
-    // leave a partial entry behind and there is no rollback.
+    // Each file task is staged through a temp file and renamed into place on
+    // completion (see copy_remote_file_between), so an interrupted copy never
+    // leaves a partial file under the real name.
     for task in tasks {
         copy_remote_entry_between(
             source,
             destination,
             &task.source_path,
             &task.destination_path,
+            task.allow_overwrite,
             &mut progress,
         )?;
     }
@@ -1084,6 +1106,7 @@ fn copy_remote_entry_between(
     destination: &Sftp,
     source_path: &Path,
     destination_path: &Path,
+    allow_overwrite: bool,
     progress: &mut RemoteCopyProgressTracker,
 ) -> Result<(), RemoteFsError> {
     progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
@@ -1093,9 +1116,19 @@ fn copy_remote_entry_between(
         .map_err(|error| RemoteFsError::Other { message: format!("failed to inspect remote source: {error}") })?;
     match kind_from_permissions(stat.perm) {
         RemoteFileKind::Directory => {
-            destination
-                .mkdir(destination_path, stat.perm.unwrap_or(0o755) as i32)
-                .map_err(|error| RemoteFsError::Other { message: format!("failed to create remote copy directory: {error}") })?;
+            // Overwrite merges into an existing destination directory; only
+            // create it when it is missing.
+            let destination_is_directory = destination
+                .stat(destination_path)
+                .map(|destination_stat| {
+                    kind_from_permissions(destination_stat.perm) == RemoteFileKind::Directory
+                })
+                .unwrap_or(false);
+            if !(allow_overwrite && destination_is_directory) {
+                destination
+                    .mkdir(destination_path, stat.perm.unwrap_or(0o755) as i32)
+                    .map_err(|error| RemoteFsError::Other { message: format!("failed to create remote copy directory: {error}") })?;
+            }
             for (child_path, _) in source
                 .readdir(source_path)
                 .map_err(|error| RemoteFsError::Other { message: format!("failed to list remote source directory: {error}") })?
@@ -1111,6 +1144,7 @@ fn copy_remote_entry_between(
                     destination,
                     &child_path,
                     &remote_join(destination_path, &child_name.to_string_lossy()),
+                    allow_overwrite,
                     progress,
                 )?;
             }
@@ -1127,57 +1161,241 @@ fn copy_remote_entry_between(
             let target = source
                 .readlink(source_path)
                 .map_err(|error| RemoteFsError::Other { message: format!("failed to read remote source symlink: {error}") })?;
+            if allow_overwrite {
+                // symlink() fails when the destination exists; remove any
+                // existing entry first. A missing destination makes unlink
+                // fail, which is fine to ignore.
+                let _ = destination.unlink(destination_path);
+            }
             destination
                 .symlink(&target, destination_path)
                 .map_err(|error| RemoteFsError::Other { message: format!("failed to create remote destination symlink: {error}") })?;
         }
         _ => {
-            let mut reader = source
-                .open(source_path)
-                .map_err(|error| RemoteFsError::Other { message: format!("failed to open remote source: {error}") })?;
-            let mut writer = destination
-                .open_mode(
-                    destination_path,
-                    OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE | OpenFlags::EXCLUSIVE,
-                    stat.perm.unwrap_or(0o644) as i32,
-                    OpenType::File,
-                )
-                .map_err(|error| RemoteFsError::Other { message: format!("failed to create remote destination: {error}") })?;
-            let mut buffer = [0u8; 64 * 1024];
-            loop {
-                progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
-                let read = reader
-                    .read(&mut buffer)
-                    .map_err(|error| RemoteFsError::Other { message: format!("failed to read remote source: {error}") })?;
-                if read == 0 {
-                    break;
-                }
-                writer
-                    .write_all(&buffer[..read])
-                    .map_err(|error| RemoteFsError::Other { message: format!("failed to copy between remote hosts: {error}") })?;
-                progress.advance_bytes(read as u64).map_err(|message| RemoteFsError::Other { message })?;
-            }
-            writer
-                .flush()
-                .map_err(|error| RemoteFsError::Other { message: format!("failed to flush remote destination: {error}") })?;
-            drop(writer);
-            if let Err(error) = destination.setstat(destination_path, FileStat {
-                size: None,
-                uid: None,
-                gid: None,
-                perm: stat.perm,
-                atime: stat.atime,
-                mtime: stat.mtime,
-            }) {
-                warn!(
-                    "failed to preserve remote copy metadata path={}: {error}",
-                    destination_path.display()
-                );
-            }
+            copy_remote_file_between(
+                source,
+                destination,
+                source_path,
+                destination_path,
+                &stat,
+                allow_overwrite,
+                progress,
+            )?;
         }
     }
     progress.set_current_path(Some(path_to_string(source_path))).map_err(|message| RemoteFsError::Other { message })?;
     progress.finish_step().map_err(|message| RemoteFsError::Other { message })
+}
+
+/// Stages a single file copy through a `<name>.tb-part` temp file that is
+/// renamed into place only after every byte is written: an interrupted copy
+/// never leaves a partial file under the real name, and a leftover temp file
+/// doubles as the resume point for retries and later copies of the same name.
+fn copy_remote_file_between(
+    source: &Sftp,
+    destination: &Sftp,
+    source_path: &Path,
+    destination_path: &Path,
+    source_stat: &FileStat,
+    allow_overwrite: bool,
+    progress: &mut RemoteCopyProgressTracker,
+) -> Result<(), RemoteFsError> {
+    let temp_path = remote_copy_temp_path(destination_path);
+    let source_size = source_stat.size.unwrap_or(0);
+    // Bytes already credited in the progress total for this file, so a resume
+    // offset is credited exactly once no matter how many attempts run.
+    let mut credited = 0u64;
+    let mut attempt = 0u32;
+    let result = loop {
+        attempt += 1;
+        match copy_remote_file_attempt(
+            source,
+            destination,
+            source_path,
+            destination_path,
+            &temp_path,
+            source_size,
+            source_stat.perm,
+            progress,
+            &mut credited,
+        ) {
+            Ok(()) => break Ok(()),
+            Err(error) => {
+                if attempt >= REMOTE_COPY_MAX_ATTEMPTS || progress.ensure_not_cancelled().is_err() {
+                    break Err(error);
+                }
+                warn!(
+                    "remote copy attempt {attempt}/{REMOTE_COPY_MAX_ATTEMPTS} failed path={}: {error:?}; resuming from temp file",
+                    destination_path.display()
+                );
+                if let Err(message) = sleep_remote_copy_retry_backoff(attempt, progress) {
+                    break Err(RemoteFsError::Other { message });
+                }
+            }
+        }
+    };
+    if let Err(error) = result {
+        // Graceful failures and cancellations remove the temp file; only a
+        // crash or kill leaves one behind, where its suffix keeps it
+        // recognizable and resumable by the next copy of the same name.
+        let _ = destination.unlink(&temp_path);
+        return Err(error);
+    }
+    if let Err(error) = destination.setstat(&temp_path, FileStat {
+        size: None,
+        uid: None,
+        gid: None,
+        perm: source_stat.perm,
+        atime: source_stat.atime,
+        mtime: source_stat.mtime,
+    }) {
+        warn!(
+            "failed to preserve remote copy metadata path={}: {error}",
+            temp_path.display()
+        );
+    }
+    // rename() without flags asks libssh2 for an atomic overwrite; servers
+    // without the posix-rename extension still refuse to clobber an existing
+    // destination, so fall back to unlink + rename when overwriting. A failed
+    // finalize keeps the temp file so the next copy can resume from it.
+    match destination.rename(&temp_path, destination_path, None) {
+        Ok(()) => Ok(()),
+        Err(first_error) if allow_overwrite => {
+            let _ = destination.unlink(destination_path);
+            destination
+                .rename(&temp_path, destination_path, None)
+                .map_err(|error| RemoteFsError::Other { message: format!(
+                    "failed to finalize remote copy {}: {error} (after rename error: {first_error})",
+                    destination_path.display()
+                ) })
+        }
+        Err(error) => Err(RemoteFsError::Other { message: format!(
+            "failed to finalize remote copy {}: {error}",
+            destination_path.display()
+        ) }),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn copy_remote_file_attempt(
+    source: &Sftp,
+    destination: &Sftp,
+    source_path: &Path,
+    destination_path: &Path,
+    temp_path: &Path,
+    source_size: u64,
+    source_perm: Option<u32>,
+    progress: &mut RemoteCopyProgressTracker,
+    credited: &mut u64,
+) -> Result<(), RemoteFsError> {
+    let temp_size = destination
+        .stat(temp_path)
+        .ok()
+        .and_then(|stat| stat.size);
+    let resume_offset = match remote_copy_resume(temp_size, source_size) {
+        // Larger than the source can never belong to it: discard and restart.
+        RemoteCopyResume::Restart => {
+            let _ = destination.unlink(temp_path);
+            0
+        }
+        RemoteCopyResume::Fresh => 0,
+        RemoteCopyResume::Resume(offset) => offset,
+        // A previous attempt wrote every byte but stopped before the rename;
+        // skip the transfer and go straight to the finalize step.
+        RemoteCopyResume::AlreadyComplete => source_size,
+    };
+    if resume_offset > *credited {
+        progress.advance_bytes(resume_offset - *credited).map_err(|message| RemoteFsError::Other { message })?;
+        *credited = resume_offset;
+    }
+    if source_size > 0 && resume_offset == source_size {
+        return Ok(());
+    }
+    let mut reader = source
+        .open(source_path)
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to open remote source: {error}") })?;
+    let mut flags = OpenFlags::CREATE | OpenFlags::WRITE;
+    if resume_offset == 0 {
+        // Fresh attempts truncate the temp file; resumed attempts keep what
+        // is already written and continue at the offset.
+        flags |= OpenFlags::TRUNCATE;
+    }
+    let mut writer = destination
+        .open_mode(temp_path, flags, source_perm.unwrap_or(0o644) as i32, OpenType::File)
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to create remote destination: {error}") })?;
+    if resume_offset > 0 {
+        reader
+            .seek(SeekFrom::Start(resume_offset))
+            .map_err(|error| RemoteFsError::Other { message: format!("failed to seek remote source: {error}") })?;
+        writer
+            .seek(SeekFrom::Start(resume_offset))
+            .map_err(|error| RemoteFsError::Other { message: format!("failed to resume remote destination: {error}") })?;
+    }
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| RemoteFsError::Other { message: format!("failed to read remote source: {error}") })?;
+        if read == 0 {
+            break;
+        }
+        writer
+            .write_all(&buffer[..read])
+            .map_err(|error| RemoteFsError::Other { message: format!(
+                "failed to copy between remote hosts ({} at byte {credited}): {error}",
+                destination_path.display(),
+                credited = *credited
+            ) })?;
+        progress.advance_bytes(read as u64).map_err(|message| RemoteFsError::Other { message })?;
+        *credited += read as u64;
+    }
+    writer
+        .flush()
+        .map_err(|error| RemoteFsError::Other { message: format!("failed to flush remote destination: {error}") })
+}
+
+/// Backoff between copy attempts, sliced so cancellation stays responsive.
+fn sleep_remote_copy_retry_backoff(
+    attempt: u32,
+    progress: &RemoteCopyProgressTracker,
+) -> Result<(), String> {
+    let mut remaining = Duration::from_millis(REMOTE_COPY_RETRY_BACKOFF_BASE_MS << (attempt - 1));
+    while !remaining.is_zero() {
+        progress.ensure_not_cancelled()?;
+        let slice = remaining.min(Duration::from_millis(100));
+        thread::sleep(slice);
+        remaining -= slice;
+    }
+    Ok(())
+}
+
+/// How a copy attempt should treat a temp file left by an earlier run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteCopyResume {
+    /// No usable temp file: copy from the start.
+    Fresh,
+    /// Continue writing at this byte offset.
+    Resume(u64),
+    /// The temp file already holds the whole source: only the rename is left.
+    AlreadyComplete,
+    /// The temp file is larger than the source and cannot belong to it.
+    Restart,
+}
+
+fn remote_copy_resume(temp_size: Option<u64>, source_size: u64) -> RemoteCopyResume {
+    match temp_size {
+        None | Some(0) => RemoteCopyResume::Fresh,
+        Some(size) if size < source_size => RemoteCopyResume::Resume(size),
+        Some(size) if size == source_size => RemoteCopyResume::AlreadyComplete,
+        Some(_) => RemoteCopyResume::Restart,
+    }
+}
+
+fn remote_copy_temp_path(destination_path: &Path) -> PathBuf {
+    let mut temp_name = destination_path.as_os_str().to_owned();
+    temp_name.push(REMOTE_COPY_TEMP_SUFFIX);
+    PathBuf::from(temp_name)
 }
 
 fn remove_remote_entry_simple(sftp: &Sftp, path: &Path) -> Result<(), RemoteFsError> {
@@ -2316,6 +2534,40 @@ mod tests {
             true,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn remote_copy_temp_path_appends_suffix_to_full_name() {
+        assert_eq!(
+            remote_copy_temp_path(Path::new("/srv/report.txt")),
+            PathBuf::from("/srv/report.txt.tb-part")
+        );
+        assert_eq!(
+            remote_copy_temp_path(Path::new("/srv/archive")),
+            PathBuf::from("/srv/archive.tb-part")
+        );
+    }
+
+    #[test]
+    fn remote_copy_resume_starts_fresh_without_usable_temp_file() {
+        assert_eq!(remote_copy_resume(None, 100), RemoteCopyResume::Fresh);
+        assert_eq!(remote_copy_resume(Some(0), 100), RemoteCopyResume::Fresh);
+        assert_eq!(remote_copy_resume(None, 0), RemoteCopyResume::Fresh);
+    }
+
+    #[test]
+    fn remote_copy_resume_continues_from_partial_temp_file() {
+        assert_eq!(remote_copy_resume(Some(40), 100), RemoteCopyResume::Resume(40));
+    }
+
+    #[test]
+    fn remote_copy_resume_skips_transfer_when_temp_file_is_complete() {
+        assert_eq!(remote_copy_resume(Some(100), 100), RemoteCopyResume::AlreadyComplete);
+    }
+
+    #[test]
+    fn remote_copy_resume_restarts_when_temp_file_exceeds_source() {
+        assert_eq!(remote_copy_resume(Some(140), 100), RemoteCopyResume::Restart);
     }
 
     #[test]
