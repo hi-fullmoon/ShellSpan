@@ -2,9 +2,11 @@
 
 All notable changes to TermBridge are documented in this file.
 
-
 ## [v2.0.23](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.23) - 2026-08-05
 
+### Chore
+
+- **deps:** update dependencies and add git-cliff
 
 ### Features
 
@@ -13,13 +15,11 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.22](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.22) - 2026-08-05
 
-
 ### Chore
 
 - **tauri:** update application icons
 
 ## [v2.0.21](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.21) - 2026-08-05
-
 
 ### Features
 
@@ -34,13 +34,11 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.20](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.20) - 2026-08-05
 
-
 ### Bug Fixes
 
 - **store:** ignore stale progress events after transfer completion
 
 ## [v2.0.19](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.19) - 2026-08-05
-
 
 ### Refactoring
 
@@ -48,13 +46,11 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.18](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.18) - 2026-08-04
 
-
 ### Bug Fixes
 
 - **ui:** improve tab bar drag behavior and new tab button
 
 ## [v2.0.17](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.17) - 2026-08-04
-
 
 ### Chore
 
@@ -66,7 +62,6 @@ All notable changes to TermBridge are documented in this file.
 - **ui:** reduce terminal and sftp tab bar height
 
 ## [v2.0.16](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.16) - 2026-08-04
-
 
 ### Chore
 
@@ -88,7 +83,6 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.15](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.15) - 2026-08-03
 
-
 ### Bug Fixes
 
 - **ui:** position toast notifications to top-right
@@ -98,7 +92,6 @@ All notable changes to TermBridge are documented in this file.
 - **sftp:** support conflict policies for remote-to-local downloads
 
 ## [v2.0.14](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.14) - 2026-08-03
-
 
 ### Bug Fixes
 
@@ -113,7 +106,6 @@ All notable changes to TermBridge are documented in this file.
 - **workbench:** add loading state and error feedback for connection management
 
 ## [v2.0.13](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.13) - 2026-08-03
-
 
 ### Bug Fixes
 
@@ -133,13 +125,11 @@ All notable changes to TermBridge are documented in this file.
 
 ## [v2.0.12](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.12) - 2026-07-31
 
-
 ### Features
 
 - **sftp:** harden transfers and pool lifecycle
 
 ## [v2.0.11](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.11) - 2026-07-30
-
 
 ### Bug Fixes
 
@@ -157,6 +147,7 @@ All notable changes to TermBridge are documented in this file.
 ### Features
 
 - **settings:** add sidebar navigation for settings panel
+
 ## [v2.0.10](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.10) - 2026-07-30
 
 ### Bug Fixes
