@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.20](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.20) - 2026-08-05
+
+
+### Bug Fixes
+
+- **store:** ignore stale progress events after transfer completion
+
 ## [v2.0.19](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.19) - 2026-08-05
 
 
