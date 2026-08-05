@@ -1,0 +1,2 @@
+# git-cliff --prepend 按字节匹配文件头,CRLF 会导致识别失败、头部重复
+CHANGELOG.md text eol=lf

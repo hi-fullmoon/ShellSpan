@@ -3,6 +3,14 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.23](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.23) - 2026-08-05
+
+
+### Features
+
+- **remote_fs:** dot-prefix copy temp files to hide them from listings
+- **sftp:** show transfer speed next to transfer progress
+
 ## [v2.0.22](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.22) - 2026-08-05
 
 
