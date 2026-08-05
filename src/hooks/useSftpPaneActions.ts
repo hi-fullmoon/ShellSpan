@@ -23,6 +23,7 @@ import {
 } from '@/stores/sftpStore';
 import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
+import { getLocalizedErrorMessage } from '@/lib/error';
 import type { FileEntry } from '@/components/sftp/utils';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 import { useAppStore } from '@/stores/appStore';
@@ -210,7 +211,7 @@ export function useSftpPaneActions(
         await openRemoteFile(target.path);
       } catch (err) {
         logger.warn(`Failed to open remote file: ${target.path}`, err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
     },
     [isLocal, openRemoteFile, selectedEntries, error],
@@ -226,7 +227,7 @@ export function useSftpPaneActions(
         setPreviewContent(content);
       } catch (err) {
         logger.warn(`Failed to preview remote file: ${target.path}`, err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
     },
     [isLocal, previewRemoteFile, selectedEntries, error],
@@ -252,7 +253,7 @@ export function useSftpPaneActions(
         await downloadRemotePaths([target.path], folders[0]);
       } catch (err) {
         logger.warn(`Failed to download: ${target.path}`, err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
     },
     [downloadRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
@@ -277,7 +278,7 @@ export function useSftpPaneActions(
         await downloadRemotePaths(selectedRemotePaths, folders[0]);
       } catch (err) {
         logger.warn('Batch download failed', err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
     },
     [downloadRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
@@ -320,7 +321,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn('Local paste failed', err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
       return;
     }
@@ -364,7 +365,7 @@ export function useSftpPaneActions(
             }
             markOperationFailed(
               operationId,
-              copyError instanceof Error ? copyError.message : String(copyError),
+              getLocalizedErrorMessage(copyError),
             );
             throw copyError;
           }
@@ -395,7 +396,7 @@ export function useSftpPaneActions(
       clearSelection();
     } catch (err) {
       logger.warn('Paste failed', err);
-      error(err instanceof Error ? err.message : String(err));
+      error(getLocalizedErrorMessage(err));
     }
   }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, pathsAreBusy, reload, remoteConnection, remoteConnectionKey, reportBusyPaths, t, error]);
 
@@ -474,7 +475,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to create ${kind}: ${name}`, err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       } finally {
         setCreateMode(null);
       }
@@ -509,7 +510,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to rename: ${renameTarget.path}`, err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       } finally {
         setRenameTarget(undefined);
       }
@@ -528,7 +529,7 @@ export function useSftpPaneActions(
           clearSelection();
         } catch (err) {
           logger.warn('Failed to trash local paths', err);
-          error(err instanceof Error ? err.message : String(err));
+          error(getLocalizedErrorMessage(err));
         }
         return;
       }
@@ -541,7 +542,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn('Failed to delete remote paths', err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
     },
     [clearSelection, deleteRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
@@ -561,7 +562,7 @@ export function useSftpPaneActions(
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload files', err);
-      error(err instanceof Error ? err.message : String(err));
+      error(getLocalizedErrorMessage(err));
     }
   }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
 
@@ -579,7 +580,7 @@ export function useSftpPaneActions(
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload folders', err);
-      error(err instanceof Error ? err.message : String(err));
+      error(getLocalizedErrorMessage(err));
     }
   }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
 
@@ -590,7 +591,7 @@ export function useSftpPaneActions(
         await uploadLocalPaths(localPaths, destinationDirectory, undefined, policies);
       } catch (err) {
         logger.warn('Upload with conflict policies failed', err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
     },
     [isLocal, uploadLocalPaths, error],
@@ -613,7 +614,7 @@ export function useSftpPaneActions(
         } catch (err) {
           markOperationFailed(
             operationId,
-            err instanceof Error ? err.message : String(err),
+            getLocalizedErrorMessage(err),
           );
           throw err;
         }
@@ -633,7 +634,7 @@ export function useSftpPaneActions(
         await runCopy();
       } catch (err) {
         logger.warn('Copy with conflict policies failed', err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       }
     },
     [addOperation, connection.id, error, isLocal, markOperationFailed, markOperationRunning, removeOperation],
@@ -657,7 +658,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to update permissions: ${permissionsTarget.path}`, err);
-        error(err instanceof Error ? err.message : String(err));
+        error(getLocalizedErrorMessage(err));
       } finally {
         setPermissionsTarget(undefined);
       }
@@ -693,7 +694,7 @@ export function useSftpPaneActions(
       await reload();
     } catch (err) {
       logger.warn('Failed to refresh directory', err);
-      error(err instanceof Error ? err.message : String(err));
+      error(getLocalizedErrorMessage(err));
     }
   }, [reload, error]);
 
