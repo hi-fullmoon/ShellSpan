@@ -50,6 +50,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "code-inspector-plugin": "^1.6.6",
+    "git-cliff": "^2.13.1",
     "jsdom": "^29.1.1",
     "playwright": "^1.62.0",
     "tailwindcss": "^4.3.3",
