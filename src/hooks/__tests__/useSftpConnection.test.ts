@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import {
   getSftpPaneConnectionKey,
@@ -28,11 +28,6 @@ const tauri = vi.hoisted(() => ({
   invokeOpenRemoteFile: vi.fn().mockResolvedValue(undefined),
   invokePreviewRemoteFile: vi.fn().mockResolvedValue(undefined),
   invokeRenameRemotePath: vi.fn().mockResolvedValue(undefined),
-  invokeRestoreRemotePath: vi.fn().mockResolvedValue(undefined),
-  invokeTrashRemotePath: vi.fn().mockResolvedValue({
-    originalPath: '/remote/draft.txt',
-    trashPath: '/remote/.termbridge/trash/id-draft.txt',
-  }),
   invokeUpdateRemotePermissions: vi.fn().mockResolvedValue(undefined),
   invokeUploadLocalPaths: vi.fn().mockResolvedValue(undefined),
 }));
@@ -104,9 +99,8 @@ function createConnection(): SftpConnection {
   };
 }
 
-describe('useSftpConnection delete undo window', () => {
+describe('useSftpConnection remote delete', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
     vi.clearAllMocks();
     const connection = createConnection();
     useSftpStore.setState({
@@ -116,66 +110,39 @@ describe('useSftpConnection delete undo window', () => {
     useTransferStore.setState({ operations: [] });
   });
 
-  afterEach(() => {
-    vi.clearAllTimers();
-    vi.useRealTimers();
-  });
-
-  it('moves the file to remote trash immediately', async () => {
+  it('permanently deletes the file directly', async () => {
     const connection = useSftpStore.getState().connections[0]!;
     const { result } = renderHook(() => useSftpConnection(connection));
 
     await act(() => result.current.deleteRemotePaths([file.path]));
 
-    expect(tauri.invokeTrashRemotePath).toHaveBeenCalledWith(
-      expect.objectContaining({ path: file.path }),
+    expect(tauri.invokeDeleteRemotePath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: file.path,
+        operationId: expect.stringContaining('-delete-'),
+      }),
     );
     expect(useTransferStore.getState().operations[0]).toMatchObject({
       kind: 'delete',
       completedSteps: 1,
       totalSteps: 1,
     });
-    expect(useTransferStore.getState().operations[0]?.undo).toBeTypeOf('function');
   });
 
-  it('restores the trashed file when undo is used', async () => {
+  it('marks a failed delete and retains the error', async () => {
+    tauri.invokeDeleteRemotePath.mockRejectedValueOnce(new Error('permission denied'));
     const connection = useSftpStore.getState().connections[0]!;
     const { result } = renderHook(() => useSftpConnection(connection));
 
-    await act(() => result.current.deleteRemotePaths([file.path]));
-    const operationId = useTransferStore.getState().operations[0]!.operationId;
-    await act(() => useTransferStore.getState().undoOperation(operationId));
+    await expect(
+      act(() => result.current.deleteRemotePaths([file.path])),
+    ).rejects.toThrow('permission denied');
 
-    expect(tauri.invokeRestoreRemotePath).toHaveBeenCalledWith(
-      expect.objectContaining({
-        originalPath: file.path,
-        trashPath: '/remote/.termbridge/trash/id-draft.txt',
-      }),
-    );
-    expect(useTransferStore.getState().operations[0]?.status).toBe('restored');
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'delete',
+      status: 'failed',
+      error: 'permission denied',
     });
-    expect(tauri.invokeDeleteRemotePath).not.toHaveBeenCalled();
-  });
-
-  it('permanently deletes trash when the undo window expires', async () => {
-    const connection = useSftpStore.getState().connections[0]!;
-    const { result } = renderHook(() => useSftpConnection(connection));
-
-    await act(() => result.current.deleteRemotePaths([file.path]));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
-
-    expect(tauri.invokeDeleteRemotePath).toHaveBeenCalledWith(
-      expect.objectContaining({
-        path: '/remote/.termbridge/trash/id-draft.txt',
-        operationId: expect.stringContaining('-cleanup-0'),
-      }),
-    );
-    expect(useTransferStore.getState().operations).toHaveLength(0);
   });
 
   it('binds backend cancellation to the delete operation', async () => {

@@ -4,8 +4,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-const TERM_BRIDGE_DIRECTORY: &str = ".termbridge";
-
 pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Result<(), String> {
     if request.source_paths.is_empty() {
         return Err("no source paths were provided for copy".to_string());
@@ -37,9 +35,6 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
             .ok_or_else(|| format!("invalid source path: {}", source_path.display()))?
             .to_string_lossy()
             .to_string();
-        if file_name == TERM_BRIDGE_DIRECTORY {
-            return Err("'.termbridge' is reserved for application data".to_string());
-        }
         let conflict_policy = request
             .conflict_policies
             .get(index)
@@ -72,9 +67,6 @@ pub(crate) fn rename_local_path_blocking(path: String, new_name: String) -> Resu
     let trimmed = new_name.trim();
     if trimmed.is_empty() {
         return Err("new name must not be empty".to_string());
-    }
-    if trimmed == TERM_BRIDGE_DIRECTORY {
-        return Err("'.termbridge' is reserved for application data".to_string());
     }
     if trimmed.contains('/') || trimmed.contains('\\') {
         return Err("new name must not contain path separators".to_string());
@@ -122,9 +114,6 @@ pub(crate) fn paste_local_paths_blocking(
             .ok_or_else(|| format!("invalid source path: {}", source_path.display()))?
             .to_string_lossy()
             .to_string();
-        if file_name == TERM_BRIDGE_DIRECTORY {
-            return Err("'.termbridge' is reserved for application data".to_string());
-        }
         let destination_name = resolve_paste_target_name(&existing_names, &file_name, &copy_suffix);
         let destination_path = destination_directory.join(&destination_name);
         if paths_refer_to_same_entry(&source_path, &destination_path) {
@@ -199,9 +188,6 @@ fn local_entry_names(directory: &Path) -> Result<HashSet<String>, String> {
     for entry in fs::read_dir(directory).map_err(|error| format!("failed to read directory: {error}"))? {
         let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if name == TERM_BRIDGE_DIRECTORY {
-            continue;
-        }
         names.insert(name);
     }
     Ok(names)
@@ -234,9 +220,6 @@ fn copy_local_entry_to_path(source: &Path, destination: &Path) -> Result<(), Str
             .map_err(|error| format!("failed to create directory {}: {error}", destination.display()))?;
         for entry in fs::read_dir(source).map_err(|error| format!("failed to read directory {}: {error}", source.display()))? {
             let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
-            if entry.file_name() == TERM_BRIDGE_DIRECTORY {
-                continue;
-            }
             let entry_destination = destination.join(entry.file_name());
             copy_local_entry_to_path(&entry.path(), &entry_destination)?;
         }
@@ -439,17 +422,6 @@ mod tests {
         );
         assert!(result.is_err());
         assert_eq!(fs::read_to_string(temp.path().join("old.txt")).unwrap(), "a");
-    }
-
-    #[test]
-    fn rename_rejects_reserved_termbridge_name() {
-        let temp = TempDir::new().unwrap();
-        let src = temp.path().join("old.txt");
-        fs::write(&src, "a").unwrap();
-
-        let result = rename_local_path_blocking(src.to_str().unwrap().to_string(), ".termbridge".to_string());
-        assert!(result.is_err());
-        assert!(src.exists());
     }
 
     #[test]

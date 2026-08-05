@@ -25,10 +25,7 @@ import type {
   RemoteFsError,
   RenameRemotePathRequest,
   DeleteRemotePathRequest,
-  RestoreRemotePathRequest,
   SftpBookmarkRow,
-  TrashRemotePathRequest,
-  TrashedRemotePath,
   OpenRemoteFileRequest,
   ReadRemoteFileRequest,
   ReadRemoteFileResponse,
@@ -151,18 +148,6 @@ export async function invokeDeleteRemotePath(
   request: DeleteRemotePathRequest,
 ): Promise<void> {
   return invokeLogged('delete_remote_path', { request });
-}
-
-export async function invokeTrashRemotePath(
-  request: TrashRemotePathRequest,
-): Promise<TrashedRemotePath> {
-  return invokeLogged('trash_remote_path', { request });
-}
-
-export async function invokeRestoreRemotePath(
-  request: RestoreRemotePathRequest,
-): Promise<void> {
-  return invokeLogged('restore_remote_path', { request });
 }
 
 export async function invokeCopyRemotePath(

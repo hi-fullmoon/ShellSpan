@@ -13,8 +13,6 @@ import {
   invokeOpenRemoteFile,
   invokePreviewRemoteFile,
   invokeRenameRemotePath,
-  invokeRestoreRemotePath,
-  invokeTrashRemotePath,
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
 } from '@/lib/tauri';
@@ -37,13 +35,10 @@ import {
 import type { SftpSide } from '@/stores/sftpStore';
 import type {
   ReadRemoteFileResponse,
-  TrashedRemotePath,
   UploadConflictPolicy,
 } from '@/types';
 
 const logger = createLogger('sftp');
-
-const DELETE_UNDO_WINDOW_MS = 30_000;
 
 function createOperationId(connectionId: string, kind: string): string {
   return `${connectionId}-${kind}-${crypto.randomUUID()}`;
@@ -113,7 +108,6 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
     (state) => state.markOperationCancelled,
   );
   const updateDelete = useTransferStore((state) => state.updateDelete);
-  const setOperationUndo = useTransferStore((state) => state.setOperationUndo);
 
   const loadRemoteDirectory = useCallback(
     async (path?: string) => {
@@ -284,15 +278,13 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         status: 'running',
         cancel: () => invokeCancelDelete(operationId),
       });
-      const trashedPaths: TrashedRemotePath[] = [];
-
       try {
         for (const [index, path] of paths.entries()) {
-          const trashedPath = await invokeTrashRemotePath({
+          await invokeDeleteRemotePath({
             ...remoteConnection,
             path,
+            operationId,
           });
-          trashedPaths.push(trashedPath);
           updateDelete({
             operationId,
             currentPath: path,
@@ -300,70 +292,17 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
             completedSteps: index + 1,
           });
         }
-
-        const pendingRestorePaths = [...trashedPaths].reverse();
-        setOperationUndo(operationId, async () => {
-          while (pendingRestorePaths.length > 0) {
-            const trashedPath = pendingRestorePaths[0];
-            await invokeRestoreRemotePath({
-              ...remoteConnection,
-              ...trashedPath,
-            });
-            pendingRestorePaths.shift();
-          }
-          await loadRemoteDirectory(panePath);
-        });
-        setTimeout(() => {
-          const operation = useTransferStore
-            .getState()
-            .operations.find((item) => item.operationId === operationId);
-
-          if (operation?.status === 'restored' || operation?.status === 'restoring') {
-            return;
-          }
-          if (operation?.status === 'failed' && operation.undo) {
-            return;
-          }
-
-          useTransferStore.getState().removeOperation(operationId);
-          // Read the latest connection from the store: the pane may have been
-          // reconnected with different credentials since the delete started.
-          const latestConnection = useSftpStore
-            .getState()
-            .connections.find((item) => item.id === connection.id);
-          const cleanupConnection = latestConnection
-            ? getSftpPaneConnection(latestConnection, side)
-            : remoteConnection;
-          void Promise.allSettled(
-            trashedPaths.map((trashedPath, index) =>
-              invokeDeleteRemotePath({
-                ...cleanupConnection,
-                path: trashedPath.trashPath,
-                operationId: `${operationId}-cleanup-${index}`,
-              }),
-            ),
-          ).then((results) => {
-            results.forEach((result, index) => {
-              if (result.status === 'rejected') {
-                logger.error(
-                  `Failed to purge trashed path ${trashedPaths[index]?.trashPath}`,
-                  result.reason,
-                );
-              }
-            });
-          });
-        }, DELETE_UNDO_WINDOW_MS);
         await loadRemoteDirectory(panePath);
       } catch (error) {
-        for (const trashedPath of [...trashedPaths].reverse()) {
-          try {
-            await invokeRestoreRemotePath({
-              ...remoteConnection,
-              ...trashedPath,
-            });
-          } catch {
-            // Keep the original failure visible; any item already in trash remains recoverable.
-          }
+        const operation = useTransferStore.getState().operations.find(
+          (item) => item.operationId === operationId,
+        );
+        if (operation?.status === 'cancelling') {
+          // The backend observed the cancel flag and reported the delete as
+          // cancelled; paths already deleted stay deleted.
+          markOperationCancelled(operationId);
+          await loadRemoteDirectory(panePath);
+          return;
         }
         markOperationFailed(
           operationId,
@@ -381,9 +320,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       panePath,
       loadRemoteDirectory,
       markOperationFailed,
-      setOperationUndo,
+      markOperationCancelled,
       updateDelete,
-      side,
     ],
   );
 

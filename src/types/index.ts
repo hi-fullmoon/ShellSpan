@@ -311,20 +311,6 @@ export interface DeleteRemotePathRequest extends RemoteConnectionRequest {
   operationId: string;
 }
 
-export interface TrashRemotePathRequest extends RemoteConnectionRequest {
-  path: string;
-}
-
-export interface TrashedRemotePath {
-  originalPath: string;
-  trashPath: string;
-}
-
-export interface RestoreRemotePathRequest extends RemoteConnectionRequest {
-  originalPath: string;
-  trashPath: string;
-}
-
 export interface CopyRemotePathRequest extends RemoteConnectionRequest {
   sourcePath: string;
   destinationDirectory: string;
