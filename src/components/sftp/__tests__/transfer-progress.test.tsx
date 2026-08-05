@@ -34,7 +34,7 @@ describe('TransferProgress', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
-    expect(screen.getByText('apple-touch-icon.png')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/apple-touch-icon.png')).toBeInTheDocument();
     expect(screen.getByText('sftp.transfer.uploadFailed')).toHaveAttribute(
       'title',
       'connection lost',
@@ -62,8 +62,8 @@ describe('TransferProgress', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
-    expect(screen.getByText('apple-touch-icon.png').parentElement).toHaveClass(
-      'h-10',
+    expect(screen.getByText('/tmp/apple-touch-icon.png').parentElement).toHaveClass(
+      'h-8',
       'bg-app-surface-muted/60',
     );
   });
