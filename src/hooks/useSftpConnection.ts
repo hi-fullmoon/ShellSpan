@@ -292,6 +292,10 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
             completedSteps: index + 1,
           });
         }
+        // Mark completion explicitly: queued backend progress events can be
+        // delivered after the last invoke resolves and would otherwise
+        // regress the counters, leaving the paths "busy" forever.
+        markOperationCompleted(operationId);
         await loadRemoteDirectory(panePath);
       } catch (error) {
         const operation = useTransferStore.getState().operations.find(
@@ -320,6 +324,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       panePath,
       loadRemoteDirectory,
       markOperationFailed,
+      markOperationCompleted,
       markOperationCancelled,
       updateDelete,
     ],
