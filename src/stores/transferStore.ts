@@ -25,6 +25,7 @@ export interface TransferOperation {
   status?:
     | 'pending'
     | 'running'
+    | 'completed'
     | 'failed'
     | 'cancelling'
     | 'cancelled';
@@ -67,7 +68,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
   updateUpload: (event) =>
     set((state) => ({
       operations: state.operations.map((op) =>
-        op.operationId === event.operationId
+        op.operationId === event.operationId && !isStaleProgressEvent(op)
           ? {
               ...op,
               currentPath: event.currentPath || op.currentPath,
@@ -82,7 +83,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
   updateDownload: (event) =>
     set((state) => ({
       operations: state.operations.map((op) =>
-        op.operationId === event.operationId
+        op.operationId === event.operationId && !isStaleProgressEvent(op)
           ? {
               ...op,
               currentPath: event.currentPath || op.currentPath,
@@ -97,7 +98,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
   updateDelete: (event) =>
     set((state) => ({
       operations: state.operations.map((op) =>
-        op.operationId === event.operationId
+        op.operationId === event.operationId && !isStaleProgressEvent(op)
           ? {
               ...op,
               currentPath: event.currentPath || op.currentPath,
@@ -134,7 +135,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
   updateRemoteCopy: (event) =>
     set((state) => ({
       operations: state.operations.map((op) =>
-        op.operationId === event.operationId
+        op.operationId === event.operationId && !isStaleProgressEvent(op)
           ? {
               ...op,
               currentPath: event.currentPath || op.currentPath,
@@ -153,7 +154,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
         operation.operationId === operationId
           ? {
               ...operation,
-              status: 'running',
+              status: 'completed',
               completedSteps: operation.totalSteps,
               processedBytes: operation.totalBytes,
               error: undefined,
@@ -221,6 +222,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
 }));
 
 export function isTransferComplete(operation: TransferOperation): boolean {
+  if (operation.status === 'completed') return true;
   if (
     operation.status === 'failed' ||
     operation.status === 'pending' ||
@@ -231,6 +233,14 @@ export function isTransferComplete(operation: TransferOperation): boolean {
   }
   if (operation.totalSteps === 0) return false;
   return operation.completedSteps >= operation.totalSteps;
+}
+
+// Backend progress events are delivered asynchronously and can arrive after
+// the invoke response already marked the operation complete. A stale event
+// must never regress a finished operation, or its paths would stay "busy"
+// for hasActivePathOperation forever.
+function isStaleProgressEvent(operation: TransferOperation | undefined): boolean {
+  return !operation || operation.status === 'completed';
 }
 
 export function isTransferActive(operation: TransferOperation): boolean {

@@ -153,4 +153,81 @@ describe('transferStore', () => {
       completedSteps: 1,
     });
   });
+
+  it('ignores stale progress events that arrive after completion', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'upload',
+      connectionId: 'connection-1',
+      paths: ['/remote/dir'],
+      status: 'running',
+      totalSteps: 3,
+      completedSteps: 1,
+    });
+
+    useTransferStore.getState().markOperationCompleted(operation.operationId);
+    // A backend event queued before the invoke resolved gets delivered late.
+    useTransferStore.getState().updateUpload({
+      operationId: operation.operationId,
+      currentPath: '/tmp/file.png',
+      totalBytes: 100,
+      uploadedBytes: 40,
+      totalSteps: 3,
+      completedSteps: 1,
+    });
+
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      status: 'completed',
+      completedSteps: 3,
+    });
+    expect(hasActivePathOperation('connection-1', ['/remote/dir'])).toBe(false);
+  });
+
+  it('keeps deleted paths free when a stale delete event arrives late', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'delete',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.txt'],
+      status: 'running',
+      totalSteps: 1,
+      completedSteps: 0,
+    });
+
+    useTransferStore.getState().markOperationCompleted(operation.operationId);
+    useTransferStore.getState().updateDelete({
+      operationId: operation.operationId,
+      currentPath: '/remote/file.txt',
+      totalSteps: 5,
+      completedSteps: 2,
+    });
+
+    expect(
+      hasActivePathOperation('connection-1', ['/remote/file.txt']),
+    ).toBe(false);
+  });
+
+  it('still tracks progress for running operations whose steps momentarily match', () => {
+    // Multi-path deletes briefly reach completedSteps === totalSteps between
+    // paths; progress events for the next path must still apply.
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'delete',
+      status: 'running',
+      totalSteps: 1,
+      completedSteps: 1,
+    });
+
+    useTransferStore.getState().updateDelete({
+      operationId: operation.operationId,
+      currentPath: '/remote/other.txt',
+      totalSteps: 2,
+      completedSteps: 1,
+    });
+
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      totalSteps: 2,
+      completedSteps: 1,
+    });
+  });
 });
