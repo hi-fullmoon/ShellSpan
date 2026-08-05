@@ -38,6 +38,16 @@ vi.mock('@tanstack/react-virtual', () => ({
   }),
 }));
 
+// File names render as separate stem + extension spans, so match the name
+// container element by its combined text content.
+function getFileName(name: string): HTMLElement {
+  return screen.getByText(
+    (_, element) =>
+      element?.classList.contains('text-[13px]') === true &&
+      element.textContent === name,
+  );
+}
+
 const sampleEntries: FileEntry[] = [
   { path: '/home/user/z.txt', name: 'z.txt', kind: 'file', size: 10, modifiedAt: 1000 },
   { path: '/home/user/a.txt', name: 'a.txt', kind: 'file', size: 20, modifiedAt: 2000 },
@@ -233,7 +243,7 @@ describe('SftpFileList', () => {
       />,
     );
 
-    fireEvent.contextMenu(screen.getByText('a.txt'));
+    fireEvent.contextMenu(getFileName('a.txt'));
 
     expect(onContextMenu).toHaveBeenCalledTimes(1);
     expect(onBlankContextMenu).not.toHaveBeenCalled();
@@ -259,20 +269,20 @@ describe('SftpFileList', () => {
     };
 
     render(<Harness />);
-    const firstRow = screen.getByText('a.txt').closest('.grid');
-    const secondRow = screen.getByText('z.txt').closest('.grid');
+    const firstRow = getFileName('a.txt').closest('.grid');
+    const secondRow = getFileName('z.txt').closest('.grid');
     const firstRowCells = firstRow?.querySelectorAll('[data-sftp-file-cell]') ?? [];
     const secondRowCells = secondRow?.querySelectorAll('[data-sftp-file-cell]') ?? [];
 
-    fireEvent.click(screen.getByText('a.txt'));
-    fireEvent.click(screen.getByText('z.txt'));
+    fireEvent.click(getFileName('a.txt'));
+    fireEvent.click(getFileName('z.txt'));
 
     expect(firstRow).not.toHaveClass('bg-app-primary/10', 'border-b');
     expect(secondRow).not.toHaveClass('bg-app-primary/10', 'border-b');
     firstRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10', 'border-b'));
     secondRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10', 'border-b'));
 
-    fireEvent.click(screen.getByText('a.txt'));
+    fireEvent.click(getFileName('a.txt'));
     firstRowCells.forEach((cell) => expect(cell).not.toHaveClass('bg-app-primary/10'));
     secondRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10'));
   });
@@ -305,7 +315,7 @@ describe('SftpFileList', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('first.txt'));
+    fireEvent.click(getFileName('first.txt'));
 
     rerender(
       <SftpFileList
@@ -325,7 +335,7 @@ describe('SftpFileList', () => {
 
     // With a stale anchor (index 0 from /a), this shift-click would select the
     // whole x..z range; after the reset it toggles only z.txt.
-    fireEvent.click(screen.getByText('z.txt'), { shiftKey: true });
+    fireEvent.click(getFileName('z.txt'), { shiftKey: true });
     expect(onSelect).toHaveBeenLastCalledWith(['/b/z.txt']);
   });
 
@@ -354,12 +364,12 @@ describe('SftpFileList', () => {
     );
 
     const { rerender } = render(renderList(''));
-    fireEvent.click(screen.getByText('cherry.txt'));
+    fireEvent.click(getFileName('cherry.txt'));
 
     // The stale anchor (index 2 of the unfiltered list) would extend the
     // shift-range over apple..banana; after the reset only apple is toggled.
     rerender(renderList('a'));
-    fireEvent.click(screen.getByText('apple.txt'), { shiftKey: true });
+    fireEvent.click(getFileName('apple.txt'), { shiftKey: true });
     expect(onSelect).toHaveBeenLastCalledWith(['/a/apple.txt']);
   });
 

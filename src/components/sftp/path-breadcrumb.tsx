@@ -98,7 +98,6 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
         <ChevronIcon />
         <Tooltip>
           <TooltipTrigger
-            delay={0}
             render={
               <Button
                 variant="ghost"
@@ -163,7 +162,6 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
         <>
           <Tooltip>
             <TooltipTrigger
-              delay={0}
               render={
                 <Button
                   variant="ghost"
