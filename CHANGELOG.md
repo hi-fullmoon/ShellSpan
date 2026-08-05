@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.19](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.19) - 2026-08-05
+
+
+### Refactoring
+
+- remove trash/undo and simplify transfers
+
 ## [v2.0.18](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.18) - 2026-08-04
 
 
