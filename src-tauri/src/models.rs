@@ -171,30 +171,6 @@ pub(crate) struct DeleteRemotePathRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TrashRemotePathRequest {
-    #[serde(flatten)]
-    pub(crate) connection: RemoteConnectionRequest,
-    pub(crate) path: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TrashedRemotePath {
-    pub(crate) original_path: String,
-    pub(crate) trash_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RestoreRemotePathRequest {
-    #[serde(flatten)]
-    pub(crate) connection: RemoteConnectionRequest,
-    pub(crate) original_path: String,
-    pub(crate) trash_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct CopyRemotePathRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,

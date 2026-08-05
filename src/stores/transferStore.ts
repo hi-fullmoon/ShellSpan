@@ -27,13 +27,10 @@ export interface TransferOperation {
     | 'running'
     | 'failed'
     | 'cancelling'
-    | 'cancelled'
-    | 'restoring'
-    | 'restored';
+    | 'cancelled';
   error?: string;
   retry?: () => Promise<void>;
   cancel?: () => Promise<void>;
-  undo?: () => Promise<void>;
 }
 
 interface TransferState {
@@ -50,8 +47,6 @@ interface TransferState {
   markOperationCancelled: (operationId: string) => void;
   retryOperation: (operationId: string) => Promise<void>;
   cancelOperation: (operationId: string) => Promise<void>;
-  setOperationUndo: (operationId: string, undo: () => Promise<void>) => void;
-  undoOperation: (operationId: string) => Promise<void>;
   clearCompleted: () => void;
 }
 
@@ -217,43 +212,6 @@ export const useTransferStore = create<TransferState>()((set) => ({
       );
     }
   },
-  setOperationUndo: (operationId, undo) =>
-    set((state) => ({
-      operations: state.operations.map((operation) =>
-        operation.operationId === operationId
-          ? { ...operation, undo }
-          : operation,
-      ),
-    })),
-  undoOperation: async (operationId) => {
-    const operation = useTransferStore
-      .getState()
-      .operations.find((item) => item.operationId === operationId);
-    if (!operation?.undo) return;
-
-    set((state) => ({
-      operations: state.operations.map((item) =>
-        item.operationId === operationId
-          ? { ...item, status: 'restoring', error: undefined }
-          : item,
-      ),
-    }));
-    try {
-      await operation.undo();
-      set((state) => ({
-        operations: state.operations.map((item) =>
-          item.operationId === operationId
-            ? { ...item, status: 'restored', undo: undefined }
-            : item,
-        ),
-      }));
-    } catch (error) {
-      useTransferStore.getState().markOperationFailed(
-        operationId,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  },
   clearCompleted: () =>
     set((state) => ({
       operations: state.operations.filter(
@@ -267,9 +225,7 @@ export function isTransferComplete(operation: TransferOperation): boolean {
     operation.status === 'failed' ||
     operation.status === 'pending' ||
     operation.status === 'cancelling' ||
-    operation.status === 'cancelled' ||
-    operation.status === 'restoring' ||
-    operation.status === 'restored'
+    operation.status === 'cancelled'
   ) {
     return false;
   }
@@ -280,7 +236,6 @@ export function isTransferComplete(operation: TransferOperation): boolean {
 export function isTransferActive(operation: TransferOperation): boolean {
   return operation.status !== 'failed' &&
     operation.status !== 'cancelled' &&
-    operation.status !== 'restored' &&
     !isTransferComplete(operation);
 }
 

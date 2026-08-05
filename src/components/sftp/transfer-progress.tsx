@@ -16,7 +16,6 @@ export const TransferProgress: React.FC = () => {
   const operations = useTransferStore((state) => state.operations);
   const removeOperation = useTransferStore((state) => state.removeOperation);
   const retryOperation = useTransferStore((state) => state.retryOperation);
-  const undoOperation = useTransferStore((state) => state.undoOperation);
   const cancelOperation = useTransferStore((state) => state.cancelOperation);
   const completedTimers = React.useRef(
     new Map<string, ReturnType<typeof setTimeout>>(),
@@ -89,10 +88,8 @@ export const TransferProgress: React.FC = () => {
                 >
                   <CircleAlertIcon className="size-4" aria-hidden="true" />
                   {t(
-                    op.undo
-                      ? 'sftp.transfer.restoreFailed'
-                      : op.kind === 'delete'
-                        ? 'sftp.transfer.trashFailed'
+                    op.kind === 'delete'
+                        ? 'sftp.transfer.failed'
                         : op.kind === 'download'
                           ? 'sftp.transfer.downloadFailed'
                           : op.kind === 'remote-copy'
@@ -107,15 +104,6 @@ export const TransferProgress: React.FC = () => {
                     onClick={() => void retryOperation(op.operationId)}
                   >
                     {t('common.retry')}
-                  </Button>
-                )}
-                {op.undo && (
-                  <Button
-                    variant="link"
-                    size="xs"
-                    onClick={() => void undoOperation(op.operationId)}
-                  >
-                    {t('sftp.transfer.retryRestore')}
                   </Button>
                 )}
                 <Button
@@ -140,30 +128,12 @@ export const TransferProgress: React.FC = () => {
                       : 'text-app-primary',
                   )}
                 >
-                  {op.status === 'restoring'
-                    ? t('sftp.transfer.restoring')
-                    : op.status === 'restored'
-                      ? t('sftp.transfer.restored')
-                      : op.kind === 'delete' && isTransferComplete(op)
-                        ? t('sftp.transfer.trashed')
-                        : op.status === 'cancelling'
+                  {op.status === 'cancelling'
                     ? t('sftp.transfer.cancelling')
                     : op.status === 'cancelled'
                       ? t('sftp.transfer.cancelled')
                       : formatTransferProgress(op)}
                 </span>
-                {op.kind === 'delete' &&
-                  op.undo &&
-                  op.status !== 'restoring' &&
-                  op.status !== 'restored' && (
-                    <Button
-                      variant="link"
-                      size="xs"
-                      onClick={() => void undoOperation(op.operationId)}
-                    >
-                      {t('sftp.transfer.undoDelete')}
-                    </Button>
-                  )}
                 {op.cancel &&
                   op.status !== 'cancelling' &&
                   op.status !== 'cancelled' &&
@@ -191,8 +161,6 @@ export const TransferProgress: React.FC = () => {
               op.status !== 'pending' &&
               op.status !== 'cancelling' &&
               op.status !== 'cancelled' &&
-              op.status !== 'restoring' &&
-              op.status !== 'restored' &&
               !isTransferComplete(op) && (
               <div
                 data-slot="transfer-progress-track"

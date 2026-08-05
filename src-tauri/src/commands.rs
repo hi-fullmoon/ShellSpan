@@ -8,8 +8,7 @@ use crate::models::{
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
     RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
-    RestoreRemotePathRequest, SessionCreateRequest, SessionStatus, SessionSummary, TrashRemotePathRequest,
-    TrashedRemotePath, TrustHostRequest,
+    SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use base64::Engine;
@@ -609,59 +608,6 @@ pub(crate) async fn rename_remote_path(
         error!("Rename remote path failed: {error:?}");
     } else {
         info!("Renamed remote path successfully");
-    }
-    result
-}
-
-#[tauri::command]
-pub(crate) async fn trash_remote_path(
-    app: AppHandle,
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    mut request: TrashRemotePathRequest,
-    pool: State<'_, SftpPool>,
-) -> Result<TrashedRemotePath, RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
-    info!(
-        "Moving remote path to trash path={} {}",
-        request.path,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        trash_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
-    })
-    .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join trash task: {error}") })?;
-    if let Err(error) = &result {
-        error!("Trash remote path failed: {error:?}");
-    }
-    result
-}
-
-#[tauri::command]
-pub(crate) async fn restore_remote_path(
-    app: AppHandle,
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    mut request: RestoreRemotePathRequest,
-    pool: State<'_, SftpPool>,
-) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
-    info!(
-        "Restoring remote path original_path={} trash_path={} {}",
-        request.original_path,
-        request.trash_path,
-        summarize_remote_connection_request(&request.connection)
-    );
-    let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        restore_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
-    })
-    .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join restore task: {error}") })?;
-    if let Err(error) = &result {
-        error!("Restore remote path failed: {error:?}");
     }
     result
 }
@@ -1829,9 +1775,6 @@ pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<Local
     let mut entries = Vec::new();
     for entry in fs::read_dir(&canonical).map_err(|error| format!("failed to read directory: {error}"))? {
         let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
-        if is_termbridge_application_entry(&entry.file_name()) {
-            continue;
-        }
         let metadata = entry.metadata().map_err(|error| format!("failed to read entry metadata: {error}"))?;
         let path = portable_local_path(&entry.path());
         let name = entry.file_name().to_string_lossy().to_string();
@@ -1873,10 +1816,6 @@ pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<Local
         parent_path,
         entries,
     })
-}
-
-fn is_termbridge_application_entry(name: &std::ffi::OsStr) -> bool {
-    name == std::ffi::OsStr::new(".termbridge")
 }
 
 fn configure_local_terminal_environment(command: &mut CommandBuilder) {
@@ -2111,15 +2050,9 @@ pub(crate) fn clear_terminal_workspace(
 
 #[cfg(test)]
 mod tests {
-    use super::{configure_local_terminal_environment, detect_key_type, is_termbridge_application_entry};
+    use super::{configure_local_terminal_environment, detect_key_type};
     use portable_pty::CommandBuilder;
     use std::ffi::OsStr;
-
-    #[test]
-    fn local_listing_hides_only_termbridge_application_directory() {
-        assert!(is_termbridge_application_entry(OsStr::new(".termbridge")));
-        assert!(!is_termbridge_application_entry(OsStr::new("termbridge")));
-    }
 
     #[test]
     fn local_shell_uses_xterm_terminal_capabilities() {
