@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Regenerate the Windows icon set with the artwork filling the canvas.
 
-The source artwork (src-tauri/icons/icon.png) draws its rounded square at
-~86% of the canvas plus a drop shadow, which makes the Windows taskbar/tray
-icon render visibly smaller than other apps. This script crops the opaque
-content, re-centers it with a small margin, and box-downsamples it into:
+The source artwork (src-tauri/icons/icon.png) is already full-bleed (see
+the git history for the original padded version); this script crops the
+opaque content just in case, re-centers it full-bleed, and box-downsamples
+it into:
 
   - src-tauri/icons/icon.ico        (16,20,24,32,40,48,64,256 PNG entries)
   - src-tauri/icons/32x32.png
@@ -28,7 +28,9 @@ ICONS_DIR = Path(__file__).resolve().parent.parent / "src-tauri" / "icons"
 SOURCE = ICONS_DIR / "icon.png"
 
 # Fraction of the canvas the opaque artwork should occupy after cropping.
-CONTENT_FILL = 0.96
+# 1.0 = full bleed: the rounded square touches the canvas edges (standard
+# for Windows taskbar/tray icons; corners stay transparent due to the radius).
+CONTENT_FILL = 1.0
 
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 256]
 PNG_TARGETS = {
