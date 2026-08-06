@@ -256,7 +256,7 @@ describe('TransferProgress', () => {
     expect(useTransferStore.getState().operations).toHaveLength(0);
   });
 
-  it('styles delete rows with a red strikethrough filename', () => {
+  it('dims active delete rows without a strikethrough filename', () => {
     useTransferStore.setState({
       operations: [{
         ...failedUpload,
@@ -269,15 +269,76 @@ describe('TransferProgress', () => {
     render(<TransferProgress />);
 
     expect(screen.getByText('/tmp/apple-touch-icon.png')).toHaveClass(
+      'text-app-text/70',
+    );
+    expect(screen.getByText('/tmp/apple-touch-icon.png')).not.toHaveClass(
       'text-destructive',
       'line-through',
     );
+  });
+
+  it('dims a completed delete row to the muted foreground color', () => {
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        kind: 'delete',
+        status: 'completed',
+        error: undefined,
+        retry: undefined,
+      }],
+    });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('/tmp/apple-touch-icon.png')).toHaveClass(
+      'text-muted-foreground/70',
+    );
+    expect(screen.getByText('/tmp/apple-touch-icon.png')).not.toHaveClass(
+      'text-destructive',
+      'line-through',
+    );
+  });
+
+  it('shows the top-level name plus sub-path for scoped folder deletes', () => {
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        kind: 'delete',
+        status: 'running',
+        error: undefined,
+        retry: undefined,
+        paths: ['/home/user/proj'],
+        currentPath: '/home/user/proj/src/index.ts',
+      }],
+    });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('proj/src/index.ts')).toBeInTheDocument();
+  });
+
+  it('uses a trash icon for delete rows', () => {
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        kind: 'delete',
+        status: 'running',
+        error: undefined,
+        retry: undefined,
+      }],
+    });
+    render(<TransferProgress />);
+
+    expect(
+      screen.getByText('/tmp/apple-touch-icon.png').parentElement!.querySelector('svg.lucide-trash-2'),
+    ).not.toBeNull();
   });
 
   it('keeps a normal filename color for non-delete rows', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
+    expect(screen.getByText('/tmp/apple-touch-icon.png')).toHaveClass(
+      'text-app-text',
+    );
     expect(screen.getByText('/tmp/apple-touch-icon.png')).not.toHaveClass(
       'text-destructive',
       'line-through',

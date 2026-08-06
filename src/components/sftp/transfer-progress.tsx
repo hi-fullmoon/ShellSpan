@@ -1,5 +1,5 @@
 import React from 'react';
-import { CircleAlertIcon, FileIcon, XIcon } from 'lucide-react';
+import { CircleAlertIcon, FileIcon, Trash2Icon, XIcon } from 'lucide-react';
 import { cn, formatBytes } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,30 @@ interface SpeedSample {
   bytes: number;
   time: number;
   speed: number;
+}
+
+function normalizeTransferPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized || '/';
+}
+
+// Remote-scoped operations (delete/download/remote-copy) identify their batch
+// by top-level paths; display the current entry as `topName/sub/...` so deep
+// folder trees stay readable. Uploads carry a local source path that is not
+// relative to the operation's `paths`, so they show the full path instead.
+function displayTransferPath(operation: TransferOperation): string {
+  const current = normalizeTransferPath(operation.currentPath ?? operation.operationId);
+  if (operation.kind === 'upload') return current;
+  for (const root of operation.paths ?? []) {
+    const normalizedRoot = normalizeTransferPath(root);
+    if (normalizedRoot === '/') continue;
+    if (current === normalizedRoot || current.startsWith(`${normalizedRoot}/`)) {
+      const baseName = normalizedRoot.split('/').pop() || normalizedRoot;
+      const rest = current.slice(normalizedRoot.length).replace(/^\/+/, '');
+      return rest ? `${baseName}/${rest}` : baseName;
+    }
+  }
+  return current;
 }
 
 // Derives a smoothed bytes-per-second rate per operation from the deltas
@@ -116,20 +140,44 @@ export const TransferProgress: React.FC = () => {
         const progress = op.totalBytes > 0 ? Math.min(100, (op.processedBytes / op.totalBytes) * 100) : 0;
         const speed = speeds.get(op.operationId);
         const showSpeed = speed !== undefined && speed > 0 && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op);
+        // A delete that finished (or was cancelled) leaves the remote entry
+        // gone, so its row dims instead of staying red/struck through.
+        const isDeleteFinished =
+          op.kind === 'delete' &&
+          (isTransferComplete(op) || op.status === 'cancelled');
+        const fullPath = (op.currentPath ?? op.operationId).replace(/\\/g, '/');
         return (
           <div
             key={op.operationId}
             className="relative flex h-8 items-center gap-3 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
           >
-            <FileIcon className="size-4 shrink-0 text-app-primary" aria-hidden="true" />
-            <span
-              className={cn(
-                'min-w-0 flex-1 truncate font-medium text-app-text',
-                op.kind === 'delete' && 'text-destructive line-through decoration-destructive/70',
-              )}
-            >
-              {(op.currentPath ?? op.operationId).replace(/\\/g, '/')}
-            </span>
+            {op.kind === 'delete' ? (
+              <Trash2Icon
+                className={cn('size-4 shrink-0', isDeleteFinished ? 'text-muted-foreground/40' : 'text-muted-foreground/70')}
+                aria-hidden="true"
+              />
+            ) : (
+              <FileIcon className="size-4 shrink-0 text-app-primary" aria-hidden="true" />
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    className={cn(
+                      'min-w-0 flex-1 truncate font-medium',
+                      op.kind === 'delete'
+                        ? isDeleteFinished
+                          ? 'text-muted-foreground/70'
+                          : 'text-app-text/70'
+                        : 'text-app-text',
+                    )}
+                  >
+                    {displayTransferPath(op)}
+                  </span>
+                }
+              />
+              <TooltipContent className="break-all">{fullPath}</TooltipContent>
+            </Tooltip>
 
             {op.status === 'failed' ? (
               <div className="flex shrink-0 items-center gap-1">
