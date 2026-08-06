@@ -120,8 +120,15 @@ export const TransferProgress: React.FC = () => {
             key={op.operationId}
             className="relative flex h-8 items-center gap-3 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
           >
-            <FileIcon className="size-5 shrink-0 text-app-primary" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate font-medium text-app-text">{(op.currentPath ?? op.operationId).replace(/\\/g, '/')}</span>
+            <FileIcon className="size-4 shrink-0 text-app-primary" aria-hidden="true" />
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate font-medium text-app-text',
+                op.kind === 'delete' && 'text-destructive line-through decoration-destructive/70',
+              )}
+            >
+              {(op.currentPath ?? op.operationId).replace(/\\/g, '/')}
+            </span>
 
             {op.status === 'failed' ? (
               <div className="flex shrink-0 items-center gap-1">
@@ -154,9 +161,9 @@ export const TransferProgress: React.FC = () => {
                 {showSpeed && <span className="whitespace-nowrap text-muted-foreground/60">{formatBytes(speed)}/s</span>}
                 <span className={cn('min-w-12 whitespace-nowrap text-right', isTransferComplete(op) ? 'text-app-success' : 'text-app-primary')}>
                   {op.status === 'cancelling'
-                    ? t('sftp.transfer.cancelling')
+                    ? t(op.kind === 'delete' ? 'sftp.transfer.cancellingDelete' : 'sftp.transfer.cancelling')
                     : op.status === 'cancelled'
-                      ? t('sftp.transfer.cancelled')
+                      ? t(op.kind === 'delete' ? 'sftp.transfer.cancellingDelete' : 'sftp.transfer.cancelled')
                       : formatTransferProgress(op)}
                 </span>
                 {op.cancel && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op) && (
