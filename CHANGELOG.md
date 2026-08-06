@@ -3,6 +3,19 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.25](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.25) - 2026-08-06
+
+
+### Bug Fixes
+
+- add transfer timeout guard for recursive delete operations
+- **ui:** adjust delete icon vertical alignment in transfer progress
+
+### Features
+
+- **ui:** add keyboard shortcuts for SFTP file filter
+- improve delete operation UI in transfer progress
+
 ## [v2.0.24](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.24) - 2026-08-06
 
 
