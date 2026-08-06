@@ -3,6 +3,18 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.24](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.24) - 2026-08-06
+
+
+### Features
+
+- **term:** implement batch remote delete with rsync-style progress
+- **sftp:** show transfer error details via tooltip
+
+### Testing
+
+- **sftp:** cover delete-row styling and 16px leading icon
+
 ## [v2.0.23](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.23) - 2026-08-06
 
 
