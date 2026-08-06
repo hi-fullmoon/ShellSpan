@@ -222,4 +222,39 @@ describe('TransferProgress', () => {
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     expect(useTransferStore.getState().operations).toHaveLength(0);
   });
+
+  it('styles delete rows with a red strikethrough filename', () => {
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        kind: 'delete',
+        status: 'running',
+        error: undefined,
+        retry: undefined,
+      }],
+    });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('/tmp/apple-touch-icon.png')).toHaveClass(
+      'text-destructive',
+      'line-through',
+    );
+  });
+
+  it('keeps a normal filename color for non-delete rows', () => {
+    useTransferStore.setState({ operations: [failedUpload] });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('/tmp/apple-touch-icon.png')).not.toHaveClass(
+      'text-destructive',
+      'line-through',
+    );
+  });
+
+  it('uses a compact 16px leading icon for transfer rows', () => {
+    useTransferStore.setState({ operations: [failedUpload] });
+    render(<TransferProgress />);
+
+    expect(screen.getByText('/tmp/apple-touch-icon.png').parentElement!.querySelector('svg')).toHaveClass('size-4');
+  });
 });
