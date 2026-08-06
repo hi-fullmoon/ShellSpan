@@ -2,6 +2,31 @@
 
 All notable changes to TermBridge are documented in this file.
 
+
+## [v2.0.23](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.23) - 2026-08-06
+
+
+### Bug Fixes
+
+- **tauri:** make Windows icon full-bleed for consistent taskbar rendering
+
+### Chore
+
+- update application icons
+- **deps:** update dependencies and add git-cliff
+
+### Documentation
+
+- **changelog:** clean up formatting and remove duplicate v2.0.23 entry
+
+### Features
+
+- **remote_fs:** dot-prefix copy temp files to hide them from listings
+- **sftp:** show transfer speed next to transfer progress
+
+### Testing
+
+- update transfer-progress tests for full paths and h-8 class
 ## [v2.0.23](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.23) - 2026-08-05
 
 ### Chore
