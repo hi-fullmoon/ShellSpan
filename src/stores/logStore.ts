@@ -80,11 +80,13 @@ export const useLogStore = create<LogState>()((set, get) => ({
     set({
       activeSource: source,
       activeFileName: sourceFile?.name,
-      content: '',
       error: undefined,
     });
     if (sourceFile) {
       void get().loadFile(sourceFile.name);
+    } else {
+      // No file to load for this source; drop stale content right away.
+      set({ content: '' });
     }
   },
 }));
