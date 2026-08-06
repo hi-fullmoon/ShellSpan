@@ -300,6 +300,10 @@ fn delete_remote_path_inner(
     // All paths in the batch are deleted over this one connection.
     let connected = connect_sftp(&request.connection, None, known_hosts)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A recursive delete can stall on a slow or large directory for much
+    // longer than the 15s session timeout, so the transfer timeout guard
+    // (120s per socket read) applies here just as it does to uploads/copies.
+    let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
     // The tree is deleted in a single pass without a pre-count walk; the total
     // grows rsync-style as entries are discovered, so progress reports
     // "removed N of M discovered so far".
