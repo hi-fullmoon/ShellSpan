@@ -264,6 +264,7 @@ export default {
   'sftp.actions': '操作',
   'sftp.showFilter': '显示筛选',
   'sftp.hideFilter': '隐藏筛选',
+  'sftp.clearFilter': '清空筛选',
   'sftp.batchMode': '批量选择',
   'sftp.selection.selectedCount': '已选择 {count} 项',
   'sftp.selection.selectAll': '全选',

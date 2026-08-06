@@ -264,6 +264,7 @@ export default {
   'sftp.actions': 'Actions',
   'sftp.showFilter': 'Show Filter',
   'sftp.hideFilter': 'Hide Filter',
+  'sftp.clearFilter': 'Clear Filter',
   'sftp.batchMode': 'Batch Selection',
   'sftp.selection.selectedCount': '{count} selected',
   'sftp.selection.selectAll': 'Select all',
