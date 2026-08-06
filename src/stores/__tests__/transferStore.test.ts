@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   hasActivePathOperation,
+  isTransferComplete,
   useTransferStore,
   type TransferOperation,
 } from '@/stores/transferStore';
@@ -207,27 +208,45 @@ describe('transferStore', () => {
     ).toBe(false);
   });
 
-  it('still tracks progress for running operations whose steps momentarily match', () => {
-    // Multi-path deletes briefly reach completedSteps === totalSteps between
-    // paths; progress events for the next path must still apply.
+  it('still tracks progress for running delete operations', () => {
+    // Deletes report entries removed so far with an unknown total (0);
+    // progress events must keep applying while the operation runs.
     useTransferStore.getState().addOperation({
       ...operation,
       kind: 'delete',
       status: 'running',
-      totalSteps: 1,
+      totalSteps: 0,
       completedSteps: 1,
     });
 
     useTransferStore.getState().updateDelete({
       operationId: operation.operationId,
       currentPath: '/remote/other.txt',
-      totalSteps: 2,
-      completedSteps: 1,
+      totalSteps: 0,
+      completedSteps: 2,
     });
 
     expect(useTransferStore.getState().operations[0]).toMatchObject({
-      totalSteps: 2,
-      completedSteps: 1,
+      totalSteps: 0,
+      completedSteps: 2,
     });
+  });
+
+  it('does not treat a running delete as complete when counters momentarily match', () => {
+    // Delete totals grow as entries are discovered, so a running delete can
+    // briefly reach completedSteps === totalSteps between discoveries; only
+    // the explicit completion status may mark it complete.
+    const runningDelete: TransferOperation = {
+      ...operation,
+      kind: 'delete',
+      status: 'running',
+      totalSteps: 6,
+      completedSteps: 6,
+    };
+
+    expect(isTransferComplete(runningDelete)).toBe(false);
+    expect(
+      isTransferComplete({ ...runningDelete, status: 'completed' }),
+    ).toBe(true);
   });
 });

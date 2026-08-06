@@ -622,9 +622,9 @@ pub(crate) async fn delete_remote_path(
 ) -> Result<(), RemoteFsError> {
     resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
     info!(
-        "Deleting remote path operation_id={} path={} {}",
+        "Deleting remote paths operation_id={} paths={:?} {}",
         request.operation_id,
-        request.path,
+        request.paths,
         summarize_remote_connection_request(&request.connection)
     );
     let cancel_flag = deletes.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;

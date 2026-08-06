@@ -307,7 +307,7 @@ export interface RenameRemotePathRequest extends RemoteConnectionRequest {
 }
 
 export interface DeleteRemotePathRequest extends RemoteConnectionRequest {
-  path: string;
+  paths: string[];
   operationId: string;
 }
 

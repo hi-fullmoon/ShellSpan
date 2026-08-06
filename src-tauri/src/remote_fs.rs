@@ -276,7 +276,7 @@ pub(crate) fn delete_remote_path_blocking(
 ) -> Result<(), RemoteFsError> {
     let connection = request.connection.clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    let result = delete_remote_path_inner(app, request, cancel_flag, pool, known_hosts.as_deref());
+    let result = delete_remote_path_inner(app, request, cancel_flag, known_hosts.as_deref());
     if let Err(ref error) = result {
         if let Some(pool) = pool {
             if is_connection_error(error) {
@@ -291,18 +291,25 @@ fn delete_remote_path_inner(
     app: AppHandle,
     request: DeleteRemotePathRequest,
     cancel_flag: Arc<AtomicBool>,
-    pool: Option<&SftpPool>,
     known_hosts: Option<&Path>,
 ) -> Result<(), RemoteFsError> {
-    let connected = connect_sftp(&request.connection, pool, known_hosts)?;
+    // Deletes hold the connection for the whole (potentially long) recursive
+    // walk, so they must not share the pooled connection: passing `pool: None`
+    // opens a dedicated connection that is closed on drop, keeping the pooled
+    // connection free for other operations on this host while the delete runs.
+    // All paths in the batch are deleted over this one connection.
+    let connected = connect_sftp(&request.connection, None, known_hosts)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let target_path = Path::new(&request.path);
-    let total_steps = count_remote_delete_steps(&connected.sftp, target_path, &cancel_flag, 0)?;
+    // The tree is deleted in a single pass without a pre-count walk; the total
+    // grows rsync-style as entries are discovered, so progress reports
+    // "removed N of M discovered so far".
     let mut progress =
-        DeleteProgressTracker::new(app, request.operation_id.clone(), cancel_flag, total_steps);
+        DeleteProgressTracker::new(app, request.operation_id.clone(), cancel_flag, 0);
     progress.emit().map_err(|message| RemoteFsError::Other { message })?;
-    progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
-    delete_remote_path_recursive(&connected.sftp, target_path, &mut progress)?;
+    for path in &request.paths {
+        progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
+        delete_remote_path_recursive(&connected.sftp, Path::new(path), &mut progress, 0)?;
+    }
     progress.set_current_path(None).map_err(|message| RemoteFsError::Other { message })?;
     Ok(())
 }
@@ -314,7 +321,7 @@ pub(crate) fn copy_remote_path_blocking(
     known_hosts: Option<&Path>,
 ) -> Result<(), RemoteFsError> {
     let connection = request.connection.clone();
-    let result = copy_remote_path_inner(request, cancel_flag, pool, known_hosts);
+    let result = copy_remote_path_inner(request, cancel_flag, known_hosts);
     if let Err(ref error) = result {
         if let Some(pool) = pool {
             if is_connection_error(error) {
@@ -328,10 +335,14 @@ pub(crate) fn copy_remote_path_blocking(
 fn copy_remote_path_inner(
     request: CopyRemotePathRequest,
     cancel_flag: Arc<AtomicBool>,
-    pool: Option<&SftpPool>,
     known_hosts: Option<&Path>,
 ) -> Result<(), RemoteFsError> {
-    let connected = connect_sftp(&request.connection, pool, known_hosts)?;
+    // Same-host copies hold the connection for the whole (potentially long)
+    // recursive walk, so they must not share the pooled connection: passing
+    // `pool: None` opens a dedicated connection that is closed on drop, keeping
+    // the pooled connection free for other operations on this host while the
+    // copy runs.
+    let connected = connect_sftp(&request.connection, None, known_hosts)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let source_path = Path::new(&request.source_path);
     let destination_directory = Path::new(&request.destination_directory);
@@ -1950,47 +1961,16 @@ fn ensure_remote_recursion_depth(depth: u32) -> Result<(), RemoteFsError> {
     Ok(())
 }
 
-fn count_remote_delete_steps(
-    sftp: &Sftp,
-    path: &Path,
-    cancel_flag: &Arc<AtomicBool>,
-    depth: u32,
-) -> Result<u64, RemoteFsError> {
-    if cancel_flag.load(AtomicOrdering::SeqCst) {
-        return Err(RemoteFsError::Other { message: "delete cancelled".to_string() });
-    }
-    ensure_remote_recursion_depth(depth)?;
-    let stat = sftp
-        .lstat(path)
-        .map_err(|error| RemoteFsError::Other { message: format!("failed to inspect remote path: {error}") })?;
-
-    match kind_from_permissions(stat.perm) {
-        RemoteFileKind::Directory => {
-            let entries = sftp
-                .readdir(path)
-                .map_err(|error| RemoteFsError::Other { message: format!("failed to list remote directory for delete: {error}") })?;
-            let mut total_steps = 1;
-            for (child_path, _) in entries {
-                if cancel_flag.load(AtomicOrdering::SeqCst) {
-                    return Err(RemoteFsError::Other { message: "delete cancelled".to_string() });
-                }
-                if should_skip_remote_child(&child_path) {
-                    continue;
-                }
-                total_steps += count_remote_delete_steps(sftp, &child_path, cancel_flag, depth + 1)?;
-            }
-            Ok(total_steps)
-        }
-        _ => Ok(1),
-    }
-}
-
 fn delete_remote_path_recursive(
     sftp: &Sftp,
     path: &Path,
     progress: &mut DeleteProgressTracker,
+    depth: u32,
 ) -> Result<(), RemoteFsError> {
     progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
+    ensure_remote_recursion_depth(depth)?;
+    // Count this entry as discovered before inspecting it.
+    progress.add_steps(1);
     let stat = sftp
         .lstat(path)
         .map_err(|error| RemoteFsError::Other { message: format!("failed to inspect remote path: {error}") })?;
@@ -2000,12 +1980,19 @@ fn delete_remote_path_recursive(
             let entries = sftp
                 .readdir(path)
                 .map_err(|error| RemoteFsError::Other { message: format!("failed to list remote directory for delete: {error}") })?;
+            // Count the listing's children as discovered in one shot.
+            progress.add_steps(
+                entries
+                    .iter()
+                    .filter(|(child_path, _)| !should_skip_remote_child(child_path))
+                    .count() as u64,
+            );
             for (child_path, _) in entries {
                 progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
                 if should_skip_remote_child(&child_path) {
                     continue;
                 }
-                delete_remote_path_recursive(sftp, &child_path, progress)?;
+                delete_remote_path_recursive(sftp, &child_path, progress, depth + 1)?;
             }
             progress.ensure_not_cancelled().map_err(|message| RemoteFsError::Other { message })?;
             progress.set_current_path(Some(path_to_string(path))).map_err(|message| RemoteFsError::Other { message })?;

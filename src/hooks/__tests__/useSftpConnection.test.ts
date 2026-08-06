@@ -118,14 +118,13 @@ describe('useSftpConnection remote delete', () => {
 
     expect(tauri.invokeDeleteRemotePath).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: file.path,
+        paths: [file.path],
         operationId: expect.stringContaining('-delete-'),
       }),
     );
     expect(useTransferStore.getState().operations[0]).toMatchObject({
       kind: 'delete',
-      completedSteps: 1,
-      totalSteps: 1,
+      status: 'completed',
     });
   });
 
