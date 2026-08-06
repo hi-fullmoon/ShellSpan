@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { TransferProgress } from '@/components/sftp/transfer-progress';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { useTransferStore, type TransferOperation } from '@/stores/transferStore';
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -31,14 +33,22 @@ describe('TransferProgress', () => {
   });
 
   it('shows failed uploads as file rows and retries them', async () => {
+    const user = userEvent.setup();
     useTransferStore.setState({ operations: [failedUpload] });
-    render(<TransferProgress />);
+    render(
+      <TooltipProvider>
+        <TransferProgress />
+      </TooltipProvider>,
+    );
 
     expect(screen.getByText('/tmp/apple-touch-icon.png')).toBeInTheDocument();
-    expect(screen.getByText('sftp.transfer.uploadFailed')).toHaveAttribute(
-      'title',
-      'connection lost',
+
+    await user.hover(screen.getByText('sftp.transfer.uploadFailed'));
+    expect(await screen.findByText('connection lost')).toHaveAttribute(
+      'data-slot',
+      'tooltip-content',
     );
+
     expect(screen.getByRole('button', { name: 'common.retry' })).toHaveClass(
       'h-6',
     );
@@ -48,6 +58,29 @@ describe('TransferProgress', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
     await waitFor(() => expect(failedUpload.retry).toHaveBeenCalledOnce());
+  });
+
+  it('shows the delete error in a tooltip on the failure indicator', async () => {
+    const user = userEvent.setup();
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        kind: 'delete',
+        error: 'permission denied',
+        retry: undefined,
+      }],
+    });
+    render(
+      <TooltipProvider>
+        <TransferProgress />
+      </TooltipProvider>,
+    );
+
+    await user.hover(screen.getByText('sftp.transfer.failed'));
+    expect(await screen.findByText('permission denied')).toHaveAttribute(
+      'data-slot',
+      'tooltip-content',
+    );
   });
 
   it('discards failed uploads', () => {

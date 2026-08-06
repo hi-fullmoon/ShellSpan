@@ -3,6 +3,7 @@ import { CircleAlertIcon, FileIcon, XIcon } from 'lucide-react';
 import { cn, formatBytes } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTransferStore, isTransferComplete, formatTransferProgress, type TransferOperation } from '@/stores/transferStore';
 
 const COMPLETED_TRANSFER_DISMISS_DELAY_MS = 2000;
@@ -132,18 +133,25 @@ export const TransferProgress: React.FC = () => {
 
             {op.status === 'failed' ? (
               <div className="flex shrink-0 items-center gap-1">
-                <span className="mr-2 flex items-center gap-1.5 text-destructive" title={op.error}>
-                  <CircleAlertIcon className="size-4" aria-hidden="true" />
-                  {t(
-                    op.kind === 'delete'
-                      ? 'sftp.transfer.failed'
-                      : op.kind === 'download'
-                        ? 'sftp.transfer.downloadFailed'
-                        : op.kind === 'remote-copy'
-                          ? 'sftp.transfer.remoteCopyFailed'
-                          : 'sftp.transfer.uploadFailed',
-                  )}
-                </span>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="mr-2 flex cursor-help items-center gap-1.5 text-destructive">
+                        <CircleAlertIcon className="size-4" aria-hidden="true" />
+                        {t(
+                          op.kind === 'delete'
+                            ? 'sftp.transfer.failed'
+                            : op.kind === 'download'
+                              ? 'sftp.transfer.downloadFailed'
+                              : op.kind === 'remote-copy'
+                                ? 'sftp.transfer.remoteCopyFailed'
+                                : 'sftp.transfer.uploadFailed',
+                        )}
+                      </span>
+                    }
+                  />
+                  <TooltipContent className="break-all">{op.error}</TooltipContent>
+                </Tooltip>
                 {op.retry && (
                   <Button variant="link" size="xs" onClick={() => void retryOperation(op.operationId)}>
                     {t('common.retry')}
