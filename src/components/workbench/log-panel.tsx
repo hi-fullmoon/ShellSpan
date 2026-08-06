@@ -409,23 +409,6 @@ export const LogPanel: React.FC = () => {
               </p>
             )}
           </div>
-          <ToggleGroup
-            value={[activeSource]}
-            onValueChange={(value) => {
-              handleSourceChange(value[0] as LogSource | undefined);
-            }}
-            variant="tag"
-            size="xs"
-            spacing={1.5}
-            aria-label={t('workbench.logs.source')}
-          >
-            <ToggleGroupItem value="frontend">
-              {t('workbench.logs.frontend')}
-            </ToggleGroupItem>
-            <ToggleGroupItem value="backend">
-              {t('workbench.logs.backend')}
-            </ToggleGroupItem>
-          </ToggleGroup>
         </div>
         <div className="flex w-full items-center gap-1.5 sm:w-auto">
           <div className="relative min-w-0 flex-1 sm:w-52">
@@ -490,6 +473,28 @@ export const LogPanel: React.FC = () => {
       <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-1.5">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">
+              {t('workbench.logs.source')}
+            </span>
+            <ToggleGroup
+              value={[activeSource]}
+              onValueChange={(value) => {
+                handleSourceChange(value[0] as LogSource | undefined);
+              }}
+              variant="tag"
+              size="xs"
+              spacing={1.5}
+              aria-label={t('workbench.logs.source')}
+            >
+              <ToggleGroupItem value="frontend">
+                {t('workbench.logs.frontend')}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="backend">
+                {t('workbench.logs.backend')}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground">
               {t('workbench.logs.date')}
             </span>
             <ToggleGroup
@@ -549,7 +554,7 @@ export const LogPanel: React.FC = () => {
           className="min-h-0 flex-1 font-mono text-xs"
           viewportRef={scrollRef}
         >
-          <div className="p-1.5">
+          <div className={cn('p-1.5', filteredLines.length === 0 && !loading && 'h-full')}>
             {filteredLines.length > 0 ? (
               <div
                 style={{
