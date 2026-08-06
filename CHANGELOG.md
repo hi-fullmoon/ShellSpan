@@ -3,6 +3,23 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.26](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.26) - 2026-08-06
+
+
+### Bug Fixes
+
+- clear stale log content when switching to a source without a file
+
+### Documentation
+
+- add ROADMAP.md
+- expand README with features, tech stack and dev guide
+
+### Refactoring
+
+- move log source toggle to bottom toolbar
+- **sftp:** remove redundant tooltip with full path
+
 ## [v2.0.25](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.25) - 2026-08-06
 
 
