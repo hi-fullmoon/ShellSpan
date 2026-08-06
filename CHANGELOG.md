@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.27](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.27) - 2026-08-06
+
+
+### Refactoring
+
+- **scripts:** regenerate full icon set from single master
+
 ## [v2.0.26](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.26) - 2026-08-06
 
 
