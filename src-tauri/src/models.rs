@@ -165,7 +165,8 @@ pub(crate) struct RenameRemotePathRequest {
 pub(crate) struct DeleteRemotePathRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,
-    pub(crate) path: String,
+    // Batch: all paths are deleted over a single dedicated connection.
+    pub(crate) paths: Vec<String>,
     pub(crate) operation_id: String,
 }
 
@@ -1077,8 +1078,20 @@ impl DeleteProgressTracker {
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
-        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
+        // total_steps is 0 until entries are discovered, so only cap when a
+        // real total is known.
+        self.completed_steps += 1;
+        if self.total_steps > 0 {
+            self.completed_steps = self.completed_steps.min(self.total_steps);
+        }
         self.emit()
+    }
+
+    // rsync-style growing total: entries are counted as they are discovered
+    // during the single-pass walk. No emit here — the next set_current_path /
+    // finish_step carries the updated total.
+    pub(crate) fn add_steps(&mut self, count: u64) {
+        self.total_steps += count;
     }
 
     pub(crate) fn ensure_not_cancelled(&self) -> Result<(), String> {

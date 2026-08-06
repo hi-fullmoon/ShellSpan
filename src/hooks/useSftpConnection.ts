@@ -107,7 +107,6 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   const markOperationCancelled = useTransferStore(
     (state) => state.markOperationCancelled,
   );
-  const updateDelete = useTransferStore((state) => state.updateDelete);
 
   const loadRemoteDirectory = useCallback(
     async (path?: string) => {
@@ -273,27 +272,21 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         currentPath: paths[0],
         totalBytes: 0,
         processedBytes: 0,
-        totalSteps: paths.length,
+        // The backend deletes single-pass without a pre-count; the total grows
+        // rsync-style as entries are discovered, starting from 0.
+        totalSteps: 0,
         completedSteps: 0,
         status: 'running',
         cancel: () => invokeCancelDelete(operationId),
       });
       try {
-        for (const [index, path] of paths.entries()) {
-          await invokeDeleteRemotePath({
-            ...remoteConnection,
-            path,
-            operationId,
-          });
-          updateDelete({
-            operationId,
-            currentPath: path,
-            totalSteps: paths.length,
-            completedSteps: index + 1,
-          });
-        }
+        await invokeDeleteRemotePath({
+          ...remoteConnection,
+          paths,
+          operationId,
+        });
         // Mark completion explicitly: queued backend progress events can be
-        // delivered after the last invoke resolves and would otherwise
+        // delivered after the invoke resolves and would otherwise
         // regress the counters, leaving the paths "busy" forever.
         markOperationCompleted(operationId);
         await loadRemoteDirectory(panePath);
@@ -326,7 +319,6 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       markOperationFailed,
       markOperationCompleted,
       markOperationCancelled,
-      updateDelete,
     ],
   );
 

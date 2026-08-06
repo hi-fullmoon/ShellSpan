@@ -232,6 +232,10 @@ export function isTransferComplete(operation: TransferOperation): boolean {
   ) {
     return false;
   }
+  // Delete totals grow as entries are discovered, so the counters can match
+  // momentarily mid-batch; only the explicit completion status is
+  // authoritative for deletes.
+  if (operation.kind === 'delete') return false;
   if (operation.totalSteps === 0) return false;
   return operation.completedSteps >= operation.totalSteps;
 }
@@ -284,6 +288,13 @@ export function hasActivePathOperation(
 }
 
 export function formatTransferProgress(operation: TransferOperation): string {
+  if (operation.kind === 'delete') {
+    // Delete totals grow rsync-style as entries are discovered; before the
+    // first discovery only the removed count is meaningful.
+    return operation.totalSteps > 0
+      ? `${operation.completedSteps}/${operation.totalSteps}`
+      : `${operation.completedSteps}`;
+  }
   if (operation.totalSteps > 0) {
     return `${operation.completedSteps}/${operation.totalSteps}`;
   }
