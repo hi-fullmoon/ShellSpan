@@ -143,7 +143,6 @@ export const TransferProgress: React.FC = () => {
         // A delete that finished (or was cancelled) leaves the remote entry
         // gone, so its row dims instead of staying red/struck through.
         const isDeleteFinished = op.kind === 'delete' && (isTransferComplete(op) || op.status === 'cancelled');
-        const fullPath = (op.currentPath ?? op.operationId).replace(/\\/g, '/');
         return (
           <div
             key={op.operationId}
@@ -157,21 +156,14 @@ export const TransferProgress: React.FC = () => {
             ) : (
               <FileIcon className="size-4 shrink-0 text-app-primary" aria-hidden="true" />
             )}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    className={cn(
-                      'min-w-0 flex-1 truncate font-medium',
-                      op.kind === 'delete' ? (isDeleteFinished ? 'text-muted-foreground/70' : 'text-app-text/70') : 'text-app-text',
-                    )}
-                  >
-                    {displayTransferPath(op)}
-                  </span>
-                }
-              />
-              <TooltipContent className="break-all">{fullPath}</TooltipContent>
-            </Tooltip>
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate font-medium',
+                op.kind === 'delete' ? (isDeleteFinished ? 'text-muted-foreground/70' : 'text-app-text/70') : 'text-app-text',
+              )}
+            >
+              {displayTransferPath(op)}
+            </span>
 
             {op.status === 'failed' ? (
               <div className="flex shrink-0 items-center gap-1">
