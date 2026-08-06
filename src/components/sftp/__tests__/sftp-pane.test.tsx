@@ -292,6 +292,71 @@ describe('SftpPane', () => {
     expect(actions.onToggleBatchMode).toHaveBeenCalledTimes(1);
   });
 
+  it('opens and focuses the file filter with Cmd/Ctrl+F', () => {
+    const connection = createConnection();
+    render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    // Fire on an element inside the pane so the keydown bubbles to the root.
+    fireEvent.keyDown(screen.getByText('sftp.local'), { key: 'f', metaKey: true });
+
+    const input = screen.getByPlaceholderText('sftp.filter');
+    expect(input.tabIndex).toBe(0);
+    expect(input).toHaveFocus();
+  });
+
+  it('dismisses the file filter with Escape, clearing the query', () => {
+    const connection = createConnection();
+    render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.showFilter' }));
+    const input = screen.getByPlaceholderText('sftp.filter');
+    fireEvent.change(input, { target: { value: 'report' } });
+    expect(input).toHaveValue('report');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(input).toHaveValue('');
+    expect(input.tabIndex).toBe(-1);
+  });
+
+  it('clears the query when the filter is toggled closed via the icon', () => {
+    const connection = createConnection();
+    render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.showFilter' }));
+    const input = screen.getByPlaceholderText('sftp.filter');
+    fireEvent.change(input, { target: { value: 'report' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.hideFilter' }));
+
+    expect(input).toHaveValue('');
+    expect(input.tabIndex).toBe(-1);
+  });
+
   it('passes a referentially stable selectedPaths array to the file list', () => {
     const connection = createConnection();
     const selected = new Set(['/home/a.txt']);

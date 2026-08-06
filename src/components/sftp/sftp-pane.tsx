@@ -140,6 +140,33 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       }
     }, [showSearch]);
 
+    // Escape dismisses the search the same way the icon and ✕ do (clear +
+    // collapse). It stands down while a context/bookmark menu owns the key so
+    // the menu still handles its own Escape first.
+    useEffect(() => {
+      if (!showSearch || fileContextMenu || blankContextMenu || bookmarkMenu) {
+        return;
+      }
+      const handleKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Escape') {
+          setShowSearch(false);
+          setSearchQuery('');
+        }
+      };
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [blankContextMenu, bookmarkMenu, fileContextMenu, showSearch]);
+
+    // Cmd/Ctrl+F opens the search. The handler lives on the pane root so the
+    // bubbled keydown only fires when focus is inside this pane (e.g. the
+    // file list), never the sibling pane.
+    const handlePaneKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setShowSearch(true);
+      }
+    }, []);
+
     useEffect(() => {
       if (isLocal) {
         loadLocalDirectory('');
@@ -389,7 +416,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const canGoForward = history.index < history.stack.length - 1;
 
     return (
-      <div ref={mergedRef} className="flex h-full flex-col overflow-hidden bg-app-surface">
+      <div ref={mergedRef} onKeyDown={handlePaneKeyDown} className="flex h-full flex-col overflow-hidden bg-app-surface">
         {/* Title bar */}
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-app-border/50 bg-app-surface px-1">
           {onTitleClick ? (
@@ -430,8 +457,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                     }
                   }}
                   className={cn(
-                    'h-[30px] w-7 shrink-0 flex items-center justify-center rounded text-app-text-soft',
-                    !showSearch && 'hover:bg-app-border/50 hover:text-app-text',
+                    'h-7 w-7 shrink-0 flex items-center justify-center rounded',
+                    showSearch ? 'text-app-text hover:bg-app-border/50' : 'text-app-text-soft hover:bg-app-border/50 hover:text-app-text',
                   )}
                   aria-label={showSearch ? t('sftp.hideFilter') : t('sftp.showFilter')}
                 >
@@ -440,7 +467,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 <div
                   className={cn(
                     'flex min-w-0 flex-1 items-center transition-opacity duration-150',
-                    showSearch ? 'opacity-100 delay-100' : 'opacity-0',
+                    showSearch ? 'opacity-100 delay-75' : 'opacity-0',
                   )}
                 >
                   <input
@@ -449,6 +476,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={t('sftp.filter')}
+                    aria-label={t('sftp.filter')}
                     tabIndex={showSearch ? 0 : -1}
                     className="h-full min-w-0 flex-1 bg-transparent text-sm text-app-text placeholder:text-app-text-soft/50 outline-none"
                   />
@@ -460,8 +488,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                       setShowSearch(false);
                       setSearchQuery('');
                     }}
-                    className="h-4 w-4 shrink-0"
-                    aria-label={t('sftp.hideFilter')}
+                    className="h-6 w-6 shrink-0 [&_svg]:size-3.5"
+                    aria-label={t('sftp.clearFilter')}
                   >
                     <XIcon className="text-app-text-soft/40" />
                   </Button>
