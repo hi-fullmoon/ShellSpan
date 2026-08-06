@@ -142,18 +142,16 @@ export const TransferProgress: React.FC = () => {
         const showSpeed = speed !== undefined && speed > 0 && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op);
         // A delete that finished (or was cancelled) leaves the remote entry
         // gone, so its row dims instead of staying red/struck through.
-        const isDeleteFinished =
-          op.kind === 'delete' &&
-          (isTransferComplete(op) || op.status === 'cancelled');
+        const isDeleteFinished = op.kind === 'delete' && (isTransferComplete(op) || op.status === 'cancelled');
         const fullPath = (op.currentPath ?? op.operationId).replace(/\\/g, '/');
         return (
           <div
             key={op.operationId}
-            className="relative flex h-8 items-center gap-3 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
+            className="relative flex h-8 items-center gap-2 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
           >
             {op.kind === 'delete' ? (
               <Trash2Icon
-                className={cn('size-4 shrink-0', isDeleteFinished ? 'text-muted-foreground/40' : 'text-muted-foreground/70')}
+                className={cn('size-4 shrink-0 -translate-y-px', isDeleteFinished ? 'text-muted-foreground/40' : 'text-muted-foreground/70')}
                 aria-hidden="true"
               />
             ) : (
@@ -165,11 +163,7 @@ export const TransferProgress: React.FC = () => {
                   <span
                     className={cn(
                       'min-w-0 flex-1 truncate font-medium',
-                      op.kind === 'delete'
-                        ? isDeleteFinished
-                          ? 'text-muted-foreground/70'
-                          : 'text-app-text/70'
-                        : 'text-app-text',
+                      op.kind === 'delete' ? (isDeleteFinished ? 'text-muted-foreground/70' : 'text-app-text/70') : 'text-app-text',
                     )}
                   >
                     {displayTransferPath(op)}
