@@ -8,6 +8,7 @@ import { ConnectionList } from './connection-list';
 import { KnownHostsPanel } from './known-hosts-panel';
 import { KeychainPanel } from './keychain-panel';
 import { LogPanel } from './log-panel';
+import { MonitorPanel } from './monitor-panel';
 import { SettingsPanel } from './settings-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
@@ -123,6 +124,7 @@ const Workbench: React.FC = () => {
             <KnownHostsPanel onCreateConnection={handleCreateFromKnownHost} />
           )}
           {activeTab === 'keychain' && <KeychainPanel />}
+          {activeTab === 'monitor' && <MonitorPanel />}
           {activeTab === 'logs' && <LogPanel />}
           {activeTab === 'settings' && <SettingsPanel />}
         </div>
