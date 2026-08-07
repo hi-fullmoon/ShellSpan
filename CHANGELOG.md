@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.29](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.29) - 2026-08-07
+
+
+### Features
+
+- **keychain:** clear fallback secret value while preserving metadata
+
 ## [v2.0.28](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.28) - 2026-08-07
 
 
