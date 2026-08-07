@@ -126,12 +126,24 @@ body {
   color: var(--foreground);
   background-color: var(--background);
   overflow: hidden;
-  user-select: none;
 }
 
+/* Disable native text selection app-wide. user-select is not inherited and
+   WebKit does not reliably propagate it from body to descendants, so it must
+   be applied to every element directly. Editable form controls opt back in
+   below so users can still select and correct text inside fields. */
 * {
   box-sizing: border-box;
   scrollbar-color: var(--app-border) transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 *:hover {
