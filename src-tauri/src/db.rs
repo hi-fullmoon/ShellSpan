@@ -394,10 +394,27 @@ impl Database {
         conn.query_row(
             "SELECT value FROM key_credentials WHERE id=?1",
             params![id],
-            |row| row.get(0),
+            |row| row.get::<_, Option<String>>(0),
         )
         .optional()
+        .map(|value| value.flatten())
         .map_err(|e| format!("failed to retrieve key credential value: {e}"))
+    }
+
+    /// Clears the fallback secret value for a key credential without removing
+    /// its metadata row. Used to purge a stale database-fallback copy after a
+    /// successful native keychain write while keeping the key listed.
+    pub(crate) fn clear_key_credential_value(&self, id: &str) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.execute(
+            "UPDATE key_credentials SET value = NULL WHERE id=?1",
+            params![id],
+        )
+        .map_err(|e| format!("failed to clear key credential value: {e}"))?;
+        Ok(())
     }
 
     pub(crate) fn list_profiles_referencing_key(
@@ -1092,6 +1109,27 @@ mod tests {
         // Conflict branch must refresh updated_at without clobbering metadata.
         assert_eq!(label, "My Key");
         assert!(updated_at > 1000);
+    }
+
+    #[test]
+    fn clear_key_credential_value_preserves_metadata_row() {
+        let db = test_db();
+        db.upsert_key_credential("key-1", "My Key", "rsa", "keyFile", "com.termbridge.key", None, None, 1000)
+            .unwrap();
+        db.store_key_credential_value("key-1", "stale-fallback-secret", "com.termbridge.key")
+            .unwrap();
+
+        db.clear_key_credential_value("key-1").unwrap();
+
+        // The fallback secret is gone…
+        assert!(db.retrieve_key_credential_value("key-1").unwrap().is_none());
+        // …but the metadata row survives so the key still shows in listings.
+        let summaries = db.list_key_credentials().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "key-1");
+        assert_eq!(summaries[0].label, "My Key");
+        assert_eq!(summaries[0].key_type, "rsa");
+        assert_eq!(summaries[0].kind, crate::models::KeyCredentialKind::KeyFile);
     }
 
     #[test]

@@ -77,6 +77,10 @@ trait CredentialBackend: Send + Sync {
     ) -> Result<(), String>;
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String>;
     fn delete_credential(&self, service: &str, key: &str) -> Result<(), String>;
+    /// Clears the secret value stored for a key while preserving any metadata
+    /// the backend keeps for it. Used to purge stale fallback copies without
+    /// dropping the key's listing metadata.
+    fn clear_credential_value(&self, service: &str, key: &str) -> Result<(), String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +141,12 @@ impl CredentialBackend for NativeKeychainBackend {
             Err(e) => Err(format!("keyring delete_credential: {e}")),
         }
     }
+
+    fn clear_credential_value(&self, service: &str, key: &str) -> Result<(), String> {
+        // A native keychain entry holds only the secret value, so clearing it
+        // is the same as deleting it.
+        self.delete_credential(service, key)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +181,12 @@ impl CredentialBackend for DatabaseBackend {
     fn delete_credential(&self, _service: &str, key: &str) -> Result<(), String> {
         self.database.delete_key_credential(key)
     }
+
+    fn clear_credential_value(&self, _service: &str, key: &str) -> Result<(), String> {
+        // The row also carries listing metadata (label, key type, kind), so
+        // only the fallback secret value is cleared.
+        self.database.clear_key_credential_value(key)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -193,10 +209,13 @@ impl CredentialBackend for CompositeBackend {
             Ok(()) => {
                 // Keep both stores in sync: remove any stale copy from the
                 // database fallback so a later native outage can't serve an
-                // outdated value. Best-effort — failure only logs.
-                if let Err(e) = self.fallback.delete_credential(service, key) {
+                // outdated value. Only the secret value is cleared — the
+                // fallback row also carries listing metadata (label, key
+                // type, kind) that must survive. Best-effort — failure only
+                // logs.
+                if let Err(e) = self.fallback.clear_credential_value(service, key) {
                     warn!(
-                        "Failed to remove stale fallback credential service={service} key={key}: {e}"
+                        "Failed to remove stale fallback credential value service={service} key={key}: {e}"
                     );
                 }
                 Ok(())
@@ -252,6 +271,32 @@ impl CredentialBackend for CompositeBackend {
             }
             (Ok(()), Ok(())) => {
                 debug!("Deleted credential service={service} key={key} (native+fallback)");
+                Ok(())
+            }
+        }
+    }
+
+    fn clear_credential_value(&self, service: &str, key: &str) -> Result<(), String> {
+        // Best-effort across both backends; used when purging a stale
+        // fallback value while preserving metadata.
+        let native_result = self.native.clear_credential_value(service, key);
+        let fallback_result = self.fallback.clear_credential_value(service, key);
+        match (&native_result, &fallback_result) {
+            (Err(_), Err(fallback_err)) => Err(fallback_err.clone()),
+            (Err(native_err), Ok(())) => {
+                warn!(
+                    "Native clear failed for service={service} key={key}, fallback clear succeeded: {native_err}"
+                );
+                Ok(())
+            }
+            (Ok(()), Err(fallback_err)) => {
+                warn!(
+                    "Fallback clear failed for service={service} key={key}, native clear succeeded: {fallback_err}"
+                );
+                Ok(())
+            }
+            (Ok(()), Ok(())) => {
+                debug!("Cleared credential value service={service} key={key} (native+fallback)");
                 Ok(())
             }
         }
@@ -499,6 +544,10 @@ mod tests {
                 .get_mut(service)
                 .map(|m| m.remove(key));
             Ok(())
+        }
+
+        fn clear_credential_value(&self, service: &str, key: &str) -> Result<(), String> {
+            self.delete_credential(service, key)
         }
     }
 
@@ -763,6 +812,10 @@ mod tests {
             }
 
             fn delete_credential(&self, _service: &str, _key: &str) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn clear_credential_value(&self, _service: &str, _key: &str) -> Result<(), String> {
                 Ok(())
             }
         }
