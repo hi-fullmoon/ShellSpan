@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.28](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.28) - 2026-08-07
+
+
+### Features
+
+- **hook:** add useLastValue hook for stable dialog content
+
 ## [v2.0.27](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.27) - 2026-08-06
 
 
