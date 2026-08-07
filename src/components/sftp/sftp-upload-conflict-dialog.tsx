@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { useI18n } from '@/hooks/useI18n';
+import { useLastValue } from '@/hooks/useLastValue';
 import type { PendingUploadConflict } from '@/hooks/useSftpPaneActions';
 import { kindLabel } from '@/lib/sftp-utils';
 import { FileWarningIcon } from 'lucide-react';
@@ -31,8 +32,11 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
 }) => {
   const { t } = useI18n();
   const [applyToRemaining, setApplyToRemaining] = useState(false);
+  const displayConflict = useLastValue(conflict);
 
-  if (!conflict) return null;
+  // Only guard the initial mount: once a payload has been seen, the snapshot
+  // keeps it alive during the exit animation so the fade-out isn't cut off.
+  if (!displayConflict) return null;
 
   const handleAction = (action: UploadConflictAction): void => {
     // Do not call onClose here: onResolve may synchronously queue the next
@@ -48,20 +52,20 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
         <SftpDialogHeader title={t('sftp.conflict.title')} />
         <SftpDialogBody>
           <DialogDescription className="min-w-0 break-words text-app-text">
-            {t('sftp.conflict.message', { name: conflict.targetName })}
+            {t('sftp.conflict.message', { name: displayConflict.targetName })}
           </DialogDescription>
           <div className="flex min-w-0 items-center gap-3 overflow-hidden rounded-lg border border-app-border bg-app-surface-muted/45 p-3">
             <FileWarningIcon className="size-5 shrink-0 text-app-text-soft" aria-hidden="true" />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="block w-full truncate text-sm font-medium text-app-text" title={conflict.targetName}>
-                {conflict.targetName}
+              <span className="block w-full truncate text-sm font-medium text-app-text" title={displayConflict.targetName}>
+                {displayConflict.targetName}
               </span>
               <span className="text-xs text-app-text-soft">
-                {kindLabel(conflict.existingKind, t)}
+                {kindLabel(displayConflict.existingKind, t)}
               </span>
             </div>
           </div>
-          {conflict.remainingConflicts > 0 && (
+          {displayConflict.remainingConflicts > 0 && (
             <div className="flex items-center gap-2 rounded-md px-1 py-1">
               <Checkbox
                 id="apply-to-remaining"
@@ -83,7 +87,7 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
           </Button>
           <Button
             variant={
-              conflict.existingKind === 'directory'
+              displayConflict.existingKind === 'directory'
                 ? 'secondary'
                 : 'destructive'
             }
@@ -92,7 +96,7 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
           >
             {t('sftp.conflict.overwrite')}
           </Button>
-          {conflict.existingKind === 'directory' && (
+          {displayConflict.existingKind === 'directory' && (
             <Button
               variant="destructive"
               size="sm"

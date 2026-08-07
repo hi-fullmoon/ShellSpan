@@ -1,6 +1,7 @@
 import React from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { useI18n } from '@/hooks/useI18n';
+import { useLastValue } from '@/hooks/useLastValue';
 import { formatSize } from '@/lib/sftp-utils';
 import type { ReadRemoteFileResponse } from '@/types';
 import { FileWarningIcon } from 'lucide-react';
@@ -22,8 +23,11 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
   onClose,
 }) => {
   const { t } = useI18n();
+  const displayContent = useLastValue(content);
 
-  if (!content) return null;
+  // Only guard the initial mount: once a payload has been seen, the snapshot
+  // keeps it alive during the exit animation so the fade-out isn't cut off.
+  if (!displayContent) return null;
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -31,12 +35,12 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
         <SftpDialogHeader title={t('sftp.preview.title')} />
         <SftpDialogBody className="gap-3">
           <div className="flex items-center justify-between gap-4 rounded-md border border-app-border bg-app-surface-muted/35 px-3 py-2 text-xs text-app-text-soft">
-            <span className="truncate font-medium text-app-text" title={content.name}>
-              {content.name}
+            <span className="truncate font-medium text-app-text" title={displayContent.name}>
+              {displayContent.name}
             </span>
-            <span className="shrink-0 font-mono">{formatSize(Number(content.size))}</span>
+            <span className="shrink-0 font-mono">{formatSize(Number(displayContent.size))}</span>
           </div>
-          {!content.isText ? (
+          {!displayContent.isText ? (
             <div className="flex items-center gap-3 rounded-lg border border-app-warning/25 bg-app-warning/5 p-4 text-sm text-app-text-soft">
               <FileWarningIcon className="size-5 shrink-0 text-app-warning" aria-hidden="true" />
               <span>{t('sftp.preview.binaryWarning')}</span>
@@ -44,7 +48,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
           ) : (
             <textarea
               readOnly
-              value={content.content}
+              value={displayContent.content}
               className="h-[60vh] w-full resize-none rounded-lg border border-app-border bg-app-surface-muted/50 p-4 font-mono text-xs leading-5 text-app-text outline-none focus-visible:ring-1 focus-visible:ring-app-primary"
             />
           )}

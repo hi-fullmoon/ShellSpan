@@ -1,6 +1,7 @@
 import React from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { useI18n } from '@/hooks/useI18n';
+import { useLastValue } from '@/hooks/useLastValue';
 import {
   SftpDialogBody,
   SftpDialogContent,
@@ -42,12 +43,15 @@ export const SftpPropertiesDialog: React.FC<SftpPropertiesDialogProps> = ({
   onClose,
 }) => {
   const { t, locale } = useI18n();
+  const displayEntry = useLastValue(entry);
 
-  if (!entry) return null;
+  // Only guard the initial mount: once a payload has been seen, the snapshot
+  // keeps it alive during the exit animation so the fade-out isn't cut off.
+  if (!displayEntry) return null;
 
-  const remote = isRemoteEntry(entry);
+  const remote = isRemoteEntry(displayEntry);
   const permissionsText = remote
-    ? `${formatPermissionSymbolic(entry.permissions, entry.kind)} (${formatPermissionOctal(entry.permissions)})`
+    ? `${formatPermissionSymbolic(displayEntry.permissions, displayEntry.kind)} (${formatPermissionOctal(displayEntry.permissions)})`
     : undefined;
 
   return (
@@ -59,16 +63,16 @@ export const SftpPropertiesDialog: React.FC<SftpPropertiesDialogProps> = ({
             data-slot="properties-content"
             className="flex flex-col overflow-hidden rounded-md border border-app-border bg-app-surface-muted/30"
           >
-          <PropertyRow label={t('sftp.properties.name')} value={entry.name} />
-          <PropertyRow label={t('sftp.properties.path')} value={entry.path} />
-          <PropertyRow label={t('sftp.properties.kind')} value={kindLabel(entry.kind, t)} />
+          <PropertyRow label={t('sftp.properties.name')} value={displayEntry.name} />
+          <PropertyRow label={t('sftp.properties.path')} value={displayEntry.path} />
+          <PropertyRow label={t('sftp.properties.kind')} value={kindLabel(displayEntry.kind, t)} />
           <PropertyRow
             label={t('sftp.properties.size')}
-            value={entry.kind === 'directory' ? '--' : formatSize(entry.size)}
+            value={displayEntry.kind === 'directory' ? '--' : formatSize(displayEntry.size)}
           />
           <PropertyRow
             label={t('sftp.properties.modifiedAt')}
-            value={formatModified(entry.modifiedAt, locale)}
+            value={formatModified(displayEntry.modifiedAt, locale)}
           />
           {permissionsText && (
             <PropertyRow label={t('sftp.properties.permissions')} value={permissionsText} />
@@ -76,13 +80,13 @@ export const SftpPropertiesDialog: React.FC<SftpPropertiesDialogProps> = ({
           {remote && (
             <PropertyRow
               label={t('sftp.properties.owner')}
-              value={formatOwner(entry)}
+              value={formatOwner(displayEntry)}
             />
           )}
           {remote && (
             <PropertyRow
               label={t('sftp.properties.group')}
-              value={formatGroup(entry)}
+              value={formatGroup(displayEntry)}
             />
           )}
           </div>
