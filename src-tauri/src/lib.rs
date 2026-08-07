@@ -2,6 +2,7 @@ mod commands;
 mod connection;
 mod db;
 mod ecdsa_key;
+mod health;
 mod identity_cache;
 mod keychain;
 mod known_hosts;
@@ -165,6 +166,7 @@ pub fn run() {
         .manage(port_forward::PortForwardManager::default())
         .manage(SftpPool::default())
         .manage(RemoteIdentityCache::default())
+        .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::create_local_session,
@@ -238,6 +240,7 @@ pub fn run() {
             commands::load_terminal_workspace,
             commands::save_terminal_workspace,
             commands::clear_terminal_workspace,
+            health::get_system_health,
         ]);
 
     menu::configure_builder(builder)
