@@ -34,6 +34,10 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       label: t('workbench.knownHosts.title'),
     },
     {
+      key: 'monitor',
+      label: t('workbench.monitor.title'),
+    },
+    {
       key: 'logs',
       label: t('workbench.logs.title'),
     },
