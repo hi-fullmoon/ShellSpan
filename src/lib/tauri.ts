@@ -38,6 +38,7 @@ import type {
   SessionErrorEvent,
   SessionSummary,
   StatusEvent,
+  SystemHealth,
   UploadProgressEvent,
 } from '@/types';
 
@@ -581,4 +582,8 @@ export async function invokeSaveTerminalWorkspace(sessionsJson: string): Promise
 
 export async function invokeClearTerminalWorkspace(): Promise<void> {
   return invokeLogged('clear_terminal_workspace');
+}
+
+export async function invokeGetSystemHealth(): Promise<SystemHealth> {
+  return invokeLogged<SystemHealth>('get_system_health');
 }

@@ -7,7 +7,7 @@ export type TerminalColorScheme = 'app' | 'oneDark' | 'solarizedDark' | 'light';
 export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'logs' | 'settings';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs' | 'settings';
 export type LogSource = 'frontend' | 'backend';
 export type ShortcutAction =
   | 'openWorkbench'
@@ -214,6 +214,19 @@ export interface ClosedEvent {
   retryable: boolean;
 }
 
+/** A non-local terminal disconnect captured by the monitor for history. */
+export interface DisconnectEvent {
+  sessionId: string;
+  title?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  reasonKind: ClosedReasonKind;
+  reason?: string;
+  retryable: boolean;
+  at: number;
+}
+
 export interface SessionErrorEventHostKeyUnknown {
   type: 'HostKeyUnknown';
   payload: {
@@ -418,4 +431,50 @@ export interface SftpBookmarkRow {
   side: 'local' | 'remote';
   label?: string;
   createdAt: number;
+}
+
+// --- System health monitor types ---
+
+export type HealthStatus = 'ok' | 'warning' | 'error';
+
+export interface AppProcessInfo {
+  pid: number;
+  rssBytes: number;
+  vszBytes: number;
+  cpuPercent: number;
+  threads?: number;
+  uptimeSecs: number;
+}
+
+export interface SystemInfo {
+  totalMemoryBytes: number;
+  usedMemoryBytes: number;
+  freeMemoryBytes: number;
+  memoryUsagePercent: number;
+  totalSwapBytes: number;
+  usedSwapBytes: number;
+  freeSwapBytes: number;
+  cpuPercent: number;
+}
+
+export interface DiskInfo {
+  totalBytes: number;
+  usedBytes: number;
+  freeBytes: number;
+  usagePercent: number;
+  mountPoint: string;
+  name?: string;
+}
+
+export interface AppInfo {
+  version: string;
+  platform: string;
+  arch: string;
+}
+
+export interface SystemHealth {
+  app: AppProcessInfo;
+  system: SystemInfo;
+  disk: DiskInfo;
+  appInfo: AppInfo;
 }
