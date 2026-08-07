@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { useLastValue } from '@/hooks/useLastValue';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,7 @@ export const CredentialPromptDialog: React.FC = () => {
   const pending = usePasswordPromptStore((state) => state.pending);
   const resolvePassword = usePasswordPromptStore((state) => state.resolvePassword);
   const [password, setPassword] = useState('');
+  const displayPending = useLastValue(pending);
 
   useEffect(() => {
     if (pending) {
@@ -39,10 +41,10 @@ export const CredentialPromptDialog: React.FC = () => {
         <CompactDialogHeader
           title={t('dialog.credentialPrompt.title')}
           description={
-            pending
+            displayPending
               ? t('dialog.credentialPrompt.description', {
-                  username: pending.request.username,
-                  host: pending.request.host,
+                  username: displayPending.request.username,
+                  host: displayPending.request.host,
                 })
               : undefined
           }

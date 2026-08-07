@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { useLastValue } from '@/hooks/useLastValue';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -15,6 +16,7 @@ export const KeychainKeyPromptDialog: React.FC = () => {
   const { keys: allKeys, initialized, hydrate } = useKeychainStore();
   const keys = allKeys.filter((k) => k.kind === 'keyFile');
   const [selectedKeyId, setSelectedKeyId] = useState('');
+  const displayPending = useLastValue(pending);
 
   useEffect(() => {
     if (pending) {
@@ -45,10 +47,10 @@ export const KeychainKeyPromptDialog: React.FC = () => {
         <CompactDialogHeader
           title={t('dialog.keychainKeyPrompt.title')}
           description={
-            pending
+            displayPending
               ? t('dialog.keychainKeyPrompt.description', {
-                  username: pending.request.username,
-                  host: pending.request.host,
+                  username: displayPending.request.username,
+                  host: displayPending.request.host,
                 })
               : undefined
           }
