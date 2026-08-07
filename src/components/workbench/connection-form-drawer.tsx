@@ -346,18 +346,18 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
           <div className="flex flex-col gap-5 px-5 py-4">
             <FormSection icon={Server} title={t('connection.form.section.general')}>
               <FormRow label={t('common.name')} error={errors.name}>
-                <Input value={form.name} onChange={(e) => updateField('name', e.target.value)} placeholder="My Server" />
+                <Input value={form.name} onChange={(e) => updateField('name', e.target.value)} placeholder="My Server" autoComplete="off" autoCapitalize="none" />
               </FormRow>
               <div className="grid grid-cols-3 gap-2">
                 <FormRow className="col-span-2" label={t('common.host')} error={errors.host}>
-                  <Input value={form.host} onChange={(e) => updateField('host', e.target.value)} onBlur={handleHostBlur} placeholder="192.168.1.1" />
+                  <Input value={form.host} onChange={(e) => updateField('host', e.target.value)} onBlur={handleHostBlur} placeholder="192.168.1.1" autoComplete="off" autoCapitalize="none" />
                 </FormRow>
                 <FormRow label={t('common.port')} error={errors.port}>
-                  <Input value={form.port} onChange={(e) => updateField('port', e.target.value)} type="number" placeholder="22" />
+                  <Input value={form.port} onChange={(e) => updateField('port', e.target.value)} type="number" placeholder="22" autoComplete="off" autoCapitalize="none" />
                 </FormRow>
               </div>
               <FormRow label={t('common.username')} error={errors.username}>
-                <Input value={form.username} onChange={(e) => updateField('username', e.target.value)} placeholder="root" />
+                <Input value={form.username} onChange={(e) => updateField('username', e.target.value)} placeholder="root" autoComplete="off" autoCapitalize="none" />
               </FormRow>
             </FormSection>
 
@@ -365,7 +365,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
               <AuthMethodToggle value={form.authMethod} onChange={(value) => handleAuthMethodChange(value, 'main')} />
               {form.authMethod === 'password' && (
                 <FormRow label={t('common.password')} error={errors.password}>
-                  <Input type="password" value={form.password} onChange={(e) => updateField('password', e.target.value)} placeholder={t('common.password')} />
+                  <Input type="password" value={form.password} onChange={(e) => updateField('password', e.target.value)} placeholder={t('common.password')} autoComplete="off" autoCapitalize="none" />
                 </FormRow>
               )}
               {form.authMethod === 'key' && (
@@ -383,7 +383,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                     onBrowse={() => pickPrivateKey('main')}
                   />
                   <FormRow label={t('common.passphrase')}>
-                    <Input type="password" value={form.passphrase} onChange={(e) => updateField('passphrase', e.target.value)} placeholder={t('common.passphrase')} />
+                    <Input type="password" value={form.passphrase} onChange={(e) => updateField('passphrase', e.target.value)} placeholder={t('common.passphrase')} autoComplete="off" autoCapitalize="none" />
                   </FormRow>
                 </>
               )}
@@ -402,19 +402,19 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                   <div className="flex flex-col gap-2.5 border-t border-app-border px-3.5 py-3">
                     <div className="grid grid-cols-3 gap-3">
                       <FormRow className="col-span-2" label={t('common.host')} error={errors.jumpHostHost}>
-                        <Input value={form.jumpHost.host} onChange={(e) => updateJumpHost('host', e.target.value)} placeholder="192.168.1.1" />
+                        <Input value={form.jumpHost.host} onChange={(e) => updateJumpHost('host', e.target.value)} placeholder="192.168.1.1" autoComplete="off" autoCapitalize="none" />
                       </FormRow>
                       <FormRow label={t('common.port')}>
-                        <Input value={form.jumpHost.port} onChange={(e) => updateJumpHost('port', Number(e.target.value))} type="number" placeholder="22" />
+                        <Input value={form.jumpHost.port} onChange={(e) => updateJumpHost('port', Number(e.target.value))} type="number" placeholder="22" autoComplete="off" autoCapitalize="none" />
                       </FormRow>
                     </div>
                     <FormRow label={t('common.username')} error={errors.jumpHostUsername}>
-                      <Input value={form.jumpHost.username} onChange={(e) => updateJumpHost('username', e.target.value)} placeholder="root" />
+                      <Input value={form.jumpHost.username} onChange={(e) => updateJumpHost('username', e.target.value)} placeholder="root" autoComplete="off" autoCapitalize="none" />
                     </FormRow>
                     <AuthMethodToggle value={form.jumpHost.authMethod} onChange={(value) => handleAuthMethodChange(value, 'jump')} />
                     {form.jumpHost.authMethod === 'password' && (
                       <FormRow label={t('common.password')} error={errors.jumpHostPassword}>
-                        <Input type="password" value={form.jumpHost.password ?? ''} onChange={(e) => updateJumpHost('password', e.target.value)} placeholder={t('common.password')} />
+                        <Input type="password" value={form.jumpHost.password ?? ''} onChange={(e) => updateJumpHost('password', e.target.value)} placeholder={t('common.password')} autoComplete="off" autoCapitalize="none" />
                       </FormRow>
                     )}
                     {form.jumpHost.authMethod === 'key' && (
@@ -437,6 +437,8 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                             value={form.jumpHost.passphrase ?? ''}
                             onChange={(e) => updateJumpHost('passphrase', e.target.value)}
                             placeholder={t('common.passphrase')}
+                            autoComplete="off"
+                            autoCapitalize="none"
                           />
                         </FormRow>
                       </>
@@ -578,7 +580,7 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
       <FormRow label={t('common.privateKey')} error={errors.privateKeyPath}>
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-2">
-            <Input value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="flex-1" />
+            <Input value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="flex-1" autoComplete="off" autoCapitalize="none" />
             <Button variant="outline" className="shrink-0" onClick={onBrowse}>
               <FolderOpen />
               {t('connection.form.browse')}
