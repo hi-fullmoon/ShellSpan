@@ -257,7 +257,7 @@ fn process_thread_count(pid: u32) -> Option<usize> {
 #[cfg(target_os = "windows")]
 fn process_thread_count(pid: u32) -> Option<usize> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::Toolhelp::{
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
     };
 
