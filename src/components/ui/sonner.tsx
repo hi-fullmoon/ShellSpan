@@ -10,6 +10,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
   const removeToast = useToastStore((s) => s.removeToast)
   const shownRef = useRef<Set<string>>(new Set())
 
+  const handleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!(event.target as HTMLElement).closest('[data-sonner-toast]')) return
+    const top = toasts[toasts.length - 1]
+    if (!top) return
+    toast.dismiss(top.id)
+    removeToast(top.id)
+  }
+
   useEffect(() => {
     for (const t of toasts) {
       if (shownRef.current.has(t.id)) continue
@@ -46,48 +54,50 @@ const Toaster = ({ ...props }: ToasterProps) => {
   }, [toasts])
 
   return (
-    <Sonner
-      theme={resolvedTheme as ToasterProps["theme"]}
-      className="toaster group"
-      position="top-right"
-      gap={8}
-      visibleToasts={1}
-      offset={{ top: 48 }}
-      icons={{
-        success: (
-          <CircleCheckIcon className="toast-icon-filled size-4 text-[#52c41a]" />
-        ),
-        info: (
-          <InfoIcon className="toast-icon-filled size-4 text-[#1677ff]" />
-        ),
-        warning: (
-          <CircleAlertIcon className="toast-icon-filled size-4 text-[#faad14]" />
-        ),
-        error: (
-          <CircleXIcon className="toast-icon-filled size-4 text-[#ff4d4f]" />
-        ),
-        loading: (
-          <Loader2Icon className="size-4 animate-spin text-[#1677ff]" />
-        ),
-      }}
-      style={
-        {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "transparent",
-          "--border-radius": "var(--radius-sm)",
-        } as React.CSSProperties
-      }
-      toastOptions={{
-        classNames: {
-          toast:
-            'w-auto! min-w-60! max-w-[var(--width)]! gap-2! px-4! py-1.5! text-sm! shadow-[var(--shadow-toast)]!',
-          icon: 'mt-[3px]! self-start!',
-          title: 'font-normal!',
-        },
-      }}
-      {...props}
-    />
+    <div onDoubleClick={handleDoubleClick}>
+      <Sonner
+        theme={resolvedTheme as ToasterProps["theme"]}
+        className="toaster group"
+        position="top-right"
+        gap={8}
+        visibleToasts={1}
+        offset={{ top: 48 }}
+        icons={{
+          success: (
+            <CircleCheckIcon className="toast-icon-filled size-4 text-[#52c41a]" />
+          ),
+          info: (
+            <InfoIcon className="toast-icon-filled size-4 text-[#1677ff]" />
+          ),
+          warning: (
+            <CircleAlertIcon className="toast-icon-filled size-4 text-[#faad14]" />
+          ),
+          error: (
+            <CircleXIcon className="toast-icon-filled size-4 text-[#ff4d4f]" />
+          ),
+          loading: (
+            <Loader2Icon className="size-4 animate-spin text-[#1677ff]" />
+          ),
+        }}
+        style={
+          {
+            "--normal-bg": "var(--popover)",
+            "--normal-text": "var(--popover-foreground)",
+            "--normal-border": "transparent",
+            "--border-radius": "var(--radius-sm)",
+          } as React.CSSProperties
+        }
+        toastOptions={{
+          classNames: {
+            toast:
+              'w-auto! min-w-60! max-w-[var(--width)]! gap-2! px-4! py-1.5! text-sm! shadow-[var(--shadow-toast)]!',
+            icon: 'mt-[3px]! self-start!',
+            title: 'font-normal!',
+          },
+        }}
+        {...props}
+      />
+    </div>
   )
 }
 
