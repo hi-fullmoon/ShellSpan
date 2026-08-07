@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Toaster } from '../sonner';
 import { useToastStore } from '@/stores/toastStore';
@@ -64,6 +64,34 @@ describe('Toaster', () => {
     expect(useToastStore.getState().toasts).toHaveLength(2);
     expect(useToastStore.getState().toasts[0].message).toBe('B');
     expect(useToastStore.getState().toasts[1].message).toBe('C');
+  });
+
+  it('dismisses the toast on double-click', async () => {
+    useToastStore.getState().addToast('Double-click to dismiss', 'info', 3000);
+    render(<Toaster />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-sonner-toast]')).toBeInTheDocument();
+    });
+
+    fireEvent.doubleClick(document.querySelector('[data-sonner-toast]')!);
+
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts).toHaveLength(0);
+    });
+  });
+
+  it('does not dismiss when double-clicking outside a toast', async () => {
+    useToastStore.getState().addToast('Keep me', 'info', 3000);
+    render(<Toaster />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-sonner-toast]')).toBeInTheDocument();
+    });
+
+    fireEvent.doubleClick(document.querySelector('[data-sonner-toaster]')!);
+
+    expect(useToastStore.getState().toasts).toHaveLength(1);
   });
 
   it('generates unique ids for each toast', () => {
