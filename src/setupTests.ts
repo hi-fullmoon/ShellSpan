@@ -1,6 +1,42 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
+// Node >= 22 ships an experimental `localStorage` global that shadows jsdom's
+// Storage during environment population and returns `undefined` unless the
+// process was started with `--localstorage-file`. Provide a real in-memory
+// Storage so tests that read/write window.localStorage behave correctly.
+const store = new Map<string, string>();
+const localStorageMock: Storage = {
+  get length() {
+    return store.size;
+  },
+  clear() {
+    store.clear();
+  },
+  getItem(key) {
+    return store.get(key) ?? null;
+  },
+  key(index) {
+    return Array.from(store.keys())[index] ?? null;
+  },
+  removeItem(key) {
+    store.delete(key);
+  },
+  setItem(key, value) {
+    store.set(key, String(value));
+  },
+};
+
+Object.defineProperty(window, 'localStorage', {
+  configurable: true,
+  value: localStorageMock,
+});
+
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: localStorageMock,
+});
+
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
