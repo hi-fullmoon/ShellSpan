@@ -13,6 +13,7 @@ const Terminal = React.lazy(() => import('@/components/terminal'));
 const Sftp = React.lazy(() => import('@/components/sftp'));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
+import { useMonitorEvents } from '@/hooks/useMonitorEvents';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -30,6 +31,7 @@ export const App: React.FC = () => {
   useDisableContextMenu();
   useTheme();
   useTransferListeners();
+  useMonitorEvents();
   useAppShortcuts();
 
   const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
