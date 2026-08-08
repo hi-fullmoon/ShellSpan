@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to rebuild (for example v2.0.7)
+        description: Existing release tag to rebuild (for example v2.0.7 or v2.0.7-test.1)
         required: true
         type: string
       release_notes:
@@ -62,9 +62,14 @@ jobs:
           const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
           const lockVersion = cargoLock.match(/\[\[package\]\]\s*\nname\s*=\s*"TermBridge"\s*\nversion\s*=\s*"([^"]+)"/m)?.[1];
           const expectedTag = `v${pkg.version}`;
+          // 允许在仓库版本之上追加 semver 预发布后缀的测试 tag
+          // （如 package.json 为 2.0.30 时的 v2.0.30-test.1），无需 bump 仓库版本
+          const prereleaseTag =
+            tag.startsWith(`${expectedTag}-`) &&
+            /^v\d+\.\d+\.\d+-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$/.test(tag);
 
-          if (tag !== expectedTag) {
-            console.error(`Release tag/version mismatch: tag=${tag}, expected=${expectedTag}`);
+          if (tag !== expectedTag && !prereleaseTag) {
+            console.error(`Release tag/version mismatch: tag=${tag}, expected=${expectedTag} (a prerelease suffix like ${expectedTag}-test.1 is also allowed)`);
             process.exit(1);
           }
 
@@ -87,10 +92,9 @@ jobs:
             IS_PRERELEASE=true
           fi
 
-          NOTES="$RELEASE_NOTES"
-          if [[ -z "$NOTES" ]]; then
-            # 从 CHANGELOG.md 中提取当前版本对应的段落，并去掉首尾空行
-            NOTES="$(awk -v tag="$RELEASE_TAG" '
+          # 从 CHANGELOG.md 中提取指定 tag 对应的段落，并去掉首尾空行
+          extract_notes() {
+            awk -v tag="$1" '
               BEGIN { header = "## [" tag "]" }
               index($0, header) == 1 { found = 1; next }
               found && /^## \[/ { exit }
@@ -100,7 +104,16 @@ jobs:
                 printf "%s%s\n", pending, $0
                 pending = ""
               }
-            ' CHANGELOG.md)"
+            ' CHANGELOG.md
+          }
+
+          NOTES="$RELEASE_NOTES"
+          if [[ -z "$NOTES" ]]; then
+            NOTES="$(extract_notes "$RELEASE_TAG")"
+          fi
+          if [[ -z "$NOTES" && "$RELEASE_TAG" == *-* ]]; then
+            # 测试 tag（如 v2.0.30-test.1）没有独立段落时，回退到基础版本的段落
+            NOTES="$(extract_notes "${RELEASE_TAG%%-*}")"
           fi
           if [[ -z "$NOTES" ]]; then
             NOTES="Release $RELEASE_TAG"
@@ -217,10 +230,12 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          echo '{"build":{"beforeBuildCommand":""}}' > tauri-ci-override.json
+          # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
+          node -e 'console.log(JSON.stringify({version: process.env.APP_VERSION, build: {beforeBuildCommand: ""}}))' > tauri-ci-override.json
           read -r -a bundle_args <<< "$BUNDLE_ARGS"
           pnpm exec tauri build --target "$RUST_TARGET" "${bundle_args[@]}" --config tauri-ci-override.json
         env:
+          APP_VERSION: ${{ needs.preflight.outputs.version }}
           BUNDLE_ARGS: ${{ matrix.bundle_args }}
           RUST_TARGET: ${{ matrix.rust_target }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -230,13 +245,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
+          APP_VERSION: ${{ needs.preflight.outputs.version }}
           RUST_TARGET: ${{ matrix.rust_target }}
           PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           perl -MLocale::Maketext::Simple -e 1
-          Set-Content -Path tauri-ci-override.json -Value '{"build":{"beforeBuildCommand":""}}'
+          # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
+          @{ version = $env:APP_VERSION; build = @{ beforeBuildCommand = '' } } | ConvertTo-Json -Compress | Set-Content -Path tauri-ci-override.json
           $bundleArgs = if ($env:PRERELEASE -eq 'true') { 'nsis' } else { 'nsis,msi' }
           Write-Host "Building bundles: $bundleArgs (prerelease=$env:PRERELEASE)"
           pnpm exec tauri build --target $env:RUST_TARGET --bundles $bundleArgs --config tauri-ci-override.json
