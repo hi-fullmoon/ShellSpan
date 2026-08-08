@@ -15,7 +15,6 @@ import {
   SearchXIcon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
-import type { LocaleKey } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useLogStore } from '@/stores/logStore';
 import type { LogSource } from '@/types';
@@ -254,13 +253,11 @@ export const LogPanel: React.FC = () => {
   const { t } = useI18n();
   const { success, error: showError } = useToast();
   const {
-    files,
     activeFileName,
     activeSource,
     content,
     loading,
     loadFiles,
-    loadFile,
     refreshActiveFile,
     setActiveSource,
   } = useLogStore();
