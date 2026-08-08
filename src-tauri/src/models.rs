@@ -489,10 +489,22 @@ pub(crate) struct DataEvent {
     pub(crate) chunk: String,
 }
 
+/// Host identity attached to a closed event so the frontend can render the
+/// disconnecting session even after its store record is gone.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionIdentity {
+    pub(crate) title: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) username: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClosedEvent {
     pub(crate) session_id: String,
+    pub(crate) identity: Option<SessionIdentity>,
     pub(crate) reason: Option<String>,
     pub(crate) reason_kind: ClosedReasonKind,
     pub(crate) retryable: bool,

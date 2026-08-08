@@ -33,12 +33,15 @@ export function useMonitorEvents(): void {
       const session = useTerminalStore
         .getState()
         .sessions.find((s) => s.sessionId === payload.sessionId);
+      // Prefer the identity the backend attached to the event (it survives even
+      // after the session record is removed from the store); fall back to the
+      // store lookup only as a defensive measure.
       const disconnect: DisconnectEvent = {
         sessionId: payload.sessionId,
-        title: session?.title,
-        host: session?.host,
-        port: session?.port,
-        username: session?.username,
+        title: payload.identity?.title ?? session?.title,
+        host: payload.identity?.host ?? session?.host,
+        port: payload.identity?.port ?? session?.port,
+        username: payload.identity?.username ?? session?.username,
         reasonKind: payload.reasonKind,
         reason: payload.reason,
         retryable: payload.retryable,
