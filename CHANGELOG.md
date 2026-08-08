@@ -3,6 +3,30 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.31](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.31) - 2026-08-08
+
+
+### Bug Fixes
+
+- **term:** improve log panel parsing and scrolling
+- **menu:** show main window on tray about event
+
+### Chore
+
+- **ci:** align cache key between warm and release jobs
+- **ci:** enforce strict semver validation for release tags and manual versions
+- **ci:** rely on shared cache for release builds, drop sccache
+
+### Features
+
+- **term:** carry session identity on closed events
+- **ci:** support prerelease tags in release workflow
+- **workbench:** wrap monitor panel content in ScrollArea
+
+### Testing
+
+- **workbench:** remove redundant tooltip hover target test
+
 ## [v2.0.30](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.30) - 2026-08-08
 
 
