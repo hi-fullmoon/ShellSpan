@@ -217,11 +217,14 @@ jobs:
       # and caches saved here (on the tag ref) can never be restored by later
       # releases — so this job restores the cache warmed on main (see
       # cache-warm.yml) without saving a new one.
+      # add-job-id-key must stay false so the lookup key matches the one
+      # cache-warm.yml saves (otherwise the job id becomes part of the key).
       - name: Cache Rust build
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: |
             src-tauri -> target
+          add-job-id-key: false
           save-if: false
 
       - name: Install dependencies

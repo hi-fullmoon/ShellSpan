@@ -53,6 +53,9 @@ jobs:
         with:
           workspaces: |
             src-tauri -> target
+          # 缓存键默认包含 job id（warm），release.yml 的 build job 会查
+          # v0-rust-build-... 而永远查不到这里的 v0-rust-warm-...，必须关掉
+          add-job-id-key: false
 
       - name: Build release dependencies
         working-directory: src-tauri
