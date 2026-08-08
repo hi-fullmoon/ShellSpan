@@ -199,14 +199,16 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
+      # Tag-triggered runs can only restore caches from the default branch,
+      # and caches saved here (on the tag ref) can never be restored by later
+      # releases — so this job restores the cache warmed on main (see
+      # cache-warm.yml) without saving a new one.
       - name: Cache Rust build
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: |
             src-tauri -> target
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+          save-if: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -223,8 +225,6 @@ jobs:
           RUST_TARGET: ${{ matrix.rust_target }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RUSTC_WRAPPER: sccache
-          SCCACHE_GHA_ENABLED: "true"
 
       - name: Build Tauri bundle on Windows
         if: runner.os == 'Windows'
@@ -234,8 +234,6 @@ jobs:
           PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RUSTC_WRAPPER: sccache
-          SCCACHE_GHA_ENABLED: "true"
         run: |
           perl -MLocale::Maketext::Simple -e 1
           Set-Content -Path tauri-ci-override.json -Value '{"build":{"beforeBuildCommand":""}}'

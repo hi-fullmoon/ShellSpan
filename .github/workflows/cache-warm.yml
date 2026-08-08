@@ -1,0 +1,59 @@
+name: Warm Rust Cache
+
+# Release builds run on tag refs, and GitHub Actions caches are scoped to the
+# ref that created them: a tag-triggered run can only restore caches from its
+# own tag or from the default branch. This workflow keeps a fresh Rust build
+# cache on main so release runs (release.yml, `save-if: false`) can restore it.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - src-tauri/**
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  warm:
+    name: Warm ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    concurrency:
+      group: cache-warm-${{ matrix.platform }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-aarch64
+            runner: macos-15
+            rust_target: aarch64-apple-darwin
+          - platform: windows-x86_64
+            runner: windows-2025
+            rust_target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - name: Build release dependencies
+        working-directory: src-tauri
+        run: cargo build --release --locked --target ${{ matrix.rust_target }}
