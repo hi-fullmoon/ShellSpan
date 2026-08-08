@@ -273,12 +273,12 @@ fn process_thread_count(pid: u32) -> Option<usize> {
             ..std::mem::zeroed()
         };
         let mut count = 0usize;
-        let mut found = Thread32First(snapshot, &mut entry).as_bool();
+        let mut found = Thread32First(snapshot, &mut entry) != 0;
         while found {
             if entry.th32OwnerProcessID == pid {
                 count += 1;
             }
-            found = Thread32Next(snapshot, &mut entry).as_bool();
+            found = Thread32Next(snapshot, &mut entry) != 0;
         }
         CloseHandle(snapshot);
         Some(count)
