@@ -10,6 +10,7 @@ import type { LocaleKey } from '@/locales';
 import { cn, formatBytes } from '@/lib/utils';
 import { formatClockTime, formatUptime } from '@/lib/monitor';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendArea } from '@/components/ui/trend-area';
 import { IconActionButton } from './icon-action-button';
@@ -294,7 +295,8 @@ export const MonitorPanel: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="p-2">
           {error && !snapshot && (
             <div className="mb-2 rounded-lg border border-app-error/30 bg-app-error/10 px-3 py-2 text-xs text-app-error">
               {t('workbench.monitor.loadFailed')}: {error}
@@ -499,7 +501,8 @@ export const MonitorPanel: React.FC = () => {
               </MonitorCard>
             </div>
           )}
-        </div>
+          </div>
+        </ScrollArea>
       </div>
     </TooltipProvider>
   );
