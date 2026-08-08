@@ -64,12 +64,13 @@ jobs:
           const expectedTag = `v${pkg.version}`;
           // 允许在仓库版本之上追加 semver 预发布后缀的测试 tag
           // （如 package.json 为 2.0.30 时的 v2.0.30-test.1），无需 bump 仓库版本
-          const prereleaseTag =
-            tag.startsWith(`${expectedTag}-`) &&
-            /^v\d+\.\d+\.\d+-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$/.test(tag);
+          // 后缀必须是严格 semver：纯数字标识符不允许前导零（test.1 合法，test.01 非法）
+          const prereleaseIdentifier = /^(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)$/;
+          const suffix = tag.startsWith(`${expectedTag}-`) ? tag.slice(expectedTag.length + 1) : null;
+          const prereleaseTag = suffix !== null && suffix.split('.').every((id) => prereleaseIdentifier.test(id));
 
           if (tag !== expectedTag && !prereleaseTag) {
-            console.error(`Release tag/version mismatch: tag=${tag}, expected=${expectedTag} (a prerelease suffix like ${expectedTag}-test.1 is also allowed)`);
+            console.error(`Release tag/version mismatch: tag=${tag}, expected=${expectedTag} (a strict-semver prerelease suffix like ${expectedTag}-test.1 is also allowed; numeric identifiers must not have leading zeros)`);
             process.exit(1);
           }
 

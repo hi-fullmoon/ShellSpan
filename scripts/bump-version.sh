@@ -19,8 +19,9 @@ case "$CHOICE" in
   3) BUMP="major" ;;
   4)
     read -rp "输入版本号 (格式 x.y.z，可带预发布/构建后缀): " MANUAL_VERSION
-    if ! echo "$MANUAL_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
-      echo "无效版本号，需符合 semver 格式（如 2.0.7 或 2.0.7-test.1）"
+    # 严格 semver（semver.org 官方正则）：纯数字标识符不允许前导零（test.1 合法，test.01 非法）
+    if ! echo "$MANUAL_VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'; then
+      echo "无效版本号，需符合严格 semver 格式（如 2.0.7 或 2.0.7-test.1；纯数字标识符不允许前导零，test.01 非法）"
       exit 1
     fi
     NEW="$MANUAL_VERSION"
