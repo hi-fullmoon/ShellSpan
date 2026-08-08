@@ -22,7 +22,6 @@ import type { LogSource } from '@/types';
 import { Button } from '@/components/ui/button';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/useToast';
 import { invokeExportLogFile } from '@/lib/tauri';
@@ -81,7 +80,26 @@ function parseLogContent(content: string): ParsedLogLine[] {
   if (lines[lines.length - 1] === '') {
     lines.pop();
   }
-  return lines.map(parseLogLine);
+
+  // A single log entry can span multiple physical lines (e.g. a stack trace
+  // after an error header). Lines without a log header are continuations of
+  // the previous entry and get merged into its message/raw so filtering,
+  // search and copy all operate on the whole entry instead of fragments.
+  const entries: ParsedLogLine[] = [];
+  let current: ParsedLogLine | undefined;
+  for (const line of lines) {
+    const parsed = parseLogLine(line);
+    if (parsed.level) {
+      current = parsed;
+      entries.push(current);
+    } else if (current) {
+      current.message = `${current.message}\n${line}`;
+      current.raw = `${current.raw}\n${line}`;
+    } else {
+      entries.push(parsed);
+    }
+  }
+  return entries;
 }
 
 function getDaysDifference(dateString: string, today: Date): number {
@@ -246,7 +264,6 @@ export const LogPanel: React.FC = () => {
     refreshActiveFile,
     setActiveSource,
   } = useLogStore();
-  const [autoScroll, setAutoScroll] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -352,10 +369,12 @@ export const LogPanel: React.FC = () => {
   }, [activeFileName, activeSection, refreshActiveFile]);
 
   useEffect(() => {
-    if (autoScroll && isAtBottom && filteredLines.length > 0) {
+    // Follow new lines only while the viewport stays pinned to the bottom;
+    // any manual scroll moves away from the bottom and pauses following.
+    if (isAtBottom && filteredLines.length > 0) {
       virtualizer.scrollToIndex(filteredLines.length - 1, { align: 'end' });
     }
-  }, [filteredLines.length, autoScroll, isAtBottom, virtualizer]);
+  }, [filteredLines.length, isAtBottom, virtualizer]);
 
   const handleScrollToBottom = (): void => {
     if (filteredLines.length === 0) return;
@@ -421,20 +440,6 @@ export const LogPanel: React.FC = () => {
               className="h-8 pl-7 text-xs"
             />
           </div>
-          <Tooltip>
-            <TooltipTrigger
-              render={<span className="inline-flex h-7 items-center justify-center" />}
-            >
-              <Switch
-                size="sm"
-                checked={autoScroll}
-                onCheckedChange={setAutoScroll}
-                aria-label={t('workbench.logs.autoScroll')}
-                className="after:hidden"
-              />
-            </TooltipTrigger>
-            <TooltipContent>{t('workbench.logs.autoScroll')}</TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={
