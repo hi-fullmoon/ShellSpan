@@ -209,6 +209,13 @@ export interface StatusEvent {
 
 export interface ClosedEvent {
   sessionId: string;
+  /** Host identity carried by the backend so the disconnect is labeled even if the store record is gone. */
+  identity?: {
+    title: string;
+    host: string;
+    port: number;
+    username: string;
+  };
   reason?: string;
   reasonKind: ClosedReasonKind;
   retryable: boolean;

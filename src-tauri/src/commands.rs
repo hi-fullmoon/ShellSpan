@@ -8,7 +8,7 @@ use crate::models::{
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
     RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
-    SessionCreateRequest, SessionStatus, SessionSummary, TrustHostRequest,
+    SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use base64::Engine;
@@ -309,6 +309,12 @@ pub(crate) fn create_local_session(
 
     let worker_id = session_id.clone();
     let worker_output_ready = output_ready;
+    let worker_identity = SessionIdentity {
+        title: summary.title.clone(),
+        host: summary.host.clone(),
+        port: summary.port,
+        username: summary.username.clone(),
+    };
     thread::spawn(move || {
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
         let reader_id = worker_id.clone();
@@ -423,6 +429,7 @@ pub(crate) fn create_local_session(
         let _ = emit_closed(
             &app,
             &worker_id,
+            Some(worker_identity),
             Some(reason.to_string()),
             if closed_by_user {
                 ClosedReasonKind::LocalClose
@@ -1876,6 +1883,12 @@ pub(crate) fn spawn_ssh_thread(
             pool: &pool,
             connection_request: &connection_request,
         };
+        let identity = SessionIdentity {
+            title: request.name.clone(),
+            host: request.host.clone(),
+            port: request.port,
+            username: request.username.clone(),
+        };
 
         let tx_for_connected = connection_result_tx.clone();
         let on_connected = move || {
@@ -1906,7 +1919,7 @@ pub(crate) fn spawn_ssh_thread(
                     SessionStatus::Disconnected,
                     message.clone(),
                 );
-                let _ = emit_closed(&app, &session_id, message, reason_kind, retryable);
+                let _ = emit_closed(&app, &session_id, Some(identity), message, reason_kind, retryable);
             }
             Err(error) => {
                 error!("SSH session failed session_id={session_id}: {error}");
@@ -1915,6 +1928,7 @@ pub(crate) fn spawn_ssh_thread(
                 let _ = emit_closed(
                     &app,
                     &session_id,
+                    Some(identity),
                     Some(error),
                     if retryable {
                         ClosedReasonKind::TransportDisconnect

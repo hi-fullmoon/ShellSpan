@@ -23,7 +23,7 @@ use crate::sftp_pool::SftpPool;
 use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
 use models::{
     DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionErrorEvent,
-    SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry,
+    SessionIdentity, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry,
 };
 
 pub(crate) use connection::{
@@ -86,6 +86,7 @@ pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Res
 pub(crate) fn emit_closed(
     app: &AppHandle,
     session_id: &str,
+    identity: Option<SessionIdentity>,
     reason: Option<String>,
     reason_kind: ClosedReasonKind,
     retryable: bool,
@@ -94,6 +95,7 @@ pub(crate) fn emit_closed(
         SSH_CLOSED_EVENT,
         ClosedEvent {
             session_id: session_id.to_string(),
+            identity,
             reason,
             reason_kind,
             retryable,
