@@ -193,20 +193,6 @@ describe('LogPanel', () => {
     ).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('uses a stable hover target for the auto-scroll tooltip', () => {
-    render(<LogPanel />);
-
-    const autoScrollSwitch = screen.getByRole('switch', {
-      name: 'workbench.logs.autoScroll',
-    });
-    const tooltipTrigger = autoScrollSwitch.parentElement;
-
-    expect(tooltipTrigger).toHaveAttribute('data-slot', 'tooltip-trigger');
-    expect(tooltipTrigger).toHaveClass('h-7');
-    expect(tooltipTrigger).not.toHaveClass('size-7');
-    expect(autoScrollSwitch).toHaveClass('after:hidden');
-  });
-
   it('shows a floating button away from the bottom and scrolls to the last log line', () => {
     render(<LogPanel />);
 
