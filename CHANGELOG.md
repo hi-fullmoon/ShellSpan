@@ -3,6 +3,30 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.30](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.30) - 2026-08-08
+
+
+### Bug Fixes
+
+- **ui:** apply user-select none to all elements for consistent text selection
+- **health:** correct ToolHelp casing in windows_sys import
+- **ui:** disable autocomplete and autocapitalize on connection form inputs
+- **tauri:** replace deprecated as_bool() with explicit comparison
+
+### Features
+
+- add backend system health module
+- add monitor store, hook, tauri bindings, and types
+- add monitor workbench tab and panel
+- **i18n:** add monitor workbench translations
+- **ui:** dismiss top toast on double-click
+
+### Testing
+
+- add unit tests for trend, monitor, and monitor store components
+- **ui:** cover toast double-click dismissal behavior
+- 修复 Node 22 下 localStorage 不可用问题
+
 ## [v2.0.29](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.29) - 2026-08-07
 
 
