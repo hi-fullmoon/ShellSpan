@@ -164,6 +164,11 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
         }
 
         if menu_id == TRAY_ABOUT_ID {
+            // The About dialog is rendered in the main window. This is especially
+            // important for tray-menu clicks when the window is currently hidden.
+            if let Err(error) = show_main_window(app) {
+                error!("failed to show main window for about event: {error}");
+            }
             if let Err(error) = emit_system_about(app) {
                 error!("failed to handle about menu event: {error}");
             }
