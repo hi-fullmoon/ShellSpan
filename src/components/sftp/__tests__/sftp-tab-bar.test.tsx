@@ -156,4 +156,30 @@ describe('SftpTabBar', () => {
 
     expect(screen.getByRole('textbox')).toHaveClass('p-0', 'leading-none');
   });
+
+  it('renders a 1px top line with the theme color on the active tab', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    const connections = useSftpStore.getState().connections;
+    useSftpStore.getState().setActiveConnection(connections[0]?.id ?? null);
+
+    render(<SftpTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    const indicator = tabs[0].querySelector<HTMLElement>('[data-active-tab-indicator]');
+    expect(indicator).not.toBeNull();
+    expect(indicator?.className).toContain('bg-app-primary');
+  });
+
+  it('does not render the top line on inactive tabs', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    const connections = useSftpStore.getState().connections;
+    useSftpStore.getState().setActiveConnection(connections[0]?.id ?? null);
+
+    render(<SftpTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs[1].querySelector('[data-active-tab-indicator]')).toBeNull();
+  });
 });

@@ -110,10 +110,17 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       }}
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
-        active ? 'h-8 bg-app-surface text-app-text' : 'h-8 bg-app-border/25 text-app-text-soft',
+        active ? 'h-[31px] bg-app-surface text-app-text' : 'h-[31px] bg-app-border/25 text-app-text-soft',
         renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
+      {active && (
+        <div
+          aria-hidden="true"
+          data-active-tab-indicator
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-app-primary"
+        />
+      )}
       {showSeparatorAfter && (
         <Separator
           orientation="vertical"
@@ -513,7 +520,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
             horizontal
             vertical={false}
             size="thin"
-            className="h-[32px] min-w-0 flex-1"
+            className="h-[31px] min-w-0 flex-1"
           >
             <div role="tablist" className="flex min-w-0 items-start gap-0">
               {connections.map((connection, index) => {
@@ -578,7 +585,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           size="icon"
           onClick={onNewTabClick}
           aria-label={t('sftp.newTab')}
-          className="pointer-events-none absolute inset-y-0 right-0 z-10 h-[32px] w-11 rounded-none bg-gradient-to-l from-app-surface-muted from-60% to-transparent pl-4 opacity-0 transition-opacity hover:bg-transparent hover:text-app-primary focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tabbar:pointer-events-auto group-hover/tabbar:opacity-100"
+          className="pointer-events-none absolute inset-y-0 right-0 z-10 h-[31px] w-11 rounded-none bg-gradient-to-l from-app-surface-muted from-60% to-transparent pl-4 opacity-0 transition-opacity hover:bg-transparent hover:text-app-primary focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tabbar:pointer-events-auto group-hover/tabbar:opacity-100"
         >
           <PlusIcon strokeWidth={1.5} />
         </Button>
