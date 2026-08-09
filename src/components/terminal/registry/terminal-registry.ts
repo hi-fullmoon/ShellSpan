@@ -12,15 +12,18 @@ import {
   listenToSshData,
   listenToSshStatus,
 } from '@/lib/tauri';
-import {
-  formatTerminalNoticeLine,
-  formatTerminalStatusLine,
-  shouldDisableTerminalInput,
-  shouldReconnectFromInput,
-} from '@/lib/terminal';
+import { formatTerminalNoticeLine, formatTerminalStatusLine, shouldDisableTerminalInput, shouldReconnectFromInput } from '@/lib/terminal';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
-import type { ClosedEvent, SessionStatus, StatusEvent, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily } from '@/types';
+import type {
+  ClosedEvent,
+  SessionStatus,
+  StatusEvent,
+  TerminalBellStyle,
+  TerminalColorScheme,
+  TerminalCursorStyle,
+  TerminalFontFamily,
+} from '@/types';
 import type { IDisposable, ILink } from '@xterm/xterm';
 
 const logger = createLogger('terminal');
@@ -109,22 +112,40 @@ const TERMINAL_COLOR_SCHEMES: Record<TerminalColorScheme, NonNullable<Constructo
     background: '#282c34',
     foreground: '#abb2bf',
     cursor: '#528bff',
-    black: '#282c34', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
-    blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#abb2bf',
+    black: '#282c34',
+    red: '#e06c75',
+    green: '#98c379',
+    yellow: '#e5c07b',
+    blue: '#61afef',
+    magenta: '#c678dd',
+    cyan: '#56b6c2',
+    white: '#abb2bf',
   },
   solarizedDark: {
     background: '#002b36',
     foreground: '#839496',
     cursor: '#93a1a1',
-    black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
-    blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+    black: '#073642',
+    red: '#dc322f',
+    green: '#859900',
+    yellow: '#b58900',
+    blue: '#268bd2',
+    magenta: '#d33682',
+    cyan: '#2aa198',
+    white: '#eee8d5',
   },
   light: {
     background: '#ffffff',
     foreground: '#1f2328',
     cursor: '#0969da',
-    black: '#24292f', red: '#cf222e', green: '#116329', yellow: '#4d2d00',
-    blue: '#0969da', magenta: '#8250df', cyan: '#1b7c83', white: '#f6f8fa',
+    black: '#24292f',
+    red: '#cf222e',
+    green: '#116329',
+    yellow: '#4d2d00',
+    blue: '#0969da',
+    magenta: '#8250df',
+    cyan: '#1b7c83',
+    white: '#f6f8fa',
   },
 };
 
@@ -206,8 +227,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.loadAddon(this.searchAddon);
 
     this.container = document.createElement('div');
-    this.container.className =
-      'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
+    this.container.className = 'h-full w-full [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
 
     this.unlisten = {
       data: undefined,
@@ -232,13 +252,7 @@ class TerminalControllerImpl implements TerminalController {
     if (status === 'connected') {
       void invokeWriteSession(this.sessionId, data).catch((error) => {
         logger.error(`Failed to write input to session ${this.sessionId}`, error);
-        this.writeSystemLine(
-          formatTerminalNoticeLine(
-            t('terminal.notice.writeFailedLabel'),
-            t('terminal.notice.writeFailedMessage'),
-            '31',
-          ),
-        );
+        this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
       });
       return;
     }
@@ -264,12 +278,7 @@ class TerminalControllerImpl implements TerminalController {
     }
 
     if (!this.inputBlockedNoticeRef) {
-      this.writeSystemLine(
-        formatTerminalNoticeLine(
-          t('terminal.notice.hintLabel'),
-          t('terminal.notice.disconnectedHint'),
-        ),
-      );
+      this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
       this.inputBlockedNoticeRef = true;
     }
   }
@@ -303,9 +312,7 @@ class TerminalControllerImpl implements TerminalController {
     if (!this.preferences.urlDetection) return;
     this.linkProviderDisposable = this.terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber, callback) => {
-        const line = this.terminal.buffer.active
-          .getLine(bufferLineNumber - 1)
-          ?.translateToString(true);
+        const line = this.terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true);
         if (!line) {
           callback(undefined);
           return;
@@ -360,9 +367,7 @@ class TerminalControllerImpl implements TerminalController {
     const statusUnlisten = await listenToSshStatus(sessionId, (event) => {
       logger.info(`Session ${sessionId} status: ${event.payload.status}`);
       this.setStatus(sessionId, event.payload);
-      this.writeSystemLine(
-        formatTerminalStatusLine(event.payload.status, event.payload.message),
-      );
+      this.writeSystemLine(formatTerminalStatusLine(event.payload.status, event.payload.message));
       if (event.payload.status === 'connected' || event.payload.status === 'error') {
         this.resetNoticeState();
       }
@@ -377,32 +382,15 @@ class TerminalControllerImpl implements TerminalController {
       logger.info(`Session ${sessionId} closed${event.payload.reason ? `: ${event.payload.reason}` : ''}`);
       this.setClosed(sessionId, event.payload);
       this.writeSystemLine(
-        formatTerminalNoticeLine(
-          t('terminal.notice.closedLabel'),
-          event.payload.reason
-            ? `: ${event.payload.reason}`
-            : undefined,
-          '31',
-        ),
+        formatTerminalNoticeLine(t('terminal.notice.closedLabel'), event.payload.reason ? `: ${event.payload.reason}` : undefined, '31'),
       );
-      this.writeSystemLine(
-        formatTerminalNoticeLine(
-          t('terminal.notice.hintLabel'),
-          t('terminal.notice.pressEnterReconnect'),
-        ),
-      );
+      this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.pressEnterReconnect')));
       this.inputBlockedNoticeRef = true;
       if (event.payload.retryable && this.preferences.autoReconnect && !this.reconnectRequestedRef) {
         this.reconnectRequestedRef = true;
         window.setTimeout(() => {
           if (this.disposed) return;
-          this.writeSystemLine(
-            formatTerminalNoticeLine(
-              t('terminal.notice.reconnectingLabel'),
-              t('terminal.notice.reconnectingMessage'),
-              '36',
-            ),
-          );
+          this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.reconnectingLabel'), t('terminal.notice.reconnectingMessage'), '36'));
           this.requestReconnect(this.sessionId);
         }, 1500);
       }
@@ -415,16 +403,10 @@ class TerminalControllerImpl implements TerminalController {
 
     try {
       const snapshot = await invokeGetSessionStatus(sessionId);
-      if (
-        !this.disposed &&
-        generation === this.listenerGeneration &&
-        this.getStatus(sessionId) === 'connecting'
-      ) {
+      if (!this.disposed && generation === this.listenerGeneration && this.getStatus(sessionId) === 'connecting') {
         logger.info(`Session ${sessionId} reconciled status: ${snapshot.status}`);
         this.setStatus(sessionId, snapshot);
-        this.writeSystemLine(
-          formatTerminalStatusLine(snapshot.status, snapshot.message),
-        );
+        this.writeSystemLine(formatTerminalStatusLine(snapshot.status, snapshot.message));
         if (snapshot.status === 'connected' || snapshot.status === 'error') {
           this.resetNoticeState();
         }
@@ -476,11 +458,7 @@ class TerminalControllerImpl implements TerminalController {
         } catch {
           return;
         }
-        invokeResizeSession(
-          this.sessionId,
-          this.terminal.cols,
-          this.terminal.rows,
-        ).catch((error) => {
+        invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
           logger.warn(`Failed to resize session ${this.sessionId}`, error);
         });
       });
@@ -489,11 +467,7 @@ class TerminalControllerImpl implements TerminalController {
 
     // Initial resize now that cols/rows are measurable after open().
     if (this.opened) {
-      invokeResizeSession(
-        this.sessionId,
-        this.terminal.cols,
-        this.terminal.rows,
-      ).catch((error) => {
+      invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
         logger.warn(`Failed to resize session ${this.sessionId}`, error);
       });
     }
