@@ -44,10 +44,19 @@ describe('SettingsPanel', () => {
       expect(screen.getByRole('button', { name: titleKey })).toBeInTheDocument();
     }
 
-    // Appearance is the default section.
+    // General is the default section.
+    expect(screen.getByText('settings.general.update')).toBeInTheDocument();
+    expect(screen.getByText('settings.general.startupSection')).toBeInTheDocument();
+    expect(screen.getByText('settings.general.startupUpdateCheck')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'settings.general.checkUpdate' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('settings.terminal.fontSize')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(3);
+
+    openSection('settings.appearance.title');
     expect(screen.getByText('settings.appearance.theme')).toBeInTheDocument();
     expect(screen.getByText('settings.appearance.language')).toBeInTheDocument();
-    expect(screen.queryByText('settings.terminal.fontSize')).not.toBeInTheDocument();
     expect(
       screen.getByRole('combobox', { name: 'settings.appearance.theme' }),
     ).toHaveTextContent('theme.system');
@@ -58,6 +67,10 @@ describe('SettingsPanel', () => {
     openSection('settings.general.title');
     expect(screen.getByText('settings.general.startupSection')).toBeInTheDocument();
     expect(screen.getByText('settings.general.startupUpdateCheck')).toBeInTheDocument();
+    expect(screen.getByText('settings.general.update')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'settings.general.checkUpdate' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('settings.appearance.theme')).not.toBeInTheDocument();
     expect(screen.getAllByRole('switch')).toHaveLength(3);
 

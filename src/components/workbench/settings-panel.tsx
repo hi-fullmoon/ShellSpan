@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { UpdateSection } from './update-section';
 import type {
   AppSection,
   Locale,
@@ -79,8 +80,8 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
 type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'shortcuts';
 
 const SETTINGS_SECTIONS: { id: SettingsSection; icon: React.ElementType; titleKey: LocaleKey }[] = [
-  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title' },
   { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title' },
+  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title' },
   { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title' },
   { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title' },
   { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title' },
@@ -176,7 +177,7 @@ export const SettingsPanel: React.FC = () => {
   const resetShortcuts = useAppStore((state) => state.resetShortcuts);
   const [editingAction, setEditingAction] = useState<ShortcutAction | null>(null);
   const [conflictAction, setConflictAction] = useState<ShortcutAction | null>(null);
-  const [activeSection, setActiveSection] = useState<SettingsSection>('appearance');
+  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
 
   const shortcutLabels = useMemo<Record<ShortcutAction, string>>(
     () => ({
@@ -359,6 +360,8 @@ export const SettingsPanel: React.FC = () => {
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
                   </div>
                 </SettingRow>
+                <Separator className="data-horizontal:border-border/40" />
+                <UpdateSection />
                 </div>
               )}
 

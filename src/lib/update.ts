@@ -73,18 +73,25 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
   };
 }
 
+export interface UpdateDownloadProgress {
+  /** 0-100 when the total download size is known; absent while it is not. */
+  percent?: number;
+  receivedBytes: number;
+  totalBytes: number;
+}
+
 export async function downloadAndInstallUpdate(
   update: AvailableUpdate,
-  onProgress: (percent: number) => void,
+  onProgress: (progress: UpdateDownloadProgress) => void,
 ): Promise<void> {
-  let downloaded = 0;
-  let contentLength = 0;
+  let receivedBytes = 0;
+  let totalBytes = 0;
 
   await update.raw.downloadAndInstall((event: DownloadEvent) => {
     if (event.event === 'Started') {
-      contentLength =
+      totalBytes =
         (event.data as { contentLength?: number } | undefined)?.contentLength ?? 0;
-      downloaded = 0;
+      receivedBytes = 0;
       return;
     }
 
@@ -94,13 +101,21 @@ export async function downloadAndInstallUpdate(
 
     const chunkLength =
       (event.data as { chunkLength?: number } | undefined)?.chunkLength ?? 0;
-    if (contentLength <= 0 || chunkLength <= 0) {
+    if (chunkLength <= 0) {
       return;
     }
 
-    downloaded = Math.min(contentLength, downloaded + chunkLength);
-    const percent = Math.round((downloaded / contentLength) * 100);
-    onProgress(percent);
+    receivedBytes += chunkLength;
+    if (totalBytes > 0) {
+      const percent = Math.round(
+        (Math.min(totalBytes, receivedBytes) / totalBytes) * 100,
+      );
+      onProgress({ percent, receivedBytes, totalBytes });
+    } else {
+      // Total size unknown (e.g. a streaming/CDN response): report bytes so
+      // callers can show an indeterminate progress state instead of a stuck 0%.
+      onProgress({ receivedBytes, totalBytes: 0 });
+    }
   });
 }
 

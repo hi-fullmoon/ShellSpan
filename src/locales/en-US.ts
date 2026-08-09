@@ -514,6 +514,11 @@ export default {
   'update.restartDialog.later': 'Later',
   'update.restartDialog.installNow': 'Restart and Install',
 
+  'settings.general.update': 'Update',
+  'settings.general.currentVersion': 'Version {version}',
+  'settings.general.checkUpdate': 'Check for updates',
+  'settings.general.checkingUpdate': 'Checking...',
+  'settings.general.retry': 'Retry',
   'settings.general.startupUpdateCheck': 'Check for updates on startup',
   'settings.general.confirmBeforeExit': 'Confirm before quitting',
   'settings.general.confirmBeforeExitDescription': 'Ask for confirmation before closing the window or quitting the app.',

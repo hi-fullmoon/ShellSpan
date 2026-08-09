@@ -384,6 +384,48 @@ jobs:
         with:
           path: release-inputs
 
+      - name: Verify Windows updater artifact type is stable
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          # Same-directory in-place updates on Windows require the updater
+          # artifact type (.msi.zip vs .nsis.zip) to stay fixed within a release
+          # channel — flipping MSI↔NSIS would install into a different directory.
+          IS_PRERELEASE=false
+          if [[ "$RELEASE_TAG" == *-* ]]; then IS_PRERELEASE=true; fi
+          THIS_SUFFIX=".msi.zip"
+          if [[ "$IS_PRERELEASE" == "true" ]]; then THIS_SUFFIX=".nsis.zip"; fi
+
+          PREVIOUS_TAG="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.draft == false) | select(.prerelease == $IS_PRERELEASE) | select(.tag_name != \"$RELEASE_TAG\")][0].tag_name")"
+
+          if [[ -z "$PREVIOUS_TAG" || "$PREVIOUS_TAG" == "null" ]]; then
+            echo "No previous $([ "$IS_PRERELEASE" == true ] && echo prerelease || echo stable) release; skipping Windows updater consistency check"
+            exit 0
+          fi
+
+          PREVIOUS_NAME="$(gh release view "$PREVIOUS_TAG" --json assets --jq '[.assets[].name | select((endswith(".msi.zip")) or (endswith(".nsis.zip")))] | .[0]')"
+          if [[ "$PREVIOUS_NAME" == *".msi.zip" ]]; then
+            PREVIOUS_SUFFIX=".msi.zip"
+          elif [[ "$PREVIOUS_NAME" == *".nsis.zip" ]]; then
+            PREVIOUS_SUFFIX=".nsis.zip"
+          else
+            PREVIOUS_SUFFIX=""
+          fi
+
+          if [[ -z "$PREVIOUS_SUFFIX" ]]; then
+            echo "Previous release $PREVIOUS_TAG has no Windows updater archive; skipping consistency check"
+            exit 0
+          fi
+
+          if [[ "$PREVIOUS_SUFFIX" != "$THIS_SUFFIX" ]]; then
+            echo "Windows updater artifact type flipped: previous $PREVIOUS_TAG used $PREVIOUS_SUFFIX, this release uses $THIS_SUFFIX — this would break in-place updates." >&2
+            exit 1
+          fi
+
+          echo "Windows updater artifact type consistent with $PREVIOUS_TAG ($THIS_SUFFIX)"
+
       - name: Generate combined updater manifest
         shell: bash
         env:
