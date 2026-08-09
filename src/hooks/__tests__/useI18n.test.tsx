@@ -45,8 +45,9 @@ describe('useI18n', () => {
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
     });
 
-    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
-    expect(screen.getByText('Cancel')).toBeInTheDocument();
-    expect(screen.getByText('Open Workbench')).toBeInTheDocument();
+    // intl.init() 切换语言是异步的，等待英文文案渲染完成再断言
+    expect(await screen.findByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(await screen.findByText('Cancel')).toBeInTheDocument();
+    expect(await screen.findByText('Open Workbench')).toBeInTheDocument();
   });
 });
