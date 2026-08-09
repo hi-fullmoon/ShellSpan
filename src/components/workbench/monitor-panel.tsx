@@ -408,7 +408,7 @@ export const MonitorPanel: React.FC = () => {
                         <DisconnectRow key={`${event.sessionId}-${event.at}`} event={event} />
                       ))
                     ) : (
-                      <div className="text-[11px] text-app-text-soft">
+                      <div className="text-[11px] text-app-text-soft/60">
                         {t('workbench.monitor.noDisconnects')}
                       </div>
                     )}
@@ -459,7 +459,7 @@ export const MonitorPanel: React.FC = () => {
                         );
                       })
                     ) : (
-                      <div className="text-[11px] text-app-text-soft">
+                      <div className="text-[11px] text-app-text-soft/60">
                         {t('workbench.monitor.noSftpConnections')}
                       </div>
                     )}

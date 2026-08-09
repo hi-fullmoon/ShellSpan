@@ -101,6 +101,17 @@ describe('terminalRegistry', () => {
     expect(viewport?.style.backgroundColor).toBe('rgb(40, 44, 52)');
   });
 
+  it('hides the xterm viewport via the container Tailwind descendant class', () => {
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+
+    const viewport = controller.terminal.element?.querySelector<HTMLElement>('.xterm-viewport');
+    expect(viewport).not.toBeNull();
+    // Tailwind compiles the descendant variant into `container .xterm-viewport { opacity: 0 }`,
+    // so the generating class lives on the container; jsdom has no compiled stylesheet.
+    expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
+  });
+
   it('detach keeps buffer intact; reattach to a different host preserves buffer', () => {
     const controller = createController('s1');
     const host1 = document.createElement('div');

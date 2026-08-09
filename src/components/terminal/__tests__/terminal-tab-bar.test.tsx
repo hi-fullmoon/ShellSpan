@@ -433,4 +433,38 @@ describe('TerminalTabBar', () => {
       'color-mix(in srgb, rgb(239, 68, 68) 8%, transparent)',
     );
   });
+
+  it('renders a 1px top line with the theme color on the active tab', () => {
+    addSession('s1', 'A');
+    useTerminalStore.getState().setActiveSession('s1');
+
+    render(<TerminalTabBar />);
+
+    const indicator = screen.getByRole('tab').querySelector<HTMLElement>('[data-active-tab-indicator]');
+    expect(indicator).not.toBeNull();
+    expect(indicator?.className).toContain('bg-app-primary');
+    expect(indicator?.style.backgroundColor).toBe('');
+  });
+
+  it('uses the session color for the top line on the active tab when set', () => {
+    addSession('s1', 'A');
+    useTerminalStore.getState().setTabColor('s1', '#ef4444');
+    useTerminalStore.getState().setActiveSession('s1');
+
+    render(<TerminalTabBar />);
+
+    const indicator = screen.getByRole('tab').querySelector<HTMLElement>('[data-active-tab-indicator]');
+    expect(indicator).not.toBeNull();
+    expect(indicator?.style.backgroundColor).toBe('rgb(239, 68, 68)');
+  });
+
+  it('does not render the top line on inactive tabs', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setActiveSession('s2');
+
+    render(<TerminalTabBar />);
+
+    expect(screen.getAllByRole('tab')[0].querySelector('[data-active-tab-indicator]')).toBeNull();
+  });
 });

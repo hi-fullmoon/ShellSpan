@@ -207,7 +207,7 @@ class TerminalControllerImpl implements TerminalController {
 
     this.container = document.createElement('div');
     this.container.className =
-      'h-full w-full [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
+      'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
 
     this.unlisten = {
       data: undefined,

@@ -159,6 +159,16 @@ textarea,
   background: transparent;
 }
 
+::-webkit-scrollbar-button {
+  display: none;
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  display: none;
+  background: transparent;
+}
+
 ::-webkit-scrollbar-thumb {
   background: var(--app-border);
   border-radius: 0;
