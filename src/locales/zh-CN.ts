@@ -513,6 +513,11 @@ export default {
   'update.restartDialog.later': '稍后',
   'update.restartDialog.installNow': '立即重启安装',
 
+  'settings.general.update': '更新',
+  'settings.general.currentVersion': '当前版本：{version}',
+  'settings.general.checkUpdate': '检查更新',
+  'settings.general.checkingUpdate': '检查中...',
+  'settings.general.retry': '重试',
   'settings.general.startupUpdateCheck': '启动时检查更新',
   'settings.general.confirmBeforeExit': '退出前确认',
   'settings.general.confirmBeforeExitDescription': '关闭窗口或退出应用前询问确认。',

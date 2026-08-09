@@ -19,7 +19,9 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { AboutDialog } from '@/components/about-dialog';
 import { UpdateRestartDialog } from '@/components/update-restart-dialog';
-import { useUpdateFlow } from '@/hooks/useUpdateFlow';
+import { useUpdateStore } from '@/stores/updateStore';
+import { isTauriRuntime } from '@/lib/tauri';
+import { shouldRunStartupUpdateCheck } from '@/lib/update';
 import { createLogger } from '@/lib/logger';
 import { useAppShortcuts } from '@/hooks/useAppShortcuts';
 import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-dialog';
@@ -68,6 +70,11 @@ export const App: React.FC = () => {
           }
         }),
       );
+      listeners.push(
+        listen('system-check-update', () => {
+          void useUpdateStore.getState().runCheck('manual');
+        }),
+      );
     };
 
     setup();
@@ -86,13 +93,32 @@ export const App: React.FC = () => {
     (state) => state.sessions.filter((session) => session.status === 'connected').length,
   );
 
-  const {
-    updateState,
-    updateDownloadProgress,
-    restartDialogOpen,
-    handleInstallUpdateNow,
-    handleInstallUpdateLater,
-  } = useUpdateFlow({ startupUpdateCheck });
+  const updatePhase = useUpdateStore((state) => state.phase);
+  const updateVersion = useUpdateStore((state) => state.version);
+  const updateDownloadProgress = useUpdateStore((state) => state.downloadProgress);
+  const restartDialogDismissed = useUpdateStore((state) => state.restartDialogDismissed);
+  const installUpdateNow = useUpdateStore((state) => state.installNow);
+  const installUpdateLater = useUpdateStore((state) => state.installLater);
+  const restartDialogOpen = updatePhase === 'downloaded' && !restartDialogDismissed;
+
+  React.useEffect(() => {
+    if (!isTauriRuntime() || !startupUpdateCheck) {
+      return;
+    }
+
+    const now = Date.now();
+    if (!shouldRunStartupUpdateCheck(now)) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void useUpdateStore.getState().runCheck('startup');
+    }, 8000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [startupUpdateCheck]);
 
   if (!ready) {
     return (
@@ -156,12 +182,12 @@ export const App: React.FC = () => {
       <UpdateRestartDialog
         downloadProgress={updateDownloadProgress}
         hasActiveSessions={connectedSessions > 0}
-        onInstallNow={handleInstallUpdateNow}
-        onLater={handleInstallUpdateLater}
+        onInstallNow={installUpdateNow}
+        onLater={installUpdateLater}
         open={restartDialogOpen}
         version={
-          updateState.version.downloadedVersion ??
-          updateState.version.latestVersion ??
+          updateVersion.downloadedVersion ??
+          updateVersion.latestVersion ??
           ''
         }
       />
