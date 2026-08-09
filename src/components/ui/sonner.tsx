@@ -61,7 +61,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         position="top-right"
         gap={8}
         visibleToasts={1}
-        offset={{ top: 48 }}
+        offset={{ top: 46, right: 8 }}
         icons={{
           success: (
             <CircleCheckIcon className="toast-icon-filled size-4 text-[#52c41a]" />
