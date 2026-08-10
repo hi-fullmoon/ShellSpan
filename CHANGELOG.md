@@ -3,6 +3,27 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.32](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.32) - 2026-08-10
+
+
+### Bug Fixes
+
+- resolve terminal viewport flash and i18n async assertions
+
+### Build System
+
+- **ci:** drop MSI bundle from Windows releases
+
+### Features
+
+- add active tab indicator with theme color and refine tab bar styling
+- add manual update check section and harden update flow
+
+### Style
+
+- adjust toast notification position offset
+- format terminal registry code style
+
 ## [v2.0.31](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.31) - 2026-08-08
 
 
