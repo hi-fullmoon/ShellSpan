@@ -184,8 +184,8 @@ jobs:
           - platform: windows-x86_64
             runner: windows-2025
             rust_target: x86_64-pc-windows-msvc
-            bundle_args: --bundles nsis,msi
-            updater_suffix: .msi.zip
+            bundle_args: --bundles nsis
+            updater_suffix: .nsis.zip
 
     steps:
       - name: Checkout release tag
@@ -251,16 +251,15 @@ jobs:
         env:
           APP_VERSION: ${{ needs.preflight.outputs.version }}
           RUST_TARGET: ${{ matrix.rust_target }}
-          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           perl -MLocale::Maketext::Simple -e 1
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
+          # Windows 只发布 NSIS 安装包，更新包固定为 .nsis.zip：
+          # MSI 会安装到不同目录，对 NSIS 安装做原地更新会错位。
           @{ version = $env:APP_VERSION; build = @{ beforeBuildCommand = '' } } | ConvertTo-Json -Compress | Set-Content -Path tauri-ci-override.json
-          $bundleArgs = if ($env:PRERELEASE -eq 'true') { 'nsis' } else { 'nsis,msi' }
-          Write-Host "Building bundles: $bundleArgs (prerelease=$env:PRERELEASE)"
-          pnpm exec tauri build --target $env:RUST_TARGET --bundles $bundleArgs --config tauri-ci-override.json
+          pnpm exec tauri build --target $env:RUST_TARGET --bundles nsis --config tauri-ci-override.json
 
       - name: Prepare release artifact
         shell: bash
@@ -323,24 +322,16 @@ jobs:
             mv "${archive}.sig" "${renamed_archive}.sig"
             mv "$dmg" "$(dirname "$dmg")/TermBridge-${PLATFORM}.dmg"
           else
-            # Detect the updater archive suffix dynamically — MSI requires
-            # numeric-only versions, so prerelease builds (e.g. 2.0.7-test.1)
-            # skip MSI and produce .nsis.zip instead of .msi.zip.
+            # Windows 只发布 NSIS：更新包固定为 .nsis.zip（MSI 会安装到不同目录，
+            # 对 NSIS 安装做原地更新会错位），此处仅校验产物完整。
             installer_count="$(find release-artifact/bundle -type f -name '*-setup.exe' | wc -l | tr -d ' ')"
-            msi_updater="$(find release-artifact/bundle -type f -name '*.msi.zip' | head -n 1)"
             nsis_updater="$(find release-artifact/bundle -type f -name '*.nsis.zip' | head -n 1)"
-            updater_file="${msi_updater:-$nsis_updater}"
-            if [[ -z "$updater_file" || "$installer_count" != "1" ]]; then
+            if [[ -z "$nsis_updater" || "$installer_count" != "1" ]]; then
               echo "Required Windows release assets are missing or ambiguous" >&2
               find release-artifact/bundle -type f -print >&2
               exit 1
             fi
-            case "$updater_file" in
-              *.msi.zip) UPDATER_SUFFIX=".msi.zip" ;;
-              *.nsis.zip) UPDATER_SUFFIX=".nsis.zip" ;;
-              *.exe.zip) UPDATER_SUFFIX=".exe.zip" ;;
-              *) echo "Unknown updater archive format: $updater_file" >&2; exit 1 ;;
-            esac
+            UPDATER_SUFFIX=".nsis.zip"
           fi
 
           cat > release-artifact/release-metadata.json <<EOF
@@ -384,48 +375,6 @@ jobs:
         with:
           path: release-inputs
 
-      - name: Verify Windows updater artifact type is stable
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-        run: |
-          # Same-directory in-place updates on Windows require the updater
-          # artifact type (.msi.zip vs .nsis.zip) to stay fixed within a release
-          # channel — flipping MSI↔NSIS would install into a different directory.
-          IS_PRERELEASE=false
-          if [[ "$RELEASE_TAG" == *-* ]]; then IS_PRERELEASE=true; fi
-          THIS_SUFFIX=".msi.zip"
-          if [[ "$IS_PRERELEASE" == "true" ]]; then THIS_SUFFIX=".nsis.zip"; fi
-
-          PREVIOUS_TAG="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.draft == false) | select(.prerelease == $IS_PRERELEASE) | select(.tag_name != \"$RELEASE_TAG\")][0].tag_name")"
-
-          if [[ -z "$PREVIOUS_TAG" || "$PREVIOUS_TAG" == "null" ]]; then
-            echo "No previous $([ "$IS_PRERELEASE" == true ] && echo prerelease || echo stable) release; skipping Windows updater consistency check"
-            exit 0
-          fi
-
-          PREVIOUS_NAME="$(gh release view "$PREVIOUS_TAG" --json assets --jq '[.assets[].name | select((endswith(".msi.zip")) or (endswith(".nsis.zip")))] | .[0]')"
-          if [[ "$PREVIOUS_NAME" == *".msi.zip" ]]; then
-            PREVIOUS_SUFFIX=".msi.zip"
-          elif [[ "$PREVIOUS_NAME" == *".nsis.zip" ]]; then
-            PREVIOUS_SUFFIX=".nsis.zip"
-          else
-            PREVIOUS_SUFFIX=""
-          fi
-
-          if [[ -z "$PREVIOUS_SUFFIX" ]]; then
-            echo "Previous release $PREVIOUS_TAG has no Windows updater archive; skipping consistency check"
-            exit 0
-          fi
-
-          if [[ "$PREVIOUS_SUFFIX" != "$THIS_SUFFIX" ]]; then
-            echo "Windows updater artifact type flipped: previous $PREVIOUS_TAG used $PREVIOUS_SUFFIX, this release uses $THIS_SUFFIX — this would break in-place updates." >&2
-            exit 1
-          fi
-
-          echo "Windows updater artifact type consistent with $PREVIOUS_TAG ($THIS_SUFFIX)"
-
       - name: Generate combined updater manifest
         shell: bash
         env:
@@ -452,11 +401,9 @@ jobs:
             -name '*.dmg' -o \
             -name '*.exe' -o \
             -name '*.app.tar.gz' -o \
-            -name '*.msi.zip' -o \
             -name '*.nsis.zip' -o \
             -name '*.exe.zip' -o \
             -name '*.app.tar.gz.sig' -o \
-            -name '*.msi.zip.sig' -o \
             -name '*.nsis.zip.sig' -o \
             -name '*.exe.zip.sig' \
           \) | sort)
