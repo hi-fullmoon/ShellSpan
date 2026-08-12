@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useTransferStore } from '@/stores/transferStore';
 import { useSystemFileDrop, type UseSystemFileDropOptions } from '@/hooks/useSystemFileDrop';
 import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import { SftpDndContext, type SftpDndPayload } from '@/components/sftp/sftp-dnd-context';
@@ -158,6 +159,7 @@ describe('SftpContent upload queue', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
     useToastStore.setState({ toasts: [] });
+    useTransferStore.setState({ operations: [] });
     connectionMocks.downloadRemotePaths.mockReset();
     connectionMocks.loadRemoteDirectory.mockReset();
     connectionMocks.loadRemoteDirectory.mockResolvedValue(undefined);
@@ -313,18 +315,20 @@ describe('SftpContent upload queue', () => {
     await capturedOnDrop!(['/local/a.txt'], 'remote');
     expect(await screen.findByTitle('a.txt')).toBeInTheDocument();
 
-    // A second drop while the conflict dialog is open is queued, not rejected.
+    // A second drop while the conflict dialog is open is queued, not rejected,
+    // and shows up as a pending row in the transfer list.
     await capturedOnDrop!(['/local/c.txt'], 'remote');
     expect(uploadWithPolicies).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(
-        useToastStore.getState().toasts.some(
-          (toast) => toast.message === 'sftp.transfer.queued',
+        useTransferStore.getState().operations.some(
+          (op) => op.status === 'pending' && op.currentPath === '/local/c.txt',
         ),
       ).toBe(true),
     );
 
-    // Finishing the first batch releases the queued one.
+    // Finishing the first batch releases the queued one; the pending row is
+    // replaced by the real upload operation.
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
     await waitFor(() =>
       expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['overwrite']),
@@ -332,6 +336,60 @@ describe('SftpContent upload queue', () => {
     await waitFor(() =>
       expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail']),
     );
+    await waitFor(() =>
+      expect(
+        useTransferStore.getState().operations.every((op) => op.status !== 'pending'),
+      ).toBe(true),
+    );
+  });
+
+  it('cancels a queued batch from the pending transfer row', async () => {
+    // The first batch stays in flight so the second drop is queued; a conflict
+    // dialog would make the transfer list inert (modal), so the cancel must
+    // happen while the previous batch is still uploading.
+    let resolveFirstUpload!: () => void;
+    const firstUpload = new Promise<void>((resolve) => {
+      resolveFirstUpload = resolve;
+    });
+    const uploadWithPolicies = vi.fn().mockImplementation(() => firstUpload);
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions({ uploadWithPolicies }));
+
+    renderContent(createConnection());
+
+    await capturedOnDrop!(['/local/a.txt'], 'remote');
+    await waitFor(() =>
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['fail']),
+    );
+
+    await capturedOnDrop!(['/local/c.txt'], 'remote');
+    await waitFor(() =>
+      expect(
+        useTransferStore.getState().operations.some((op) => op.status === 'pending'),
+      ).toBe(true),
+    );
+
+    // Cancelling the pending row removes it and drops the queued batch.
+    fireEvent.click(await screen.findByRole('button', { name: 'common.cancel' }));
+    await waitFor(() =>
+      expect(
+        useTransferStore.getState().operations.every((op) => op.status !== 'pending'),
+      ).toBe(true),
+    );
+
+    // Finishing the first batch must not run the cancelled one.
+    uploadWithPolicies.mockResolvedValue(undefined);
+    resolveFirstUpload();
+    await waitFor(() =>
+      expect(connectionMocks.loadRemoteDirectory).toHaveBeenCalled(),
+    );
+    expect(uploadWithPolicies).toHaveBeenCalledTimes(1);
+    expect(uploadWithPolicies).not.toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail']);
   });
 
   it('treats a name claimed earlier in the same batch as a conflict', async () => {

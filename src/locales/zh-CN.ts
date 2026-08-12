@@ -332,6 +332,7 @@ export default {
   'sftp.transfer.cancelling': '正在取消',
   'sftp.transfer.cancelled': '已撤销',
   'sftp.transfer.queued': '已加入队列，等待当前操作完成',
+  'sftp.transfer.pending': '排队中',
 
   'sftp.transfers.title': '传输',
   'sftp.transfers.clearCompleted': '清除已完成',
