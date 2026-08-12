@@ -99,11 +99,10 @@ else
 	echo "  [skip] git-cliff not found, CHANGELOG.md not updated"
 fi
 
-# 提交 + tag + 推送
+# 提交 + tag（不推送到远程，需手动执行 git push origin main --follow-tags）
 git add -A
 git commit -m "chore(release): bump version to $NEW"
 git tag -a "v$NEW" -m "Release v$NEW"
-git push origin main --follow-tags
 
 echo ""
-echo "完成! v$NEW 已发布"
+echo "完成! v$NEW 已提交到本地（未推送，推送请手动执行: git push origin main --follow-tags）"
