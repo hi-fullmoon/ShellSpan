@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "TermBridge"
-version = "2.0.35"
+version = "2.0.36"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.23.0",
