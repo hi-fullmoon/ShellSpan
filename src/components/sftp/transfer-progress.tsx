@@ -201,12 +201,14 @@ export const TransferProgress: React.FC = () => {
                   {op.totalBytes > 0 && `${formatBytes(op.processedBytes)} / ${formatBytes(op.totalBytes)}`}
                 </span>
                 {showSpeed && <span className="whitespace-nowrap text-muted-foreground/60">{formatBytes(speed)}/s</span>}
-                <span className={cn('min-w-12 whitespace-nowrap text-right', isTransferComplete(op) ? 'text-app-success' : 'text-app-primary')}>
+                <span className={cn('min-w-12 whitespace-nowrap text-right', isTransferComplete(op) ? 'text-app-success' : op.status === 'pending' ? 'text-muted-foreground' : 'text-app-primary')}>
                   {op.status === 'cancelling'
                     ? t(op.kind === 'delete' ? 'sftp.transfer.cancellingDelete' : 'sftp.transfer.cancelling')
                     : op.status === 'cancelled'
                       ? t(op.kind === 'delete' ? 'sftp.transfer.cancellingDelete' : 'sftp.transfer.cancelled')
-                      : formatTransferProgress(op)}
+                      : op.status === 'pending'
+                        ? t('sftp.transfer.pending')
+                        : formatTransferProgress(op)}
                 </span>
                 {op.cancel && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op) && (
                   <Button variant="link" size="xs" onClick={() => void cancelOperation(op.operationId)}>
