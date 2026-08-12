@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.38](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.38) - 2026-08-12
+
+
+### Features
+
+- **sftp:** reuse pending row id when queued batch starts
+
 ## [v2.0.37](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.37) - 2026-08-12
 
 
