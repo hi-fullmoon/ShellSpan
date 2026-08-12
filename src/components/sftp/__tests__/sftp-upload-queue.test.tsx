@@ -200,6 +200,7 @@ describe('SftpContent upload queue', () => {
         ['/local/a.txt', '/local/b.txt'],
         '/remote',
         ['overwrite', 'overwrite'],
+        undefined,
       ),
     );
   });
@@ -227,7 +228,7 @@ describe('SftpContent upload queue', () => {
     // The queue must be free again: a later drop is processed normally.
     await capturedOnDrop!(['/local/c.txt'], 'remote');
     await waitFor(() =>
-      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail']),
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail'], undefined),
     );
   });
 
@@ -327,14 +328,14 @@ describe('SftpContent upload queue', () => {
       ).toBe(true),
     );
 
-    // Finishing the first batch releases the queued one; the pending row is
-    // replaced by the real upload operation.
+    // Finishing the first batch releases the queued one; the pending row
+    // becomes the real upload operation in place (same operation id).
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
     await waitFor(() =>
-      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['overwrite']),
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['overwrite'], undefined),
     );
     await waitFor(() =>
-      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail']),
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail'], expect.any(String)),
     );
     await waitFor(() =>
       expect(
@@ -368,7 +369,7 @@ describe('SftpContent upload queue', () => {
 
     await capturedOnDrop!(['/local/a.txt'], 'remote');
     await waitFor(() =>
-      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['fail']),
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['fail'], undefined),
     );
 
     await capturedOnDrop!(['/local/c.txt'], 'remote');
@@ -397,7 +398,7 @@ describe('SftpContent upload queue', () => {
     },
   );
 
-  it('lists queued batches in drop order', async () => {
+  it('lists queued batches newest first', async () => {
     const firstUpload = new Promise<void>(() => {
       // Never settles: the first batch stays in flight for the whole test.
     });
@@ -418,12 +419,72 @@ describe('SftpContent upload queue', () => {
     await capturedOnDrop!(['/local/b.txt'], 'remote');
     await capturedOnDrop!(['/local/c.txt'], 'remote');
 
-    // The store prepends new operations; the list must still render the
-    // earlier queued batch above the later one.
+    // The store prepends new operations and the list renders newest first:
+    // the later queued batch sits above the earlier one.
     const rowB = await screen.findByText('/local/b.txt');
     const rowC = await screen.findByText('/local/c.txt');
     expect(
-      rowB.compareDocumentPosition(rowC) & Node.DOCUMENT_POSITION_FOLLOWING,
+      rowC.compareDocumentPosition(rowB) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('keeps a queued batch in its row when it starts running', async () => {
+    let resolveFirstUpload!: () => void;
+    const firstUpload = new Promise<void>((resolve) => {
+      resolveFirstUpload = resolve;
+    });
+    const uploadWithPolicies = vi
+      .fn()
+      .mockImplementationOnce(() => firstUpload)
+      .mockImplementation(async (paths: string[], _destination: string, _policies: unknown, operationId?: string) => {
+        // Mirror the real hook: the operation reuses the pending row's id.
+        useTransferStore.getState().addOperation({
+          operationId: operationId ?? 'unexpected-id',
+          kind: 'upload',
+          currentPath: paths[0],
+          totalBytes: 0,
+          processedBytes: 0,
+          totalSteps: paths.length,
+          completedSteps: 0,
+          status: 'running',
+        });
+      });
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions({ uploadWithPolicies }));
+
+    renderContent(createConnection());
+
+    await capturedOnDrop!(['/local/a.txt'], 'remote');
+    await waitFor(() => expect(uploadWithPolicies).toHaveBeenCalledTimes(1));
+
+    await capturedOnDrop!(['/local/b.txt'], 'remote');
+    await capturedOnDrop!(['/local/c.txt'], 'remote');
+    await screen.findByText('/local/b.txt');
+    await screen.findByText('/local/c.txt');
+
+    resolveFirstUpload();
+    await waitFor(() =>
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/b.txt'], '/remote', ['fail'], expect.any(String)),
+    );
+    await waitFor(() =>
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail'], expect.any(String)),
+    );
+
+    // Both batches turned their pending rows into the real operation: no new
+    // row was prepended, so the order (c above b) is unchanged.
+    expect(useTransferStore.getState().operations).toHaveLength(2);
+    expect(
+      useTransferStore.getState().operations.every((op) => op.status === 'running'),
+    ).toBe(true);
+    const rowB = await screen.findByText('/local/b.txt');
+    const rowC = await screen.findByText('/local/c.txt');
+    expect(
+      rowC.compareDocumentPosition(rowB) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -451,6 +512,7 @@ describe('SftpContent upload queue', () => {
         ['/local/a.txt', '/other/a.txt'],
         '/remote',
         ['fail', 'overwrite'],
+        undefined,
       ),
     );
   });
@@ -488,6 +550,7 @@ describe('SftpContent upload queue', () => {
         ['/local/a.txt', '/local/b.txt'],
         '/remote',
         ['overwrite', 'overwrite'],
+        undefined,
       ),
     );
   });

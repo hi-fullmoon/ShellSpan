@@ -103,10 +103,11 @@ export const TransferProgress: React.FC = () => {
   const cancelOperation = useTransferStore((state) => state.cancelOperation);
   const completedTimers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  // The store prepends new operations; render oldest-first so the list reads
-  // in enqueue order — a queued batch that starts keeps its row position
-  // instead of jumping above rows enqueued earlier.
-  const orderedOperations = React.useMemo(() => [...operations].reverse(), [operations]);
+  // The store prepends new operations, so the list renders newest-first: a
+  // freshly queued batch lands on top while the running batch sinks to the
+  // bottom. A queued batch that starts keeps its row — the real operation
+  // reuses the pending row's id instead of being prepended as a new entry.
+  const orderedOperations = operations;
 
   React.useEffect(() => {
     const completedIds = new Set(
