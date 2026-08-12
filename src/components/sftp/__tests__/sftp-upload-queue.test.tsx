@@ -343,7 +343,11 @@ describe('SftpContent upload queue', () => {
     );
   });
 
-  it('cancels a queued batch from the pending transfer row', async () => {
+  // Both the "cancel" link and the row's close (X) button must abort a queued
+  // batch; closing the row alone would let it run later.
+  it.each([{ buttonName: 'common.cancel' }, { buttonName: 'common.close' }])(
+    'cancels a queued batch from the pending transfer row ($buttonName)',
+    async ({ buttonName }) => {
     // The first batch stays in flight so the second drop is queued; a conflict
     // dialog would make the transfer list inert (modal), so the cancel must
     // happen while the previous batch is still uploading.
@@ -375,7 +379,7 @@ describe('SftpContent upload queue', () => {
     );
 
     // Cancelling the pending row removes it and drops the queued batch.
-    fireEvent.click(await screen.findByRole('button', { name: 'common.cancel' }));
+    fireEvent.click(await screen.findByRole('button', { name: buttonName }));
     await waitFor(() =>
       expect(
         useTransferStore.getState().operations.every((op) => op.status !== 'pending'),
@@ -390,7 +394,8 @@ describe('SftpContent upload queue', () => {
     );
     expect(uploadWithPolicies).toHaveBeenCalledTimes(1);
     expect(uploadWithPolicies).not.toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail']);
-  });
+    },
+  );
 
   it('treats a name claimed earlier in the same batch as a conflict', async () => {
     const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);

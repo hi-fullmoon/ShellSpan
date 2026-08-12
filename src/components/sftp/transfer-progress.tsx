@@ -220,7 +220,14 @@ export const TransferProgress: React.FC = () => {
                   size="icon"
                   className="h-6 w-6"
                   aria-label={t('common.close')}
-                  onClick={() => removeOperation(op.operationId)}
+                  onClick={() =>
+                    // Dismissing a queued (pending) batch must cancel it too;
+                    // merely dropping the row would let it run later, which
+                    // reads as if the close did nothing.
+                    op.status === 'pending'
+                      ? void cancelOperation(op.operationId)
+                      : removeOperation(op.operationId)
+                  }
                 >
                   <XIcon />
                 </Button>
