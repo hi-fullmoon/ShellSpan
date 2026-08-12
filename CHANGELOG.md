@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.34](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.34) - 2026-08-12
+
+
+### Features
+
+- **sftp:** show queued upload batches as pending transfer rows
+
 ## [v2.0.33](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.33) - 2026-08-12
 
 
