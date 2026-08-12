@@ -289,7 +289,12 @@ def circle_mask(rows, size):
 
 
 def build_ico(png_by_size):
-    entries = sorted(png_by_size)
+    # Largest first: tauri-codegen (CachedIcon::new_ico) decodes only
+    # entries()[0] into the runtime default_window_icon, which is what the
+    # Windows tray icon uses. A 16px first entry gets upscaled by Windows on
+    # high-DPI displays and looks blurry; the shell itself (taskbar,
+    # explorer) picks entries by size and is unaffected by the order.
+    entries = sorted(png_by_size, reverse=True)
     header = struct.pack("<HHH", 0, 1, len(entries))
     directory = b""
     offset = 6 + 16 * len(entries)
