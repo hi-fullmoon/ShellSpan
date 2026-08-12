@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.36](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.36) - 2026-08-12
+
+
+### Features
+
+- **sftp:** improve transfer queue ordering and monitor panel accuracy
+
 ## [v2.0.35](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.35) - 2026-08-12
 
 
