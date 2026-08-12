@@ -397,6 +397,36 @@ describe('SftpContent upload queue', () => {
     },
   );
 
+  it('lists queued batches in drop order', async () => {
+    const firstUpload = new Promise<void>(() => {
+      // Never settles: the first batch stays in flight for the whole test.
+    });
+    const uploadWithPolicies = vi.fn().mockImplementation(() => firstUpload);
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions({ uploadWithPolicies }));
+
+    renderContent(createConnection());
+
+    await capturedOnDrop!(['/local/a.txt'], 'remote');
+    await waitFor(() => expect(uploadWithPolicies).toHaveBeenCalled());
+
+    await capturedOnDrop!(['/local/b.txt'], 'remote');
+    await capturedOnDrop!(['/local/c.txt'], 'remote');
+
+    // The store prepends new operations; the list must still render the
+    // earlier queued batch above the later one.
+    const rowB = await screen.findByText('/local/b.txt');
+    const rowC = await screen.findByText('/local/c.txt');
+    expect(
+      rowB.compareDocumentPosition(rowC) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('treats a name claimed earlier in the same batch as a conflict', async () => {
     const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);
     let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;

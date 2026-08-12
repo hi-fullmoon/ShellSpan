@@ -3,7 +3,7 @@ import { ActivityIcon, PauseIcon, PlayIcon, RefreshCwIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { useSftpStore } from '@/stores/sftpStore';
+import { getSftpPaneSource, useSftpStore } from '@/stores/sftpStore';
 import { useMonitorStore, MONITOR_POLL_INTERVAL_MS } from '@/stores/monitorStore';
 import type { ClosedReasonKind, DisconnectEvent, HealthStatus } from '@/types';
 import type { LocaleKey } from '@/locales';
@@ -244,9 +244,36 @@ export const MonitorPanel: React.FC = () => {
     return counts;
   }, [sessions]);
 
-  const sftpErrorCount = useMemo(
-    () => sftpConnections.filter((conn) => conn.remoteError || conn.localError).length,
+  // Count per remote pane, not per tab: a dual-remote tab holds two SFTP
+  // connections, and a local-only pane is not a connection at all.
+  const sftpRemotePanes = useMemo(
+    () =>
+      sftpConnections.flatMap((conn) => {
+        const panes: Array<{ id: string; title: string; path: string; error?: string }> = [];
+        if (getSftpPaneSource(conn, 'local') === 'remote') {
+          panes.push({
+            id: `${conn.id}-left`,
+            title: conn.leftTitle ?? conn.title,
+            path: conn.localPath,
+            error: conn.localError,
+          });
+        }
+        if (getSftpPaneSource(conn, 'remote') === 'remote') {
+          panes.push({
+            id: `${conn.id}-right`,
+            title: conn.title,
+            path: conn.remotePath,
+            error: conn.remoteError,
+          });
+        }
+        return panes;
+      }),
     [sftpConnections],
+  );
+
+  const sftpErrorCount = useMemo(
+    () => sftpRemotePanes.filter((pane) => pane.error).length,
+    [sftpRemotePanes],
   );
 
   const recentDisconnects = useMemo(() => [...disconnectEvents].reverse(), [disconnectEvents]);
@@ -421,7 +448,7 @@ export const MonitorPanel: React.FC = () => {
                       </span>
                       <StatusCount
                         tone="ok"
-                        count={sftpConnections.length}
+                        count={sftpRemotePanes.length}
                         label={t('workbench.monitor.active')}
                       />
                       <StatusCount
@@ -430,18 +457,18 @@ export const MonitorPanel: React.FC = () => {
                         label={t('workbench.monitor.error')}
                       />
                     </div>
-                    {sftpConnections.length > 0 ? (
-                      sftpConnections.map((conn) => {
-                        const hasError = Boolean(conn.remoteError || conn.localError);
+                    {sftpRemotePanes.length > 0 ? (
+                      sftpRemotePanes.map((pane) => {
+                        const hasError = Boolean(pane.error);
                         return (
                           <div
-                            key={conn.id}
+                            key={pane.id}
                             className="flex items-center justify-between gap-2 rounded-md bg-app-surface-muted/60 px-2 py-1"
                           >
                             <span className="truncate font-mono text-xs text-app-text">
-                              {conn.title}
+                              {pane.title}
                               <span className="ml-1.5 text-app-text-soft">
-                                {conn.remotePath || conn.localPath}
+                                {pane.path}
                               </span>
                             </span>
                             <span
