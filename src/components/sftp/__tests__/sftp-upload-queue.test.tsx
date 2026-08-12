@@ -287,7 +287,7 @@ describe('SftpContent upload queue', () => {
     // ...and the directory still refreshes afterwards.
     expect(connectionMocks.loadLocalDirectory).toHaveBeenCalledWith('/local');
 
-    // The queue is released: the next drag runs instead of hitting pathBusy.
+    // The queue is released: the next drag runs instead of being blocked.
     await onDragEnd(
       {
         side: 'remote',
@@ -296,9 +296,42 @@ describe('SftpContent upload queue', () => {
       'local',
     );
     await waitFor(() => expect(connectionMocks.downloadRemotePaths).toHaveBeenCalledTimes(2));
-    expect(
-      useToastStore.getState().toasts.some((toast) => toast.message === 'sftp.transfer.pathBusy'),
-    ).toBe(false);
+  });
+
+  it('queues a drop while another batch waits on a conflict dialog', async () => {
+    const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions({ uploadWithPolicies }));
+
+    renderContent(createConnection(['a.txt']));
+
+    await capturedOnDrop!(['/local/a.txt'], 'remote');
+    expect(await screen.findByTitle('a.txt')).toBeInTheDocument();
+
+    // A second drop while the conflict dialog is open is queued, not rejected.
+    await capturedOnDrop!(['/local/c.txt'], 'remote');
+    expect(uploadWithPolicies).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        useToastStore.getState().toasts.some(
+          (toast) => toast.message === 'sftp.transfer.queued',
+        ),
+      ).toBe(true),
+    );
+
+    // Finishing the first batch releases the queued one.
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
+    await waitFor(() =>
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['overwrite']),
+    );
+    await waitFor(() =>
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail']),
+    );
   });
 
   it('treats a name claimed earlier in the same batch as a conflict', async () => {

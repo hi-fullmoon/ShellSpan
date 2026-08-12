@@ -2,19 +2,32 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
-import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/tauri';
+import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokePickLocalFolder, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/tauri';
 import { useTransferStore } from '@/stores/transferStore';
+
+const connectionMocks = vi.hoisted(() => ({
+  deleteRemotePaths: vi.fn().mockResolvedValue(undefined),
+  renameRemotePath: vi.fn().mockResolvedValue(undefined),
+  downloadRemotePaths: vi.fn().mockResolvedValue(undefined),
+}));
+
+const toastMocks = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  toast: vi.fn(),
+}));
 
 vi.mock('@/hooks/useSftpConnection', () => ({
   useSftpConnection: () => ({
     loadRemoteDirectory: vi.fn().mockResolvedValue(undefined),
     createRemoteEntry: vi.fn().mockResolvedValue(undefined),
-    renameRemotePath: vi.fn().mockResolvedValue(undefined),
+    renameRemotePath: connectionMocks.renameRemotePath,
     copyRemotePath: vi.fn().mockResolvedValue(undefined),
-    deleteRemotePaths: vi.fn().mockResolvedValue(undefined),
+    deleteRemotePaths: connectionMocks.deleteRemotePaths,
     updateRemotePermissions: vi.fn().mockResolvedValue(undefined),
     uploadLocalPaths: vi.fn().mockResolvedValue(undefined),
-    downloadRemotePaths: vi.fn().mockResolvedValue(undefined),
+    downloadRemotePaths: connectionMocks.downloadRemotePaths,
     openRemoteFile: vi.fn().mockResolvedValue(undefined),
     previewRemoteFile: vi.fn().mockResolvedValue({
       path: '/home/test.txt',
@@ -34,12 +47,11 @@ vi.mock('@/hooks/useLocalDirectory', () => ({
 }));
 
 vi.mock('@/hooks/useToast', () => ({
-  useToast: () => ({
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    toast: vi.fn(),
-  }),
+  useToast: () => toastMocks,
+}));
+
+vi.mock('@/hooks/useI18n', () => ({
+  useI18n: () => ({ t: (key: string) => key, locale: 'en-US' }),
 }));
 
 vi.mock('@/hooks/useTransferListeners', () => ({
@@ -84,6 +96,10 @@ function addConnection(): SftpConnection {
 describe('useSftpPaneActions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(invokePickLocalFolder).mockResolvedValue([]);
+    connectionMocks.downloadRemotePaths.mockResolvedValue(undefined);
+    connectionMocks.deleteRemotePaths.mockResolvedValue(undefined);
+    connectionMocks.renameRemotePath.mockResolvedValue(undefined);
     useSftpStore.setState(initialState, true);
     useTransferStore.setState({ operations: [] });
   });
@@ -273,7 +289,7 @@ describe('useSftpPaneActions', () => {
     return destinationActions;
   }
 
-  it('skips paste when the source path has an active operation', async () => {
+  it('queues paste until the source path operation finishes', async () => {
     const destinationActions = setupCrossServerPaste();
     useTransferStore.getState().addOperation({
       operationId: 'busy-source',
@@ -287,12 +303,22 @@ describe('useSftpPaneActions', () => {
       status: 'running',
     });
 
-    await act(() => destinationActions.current.onPaste());
-
+    let pastePromise: Promise<void> | undefined;
+    await act(async () => {
+      pastePromise = destinationActions.current.onPaste();
+      await Promise.resolve();
+    });
     expect(vi.mocked(invokeCopyRemoteToRemote)).not.toHaveBeenCalled();
+    expect(toastMocks.info).toHaveBeenCalledWith('sftp.transfer.queued');
+
+    await act(async () => {
+      useTransferStore.getState().markOperationCompleted('busy-source');
+    });
+    await act(() => pastePromise!);
+    expect(vi.mocked(invokeCopyRemoteToRemote)).toHaveBeenCalled();
   });
 
-  it('skips paste when the destination path has an active operation', async () => {
+  it('queues paste until the destination path operation finishes', async () => {
     const destinationActions = setupCrossServerPaste();
     useTransferStore.getState().addOperation({
       operationId: 'busy-destination',
@@ -306,9 +332,162 @@ describe('useSftpPaneActions', () => {
       status: 'running',
     });
 
-    await act(() => destinationActions.current.onPaste());
-
+    let pastePromise: Promise<void> | undefined;
+    await act(async () => {
+      pastePromise = destinationActions.current.onPaste();
+      await Promise.resolve();
+    });
     expect(vi.mocked(invokeCopyRemoteToRemote)).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useTransferStore.getState().markOperationCompleted('busy-destination');
+    });
+    await act(() => pastePromise!);
+    expect(vi.mocked(invokeCopyRemoteToRemote)).toHaveBeenCalled();
+  });
+
+  it('surfaces the backend error when a queued paste runs after the source was deleted', async () => {
+    const destinationActions = setupCrossServerPaste();
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-delete',
+      kind: 'delete',
+      connectionId: JSON.stringify(['source.example.com', 22, 'source-user', '', 0, '']),
+      paths: ['/source/report.txt'],
+      totalBytes: 0,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+    vi.mocked(invokeCopyRemoteToRemote).mockRejectedValueOnce(
+      new Error('No such file'),
+    );
+
+    let pastePromise: Promise<void> | undefined;
+    await act(async () => {
+      pastePromise = destinationActions.current.onPaste();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      useTransferStore.getState().markOperationCompleted('busy-delete');
+    });
+    await act(() => pastePromise!);
+    expect(vi.mocked(invokeCopyRemoteToRemote)).toHaveBeenCalled();
+    expect(toastMocks.error).toHaveBeenCalledWith('No such file');
+  });
+
+  it('queues delete until the path operation finishes', async () => {
+    const connection = addConnection();
+    useSftpStore.getState().setEntries(connection.id, 'remote', [{
+      path: '/home/file.txt',
+      name: 'file.txt',
+      kind: 'file',
+      size: 10,
+    }]);
+    const updated = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpPaneActions(updated, 'remote'));
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-download',
+      kind: 'download',
+      connectionId: JSON.stringify(['h', 22, 'u', '', 0, '']),
+      paths: ['/home/file.txt'],
+      totalBytes: 0,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+
+    let deletePromise: Promise<void> | undefined;
+    await act(async () => {
+      deletePromise = result.current.onDelete([updated.remoteEntries[0]!]);
+      await Promise.resolve();
+    });
+    expect(connectionMocks.deleteRemotePaths).not.toHaveBeenCalled();
+    expect(toastMocks.info).toHaveBeenCalledWith('sftp.transfer.queued');
+
+    await act(async () => {
+      useTransferStore.getState().markOperationCompleted('busy-download');
+    });
+    await act(() => deletePromise!);
+    expect(connectionMocks.deleteRemotePaths).toHaveBeenCalledWith(['/home/file.txt']);
+  });
+
+  it('queues rename until the path operation finishes', async () => {
+    const connection = addConnection();
+    useSftpStore.getState().setEntries(connection.id, 'remote', [{
+      path: '/home/file.txt',
+      name: 'file.txt',
+      kind: 'file',
+      size: 10,
+    }]);
+    const updated = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpPaneActions(updated, 'remote'));
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-upload',
+      kind: 'upload',
+      connectionId: JSON.stringify(['h', 22, 'u', '', 0, '']),
+      paths: ['/home/file.txt'],
+      totalBytes: 0,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+
+    act(() => result.current.onRename(updated.remoteEntries[0]!));
+    let renamePromise: Promise<void> | undefined;
+    await act(async () => {
+      renamePromise = result.current.handleRename('renamed.txt');
+      await Promise.resolve();
+    });
+    expect(connectionMocks.renameRemotePath).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useTransferStore.getState().markOperationCompleted('busy-upload');
+    });
+    await act(() => renamePromise!);
+    expect(connectionMocks.renameRemotePath).toHaveBeenCalledWith('/home/file.txt', 'renamed.txt');
+  });
+
+  it('surfaces the backend error when a queued download runs after the file was deleted', async () => {
+    const connection = addConnection();
+    useSftpStore.getState().setEntries(connection.id, 'remote', [{
+      path: '/home/file.txt',
+      name: 'file.txt',
+      kind: 'file',
+      size: 10,
+    }]);
+    const updated = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpPaneActions(updated, 'remote'));
+    vi.mocked(invokePickLocalFolder).mockResolvedValue(['/downloads']);
+    connectionMocks.downloadRemotePaths.mockRejectedValueOnce(new Error('No such file'));
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-delete',
+      kind: 'delete',
+      connectionId: JSON.stringify(['h', 22, 'u', '', 0, '']),
+      paths: ['/home/file.txt'],
+      totalBytes: 0,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+
+    let downloadPromise: Promise<void> | undefined;
+    await act(async () => {
+      downloadPromise = result.current.onDownload(updated.remoteEntries[0]!);
+      await Promise.resolve();
+    });
+    expect(connectionMocks.downloadRemotePaths).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useTransferStore.getState().markOperationCompleted('busy-delete');
+    });
+    await act(() => downloadPromise!);
+    expect(connectionMocks.downloadRemotePaths).toHaveBeenCalledWith(['/home/file.txt'], '/downloads');
+    expect(toastMocks.error).toHaveBeenCalledWith('No such file');
   });
 
   it('copies local entries into the local clipboard', async () => {
