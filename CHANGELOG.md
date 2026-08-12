@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.37](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.37) - 2026-08-12
+
+
+### Bug Fixes
+
+- **build:** sort ICO entries largest-first for crisp tray icon
+
 ## [v2.0.36](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.36) - 2026-08-12
 
 
