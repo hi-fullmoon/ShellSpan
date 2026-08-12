@@ -56,8 +56,8 @@ export interface UseSftpPaneActionsResult {
   onPreview: (entry?: FileEntry) => Promise<void>;
   onDownload: (entry?: FileEntry) => Promise<void>;
   onBatchDownload: () => Promise<void>;
-  uploadWithPolicies: (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => Promise<void>;
-  copyWithPolicies: (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => Promise<void>;
+  uploadWithPolicies: (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => Promise<void>;
+  copyWithPolicies: (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => Promise<void>;
   onCopy: (entry?: FileEntry) => void;
   onPaste: () => Promise<void>;
   onRename: (entry?: FileEntry) => void;
@@ -584,10 +584,12 @@ export function useSftpPaneActions(
   }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
 
   const uploadWithPolicies = useCallback(
-    async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
+    async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
       if (isLocal) return;
       try {
-        await uploadLocalPaths(localPaths, destinationDirectory, undefined, policies);
+        // A queued batch passes its pending row's id so the real operation
+        // replaces that row in place; undefined lets uploadLocalPaths mint one.
+        await uploadLocalPaths(localPaths, destinationDirectory, operationId, policies);
       } catch (err) {
         logger.warn('Upload with conflict policies failed', err);
         error(getLocalizedErrorMessage(err));
@@ -597,29 +599,29 @@ export function useSftpPaneActions(
   );
 
   const copyWithPolicies = useCallback(
-    async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
+    async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
       if (!isLocal) return;
-      const operationId = `${connection.id}-copy-${Date.now()}`;
+      const resolvedOperationId = operationId ?? `${connection.id}-copy-${Date.now()}`;
       const runCopy = async () => {
-        markOperationRunning(operationId);
+        markOperationRunning(resolvedOperationId);
         try {
           await invokeCopyLocalPaths({
             sourcePaths,
             destinationDirectory,
             conflictPolicies: policies,
-            operationId,
+            operationId: resolvedOperationId,
           });
-          removeOperation(operationId);
+          removeOperation(resolvedOperationId);
         } catch (err) {
           markOperationFailed(
-            operationId,
+            resolvedOperationId,
             getLocalizedErrorMessage(err),
           );
           throw err;
         }
       };
       addOperation({
-        operationId,
+        operationId: resolvedOperationId,
         kind: 'upload',
         currentPath: sourcePaths[0],
         totalBytes: 0,
