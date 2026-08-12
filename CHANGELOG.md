@@ -3,6 +3,17 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.33](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.33) - 2026-08-12
+
+
+### Bug Fixes
+
+- **update:** remove redundant checking toast on manual update
+
+### Features
+
+- **sftp:** queue path operations instead of rejecting while busy
+
 ## [v2.0.32](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.32) - 2026-08-10
 
 
