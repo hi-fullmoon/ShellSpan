@@ -331,7 +331,7 @@ export default {
   'sftp.transfer.cancellingDelete': 'Cancelling',
   'sftp.transfer.cancelling': 'Cancelling',
   'sftp.transfer.cancelled': 'Cancelled',
-  'sftp.transfer.pathBusy': 'This path already has an active operation',
+  'sftp.transfer.queued': 'Queued until the current operation finishes',
 
   'sftp.transfers.title': 'Transfers',
   'sftp.transfers.clearCompleted': 'Clear completed',

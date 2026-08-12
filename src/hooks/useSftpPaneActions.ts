@@ -21,7 +21,12 @@ import {
   type SftpConnection,
   type SftpSide,
 } from '@/stores/sftpStore';
-import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
+import {
+  hasActivePathOperation,
+  useTransferStore,
+  waitForPathIdle,
+  type PathOperationScope,
+} from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import type { FileEntry } from '@/components/sftp/utils';
@@ -145,7 +150,7 @@ export function useSftpPaneActions(
     markOperationRunning,
     removeOperation,
   } = useTransferStore();
-  const { error, success } = useToast();
+  const { error, info, success } = useToast();
   const { t } = useI18n();
 
   const setPaneState = useSftpStore((state) => state.setPaneState);
@@ -168,14 +173,24 @@ export function useSftpPaneActions(
     [entries, selectedPaths],
   );
 
-  const pathsAreBusy = useCallback(
-    (paths: string[]) => hasActivePathOperation(remoteConnectionKey, paths),
-    [remoteConnectionKey],
+  // Instead of rejecting an action while its paths are busy, queue it: notify
+  // once, wait for the active operations to finish, then run. If an earlier
+  // queued operation removed the files, the backend error surfaces through the
+  // caller's normal catch path.
+  const waitForPathsIdle = useCallback(
+    async (scopes: PathOperationScope[]) => {
+      const isBusy = () =>
+        scopes.some((scope) =>
+          hasActivePathOperation(scope.connectionId, scope.paths),
+        );
+      if (!isBusy()) return;
+      info(t('sftp.transfer.queued'));
+      while (isBusy()) {
+        await waitForPathIdle(scopes);
+      }
+    },
+    [info, t],
   );
-
-  const reportBusyPaths = useCallback(() => {
-    error(t('sftp.transfer.pathBusy'));
-  }, [error, t]);
 
   const reload = useCallback(async () => {
     if (isLocal) {
@@ -238,50 +253,40 @@ export function useSftpPaneActions(
       if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target) return;
-      if (pathsAreBusy([target.path])) {
-        reportBusyPaths();
-        return;
-      }
+      const targetScope = [{ connectionId: remoteConnectionKey, paths: [target.path] }];
+      await waitForPathsIdle(targetScope);
       try {
         const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
         const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
         if (!folders.length) return;
-        if (pathsAreBusy([target.path])) {
-          reportBusyPaths();
-          return;
-        }
+        await waitForPathsIdle(targetScope);
         await downloadRemotePaths([target.path], folders[0]);
       } catch (err) {
         logger.warn(`Failed to download: ${target.path}`, err);
         error(getLocalizedErrorMessage(err));
       }
     },
-    [downloadRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
+    [downloadRemotePaths, isLocal, remoteConnectionKey, waitForPathsIdle, selectedEntries, error],
   );
 
   const onBatchDownload = useCallback(
     async () => {
       if (isLocal || !selectedEntries.length) return;
       const selectedRemotePaths = selectedEntries.map((entry) => entry.path);
-      if (pathsAreBusy(selectedRemotePaths)) {
-        reportBusyPaths();
-        return;
-      }
+      const selectedScopes = [{ connectionId: remoteConnectionKey, paths: selectedRemotePaths }];
+      await waitForPathsIdle(selectedScopes);
       try {
         const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
         const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
         if (!folders.length) return;
-        if (pathsAreBusy(selectedRemotePaths)) {
-          reportBusyPaths();
-          return;
-        }
+        await waitForPathsIdle(selectedScopes);
         await downloadRemotePaths(selectedRemotePaths, folders[0]);
       } catch (err) {
         logger.warn('Batch download failed', err);
         error(getLocalizedErrorMessage(err));
       }
     },
-    [downloadRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
+    [downloadRemotePaths, isLocal, remoteConnectionKey, waitForPathsIdle, selectedEntries, error],
   );
 
   const onCopy = useCallback(
@@ -329,13 +334,10 @@ export function useSftpPaneActions(
     const clipboard = connection.remoteClipboard;
     const destinationBase = path === '/' ? '' : path.replace(/\/+$/, '');
     const destinationPath = `${destinationBase}/${clipboard.sourceName}`;
-    if (
-      hasActivePathOperation(clipboard.sourceConnectionKey, [clipboard.sourcePath]) ||
-      pathsAreBusy([destinationPath])
-    ) {
-      reportBusyPaths();
-      return;
-    }
+    await waitForPathsIdle([
+      { connectionId: clipboard.sourceConnectionKey, paths: [clipboard.sourcePath] },
+      { connectionId: remoteConnectionKey, paths: [destinationPath] },
+    ]);
     try {
       if (clipboard.sourceConnectionKey === remoteConnectionKey) {
         await copyRemotePath(clipboard.sourcePath, path);
@@ -398,7 +400,7 @@ export function useSftpPaneActions(
       logger.warn('Paste failed', err);
       error(getLocalizedErrorMessage(err));
     }
-  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, pathsAreBusy, reload, remoteConnection, remoteConnectionKey, reportBusyPaths, t, error]);
+  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, waitForPathsIdle, reload, remoteConnection, remoteConnectionKey, t, error]);
 
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
@@ -500,11 +502,9 @@ export function useSftpPaneActions(
           await invokeRenameLocalPath(renameTarget.path, newName);
           await reload();
         } else {
-          if (pathsAreBusy([renameTarget.path])) {
-            reportBusyPaths();
-            setRenameTarget(undefined);
-            return;
-          }
+          await waitForPathsIdle([
+            { connectionId: remoteConnectionKey, paths: [renameTarget.path] },
+          ]);
           await renameRemotePath(renameTarget.path, newName);
         }
         clearSelection();
@@ -515,7 +515,7 @@ export function useSftpPaneActions(
         setRenameTarget(undefined);
       }
     },
-    [clearSelection, isLocal, pathsAreBusy, renameRemotePath, renameTarget, reload, reportBusyPaths, error],
+    [clearSelection, isLocal, waitForPathsIdle, remoteConnectionKey, renameRemotePath, renameTarget, reload, error],
   );
 
   const onDelete = useCallback(
@@ -533,10 +533,9 @@ export function useSftpPaneActions(
         }
         return;
       }
-      if (pathsAreBusy(targets.map((entry) => entry.path))) {
-        reportBusyPaths();
-        return;
-      }
+      await waitForPathsIdle([
+        { connectionId: remoteConnectionKey, paths: targets.map((entry) => entry.path) },
+      ]);
       try {
         await deleteRemotePaths(targets.map((e) => e.path));
         clearSelection();
@@ -545,7 +544,7 @@ export function useSftpPaneActions(
         error(getLocalizedErrorMessage(err));
       }
     },
-    [clearSelection, deleteRemotePaths, isLocal, pathsAreBusy, reportBusyPaths, selectedEntries, error],
+    [clearSelection, deleteRemotePaths, isLocal, waitForPathsIdle, remoteConnectionKey, selectedEntries, error],
   );
 
   const onUploadFiles = useCallback(async () => {

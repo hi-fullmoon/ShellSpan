@@ -3,6 +3,7 @@ import {
   hasActivePathOperation,
   isTransferComplete,
   useTransferStore,
+  waitForPathIdle,
   type TransferOperation,
 } from '@/stores/transferStore';
 
@@ -248,5 +249,99 @@ describe('transferStore', () => {
     expect(
       isTransferComplete({ ...runningDelete, status: 'completed' }),
     ).toBe(true);
+  });
+
+  it('waitForPathIdle resolves immediately when nothing is busy', async () => {
+    await expect(
+      waitForPathIdle([{ connectionId: 'connection-1', paths: ['/remote/a'] }]),
+    ).resolves.toBeUndefined();
+  });
+
+  it('waitForPathIdle resolves once the blocking operation completes', async () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'download',
+      connectionId: 'connection-1',
+      paths: ['/remote/archive'],
+      status: 'running',
+    });
+
+    let resolved = false;
+    const waiting = waitForPathIdle([
+      { connectionId: 'connection-1', paths: ['/remote/archive/file.zip'] },
+    ]).then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    useTransferStore.getState().markOperationCompleted(operation.operationId);
+    await waiting;
+    expect(resolved).toBe(true);
+  });
+
+  it('waitForPathIdle resolves when the blocking operation is cancelled or fails', async () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'upload',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.zip'],
+      status: 'running',
+    });
+
+    const waiting = waitForPathIdle([
+      { connectionId: 'connection-1', paths: ['/remote/file.zip'] },
+    ]);
+    useTransferStore.getState().markOperationCancelled(operation.operationId);
+    await expect(waiting).resolves.toBeUndefined();
+
+    useTransferStore.getState().addOperation({
+      ...operation,
+      kind: 'upload',
+      connectionId: 'connection-1',
+      paths: ['/remote/other.zip'],
+      status: 'running',
+    });
+    const waitingOnFailure = waitForPathIdle([
+      { connectionId: 'connection-1', paths: ['/remote/other.zip'] },
+    ]);
+    useTransferStore.getState().markOperationFailed(operation.operationId, 'boom');
+    await expect(waitingOnFailure).resolves.toBeUndefined();
+  });
+
+  it('waitForPathIdle waits for every scope to become idle', async () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'op-source',
+      kind: 'download',
+      connectionId: 'source',
+      paths: ['/shared/report.txt'],
+      status: 'running',
+    });
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'op-destination',
+      kind: 'upload',
+      connectionId: 'destination',
+      paths: ['/shared/report.txt'],
+      status: 'running',
+    });
+
+    let resolved = false;
+    const waiting = waitForPathIdle([
+      { connectionId: 'source', paths: ['/shared/report.txt'] },
+      { connectionId: 'destination', paths: ['/shared/report.txt'] },
+    ]).then(() => {
+      resolved = true;
+    });
+
+    useTransferStore.getState().markOperationCompleted('op-source');
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    useTransferStore.getState().markOperationCompleted('op-destination');
+    await waiting;
+    expect(resolved).toBe(true);
   });
 });

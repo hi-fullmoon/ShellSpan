@@ -331,7 +331,7 @@ export default {
   'sftp.transfer.cancellingDelete': '正在撤销',
   'sftp.transfer.cancelling': '正在取消',
   'sftp.transfer.cancelled': '已撤销',
-  'sftp.transfer.pathBusy': '该路径已有正在执行的操作',
+  'sftp.transfer.queued': '已加入队列，等待当前操作完成',
 
   'sftp.transfers.title': '传输',
   'sftp.transfers.clearCompleted': '清除已完成',

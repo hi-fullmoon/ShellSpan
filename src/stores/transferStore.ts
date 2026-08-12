@@ -265,26 +265,60 @@ function pathsOverlap(left: string, right: string): boolean {
   return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
+export interface PathOperationScope {
+  connectionId: string;
+  paths: string[];
+}
+
+function scopeHasActiveOperation(
+  scope: PathOperationScope,
+  operations: TransferOperation[],
+): boolean {
+  return operations.some((operation) =>
+    isTransferActive(operation) &&
+    (
+      operation.pathScopes?.some((activeScope) =>
+        activeScope.connectionId === scope.connectionId &&
+        activeScope.paths.some((activePath) =>
+          scope.paths.some((path) => pathsOverlap(activePath, path)),
+        ),
+      ) ??
+      (operation.connectionId === scope.connectionId &&
+        operation.paths?.some((activePath) =>
+          scope.paths.some((path) => pathsOverlap(activePath, path)),
+        ))
+    ),
+  );
+}
+
 export function hasActivePathOperation(
   connectionId: string,
   paths: string[],
   operations = useTransferStore.getState().operations,
 ): boolean {
-  return operations.some((operation) =>
-    isTransferActive(operation) &&
-    (
-      operation.pathScopes?.some((scope) =>
-        scope.connectionId === connectionId &&
-        scope.paths.some((activePath) =>
-          paths.some((path) => pathsOverlap(activePath, path)),
-        ),
-      ) ??
-      (operation.connectionId === connectionId &&
-        operation.paths?.some((activePath) =>
-          paths.some((path) => pathsOverlap(activePath, path)),
-        ))
-    ),
-  );
+  return scopeHasActiveOperation({ connectionId, paths }, operations);
+}
+
+/**
+ * Resolves once no active operation overlaps any of the given scopes. Used to
+ * queue path operations instead of rejecting them while a transfer is busy.
+ * The check re-runs on every store change, so competing waiters that lose the
+ * race to a newly started operation simply keep waiting.
+ */
+export function waitForPathIdle(scopes: PathOperationScope[]): Promise<void> {
+  const isIdle = () =>
+    !scopes.some((scope) =>
+      scopeHasActiveOperation(scope, useTransferStore.getState().operations),
+    );
+  if (isIdle()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsubscribe = useTransferStore.subscribe(() => {
+      if (isIdle()) {
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
 }
 
 export function formatTransferProgress(operation: TransferOperation): string {
