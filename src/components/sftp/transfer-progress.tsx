@@ -103,6 +103,11 @@ export const TransferProgress: React.FC = () => {
   const cancelOperation = useTransferStore((state) => state.cancelOperation);
   const completedTimers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+  // The store prepends new operations; render oldest-first so the list reads
+  // in enqueue order — a queued batch that starts keeps its row position
+  // instead of jumping above rows enqueued earlier.
+  const orderedOperations = React.useMemo(() => [...operations].reverse(), [operations]);
+
   React.useEffect(() => {
     const completedIds = new Set(
       operations.filter((operation) => operation.kind !== 'delete' && isTransferComplete(operation)).map((operation) => operation.operationId),
@@ -136,7 +141,7 @@ export const TransferProgress: React.FC = () => {
 
   return (
     <div className="max-h-64 shrink-0 overflow-y-auto border-t border-app-border/50 bg-app-surface">
-      {operations.map((op) => {
+      {orderedOperations.map((op) => {
         const progress = op.totalBytes > 0 ? Math.min(100, (op.processedBytes / op.totalBytes) * 100) : 0;
         const speed = speeds.get(op.operationId);
         const showSpeed = speed !== undefined && speed > 0 && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op);

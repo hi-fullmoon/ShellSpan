@@ -279,7 +279,6 @@ export const SettingsPanel: React.FC = () => {
               {activeSection === 'appearance' && (
                 <div>
                   <div className="px-3 pb-2 pt-1">
-                    <h2 className="text-sm font-medium text-foreground">{t('settings.appearance.title')}</h2>
                     <p className="text-xs text-muted-foreground">{t('settings.appearance.description')}</p>
                   </div>
                   <Separator className="data-horizontal:border-border/40" />
@@ -318,7 +317,6 @@ export const SettingsPanel: React.FC = () => {
               {activeSection === 'general' && (
                 <div>
                   <div className="px-3 pb-2 pt-1">
-                    <h2 className="text-sm font-medium text-foreground">{t('settings.general.title')}</h2>
                     <p className="text-xs text-muted-foreground">{t('settings.general.description')}</p>
                   </div>
                   <Separator className="data-horizontal:border-border/40" />
@@ -368,7 +366,6 @@ export const SettingsPanel: React.FC = () => {
               {activeSection === 'terminal' && (
                 <div>
                   <div className="px-3 pb-2 pt-1">
-                    <h2 className="text-sm font-medium text-foreground">{t('settings.terminal.title')}</h2>
                     <p className="text-xs text-muted-foreground">{t('settings.terminal.description')}</p>
                   </div>
                   <Separator className="data-horizontal:border-border/40" />
@@ -622,7 +619,6 @@ export const SettingsPanel: React.FC = () => {
               {activeSection === 'sftp' && (
                 <div>
                   <div className="px-3 pb-2 pt-1">
-                    <h2 className="text-sm font-medium text-foreground">{t('settings.sftp.title')}</h2>
                     <p className="text-xs text-muted-foreground">{t('settings.sftp.description')}</p>
                   </div>
                   <Separator className="data-horizontal:border-border/40" />
@@ -723,10 +719,7 @@ export const SettingsPanel: React.FC = () => {
               {activeSection === 'shortcuts' && (
                 <div>
                   <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <h2 className="text-sm font-medium text-foreground">{t('settings.shortcuts.title')}</h2>
-                      <p className="text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
-                    </div>
+                    <p className="min-w-0 text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
                     <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
                       <RotateCcwIcon data-icon="inline-start" />
                       {t('settings.shortcuts.resetAll')}
