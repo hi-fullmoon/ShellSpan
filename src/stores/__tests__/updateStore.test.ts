@@ -74,8 +74,7 @@ describe('updateStore', () => {
       expect(useUpdateStore.getState().phase).toBe('downloading');
     });
 
-    expect(mocks.addToast).toHaveBeenNthCalledWith(1, 'update.checking', 'info');
-    expect(mocks.addToast).toHaveBeenNthCalledWith(2, 'update.available', 'info');
+    expect(mocks.addToast).toHaveBeenNthCalledWith(1, 'update.available', 'info');
   });
 
   it('reports a determinate download progress and reaches the downloaded state', async () => {

@@ -72,9 +72,6 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       downloadProgress: undefined,
       downloadIndeterminate: false,
     });
-    if (mode === 'manual') {
-      useToastStore.getState().addToast(t('update.checking'), 'info');
-    }
 
     try {
       const available = await checkForUpdate();
