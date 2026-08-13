@@ -40,10 +40,10 @@ export const TerminalControllerLayer: React.FC = () => {
 
   useEffect(() => {
     const currentIds = new Set(sessions.map((s) => s.sessionId));
-    for (const sessionId of currentIds) {
-      if (!knownRef.current.has(sessionId) && !terminalRegistry.get(sessionId)) {
-        terminalRegistry.create(
-          sessionId,
+    for (const session of sessions) {
+      if (!knownRef.current.has(session.sessionId) && !terminalRegistry.get(session.sessionId)) {
+        const controller = terminalRegistry.create(
+          session.sessionId,
           setStatus,
           setClosed,
           (currentSessionId) =>
@@ -51,6 +51,12 @@ export const TerminalControllerLayer: React.FC = () => {
             )?.status ?? 'connecting',
           (currentSessionId) => reconnectSession(currentSessionId),
         );
+        // Restored workspace sessions start disconnected and have no backend
+        // process, so the closed-event hint never fires for them; show it up
+        // front so the pane isn't blank.
+        if (session.status === 'disconnected') {
+          controller.writeDisconnectedHint();
+        }
       }
     }
     for (const sessionId of knownRef.current) {

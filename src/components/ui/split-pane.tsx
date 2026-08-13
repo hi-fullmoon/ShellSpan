@@ -109,7 +109,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
               ? 'border-l-[0.5px] border-app-border/15 dark:border-l dark:border-app-border'
               : 'border-l border-app-border'
             : dividerStyle === 'subtle'
-              ? 'border-t border-app-border/15 dark:border-t dark:border-app-border'
+              ? 'border-t-[0.5px] border-app-border/15 dark:border-t dark:border-app-border'
               : 'border-t border-app-border',
         )}
       >
@@ -135,12 +135,16 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
                   ? dividerStyle === 'subtle'
                     ? 'w-0.5 bg-app-primary/80'
                     : 'w-[3px] bg-app-primary'
-                  : 'h-[3px] bg-app-primary'
+                  : dividerStyle === 'subtle'
+                    ? 'h-0.5 bg-app-primary/80'
+                    : 'h-[3px] bg-app-primary'
                 : direction === 'horizontal'
                   ? dividerStyle === 'subtle'
                     ? 'w-px bg-transparent delay-0 group-hover:w-0.5 group-hover:bg-app-primary/80 group-hover:delay-200'
                     : 'w-px bg-transparent delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200'
-                  : 'h-px bg-transparent delay-0 group-hover:h-[3px] group-hover:bg-app-primary group-hover:delay-200',
+                  : dividerStyle === 'subtle'
+                    ? 'h-px bg-transparent delay-0 group-hover:h-0.5 group-hover:bg-app-primary/80 group-hover:delay-200'
+                    : 'h-px bg-transparent delay-0 group-hover:h-[3px] group-hover:bg-app-primary group-hover:delay-200',
             )}
           />
         </div>

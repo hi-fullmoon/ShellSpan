@@ -1015,8 +1015,13 @@ pub(crate) async fn open_remote_file(
     );
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let open_root = app
+        .path()
+        .home_dir()
+        .ok()
+        .map(|home| home.join(".termbridge").join("open-cache"));
     let result = tauri::async_runtime::spawn_blocking(move || {
-        open_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
+        open_remote_file_blocking(request, Some(&pool), known_hosts.as_deref(), open_root.as_deref())
     })
     .await
     .map_err(|error| RemoteFsError::Other { message: format!("failed to join open file task: {error}") })?;
