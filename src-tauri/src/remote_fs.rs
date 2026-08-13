@@ -1451,9 +1451,10 @@ pub(crate) fn open_remote_file_blocking(
     request: OpenRemoteFileRequest,
     pool: Option<&SftpPool>,
     known_hosts: Option<&Path>,
+    open_root: Option<&Path>,
 ) -> Result<(), RemoteFsError> {
     let connection = request.connection.clone();
-    let result = open_remote_file_inner(request, pool, known_hosts);
+    let result = open_remote_file_inner(request, pool, known_hosts, open_root);
     if let Err(ref error) = result {
         if let Some(pool) = pool {
             if is_connection_error(error) {
@@ -1468,6 +1469,7 @@ fn open_remote_file_inner(
     request: OpenRemoteFileRequest,
     pool: Option<&SftpPool>,
     known_hosts: Option<&Path>,
+    open_root: Option<&Path>,
 ) -> Result<(), RemoteFsError> {
     let connected = connect_sftp(&request.connection, pool, known_hosts)?;
     let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1502,7 +1504,12 @@ fn open_remote_file_inner(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "remote-file".to_string());
 
-    let open_root = std::env::temp_dir().join("termbridge-open");
+    // Local copies of remotely-opened files live under ~/.termbridge so they
+    // survive reboots (the retention cleanup bounds their lifetime); fall
+    // back to the system temp dir if the home dir is unavailable.
+    let open_root = open_root
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("termbridge-open"));
     fs::create_dir_all(&open_root)
         .map_err(|error| RemoteFsError::Other { message: format!("failed to create temp directory: {error}") })?;
     cleanup_stale_open_temp_files(&open_root);

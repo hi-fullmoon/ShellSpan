@@ -167,6 +167,7 @@ export interface TerminalController {
   focus(): void;
   simulateInput(data: string): void;
   write(chunk: string): void;
+  writeDisconnectedHint(): void;
   rebindSession(sessionId: string): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
   dispose(): void;
@@ -498,6 +499,11 @@ class TerminalControllerImpl implements TerminalController {
 
   write(chunk: string): void {
     this.terminal.write(chunk);
+  }
+
+  writeDisconnectedHint(): void {
+    this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
+    this.inputBlockedNoticeRef = true;
   }
 
   rebindSession(sessionId: string): void {
