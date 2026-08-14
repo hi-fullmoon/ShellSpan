@@ -388,6 +388,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
             try {
               await invokeCopyRemoteToRemote(request);
               markTransferCompleted(operationId);
+              targetRemote.invalidatePaneListingCache();
               void targetRemote.loadRemoteDirectory(queue.destination);
             } catch (copyError) {
               const operation = useTransferStore.getState().operations.find(
@@ -453,9 +454,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
       if (source === 'local') {
         await (side === 'local' ? loadLocalDirectory(path) : loadRightLocalDirectory(path));
       } else {
-        await (side === 'local'
-          ? leftRemote.loadRemoteDirectory(path)
-          : rightRemote.loadRemoteDirectory(path));
+        const target = side === 'local' ? leftRemote : rightRemote;
+        target.invalidatePaneListingCache();
+        await target.loadRemoteDirectory(path);
       }
       setPaneState(connection.id, side, { selectedPaths: [] });
     },

@@ -22,6 +22,8 @@ import type {
   RemoteConnectionRequest,
   RemoteDirectoryListing,
   RemoteDirectoryRequest,
+  RemoteEntryOwners,
+  RemoteEntryOwnersRequest,
   RemoteFsError,
   RenameRemotePathRequest,
   DeleteRemotePathRequest,
@@ -131,6 +133,18 @@ export async function invokeListRemoteDirectory(
   request: RemoteDirectoryRequest,
 ): Promise<RemoteDirectoryListing> {
   return invokeLogged('list_remote_directory', { request });
+}
+
+export async function invokeResolveRemoteEntryOwners(
+  request: RemoteEntryOwnersRequest,
+): Promise<RemoteEntryOwners> {
+  return invokeLogged('resolve_remote_entry_owners', { request });
+}
+
+export async function invokeWarmRemoteConnection(
+  request: RemoteConnectionRequest,
+): Promise<void> {
+  return invokeLogged('warm_remote_connection', { request });
 }
 
 export async function invokeCreateRemoteEntry(

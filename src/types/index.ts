@@ -315,6 +315,16 @@ export interface RemoteDirectoryRequest extends RemoteConnectionRequest {
   path?: string;
 }
 
+export interface RemoteEntryOwnersRequest extends RemoteConnectionRequest {
+  ownerIds: number[];
+  groupIds: number[];
+}
+
+export interface RemoteEntryOwners {
+  ownerNames: Record<number, string>;
+  groupNames: Record<number, string>;
+}
+
 export interface CreateRemoteEntryRequest extends RemoteConnectionRequest {
   parentPath: string;
   name: string;

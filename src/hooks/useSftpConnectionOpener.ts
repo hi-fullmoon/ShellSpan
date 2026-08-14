@@ -4,6 +4,7 @@ import {
   invokeCheckHostKey,
   invokeListRemoteDirectory,
   invokeTrustHost,
+  invokeWarmRemoteConnection,
   parseRemoteFsError,
 } from '@/lib/tauri';
 import { generateId } from '@/lib/utils';
@@ -66,6 +67,10 @@ export function useSftpConnectionOpener(): {
       } else {
         addConnection(summary, connection, profile.id);
       }
+      // Warm the pooled SFTP connection in the background so the first
+      // directory listing does not pay the full connect/handshake cost. Any
+      // failure is logged by invokeLogged and will surface on the listing.
+      void invokeWarmRemoteConnection(connection).catch(() => {});
       const connectionId = targetConnectionId ?? useSftpStore.getState().activeConnectionId;
       if (connectionId) {
         void hydrateSftpBookmarks(
