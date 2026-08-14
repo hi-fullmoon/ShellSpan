@@ -34,7 +34,7 @@
     "targets": "all",
     "createUpdaterArtifacts": "v1Compatible",
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "TermBridge Dev"
     },
     "windows": {
       "nsis": {
