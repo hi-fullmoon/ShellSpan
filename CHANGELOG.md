@@ -3,6 +3,22 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.40](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.40) - 2026-08-14
+
+
+### CI/CD
+
+- **release:** use adhoc signing for macOS CI builds
+
+### Features
+
+- add lazy owner/group name resolution for remote listings
+- integrate lazy owner resolution and connection warm-up in frontend
+
+### Testing
+
+- update tests for lazy owner resolution and connection warm-up
+
 ## [v2.0.39](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.39) - 2026-08-14
 
 
