@@ -235,7 +235,9 @@ jobs:
         shell: bash
         run: |
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
-          node -e 'console.log(JSON.stringify({version: process.env.APP_VERSION, build: {beforeBuildCommand: ""}}))' > tauri-ci-override.json
+          # signingIdentity 覆盖为 adhoc：配置文件里的 "TermBridge Dev" 是开发者本机钥匙串里的
+          # 自签名证书，runner 上没有；自签名对 Gatekeeper 本就无效，CI 用 adhoc 签名即可
+          node -e 'console.log(JSON.stringify({version: process.env.APP_VERSION, build: {beforeBuildCommand: ""}, bundle: {macOS: {signingIdentity: "-"}}}))' > tauri-ci-override.json
           read -r -a bundle_args <<< "$BUNDLE_ARGS"
           pnpm exec tauri build --target "$RUST_TARGET" "${bundle_args[@]}" --config tauri-ci-override.json
         env:
