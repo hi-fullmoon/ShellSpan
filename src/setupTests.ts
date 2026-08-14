@@ -1,5 +1,12 @@
 import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import { beforeEach, vi } from 'vitest';
+import { clearDirectoryListingCache } from '@/lib/directory-listing-cache';
+
+// The directory listing cache is module-level state; reset it between tests
+// so cached entries never leak across test cases.
+beforeEach(() => {
+  clearDirectoryListingCache();
+});
 
 // Node >= 22 ships an experimental `localStorage` global that shadows jsdom's
 // Storage during environment population and returns `undefined` unless the

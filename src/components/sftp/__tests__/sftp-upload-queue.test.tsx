@@ -53,6 +53,7 @@ vi.mock('@/hooks/useSftpConnection', () => ({
   useSftpConnection: () => ({
     loadRemoteDirectory: connectionMocks.loadRemoteDirectory,
     downloadRemotePaths: connectionMocks.downloadRemotePaths,
+    invalidatePaneListingCache: vi.fn(),
   }),
 }));
 
