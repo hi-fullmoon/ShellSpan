@@ -7,7 +7,7 @@ use crate::models::{
     HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing,
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
+    RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
     SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
@@ -558,6 +558,42 @@ pub(crate) async fn list_remote_directory(
         }
     }
     result
+}
+
+#[tauri::command]
+pub(crate) async fn resolve_remote_entry_owners(
+    app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RemoteEntryOwnersRequest,
+    pool: State<'_, SftpPool>,
+    cache: State<'_, RemoteIdentityCache>,
+) -> Result<RemoteEntryOwners, RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    let pool = pool.inner().clone();
+    let cache = cache.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_remote_entry_owners_blocking(request, Some(&pool), Some(&cache), known_hosts.as_deref())
+    })
+    .await
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join owner lookup task: {error}") })?
+}
+
+#[tauri::command]
+pub(crate) async fn warm_remote_connection(
+    app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RemoteConnectionRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request).map_err(|message| RemoteFsError::Other { message })?;
+    let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        warm_remote_connection_blocking(request, Some(&pool), known_hosts.as_deref())
+    })
+    .await
+    .map_err(|error| RemoteFsError::Other { message: format!("failed to join warm-up task: {error}") })?
 }
 
 #[tauri::command]
