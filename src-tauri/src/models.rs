@@ -136,6 +136,24 @@ pub(crate) struct RemoteDirectoryRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteEntryOwnersRequest {
+    #[serde(flatten)]
+    pub(crate) connection: RemoteConnectionRequest,
+    #[serde(default)]
+    pub(crate) owner_ids: Vec<u32>,
+    #[serde(default)]
+    pub(crate) group_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteEntryOwners {
+    pub(crate) owner_names: HashMap<u32, String>,
+    pub(crate) group_names: HashMap<u32, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CreateRemoteEntryRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,

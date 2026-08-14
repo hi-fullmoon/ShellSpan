@@ -8,7 +8,8 @@ use crate::models::{
     DeleteRemotePathRequest, DownloadProgressTracker, DownloadRemotePathsRequest, DownloadScanStats,
     OpenRemoteFileRequest, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
     RemoteCopyProgressTracker,
-    RemoteCopyScanStats, RemoteDirectoryListing, RemoteDirectoryRequest, RemoteFileEntry,
+    RemoteCopyScanStats, RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners,
+    RemoteEntryOwnersRequest, RemoteFileEntry,
     RemoteFileKind, RemoteFsError, RenameRemotePathRequest,
     UpdateRemotePermissionsRequest, UploadConflictPolicy, UploadLocalPathsRequest,
     UploadProgressTracker, UploadScanStats,
@@ -92,26 +93,109 @@ fn list_remote_directory_inner(
         "{}:{}:{}",
         request.connection.host, request.connection.port, request.connection.username
     );
-    // Two-phase listing: phase 1 holds the connection lock only for the SFTP
-    // walk (readdir + sort); phase 2 resolves uid/gid names and re-locks the
-    // connection only when the identity cache misses, so a slow remote exec
-    // round-trip does not block transfers sharing this connection.
+    // Listing stays on the SFTP fast path: owner/group names are applied only
+    // from the identity cache (no remote exec here). The frontend lazily calls
+    // resolve_remote_entry_owners for the ids that miss.
     let mut listing = {
         let connected = connect_sftp(&request.connection, pool, known_hosts)?;
         let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         list_remote_directory_from_sftp(&connected.sftp, request.path.as_deref())?
     };
-
-    enrich_remote_entry_owners(
-        &scope,
-        &request.connection,
-        pool,
-        known_hosts,
-        &mut listing.entries,
-        cache,
-    );
+    apply_cached_entry_owner_names(&scope, cache, &mut listing.entries);
 
     Ok(listing)
+}
+
+// Applies cached uid/gid names to listing entries without any remote exec;
+// entries whose ids are not cached keep `None` and the UI falls back to the
+// numeric id until resolve_remote_entry_owners fills them in.
+fn apply_cached_entry_owner_names(
+    scope: &str,
+    cache: Option<&RemoteIdentityCache>,
+    entries: &mut [RemoteFileEntry],
+) {
+    let Some(cache) = cache else {
+        return;
+    };
+    let owner_ids = entries
+        .iter()
+        .filter_map(|entry| entry.owner_uid)
+        .collect::<HashSet<_>>();
+    let group_ids = entries
+        .iter()
+        .filter_map(|entry| entry.group_gid)
+        .collect::<HashSet<_>>();
+    let (owner_names, _) =
+        lookup_cached_identity_names(scope, Some(cache), &owner_ids, RemoteIdentityKind::User);
+    let (group_names, _) =
+        lookup_cached_identity_names(scope, Some(cache), &group_ids, RemoteIdentityKind::Group);
+    for entry in entries.iter_mut() {
+        entry.owner_name = entry.owner_uid.and_then(|uid| owner_names.get(&uid).cloned());
+        entry.group_name = entry.group_gid.and_then(|gid| group_names.get(&gid).cloned());
+    }
+}
+
+// Lazy owner/group name resolution: the frontend calls this after rendering a
+// listing so the readdir result is never delayed by the remote lookup exec.
+pub(crate) fn resolve_remote_entry_owners_blocking(
+    request: RemoteEntryOwnersRequest,
+    pool: Option<&SftpPool>,
+    cache: Option<&RemoteIdentityCache>,
+    known_hosts: Option<&Path>,
+) -> Result<RemoteEntryOwners, RemoteFsError> {
+    let scope = format!(
+        "{}:{}:{}",
+        request.connection.host, request.connection.port, request.connection.username
+    );
+    let owner_ids = request.owner_ids.iter().copied().collect::<HashSet<_>>();
+    let group_ids = request.group_ids.iter().copied().collect::<HashSet<_>>();
+
+    let (mut owner_names, missing_owner_ids) =
+        lookup_cached_identity_names(scope.as_str(), cache, &owner_ids, RemoteIdentityKind::User);
+    let (mut group_names, missing_group_ids) =
+        lookup_cached_identity_names(scope.as_str(), cache, &group_ids, RemoteIdentityKind::Group);
+
+    if !missing_owner_ids.is_empty() || !missing_group_ids.is_empty() {
+        let connection = request.connection.clone();
+        let result = connect_sftp(&request.connection, pool, known_hosts);
+        match result {
+            Ok(connected) => {
+                let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                resolve_missing_identity_names(
+                    &scope,
+                    &connected.session,
+                    cache,
+                    &missing_owner_ids,
+                    &missing_group_ids,
+                    &mut owner_names,
+                    &mut group_names,
+                );
+            }
+            Err(error) => {
+                if let Some(pool) = pool {
+                    if is_connection_error(&error) {
+                        pool.invalidate(&connection);
+                    }
+                }
+                // Keep the numeric ids when the lookup connection fails, the
+                // same fallback as a failed lookup exec.
+                warn!("failed to reconnect for remote identity lookup: {error:?}");
+            }
+        }
+    }
+
+    Ok(RemoteEntryOwners { owner_names, group_names })
+}
+
+// Establishes (or health-checks) the pooled SFTP connection so the first
+// directory listing does not pay the full connect cost.
+pub(crate) fn warm_remote_connection_blocking(
+    connection: RemoteConnectionRequest,
+    pool: Option<&SftpPool>,
+    known_hosts: Option<&Path>,
+) -> Result<(), RemoteFsError> {
+    connect_sftp(&connection, pool, known_hosts)?;
+    Ok(())
 }
 
 pub(crate) fn create_remote_entry_blocking(
@@ -1695,66 +1779,6 @@ fn list_remote_directory_from_sftp(
     })
 }
 
-// Phase 2 of directory listing: runs after the phase-1 lock was released.
-// Cached names are applied without any locking; only cache misses trigger a
-// fresh connect + lock to run the remote identity lookup exec.
-fn enrich_remote_entry_owners(
-    scope: &str,
-    connection: &RemoteConnectionRequest,
-    pool: Option<&SftpPool>,
-    known_hosts: Option<&Path>,
-    entries: &mut [RemoteFileEntry],
-    cache: Option<&RemoteIdentityCache>,
-) {
-    let owner_ids = entries
-        .iter()
-        .filter_map(|entry| entry.owner_uid)
-        .collect::<HashSet<_>>();
-    let group_ids = entries
-        .iter()
-        .filter_map(|entry| entry.group_gid)
-        .collect::<HashSet<_>>();
-
-    let (mut owner_names, missing_owner_ids) =
-        lookup_cached_identity_names(scope, cache, &owner_ids, RemoteIdentityKind::User);
-    let (mut group_names, missing_group_ids) =
-        lookup_cached_identity_names(scope, cache, &group_ids, RemoteIdentityKind::Group);
-
-    if !missing_owner_ids.is_empty() || !missing_group_ids.is_empty() {
-        match connect_sftp(connection, pool, known_hosts) {
-            Ok(connected) => {
-                let connected = connected.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                resolve_missing_identity_names(
-                    scope,
-                    &connected.session,
-                    cache,
-                    &missing_owner_ids,
-                    RemoteIdentityKind::User,
-                    &mut owner_names,
-                );
-                resolve_missing_identity_names(
-                    scope,
-                    &connected.session,
-                    cache,
-                    &missing_group_ids,
-                    RemoteIdentityKind::Group,
-                    &mut group_names,
-                );
-            }
-            Err(error) => {
-                // Keep the numeric ids when the lookup connection fails, the
-                // same fallback as a failed lookup exec.
-                warn!("failed to reconnect for remote identity lookup: {error:?}");
-            }
-        }
-    }
-
-    for entry in entries {
-        entry.owner_name = entry.owner_uid.and_then(|uid| owner_names.get(&uid).cloned());
-        entry.group_name = entry.group_gid.and_then(|gid| group_names.get(&gid).cloned());
-    }
-}
-
 fn lookup_cached_identity_names(
     scope: &str,
     cache: Option<&RemoteIdentityCache>,
@@ -1774,29 +1798,63 @@ fn lookup_cached_identity_names(
     }
 }
 
+// Resolves user and group names in a single remote exec (one channel, one
+// remote shell) instead of one exec per kind. Ids that come back without a
+// name — and all requested ids when the exec fails — are cached as unresolved
+// so the next listing does not pay for the lookup again.
 fn resolve_missing_identity_names(
     scope: &str,
     session: &Session,
     cache: Option<&RemoteIdentityCache>,
-    missing_ids: &[u32],
-    kind: RemoteIdentityKind,
-    names: &mut HashMap<u32, String>,
+    missing_owner_ids: &[u32],
+    missing_group_ids: &[u32],
+    owner_names: &mut HashMap<u32, String>,
+    group_names: &mut HashMap<u32, String>,
 ) {
-    if missing_ids.is_empty() {
+    if missing_owner_ids.is_empty() && missing_group_ids.is_empty() {
         return;
     }
 
-    match resolve_remote_identity_names(session, missing_ids, kind) {
-        Ok(resolved) => {
+    let mut sorted_owner_ids = missing_owner_ids.to_vec();
+    sorted_owner_ids.sort_unstable();
+    let mut sorted_group_ids = missing_group_ids.to_vec();
+    sorted_group_ids.sort_unstable();
+
+    let command = build_remote_identity_lookup_command(&sorted_owner_ids, &sorted_group_ids);
+    match run_remote_exec(session, &command) {
+        Ok(output) => {
+            let (resolved_owners, resolved_groups) = parse_identity_lookup_output(&output);
             if let Some(cache) = cache {
-                for (id, name) in &resolved {
-                    cache.insert(scope, *id, kind, name.clone());
+                for (id, name) in &resolved_owners {
+                    cache.insert(scope, *id, RemoteIdentityKind::User, name.clone());
+                }
+                for (id, name) in &resolved_groups {
+                    cache.insert(scope, *id, RemoteIdentityKind::Group, name.clone());
+                }
+                for id in &sorted_owner_ids {
+                    if !resolved_owners.contains_key(id) {
+                        cache.insert_unresolved(scope, *id, RemoteIdentityKind::User);
+                    }
+                }
+                for id in &sorted_group_ids {
+                    if !resolved_groups.contains_key(id) {
+                        cache.insert_unresolved(scope, *id, RemoteIdentityKind::Group);
+                    }
                 }
             }
-            names.extend(resolved);
+            owner_names.extend(resolved_owners);
+            group_names.extend(resolved_groups);
         }
         Err(error) => {
-            warn!("failed to resolve remote {:?} names: {:?}", kind, error);
+            if let Some(cache) = cache {
+                for id in &sorted_owner_ids {
+                    cache.insert_unresolved(scope, *id, RemoteIdentityKind::User);
+                }
+                for id in &sorted_group_ids {
+                    cache.insert_unresolved(scope, *id, RemoteIdentityKind::Group);
+                }
+            }
+            warn!("failed to resolve remote identity names: {error:?}");
         }
     }
 }
@@ -1807,66 +1865,77 @@ pub(crate) enum RemoteIdentityKind {
     Group,
 }
 
-fn resolve_remote_identity_names(
-    session: &Session,
-    ids: &[u32],
-    kind: RemoteIdentityKind,
-) -> Result<HashMap<u32, String>, RemoteFsError> {
-    if ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut sorted_ids = ids.to_vec();
-    sorted_ids.sort_unstable();
-
-    let command = build_remote_identity_lookup_command(&sorted_ids, kind);
-    let output = run_remote_exec(session, &command)?;
-
-    let mut names = HashMap::new();
+// Parses lines of `u\tid\tname` / `g\tid\tname` emitted by the lookup command.
+fn parse_identity_lookup_output(output: &str) -> (HashMap<u32, String>, HashMap<u32, String>) {
+    let mut owners = HashMap::new();
+    let mut groups = HashMap::new();
     for line in output.lines() {
-        let Some((id, name)) = line.split_once('\t') else {
+        let mut parts = line.splitn(3, '\t');
+        let (Some(kind_tag), Some(id_text), Some(name)) = (parts.next(), parts.next(), parts.next()) else {
             continue;
         };
-        let Ok(parsed_id) = id.trim().parse::<u32>() else {
+        let Ok(id) = id_text.trim().parse::<u32>() else {
             continue;
         };
-        let trimmed_name = name.trim();
-        if trimmed_name.is_empty() {
+        let name = name.trim();
+        if name.is_empty() {
             continue;
         }
-        names.insert(parsed_id, trimmed_name.to_string());
+        match kind_tag {
+            "u" => {
+                owners.insert(id, name.to_string());
+            }
+            "g" => {
+                groups.insert(id, name.to_string());
+            }
+            _ => {}
+        }
     }
-
-    Ok(names)
+    (owners, groups)
 }
 
-fn build_remote_identity_lookup_command(ids: &[u32], kind: RemoteIdentityKind) -> String {
+fn build_remote_identity_lookup_command(owner_ids: &[u32], group_ids: &[u32]) -> String {
+    // One `sh -lc` for both databases: `lookup_ids <db> <python module>
+    // <python lookup> <python field> <output tag> <id...>` prints
+    // `tag\tid\tname` per resolved id.
+    let mut script = String::from(
+        "lookup_ids() {\n\
+         db=\"$1\"; py_module=\"$2\"; py_lookup=\"$3\"; py_field=\"$4\"; tag=\"$5\"; shift 5;\n\
+         if command -v getent >/dev/null 2>&1; then\n\
+         for id in \"$@\"; do\n\
+         entry=$(getent \"$db\" \"$id\" 2>/dev/null | cut -d: -f1);\n\
+         if [ -n \"$entry\" ]; then printf \"%s\\t%s\\t%s\\n\" \"$tag\" \"$id\" \"$entry\"; fi;\n\
+         done;\n\
+         else\n\
+         for id in \"$@\"; do\n\
+         entry=\"\";\n\
+         if command -v python3 >/dev/null 2>&1; then\n\
+         entry=$(python3 -c \"import $py_module,sys; print(getattr($py_module.$py_lookup(int(sys.argv[1])), \\\"$py_field\\\"))\" \"$id\" 2>/dev/null);\n\
+         elif command -v python >/dev/null 2>&1; then\n\
+         entry=$(python -c \"import $py_module,sys; print(getattr($py_module.$py_lookup(int(sys.argv[1])), \\\"$py_field\\\"))\" \"$id\" 2>/dev/null);\n\
+         fi;\n\
+         if [ -n \"$entry\" ]; then printf \"%s\\t%s\\t%s\\n\" \"$tag\" \"$id\" \"$entry\"; fi;\n\
+         done;\n\
+         fi;\n\
+         }",
+    );
+
     // Space-separated: POSIX `for id in ...` splits on IFS (spaces), not commas.
-    let ids_text = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
+    let owner_ids_text = owner_ids.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
+    let group_ids_text = group_ids.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
 
-    let (python_module, python_lookup, python_field, getent_database) = match kind {
-        RemoteIdentityKind::User => ("pwd", "getpwuid", "pw_name", "passwd"),
-        RemoteIdentityKind::Group => ("grp", "getgrgid", "gr_name", "group"),
-    };
+    if !owner_ids.is_empty() {
+        script.push_str(&format!(
+            "\nlookup_ids passwd pwd getpwuid pw_name u {owner_ids_text};"
+        ));
+    }
+    if !group_ids.is_empty() {
+        script.push_str(&format!(
+            "\nlookup_ids group grp getgrgid gr_name g {group_ids_text};"
+        ));
+    }
 
-    format!(
-        "sh -lc 'if command -v getent >/dev/null 2>&1; then \
-for id in {ids_text}; do \
-entry=$(getent {getent_database} \"$id\" 2>/dev/null | cut -d: -f1); \
-if [ -n \"$entry\" ]; then printf \"%s\\t%s\\n\" \"$id\" \"$entry\"; fi; \
-done; \
-else \
-for id in {ids_text}; do \
-entry=\"\"; \
-if command -v python3 >/dev/null 2>&1; then \
-entry=$(python3 -c \"import {python_module},sys; print(getattr({python_module}.{python_lookup}(int(sys.argv[1])), '{python_field}'))\" \"$id\" 2>/dev/null); \
-elif command -v python >/dev/null 2>&1; then \
-entry=$(python -c \"import {python_module},sys; print(getattr({python_module}.{python_lookup}(int(sys.argv[1])), '{python_field}'))\" \"$id\" 2>/dev/null); \
-fi; \
-if [ -n \"$entry\" ]; then printf \"%s\\t%s\\n\" \"$id\" \"$entry\"; fi; \
-done; \
-fi'"
-    )
+    format!("sh -lc '{script}'")
 }
 
 fn run_remote_exec(session: &Session, command: &str) -> Result<String, RemoteFsError> {
@@ -2511,6 +2580,41 @@ fn open_path_with_default_app(path: &Path) -> Result<(), RemoteFsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_identity_lookup_output_splits_users_and_groups() {
+        let output = "u\t1000\talice\ng\t100\twheel\nu\t0\troot\ngarbage line\nu\tnotanumber\tbob\nu\t1001\t\n";
+
+        let (owners, groups) = parse_identity_lookup_output(output);
+
+        assert_eq!(owners.get(&1000), Some(&"alice".to_string()));
+        assert_eq!(owners.get(&0), Some(&"root".to_string()));
+        assert_eq!(groups.get(&100), Some(&"wheel".to_string()));
+        assert_eq!(owners.len(), 2);
+        assert_eq!(groups.len(), 1);
+    }
+
+    #[test]
+    fn build_identity_lookup_command_uses_single_shell_for_both_kinds() {
+        let command = build_remote_identity_lookup_command(&[0, 1000], &[100]);
+
+        assert!(command.starts_with("sh -lc '"));
+        assert!(command.ends_with('\''));
+        assert!(command.contains("lookup_ids passwd pwd getpwuid pw_name u 0 1000;"));
+        assert!(command.contains("lookup_ids group grp getgrgid gr_name g 100;"));
+        // Single quotes inside the script would break the outer sh -lc quoting.
+        let script = &command["sh -lc '".len()..command.len() - 1];
+        assert!(!script.contains('\''),
+            "script must not contain single quotes: {script}");
+    }
+
+    #[test]
+    fn build_identity_lookup_command_skips_empty_kind() {
+        let command = build_remote_identity_lookup_command(&[], &[100]);
+
+        assert!(!command.contains("passwd"));
+        assert!(command.contains("lookup_ids group grp getgrgid gr_name g 100;"));
+    }
 
     #[test]
     fn same_connection_copy_rejects_copying_entry_onto_itself() {
