@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.39](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.39) - 2026-08-14
+
+
+### Bug Fixes
+
+- persist remote file open cache under user home dir
+
 ## [v2.0.38](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.38) - 2026-08-12
 
 
