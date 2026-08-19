@@ -129,17 +129,16 @@ describe('SftpTabBar', () => {
     );
   });
 
-  it('calls onNewTabClick when plus button is clicked', async () => {
+  it('calls onNewTabClick when empty tab bar space is double-clicked', async () => {
     addConnection('Conn A');
     const onNewTabClick = vi.fn();
-    render(
+    const { container } = render(
       <SftpTabBar
         onNewTabClick={onNewTabClick}
         onTabContextMenu={vi.fn()}
       />,
     );
-    const plusButton = screen.getByRole('button', { name: 'sftp.newTab' });
-    await userEvent.click(plusButton);
+    await userEvent.dblClick(container.firstChild as HTMLElement);
     expect(onNewTabClick).toHaveBeenCalled();
   });
 
