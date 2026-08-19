@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -74,6 +74,23 @@ vi.mock('@/lib/tauri', () => ({
 }));
 
 const initialState = useSftpStore.getState();
+
+// The conflict dialog shows the conflicting name as plain text, so queries
+// must be scoped to the dialog content to avoid matching the file listing.
+function queryConflictFileName(name: string): HTMLElement | null {
+  const dialog = document.body.querySelector('[data-slot="dialog-content"]');
+  if (!dialog) return null;
+  return within(dialog as HTMLElement).queryByText(name);
+}
+
+async function findConflictFileName(name: string): Promise<HTMLElement> {
+  let found: HTMLElement | null = null;
+  await waitFor(() => {
+    found = queryConflictFileName(name);
+    expect(found).not.toBeNull();
+  });
+  return found!;
+}
 
 function createConnection(remoteEntryNames: string[] = []) {
   useSftpStore.getState().addConnection(
@@ -188,12 +205,12 @@ describe('SftpContent upload queue', () => {
     await capturedOnDrop!(['/local/a.txt', '/local/b.txt'], 'remote');
 
     // First conflict is presented.
-    expect(await screen.findByTitle('a.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('a.txt')).toBeInTheDocument();
 
     // Resolving the first conflict must surface the second one instead of
     // letting the dialog's onClose wipe the pending queue.
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
-    expect(await screen.findByTitle('b.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('b.txt')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
     await waitFor(() =>
@@ -219,11 +236,11 @@ describe('SftpContent upload queue', () => {
     renderContent(createConnection(['a.txt', 'b.txt']));
 
     await capturedOnDrop!(['/local/a.txt', '/local/b.txt'], 'remote');
-    expect(await screen.findByTitle('a.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('a.txt')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.cancel' }));
 
-    await waitFor(() => expect(screen.queryByTitle('a.txt')).not.toBeInTheDocument());
+    await waitFor(() => expect(queryConflictFileName('a.txt')).not.toBeInTheDocument());
     expect(uploadWithPolicies).not.toHaveBeenCalled();
 
     // The queue must be free again: a later drop is processed normally.
@@ -252,7 +269,7 @@ describe('SftpContent upload queue', () => {
       'local',
     );
 
-    expect(await screen.findByTitle('file.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('file.txt')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
 
     await waitFor(() =>
@@ -315,7 +332,7 @@ describe('SftpContent upload queue', () => {
     renderContent(createConnection(['a.txt']));
 
     await capturedOnDrop!(['/local/a.txt'], 'remote');
-    expect(await screen.findByTitle('a.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('a.txt')).toBeInTheDocument();
 
     // A second drop while the conflict dialog is open is queued, not rejected,
     // and shows up as a pending row in the transfer list.
@@ -422,8 +439,8 @@ describe('SftpContent upload queue', () => {
 
     // The store prepends new operations and the list renders newest first:
     // the later queued batch sits above the earlier one.
-    const rowB = await screen.findByText('/local/b.txt');
-    const rowC = await screen.findByText('/local/c.txt');
+    const rowB = await screen.findByText('b.txt');
+    const rowC = await screen.findByText('c.txt');
     expect(
       rowC.compareDocumentPosition(rowB) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -465,8 +482,8 @@ describe('SftpContent upload queue', () => {
 
     await capturedOnDrop!(['/local/b.txt'], 'remote');
     await capturedOnDrop!(['/local/c.txt'], 'remote');
-    await screen.findByText('/local/b.txt');
-    await screen.findByText('/local/c.txt');
+    await screen.findByText('b.txt');
+    await screen.findByText('c.txt');
 
     resolveFirstUpload();
     await waitFor(() =>
@@ -482,8 +499,8 @@ describe('SftpContent upload queue', () => {
     expect(
       useTransferStore.getState().operations.every((op) => op.status === 'running'),
     ).toBe(true);
-    const rowB = await screen.findByText('/local/b.txt');
-    const rowC = await screen.findByText('/local/c.txt');
+    const rowB = await screen.findByText('b.txt');
+    const rowC = await screen.findByText('c.txt');
     expect(
       rowC.compareDocumentPosition(rowB) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -505,7 +522,7 @@ describe('SftpContent upload queue', () => {
     renderContent(createConnection());
 
     await capturedOnDrop!(['/local/a.txt', '/other/a.txt'], 'remote');
-    expect(await screen.findByTitle('a.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('a.txt')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
     await waitFor(() =>
@@ -532,7 +549,7 @@ describe('SftpContent upload queue', () => {
     renderContent(connection);
 
     await capturedOnDrop!(['/local/a.txt', '/local/b.txt'], 'remote');
-    expect(await screen.findByTitle('a.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('a.txt')).toBeInTheDocument();
 
     // b.txt appears in the directory while the first conflict dialog is open.
     useSftpStore.getState().setEntries(connection.id, 'remote', [
@@ -543,7 +560,7 @@ describe('SftpContent upload queue', () => {
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
     // A stale snapshot would have accepted b.txt with a 'fail' policy;
     // instead the fresh listing surfaces its conflict dialog.
-    expect(await screen.findByTitle('b.txt')).toBeInTheDocument();
+    expect(await findConflictFileName('b.txt')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
     await waitFor(() =>
