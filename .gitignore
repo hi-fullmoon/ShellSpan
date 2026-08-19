@@ -5,5 +5,3 @@ src-tauri/target
 .env
 .env.local
 .worktrees/
-
-.aicommit.config.json
