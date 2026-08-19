@@ -3,6 +3,20 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.42](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.42) - 2026-08-19
+
+
+### Bug Fixes
+
+- **sftp:** clear filter query when path changes
+- **ui:** force default cursor during tab drag via body class
+- **term:** ignore stray pointer moves after trackpad taps
+
+### Refactoring
+
+- **sftp:** replace new-tab button with double-click on empty space
+- **terminal:** replace new-tab button with double-click on empty space
+
 ## [v2.0.41](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.41) - 2026-08-19
 
 
