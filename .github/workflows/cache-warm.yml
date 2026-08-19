@@ -44,7 +44,8 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        # 版本由仓库根目录 rust-toolchain.toml 固定（不传 toolchain 输入即自动读取）
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           targets: ${{ matrix.rust_target }}
 
@@ -56,6 +57,8 @@ jobs:
           # 缓存键默认包含 job id（warm），release.yml 的 build job 会查
           # v0-rust-build-... 而永远查不到这里的 v0-rust-warm-...，必须关掉
           add-job-id-key: false
+          # 构建中途失败也把已编译的依赖进度存下来，避免下次从头全量重编
+          cache-on-failure: true
 
       - name: Build release dependencies
         working-directory: src-tauri

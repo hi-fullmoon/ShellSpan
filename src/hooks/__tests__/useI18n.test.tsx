@@ -45,9 +45,11 @@ describe('useI18n', () => {
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
     });
 
-    // intl.init() 切换语言是异步的，等待英文文案渲染完成再断言
-    expect(await screen.findByRole('button', { name: 'Save' })).toBeInTheDocument();
-    expect(await screen.findByText('Cancel')).toBeInTheDocument();
-    expect(await screen.findByText('Open Workbench')).toBeInTheDocument();
+    // react-intl-universal 的 init() 是同步应用语言包的（仅返回已 resolve 的
+    // Promise），await act 排空微任务后英文文案必然已渲染；用同步 getBy 断言，
+    // 避免高负载下 waitFor 默认 1s 超时造成的偶发失败
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByText('Cancel')).toBeInTheDocument();
+    expect(screen.getByText('Open Workbench')).toBeInTheDocument();
   });
 });

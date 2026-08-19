@@ -82,7 +82,13 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       tabIndex={0}
       aria-selected={active}
       data-sftp-tab={connection.id}
-      onClick={() => onActivate(connection.id)}
+      // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
+      // swallows the click after any drag, so a trackpad tap that jitters past
+      // the sensor threshold would otherwise both start a drag and lose the
+      // activation.
+      onPointerDown={(e) => {
+        if (e.button === 0) onActivate(connection.id);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(connection, e.clientX, e.clientY);
@@ -301,7 +307,9 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
+      // 10px dead zone: trackpad taps (tap-to-click) often jitter a few px;
+      // a low threshold misreads them as drags.
+      activationConstraint: { distance: 10 },
     }),
   );
 

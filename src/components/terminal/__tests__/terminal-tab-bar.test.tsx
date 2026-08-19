@@ -47,7 +47,8 @@ describe('TerminalTabBar', () => {
 
     const tabs = screen.getAllByRole('tab');
     expect(tabs[1]).not.toHaveClass('shadow-md');
-    fireEvent.click(tabs[1]);
+    // Tabs activate on pointerdown (browser-tab behavior), not click.
+    fireEvent.pointerDown(tabs[1], { button: 0 });
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });
 
@@ -218,7 +219,9 @@ describe('TerminalTabBar', () => {
         clientX: 250,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 260, clientY: 10 });
+      // The first move must clear the PointerSensor's 10px activation
+      // distance, or the drag never starts and the drop is a no-op.
+      fireEvent.pointerMove(document, { clientX: 262, clientY: 10 });
       fireEvent.pointerMove(document, { clientX: 50, clientY: 10 });
     });
     await act(async () => {
@@ -304,7 +307,7 @@ describe('TerminalTabBar', () => {
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
+      fireEvent.pointerMove(document, { clientX: 62, clientY: 10 });
       fireEvent.pointerMove(document, { clientX: 180, clientY: 10 });
     });
     await act(async () => {
@@ -350,7 +353,7 @@ describe('TerminalTabBar', () => {
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
+      fireEvent.pointerMove(document, { clientX: 62, clientY: 10 });
       fireEvent.pointerMove(document, { clientX: 260, clientY: 10 });
     });
     await act(async () => {

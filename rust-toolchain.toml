@@ -1,0 +1,4 @@
+# 固定编译器版本，避免 floating `stable` 漂移导致 CI 缓存（key 含 rustc 版本）
+# 在发版时失配、全量重编。升级时手动 bump channel。
+[toolchain]
+channel = "1.95.0"

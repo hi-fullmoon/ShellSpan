@@ -499,7 +499,12 @@ const Terminal: React.FC = () => {
           'relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-app-bg',
           focused && 'ring-1 ring-inset ring-app-primary/70',
         )}
-        onPointerDown={() => {
+        onPointerDown={(e) => {
+          // Tab presses activate on pointerdown too and already focus the
+          // group via activateGroupTab. Handling them here as well would
+          // re-activate the render-time groupActiveSession, clobbering a
+          // same-press tab switch with the stale session.
+          if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
           focusGroup(slot);
           if (groupActiveSession) {
             useTerminalStore.getState().setActiveSession(groupActiveSession.sessionId);
