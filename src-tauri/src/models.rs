@@ -379,6 +379,27 @@ impl ConnectionError {
             ConnectionError::Other { message } => message.clone(),
         }
     }
+
+    /// Lossless conversion into the command-facing error so `create_session`
+    /// rejects with the same host-key classification the connection produced.
+    pub(crate) fn to_create_session_error(&self) -> CreateSessionError {
+        match self {
+            ConnectionError::HostKeyUnknown { host, port, fingerprint } => {
+                CreateSessionError::HostKeyUnknown {
+                    host: host.clone(),
+                    port: *port,
+                    fingerprint: fingerprint.clone(),
+                }
+            }
+            ConnectionError::HostKeyMismatch { host, port } => CreateSessionError::HostKeyMismatch {
+                host: host.clone(),
+                port: *port,
+            },
+            ConnectionError::Other { message } => CreateSessionError::Other {
+                message: message.clone(),
+            },
+        }
+    }
 }
 
 /// Structured remote filesystem error. Serialization matches `CreateSessionError`
@@ -681,6 +702,10 @@ pub(crate) enum SessionCommand {
 
 pub(crate) struct ManagedSession {
     pub(crate) sender: Sender<SessionCommand>,
+    /// Poked after each enqueued command so an event-driven session worker
+    /// wakes from its idle poll immediately. Local sessions poll their command
+    /// channel on a timer instead and leave this empty.
+    pub(crate) waker: Option<crate::session::SessionWaker>,
     pub(crate) status: StatusEvent,
     /// Signals that the frontend has attached its event listeners, so the
     /// session worker may emit output live instead of buffering it.
@@ -1160,7 +1185,11 @@ impl SessionManager {
         managed
             .sender
             .send(command)
-            .map_err(|_| format!("session {session_id} is not available"))
+            .map_err(|_| format!("session {session_id} is not available"))?;
+        if let Some(waker) = managed.waker.as_ref() {
+            waker.wake();
+        }
+        Ok(())
     }
 
     pub(crate) fn status(&self, session_id: &str) -> Result<StatusEvent, String> {
@@ -1217,6 +1246,7 @@ mod session_manager_tests {
     fn managed_session(sender: mpsc::Sender<SessionCommand>) -> ManagedSession {
         ManagedSession {
             sender,
+            waker: None,
             status: StatusEvent {
                 session_id: "local-1".to_string(),
                 status: SessionStatus::Connecting,

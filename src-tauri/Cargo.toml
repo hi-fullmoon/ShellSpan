@@ -44,6 +44,7 @@ windows-native-keyring-store = "1"
 windows-sys = { version = "0.60", features = [
   "Win32_Foundation",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_Networking_WinSock",
 ] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]

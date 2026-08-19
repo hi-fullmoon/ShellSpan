@@ -4,7 +4,7 @@ use crate::db::Database;
 use crate::models::{
     AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest,
     CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, RemoteFsError,
-    HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing,
+    HostKeyCheckResult, JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing,
     LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
     RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
@@ -75,79 +75,11 @@ pub(crate) async fn create_session(
 
     let session_id = Uuid::new_v4().to_string();
 
-    if request.jump_host.is_none() {
-        let host_key_check = {
-            let app = app.clone();
-            let host = request.host.clone();
-            let port = request.port;
-            tauri::async_runtime::spawn_blocking(move || {
-                crate::known_hosts::check_host_key_blocking(
-                    &app,
-                    &HostKeyCheckRequest { host, port },
-                )
-            })
-            .await
-            .map_err(|error| {
-                error!("Failed to join host key check task: {error}");
-                CreateSessionError::Other {
-                    message: format!("failed to join host key check task: {error}"),
-                }
-            })?
-            .map_err(|message| {
-                if let Some(kind) = crate::known_hosts::classify_host_key_error(&message) {
-                    match kind {
-                        crate::known_hosts::HostKeyErrorKind::Unknown => {
-                            CreateSessionError::HostKeyUnknown {
-                                host: request.host.clone(),
-                                port: request.port,
-                                fingerprint: None,
-                            }
-                        }
-                        crate::known_hosts::HostKeyErrorKind::Mismatch => {
-                            CreateSessionError::HostKeyMismatch {
-                                host: request.host.clone(),
-                                port: request.port,
-                            }
-                        }
-                    }
-                } else {
-                    error!(
-                        "Host key check failed host={} port={}: {message}",
-                        request.host, request.port
-                    );
-                    CreateSessionError::Other { message }
-                }
-            })?
-        };
-
-        match host_key_check.status {
-            HostKeyCheckStatus::Match => {}
-            HostKeyCheckStatus::NotFound => {
-                return Err(CreateSessionError::HostKeyUnknown {
-                    host: request.host.clone(),
-                    port: request.port,
-                    fingerprint: host_key_check.fingerprint,
-                });
-            }
-            HostKeyCheckStatus::Mismatch => {
-                return Err(CreateSessionError::HostKeyMismatch {
-                    host: request.host.clone(),
-                    port: request.port,
-                });
-            }
-            HostKeyCheckStatus::Failure => {
-                let message = host_key_check
-                    .message
-                    .unwrap_or_else(|| "host key check failed".to_string());
-                error!(
-                    "Host key check failed host={} port={}: {message}",
-                    request.host, request.port
-                );
-                return Err(CreateSessionError::Other { message });
-            }
-        }
-    }
-
+    // The host key is verified once, inside the session's own SSH handshake
+    // (open_authenticated_session), so there is no separate pre-check
+    // connection here: an extra handshake per session would double the
+    // connect cost. Host-key failures still come back as typed
+    // CreateSessionError variants via the connection result channel below.
     let summary = SessionSummary {
         session_id: session_id.clone(),
         title: request.name.clone(),
@@ -157,9 +89,17 @@ pub(crate) async fn create_session(
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
-    let (connection_result_tx, connection_result_rx) = mpsc::channel::<Result<(), String>>();
+    let (connection_result_tx, connection_result_rx) =
+        mpsc::channel::<Result<(), CreateSessionError>>();
+    let (waker, wake_source) = session_wake_pair().map_err(|error| {
+        error!("Failed to create session wake channel session_id={session_id}: {error}");
+        CreateSessionError::Other {
+            message: format!("failed to create session wake channel: {error}"),
+        }
+    })?;
     state.insert(session_id.clone(), ManagedSession {
         sender: tx,
+        waker: Some(waker),
         status: StatusEvent {
             session_id: session_id.clone(),
             status: SessionStatus::Connecting,
@@ -184,6 +124,7 @@ pub(crate) async fn create_session(
         session_id.clone(),
         request,
         rx,
+        wake_source,
         pool.inner().clone(),
         connection_request,
         Some(connection_result_tx),
@@ -207,15 +148,15 @@ pub(crate) async fn create_session(
 
     match connection_result {
         Ok(()) => Ok(summary),
-        Err(message) => {
-            error!("SSH session connection failed session_id={session_id}: {message}");
+        Err(create_error) => {
+            error!("SSH session connection failed session_id={session_id}: {create_error:?}");
             // The frontend never receives this session id and will not call
             // close_session, so drop the registry entry here to avoid leaking
             // it. The worker thread has already sent its result; its later
             // emit_status calls tolerate the missing entry (set_status error
             // is ignored in emit_status).
             let _ = state.remove(&session_id);
-            Err(CreateSessionError::Other { message })
+            Err(create_error)
         }
     }
 }
@@ -295,6 +236,7 @@ pub(crate) fn create_local_session(
     state
         .insert(session_id.clone(), ManagedSession {
             sender: tx,
+            waker: None,
             status: StatusEvent {
                 session_id: session_id.clone(),
                 status: SessionStatus::Connected,
@@ -318,7 +260,7 @@ pub(crate) fn create_local_session(
     thread::spawn(move || {
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
         let reader_id = worker_id.clone();
-        thread::spawn(move || {
+        let reader_handle = thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
             loop {
                 match reader.read(&mut buffer) {
@@ -407,20 +349,31 @@ pub(crate) fn create_local_session(
                     }
                     break;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    // The controller went away without a Close command; kill
+                    // the shell so it does not outlive the session and the
+                    // reader thread below can observe EOF and finish.
+                    if let Err(error) = child.kill() {
+                        warn!("Failed to kill local shell session_id={worker_id}: {error}");
+                    }
+                    break;
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
             if matches!(child.try_wait(), Ok(Some(_))) {
                 break;
             }
         }
+        // Wait for the reader thread to finish so output still in flight
+        // (e.g. the shell's final exit message) is not lost, then flush.
+        let _ = reader_handle.join();
         for chunk in buffered_output.drain(..) {
             let _ = emit_data(&app, &worker_id, chunk);
         }
         while let Ok(bytes) = output_rx.try_recv() {
             pending_bytes.extend_from_slice(&bytes);
         }
-        let _ = flush_pending_output(&app, &worker_id, &mut pending_bytes, &mut pending_output);
+        flush_pending_output(&app, &worker_id, &mut pending_bytes, &mut pending_output);
         let reason = if closed_by_user {
             "local shell closed"
         } else {
@@ -1920,9 +1873,10 @@ pub(crate) fn spawn_ssh_thread(
     session_id: String,
     request: SessionCreateRequest,
     rx: std::sync::mpsc::Receiver<SessionCommand>,
+    wake: SessionWakeSource,
     pool: SftpPool,
     connection_request: RemoteConnectionRequest,
-    connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), String>>>,
+    connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), CreateSessionError>>>,
 ) {
     thread::spawn(move || {
         debug!("Spawned SSH worker session_id={session_id}");
@@ -1943,13 +1897,7 @@ pub(crate) fn spawn_ssh_thread(
                 let _ = tx.send(Ok(()));
             }
         };
-        let run_result = run_ssh_session(&app, &session_id, &request, rx, on_connected);
-
-        if let Some(tx) = connection_result_tx.as_ref() {
-            if let Err(ref error) = run_result {
-                let _ = tx.send(Err(error.clone()));
-            }
-        }
+        let run_result = run_ssh_session(&app, &session_id, &request, rx, wake, on_connected);
 
         match run_result {
             Ok(message) => {
@@ -1968,15 +1916,19 @@ pub(crate) fn spawn_ssh_thread(
                 );
                 let _ = emit_closed(&app, &session_id, Some(identity), message, reason_kind, retryable);
             }
-            Err(error) => {
-                error!("SSH session failed session_id={session_id}: {error}");
-                let retryable = is_transport_disconnect_message(&error);
-                let _ = emit_status(&app, &session_id, SessionStatus::Error, Some(error.clone()));
+            Err(connection_error) => {
+                if let Some(tx) = connection_result_tx.as_ref() {
+                    let _ = tx.send(Err(connection_error.to_create_session_error()));
+                }
+                let message = connection_error.message();
+                error!("SSH session failed session_id={session_id}: {message}");
+                let retryable = is_transport_disconnect_message(&message);
+                let _ = emit_status(&app, &session_id, SessionStatus::Error, Some(message.clone()));
                 let _ = emit_closed(
                     &app,
                     &session_id,
                     Some(identity),
-                    Some(error),
+                    Some(message),
                     if retryable {
                         ClosedReasonKind::TransportDisconnect
                     } else {
