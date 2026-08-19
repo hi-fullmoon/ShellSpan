@@ -500,13 +500,6 @@ pub(crate) struct StatusEvent {
     pub(crate) message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DataEvent {
-    pub(crate) session_id: String,
-    pub(crate) chunk: String,
-}
-
 /// Host identity attached to a closed event so the frontend can render the
 /// disconnecting session even after its store record is gone.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
