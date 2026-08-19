@@ -37,7 +37,7 @@ describe('SftpUploadConflictDialog', () => {
       'break-words',
     );
 
-    const fileName = screen.getByTitle(targetName);
+    const fileName = screen.getByText(targetName);
     expect(fileName).toHaveClass('w-full', 'truncate');
     expect(fileName.parentElement).toHaveClass('min-w-0', 'flex-1');
     expect(fileName.parentElement?.parentElement).toHaveClass(

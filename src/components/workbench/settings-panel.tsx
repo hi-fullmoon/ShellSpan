@@ -664,19 +664,27 @@ export const SettingsPanel: React.FC = () => {
                 <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.downloadDirectory')} description={t('settings.sftp.downloadDirectoryDescription')}>
                   <div className="flex gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="min-w-0 flex-1 justify-start"
-                      title={sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}
-                      onClick={() => {
-                        void invokePickLocalFolder().then((folders) => {
-                          if (folders[0]) setSftpDownloadDirectory(folders[0]);
-                        });
-                      }}
-                    >
-                      <span className="truncate">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</span>
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="min-w-0 flex-1 justify-start"
+                            onClick={() => {
+                              void invokePickLocalFolder().then((folders) => {
+                                if (folders[0]) setSftpDownloadDirectory(folders[0]);
+                              });
+                            }}
+                          />
+                        }
+                      >
+                        <span className="truncate">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</span>
+                      </TooltipTrigger>
+                      <TooltipContent className="break-all">
+                        {sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}
+                      </TooltipContent>
+                    </Tooltip>
                     {sftpDownloadDirectory && (
                       <Button
                         variant="ghost"
