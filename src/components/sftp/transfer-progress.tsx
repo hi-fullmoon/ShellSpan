@@ -22,10 +22,10 @@ function normalizeTransferPath(path: string): string {
 // Remote-scoped operations (delete/download/remote-copy) identify their batch
 // by top-level paths; display the current entry as `topName/sub/...` so deep
 // folder trees stay readable. Uploads carry a local source path that is not
-// relative to the operation's `paths`, so they show the full path instead.
+// relative to the operation's `paths`, so they show just the file name.
 function displayTransferPath(operation: TransferOperation): string {
   const current = normalizeTransferPath(operation.currentPath ?? operation.operationId);
-  if (operation.kind === 'upload') return current;
+  if (operation.kind === 'upload') return current.split('/').pop() || current;
   for (const root of operation.paths ?? []) {
     const normalizedRoot = normalizeTransferPath(root);
     if (normalizedRoot === '/') continue;

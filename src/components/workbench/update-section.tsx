@@ -4,6 +4,7 @@ import { useUpdateStore } from '@/stores/updateStore';
 import { isTauriRuntime } from '@/lib/tauri';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 export const UpdateSection: React.FC = () => {
@@ -109,9 +110,16 @@ export const UpdateSection: React.FC = () => {
 
       {failed && (
         <div className="flex items-center justify-between gap-3">
-          <p className="min-w-0 flex-1 truncate text-xs text-destructive" title={error}>
-            {error ?? t('update.failed', { error: '' })}
-          </p>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <p className="min-w-0 flex-1 truncate text-xs text-destructive" />
+              }
+            >
+              {error ?? t('update.failed', { error: '' })}
+            </TooltipTrigger>
+            <TooltipContent className="break-all">{error ?? t('update.failed', { error: '' })}</TooltipContent>
+          </Tooltip>
           <Button variant="outline" size="sm" onClick={() => void runCheck('manual')}>
             {t('settings.general.retry')}
           </Button>
