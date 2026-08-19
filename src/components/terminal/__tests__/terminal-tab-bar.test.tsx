@@ -370,6 +370,42 @@ describe('TerminalTabBar', () => {
     expect(state.sessions.find((s) => s.sessionId === 's2')?.pinned).toBe(true);
   });
 
+  it('forces the default cursor via a body class while dragging', async () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+
+    render(<TerminalTabBar />);
+    const tabs = screen.getAllByRole('tab');
+    tabs[0].getBoundingClientRect = vi.fn(() => ({
+      left: 0, right: 100, top: 0, bottom: 24, x: 0, y: 0,
+      width: 100, height: 24, toJSON: () => ({}),
+    }));
+    tabs[1].getBoundingClientRect = vi.fn(() => ({
+      left: 100, right: 200, top: 0, bottom: 24, x: 100, y: 0,
+      width: 100, height: 24, toJSON: () => ({}),
+    }));
+
+    expect(document.body.classList.contains('tab-dragging')).toBe(false);
+
+    await act(async () => {
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        pointerType: 'mouse',
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 62, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 150, clientY: 10 });
+    });
+    expect(document.body.classList.contains('tab-dragging')).toBe(true);
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 150, clientY: 10 });
+    });
+    expect(document.body.classList.contains('tab-dragging')).toBe(false);
+  });
+
   it('does not start a drag when a trackpad tap is followed by a buttonless move', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');

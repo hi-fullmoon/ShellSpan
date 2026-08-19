@@ -406,6 +406,14 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     return () => window.clearInterval(timer);
   }, [draggingSessionId]);
 
+  // Force the default cursor for the whole drag via a body class (see
+  // base.css); removed automatically when the drag ends or is cancelled.
+  useEffect(() => {
+    if (!draggingSessionId) return;
+    document.body.classList.add('tab-dragging');
+    return () => document.body.classList.remove('tab-dragging');
+  }, [draggingSessionId]);
+
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
     const container = scrollRef.current;
     if (!container) {
