@@ -17,11 +17,10 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
+import { PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -643,6 +642,13 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     <div
       ref={tabBarRef}
       data-terminal-tab-bar
+      // Double-clicking empty tab bar space opens a new tab; double-clicking
+      // a tab itself is rename, so ignore events coming from inside a tab.
+      onDoubleClick={(e) => {
+        if (!onNewTabClick) return;
+        if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
+        onNewTabClick();
+      }}
       className={cn('group/tabbar relative flex h-8 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
     >
       <DndContext
@@ -716,21 +722,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               document.body,
             )}
       </DndContext>
-      {sessions.length > 0 && onNewTabClick && (
-        // Overlays the tab strip instead of taking layout space, so scrollable
-        // tabs never leave an empty block at the right edge. The gradient keeps
-        // the icon readable over the last tab; pointer events pass through
-        // while hidden.
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onNewTabClick}
-          aria-label={t('terminal.newTab')}
-          className="pointer-events-none absolute inset-y-0 right-0 z-10 h-[31px] w-11 rounded-none bg-gradient-to-l from-app-surface-muted from-60% to-transparent pl-4 opacity-0 transition-opacity hover:bg-transparent hover:text-app-primary focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tabbar:pointer-events-auto group-hover/tabbar:opacity-100"
-        >
-          <PlusIcon strokeWidth={1.5} />
-        </Button>
-      )}
       <AlertDialog
         open={!!closingSessionId}
         onOpenChange={(open) => {

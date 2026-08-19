@@ -120,20 +120,22 @@ describe('TerminalTabBar', () => {
     expect(y).toBe(20);
   });
 
-  it('fires onNewTabClick when the + button is pressed', () => {
+  it('fires onNewTabClick when empty tab bar space is double-clicked', () => {
+    addSession('s1', 'A');
+    const onNewTabClick = vi.fn();
+    const { container } = render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
+
+    fireEvent.doubleClick(container.querySelector('[data-terminal-tab-bar]')!);
+    expect(onNewTabClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire onNewTabClick when a tab itself is double-clicked', () => {
     addSession('s1', 'A');
     const onNewTabClick = vi.fn();
     render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'terminal.newTab' }));
-    expect(onNewTabClick).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not render the + button when there are no sessions', () => {
-    const onNewTabClick = vi.fn();
-    render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
-
-    expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
+    fireEvent.doubleClick(screen.getByRole('tab'));
+    expect(onNewTabClick).not.toHaveBeenCalled();
   });
 
   it('starts renaming on double-click and commits on Enter', () => {
