@@ -196,11 +196,6 @@ export type CreateSessionError =
   | CreateSessionErrorHostKeyMismatch
   | CreateSessionErrorOther;
 
-export interface DataEvent {
-  sessionId: string;
-  chunk: string;
-}
-
 export interface StatusEvent {
   sessionId: string;
   status: SessionStatus;

@@ -18,14 +18,6 @@ vi.mock('@/hooks/useI18n', () => ({
 vi.mock('@/hooks/useConnectSession', () => ({
   useConnectSession: () => ({
     connect: mockConnect,
-    hostKeyDialog: {
-      open: false,
-      host: '',
-      port: 22,
-      mismatch: false,
-      onTrust: () => {},
-    },
-    closeHostKeyDialog: vi.fn(),
   }),
 }));
 
@@ -76,10 +68,6 @@ vi.mock('../terminal-context-menu', () => ({
       <button type="button" onClick={onUnsplit}>unsplit</button>
     </div>
   ) : null,
-}));
-
-vi.mock('../host-key-dialog', () => ({
-  HostKeyDialog: () => null,
 }));
 
 const initialState = useTerminalStore.getState();
