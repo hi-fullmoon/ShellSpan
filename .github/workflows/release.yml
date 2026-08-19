@@ -207,7 +207,9 @@ jobs:
           node-version: 24
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        # 版本由仓库根目录 rust-toolchain.toml 固定，与 cache-warm.yml 保持一致，
+        # 否则 rustc 版本变化会使 rust-cache 的 key 失配、缓存失效
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           targets: ${{ matrix.rust_target }}
 
