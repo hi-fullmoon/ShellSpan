@@ -357,6 +357,14 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     return () => container.removeEventListener('wheel', handleWheel);
   }, [connections.length]);
 
+  // Force the default cursor for the whole drag via a body class (see
+  // base.css); removed automatically when the drag ends or is cancelled.
+  useEffect(() => {
+    if (!draggingConnectionId) return;
+    document.body.classList.add('tab-dragging');
+    return () => document.body.classList.remove('tab-dragging');
+  }, [draggingConnectionId]);
+
   const finishDrag = (): void => {
     setDraggingConnectionId(null);
     setInsertIndex(null);
