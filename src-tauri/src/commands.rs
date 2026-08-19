@@ -354,6 +354,8 @@ pub(crate) fn create_local_session(
         let output_wait_started = Instant::now();
         let mut output_live = false;
         let mut closed_by_user = false;
+        let mut pending_bytes: Vec<u8> = Vec::new();
+        let mut pending_output = String::new();
         loop {
             if !output_live
                 && (worker_output_ready.load(AtomicOrdering::Relaxed)
@@ -366,12 +368,15 @@ pub(crate) fn create_local_session(
                 }
             }
             while let Ok(bytes) = output_rx.try_recv() {
-                let chunk = String::from_utf8_lossy(&bytes).into_owned();
+                pending_bytes.extend_from_slice(&bytes);
+            }
+            drain_decoded_output(&mut pending_bytes, &mut pending_output);
+            if !pending_output.is_empty() {
                 if output_live {
-                    let _ = emit_data(&app, &worker_id, chunk);
+                    let _ = emit_data(&app, &worker_id, std::mem::take(&mut pending_output));
                 } else {
-                    buffered_bytes += chunk.len();
-                    buffered_output.push(chunk);
+                    buffered_bytes += pending_output.len();
+                    buffered_output.push(std::mem::take(&mut pending_output));
                 }
             }
             match rx.recv_timeout(Duration::from_millis(16)) {
@@ -413,8 +418,9 @@ pub(crate) fn create_local_session(
             let _ = emit_data(&app, &worker_id, chunk);
         }
         while let Ok(bytes) = output_rx.try_recv() {
-            let _ = emit_data(&app, &worker_id, String::from_utf8_lossy(&bytes).into_owned());
+            pending_bytes.extend_from_slice(&bytes);
         }
+        let _ = flush_pending_output(&app, &worker_id, &mut pending_bytes, &mut pending_output);
         let reason = if closed_by_user {
             "local shell closed"
         } else {
