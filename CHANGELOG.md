@@ -3,6 +3,17 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.41](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.41) - 2026-08-19
+
+
+### Bug Fixes
+
+- **term:** stabilize tab activation and CI cache key
+
+### CI/CD
+
+- remove pnpm cache from setup-node in release workflow
+
 ## [v2.0.40](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.40) - 2026-08-14
 
 
