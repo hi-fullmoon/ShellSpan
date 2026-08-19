@@ -17,12 +17,13 @@ use std::os::fd::AsRawFd;
 
 use crate::{
     connection::{connect_tcp_stream, connect_through_jump_host, open_authenticated_session, summarize_session_request, SSH_SESSION_KEEPALIVE_INTERVAL_SECS},
-    emit_data, emit_session_error, emit_status,
+    drain_decoded_output, emit_data, emit_session_error, emit_status, flush_pending_output,
     known_hosts::known_hosts_path,
     models::{ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent, SessionStatus},
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
+const SSH_OUTPUT_FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
 
 pub(crate) fn run_ssh_session<
     F: FnOnce() + Send,
@@ -196,6 +197,37 @@ fn session_loop(
     channel: &mut Channel,
     rx: Receiver<SessionCommand>,
 ) -> Result<Option<String>, String> {
+    let mut pending_bytes: Vec<u8> = Vec::new();
+    let mut pending_output = String::new();
+    let result = session_loop_inner(
+        app,
+        session_id,
+        session,
+        channel,
+        rx,
+        &mut pending_bytes,
+        &mut pending_output,
+    );
+    // Emit whatever decoded output remains so the final screen state is not
+    // lost when the session ends.
+    match flush_pending_output(app, session_id, &mut pending_bytes, &mut pending_output) {
+        Ok(()) => result,
+        Err(flush_error) => match result {
+            Ok(_) => Err(flush_error),
+            Err(_) => result,
+        },
+    }
+}
+
+fn session_loop_inner(
+    app: &AppHandle,
+    session_id: &str,
+    session: &Session,
+    channel: &mut Channel,
+    rx: Receiver<SessionCommand>,
+    pending_bytes: &mut Vec<u8>,
+    pending_output: &mut String,
+) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
     let mut next_keepalive_at =
         Instant::now() + normalize_keepalive_delay(SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
@@ -243,12 +275,18 @@ fn session_loop(
                 }
             }
             Ok(read) => {
-                let chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
-                emit_data(app, session_id, chunk)?;
+                pending_bytes.extend_from_slice(&buffer[..read]);
+                drain_decoded_output(pending_bytes, pending_output);
+                if pending_output.len() >= SSH_OUTPUT_FLUSH_THRESHOLD_BYTES {
+                    emit_data(app, session_id, std::mem::take(pending_output))?;
+                }
                 made_progress = true;
             }
             Err(error) if is_retryable_channel_error_kind(error.kind()) => {
                 blocked_on_socket = true;
+                if !pending_output.is_empty() {
+                    emit_data(app, session_id, std::mem::take(pending_output))?;
+                }
             }
             Err(error) => {
                 warn!(
