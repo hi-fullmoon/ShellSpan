@@ -5,7 +5,6 @@ import {
   type DragMoveEvent,
   type DragStartEvent,
   type Modifier,
-  PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -23,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -306,7 +306,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const [closingConnectionId, setClosingConnectionId] = useState<string | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(TrackpadSafePointerSensor, {
       // 10px dead zone: trackpad taps (tap-to-click) often jitter a few px;
       // a low threshold misreads them as drags.
       activationConstraint: { distance: 10 },

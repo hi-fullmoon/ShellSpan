@@ -216,13 +216,14 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[2], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 250,
         clientY: 10,
       });
       // The first move must clear the PointerSensor's 10px activation
       // distance, or the drag never starts and the drop is a no-op.
-      fireEvent.pointerMove(document, { clientX: 262, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 50, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 262, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 50, clientY: 10 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 50, clientY: 10 });
@@ -258,11 +259,12 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[0], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 160 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 60, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 60, clientY: 160 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 60, clientY: 160 });
@@ -304,11 +306,12 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[0], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 62, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 180, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 62, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 180, clientY: 10 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 180, clientY: 10 });
@@ -350,11 +353,12 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[0], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 62, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 260, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 62, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 260, clientY: 10 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 260, clientY: 10 });
@@ -364,6 +368,36 @@ describe('TerminalTabBar', () => {
     expect(state.sessions.map((s) => s.sessionId)).toEqual(['s2', 's3', 's1']);
     expect(state.sessions.find((s) => s.sessionId === 's1')?.pinned).toBe(false);
     expect(state.sessions.find((s) => s.sessionId === 's2')?.pinned).toBe(true);
+  });
+
+  it('does not start a drag when a trackpad tap is followed by a buttonless move', async () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setActiveSession('s2');
+    const reorderSpy = vi.spyOn(useTerminalStore.getState(), 'reorderSessions');
+
+    render(<TerminalTabBar />);
+    const tabs = screen.getAllByRole('tab');
+
+    await act(async () => {
+      // Tap-to-click: the pointerdown arrives, but WKWebView can drop the
+      // pointerup. The next move reports no buttons held, so it must end the
+      // pending interaction instead of starting a drag.
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        pointerType: 'mouse',
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 0, clientX: 150, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 0, clientX: 250, clientY: 10 });
+    });
+
+    expect(reorderSpy).not.toHaveBeenCalled();
+    // The tap still activates the tab via pointerdown.
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    expect(useTerminalStore.getState().sessions.map((s) => s.sessionId)).toEqual(['s1', 's2']);
   });
 
   it('does not initiate a drag when clicking the close button (pointerDown stopped)', () => {

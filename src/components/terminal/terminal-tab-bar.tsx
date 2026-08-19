@@ -6,7 +6,6 @@ import {
   type DragStartEvent,
   KeyboardSensor,
   type Modifier,
-  PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -24,6 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
+import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import {
   AlertDialog,
@@ -345,7 +345,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(TrackpadSafePointerSensor, {
       // 10px dead zone: trackpad taps (tap-to-click) often jitter a few px;
       // a low threshold misreads them as drags.
       activationConstraint: { distance: 10 },
