@@ -16,7 +16,6 @@ import { TerminalTabBar } from './terminal-tab-bar';
 import { TerminalPane } from './terminal-pane';
 import { NewTabMenu } from './new-tab-menu';
 import { TerminalContextMenu } from './terminal-context-menu';
-import { HostKeyDialog } from './host-key-dialog';
 import {
   findAdjacentTerminalGroup,
   findTerminalGroup,
@@ -46,7 +45,7 @@ const Terminal: React.FC = () => {
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
   const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
-  const { connect, openLocal, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
+  const { connect, openLocal } = useConnectSession();
 
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
@@ -633,15 +632,6 @@ const Terminal: React.FC = () => {
         isSplit={Boolean(split)}
         onSplit={createOrArrangeSplit}
         onUnsplit={() => setSplit(null)}
-      />
-      <HostKeyDialog
-        open={hostKeyDialog.open}
-        onClose={closeHostKeyDialog}
-        host={hostKeyDialog.host}
-        port={hostKeyDialog.port}
-        fingerprint={hostKeyDialog.fingerprint}
-        mismatch={hostKeyDialog.mismatch}
-        onTrust={hostKeyDialog.onTrust}
       />
     </div>
   );

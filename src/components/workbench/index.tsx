@@ -28,7 +28,7 @@ const Workbench: React.FC = () => {
   const [initialValues, setInitialValues] = useState<
     { host: string; port: string } | undefined
   >();
-  const { connect, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
+  const { connect } = useConnectSession();
   const {
     open: openSftpConnection,
     hostKeyDialog: sftpHostKeyDialog,
@@ -147,15 +147,6 @@ const Workbench: React.FC = () => {
         onConfirm={handleDelete}
       />
 
-      <HostKeyDialog
-        open={hostKeyDialog.open}
-        onClose={closeHostKeyDialog}
-        host={hostKeyDialog.host}
-        port={hostKeyDialog.port}
-        fingerprint={hostKeyDialog.fingerprint}
-        mismatch={hostKeyDialog.mismatch}
-        onTrust={hostKeyDialog.onTrust}
-      />
       <HostKeyDialog
         open={sftpHostKeyDialog.open}
         onClose={closeSftpHostKeyDialog}

@@ -10,7 +10,6 @@ import type {
   KeychainKeyKind,
   CreateRemoteEntryRequest,
   CreateSessionError,
-  DataEvent,
   DownloadProgressEvent,
   HostKeyCheckResult,
   JumpHostConfig,
@@ -459,12 +458,10 @@ function mapJumpHostAuthMethod(jumpHost: JumpHostConfig): JumpHostConfig {
 
 export async function listenToSshData(
   sessionId: string,
-  callback: EventCallback<DataEvent>,
+  callback: EventCallback<string>,
 ): Promise<UnlistenFn> {
-  return listen<DataEvent>('ssh-data', (event) => {
-    if (event.payload.sessionId === sessionId) {
-      callback(event);
-    }
+  return listen<string>(`ssh-data:${sessionId}`, (event) => {
+    callback(event);
   });
 }
 

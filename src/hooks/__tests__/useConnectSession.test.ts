@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useConnectSession } from '../useConnectSession';
+import { useHostKeyDialogStore } from '@/stores/hostKeyDialogStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
@@ -85,6 +86,9 @@ const initialTerminal = useTerminalStore.getState();
 const initialApp = useAppStore.getState();
 const initialProfile = useProfileStore.getState();
 const initialRecent = useRecentProfilesStore.getState();
+const initialHostKeyDialog = useHostKeyDialogStore.getState();
+
+const hostKeyDialog = () => useHostKeyDialogStore.getState().dialog;
 
 describe('useConnectSession', () => {
   beforeEach(() => {
@@ -92,6 +96,7 @@ describe('useConnectSession', () => {
     useAppStore.setState(initialApp, true);
     useProfileStore.setState(initialProfile, true);
     useRecentProfilesStore.setState(initialRecent, true);
+    useHostKeyDialogStore.setState(initialHostKeyDialog, true);
     vi.mocked(invokeCreateSession).mockReset();
     vi.mocked(invokeTrustHost).mockReset();
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
@@ -128,7 +133,7 @@ describe('useConnectSession', () => {
     expect(sessions[0]).toMatchObject({ sessionId: 's1', profileId: 'p1' });
     expect(useAppStore.getState().activeSection).toBe('terminal');
     expect(useRecentProfilesStore.getState().recentIds).toEqual(['p1']);
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(hostKeyDialog().open).toBe(false);
   });
 
   it('opens dialog on HostKeyUnknown and trusts then retries', async () => {
@@ -145,7 +150,7 @@ describe('useConnectSession', () => {
       await result.current.connect(profile);
     });
 
-    expect(result.current.hostKeyDialog).toMatchObject({
+    expect(hostKeyDialog()).toMatchObject({
       open: true,
       host: 'h',
       port: 22,
@@ -154,14 +159,14 @@ describe('useConnectSession', () => {
     });
 
     await act(async () => {
-      result.current.hostKeyDialog.onTrust();
+      hostKeyDialog().onTrust();
     });
 
     await waitFor(() =>
       expect(vi.mocked(invokeCreateSession)).toHaveBeenCalledTimes(2),
     );
     expect(vi.mocked(invokeTrustHost)).toHaveBeenCalledWith('h', 22);
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(hostKeyDialog().open).toBe(false);
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
       sessionId: 's1',
       profileId: 'p1',
@@ -180,13 +185,13 @@ describe('useConnectSession', () => {
       await result.current.connect(profile);
     });
 
-    expect(result.current.hostKeyDialog).toMatchObject({
+    expect(hostKeyDialog()).toMatchObject({
       open: true,
       host: 'h',
       port: 2222,
       mismatch: true,
     });
-    expect(result.current.hostKeyDialog.fingerprint).toBeUndefined();
+    expect(hostKeyDialog().fingerprint).toBeUndefined();
   });
 
   it('shows a toast and keeps dialog closed on other errors', async () => {
@@ -208,7 +213,7 @@ describe('useConnectSession', () => {
     });
 
     expect(addToast).toHaveBeenCalledWith('boom', 'error');
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(hostKeyDialog().open).toBe(false);
   });
 
   it('shows the original message for non-recoverable Other errors', async () => {
@@ -234,7 +239,7 @@ describe('useConnectSession', () => {
     });
 
     expect(addToast).toHaveBeenCalledWith('authentication failed', 'error');
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(hostKeyDialog().open).toBe(false);
   });
 
   it('prompts for replacement key on keychain key not found and retries', async () => {
@@ -302,7 +307,7 @@ describe('useConnectSession', () => {
     expect(useTerminalStore.getState().sessions).toHaveLength(0);
   });
 
-  it('closeHostKeyDialog resets to the closed default', async () => {
+  it('closeDialog resets to the closed default', async () => {
     vi.mocked(invokeCreateSession).mockRejectedValueOnce({
       type: 'HostKeyUnknown',
       payload: { host: 'h', port: 22, fingerprint: 'fp' },
@@ -313,19 +318,19 @@ describe('useConnectSession', () => {
     await act(async () => {
       await result.current.connect(profile);
     });
-    expect(result.current.hostKeyDialog.open).toBe(true);
+    expect(hostKeyDialog().open).toBe(true);
 
     act(() => {
-      result.current.closeHostKeyDialog();
+      useHostKeyDialogStore.getState().closeDialog();
     });
 
-    expect(result.current.hostKeyDialog).toMatchObject({
+    expect(hostKeyDialog()).toMatchObject({
       open: false,
       host: '',
       port: 22,
       mismatch: false,
     });
-    expect(result.current.hostKeyDialog.onTrust).toBeInstanceOf(Function);
+    expect(hostKeyDialog().onTrust).toBeInstanceOf(Function);
   });
 
   it('persists a password entered via the prompt after a successful connection', async () => {

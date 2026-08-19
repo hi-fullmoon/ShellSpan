@@ -138,23 +138,26 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const oldIndex = state.sessions.findIndex(
         (session) => session.sessionId === oldSessionId,
       );
-      const old = oldIndex >= 0 ? state.sessions[oldIndex] : undefined;
+      // The old session may have been closed while the reconnect was in flight;
+      // never resurrect it.
+      if (oldIndex === -1) return state;
+      const old = state.sessions[oldIndex];
       const newSession: TerminalSession = {
         sessionId: summary.sessionId,
-        title: old?.title ?? summary.title,
+        title: old.title ?? summary.title,
         host: summary.host,
         port: summary.port,
         username: summary.username,
         status: 'connecting',
         profileId,
-        pinned: old?.pinned,
-        color: old?.color,
+        pinned: old.pinned,
+        color: old.color,
         reconnecting: true,
       };
       const sessions = state.sessions.filter(
         (session) => session.sessionId !== oldSessionId,
       );
-      sessions.splice(oldIndex >= 0 ? oldIndex : sessions.length, 0, newSession);
+      sessions.splice(oldIndex, 0, newSession);
       return {
         sessions: sortSessions(sessions),
         activeSessionId: summary.sessionId,
