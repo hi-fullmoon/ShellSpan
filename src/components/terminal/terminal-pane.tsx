@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -78,7 +78,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     isActive,
   );
 
-  const controller = activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId);
+  const controller = useSyncExternalStore(terminalRegistry.subscribe, () =>
+    activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
+  );
   const terminal = controller?.terminal ?? null;
 
   const handleOpenSearch = useCallback((): void => {
