@@ -43,7 +43,8 @@ pub(crate) use remote_fs::{
     upload_local_paths_blocking, warm_remote_connection_blocking,
 };
 pub(crate) use session::{
-    classify_closed_reason, is_transport_disconnect_message, run_ssh_session,
+    classify_closed_reason, is_transport_disconnect_message, run_ssh_session, session_wake_pair,
+    SessionWakeSource,
 };
 
 pub(crate) const SSH_DATA_EVENT_PREFIX: &str = "ssh-data:";
@@ -111,21 +112,24 @@ pub(crate) fn drain_decoded_output(pending_bytes: &mut Vec<u8>, output: &mut Str
 }
 
 /// Emits whatever decoded output remains when a session ends, lossy-decoding
-/// any bytes still stuck in the incremental decode buffer.
+/// any bytes still stuck in the incremental decode buffer. Emit failures are
+/// logged and swallowed: the session is ending anyway, so a dead frontend
+/// listener must not mask the real session result.
 pub(crate) fn flush_pending_output(
     app: &AppHandle,
     session_id: &str,
     pending_bytes: &mut Vec<u8>,
     pending_output: &mut String,
-) -> Result<(), String> {
+) {
     if !pending_bytes.is_empty() {
         pending_output.push_str(&String::from_utf8_lossy(pending_bytes));
         pending_bytes.clear();
     }
     if !pending_output.is_empty() {
-        emit_data(app, session_id, std::mem::take(pending_output))?;
+        if let Err(error) = emit_data(app, session_id, std::mem::take(pending_output)) {
+            log::warn!("Failed to emit final session output session_id={session_id}: {error}");
+        }
     }
-    Ok(())
 }
 
 pub(crate) fn emit_closed(
