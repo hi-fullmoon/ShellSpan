@@ -335,6 +335,36 @@ describe('SftpPane', () => {
     expect(input.tabIndex).toBe(-1);
   });
 
+  it('clears the filter query when the path changes', () => {
+    const connection = createConnection();
+    const { rerender } = render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.showFilter' }));
+    const input = screen.getByPlaceholderText('sftp.filter');
+    fireEvent.change(input, { target: { value: 'report' } });
+    expect(input).toHaveValue('report');
+
+    rerender(
+      <SftpPane
+        connection={{ ...connection, localPath: '/elsewhere' }}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    expect(input).toHaveValue('');
+  });
+
   it('clears the query when the filter is toggled closed via the icon', () => {
     const connection = createConnection();
     render(
