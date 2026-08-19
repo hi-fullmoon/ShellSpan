@@ -358,7 +358,7 @@ class TerminalControllerImpl implements TerminalController {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
-      this.terminal.write(event.payload.chunk);
+      this.terminal.write(event.payload);
     });
     if (this.disposed || generation !== this.listenerGeneration) {
       dataUnlisten();
@@ -561,11 +561,19 @@ interface TerminalRegistry {
   updateOptions(preferences: TerminalDisplayPreferences): void;
   dispose(sessionId: string): void;
   disposeAll(): void;
+  subscribe(listener: () => void): () => void;
 }
 
 export const terminalRegistry: TerminalRegistry = (() => {
   const controllers = new Map<string, TerminalController>();
+  const listeners = new Set<() => void>();
   let preferences = DEFAULT_TERMINAL_PREFERENCES;
+
+  const notify = (): void => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
 
   return {
     create(sessionId, setStatus, setClosed, getStatus, requestReconnect) {
@@ -579,10 +587,14 @@ export const terminalRegistry: TerminalRegistry = (() => {
         setClosed,
         getStatus,
         requestReconnect,
-        (currentSessionId) => controllers.delete(currentSessionId),
+        (currentSessionId) => {
+          controllers.delete(currentSessionId);
+          notify();
+        },
         preferences,
       );
       controllers.set(sessionId, controller);
+      notify();
       return controller;
     },
     get(sessionId) {
@@ -596,6 +608,7 @@ export const terminalRegistry: TerminalRegistry = (() => {
       controllers.delete(oldSessionId);
       controller.rebindSession(newSessionId);
       controllers.set(newSessionId, controller);
+      notify();
     },
     updateOptions(nextPreferences) {
       preferences = nextPreferences;
@@ -608,12 +621,18 @@ export const terminalRegistry: TerminalRegistry = (() => {
       if (!controller) return;
       controller.dispose();
       controllers.delete(sessionId);
+      notify();
     },
     disposeAll() {
       for (const controller of controllers.values()) {
         controller.dispose();
       }
       controllers.clear();
+      notify();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
   };
 })();

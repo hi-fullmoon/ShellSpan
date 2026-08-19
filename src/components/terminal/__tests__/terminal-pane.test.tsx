@@ -29,6 +29,7 @@ vi.mock('@/components/terminal/registry/terminal-registry', () => ({
     create: vi.fn(),
     dispose: vi.fn(),
     disposeAll: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
   },
 }));
 
