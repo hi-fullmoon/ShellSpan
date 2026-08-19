@@ -39,10 +39,6 @@ export function formatTerminalStatusLine(
   return `${TERMINAL_PREFIX} [33m[${statusLabel(status)}][0m${suffix}`;
 }
 
-export function formatTerminalPrefixedText(text: string): string {
-  return `${TERMINAL_PREFIX} ${text}`;
-}
-
 export function formatTerminalNoticeLine(
   label: string,
   message?: string,
@@ -65,8 +61,4 @@ export function shouldReconnectFromInput(
     (status === 'disconnected' || status === 'error') &&
     (data === '\r' || data === '\n')
   );
-}
-
-export function shouldWarnOnClosedSession(status: SessionStatus): boolean {
-  return status !== 'error';
 }

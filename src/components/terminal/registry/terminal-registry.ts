@@ -71,6 +71,8 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
 
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
+const RESIZE_IPC_DEBOUNCE_MS = 100;
+
 function trimUrlPunctuation(url: string): string {
   return url.replace(/[),.;!?\]}]+$/g, '');
 }
@@ -194,6 +196,8 @@ class TerminalControllerImpl implements TerminalController {
   private listenerGeneration = 0;
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
+  private fitAnimationFrame: number | null = null;
+  private resizeDebounceTimer: number | null = null;
 
   constructor(
     sessionId: string,
@@ -455,14 +459,29 @@ class TerminalControllerImpl implements TerminalController {
     if (!this.resizeObserver) {
       this.resizeObserver = new ResizeObserver(() => {
         if (this.container.offsetParent === null) return;
-        try {
-          this.fitAddon.fit();
-        } catch {
-          return;
+        // fit() triggers a full xterm reflow, so coalesce it to at most once
+        // per frame while a splitter is being dragged.
+        if (this.fitAnimationFrame === null) {
+          this.fitAnimationFrame = requestAnimationFrame(() => {
+            this.fitAnimationFrame = null;
+            try {
+              this.fitAddon.fit();
+            } catch {
+              // fit() can fail without a measurable container; harmless.
+            }
+          });
         }
-        invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
-          logger.warn(`Failed to resize session ${this.sessionId}`, error);
-        });
+        // The resize IPC is debounced so only the final stable size is sent.
+        if (this.resizeDebounceTimer !== null) {
+          window.clearTimeout(this.resizeDebounceTimer);
+        }
+        this.resizeDebounceTimer = window.setTimeout(() => {
+          this.resizeDebounceTimer = null;
+          if (this.disposed) return;
+          invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
+            logger.warn(`Failed to resize session ${this.sessionId}`, error);
+          });
+        }, RESIZE_IPC_DEBOUNCE_MS);
       });
       this.resizeObserver.observe(this.container);
     }
@@ -480,8 +499,22 @@ class TerminalControllerImpl implements TerminalController {
   detach(): void {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.cancelPendingResize();
     this.container.remove();
     this.host = null;
+  }
+
+  // Drop any scheduled fit/debounced resize so a disposed or rebound
+  // controller never sends a resize IPC for a stale session.
+  private cancelPendingResize(): void {
+    if (this.fitAnimationFrame !== null) {
+      cancelAnimationFrame(this.fitAnimationFrame);
+      this.fitAnimationFrame = null;
+    }
+    if (this.resizeDebounceTimer !== null) {
+      window.clearTimeout(this.resizeDebounceTimer);
+      this.resizeDebounceTimer = null;
+    }
   }
 
   focus(): void {
@@ -509,6 +542,7 @@ class TerminalControllerImpl implements TerminalController {
   rebindSession(sessionId: string): void {
     if (this.disposed || sessionId === this.sessionId) return;
     this.clearListeners();
+    this.cancelPendingResize();
     this.sessionId = sessionId;
     this.resetNoticeState();
     void this.setupListeners();

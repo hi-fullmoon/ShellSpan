@@ -120,19 +120,26 @@ const Terminal: React.FC = () => {
     const availableIds = new Set(sessions.map((session) => session.sessionId));
     const syncNode = (node: TerminalLayoutNode): TerminalLayoutNode => {
       if (node.kind === 'split') {
-        return { ...node, first: syncNode(node.first), second: syncNode(node.second) };
+        const first = syncNode(node.first);
+        const second = syncNode(node.second);
+        return first === node.first && second === node.second ? node : { ...node, first, second };
       }
       const ids = node.sessionIds.filter((id) => availableIds.has(id));
-      return {
-        ...node,
-        sessionIds: ids,
-        activeSessionId:
-          node.id === focusedGroupRef.current && activeSessionId && ids.includes(activeSessionId)
-            ? activeSessionId
-            : ids.includes(node.activeSessionId)
-              ? node.activeSessionId
-              : ids[ids.length - 1] ?? '',
-      };
+      const nextActiveSessionId =
+        node.id === focusedGroupRef.current && activeSessionId && ids.includes(activeSessionId)
+          ? activeSessionId
+          : ids.includes(node.activeSessionId)
+            ? node.activeSessionId
+            : ids[ids.length - 1] ?? '';
+      // Return the original node when nothing changed so the layout keeps
+      // referential equality and the setSplit below can be skipped.
+      const unchanged =
+        nextActiveSessionId === node.activeSessionId
+        && ids.length === node.sessionIds.length
+        && ids.every((id, index) => id === node.sessionIds[index]);
+      return unchanged
+        ? node
+        : { ...node, sessionIds: ids, activeSessionId: nextActiveSessionId };
     };
     let nextLayout = syncNode(split);
     const assignedIds = new Set(getTerminalGroups(nextLayout).flatMap((group) => group.sessionIds));
@@ -159,7 +166,9 @@ const Terminal: React.FC = () => {
       if (nextActiveId) useTerminalStore.getState().setActiveSession(nextActiveId);
       return;
     }
-    setSplit(pruned);
+    // Skip the state update (and the re-renders, pin repartition and workspace
+    // save it would trigger) when the layout is referentially unchanged.
+    if (pruned !== split) setSplit(pruned);
   }, [sessions]);
 
   // The layout's sessionIds are the source of truth for tab order while split,
@@ -182,8 +191,10 @@ const Terminal: React.FC = () => {
     if (!group) return;
     focusGroup(group.id);
     if (group.activeSessionId === activeSessionId) return;
-    setSplit(updateTerminalGroup(split, group.id, (current) => ({ ...current, activeSessionId })) as TerminalSplitState);
-  }, [activeSessionId, focusGroup]);
+    setSplit((current) => (current
+      ? updateTerminalGroup(current, group.id, (currentGroup) => ({ ...currentGroup, activeSessionId })) as TerminalSplitState
+      : current));
+  }, [activeSessionId, focusGroup, split]);
 
   const getGroupRegionAtPoint = useCallback((x: number, y: number): {
     slot: TerminalGroupSlot;
