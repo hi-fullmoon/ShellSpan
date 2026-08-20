@@ -1184,6 +1184,31 @@ fn is_same_connection_target(
     source.host == destination.host
         && source.port == destination.port
         && source.username == destination.username
+        && ConnectionRouteKey::from(source) == ConnectionRouteKey::from(destination)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ConnectionRouteKey<'a> {
+    jump_host: Option<JumpRouteKey<'a>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct JumpRouteKey<'a> {
+    host: &'a str,
+    port: u16,
+    username: &'a str,
+}
+
+impl<'a> From<&'a RemoteConnectionRequest> for ConnectionRouteKey<'a> {
+    fn from(request: &'a RemoteConnectionRequest) -> Self {
+        Self {
+            jump_host: request.jump_host.as_ref().map(|jump| JumpRouteKey {
+                host: jump.host.as_str(),
+                port: jump.port,
+                username: jump.username.as_str(),
+            }),
+        }
+    }
 }
 
 fn validate_same_connection_copy_destination(
@@ -2981,6 +3006,19 @@ mod tests {
         }
     }
 
+    fn jump_host(host: &str) -> crate::models::JumpHostConfig {
+        crate::models::JumpHostConfig {
+            host: host.to_string(),
+            port: 22,
+            username: "jump-user".to_string(),
+            auth_method: crate::models::AuthMethod::Password,
+            password: None,
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+        }
+    }
+
     #[test]
     fn same_connection_target_matches_host_port_username() {
         let source = connection_request("example.com", 22, "alice");
@@ -2996,6 +3034,26 @@ mod tests {
         assert!(!is_same_connection_target(&source, &connection_request("example.com", 22, "bob")));
         assert!(!is_same_connection_target(&source, &connection_request("example.com", 2222, "alice")));
         assert!(!is_same_connection_target(&source, &connection_request("other.example.com", 22, "alice")));
+    }
+
+    #[test]
+    fn same_connection_target_matches_same_jump_route() {
+        let mut source = connection_request("10.0.0.5", 22, "alice");
+        let mut destination = connection_request("10.0.0.5", 22, "alice");
+        source.jump_host = Some(jump_host("jump.example.com"));
+        destination.jump_host = Some(jump_host("jump.example.com"));
+
+        assert!(is_same_connection_target(&source, &destination));
+    }
+
+    #[test]
+    fn same_connection_target_rejects_different_jump_route() {
+        let mut source = connection_request("10.0.0.5", 22, "alice");
+        let mut destination = connection_request("10.0.0.5", 22, "alice");
+        source.jump_host = Some(jump_host("jump-a.example.com"));
+        destination.jump_host = Some(jump_host("jump-b.example.com"));
+
+        assert!(!is_same_connection_target(&source, &destination));
     }
 
     #[test]
