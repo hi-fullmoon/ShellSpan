@@ -71,7 +71,10 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
         return;
       }
 
-      const profileWithPassword = await promptForMissingPassword(profile);
+      const profileWithSavedSecrets = await useProfileStore
+        .getState()
+        .ensurePassword(profile);
+      const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
       if (!profileWithPassword) {
         logger.info(`Reconnect cancelled by user for session ${sessionId}`);
         return;

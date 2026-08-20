@@ -19,6 +19,7 @@ import {
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
 import { openHostKeyPrompt } from '@/lib/host-key-prompt';
+import { useProfileStore } from '@/stores/profileStore';
 
 const logger = createLogger('connect');
 
@@ -77,7 +78,10 @@ export function useConnectSession(): {
     let keyPromptShown = false;
 
     while (true) {
-      const profileWithPassword = await promptForMissingPassword(currentProfile);
+      const profileWithSavedSecrets = await useProfileStore
+        .getState()
+        .ensurePassword(currentProfile);
+      const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
       if (!profileWithPassword) {
         logger.info('Connection cancelled by user (password dialog dismissed)');
         return;

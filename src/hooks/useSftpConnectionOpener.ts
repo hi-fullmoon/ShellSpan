@@ -20,6 +20,7 @@ import {
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
+import { useProfileStore } from '@/stores/profileStore';
 
 interface SftpHostKeyDialogState {
   open: boolean;
@@ -134,7 +135,10 @@ export function useSftpConnectionOpener(): {
 
   const open = useCallback(
     async (profile: ConnectionProfile, targetConnectionId?: string, targetSide: SftpSide = 'remote') => {
-      const profileWithPassword = await promptForMissingPassword(profile);
+      const profileWithSavedSecrets = await useProfileStore
+        .getState()
+        .ensurePassword(profile);
+      const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
       if (!profileWithPassword) {
         return;
       }

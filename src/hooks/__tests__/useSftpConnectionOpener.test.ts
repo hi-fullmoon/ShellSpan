@@ -13,6 +13,8 @@ vi.mock('@/lib/tauri', () => ({
   invokeTrustHost: vi.fn(),
   invokeWarmRemoteConnection: vi.fn().mockResolvedValue(undefined),
   invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfileSecret: vi.fn().mockResolvedValue(undefined),
   invokeTouchRecentProfile: vi.fn().mockResolvedValue(undefined),
   invokeRemoveRecentProfile: vi.fn().mockResolvedValue(undefined),
   invokeListRecentProfiles: vi.fn().mockResolvedValue([]),
@@ -35,7 +37,14 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
   prepareKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
 }));
 
-import { invokeCheckHostKey, invokeListSftpBookmarks, invokeStoreProfilePassword, invokeTrustHost } from '@/lib/tauri';
+import {
+  invokeCheckHostKey,
+  invokeListSftpBookmarks,
+  invokeRetrieveProfilePassword,
+  invokeRetrieveProfileSecret,
+  invokeStoreProfilePassword,
+  invokeTrustHost,
+} from '@/lib/tauri';
 import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
   ensureKeychainKeyForProfile,
@@ -70,6 +79,10 @@ describe('useSftpConnectionOpener', () => {
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
     vi.mocked(invokeStoreProfilePassword).mockReset();
     vi.mocked(invokeStoreProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(invokeRetrieveProfilePassword).mockReset();
+    vi.mocked(invokeRetrieveProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(invokeRetrieveProfileSecret).mockReset();
+    vi.mocked(invokeRetrieveProfileSecret).mockResolvedValue(undefined);
     vi.mocked(promptForMissingPassword).mockReset();
     vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
