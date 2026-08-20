@@ -228,6 +228,18 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const reorderConnections = useSftpStore((state) => state.reorderConnections);
   const togglePin = useSftpStore((state) => state.togglePin);
 
+  // macOS tap-to-click in WKWebView can drop the pointerdown of a tap that
+  // immediately follows another one (the single-tap gesture recognizer stays
+  // blocked until the double-tap recognizer fails). Activation already runs on
+  // pointerdown; when the pointerdown is lost the release still lands on the
+  // tab, so track the last pointerdown target and use a pointerup on a
+  // different tab as the fallback activation signal. See handleTabPointerUp.
+  const lastPointerDownTabRef = useRef<string | null>(null);
+  const activateTabRef = useRef<(id: string) => void>(() => {});
+  activateTabRef.current = setActiveConnection;
+  const tabBarConnectionsRef = useRef(connections);
+  tabBarConnectionsRef.current = connections;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragPointerStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -297,6 +309,47 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     document.body.classList.add('tab-dragging');
     return () => document.body.classList.remove('tab-dragging');
   }, [draggingConnectionId]);
+
+  // Fallback tab activation for a pointerdown that WKWebView dropped (see
+  // lastPointerDownTabRef). Listeners run in the capture phase so they see the
+  // events before the close/pin buttons can stop their propagation.
+  useEffect(() => {
+    const getElement = (target: EventTarget | null): Element | null =>
+      target instanceof Element ? target : null;
+    const isInteractiveControl = (target: EventTarget | null): boolean =>
+      Boolean(getElement(target)?.closest('button, a[href], input, select, textarea'));
+    const getTabId = (target: EventTarget | null): string | null =>
+      getElement(target)?.closest('[data-sftp-tab]')
+        ?.getAttribute('data-sftp-tab') ?? null;
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      lastPointerDownTabRef.current = getTabId(event.target);
+    };
+    const handlePointerUp = (event: PointerEvent): void => {
+      if (event.button !== 0) return;
+      // A release that ends a reorder drag is not an activation: dropping a tab
+      // onto another one must stay a pure reorder.
+      if (document.body.classList.contains('tab-dragging')) return;
+      // Close/pin buttons stop their own pointerdown, but this fallback exists
+      // for taps whose pointerdown was never delivered. Do not turn their
+      // release into a tab activation before the button action runs.
+      if (isInteractiveControl(event.target)) return;
+      const tabId = getTabId(event.target);
+      if (!tabId) return;
+      if (!tabBarConnectionsRef.current.some((connection) => connection.id === tabId)) return;
+      // The pointerdown for this tap was delivered on the tab itself: it
+      // already activated, nothing to do.
+      if (lastPointerDownTabRef.current === tabId) return;
+      activateTabRef.current(tabId);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('pointerup', handlePointerUp, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('pointerup', handlePointerUp, true);
+    };
+  }, []);
 
   const finishDrag = (): void => {
     setDraggingConnectionId(null);
