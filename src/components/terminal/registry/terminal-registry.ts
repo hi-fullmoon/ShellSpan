@@ -2,7 +2,6 @@ import '@xterm/xterm/css/xterm.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
-import { WebglAddon } from '@xterm/addon-webgl';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
@@ -316,24 +315,13 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   // Renderer addons need the terminal element, so they are loaded once after
-  // the first successful open(): WebGL first, then the DOM renderer.
-  // Loaded addons are disposed by terminal.dispose().
+  // the first successful open().
+  // NOTE: the WebGL renderer (@xterm/addon-webgl) is temporarily disabled;
+  // the DOM renderer is always used. To restore it, re-add the WebglAddon
+  // import and the try/catch block that loads it here.
   private setupRenderer(): void {
     if (this.rendererInitialized) return;
     this.rendererInitialized = true;
-    try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => {
-        webglAddon.dispose();
-        if (this.disposed) return;
-        this.setRendererMode('dom');
-      });
-      this.terminal.loadAddon(webglAddon);
-      this.setRendererMode('webgl');
-      return;
-    } catch (error) {
-      logger.warn('WebGL renderer unavailable, falling back to DOM renderer', error);
-    }
     this.setRendererMode('dom');
   }
 
