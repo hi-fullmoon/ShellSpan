@@ -3,6 +3,21 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.44](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.44) - 2026-08-20
+
+
+### Features
+
+- **tauri:** use native macOS keychain APIs for credential storage
+
+### Style
+
+- **ui:** refine terminal padding and update section spacing
+
+### Testing
+
+- **hook:** mock new profile secret retrieval commands and verify lazy loading
+
 ## [v2.0.43](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.43) - 2026-08-20
 
 
