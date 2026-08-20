@@ -69,12 +69,7 @@ impl ProfileSecretKind {
 
 /// Abstraction over credential storage backends.
 trait CredentialBackend: Send + Sync {
-    fn set_credential(
-        &self,
-        service: &str,
-        key: &str,
-        value: &str,
-    ) -> Result<(), String>;
+    fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String>;
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String>;
     fn delete_credential(&self, service: &str, key: &str) -> Result<(), String>;
     /// Clears the secret value stored for a key while preserving any metadata
@@ -92,36 +87,59 @@ trait CredentialBackend: Send + Sync {
 struct NativeKeychainBackend;
 
 impl CredentialBackend for NativeKeychainBackend {
-    fn set_credential(
-        &self,
-        service: &str,
-        key: &str,
-        value: &str,
-    ) -> Result<(), String> {
-        ensure_native_store()?;
-        let entry =
-            keyring_core::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
-        entry
-            .set_password(value)
-            .map_err(|e| format!("keyring set_password: {e}"))?;
-        debug!("Stored credential in OS keychain service={service} key={key}");
-        Ok(())
+    fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            macos_keychain::set_generic_password_with_current_app_access(service, key, value)?;
+            debug!("Stored credential in OS keychain service={service} key={key}");
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            ensure_native_store()?;
+            let entry =
+                keyring_core::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
+            entry
+                .set_password(value)
+                .map_err(|e| format!("keyring set_password: {e}"))?;
+            debug!("Stored credential in OS keychain service={service} key={key}");
+            Ok(())
+        }
     }
 
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
-        ensure_native_store()?;
-        let entry =
-            keyring_core::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
-        match entry.get_password() {
-            Ok(password) => {
-                debug!("Loaded credential from OS keychain service={service} key={key}");
-                Ok(Some(password))
+        #[cfg(target_os = "macos")]
+        {
+            match macos_keychain::get_generic_password(service, key) {
+                Ok(Some(password)) => {
+                    debug!("Loaded credential from OS keychain service={service} key={key}");
+                    Ok(Some(password))
+                }
+                Ok(None) => {
+                    debug!("No credential in OS keychain for service={service} key={key}");
+                    Ok(None)
+                }
+                Err(e) => Err(format!("keyring get_password: {e}")),
             }
-            Err(keyring_core::Error::NoEntry) => {
-                debug!("No credential in OS keychain for service={service} key={key}");
-                Ok(None)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            ensure_native_store()?;
+            let entry =
+                keyring_core::Entry::new(service, key).map_err(|e| format!("keyring new: {e}"))?;
+            match entry.get_password() {
+                Ok(password) => {
+                    debug!("Loaded credential from OS keychain service={service} key={key}");
+                    Ok(Some(password))
+                }
+                Err(keyring_core::Error::NoEntry) => {
+                    debug!("No credential in OS keychain for service={service} key={key}");
+                    Ok(None)
+                }
+                Err(e) => Err(format!("keyring get_password: {e}")),
             }
-            Err(e) => Err(format!("keyring get_password: {e}")),
         }
     }
 
@@ -165,13 +183,9 @@ impl DatabaseBackend {
 }
 
 impl CredentialBackend for DatabaseBackend {
-    fn set_credential(
-        &self,
-        service: &str,
-        key: &str,
-        value: &str,
-    ) -> Result<(), String> {
-        self.database.store_key_credential_value(key, value, service)
+    fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
+        self.database
+            .store_key_credential_value(key, value, service)
     }
 
     fn get_credential(&self, _service: &str, key: &str) -> Result<Option<String>, String> {
@@ -199,12 +213,7 @@ struct CompositeBackend {
 }
 
 impl CredentialBackend for CompositeBackend {
-    fn set_credential(
-        &self,
-        service: &str,
-        key: &str,
-        value: &str,
-    ) -> Result<(), String> {
+    fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
         match self.native.set_credential(service, key, value) {
             Ok(()) => {
                 // Keep both stores in sync: remove any stale copy from the
@@ -380,11 +389,7 @@ impl CredentialManager {
         Ok(value)
     }
 
-    pub(crate) fn delete_credential(
-        &self,
-        service: &str,
-        key: &str,
-    ) -> Result<(), String> {
+    pub(crate) fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
         self.backend.delete_credential(service, key)?;
         self.cache
             .lock()
@@ -395,18 +400,11 @@ impl CredentialManager {
 
     // --- Key credentials ---
 
-    pub(crate) fn store_key_credential(
-        &self,
-        key_id: &str,
-        value: &str,
-    ) -> Result<(), String> {
+    pub(crate) fn store_key_credential(&self, key_id: &str, value: &str) -> Result<(), String> {
         self.set_credential(KEY_SERVICE, key_id, value)
     }
 
-    pub(crate) fn retrieve_key_credential(
-        &self,
-        key_id: &str,
-    ) -> Result<Option<String>, String> {
+    pub(crate) fn retrieve_key_credential(&self, key_id: &str) -> Result<Option<String>, String> {
         self.get_credential(KEY_SERVICE, key_id)
     }
 
@@ -459,9 +457,7 @@ impl CredentialManager {
     /// on one kind does not prevent deleting the others; the first error is
     /// returned after all deletes were attempted.
     pub(crate) fn delete_all_profile_secrets(&self, profile_id: &str) -> Result<(), String> {
-        let mut first_error = self
-            .delete_profile_password(profile_id)
-            .err();
+        let mut first_error = self.delete_profile_password(profile_id).err();
         for kind in [
             ProfileSecretKind::Passphrase,
             ProfileSecretKind::JumpPassword,
@@ -488,6 +484,227 @@ impl CredentialManager {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod macos_keychain {
+    use core_foundation::base::{CFRelease, TCFType};
+    use core_foundation::string::CFString;
+    use core_foundation_sys::array::CFArrayRef;
+    use core_foundation_sys::base::OSStatus;
+    use core_foundation_sys::string::CFStringRef;
+    use log::warn;
+    use security_framework::base::Error;
+    use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};
+    use security_framework::os::macos::keychain_item::SecKeychainItem;
+    use security_framework::os::macos::passwords::find_generic_password;
+    use security_framework_sys::base::{
+        errSecDuplicateItem, errSecItemNotFound, errSecSuccess, SecAccessRef, SecKeychainAttribute,
+        SecKeychainAttributeList, SecKeychainItemRef, SecKeychainRef,
+    };
+    use std::os::raw::c_void;
+    use std::ptr;
+
+    const ITEM_CLASS_GENERIC_PASSWORD: u32 = four_char_code(*b"genp");
+    const ATTR_ACCOUNT: u32 = four_char_code(*b"acct");
+    const ATTR_SERVICE: u32 = four_char_code(*b"svce");
+
+    const fn four_char_code(value: [u8; 4]) -> u32 {
+        ((value[0] as u32) << 24)
+            | ((value[1] as u32) << 16)
+            | ((value[2] as u32) << 8)
+            | (value[3] as u32)
+    }
+
+    extern "C" {
+        fn SecAccessCreate(
+            descriptor: CFStringRef,
+            trustedlist: CFArrayRef,
+            access_ref: *mut SecAccessRef,
+        ) -> OSStatus;
+
+        fn SecKeychainItemCreateFromContent(
+            item_class: u32,
+            attr_list: *mut SecKeychainAttributeList,
+            length: u32,
+            data: *const c_void,
+            keychain_ref: SecKeychainRef,
+            initial_access: SecAccessRef,
+            item_ref: *mut SecKeychainItemRef,
+        ) -> OSStatus;
+
+        fn SecKeychainItemSetAccess(item_ref: SecKeychainItemRef, access: SecAccessRef)
+            -> OSStatus;
+    }
+
+    pub(super) fn get_generic_password(
+        service: &str,
+        account: &str,
+    ) -> Result<Option<String>, String> {
+        validate_specifier(service, "service")?;
+        validate_specifier(account, "account")?;
+
+        let keychain = user_keychain()?;
+        match find_generic_password(Some(&[keychain]), service, account) {
+            Ok((password, item)) => {
+                let value = String::from_utf8(password.as_ref().to_vec())
+                    .map_err(|e| format!("macOS keychain password is not utf-8: {e}"))?;
+                if let Err(error) = set_item_current_app_access(&item) {
+                    warn!(
+                        "Failed to refresh macOS keychain ACL service={service} key={account}: {error}"
+                    );
+                }
+                Ok(Some(value))
+            }
+            Err(error) if error.code() == errSecItemNotFound => Ok(None),
+            Err(error) => Err(format!("macOS keychain find: {error}")),
+        }
+    }
+
+    pub(super) fn set_generic_password_with_current_app_access(
+        service: &str,
+        account: &str,
+        password: &str,
+    ) -> Result<(), String> {
+        validate_specifier(service, "service")?;
+        validate_specifier(account, "account")?;
+
+        let keychain = user_keychain()?;
+        match find_generic_password(Some(std::slice::from_ref(&keychain)), service, account) {
+            Ok((_old_password, mut item)) => {
+                item.set_password(password.as_bytes())
+                    .map_err(|e| format!("macOS keychain update password: {e}"))?;
+                set_item_current_app_access(&item)
+                    .map_err(|e| format!("macOS keychain update ACL: {e}"))
+            }
+            Err(error) if error.code() == errSecItemNotFound => {
+                match add_with_current_app_access(&keychain, service, account, password.as_bytes())
+                {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.code() == errSecDuplicateItem => {
+                        update_existing_password(&keychain, service, account, password)
+                    }
+                    Err(error) => Err(format!("macOS keychain create: {error}")),
+                }
+            }
+            Err(error) => Err(format!("macOS keychain find existing item: {error}")),
+        }
+    }
+
+    fn validate_specifier(value: &str, label: &str) -> Result<(), String> {
+        if value.is_empty() {
+            Err(format!("macOS keychain {label} cannot be empty"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn user_keychain() -> Result<SecKeychain, String> {
+        SecKeychain::default_for_domain(SecPreferencesDomain::User)
+            .map_err(|e| format!("macOS keychain open login keychain: {e}"))
+    }
+
+    fn update_existing_password(
+        keychain: &SecKeychain,
+        service: &str,
+        account: &str,
+        password: &str,
+    ) -> Result<(), String> {
+        match find_generic_password(Some(std::slice::from_ref(keychain)), service, account) {
+            Ok((_old_password, mut item)) => {
+                item.set_password(password.as_bytes())
+                    .map_err(|e| format!("macOS keychain update password: {e}"))?;
+                set_item_current_app_access(&item)
+                    .map_err(|e| format!("macOS keychain update ACL: {e}"))
+            }
+            Err(error) => Err(format!("macOS keychain update existing item: {error}")),
+        }
+    }
+
+    fn add_with_current_app_access(
+        keychain: &SecKeychain,
+        service: &str,
+        account: &str,
+        password: &[u8],
+    ) -> Result<(), Error> {
+        let mut service_bytes = service.as_bytes().to_vec();
+        let mut account_bytes = account.as_bytes().to_vec();
+        let mut attrs = [
+            SecKeychainAttribute {
+                tag: ATTR_SERVICE,
+                length: service_bytes.len() as u32,
+                data: service_bytes.as_mut_ptr().cast(),
+            },
+            SecKeychainAttribute {
+                tag: ATTR_ACCOUNT,
+                length: account_bytes.len() as u32,
+                data: account_bytes.as_mut_ptr().cast(),
+            },
+        ];
+        let mut attr_list = SecKeychainAttributeList {
+            count: attrs.len() as u32,
+            attr: attrs.as_mut_ptr(),
+        };
+        let mut item = ptr::null_mut();
+
+        let result = with_current_app_access(|access| unsafe {
+            cvt_status(SecKeychainItemCreateFromContent(
+                ITEM_CLASS_GENERIC_PASSWORD,
+                &mut attr_list,
+                password.len() as u32,
+                password.as_ptr().cast(),
+                keychain.as_concrete_TypeRef(),
+                access,
+                &mut item,
+            ))
+        });
+
+        unsafe {
+            if !item.is_null() {
+                CFRelease(item.cast());
+            }
+        }
+
+        result
+    }
+
+    fn set_item_current_app_access(item: &SecKeychainItem) -> Result<(), Error> {
+        with_current_app_access(|access| unsafe {
+            cvt_status(SecKeychainItemSetAccess(item.as_concrete_TypeRef(), access))
+        })
+    }
+
+    fn with_current_app_access<T>(
+        f: impl FnOnce(SecAccessRef) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let descriptor = CFString::from_static_string("TermBridge");
+        let mut access = ptr::null_mut();
+        unsafe {
+            cvt_status(SecAccessCreate(
+                descriptor.as_concrete_TypeRef(),
+                ptr::null(),
+                &mut access,
+            ))?;
+        }
+
+        let result = f(access);
+
+        unsafe {
+            if !access.is_null() {
+                CFRelease(access.cast());
+            }
+        }
+
+        result
+    }
+
+    fn cvt_status(status: OSStatus) -> Result<(), Error> {
+        if status == errSecSuccess {
+            Ok(())
+        } else {
+            Err(Error::from_code(status))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,12 +721,7 @@ mod tests {
     }
 
     impl CredentialBackend for MockBackend {
-        fn set_credential(
-            &self,
-            service: &str,
-            key: &str,
-            value: &str,
-        ) -> Result<(), String> {
+        fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
             self.set_calls.fetch_add(1, Ordering::SeqCst);
             if self.fail_set.load(Ordering::SeqCst) {
                 return Err("mock set failure".to_string());
