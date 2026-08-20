@@ -20,6 +20,7 @@ import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('profileStore');
+const legacyJumpSecretProfileIds = new Set<string>();
 
 /**
  * Per-profile secrets kept in the OS keychain (via `CredentialManager`),
@@ -65,14 +66,27 @@ async function syncProfileSecrets(
 ): Promise<void> {
   const before = profileSecrets(previous);
   const after = profileSecrets(next);
+  const shouldDeleteForAuthChange = (kind: ProfileSecretKind): boolean => {
+    if (kind === 'passphrase') {
+      return previous.authMethod === 'key' && next.authMethod !== 'key';
+    }
+    if (kind === 'jump-password') {
+      return previous.jumpHost?.authMethod === 'password' && next.jumpHost?.authMethod !== 'password';
+    }
+    return previous.jumpHost?.authMethod === 'key' && next.jumpHost?.authMethod !== 'key';
+  };
   await Promise.all(
     (Object.keys(after) as ProfileSecretKind[]).map(async (kind) => {
-      if ((before[kind] ?? '') === (after[kind] ?? '')) return;
+      const beforeValue = before[kind];
+      const afterValue = after[kind];
+      if ((beforeValue ?? '') === (afterValue ?? '') && !shouldDeleteForAuthChange(kind)) return;
       try {
-        if (after[kind]) {
-          await invokeStoreProfileSecret(next.id, kind, after[kind]);
-        } else {
+        if (afterValue) {
+          await invokeStoreProfileSecret(next.id, kind, afterValue);
+        } else if (beforeValue || shouldDeleteForAuthChange(kind)) {
           await invokeDeleteProfileSecret(next.id, kind);
+        } else {
+          return;
         }
       } catch (error) {
         notifySecretPersistFailure(`failed to sync ${kind} for profile ${next.id}`, error);
@@ -81,46 +95,51 @@ async function syncProfileSecrets(
   );
 }
 
-/** Loads the profile's secrets back from the keychain into the given profile. */
-async function retrieveProfileSecrets(profile: ConnectionProfile): Promise<void> {
+/** Loads the profile's secrets back from the keychain into a profile copy. */
+async function retrieveProfileSecrets(profile: ConnectionProfile): Promise<ConnectionProfile> {
+  const hydrated: ConnectionProfile = {
+    ...profile,
+    jumpHost: profile.jumpHost ? { ...profile.jumpHost } : undefined,
+  };
   const jobs: Promise<void>[] = [];
-  if (profile.authMethod === 'key' && !profile.passphrase) {
+  if (hydrated.authMethod === 'key' && !hydrated.passphrase) {
     jobs.push(
-      invokeRetrieveProfileSecret(profile.id, 'passphrase')
+      invokeRetrieveProfileSecret(hydrated.id, 'passphrase')
         .then((value) => {
-          profile.passphrase = value;
+          hydrated.passphrase = value;
         })
         .catch((error) =>
-          logger.error(`failed to retrieve passphrase for profile ${profile.id}`, error),
+          logger.error(`failed to retrieve passphrase for profile ${hydrated.id}`, error),
         ),
     );
   }
-  if (profile.jumpHost) {
-    const jumpHost = profile.jumpHost;
+  if (hydrated.jumpHost) {
+    const jumpHost = hydrated.jumpHost;
     if (jumpHost.authMethod === 'password' && !jumpHost.password) {
       jobs.push(
-        invokeRetrieveProfileSecret(profile.id, 'jump-password')
+        invokeRetrieveProfileSecret(hydrated.id, 'jump-password')
           .then((value) => {
             jumpHost.password = value;
           })
           .catch((error) =>
-            logger.error(`failed to retrieve jump password for profile ${profile.id}`, error),
+            logger.error(`failed to retrieve jump password for profile ${hydrated.id}`, error),
           ),
       );
     }
     if (jumpHost.authMethod === 'key' && !jumpHost.passphrase) {
       jobs.push(
-        invokeRetrieveProfileSecret(profile.id, 'jump-passphrase')
+        invokeRetrieveProfileSecret(hydrated.id, 'jump-passphrase')
           .then((value) => {
             jumpHost.passphrase = value;
           })
           .catch((error) =>
-            logger.error(`failed to retrieve jump passphrase for profile ${profile.id}`, error),
+            logger.error(`failed to retrieve jump passphrase for profile ${hydrated.id}`, error),
           ),
       );
     }
   }
   await Promise.all(jobs);
+  return hydrated;
 }
 
 /**
@@ -181,7 +200,39 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
   };
 }
 
+async function retrieveProfilePassword(profile: ConnectionProfile): Promise<ConnectionProfile> {
+  if (profile.authMethod !== 'password' || profile.password || profile.keychainKeyId) {
+    return profile;
+  }
+  try {
+    return {
+      ...profile,
+      password: await invokeRetrieveProfilePassword(profile.id),
+    };
+  } catch (error) {
+    logger.error(`failed to retrieve password for profile ${profile.id}`, error);
+    return {
+      ...profile,
+      password: undefined,
+    };
+  }
+}
+
+async function prepareProfileSecrets(profile: ConnectionProfile): Promise<ConnectionProfile> {
+  let prepared = await retrieveProfilePassword(profile);
+  prepared = await retrieveProfileSecrets(prepared);
+  if (legacyJumpSecretProfileIds.has(prepared.id)) {
+    await migrateLegacyJumpSecrets(prepared);
+    legacyJumpSecretProfileIds.delete(prepared.id);
+  }
+  return prepared;
+}
+
 function rowToProfile(row: ProfileRow): ConnectionProfile {
+  const jumpHost = row.jumpHostConfig ? JSON.parse(row.jumpHostConfig) : undefined;
+  if (jumpHost?.password || jumpHost?.passphrase) {
+    legacyJumpSecretProfileIds.add(row.id);
+  }
   return {
     id: row.id,
     name: row.name,
@@ -190,7 +241,7 @@ function rowToProfile(row: ProfileRow): ConnectionProfile {
     username: row.username,
     authMethod: row.authMethod,
     keychainKeyId: row.keychainKeyId,
-    jumpHost: row.jumpHostConfig ? JSON.parse(row.jumpHostConfig) : undefined,
+    jumpHost,
     password: undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -204,24 +255,8 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   hydrateFromDb: async () => {
     try {
       const rows = await invokeListProfiles();
-      const profiles = await Promise.all(
-        rows.map(async (row) => {
-          const profile = rowToProfile(row);
-          if (profile.authMethod === 'password') {
-            try {
-              profile.password = await invokeRetrieveProfilePassword(profile.id);
-            } catch (error) {
-              logger.error(`failed to retrieve password for profile ${profile.id}`, error);
-              profile.password = undefined;
-            }
-          }
-          // Legacy rows may still carry plaintext jump-host secrets; move them
-          // to the keychain before filling in anything missing from there.
-          await migrateLegacyJumpSecrets(profile);
-          await retrieveProfileSecrets(profile);
-          return profile;
-        }),
-      );
+      legacyJumpSecretProfileIds.clear();
+      const profiles = rows.map(rowToProfile);
       set({ profiles, initialized: true });
       logger.info(`loaded ${profiles.length} profiles from database`);
     } catch (error) {
@@ -367,7 +402,14 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
 
   getProfile: (id) => get().profiles.find((p) => p.id === id),
 
-  ensurePassword: async (profile) => profile,
+  ensurePassword: async (profile) => {
+    const current = get().profiles.find((p) => p.id === profile.id) ?? profile;
+    const prepared = await prepareProfileSecrets(current);
+    set((state) => ({
+      profiles: state.profiles.map((p) => (p.id === prepared.id ? prepared : p)),
+    }));
+    return prepared;
+  },
 
   clearKeychainKeyIds: (profileIds) => {
     if (profileIds.length === 0) return;

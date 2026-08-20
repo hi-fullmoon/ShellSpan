@@ -292,7 +292,7 @@ describe('profileStore', () => {
     expect(invokeDeleteProfileSecrets).toHaveBeenCalledWith('profile-1');
   });
 
-  it('hydrates passphrases and jump-host secrets from the keychain', async () => {
+  it('hydrates profile metadata without reading keychain secrets', async () => {
     invokeListProfiles.mockResolvedValue([{
       id: 'profile-1',
       name: 'Key',
@@ -310,17 +310,50 @@ describe('profileStore', () => {
       createdAt: 1,
       updatedAt: 1,
     }]);
+
+    await useProfileStore.getState().hydrateFromDb();
+
+    const profile = useProfileStore.getState().profiles[0];
+    expect(profile.passphrase).toBeUndefined();
+    expect(profile.jumpHost?.password).toBeUndefined();
+    expect(invokeRetrieveProfilePassword).not.toHaveBeenCalled();
+    expect(invokeRetrieveProfileSecret).not.toHaveBeenCalled();
+  });
+
+  it('loads stored profile secrets on demand and caches them in memory', async () => {
+    useProfileStore.setState({
+      profiles: [{
+        id: 'profile-1',
+        name: 'Key',
+        host: 'h',
+        port: 22,
+        username: 'u',
+        authMethod: 'key',
+        keychainKeyId: 'key-1',
+        jumpHost: {
+          host: 'j',
+          port: 22,
+          username: 'ju',
+          authMethod: 'password',
+        },
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    });
     invokeRetrieveProfileSecret.mockImplementation((_id: string, kind: string) => {
       if (kind === 'passphrase') return Promise.resolve('main-pp');
       if (kind === 'jump-password') return Promise.resolve('jump-secret');
       return Promise.resolve(undefined);
     });
 
-    await useProfileStore.getState().hydrateFromDb();
+    const profile = await useProfileStore
+      .getState()
+      .ensurePassword(useProfileStore.getState().profiles[0]);
 
-    const profile = useProfileStore.getState().profiles[0];
     expect(profile.passphrase).toBe('main-pp');
     expect(profile.jumpHost?.password).toBe('jump-secret');
+    expect(useProfileStore.getState().profiles[0].passphrase).toBe('main-pp');
+    expect(useProfileStore.getState().profiles[0].jumpHost?.password).toBe('jump-secret');
   });
 
   it('migrates plaintext jump-host secrets from legacy rows into the keychain', async () => {
@@ -343,6 +376,9 @@ describe('profileStore', () => {
     }]);
 
     await useProfileStore.getState().hydrateFromDb();
+    await useProfileStore
+      .getState()
+      .ensurePassword(useProfileStore.getState().profiles[0]);
 
     expect(invokeStoreProfileSecret).toHaveBeenCalledWith('profile-1', 'jump-password', 'legacy-jump');
     const scrubbedRow = invokeUpdateProfile.mock.calls[0][1];

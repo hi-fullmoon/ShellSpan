@@ -12,6 +12,8 @@ vi.mock('@/lib/tauri', () => ({
   invokeCreateSession: vi.fn(),
   invokeTrustHost: vi.fn(),
   invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfileSecret: vi.fn().mockResolvedValue(undefined),
   buildSessionCreateRequest: vi.fn((p: ConnectionProfile) => p),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
@@ -52,6 +54,8 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
 
 import {
   invokeCreateSession,
+  invokeRetrieveProfilePassword,
+  invokeRetrieveProfileSecret,
   invokeTrustHost,
   invokeStoreProfilePassword,
 } from '@/lib/tauri';
@@ -102,6 +106,10 @@ describe('useConnectSession', () => {
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
     vi.mocked(invokeStoreProfilePassword).mockReset();
     vi.mocked(invokeStoreProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(invokeRetrieveProfilePassword).mockReset();
+    vi.mocked(invokeRetrieveProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(invokeRetrieveProfileSecret).mockReset();
+    vi.mocked(invokeRetrieveProfileSecret).mockResolvedValue(undefined);
     vi.mocked(promptForMissingPassword).mockReset();
     vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(promptForMissingKeychainKey).mockReset();
