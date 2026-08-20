@@ -488,10 +488,9 @@ impl CredentialManager {
 mod macos_keychain {
     use core_foundation::base::{CFRelease, TCFType};
     use core_foundation::string::CFString;
-    use core_foundation_sys::array::CFArrayRef;
-    use core_foundation_sys::base::OSStatus;
+    use core_foundation_sys::array::{CFArrayCreate, CFArrayRef, kCFTypeArrayCallBacks};
+    use core_foundation_sys::base::{CFTypeRef, OSStatus, kCFAllocatorDefault};
     use core_foundation_sys::string::CFStringRef;
-    use log::warn;
     use security_framework::base::Error;
     use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};
     use security_framework::os::macos::keychain_item::SecKeychainItem;
@@ -500,7 +499,9 @@ mod macos_keychain {
         errSecDuplicateItem, errSecItemNotFound, errSecSuccess, SecAccessRef, SecKeychainAttribute,
         SecKeychainAttributeList, SecKeychainItemRef, SecKeychainRef,
     };
+    use std::ffi::CString;
     use std::os::raw::c_void;
+    use std::path::{Path, PathBuf};
     use std::ptr;
 
     const ITEM_CLASS_GENERIC_PASSWORD: u32 = four_char_code(*b"genp");
@@ -533,6 +534,11 @@ mod macos_keychain {
 
         fn SecKeychainItemSetAccess(item_ref: SecKeychainItemRef, access: SecAccessRef)
             -> OSStatus;
+
+        fn SecTrustedApplicationCreateFromPath(
+            path: *const i8,
+            app: *mut CFTypeRef,
+        ) -> OSStatus;
     }
 
     pub(super) fn get_generic_password(
@@ -544,16 +550,9 @@ mod macos_keychain {
 
         let keychain = user_keychain()?;
         match find_generic_password(Some(&[keychain]), service, account) {
-            Ok((password, item)) => {
-                let value = String::from_utf8(password.as_ref().to_vec())
-                    .map_err(|e| format!("macOS keychain password is not utf-8: {e}"))?;
-                if let Err(error) = set_item_current_app_access(&item) {
-                    warn!(
-                        "Failed to refresh macOS keychain ACL service={service} key={account}: {error}"
-                    );
-                }
-                Ok(Some(value))
-            }
+            Ok((password, _item)) => String::from_utf8(password.as_ref().to_vec())
+                .map(Some)
+                .map_err(|e| format!("macOS keychain password is not utf-8: {e}")),
             Err(error) if error.code() == errSecItemNotFound => Ok(None),
             Err(error) => Err(format!("macOS keychain find: {error}")),
         }
@@ -676,11 +675,14 @@ mod macos_keychain {
         f: impl FnOnce(SecAccessRef) -> Result<T, Error>,
     ) -> Result<T, Error> {
         let descriptor = CFString::from_static_string("TermBridge");
+        let trusted_list = TrustedApplicationList::current_app();
         let mut access = ptr::null_mut();
         unsafe {
             cvt_status(SecAccessCreate(
                 descriptor.as_concrete_TypeRef(),
-                ptr::null(),
+                trusted_list
+                    .as_ref()
+                    .map_or(ptr::null(), |list| list.array),
                 &mut access,
             ))?;
         }
@@ -694,6 +696,58 @@ mod macos_keychain {
         }
 
         result
+    }
+
+    struct TrustedApplicationList {
+        app: CFTypeRef,
+        array: CFArrayRef,
+    }
+
+    impl TrustedApplicationList {
+        fn current_app() -> Option<Self> {
+            let path = trusted_app_path()?;
+            let path = CString::new(path.to_string_lossy().as_bytes()).ok()?;
+            let mut app = ptr::null();
+            unsafe {
+                cvt_status(SecTrustedApplicationCreateFromPath(
+                    path.as_ptr(),
+                    &mut app,
+                ))
+                .ok()?;
+                let values = [app];
+                let array = CFArrayCreate(
+                    kCFAllocatorDefault,
+                    values.as_ptr(),
+                    values.len() as isize,
+                    &kCFTypeArrayCallBacks,
+                );
+                if array.is_null() {
+                    CFRelease(app);
+                    return None;
+                }
+                Some(Self { app, array })
+            }
+        }
+    }
+
+    impl Drop for TrustedApplicationList {
+        fn drop(&mut self) {
+            unsafe {
+                CFRelease(self.array.cast_mut().cast());
+                CFRelease(self.app);
+            }
+        }
+    }
+
+    fn trusted_app_path() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        find_app_bundle(&exe).or(Some(exe))
+    }
+
+    fn find_app_bundle(path: &Path) -> Option<PathBuf> {
+        path.ancestors()
+            .find(|ancestor| ancestor.extension().is_some_and(|ext| ext == "app"))
+            .map(Path::to_path_buf)
     }
 
     fn cvt_status(status: OSStatus) -> Result<(), Error> {

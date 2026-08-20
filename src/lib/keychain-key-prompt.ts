@@ -92,22 +92,20 @@ export async function prepareKeychainKeyForProfile(
     return profile;
   }
 
-  const { initialized, hydrate, getKey } = useKeychainStore.getState();
+  const { initialized, hydrate } = useKeychainStore.getState();
   if (!initialized) {
     await hydrate();
   }
 
-  let key = await getKey(profile.keychainKeyId);
-  if (!key) {
+  const keyExists = useKeychainStore
+    .getState()
+    .keys.some((key) => key.id === profile.keychainKeyId);
+  if (!keyExists) {
     const recovered = await promptForMissingKeychainKey(profile);
     if (!recovered) {
       return null;
     }
     if (!recovered.keychainKeyId) {
-      return null;
-    }
-    key = await getKey(recovered.keychainKeyId);
-    if (!key) {
       return null;
     }
     profile = recovered;
@@ -158,4 +156,3 @@ export async function preparePasswordKeychain(
     password: key.privateKey,
   };
 }
-
