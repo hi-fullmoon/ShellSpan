@@ -3,6 +3,18 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.46](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.46) - 2026-08-20
+
+
+### Bug Fixes
+
+- **terminal:** debounce copy-on-select and suppress tap-and-slide drags
+
+### Features
+
+- **sftp:** add pointerup fallback for tab activation
+- **terminal:** add pointerup fallback for tab activation
+
 ## [v2.0.45](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.45) - 2026-08-20
 
 
