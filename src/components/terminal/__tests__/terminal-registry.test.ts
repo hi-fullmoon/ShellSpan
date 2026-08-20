@@ -1,6 +1,19 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { findHttpLinksInLine, terminalRegistry } from '../registry/terminal-registry';
 
+// Controls whether the mocked WebglAddon activates; jsdom has no real WebGL2.
+const webglState = vi.hoisted(() => ({ available: false }));
+
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class {
+    onContextLoss(_callback: () => void) {}
+    activate() {
+      if (!webglState.available) throw new Error('WebGL2 not supported');
+    }
+    dispose() {}
+  },
+}));
+
 // xterm + addons work in jsdom for write/buffer; fit yields 0x0 (harmless).
 // Polyfill ResizeObserver if undefined.
 class RO {
@@ -110,6 +123,20 @@ describe('terminalRegistry', () => {
     // Tailwind compiles the descendant variant into `container .xterm-viewport { opacity: 0 }`,
     // so the generating class lives on the container; jsdom has no compiled stylesheet.
     expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
+  });
+
+  it('keeps the viewport visible when the webgl renderer is active', () => {
+    // With webgl the content is drawn to a canvas and the viewport only
+    // carries the scrollbar, so the opacity-0 descendant class must be removed.
+    webglState.available = true;
+    try {
+      const controller = createController('s1');
+      controller.attach(document.createElement('div'));
+
+      expect(controller.container).not.toHaveClass('[&_.xterm-viewport]:opacity-0');
+    } finally {
+      webglState.available = false;
+    }
   });
 
   it('detach keeps buffer intact; reattach to a different host preserves buffer', () => {
