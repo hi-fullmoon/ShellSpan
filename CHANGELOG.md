@@ -3,6 +3,13 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.45](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.45) - 2026-08-20
+
+
+### Bug Fixes
+
+- **keychain:** trust current app instead of refreshing ACL on every read
+
 ## [v2.0.44](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.44) - 2026-08-20
 
 
