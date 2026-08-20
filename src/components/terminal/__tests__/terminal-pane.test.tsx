@@ -103,6 +103,7 @@ function makeMockTerminal(selection = '') {
     focus: vi.fn(),
   };
 
+  Object.assign(terminal, { __controller: controller });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(controller);
   return terminal;
 }
@@ -210,6 +211,28 @@ describe('TerminalPane', () => {
     expect(terminal.paste).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' }));
     expect(terminal.paste).toHaveBeenCalledWith('echo one\necho two');
+  });
+
+  it('confirms a pending paste into the session where it started', async () => {
+    vi.mocked(navigator.clipboard.readText).mockResolvedValue('echo one\necho two');
+    const firstTerminal = makeMockTerminal();
+    const firstController = (firstTerminal as typeof firstTerminal & { __controller: unknown }).__controller;
+    const { rerender } = render(<TerminalPane activeSession={makeSession({ sessionId: 's1' })} />);
+
+    firstTerminal.element?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(await screen.findByText('terminal.pasteWarning.title')).toBeInTheDocument();
+
+    const secondTerminal = makeMockTerminal();
+    const secondController = (secondTerminal as typeof secondTerminal & { __controller: unknown }).__controller;
+    (terminalRegistry.get as ReturnType<typeof vi.fn>).mockImplementation((sessionId: string) => (
+      sessionId === 's1' ? firstController : secondController
+    ));
+    rerender(<TerminalPane activeSession={makeSession({ sessionId: 's2' })} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' }));
+
+    expect(firstTerminal.paste).toHaveBeenCalledWith('echo one\necho two');
+    expect(secondTerminal.paste).not.toHaveBeenCalled();
   });
 
   it('renders without an active session', () => {

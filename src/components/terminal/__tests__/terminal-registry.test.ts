@@ -1,3 +1,4 @@
+import { act } from '@testing-library/react';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { findHttpLinksInLine, terminalRegistry } from '../registry/terminal-registry';
 
@@ -316,6 +317,74 @@ describe('terminalRegistry', () => {
 
     controller.simulateInput('\r');
     expect(requestReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the auto-reconnect guard after an attempted reconnect settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const { listenToSshClosed } = await import('@/lib/tauri');
+      let closedHandler: ((event: any) => void) | undefined;
+      vi.mocked(listenToSshClosed).mockImplementation(async (_sessionId, callback) => {
+        closedHandler = callback;
+        return () => {};
+      });
+      terminalRegistry.updateOptions({
+        fontSize: 14,
+        fontFamily: 'system',
+        cursorBlink: true,
+        cursorStyle: 'block',
+        scrollback: 10000,
+        colorScheme: 'app',
+        autoReconnect: true,
+        lineHeight: 1,
+        letterSpacing: 0,
+        urlDetection: true,
+        bellStyle: 'none',
+      });
+      const requestReconnect = vi.fn().mockResolvedValue(undefined);
+      const controller = terminalRegistry.create(
+        's1',
+        vi.fn(),
+        vi.fn(),
+        () => 'disconnected',
+        requestReconnect,
+      );
+      controller.attach(document.createElement('div'));
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(closedHandler).toBeDefined();
+
+      closedHandler!({
+        payload: {
+          sessionId: 's1',
+          reasonKind: 'transport_disconnect',
+          retryable: true,
+        },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+        await Promise.resolve();
+      });
+      expect(requestReconnect).toHaveBeenCalledTimes(1);
+
+      closedHandler!({
+        payload: {
+          sessionId: 's1',
+          reasonKind: 'transport_disconnect',
+          retryable: true,
+        },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+        await Promise.resolve();
+      });
+
+      expect(requestReconnect).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

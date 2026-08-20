@@ -433,10 +433,14 @@ class TerminalControllerImpl implements TerminalController {
       this.inputBlockedNoticeRef = true;
       if (event.payload.retryable && this.preferences.autoReconnect && !this.reconnectRequestedRef) {
         this.reconnectRequestedRef = true;
+        const reconnectSessionId = this.sessionId;
         window.setTimeout(() => {
-          if (this.disposed) return;
+          if (this.disposed || this.sessionId !== reconnectSessionId) return;
           this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.reconnectingLabel'), t('terminal.notice.reconnectingMessage'), '36'));
-          this.requestReconnect(this.sessionId);
+          Promise.resolve(this.requestReconnect(reconnectSessionId)).finally(() => {
+            if (this.disposed || this.sessionId !== reconnectSessionId) return;
+            this.reconnectRequestedRef = false;
+          });
         }, 1500);
       }
     });

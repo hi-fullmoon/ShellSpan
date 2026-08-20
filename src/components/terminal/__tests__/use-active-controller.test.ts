@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useRef } from 'react';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useActiveController } from '../hooks/use-active-controller';
@@ -46,13 +46,17 @@ function renderControllerHook(
 }
 
 function createController(sessionId: string) {
-  return terminalRegistry.create(
-    sessionId,
-    vi.fn(),
-    vi.fn(),
-    () => 'connected',
-    vi.fn(),
-  );
+  let controller: ReturnType<typeof terminalRegistry.create>;
+  act(() => {
+    controller = terminalRegistry.create(
+      sessionId,
+      vi.fn(),
+      vi.fn(),
+      () => 'connected',
+      vi.fn(),
+    );
+  });
+  return controller!;
 }
 
 describe('useActiveController', () => {
@@ -61,7 +65,9 @@ describe('useActiveController', () => {
   });
 
   afterEach(() => {
-    terminalRegistry.disposeAll();
+    act(() => {
+      terminalRegistry.disposeAll();
+    });
     document.body.innerHTML = '';
   });
 
@@ -150,6 +156,16 @@ describe('useActiveController', () => {
     const host = setupPane();
     expect(() => renderControllerHook(host, 'missing')).not.toThrow();
     expect(host.firstChild).toBeNull();
+  });
+
+  it('attaches when the controller is created after the hook renders', () => {
+    const host = setupPane();
+    renderControllerHook(host, 's1');
+    expect(host.firstChild).toBeNull();
+
+    const controller = createController('s1');
+
+    expect(host.firstChild).toBe(controller.container);
   });
 
   it('does not auto-focus a controller in an inactive terminal group', async () => {
