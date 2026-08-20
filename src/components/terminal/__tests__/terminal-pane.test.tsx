@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TerminalPane } from '../terminal-pane';
+import { COPY_ON_SELECT_DEBOUNCE_MS, TerminalPane } from '../terminal-pane';
 import { resetTerminalLeader } from '../terminal-leader';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
@@ -218,26 +218,40 @@ describe('TerminalPane', () => {
     expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
   });
 
-  it('copies selected text when the selection changes', async () => {
-    const terminal = makeMockTerminal('selected text');
-    render(<TerminalPane activeSession={makeSession()} />);
+  it('copies selected text once the selection settles', () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = makeMockTerminal('selected text');
+      render(<TerminalPane activeSession={makeSession()} />);
 
-    terminal.getSelectionChangeHandlers()[0]?.();
+      terminal.getSelectionChangeHandlers()[0]?.();
+      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
 
-    await vi.waitFor(() => {
+      act(() => {
+        vi.advanceTimersByTime(COPY_ON_SELECT_DEBOUNCE_MS);
+      });
+
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('selected text');
-    });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('trims trailing whitespace from copied lines', async () => {
-    const terminal = makeMockTerminal('first  \nsecond\t');
-    render(<TerminalPane activeSession={makeSession()} />);
+  it('trims trailing whitespace from copied lines', () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = makeMockTerminal('first  \nsecond\t');
+      render(<TerminalPane activeSession={makeSession()} />);
 
-    terminal.getSelectionChangeHandlers()[0]?.();
+      terminal.getSelectionChangeHandlers()[0]?.();
+      act(() => {
+        vi.advanceTimersByTime(COPY_ON_SELECT_DEBOUNCE_MS);
+      });
 
-    await vi.waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('first\nsecond');
-    });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('copies a selection on right click in copy-or-paste mode', async () => {
@@ -262,6 +276,65 @@ describe('TerminalPane', () => {
     terminal.getSelectionChangeHandlers()[0]?.();
 
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it('swallows sub-threshold mousemove so a tap-and-slide cannot extend the selection', () => {
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    const downstream = vi.fn();
+    document.addEventListener('mousemove', downstream);
+
+    // macOS "tap to click": a light tap is a mousedown, and sliding slightly
+    // while the finger is down is a held-button drag. A 1px drift must not
+    // reach xterm's selection handler (registered on document after ours).
+    terminal.element?.dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+    );
+    document.dispatchEvent(
+      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 101, clientY: 100, bubbles: true }),
+    );
+
+    expect(downstream).not.toHaveBeenCalled();
+    document.removeEventListener('mousemove', downstream);
+  });
+
+  it('lets the selection extend once a drag crosses the threshold', () => {
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    const downstream = vi.fn();
+    document.addEventListener('mousemove', downstream);
+
+    terminal.element?.dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+    );
+    document.dispatchEvent(
+      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 110, clientY: 100, bubbles: true }),
+    );
+
+    expect(downstream).toHaveBeenCalledTimes(1);
+    document.removeEventListener('mousemove', downstream);
+  });
+
+  it('does not suppress mousemove after the button was released outside the window', () => {
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    const downstream = vi.fn();
+    document.addEventListener('mousemove', downstream);
+
+    terminal.element?.dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+    );
+    // No mouseup was delivered (released outside), so buttons is 0 on the next
+    // move and the stale drag state must self-heal instead of swallowing moves.
+    document.dispatchEvent(
+      new MouseEvent('mousemove', { button: 0, buttons: 0, clientX: 101, clientY: 100, bubbles: true }),
+    );
+
+    expect(downstream).toHaveBeenCalledTimes(1);
+    document.removeEventListener('mousemove', downstream);
   });
 
   it('copies selection via keyboard shortcut on macOS', async () => {
