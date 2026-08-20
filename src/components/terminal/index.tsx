@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -67,6 +67,11 @@ const Terminal: React.FC = () => {
   const [focusedSlot, setFocusedSlot] = useState<TerminalGroupSlot>('first');
   const nextGroupIdRef = useRef(3);
   const restoredLayoutAppliedRef = useRef(false);
+  const pinnedSessionKey = useMemo(
+    () => sessions.filter((session) => session.pinned).map((session) => session.sessionId).join('\0'),
+    [sessions],
+  );
+  const splitEnabled = split !== null;
 
   const focusGroup = useCallback((slot: TerminalGroupSlot): void => {
     focusedGroupRef.current = slot;
@@ -188,14 +193,11 @@ const Terminal: React.FC = () => {
   // so pin toggles (which only reorder the global sessions array) are mirrored
   // into every group to keep pinned tabs at the front.
   useEffect(() => {
-    if (!split) return;
-    const pinnedIds = new Set(
-      sessions.filter((session) => session.pinned).map((session) => session.sessionId),
-    );
+    const pinnedIds = new Set(pinnedSessionKey ? pinnedSessionKey.split('\0') : []);
     setSplit((current) => (current
       ? repartitionTerminalLayoutPinnedFirst(current, (id) => pinnedIds.has(id)) as TerminalSplitState
       : current));
-  }, [sessions, split]);
+  }, [pinnedSessionKey, splitEnabled]);
 
   // Shortcut-based tab changes target the active group, just like VS Code editor groups.
   useEffect(() => {

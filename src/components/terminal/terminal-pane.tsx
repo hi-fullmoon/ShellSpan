@@ -88,7 +88,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
-  const [pendingPaste, setPendingPaste] = useState('');
+  const [pendingPaste, setPendingPaste] = useState<{ sessionId: string; text: string } | null>(null);
   const activeSessionId = activeSession?.sessionId ?? null;
   const { focus, searchNext, searchPrevious, clearSearch } = useActiveController(
     paneRef,
@@ -245,10 +245,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
 
     const element = terminal.element;
     const pasteText = (text: string): void => {
+      if (!activeSessionId) return;
       const isMultiLine = /[\r\n]/.test(text);
       const isLarge = new Blob([text]).size > 5 * 1024;
       if ((multiLinePasteWarning && isMultiLine) || (largePasteWarning && isLarge)) {
-        setPendingPaste(text);
+        setPendingPaste({ sessionId: activeSessionId, text });
         return;
       }
       terminal.paste(text);
@@ -296,7 +297,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeSession?.status, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
+  }, [activeSession?.status, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
 
   // Enforce a click-drag threshold (see CLICK_DRAG_THRESHOLD_PX). xterm
   // registers its selection mousemove handler on document only after the first
@@ -410,25 +411,27 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
         <ReconnectingIndicator label={t('terminal.notice.reconnectingLabel')} />
       )}
       <div ref={paneRef} className="h-full w-full p-0" />
-      <AlertDialog open={Boolean(pendingPaste)} onOpenChange={(open) => { if (!open) setPendingPaste(''); }}>
+      <AlertDialog open={Boolean(pendingPaste)} onOpenChange={(open) => { if (!open) setPendingPaste(null); }}>
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('terminal.pasteWarning.title')}</AlertDialogTitle>
             <AlertDialogDescription>
               {t('terminal.pasteWarning.description', {
-                lines: pendingPaste ? pendingPaste.split(/\r?\n/).length : 0,
-                characters: pendingPaste.length,
+                lines: pendingPaste ? pendingPaste.text.split(/\r?\n/).length : 0,
+                characters: pendingPaste?.text.length ?? 0,
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingPaste('')}>
+            <AlertDialogCancel onClick={() => setPendingPaste(null)}>
               {t('common.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                terminal?.paste(pendingPaste);
-                setPendingPaste('');
+                if (pendingPaste) {
+                  terminalRegistry.get(pendingPaste.sessionId)?.terminal.paste(pendingPaste.text);
+                }
+                setPendingPaste(null);
               }}
             >
               {t('terminal.pasteWarning.confirm')}
