@@ -72,7 +72,7 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
 
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
-const RESIZE_IPC_DEBOUNCE_MS = 100;
+const RESIZE_DEBOUNCE_MS = 100;
 
 // Hides the DOM renderer's scroll viewport layer. With the webgl renderer
 // the viewport only carries the scrollbar, so it must stay visible.
@@ -203,8 +203,8 @@ class TerminalControllerImpl implements TerminalController {
   private listenerGeneration = 0;
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
-  private fitAnimationFrame: number | null = null;
   private resizeDebounceTimer: number | null = null;
+  private pendingDimensions: { cols: number; rows: number } | null = null;
   private rendererMode: RendererMode = 'dom';
   private rendererInitialized = false;
 
@@ -241,8 +241,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.loadAddon(this.searchAddon);
 
     this.container = document.createElement('div');
-    this.container.className =
-      'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
+    this.container.className = 'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
 
     this.unlisten = {
       data: undefined,
@@ -499,29 +498,39 @@ class TerminalControllerImpl implements TerminalController {
     if (!this.resizeObserver) {
       this.resizeObserver = new ResizeObserver(() => {
         if (this.container.offsetParent === null) return;
-        // fit() triggers a full xterm reflow, so coalesce it to at most once
-        // per frame while a splitter is being dragged.
-        if (this.fitAnimationFrame === null) {
-          this.fitAnimationFrame = requestAnimationFrame(() => {
-            this.fitAnimationFrame = null;
-            try {
-              this.fitAddon.fit();
-            } catch {
-              // fit() can fail without a measurable container; harmless.
-            }
-          });
+        const dimensions = this.fitAddon.proposeDimensions();
+        if (!dimensions) return;
+        if (dimensions.cols === this.terminal.cols && dimensions.rows === this.terminal.rows) {
+          // Grid size unchanged (most drag frames): nothing to do — the pty
+          // size is unchanged too, so no IPC either.
+          return;
         }
-        // The resize IPC is debounced so only the final stable size is sent.
+        // Debounce the reflow itself, not just the IPC: with the webgl
+        // renderer each terminal.resize() updates the canvas CSS size
+        // immediately while the glyph texture is redrawn one frame later, so
+        // resizing on every drag frame shows the old texture squeezed into
+        // the new size — a constant compression flicker. Coalescing to a
+        // single reflow once the size settles avoids it; overflow is simply
+        // clipped while dragging.
+        this.pendingDimensions = dimensions;
         if (this.resizeDebounceTimer !== null) {
           window.clearTimeout(this.resizeDebounceTimer);
         }
         this.resizeDebounceTimer = window.setTimeout(() => {
           this.resizeDebounceTimer = null;
           if (this.disposed) return;
-          invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
+          const pending = this.pendingDimensions;
+          this.pendingDimensions = null;
+          if (!pending) return;
+          try {
+            this.terminal.resize(pending.cols, pending.rows);
+          } catch {
+            // resize() can fail mid-teardown; harmless.
+          }
+          invokeResizeSession(this.sessionId, pending.cols, pending.rows).catch((error) => {
             logger.warn(`Failed to resize session ${this.sessionId}`, error);
           });
-        }, RESIZE_IPC_DEBOUNCE_MS);
+        }, RESIZE_DEBOUNCE_MS);
       });
       this.resizeObserver.observe(this.container);
     }
@@ -544,17 +553,14 @@ class TerminalControllerImpl implements TerminalController {
     this.host = null;
   }
 
-  // Drop any scheduled fit/debounced resize so a disposed or rebound
-  // controller never sends a resize IPC for a stale session.
+  // Drop any scheduled debounced resize so a disposed or rebound
+  // controller never reflows or sends a resize IPC for a stale session.
   private cancelPendingResize(): void {
-    if (this.fitAnimationFrame !== null) {
-      cancelAnimationFrame(this.fitAnimationFrame);
-      this.fitAnimationFrame = null;
-    }
     if (this.resizeDebounceTimer !== null) {
       window.clearTimeout(this.resizeDebounceTimer);
       this.resizeDebounceTimer = null;
     }
+    this.pendingDimensions = null;
   }
 
   focus(): void {
