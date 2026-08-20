@@ -10,11 +10,13 @@ import {
 import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { promptForMissingPassword } from '@/lib/password-prompt';
-import { getLocalizedErrorMessage } from '@/lib/error';
+import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
+  getMissingKeychainKeyTarget,
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
+  promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
 
 const logger = createLogger('reconnect');
@@ -105,18 +107,45 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
 
       setReconnecting(sessionId, true);
       logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
-      try {
-        const summary = await invokeCreateSession(
-          buildSessionCreateRequest(preparedProfile, cols, rows),
-        );
-
+      const replaceSession = (summary: Awaited<ReturnType<typeof invokeCreateSession>>): void => {
         terminalRegistry.rebindSession(sessionId, summary.sessionId);
         reconnectSession(sessionId, summary, profile.id);
         logger.info(`Reconnected session ${sessionId} as session ${summary.sessionId}`);
         invokeCloseSession(sessionId).catch((error) => {
           logger.warn(`Failed to close replaced session ${sessionId}`, error);
         });
+      };
+
+      try {
+        const summary = await invokeCreateSession(
+          buildSessionCreateRequest(preparedProfile, cols, rows),
+        );
+        replaceSession(summary);
       } catch (error) {
+        const missingKeyTarget = getMissingKeychainKeyTarget(
+          preparedProfile,
+          getErrorMessage(error),
+        );
+        if (missingKeyTarget) {
+          const recoveredProfile = await promptForMissingKeychainKey(
+            preparedProfile,
+            missingKeyTarget,
+          );
+          if (!recoveredProfile) {
+            logger.info(`Reconnect cancelled by user for session ${sessionId}`);
+            return;
+          }
+          try {
+            const summary = await invokeCreateSession(
+              buildSessionCreateRequest(recoveredProfile, cols, rows),
+            );
+            replaceSession(summary);
+            return;
+          } catch (retryError) {
+            error = retryError;
+          }
+        }
+
         logger.error(`Failed to reconnect session ${sessionId}`, error);
         setStatus(sessionId, {
           sessionId,
