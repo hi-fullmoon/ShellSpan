@@ -45,6 +45,7 @@ const Terminal: React.FC = () => {
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
   const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
+  const activeSection = useAppStore((state) => state.activeSection);
   const { connect, openLocal } = useConnectSession();
 
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
@@ -83,6 +84,18 @@ const Terminal: React.FC = () => {
       terminalRegistry.get(sessionId)?.focus();
     });
   }, []);
+
+  // Switching back to the terminal section refocuses the terminal in the
+  // group the user focused last (or the active session when not split).
+  const prevSectionRef = useRef(activeSection);
+  useEffect(() => {
+    const prevSection = prevSectionRef.current;
+    prevSectionRef.current = activeSection;
+    if (prevSection === 'terminal' || activeSection !== 'terminal') return;
+    const focusedGroup = split ? findTerminalGroup(split, focusedGroupRef.current) : null;
+    const sessionId = focusedGroup?.activeSessionId || activeSessionId;
+    if (sessionId) focusSession(sessionId);
+  }, [activeSection, activeSessionId, split, focusSession]);
 
   useEffect(() => {
     if (restoredLayoutAppliedRef.current) return;
@@ -509,6 +522,22 @@ const Terminal: React.FC = () => {
           'relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-app-bg',
           focused && 'ring-1 ring-inset ring-app-primary/70',
         )}
+        onPointerDownCapture={(e) => {
+          // macOS tap-to-click: the tap that focuses an inactive group would
+          // otherwise reach xterm as mousedown, so the continued touchpad
+          // motion is treated as a drag and starts a selection. Swallow
+          // pointerdowns landing on the terminal screen of an inactive group
+          // and just focus the group; tab bar presses are left untouched.
+          if (focused) return;
+          if (!(e.target as HTMLElement).closest('[data-terminal-content]')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          focusGroup(slot);
+          if (groupActiveSession) {
+            useTerminalStore.getState().setActiveSession(groupActiveSession.sessionId);
+            focusSession(groupActiveSession.sessionId);
+          }
+        }}
         onPointerDown={(e) => {
           // Tab presses activate on pointerdown too and already focus the
           // group via activateGroupTab. Handling them here as well would
@@ -557,6 +586,11 @@ const Terminal: React.FC = () => {
             />
           )}
         </div>
+        {!focused && (
+          // Mask marking this split group as inactive. Clicks pass through to
+          // the wrapper's onPointerDown, which refocuses the group.
+          <div className="pointer-events-none absolute inset-0 z-10 bg-app-bg/30" />
+        )}
       </div>
     );
   };

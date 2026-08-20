@@ -30,6 +30,10 @@ const effectiveShortcuts = (): ShortcutBindings => ({
   ...useAppStore.getState().shortcuts,
 });
 
+// Keep the connecting overlay up for at least this long so fast connections
+// don't make it flash.
+const MIN_CONNECTING_OVERLAY_MS = 600;
+
 const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
   <div
     className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
@@ -82,6 +86,40 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
   );
   const terminal = controller?.terminal ?? null;
+
+  const connecting = activeSession?.status === 'connecting' && !activeSession.reconnecting;
+  // Once the overlay appears, hold it for MIN_CONNECTING_OVERLAY_MS even if
+  // the session connects faster than that.
+  const [overlayHold, setOverlayHold] = useState<{ sessionId: string; until: number } | null>(null);
+
+  useEffect(() => {
+    if (!connecting || !activeSessionId) return;
+    setOverlayHold((prev) =>
+      prev?.sessionId === activeSessionId
+        ? prev
+        : { sessionId: activeSessionId, until: Date.now() + MIN_CONNECTING_OVERLAY_MS },
+    );
+  }, [connecting, activeSessionId]);
+
+  useEffect(() => {
+    if (!overlayHold) return;
+    const delay = overlayHold.until - Date.now();
+    if (delay <= 0) {
+      setOverlayHold(null);
+      return;
+    }
+    const timer = window.setTimeout(() => setOverlayHold(null), delay);
+    return () => window.clearTimeout(timer);
+  }, [overlayHold]);
+
+  // The hold only smooths the connecting -> connected transition; failures
+  // should surface immediately.
+  const showConnectingOverlay = Boolean(
+    activeSession &&
+      (connecting ||
+        (overlayHold?.sessionId === activeSession.sessionId &&
+          activeSession.status === 'connected')),
+  );
 
   const handleOpenSearch = useCallback((): void => {
     setSearchOpen(true);
@@ -292,7 +330,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
           </Button>
         </div>
       )}
-      {activeSession?.status === 'connecting' && !activeSession.reconnecting && (
+      {showConnectingOverlay && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
           <Spinner />
           <span className="text-xs text-app-text-soft">{t('terminal.status.connecting')}...</span>

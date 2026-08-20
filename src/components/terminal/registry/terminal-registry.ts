@@ -73,6 +73,12 @@ const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
 const RESIZE_DEBOUNCE_MS = 100;
 
+// After a reconnect the channel reports connected while the remote shell is
+// still starting up (sourcing rc files, printing its first prompt). Input
+// sent in that window is echoed into the middle of the prompt output,
+// leaving garbled duplicate prompt lines, so it is dropped briefly.
+const RECONNECT_INPUT_GRACE_MS = 800;
+
 // Hides the DOM renderer's scroll viewport layer. With the webgl renderer
 // the viewport only carries the scrollbar, so it must stay visible.
 const VIEWPORT_HIDDEN_CLASS = '[&_.xterm-viewport]:opacity-0';
@@ -199,11 +205,17 @@ class TerminalControllerImpl implements TerminalController {
   private readonly requestReconnect: RequestReconnectCallback;
   private inputBlockedNoticeRef = false;
   private reconnectRequestedRef = false;
+  private inputGraceDeadlineRef = 0;
   private listenerGeneration = 0;
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
   private resizeDebounceTimer: number | null = null;
   private pendingDimensions: { cols: number; rows: number } | null = null;
+  // Last size forwarded to the pty. The backend relays every resize as an
+  // SSH window-change even when the size is unchanged, and the resulting
+  // SIGWINCH makes the remote shell redraw its prompt — sometimes leaving
+  // duplicated/garbled prompt lines — so identical resizes are dropped here.
+  private lastSentDimensions: { cols: number; rows: number } | null = null;
   private rendererMode: RendererMode = 'dom';
   private rendererInitialized = false;
 
@@ -263,6 +275,10 @@ class TerminalControllerImpl implements TerminalController {
     const status = this.getStatus(this.sessionId);
 
     if (status === 'connected') {
+      if (Date.now() < this.inputGraceDeadlineRef) {
+        logger.debug(`Dropped input during post-reconnect grace period session=${this.sessionId}`);
+        return;
+      }
       void invokeWriteSession(this.sessionId, data).catch((error) => {
         logger.error(`Failed to write input to session ${this.sessionId}`, error);
         this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
@@ -515,9 +531,7 @@ class TerminalControllerImpl implements TerminalController {
           } catch {
             // resize() can fail mid-teardown; harmless.
           }
-          invokeResizeSession(this.sessionId, pending.cols, pending.rows).catch((error) => {
-            logger.warn(`Failed to resize session ${this.sessionId}`, error);
-          });
+          this.sendResize(pending.cols, pending.rows);
         }, RESIZE_DEBOUNCE_MS);
       });
       this.resizeObserver.observe(this.container);
@@ -525,9 +539,7 @@ class TerminalControllerImpl implements TerminalController {
 
     // Initial resize now that cols/rows are measurable after open().
     if (this.opened) {
-      invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
-        logger.warn(`Failed to resize session ${this.sessionId}`, error);
-      });
+      this.sendResize(this.terminal.cols, this.terminal.rows);
     }
 
     this.host = host;
@@ -549,6 +561,15 @@ class TerminalControllerImpl implements TerminalController {
       this.resizeDebounceTimer = null;
     }
     this.pendingDimensions = null;
+  }
+
+  private sendResize(cols: number, rows: number): void {
+    const last = this.lastSentDimensions;
+    if (last && last.cols === cols && last.rows === rows) return;
+    this.lastSentDimensions = { cols, rows };
+    invokeResizeSession(this.sessionId, cols, rows).catch((error) => {
+      logger.warn(`Failed to resize session ${this.sessionId}`, error);
+    });
   }
 
   focus(): void {
@@ -579,6 +600,7 @@ class TerminalControllerImpl implements TerminalController {
     this.cancelPendingResize();
     this.sessionId = sessionId;
     this.resetNoticeState();
+    this.inputGraceDeadlineRef = Date.now() + RECONNECT_INPUT_GRACE_MS;
     void this.setupListeners();
   }
 

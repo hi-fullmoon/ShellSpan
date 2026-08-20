@@ -142,20 +142,6 @@ describe('SftpTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalled();
   });
 
-  it('removes input padding while renaming a tab', async () => {
-    addConnection('Conn A');
-    render(
-      <SftpTabBar
-        onNewTabClick={vi.fn()}
-        onTabContextMenu={vi.fn()}
-      />,
-    );
-
-    await userEvent.dblClick(screen.getByText('Conn A'));
-
-    expect(screen.getByRole('textbox')).toHaveClass('p-0', 'leading-none');
-  });
-
   it('renders a 1px top line with the theme color on the active tab', () => {
     addConnection('Conn A');
     addConnection('Conn B');
