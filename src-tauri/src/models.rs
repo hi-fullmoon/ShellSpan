@@ -257,6 +257,29 @@ pub(crate) struct UploadLocalPathsRequest {
     pub(crate) operation_id: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TransferItemStatus {
+    Completed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TransferItemResult {
+    pub(crate) source_path: String,
+    pub(crate) destination_path: Option<String>,
+    pub(crate) status: TransferItemStatus,
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TransferBatchResult {
+    pub(crate) items: Vec<TransferItemResult>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CopyLocalPathsRequest {
@@ -371,7 +394,9 @@ impl ConnectionError {
     pub(crate) fn message(&self) -> String {
         match self {
             ConnectionError::HostKeyUnknown { host, port, .. } => {
-                format!("host key for {host}:{port} is not known — trust this host before connecting")
+                format!(
+                    "host key for {host}:{port} is not known — trust this host before connecting"
+                )
             }
             ConnectionError::HostKeyMismatch { host, port } => {
                 format!("host key for {host}:{port} does not match the known key — possible man-in-the-middle attack")
@@ -384,17 +409,21 @@ impl ConnectionError {
     /// rejects with the same host-key classification the connection produced.
     pub(crate) fn to_create_session_error(&self) -> CreateSessionError {
         match self {
-            ConnectionError::HostKeyUnknown { host, port, fingerprint } => {
-                CreateSessionError::HostKeyUnknown {
-                    host: host.clone(),
-                    port: *port,
-                    fingerprint: fingerprint.clone(),
-                }
-            }
-            ConnectionError::HostKeyMismatch { host, port } => CreateSessionError::HostKeyMismatch {
+            ConnectionError::HostKeyUnknown {
+                host,
+                port,
+                fingerprint,
+            } => CreateSessionError::HostKeyUnknown {
                 host: host.clone(),
                 port: *port,
+                fingerprint: fingerprint.clone(),
             },
+            ConnectionError::HostKeyMismatch { host, port } => {
+                CreateSessionError::HostKeyMismatch {
+                    host: host.clone(),
+                    port: *port,
+                }
+            }
             ConnectionError::Other { message } => CreateSessionError::Other {
                 message: message.clone(),
             },
@@ -424,9 +453,15 @@ pub(crate) enum RemoteFsError {
 impl RemoteFsError {
     pub(crate) fn from_connection_error(error: ConnectionError) -> Self {
         match error {
-            ConnectionError::HostKeyUnknown { host, port, fingerprint } => {
-                RemoteFsError::HostKeyUnknown { host, port, fingerprint }
-            }
+            ConnectionError::HostKeyUnknown {
+                host,
+                port,
+                fingerprint,
+            } => RemoteFsError::HostKeyUnknown {
+                host,
+                port,
+                fingerprint,
+            },
             ConnectionError::HostKeyMismatch { host, port } => {
                 RemoteFsError::HostKeyMismatch { host, port }
             }
@@ -833,8 +868,7 @@ pub(crate) struct DownloadProgressTracker {
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 
 fn should_emit_progress(last_emitted_at: Option<Instant>) -> bool {
-    last_emitted_at
-        .map_or(true, |instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
+    last_emitted_at.map_or(true, |instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
 }
 
 impl DownloadProgressTracker {
@@ -1298,8 +1332,8 @@ mod session_manager_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        should_emit_progress, CancellationRegistry, JumpHostConfig, RemoteConnectionRequest,
-        AuthMethod, PROGRESS_EMIT_INTERVAL,
+        should_emit_progress, AuthMethod, CancellationRegistry, JumpHostConfig,
+        RemoteConnectionRequest, PROGRESS_EMIT_INTERVAL,
     };
     use std::sync::atomic::Ordering as AtomicOrdering;
     use std::time::{Duration, Instant};
@@ -1397,4 +1431,3 @@ pub(crate) struct SftpBookmarkRow {
     pub(crate) label: Option<String>,
     pub(crate) created_at: i64,
 }
-
