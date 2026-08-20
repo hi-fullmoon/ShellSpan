@@ -366,7 +366,21 @@ pub(crate) fn create_local_session(
         }
         // Wait for the reader thread to finish so output still in flight
         // (e.g. the shell's final exit message) is not lost, then flush.
-        let _ = reader_handle.join();
+        // Releasing the PTY lets a reader blocked in read observe EOF, and
+        // the watchdog bounds the wait: a grandchild process can keep the
+        // slave open and block the reader forever, in which case the reader
+        // stays detached and its next send fails once the output receiver is
+        // dropped at the end of this closure.
+        drop(writer);
+        drop(master);
+        let (reader_done_tx, reader_done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = reader_handle.join();
+            let _ = reader_done_tx.send(());
+        });
+        if reader_done_rx.recv_timeout(Duration::from_secs(2)).is_err() {
+            warn!("Local shell reader did not stop session_id={worker_id}; detaching it");
+        }
         for chunk in buffered_output.drain(..) {
             let _ = emit_data(&app, &worker_id, chunk);
         }

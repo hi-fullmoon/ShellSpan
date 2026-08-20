@@ -2,6 +2,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
+import { WebglAddon } from '@xterm/addon-webgl';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
@@ -72,6 +73,12 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
 const RESIZE_IPC_DEBOUNCE_MS = 100;
+
+// Hides the DOM renderer's scroll viewport layer. With the webgl renderer
+// the viewport only carries the scrollbar, so it must stay visible.
+const VIEWPORT_HIDDEN_CLASS = '[&_.xterm-viewport]:opacity-0';
+
+type RendererMode = 'webgl' | 'dom';
 
 function trimUrlPunctuation(url: string): string {
   return url.replace(/[),.;!?\]}]+$/g, '');
@@ -198,6 +205,8 @@ class TerminalControllerImpl implements TerminalController {
   private linkProviderDisposable?: IDisposable;
   private fitAnimationFrame: number | null = null;
   private resizeDebounceTimer: number | null = null;
+  private rendererMode: RendererMode = 'dom';
+  private rendererInitialized = false;
 
   constructor(
     sessionId: string,
@@ -305,6 +314,33 @@ class TerminalControllerImpl implements TerminalController {
       element.style.removeProperty('background-color');
       viewport?.style.removeProperty('background-color');
     }
+  }
+
+  // Renderer addons need the terminal element, so they are loaded once after
+  // the first successful open(): WebGL first, then the DOM renderer.
+  // Loaded addons are disposed by terminal.dispose().
+  private setupRenderer(): void {
+    if (this.rendererInitialized) return;
+    this.rendererInitialized = true;
+    try {
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+        if (this.disposed) return;
+        this.setRendererMode('dom');
+      });
+      this.terminal.loadAddon(webglAddon);
+      this.setRendererMode('webgl');
+      return;
+    } catch (error) {
+      logger.warn('WebGL renderer unavailable, falling back to DOM renderer', error);
+    }
+    this.setRendererMode('dom');
+  }
+
+  private setRendererMode(mode: RendererMode): void {
+    this.rendererMode = mode;
+    this.container.classList.toggle(VIEWPORT_HIDDEN_CLASS, mode === 'dom');
   }
 
   private writeSystemLine(line: string): void {
@@ -446,6 +482,10 @@ class TerminalControllerImpl implements TerminalController {
         // jsdom: open() may fail when host is detached. xterm buffers
         // writes before open(), so write() still accumulates buffer.
       }
+    }
+
+    if (this.opened) {
+      this.setupRenderer();
     }
 
     this.updateElementStyles();
