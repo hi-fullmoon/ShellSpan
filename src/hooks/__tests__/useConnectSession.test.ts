@@ -47,6 +47,7 @@ vi.mock('@/lib/password-prompt', async (importActual) => {
 
 vi.mock('@/lib/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
+  getMissingKeychainKeyTarget: vi.fn().mockReturnValue(null),
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
   preparePasswordKeychain: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
   prepareKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
@@ -62,6 +63,7 @@ import {
 import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
   ensureKeychainKeyForProfile,
+  getMissingKeychainKeyTarget,
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
   promptForMissingKeychainKey,
@@ -114,6 +116,8 @@ describe('useConnectSession', () => {
     vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(promptForMissingKeychainKey).mockReset();
     vi.mocked(promptForMissingKeychainKey).mockResolvedValue(null);
+    vi.mocked(getMissingKeychainKeyTarget).mockReset();
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValue(null);
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
     vi.mocked(preparePasswordKeychain).mockReset();
@@ -267,6 +271,7 @@ describe('useConnectSession', () => {
         payload: { message: 'keychain key not found: old-key' },
       })
       .mockResolvedValueOnce(SUMMARY);
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValueOnce('main');
     vi.mocked(promptForMissingKeychainKey).mockResolvedValueOnce(recoveredProfile);
 
     const { result } = renderHook(() => useConnectSession());
@@ -275,7 +280,7 @@ describe('useConnectSession', () => {
       await result.current.connect(keychainProfile);
     });
 
-    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile);
+    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile, 'main');
     expect(invokeCreateSession).toHaveBeenCalledTimes(2);
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
@@ -303,6 +308,7 @@ describe('useConnectSession', () => {
       type: 'Other',
       payload: { message: 'keychain key not found: old-key' },
     });
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValueOnce('main');
 
     const { result } = renderHook(() => useConnectSession());
 
@@ -310,9 +316,50 @@ describe('useConnectSession', () => {
       await result.current.connect(keychainProfile);
     });
 
-    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile);
+    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile, 'main');
     expect(addToast).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().sessions).toHaveLength(0);
+  });
+
+  it('recovers a missing jump-host key and retries', async () => {
+    const jumpProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+      password: 'target-pass',
+      jumpHost: {
+        host: 'jump',
+        port: 22,
+        username: 'ju',
+        authMethod: 'key',
+        keychainKeyId: 'old-jump-key',
+      },
+    };
+    const recoveredProfile: ConnectionProfile = {
+      ...jumpProfile,
+      jumpHost: {
+        ...jumpProfile.jumpHost!,
+        keychainKeyId: 'new-jump-key',
+      },
+    };
+
+    vi.mocked(invokeCreateSession)
+      .mockRejectedValueOnce({
+        type: 'Other',
+        payload: { message: 'keychain key not found: old-jump-key' },
+      })
+      .mockResolvedValueOnce(SUMMARY);
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValueOnce('jump');
+    vi.mocked(promptForMissingKeychainKey).mockResolvedValueOnce(recoveredProfile);
+
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(jumpProfile);
+    });
+
+    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(jumpProfile, 'jump');
+    expect(invokeCreateSession).toHaveBeenCalledTimes(2);
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
   });
 
   it('closeDialog resets to the closed default', async () => {

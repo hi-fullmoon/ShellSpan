@@ -14,6 +14,7 @@ import { promptForMissingPassword, persistPromptedPassword } from '@/lib/passwor
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
+  getMissingKeychainKeyTarget,
   prepareKeychainKeyForProfile,
   preparePasswordKeychain,
   promptForMissingKeychainKey,
@@ -117,12 +118,15 @@ export function useConnectSession(): {
         return;
       } catch (error) {
         const message = getErrorMessage(error);
+        const missingKeyTarget = getMissingKeychainKeyTarget(preparedProfile, message);
         if (
           !keyPromptShown &&
-          preparedProfile.authMethod === 'key' &&
-          message.toLowerCase().startsWith('keychain key not found:')
+          missingKeyTarget
         ) {
-          const recovered = await promptForMissingKeychainKey(preparedProfile);
+          const recovered = await promptForMissingKeychainKey(
+            preparedProfile,
+            missingKeyTarget,
+          );
           if (!recovered) {
             logger.info('Connection cancelled by user (key prompt dismissed)');
             return;
