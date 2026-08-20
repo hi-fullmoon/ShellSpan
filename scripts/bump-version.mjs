@@ -19,6 +19,10 @@ function run(command, args) {
   execFileSync(command, args, { stdio: 'inherit' });
 }
 
+function runWithoutOutput(command, args) {
+  execFileSync(command, args, { stdio: ['ignore', 'ignore', 'inherit'] });
+}
+
 function runSilently(command, args) {
   try {
     execFileSync(command, args, { stdio: 'ignore' });
@@ -74,6 +78,23 @@ function bumpVersion(current, bump) {
   if (bump === 'patch') return `${major}.${minor}.${patch + 1}`;
   if (bump === 'minor') return `${major}.${minor + 1}.0`;
   return `${major + 1}.0.0`;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function updateCargoLockVersion(path, packageName, currentVersion, nextVersion) {
+  const content = readFileSync(path, 'utf8');
+  const pattern = new RegExp(
+    `(\\[\\[package\\]\\]\\r?\\nname = "${escapeRegExp(packageName)}"\\r?\\nversion = ")${escapeRegExp(currentVersion)}(")`,
+    'g',
+  );
+  const matches = [...content.matchAll(pattern)];
+  if (matches.length !== 1) {
+    throw new Error(`无法唯一定位 Cargo.lock 中的根包 ${packageName}@${currentVersion}`);
+  }
+  writeFileSync(path, content.replace(pattern, (_, prefix, suffix) => `${prefix}${nextVersion}${suffix}`));
 }
 
 function trimChangelog() {
@@ -147,14 +168,19 @@ try {
 
     const cargoPath = 'src-tauri/Cargo.toml';
     const cargo = readFileSync(cargoPath, 'utf8').replace(/^version = ".*"/m, `version = "${next}"`);
+    const cargoPackageName = cargo.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+    if (!cargoPackageName) throw new Error('无法读取 Cargo.toml 中的包名');
     writeFileSync(cargoPath, cargo);
+
+    updateCargoLockVersion('src-tauri/Cargo.lock', cargoPackageName, current, next);
 
     const tauriPath = 'src-tauri/tauri.conf.json';
     const tauri = readJson(tauriPath);
     tauri.version = next;
     writeJson(tauriPath, tauri);
 
-    run('cargo', ['check', '--manifest-path', cargoPath]);
+    // 只验证清单和锁文件，不编译依赖（尤其避免 Windows 上触发 vendored OpenSSL 构建）。
+    runWithoutOutput('cargo', ['metadata', '--no-deps', '--locked', '--format-version', '1', '--manifest-path', cargoPath]);
 
     const gitCliffCli = resolveGitCliffCli();
     if (gitCliffCli) {
