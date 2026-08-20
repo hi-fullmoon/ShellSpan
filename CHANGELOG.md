@@ -3,6 +3,40 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.43](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.43) - 2026-08-20
+
+
+### Bug Fixes
+
+- **term:** debounce reflow to eliminate canvas flicker during drag
+- decode UTF-8 incrementally across SSH output drains
+
+### Chore
+
+- add aicommit config and update gitignore
+
+### Features
+
+- **term:** add WebGL renderer with DOM fallback
+- **tauri:** add event-driven session wake and host key classification
+- **term:** polish terminal reconnect, focus, and tab rename behavior
+- **ui:** replace title attributes with tooltip components for truncated text
+- stream SSH output as session-scoped events
+- subscribe to terminal registry changes
+
+### Performance
+
+- **term:** reduce redundant work in terminal layout and resize paths
+
+### Refactoring
+
+- **term:** disable WebGL renderer, fall back to DOM
+- extract host-key dialog into its own store and host
+
+### Testing
+
+- **sftp:** scope conflict-dialog queries to dialog content
+
 ## [v2.0.42](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.42) - 2026-08-19
 
 
