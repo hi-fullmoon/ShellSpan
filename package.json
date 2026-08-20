@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "version": "bash scripts/bump-version.sh",
+    "version": "node scripts/bump-version.mjs",
     "changelog": "git-cliff -o CHANGELOG.md"
   },
   "dependencies": {
