@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpTabBar } from '../sftp-tab-bar';
 import { useSftpStore } from '@/stores/sftpStore';
@@ -63,6 +63,52 @@ describe('SftpTabBar', () => {
       />,
     );
     await userEvent.click(screen.getByText('Conn B'));
+    expect(useSftpStore.getState().activeConnectionId).toBe(idB);
+  });
+
+  it('activates a connection via pointerup fallback when its pointerdown was missed', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    const connections = useSftpStore.getState().connections;
+    const idA = connections[0]?.id ?? '';
+    const idB = connections[1]?.id ?? '';
+    render(
+      <SftpTabBar
+        onNewTabClick={vi.fn()}
+        onTabContextMenu={vi.fn()}
+      />,
+    );
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[0], { button: 0 });
+    expect(useSftpStore.getState().activeConnectionId).toBe(idA);
+
+    // The second tap's pointerdown is swallowed by WKWebView; only the release
+    // reaches the tab. The fallback must still switch.
+    fireEvent.pointerUp(tabs[1], { button: 0 });
+    expect(useSftpStore.getState().activeConnectionId).toBe(idB);
+  });
+
+  it('does not activate a connection when a missed pointerdown releases on its close button', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    const connections = useSftpStore.getState().connections;
+    const idB = connections[1]?.id ?? '';
+    render(
+      <SftpTabBar
+        onNewTabClick={vi.fn()}
+        onTabContextMenu={vi.fn()}
+      />,
+    );
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[1], { button: 0 });
+    expect(useSftpStore.getState().activeConnectionId).toBe(idB);
+
+    // If WKWebView drops the pointerdown for this tap, only the release reaches
+    // the close button. The fallback activation handler must leave the active
+    // connection alone so the button action does not also switch tabs.
+    fireEvent.pointerUp(screen.getAllByRole('button', { name: 'close' })[0], { button: 0 });
     expect(useSftpStore.getState().activeConnectionId).toBe(idB);
   });
 
