@@ -138,49 +138,6 @@ describe('TerminalTabBar', () => {
     expect(onNewTabClick).not.toHaveBeenCalled();
   });
 
-  it('starts renaming on double-click and commits on Enter', () => {
-    addSession('s1', 'A');
-    const updateTitleSpy = vi.spyOn(
-      useTerminalStore.getState(),
-      'updateTitle',
-    );
-
-    render(<TerminalTabBar />);
-
-    const tab = screen.getByRole('tab');
-    fireEvent.doubleClick(tab);
-
-    const input = screen.getByDisplayValue('A');
-    expect(input).toBeInTheDocument();
-    expect(input).toHaveClass('p-0', 'leading-none');
-
-    fireEvent.change(input, { target: { value: 'Renamed' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    expect(updateTitleSpy).toHaveBeenCalledWith('s1', 'Renamed');
-    expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument();
-  });
-
-  it('cancels renaming on Escape', () => {
-    addSession('s1', 'A');
-    const updateTitleSpy = vi.spyOn(
-      useTerminalStore.getState(),
-      'updateTitle',
-    );
-
-    render(<TerminalTabBar />);
-
-    const tab = screen.getByRole('tab');
-    fireEvent.doubleClick(tab);
-
-    const input = screen.getByDisplayValue('A');
-    fireEvent.change(input, { target: { value: 'Renamed' } });
-    fireEvent.keyDown(input, { key: 'Escape' });
-
-    expect(updateTitleSpy).not.toHaveBeenCalled();
-    expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument();
-  });
-
   it('reorders sessions via drag-to-reorder (s3 onto s1 -> [s3,s1,s2])', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');

@@ -139,6 +139,34 @@ describe('TerminalPane', () => {
     expect(document.querySelector('div.absolute.inset-0.z-10')).toBeNull();
   });
 
+  it('keeps the connecting overlay for at least 600ms after a fast connect', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <TerminalPane activeSession={makeSession({ status: 'connecting' })} />,
+      );
+      expect(document.querySelector('div.absolute.inset-0.z-10')).not.toBeNull();
+
+      rerender(<TerminalPane activeSession={makeSession({ status: 'connected' })} />);
+      expect(document.querySelector('div.absolute.inset-0.z-10')).not.toBeNull();
+
+      act(() => vi.advanceTimersByTime(600));
+      expect(document.querySelector('div.absolute.inset-0.z-10')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides the connecting overlay immediately when the connection fails', () => {
+    const { rerender } = render(
+      <TerminalPane activeSession={makeSession({ status: 'connecting' })} />,
+    );
+    expect(document.querySelector('div.absolute.inset-0.z-10')).not.toBeNull();
+
+    rerender(<TerminalPane activeSession={makeSession({ status: 'error' })} />);
+    expect(document.querySelector('div.absolute.inset-0.z-10')).toBeNull();
+  });
+
   it('shows reconnecting dots over the terminal without the loading spinner', () => {
     render(
       <TerminalPane

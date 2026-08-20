@@ -17,7 +17,6 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { PinIcon, XIcon } from 'lucide-react';
@@ -71,8 +70,6 @@ interface SessionTabProps {
   session: TerminalSession;
   active: boolean;
   dragging?: boolean;
-  renaming?: boolean;
-  renameValue?: string;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
   showSeparatorAfter?: boolean;
@@ -80,18 +77,12 @@ interface SessionTabProps {
   onContextMenu: (session: TerminalSession, x: number, y: number) => void;
   onClose: (sessionId: string) => void;
   onTogglePin?: (sessionId: string) => void;
-  onRenameStart?: (session: TerminalSession) => void;
-  onRenameChange?: (value: string) => void;
-  onRenameCommit?: () => void;
-  onRenameCancel?: () => void;
 }
 
 const SessionTab: React.FC<SessionTabProps> = ({
   session,
   active,
   dragging = false,
-  renaming = false,
-  renameValue = '',
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
   showSeparatorAfter = false,
@@ -99,10 +90,6 @@ const SessionTab: React.FC<SessionTabProps> = ({
   onContextMenu,
   onClose,
   onTogglePin,
-  onRenameStart,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
 }) => {
   return (
     <div
@@ -121,7 +108,6 @@ const SessionTab: React.FC<SessionTabProps> = ({
         e.preventDefault();
         onContextMenu(session, e.clientX, e.clientY);
       }}
-      onDoubleClick={() => onRenameStart?.(session)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -131,7 +117,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
         active ? 'h-[31px] bg-app-surface text-app-text' : 'h-[31px] bg-app-border/25 text-app-text-soft',
-        renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
+        dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
     >
@@ -157,71 +143,39 @@ const SessionTab: React.FC<SessionTabProps> = ({
       {showDropIndicatorRight && (
         <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
-      {renaming ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
-          <span className="min-w-0 flex-1">
-            <Input
-              autoFocus
-              value={renameValue}
-              onChange={(e) => onRenameChange?.(e.target.value)}
-              onBlur={onRenameCommit}
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRenameCommit?.();
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRenameCancel?.();
-                }
-              }}
-              className="h-5 border-0 bg-transparent p-0 text-xs font-medium leading-none shadow-none focus-visible:ring-0"
-            />
-          </span>
-        </div>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
+        <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
+      </div>
+      {session.pinned ? (
+        <button
+          type="button"
+          aria-label="unpin"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin?.(session.sessionId);
+          }}
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+        >
+          <PinIcon className="size-3" strokeWidth={1.5} />
+        </button>
       ) : (
-        <>
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
-            <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
-          </div>
-          {session.pinned ? (
-            <button
-              type="button"
-              aria-label="unpin"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onTogglePin?.(session.sessionId);
-              }}
-              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
-            >
-              <PinIcon className="size-3" strokeWidth={1.5} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              aria-label="close"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(session.sessionId);
-              }}
-              className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-                !dragging && active ? 'flex' : 'hidden group-hover:flex',
-              )}
-            >
-              <XIcon className="h-3 w-3" strokeWidth={1.5} />
-            </button>
+        <button
+          type="button"
+          aria-label="close"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose(session.sessionId);
+          }}
+          className={cn(
+            'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+            !dragging && active ? 'flex' : 'hidden group-hover:flex',
           )}
-        </>
+        >
+          <XIcon className="h-3 w-3" strokeWidth={1.5} />
+        </button>
       )}
     </div>
   );
@@ -234,12 +188,6 @@ interface SortableTabProps {
   onContextMenu: (session: TerminalSession, x: number, y: number) => void;
   onClose: (sessionId: string) => void;
   onTogglePin: (sessionId: string) => void;
-  renaming: boolean;
-  renameValue: string;
-  onRenameStart: (session: TerminalSession) => void;
-  onRenameChange: (value: string) => void;
-  onRenameCommit: () => void;
-  onRenameCancel: () => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
   showSeparatorAfter?: boolean;
@@ -252,19 +200,12 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onContextMenu,
   onClose,
   onTogglePin,
-  renaming,
-  renameValue,
-  onRenameStart,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
   showDropIndicatorLeft,
   showDropIndicatorRight,
   showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: session.sessionId,
-    disabled: renaming,
   });
 
   return (
@@ -282,8 +223,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         session={session}
         active={active}
         dragging={isDragging}
-        renaming={renaming}
-        renameValue={renameValue}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
         showSeparatorAfter={showSeparatorAfter}
@@ -291,10 +230,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         onContextMenu={onContextMenu}
         onClose={onClose}
         onTogglePin={onTogglePin}
-        onRenameStart={onRenameStart}
-        onRenameChange={onRenameChange}
-        onRenameCommit={onRenameCommit}
-        onRenameCancel={onRenameCancel}
       />
     </div>
   );
@@ -325,7 +260,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
   const removeSession = useTerminalStore((state) => state.removeSession);
   const reorderSessions = useTerminalStore((state) => state.reorderSessions);
-  const updateTitle = useTerminalStore((state) => state.updateTitle);
   const togglePin = useTerminalStore((state) => state.togglePin);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -339,8 +273,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -446,9 +378,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   };
 
   const handleDragStart = (event: DragStartEvent): void => {
-    if (renamingSessionId) {
-      return;
-    }
     const nextId = String(event.active.id);
     setDraggingSessionId(nextId);
     const isKeyboardDrag = typeof KeyboardEvent !== 'undefined'
@@ -601,24 +530,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     finishDrag();
   };
 
-  const handleRenameStart = (session: TerminalSession): void => {
-    setRenamingSessionId(session.sessionId);
-    setRenameValue(session.title);
-  };
-
-  const handleRenameCommit = (): void => {
-    if (renamingSessionId && renameValue.trim()) {
-      updateTitle(renamingSessionId, renameValue.trim());
-    }
-    setRenamingSessionId(null);
-    setRenameValue('');
-  };
-
-  const handleRenameCancel = (): void => {
-    setRenamingSessionId(null);
-    setRenameValue('');
-  };
-
   const draggingSession = draggingSessionId ? (sessions.find((s) => s.sessionId === draggingSessionId) ?? null) : null;
 
   const closingSession = closingSessionId ? (sessions.find((s) => s.sessionId === closingSessionId) ?? null) : null;
@@ -642,8 +553,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     <div
       ref={tabBarRef}
       data-terminal-tab-bar
-      // Double-clicking empty tab bar space opens a new tab; double-clicking
-      // a tab itself is rename, so ignore events coming from inside a tab.
+      // Double-clicking empty tab bar space opens a new tab; ignore events
+      // coming from inside a tab itself.
       onDoubleClick={(e) => {
         if (!onNewTabClick) return;
         if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
@@ -688,12 +599,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                   onContextMenu={(s, x, y) => onTabContextMenu?.(s, x, y)}
                   onClose={handleCloseSession}
                   onTogglePin={togglePin}
-                  renaming={renamingSessionId === session.sessionId}
-                  renameValue={renameValue}
-                  onRenameStart={handleRenameStart}
-                  onRenameChange={setRenameValue}
-                  onRenameCommit={handleRenameCommit}
-                  onRenameCancel={handleRenameCancel}
                   showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
                   showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
                   showSeparatorAfter={showSeparatorAfter}

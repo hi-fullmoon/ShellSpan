@@ -35,13 +35,19 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
     reconnectInFlight.add(sessionId);
     try {
       const { setReconnecting, setStatus, reconnectSession } = useTerminalStore.getState();
+      // Create the replacement session at the terminal's current size so the
+      // follow-up resize is a no-op; otherwise the SIGWINCH makes the remote
+      // shell redraw its prompt, showing duplicated prompt lines.
+      const controller = terminalRegistry.get(sessionId);
+      const cols = controller?.terminal.cols ?? 120;
+      const rows = controller?.terminal.rows ?? 30;
 
       // Sessions without a profile are local shells; recreate them directly.
       if (!session.profileId) {
         setReconnecting(sessionId, true);
         logger.info(`Reconnecting local session ${sessionId}`);
         try {
-          const summary = await invokeCreateLocalSession(120, 30);
+          const summary = await invokeCreateLocalSession(cols, rows);
 
           terminalRegistry.rebindSession(sessionId, summary.sessionId);
           reconnectSession(sessionId, summary);
@@ -75,7 +81,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
       logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
       try {
         const summary = await invokeCreateSession(
-          buildSessionCreateRequest(profileWithPassword, 120, 30),
+          buildSessionCreateRequest(profileWithPassword, cols, rows),
         );
 
         terminalRegistry.rebindSession(sessionId, summary.sessionId);

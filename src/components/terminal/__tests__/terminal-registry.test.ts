@@ -142,8 +142,18 @@ describe('terminalRegistry', () => {
     expect(controller.terminal.buffer.active.length).toBe(bufferLength);
     expect(listenToSshData).toHaveBeenCalledWith('s2', expect.any(Function));
 
-    controller.simulateInput('after');
-    expect(invokeWriteSession).toHaveBeenCalledWith('s2', 'after');
+    // Input within the post-reconnect grace window is dropped so a stray
+    // keystroke cannot echo into the middle of the shell's first prompt.
+    controller.simulateInput('during-grace');
+    expect(invokeWriteSession).not.toHaveBeenCalled();
+
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 1000);
+    try {
+      controller.simulateInput('after');
+      expect(invokeWriteSession).toHaveBeenCalledWith('s2', 'after');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('dispose removes the controller and container from host', () => {
