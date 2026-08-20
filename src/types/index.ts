@@ -378,6 +378,19 @@ export interface UploadLocalPathsRequest extends RemoteConnectionRequest {
   operationId: string;
 }
 
+export type TransferItemStatus = 'completed' | 'failed' | 'skipped';
+
+export interface TransferItemResult {
+  sourcePath: string;
+  destinationPath?: string;
+  status: TransferItemStatus;
+  error?: string;
+}
+
+export interface TransferBatchResult {
+  items: TransferItemResult[];
+}
+
 export interface CopyLocalPathsRequest {
   sourcePaths: string[];
   destinationDirectory: string;

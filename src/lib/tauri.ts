@@ -40,6 +40,7 @@ import type {
   SessionSummary,
   StatusEvent,
   SystemHealth,
+  TransferBatchResult,
   UploadProgressEvent,
 } from '@/types';
 
@@ -172,7 +173,7 @@ export async function invokeCopyRemotePath(
 
 export async function invokeUploadLocalPaths(
   request: UploadLocalPathsRequest,
-): Promise<void> {
+): Promise<TransferBatchResult> {
   return invokeLogged('upload_local_paths', { request });
 }
 
@@ -218,7 +219,7 @@ export async function invokeCancelDelete(operationId: string): Promise<void> {
 
 export async function invokeDownloadRemotePaths(
   request: DownloadRemotePathsRequest,
-): Promise<void> {
+): Promise<TransferBatchResult> {
   return invokeLogged('download_remote_paths', { request });
 }
 
