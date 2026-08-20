@@ -52,6 +52,85 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });
 
+  it('activates a tab via pointerup fallback when its pointerdown was missed', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    // First tap lands on s1 and records the last pointerdown target.
+    fireEvent.pointerDown(tabs[0], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+
+    // macOS tap-to-click can swallow the second tap's pointerdown entirely;
+    // only its release reaches the tab. The fallback must still switch.
+    fireEvent.pointerUp(tabs[1], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('does not activate a tab when a missed pointerdown releases on its close button', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[1], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+
+    // If WKWebView drops the pointerdown for this tap, only the release reaches
+    // the close button. The fallback activation handler must leave the active
+    // session alone so the button action does not also switch tabs.
+    fireEvent.pointerUp(screen.getAllByLabelText('close')[0], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('does not activate on pointerup when the pointerdown landed on the same tab', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[0], { button: 0 });
+    fireEvent.pointerUp(tabs[0], { button: 0 });
+
+    // s1 activated on pointerdown; the matching pointerup is a no-op.
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+  });
+
+  it('does not activate a tab when a reorder drag ends on it', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    document.body.classList.add('tab-dragging');
+    try {
+      const tabs = screen.getAllByRole('tab');
+      fireEvent.pointerDown(tabs[0], { button: 0 });
+      // A release that lands on another tab during a drag is a drop, not a
+      // click: the active session must not switch.
+      fireEvent.pointerUp(tabs[1], { button: 0 });
+      expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    } finally {
+      document.body.classList.remove('tab-dragging');
+    }
+  });
+
+  it('activates a tab on pointerup when the preceding pointerdown was outside any tab', () => {
+    addSession('s1', 'A');
+    render(<TerminalTabBar />);
+
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+    try {
+      fireEvent.pointerDown(outside, { button: 0 });
+      const tab = screen.getAllByRole('tab')[0];
+      fireEvent.pointerUp(tab, { button: 0 });
+      expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    } finally {
+      document.body.removeChild(outside);
+    }
+  });
+
   it('shows separators only between tabs that are not adjacent to the active tab', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
