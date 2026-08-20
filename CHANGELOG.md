@@ -3,6 +3,26 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.47](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.47) - 2026-08-20
+
+
+### Bug Fixes
+
+- **tauri:** harden connection routing and local copy safety
+
+### Features
+
+- add jump-host keychain key recovery
+- connect session supports jump-host key recovery
+- **term:** prevent re-persisting keychain passwords on reconnect
+- reconnect session prompts for missing keychain key
+- **sftp:** return per-item transfer results for uploads and downloads
+- **build:** sync Cargo.lock version and avoid slow cargo check
+
+### Testing
+
+- **term:** cover paste warning and reconnect guard edge cases
+
 ## [v2.0.46](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.46) - 2026-08-20
 
 
