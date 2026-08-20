@@ -415,7 +415,7 @@ export function buildRemoteConnectionRequest(
     username: profile.username,
     authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
-    keychainKeyId: profile.keychainKeyId,
+    keychainKeyId: profile.authMethod === 'key' ? profile.keychainKeyId : undefined,
     privateKeyData: profile.privateKeyData,
     passphrase: profile.passphrase,
     jumpHost: profile.jumpHost ? mapJumpHostAuthMethod(profile.jumpHost) : undefined,
@@ -434,7 +434,7 @@ export function buildSessionCreateRequest(
     username: profile.username,
     authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
-    keychainKeyId: profile.keychainKeyId,
+    keychainKeyId: profile.authMethod === 'key' ? profile.keychainKeyId : undefined,
     privateKeyData: profile.privateKeyData,
     passphrase: profile.passphrase,
     terminalCols: cols,
@@ -452,6 +452,7 @@ function mapJumpHostAuthMethod(jumpHost: JumpHostConfig): JumpHostConfig {
   return {
     ...jumpHost,
     authMethod: mapAuthMethodForBackend(jumpHost.authMethod),
+    keychainKeyId: jumpHost.authMethod === 'key' ? jumpHost.keychainKeyId : undefined,
     privateKeyData: jumpHost.privateKeyData,
   };
 }

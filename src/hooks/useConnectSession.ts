@@ -109,7 +109,7 @@ export function useConnectSession(): {
         const summary = await invokeCreateSession(
           buildSessionCreateRequest(preparedProfile, 120, 30),
         );
-        await persistPromptedPassword(profile, preparedProfile);
+        await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
         addSession(summary, profile.id, options);
         logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
         useRecentProfilesStore.getState().touchProfile(profile.id);

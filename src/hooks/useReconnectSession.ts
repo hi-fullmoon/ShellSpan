@@ -11,6 +11,11 @@ import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { promptForMissingPassword } from '@/lib/password-prompt';
 import { getLocalizedErrorMessage } from '@/lib/error';
+import {
+  ensureKeychainKeyForProfile,
+  prepareKeychainKeyForProfile,
+  preparePasswordKeychain,
+} from '@/lib/keychain-key-prompt';
 
 const logger = createLogger('reconnect');
 
@@ -80,11 +85,29 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
         return;
       }
 
+      const profileWithKey = await ensureKeychainKeyForProfile(profileWithPassword);
+      if (!profileWithKey) {
+        logger.info(`Reconnect cancelled by user for session ${sessionId}`);
+        return;
+      }
+
+      const passwordPreparedProfile = await preparePasswordKeychain(profileWithKey);
+      if (!passwordPreparedProfile) {
+        logger.info(`Reconnect cancelled by user for session ${sessionId}`);
+        return;
+      }
+
+      const preparedProfile = await prepareKeychainKeyForProfile(passwordPreparedProfile);
+      if (!preparedProfile) {
+        logger.info(`Reconnect cancelled by user for session ${sessionId}`);
+        return;
+      }
+
       setReconnecting(sessionId, true);
       logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
       try {
         const summary = await invokeCreateSession(
-          buildSessionCreateRequest(profileWithPassword, cols, rows),
+          buildSessionCreateRequest(preparedProfile, cols, rows),
         );
 
         terminalRegistry.rebindSession(sessionId, summary.sessionId);

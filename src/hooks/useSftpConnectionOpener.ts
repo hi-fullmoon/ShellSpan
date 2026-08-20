@@ -161,7 +161,7 @@ export function useSftpConnectionOpener(): {
       // Persist a password entered via the prompt once the connection
       // succeeds; failures are swallowed inside persistPromptedPassword.
       const finish = (): void => {
-        void persistPromptedPassword(profile, preparedProfile);
+        void persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
         finishOpen(preparedProfile, targetConnectionId, targetSide);
       };
 

@@ -380,6 +380,29 @@ describe('useConnectSession', () => {
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
   });
 
+  it('does not re-persist a password loaded from the profile keychain', async () => {
+    const passwordProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+    };
+    useProfileStore.setState({ profiles: [passwordProfile] });
+    vi.mocked(invokeRetrieveProfilePassword).mockResolvedValueOnce('saved-secret');
+    vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
+
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(passwordProfile);
+    });
+
+    expect(invokeRetrieveProfilePassword).toHaveBeenCalledWith('p1');
+    expect(invokeCreateSession).toHaveBeenCalledWith(expect.objectContaining({
+      password: 'saved-secret',
+    }));
+    expect(invokeStoreProfilePassword).not.toHaveBeenCalled();
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+  });
+
   it('keeps the connection when persisting the prompted password fails', async () => {
     const passwordProfile: ConnectionProfile = {
       ...profile,

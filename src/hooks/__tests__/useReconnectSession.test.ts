@@ -46,6 +46,19 @@ vi.mock('@/lib/password-prompt', () => ({
   ),
 }));
 
+vi.mock('@/lib/keychain-key-prompt', () => ({
+  ensureKeychainKeyForProfile: vi.fn((profile) => Promise.resolve(profile)),
+  preparePasswordKeychain: vi.fn((profile) => Promise.resolve(profile)),
+  prepareKeychainKeyForProfile: vi.fn((profile) => Promise.resolve(profile)),
+}));
+
+import { promptForMissingPassword } from '@/lib/password-prompt';
+import {
+  ensureKeychainKeyForProfile,
+  prepareKeychainKeyForProfile,
+  preparePasswordKeychain,
+} from '@/lib/keychain-key-prompt';
+
 const initialTerminal = useTerminalStore.getState();
 const initialProfile = useProfileStore.getState();
 
@@ -54,6 +67,16 @@ describe('useReconnectSession', () => {
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
     terminalRegistry.disposeAll();
+    vi.mocked(promptForMissingPassword).mockReset();
+    vi.mocked(promptForMissingPassword).mockImplementation((profile) =>
+      Promise.resolve({ ...profile, password: 'mock-pass' }),
+    );
+    vi.mocked(ensureKeychainKeyForProfile).mockReset();
+    vi.mocked(ensureKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
+    vi.mocked(preparePasswordKeychain).mockReset();
+    vi.mocked(preparePasswordKeychain).mockImplementation((profile) => Promise.resolve(profile));
+    vi.mocked(prepareKeychainKeyForProfile).mockReset();
+    vi.mocked(prepareKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
   });
 
   afterEach(() => {
@@ -145,10 +168,58 @@ describe('useReconnectSession', () => {
     await result.current('s1');
 
     expect(invokeCreateSession).toHaveBeenCalledTimes(1);
+    expect(ensureKeychainKeyForProfile).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'p1',
+      password: 'mock-pass',
+    }));
+    expect(preparePasswordKeychain).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'p1',
+      password: 'mock-pass',
+    }));
+    expect(prepareKeychainKeyForProfile).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'p1',
+      password: 'mock-pass',
+    }));
     expect(invokeCloseSession).toHaveBeenCalledWith('s1');
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
     expect(terminalRegistry.get('s2')?.terminal).toBe(terminal);
+  });
+
+  it('uses the profile returned by keychain preparation when reconnecting', async () => {
+    const preparedProfile = {
+      id: 'p1',
+      name: 'Alpha',
+      host: 'h',
+      port: 22,
+      username: 'u',
+      authMethod: 'password' as const,
+      password: 'stored-keychain-pass',
+      keychainKeyId: 'password-key',
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    useProfileStore.setState({
+      profiles: [
+        {
+          ...preparedProfile,
+          password: undefined,
+        },
+      ],
+    });
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' },
+      'p1',
+    );
+
+    vi.mocked(promptForMissingPassword).mockImplementation((profile) => Promise.resolve(profile));
+    vi.mocked(preparePasswordKeychain).mockResolvedValueOnce(preparedProfile);
+
+    const { buildSessionCreateRequest } = await import('@/lib/tauri');
+    const { result } = renderHook(() => useReconnectSession());
+    await result.current('s1');
+
+    expect(buildSessionCreateRequest).toHaveBeenCalledWith(preparedProfile, 120, 30);
   });
 
   it('sets status to error when create session fails', async () => {
