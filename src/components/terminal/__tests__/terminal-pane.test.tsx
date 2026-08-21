@@ -72,6 +72,8 @@ function makeMockTerminal(selection = '') {
   const selectionHandlers: Array<() => void> = [];
   const terminal = {
     getSelection: vi.fn().mockReturnValue(selection),
+    hasSelection: vi.fn().mockReturnValue(Boolean(selection)),
+    clearSelection: vi.fn(),
     selectAll: vi.fn(),
     clear: vi.fn(),
     write: vi.fn(),
@@ -309,17 +311,33 @@ describe('TerminalPane', () => {
     document.addEventListener('mousemove', downstream);
 
     // macOS "tap to click": a light tap is a mousedown, and sliding slightly
-    // while the finger is down is a held-button drag. A 1px drift must not
+    // while the finger is down is a held-button drag. A 6px drift must not
     // reach xterm's selection handler (registered on document after ours).
     terminal.element?.dispatchEvent(
       new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 101, clientY: 100, bubbles: true }),
+      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 106, clientY: 100, bubbles: true }),
     );
 
     expect(downstream).not.toHaveBeenCalled();
     document.removeEventListener('mousemove', downstream);
+  });
+
+  it('clears a transient selection when a trackpad-like tap drift ends', () => {
+    const terminal = makeMockTerminal();
+    vi.mocked(terminal.hasSelection).mockReturnValue(true);
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.element?.dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+    );
+    document.dispatchEvent(
+      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 106, clientY: 100, bubbles: true }),
+    );
+    document.dispatchEvent(new MouseEvent('mouseup', { button: 0, buttons: 0, bubbles: true }));
+
+    expect(terminal.clearSelection).toHaveBeenCalledTimes(1);
   });
 
   it('lets the selection extend once a drag crosses the threshold', () => {

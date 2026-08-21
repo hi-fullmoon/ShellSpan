@@ -1,5 +1,6 @@
 import { act } from '@testing-library/react';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
+import type { Event as TauriEvent } from '@tauri-apps/api/event';
 import { findHttpLinksInLine, terminalRegistry } from '../registry/terminal-registry';
 
 // xterm + addons work in jsdom for write/buffer; fit yields 0x0 (harmless).
@@ -18,6 +19,7 @@ vi.mock('@/lib/tauri', () => ({
     message: 'ready',
   }),
   invokeMarkSessionReady: vi.fn().mockResolvedValue(undefined),
+  invokeSetSessionOutputPaused: vi.fn().mockResolvedValue(undefined),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
@@ -37,6 +39,10 @@ function createController(sessionId: string) {
 
 describe('terminalRegistry', () => {
   beforeEach(() => {
+    document.documentElement.dataset.theme = 'light';
+    document.documentElement.style.setProperty('--app-surface', '#ffffff');
+    document.documentElement.style.setProperty('--app-text', '#0f172a');
+    document.documentElement.style.setProperty('--app-primary', '#0e7490');
     terminalRegistry.disposeAll();
     terminalRegistry.updateOptions({
       fontSize: 14,
@@ -80,8 +86,8 @@ describe('terminalRegistry', () => {
     expect(terminalElement).not.toBeNull();
     expect(viewport).not.toBeNull();
     expect(terminalElement).toHaveClass('terminal', 'xterm');
-    expect(terminalElement).toHaveStyle({ backgroundColor: '#000000' });
-    expect(viewport).toHaveStyle({ backgroundColor: '#000000' });
+    expect(terminalElement).toHaveStyle({ backgroundColor: '#ffffff' });
+    expect(viewport).toHaveStyle({ backgroundColor: '#ffffff' });
     expect(terminalElement).toHaveStyle({ width: '100%', height: '100%' });
 
     terminalRegistry.updateOptions({
@@ -100,6 +106,29 @@ describe('terminalRegistry', () => {
 
     expect(terminalElement?.style.backgroundColor).toBe('rgb(40, 44, 52)');
     expect(viewport?.style.backgroundColor).toBe('rgb(40, 44, 52)');
+  });
+
+  it('resolves app CSS variables and refreshes them after an app theme change', () => {
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+    expect(controller.terminal.options.theme).toMatchObject({
+      background: '#ffffff',
+      foreground: '#0f172a',
+      cursor: '#0e7490',
+    });
+
+    document.documentElement.dataset.theme = 'dark';
+    document.documentElement.style.setProperty('--app-surface', '#0f172a');
+    document.documentElement.style.setProperty('--app-text', '#f8fafc');
+    document.documentElement.style.setProperty('--app-primary', '#22d3ee');
+    terminalRegistry.refreshTheme();
+
+    expect(controller.terminal.options.theme).toMatchObject({
+      background: '#0f172a',
+      foreground: '#f8fafc',
+      cursor: '#22d3ee',
+    });
+    expect(controller.terminal.element?.style.backgroundColor).toBe('rgb(15, 23, 42)');
   });
 
   it('hides the xterm viewport via the container Tailwind descendant class', () => {
@@ -236,6 +265,42 @@ describe('terminalRegistry', () => {
     });
   });
 
+  it('only refits attached terminals when cell geometry changes', () => {
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+    const fit = vi.spyOn(controller.fitAddon, 'fit').mockImplementation(() => {});
+
+    controller.updateOptions({
+      fontSize: 14,
+      fontFamily: 'system',
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      colorScheme: 'app',
+      autoReconnect: true,
+      lineHeight: 1,
+      letterSpacing: 0,
+      urlDetection: true,
+      bellStyle: 'sound',
+    });
+    expect(fit).not.toHaveBeenCalled();
+
+    controller.updateOptions({
+      fontSize: 16,
+      fontFamily: 'system',
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      colorScheme: 'app',
+      autoReconnect: true,
+      lineHeight: 1,
+      letterSpacing: 0,
+      urlDetection: true,
+      bellStyle: 'sound',
+    });
+    expect(fit).toHaveBeenCalledTimes(1);
+  });
+
   it('writes connected input to the session', async () => {
     const { invokeWriteSession } = await import('@/lib/tauri');
     const getStatus = vi.fn().mockReturnValue('connected');
@@ -251,6 +316,34 @@ describe('terminalRegistry', () => {
     controller.simulateInput('hello');
 
     expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'hello');
+  });
+
+  it('pauses backend output at the parser high watermark and resumes after draining', async () => {
+    const { invokeSetSessionOutputPaused, listenToSshData } = await import('@/lib/tauri');
+    let dataHandler: ((event: TauriEvent<string>) => void) | undefined;
+    vi.mocked(listenToSshData).mockImplementation(async (_sessionId, callback) => {
+      dataHandler = callback;
+      return () => {};
+    });
+    const controller = createController('s1');
+    await vi.waitFor(() => expect(dataHandler).toBeDefined());
+
+    const parsedCallbacks: Array<() => void> = [];
+    vi.spyOn(controller.terminal, 'write').mockImplementation((_data, callback) => {
+      if (callback) parsedCallbacks.push(callback);
+    });
+    dataHandler!({ event: 'ssh-data:s1', id: 1, payload: 'x'.repeat(300 * 1024) });
+    dataHandler!({ event: 'ssh-data:s1', id: 2, payload: 'y'.repeat(300 * 1024) });
+
+    await vi.waitFor(() => {
+      expect(invokeSetSessionOutputPaused).toHaveBeenCalledWith('s1', true);
+    });
+    parsedCallbacks[0]();
+    expect(invokeSetSessionOutputPaused).not.toHaveBeenCalledWith('s1', false);
+    parsedCallbacks[1]();
+    await vi.waitFor(() => {
+      expect(invokeSetSessionOutputPaused).toHaveBeenCalledWith('s1', false);
+    });
   });
 
   it('reconciles a connected status emitted before listeners were ready', async () => {

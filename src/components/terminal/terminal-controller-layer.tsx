@@ -39,6 +39,19 @@ export const TerminalControllerLayer: React.FC = () => {
   }, [terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalScrollback, terminalUrlDetection]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    let previousTheme = root.getAttribute('data-theme');
+    const observer = new MutationObserver(() => {
+      const nextTheme = root.getAttribute('data-theme');
+      if (nextTheme === previousTheme) return;
+      previousTheme = nextTheme;
+      terminalRegistry.refreshTheme();
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     const currentIds = new Set(sessions.map((s) => s.sessionId));
     for (const session of sessions) {
       if (!knownRef.current.has(session.sessionId) && !terminalRegistry.get(session.sessionId)) {
