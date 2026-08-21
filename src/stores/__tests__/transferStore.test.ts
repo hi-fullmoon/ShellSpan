@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   hasActivePathOperation,
   isTransferComplete,
+  runPathOperation,
   useTransferStore,
   waitForPathIdle,
   type TransferOperation,
@@ -51,6 +52,38 @@ describe('transferStore', () => {
       status: 'failed',
       error: 'still offline',
     });
+  });
+
+  it('queues a retry behind an active operation on the same path', async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'retry-target',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.txt'],
+      status: 'failed',
+      retry,
+    });
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'blocking-transfer',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.txt'],
+      status: 'running',
+    });
+
+    const retrying = useTransferStore.getState().retryOperation('retry-target');
+    await Promise.resolve();
+    expect(retry).not.toHaveBeenCalled();
+
+    useTransferStore.getState().markOperationCompleted('blocking-transfer');
+    await retrying;
+    expect(retry).toHaveBeenCalledOnce();
+    expect(
+      useTransferStore.getState().operations.find(
+        (item) => item.operationId === 'retry-target',
+      )?.status,
+    ).toBe('running');
   });
 
   it('places new transfers before existing transfers', () => {
@@ -343,5 +376,66 @@ describe('transferStore', () => {
     useTransferStore.getState().markOperationCompleted('op-destination');
     await waiting;
     expect(resolved).toBe(true);
+  });
+
+  it('serializes overlapping path tasks even when both are queued while idle', async () => {
+    const scopes = [{ connectionId: 'connection-1', paths: ['/remote/file.txt'] }];
+    const started: string[] = [];
+    let finishFirst!: () => void;
+    let finishSecond!: () => void;
+    const firstGate = new Promise<void>((resolve) => { finishFirst = resolve; });
+    const secondGate = new Promise<void>((resolve) => { finishSecond = resolve; });
+
+    const first = runPathOperation(scopes, async () => {
+      started.push('first');
+      await firstGate;
+    });
+    const second = runPathOperation(scopes, async () => {
+      started.push('second');
+      await secondGate;
+    });
+
+    await Promise.resolve();
+    expect(started).toEqual(['first']);
+
+    finishFirst();
+    await first;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(started).toEqual(['first', 'second']);
+
+    finishSecond();
+    await second;
+  });
+
+  it('releases competing path tasks one at a time after an active transfer finishes', async () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'blocking-transfer',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.txt'],
+      status: 'running',
+    });
+    const scopes = [{ connectionId: 'connection-1', paths: ['/remote/file.txt'] }];
+    const started: string[] = [];
+    let finishFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { finishFirst = resolve; });
+
+    const first = runPathOperation(scopes, async () => {
+      started.push('first');
+      await firstGate;
+    });
+    const second = runPathOperation(scopes, async () => {
+      started.push('second');
+    });
+
+    useTransferStore.getState().markOperationCompleted('blocking-transfer');
+    await Promise.resolve();
+    expect(started).toEqual(['first']);
+
+    finishFirst();
+    await first;
+    await second;
+    expect(started).toEqual(['first', 'second']);
   });
 });

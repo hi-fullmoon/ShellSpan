@@ -2,13 +2,14 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
-import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokePickLocalFolder, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/tauri';
+import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokePickLocalFiles, invokePickLocalFolder, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/tauri';
 import { useTransferStore } from '@/stores/transferStore';
 import type { ReadRemoteFileResponse } from '@/types';
 
 const connectionMocks = vi.hoisted(() => ({
   deleteRemotePaths: vi.fn().mockResolvedValue(undefined),
   renameRemotePath: vi.fn().mockResolvedValue(undefined),
+  uploadLocalPaths: vi.fn().mockResolvedValue(undefined),
   downloadRemotePaths: vi.fn().mockResolvedValue(undefined),
   openRemoteFile: vi.fn().mockResolvedValue(undefined),
   previewRemoteFile: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock('@/hooks/useSftpConnection', () => ({
     copyRemotePath: vi.fn().mockResolvedValue(undefined),
     deleteRemotePaths: connectionMocks.deleteRemotePaths,
     updateRemotePermissions: vi.fn().mockResolvedValue(undefined),
-    uploadLocalPaths: vi.fn().mockResolvedValue(undefined),
+    uploadLocalPaths: connectionMocks.uploadLocalPaths,
     downloadRemotePaths: connectionMocks.downloadRemotePaths,
     openRemoteFile: connectionMocks.openRemoteFile,
     previewRemoteFile: connectionMocks.previewRemoteFile,
@@ -105,10 +106,12 @@ function responseFor(path: string): ReadRemoteFileResponse {
 describe('useSftpPaneActions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(invokePickLocalFiles).mockResolvedValue([]);
     vi.mocked(invokePickLocalFolder).mockResolvedValue([]);
     connectionMocks.downloadRemotePaths.mockResolvedValue(undefined);
     connectionMocks.deleteRemotePaths.mockResolvedValue(undefined);
     connectionMocks.renameRemotePath.mockResolvedValue(undefined);
+    connectionMocks.uploadLocalPaths.mockResolvedValue(undefined);
     connectionMocks.openRemoteFile.mockResolvedValue(undefined);
     connectionMocks.previewRemoteFile.mockResolvedValue({
       path: '/home/test.txt',
@@ -507,6 +510,42 @@ describe('useSftpPaneActions', () => {
     });
     await act(() => renamePromise!);
     expect(connectionMocks.renameRemotePath).toHaveBeenCalledWith('/home/file.txt', 'renamed.txt');
+  });
+
+  it('queues a toolbar upload behind an active destination-path operation', async () => {
+    const connection = addConnection();
+    vi.mocked(invokePickLocalFiles).mockResolvedValue(['/local/file.txt']);
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-destination',
+      kind: 'delete',
+      connectionId: JSON.stringify(['h', 22, 'u', '', 0, '']),
+      paths: ['/home/file.txt'],
+      totalBytes: 0,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
+
+    let uploadPromise!: Promise<void>;
+    act(() => {
+      uploadPromise = result.current.onUploadFiles();
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(connectionMocks.uploadLocalPaths).not.toHaveBeenCalled();
+    expect(toastMocks.info).toHaveBeenCalledWith('sftp.transfer.queued');
+
+    act(() => {
+      useTransferStore.getState().markOperationCompleted('busy-destination');
+    });
+    await act(() => uploadPromise);
+    expect(connectionMocks.uploadLocalPaths).toHaveBeenCalledWith(
+      ['/local/file.txt'],
+      '/home',
+      undefined,
+      ['fail'],
+    );
   });
 
   it('surfaces the backend error when a queued download runs after the file was deleted', async () => {

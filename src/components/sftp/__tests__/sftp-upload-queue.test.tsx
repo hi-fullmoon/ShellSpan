@@ -250,6 +250,40 @@ describe('SftpContent upload queue', () => {
     );
   });
 
+  it('releases the FIFO chain when the conflict dialog is dismissed with Escape', async () => {
+    const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions({ uploadWithPolicies }));
+
+    renderContent(createConnection(['a.txt']));
+
+    await capturedOnDrop!(['/local/a.txt'], 'remote');
+    expect(await findConflictFileName('a.txt')).toBeInTheDocument();
+    await capturedOnDrop!(['/local/c.txt'], 'remote');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(uploadWithPolicies).toHaveBeenCalledWith(
+        ['/local/c.txt'],
+        '/remote',
+        ['fail'],
+        expect.any(String),
+      ),
+    );
+    expect(uploadWithPolicies).not.toHaveBeenCalledWith(
+      ['/local/a.txt'],
+      '/remote',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('passes the overwrite policy through to remote-to-local downloads', async () => {
     connectionMocks.downloadRemotePaths.mockResolvedValue(undefined);
     vi.mocked(useSftpPaneActions).mockReturnValue(createActions());

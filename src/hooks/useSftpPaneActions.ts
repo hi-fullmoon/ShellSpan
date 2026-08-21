@@ -23,6 +23,7 @@ import {
 } from '@/stores/sftpStore';
 import {
   hasActivePathOperation,
+  runPathOperation,
   useTransferStore,
   waitForPathIdle,
   type PathOperationScope,
@@ -87,6 +88,13 @@ export interface UseSftpPaneActionsResult {
 
 export function parentDirectoryPath(path: string): string {
   return parentPortablePath(path);
+}
+
+function remoteDestinationPath(directory: string, sourcePath: string): string {
+  const normalizedSource = sourcePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const name = normalizedSource.split('/').filter(Boolean).pop() ?? sourcePath;
+  const base = directory === '/' ? '' : directory.replace(/\/+$/, '');
+  return `${base}/${name}`;
 }
 
 function writeClipboardText(value: string): Promise<void> {
@@ -193,6 +201,12 @@ export function useSftpPaneActions(
     [info, t],
   );
 
+  const runAfterPathsIdle = useCallback(
+    <T,>(scopes: PathOperationScope[], task: () => Promise<T> | T) =>
+      runPathOperation(scopes, task, () => info(t('sftp.transfer.queued'))),
+    [info, t],
+  );
+
   const reload = useCallback(async () => {
     if (isLocal) {
       await loadLocalDirectory(path);
@@ -264,14 +278,15 @@ export function useSftpPaneActions(
         const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
         const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
         if (!folders.length) return;
-        await waitForPathsIdle(targetScope);
-        await downloadRemotePaths([target.path], folders[0]);
+        await runAfterPathsIdle(targetScope, () =>
+          downloadRemotePaths([target.path], folders[0]),
+        );
       } catch (err) {
         logger.warn(`Failed to download: ${target.path}`, err);
         error(getToastErrorMessage(err));
       }
     },
-    [downloadRemotePaths, isLocal, remoteConnectionKey, waitForPathsIdle, selectedEntries, error],
+    [downloadRemotePaths, isLocal, remoteConnectionKey, runAfterPathsIdle, waitForPathsIdle, selectedEntries, error],
   );
 
   const onBatchDownload = useCallback(
@@ -284,14 +299,15 @@ export function useSftpPaneActions(
         const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
         const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
         if (!folders.length) return;
-        await waitForPathsIdle(selectedScopes);
-        await downloadRemotePaths(selectedRemotePaths, folders[0]);
+        await runAfterPathsIdle(selectedScopes, () =>
+          downloadRemotePaths(selectedRemotePaths, folders[0]),
+        );
       } catch (err) {
         logger.warn('Batch download failed', err);
         error(getToastErrorMessage(err));
       }
     },
-    [downloadRemotePaths, isLocal, remoteConnectionKey, waitForPathsIdle, selectedEntries, error],
+    [downloadRemotePaths, isLocal, remoteConnectionKey, runAfterPathsIdle, waitForPathsIdle, selectedEntries, error],
   );
 
   const onCopy = useCallback(
@@ -339,73 +355,69 @@ export function useSftpPaneActions(
     const clipboard = connection.remoteClipboard;
     const destinationBase = path === '/' ? '' : path.replace(/\/+$/, '');
     const destinationPath = `${destinationBase}/${clipboard.sourceName}`;
-    await waitForPathsIdle([
+    const transferScopes = [
       { connectionId: clipboard.sourceConnectionKey, paths: [clipboard.sourcePath] },
       { connectionId: remoteConnectionKey, paths: [destinationPath] },
-    ]);
+    ];
     try {
-      if (clipboard.sourceConnectionKey === remoteConnectionKey) {
-        await copyRemotePath(clipboard.sourcePath, path);
-      } else {
-        const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
-        const request = {
-          sourceConnection: clipboard.sourceConnection,
-          destinationConnection: remoteConnection,
-          sourcePaths: [clipboard.sourcePath],
-          destinationDirectory: path,
-          conflictPolicies: ['fail'] as UploadConflictPolicy[],
-          operationId,
-        };
-        const runRemoteCopy = async (): Promise<void> => {
-          markOperationRunning(operationId);
-          try {
-            await invokeCopyRemoteToRemote(request);
-            markOperationCompleted(operationId);
-            void reload();
-          } catch (copyError) {
-            const operation = useTransferStore.getState().operations.find(
-              (item) => item.operationId === operationId,
-            );
-            if (operation?.status === 'cancelling') {
-              markOperationCancelled(operationId);
-              return;
+      await runAfterPathsIdle(transferScopes, async () => {
+        if (clipboard.sourceConnectionKey === remoteConnectionKey) {
+          await copyRemotePath(clipboard.sourcePath, path);
+        } else {
+          const operationId = `${connection.id}-remote-copy-${crypto.randomUUID()}`;
+          const request = {
+            sourceConnection: clipboard.sourceConnection,
+            destinationConnection: remoteConnection,
+            sourcePaths: [clipboard.sourcePath],
+            destinationDirectory: path,
+            conflictPolicies: ['fail'] as UploadConflictPolicy[],
+            operationId,
+          };
+          const runRemoteCopy = async (): Promise<void> => {
+            markOperationRunning(operationId);
+            try {
+              await invokeCopyRemoteToRemote(request);
+              markOperationCompleted(operationId);
+              void reload();
+            } catch (copyError) {
+              const operation = useTransferStore.getState().operations.find(
+                (item) => item.operationId === operationId,
+              );
+              if (operation?.status === 'cancelling') {
+                markOperationCancelled(operationId);
+                return;
+              }
+              markOperationFailed(
+                operationId,
+                getLocalizedErrorMessage(copyError),
+              );
+              throw copyError;
             }
-            markOperationFailed(
-              operationId,
-              getLocalizedErrorMessage(copyError),
-            );
-            throw copyError;
-          }
-        };
-        addOperation({
-          operationId,
-          kind: 'remote-copy',
-          connectionId: clipboard.sourceConnectionKey,
-          paths: [clipboard.sourcePath],
-          pathScopes: [
-            {
-              connectionId: clipboard.sourceConnectionKey,
-              paths: [clipboard.sourcePath],
-            },
-            { connectionId: remoteConnectionKey, paths: [destinationPath] },
-          ],
-          currentPath: clipboard.sourcePath,
-          totalBytes: 0,
-          processedBytes: 0,
-          totalSteps: 1,
-          completedSteps: 0,
-          status: 'running',
-          retry: runRemoteCopy,
-          cancel: () => invokeCancelRemoteCopy(operationId),
-        });
-        await runRemoteCopy();
-      }
+          };
+          addOperation({
+            operationId,
+            kind: 'remote-copy',
+            connectionId: clipboard.sourceConnectionKey,
+            paths: [clipboard.sourcePath],
+            pathScopes: transferScopes,
+            currentPath: clipboard.sourcePath,
+            totalBytes: 0,
+            processedBytes: 0,
+            totalSteps: 1,
+            completedSteps: 0,
+            status: 'running',
+            retry: runRemoteCopy,
+            cancel: () => invokeCancelRemoteCopy(operationId),
+          });
+          await runRemoteCopy();
+        }
+      });
       clearSelection();
     } catch (err) {
       logger.warn('Paste failed', err);
       error(getToastErrorMessage(err));
     }
-  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, waitForPathsIdle, reload, remoteConnection, remoteConnectionKey, t, error]);
+  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, runAfterPathsIdle, reload, remoteConnection, remoteConnectionKey, t, error]);
 
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
@@ -507,10 +519,10 @@ export function useSftpPaneActions(
           await invokeRenameLocalPath(renameTarget.path, newName);
           await reload();
         } else {
-          await waitForPathsIdle([
-            { connectionId: remoteConnectionKey, paths: [renameTarget.path] },
-          ]);
-          await renameRemotePath(renameTarget.path, newName);
+          await runAfterPathsIdle(
+            [{ connectionId: remoteConnectionKey, paths: [renameTarget.path] }],
+            () => renameRemotePath(renameTarget.path, newName),
+          );
         }
         clearSelection();
       } catch (err) {
@@ -520,7 +532,7 @@ export function useSftpPaneActions(
         setRenameTarget(undefined);
       }
     },
-    [clearSelection, isLocal, waitForPathsIdle, remoteConnectionKey, renameRemotePath, renameTarget, reload, error],
+    [clearSelection, isLocal, runAfterPathsIdle, remoteConnectionKey, renameRemotePath, renameTarget, reload, error],
   );
 
   const onDelete = useCallback(
@@ -538,18 +550,19 @@ export function useSftpPaneActions(
         }
         return;
       }
-      await waitForPathsIdle([
-        { connectionId: remoteConnectionKey, paths: targets.map((entry) => entry.path) },
-      ]);
       try {
-        await deleteRemotePaths(targets.map((e) => e.path));
+        const targetPaths = targets.map((entry) => entry.path);
+        await runAfterPathsIdle(
+          [{ connectionId: remoteConnectionKey, paths: targetPaths }],
+          () => deleteRemotePaths(targetPaths),
+        );
         clearSelection();
       } catch (err) {
         logger.warn('Failed to delete remote paths', err);
         error(getToastErrorMessage(err));
       }
     },
-    [clearSelection, deleteRemotePaths, isLocal, waitForPathsIdle, remoteConnectionKey, selectedEntries, error],
+    [clearSelection, deleteRemotePaths, isLocal, runAfterPathsIdle, remoteConnectionKey, selectedEntries, error],
   );
 
   const onUploadFiles = useCallback(async () => {
@@ -561,14 +574,18 @@ export function useSftpPaneActions(
       const policies: UploadConflictPolicy[] = files.map(() =>
         defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
       );
-      await uploadLocalPaths(files, path, undefined, policies);
+      const targetPaths = files.map((file) => remoteDestinationPath(path, file));
+      await runAfterPathsIdle(
+        [{ connectionId: remoteConnectionKey, paths: targetPaths }],
+        () => uploadLocalPaths(files, path, undefined, policies),
+      );
       await reload();
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload files', err);
       error(getToastErrorMessage(err));
     }
-  }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
+  }, [clearSelection, isLocal, path, reload, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
 
   const onUploadFolders = useCallback(async () => {
     if (isLocal) return;
@@ -579,14 +596,18 @@ export function useSftpPaneActions(
       const policies: UploadConflictPolicy[] = folders.map(() =>
         defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
       );
-      await uploadLocalPaths(folders, path, undefined, policies);
+      const targetPaths = folders.map((folder) => remoteDestinationPath(path, folder));
+      await runAfterPathsIdle(
+        [{ connectionId: remoteConnectionKey, paths: targetPaths }],
+        () => uploadLocalPaths(folders, path, undefined, policies),
+      );
       await reload();
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload folders', err);
       error(getToastErrorMessage(err));
     }
-  }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
+  }, [clearSelection, isLocal, path, reload, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
 
   const uploadWithPolicies = useCallback(
     async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
@@ -594,13 +615,19 @@ export function useSftpPaneActions(
       try {
         // A queued batch passes its pending row's id so the real operation
         // replaces that row in place; undefined lets uploadLocalPaths mint one.
-        await uploadLocalPaths(localPaths, destinationDirectory, operationId, policies);
+        const targetPaths = localPaths.map((localPath) =>
+          remoteDestinationPath(destinationDirectory, localPath),
+        );
+        await runAfterPathsIdle(
+          [{ connectionId: remoteConnectionKey, paths: targetPaths }],
+          () => uploadLocalPaths(localPaths, destinationDirectory, operationId, policies),
+        );
       } catch (err) {
         logger.warn('Upload with conflict policies failed', err);
         error(getToastErrorMessage(err));
       }
     },
-    [isLocal, uploadLocalPaths, error],
+    [isLocal, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error],
   );
 
   const copyWithPolicies = useCallback(
