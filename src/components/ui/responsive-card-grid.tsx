@@ -12,8 +12,9 @@ export interface ResponsiveCardGridProps {
   className?: string;
   gridClassName?: string;
   /**
-   * When provided, columns are fitted automatically and never render narrower
-   * than this value. This is preferable for cards with intrinsic action rows.
+   * When provided, columns are filled automatically and never render narrower
+   * than this value. Empty tracks are preserved so a short final row keeps the
+   * same card width as a full row.
    */
   minColumnWidth?: number | string;
   /** Column count below the first breakpoint. */
@@ -117,7 +118,7 @@ export const ResponsiveCardGrid: React.FC<ResponsiveCardGridProps> = ({
       throw new Error('minColumnWidth must not be empty');
     }
 
-    return `repeat(auto-fit, minmax(min(100%, ${cssWidth}), 1fr))`;
+    return `repeat(auto-fill, minmax(min(100%, ${cssWidth}), 1fr))`;
   }, [currentColumns, minColumnWidth]);
 
   return (
