@@ -8,28 +8,43 @@ import React, {
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDownToLineIcon,
+  BugIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  CopyIcon,
   DownloadIcon,
   FileSearchIcon,
+  Layers3Icon,
   RefreshCwIcon,
   SearchIcon,
   SearchXIcon,
+  XIcon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useLogStore } from '@/stores/logStore';
 import type { LogSource } from '@/types';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
-import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/useToast';
 import { invokeExportLogFile } from '@/lib/tauri';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from '@/components/ui/toggle-group';
-import { cn } from '@/lib/utils';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { cn, formatBytes } from '@/lib/utils';
 
 interface ParsedLogLine {
   raw: string;
@@ -38,6 +53,16 @@ interface ParsedLogLine {
   level?: string;
   target?: string;
   message?: string;
+}
+
+interface IndexedLogLine {
+  line: ParsedLogLine;
+  originalIndex: number;
+}
+
+interface ActivityBucket {
+  total: number;
+  errors: number;
 }
 
 const DATE_FILTER_OPTIONS = [
@@ -58,10 +83,7 @@ const LOG_LINE_REGEX =
 
 function parseLogLine(line: string): ParsedLogLine {
   const match = LOG_LINE_REGEX.exec(line);
-  if (!match) {
-    return { raw: line };
-  }
-
+  if (!match) return { raw: line };
   return {
     raw: line,
     date: match[1],
@@ -74,16 +96,9 @@ function parseLogLine(line: string): ParsedLogLine {
 
 function parseLogContent(content: string): ParsedLogLine[] {
   if (!content) return [];
-
   const lines = content.split(/\r?\n/);
-  if (lines[lines.length - 1] === '') {
-    lines.pop();
-  }
+  if (lines[lines.length - 1] === '') lines.pop();
 
-  // A single log entry can span multiple physical lines (e.g. a stack trace
-  // after an error header). Lines without a log header are continuations of
-  // the previous entry and get merged into its message/raw so filtering,
-  // search and copy all operate on the whole entry instead of fragments.
   const entries: ParsedLogLine[] = [];
   let current: ParsedLogLine | undefined;
   for (const line of lines) {
@@ -104,13 +119,8 @@ function parseLogContent(content: string): ParsedLogLine[] {
 function getDaysDifference(dateString: string, today: Date): number {
   const [year, month, day] = dateString.split('-').map(Number);
   const date = new Date(year, month - 1, day);
-  const todayMidnight = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
-  );
-  const diffTime = todayMidnight.getTime() - date.getTime();
-  return Math.round(diffTime / (1000 * 60 * 60 * 24));
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((todayMidnight.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 function matchesDateFilter(
@@ -118,38 +128,66 @@ function matchesDateFilter(
   filter: DateFilterOption,
   today: Date,
 ): boolean {
-  if (filter === 'all' || !lineDate) {
-    return true;
-  }
+  if (filter === 'all' || !lineDate) return true;
   const diff = getDaysDifference(lineDate, today);
-  if (diff < 0 || diff > 29) {
-    return false;
-  }
+  if (diff < 0 || diff > 29) return false;
   switch (filter) {
-    case 'today':
-      return diff === 0;
-    case 'last3days':
-      return diff <= 2;
-    case 'last7days':
-      return diff <= 6;
-    case 'last30days':
-      return diff <= 29;
-    default:
-      return true;
+    case 'today': return diff === 0;
+    case 'last3days': return diff <= 2;
+    case 'last7days': return diff <= 6;
+    case 'last30days': return diff <= 29;
+    default: return true;
   }
+}
+
+function getLogTimestamp(line: ParsedLogLine): number | undefined {
+  if (!line.date || !line.time) return undefined;
+  const timestamp = new Date(`${line.date}T${line.time}`).getTime();
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function buildActivityBuckets(entries: IndexedLogLine[], bucketCount = 36): ActivityBucket[] {
+  const buckets = Array.from({ length: bucketCount }, () => ({ total: 0, errors: 0 }));
+  if (entries.length === 0) return buckets;
+
+  const timestamps = entries.map(({ line }) => getLogTimestamp(line));
+  const validTimestamps = timestamps.filter(
+    (timestamp): timestamp is number => timestamp !== undefined,
+  );
+  const start = validTimestamps.length > 0 ? Math.min(...validTimestamps) : 0;
+  const end = validTimestamps.length > 0 ? Math.max(...validTimestamps) : 0;
+  const hasTimeRange = end > start;
+
+  entries.forEach(({ line }, index) => {
+    const timestamp = timestamps[index];
+    const ratio = hasTimeRange && timestamp !== undefined
+      ? (timestamp - start) / (end - start)
+      : index / Math.max(1, entries.length - 1);
+    const bucketIndex = Math.min(
+      bucketCount - 1,
+      Math.max(0, Math.floor(ratio * bucketCount)),
+    );
+    buckets[bucketIndex].total += 1;
+    if (line.level === 'ERROR') buckets[bucketIndex].errors += 1;
+  });
+  return buckets;
 }
 
 function getLevelClasses(level: string): string {
   switch (level) {
-    case 'ERROR':
-      return 'bg-app-error/10 text-app-error';
-    case 'WARN':
-      return 'bg-app-warning/10 text-app-warning';
-    case 'DEBUG':
-      return 'bg-app-primary/10 text-app-primary';
-    case 'INFO':
-    default:
-      return 'bg-app-success/10 text-app-success';
+    case 'ERROR': return 'border-app-error/20 bg-app-error/10 text-app-error';
+    case 'WARN': return 'border-app-warning/20 bg-app-warning/10 text-app-warning';
+    case 'DEBUG': return 'border-app-primary/20 bg-app-primary/10 text-app-primary';
+    default: return 'border-app-success/20 bg-app-success/10 text-app-success';
+  }
+}
+
+function getLevelRailClass(level: string | undefined): string {
+  switch (level) {
+    case 'ERROR': return 'before:bg-app-error';
+    case 'WARN': return 'before:bg-app-warning';
+    case 'DEBUG': return 'before:bg-app-primary';
+    default: return 'before:bg-transparent';
   }
 }
 
@@ -166,14 +204,9 @@ function renderHighlightedText(text: string, query: string): React.ReactNode {
       nodes.push(text.slice(cursor));
       break;
     }
-    if (matchIndex > cursor) {
-      nodes.push(text.slice(cursor, matchIndex));
-    }
+    if (matchIndex > cursor) nodes.push(text.slice(cursor, matchIndex));
     nodes.push(
-      <mark
-        key={key++}
-        className="rounded-[2px] bg-app-warning/30 text-inherit"
-      >
+      <mark key={key++} className="rounded-[2px] bg-app-warning/30 text-inherit">
         {text.slice(matchIndex, matchIndex + lowerQuery.length)}
       </mark>,
     );
@@ -182,10 +215,24 @@ function renderHighlightedText(text: string, query: string): React.ReactNode {
   return nodes;
 }
 
+const LevelBadge: React.FC<{ level?: string }> = ({ level }) => (
+  <Badge
+    variant="outline"
+    className={cn(
+      'h-5 min-w-14 justify-center rounded-md px-1.5 font-mono text-[10px]',
+      getLevelClasses(level ?? 'INFO'),
+    )}
+  >
+    {level ?? 'RAW'}
+  </Badge>
+);
+
 interface LogLineProps {
   line: ParsedLogLine;
   originalIndex: number;
   query: string;
+  selected: boolean;
+  onSelect: () => void;
   onDoubleClick: () => void;
 }
 
@@ -193,59 +240,201 @@ const LogLine: React.FC<LogLineProps> = ({
   line,
   originalIndex,
   query,
+  selected,
+  onSelect,
   onDoubleClick,
 }) => {
-  if (!line.level || !line.message) {
-    return (
-      <button
-        type="button"
-        onDoubleClick={onDoubleClick}
-        className="flex w-full cursor-pointer items-start gap-2 px-2 py-1 text-left text-app-text-soft transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
-      >
-        <span className="min-w-0 whitespace-pre-wrap break-all">
-          {renderHighlightedText(line.raw, query)}
-        </span>
-      </button>
-    );
-  }
-
-  const time = line.time ?? '';
-  const shortTime = time.split('.')[0];
-  const tooltip = line.target
-    ? `${line.target} (line ${originalIndex + 1})`
-    : `line ${originalIndex + 1}`;
+  const timestamp = line.date && line.time
+    ? `${line.date} ${line.time}`
+    : `#${originalIndex + 1}`;
+  const target = line.target?.split('::').pop();
+  const message = line.message ?? line.raw;
 
   return (
     <button
       type="button"
+      onClick={onSelect}
       onDoubleClick={onDoubleClick}
-      className="flex w-full cursor-pointer items-start gap-2 px-2 py-1 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-app-primary/50"
+      className={cn(
+        'relative grid w-full cursor-pointer grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50 lg:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]',
+        selected && 'bg-muted/80',
+        getLevelRailClass(line.level),
+      )}
+      aria-label={`${timestamp} ${line.level ?? ''} ${message}`}
     >
-      <span className="w-[19ch] shrink-0 whitespace-nowrap text-[10px] leading-4 text-app-text-soft">
-        {line.date} {shortTime}
-      </span>
-      <span
-        className={cn(
-          'inline-flex h-4 w-11 shrink-0 items-center justify-center rounded px-1 text-[10px] font-semibold uppercase',
-          getLevelClasses(line.level),
-        )}
-      >
-        {line.level}
-      </span>
+      <span className="truncate text-[11px] leading-5 text-muted-foreground">{timestamp}</span>
+      <LevelBadge level={line.level} />
       <Tooltip>
         <TooltipTrigger
-          render={
-            <span className="hidden w-28 shrink-0 truncate text-[10px] leading-4 text-app-text-soft md:block" />
-          }
+          render={<span className="hidden truncate text-[11px] leading-5 text-muted-foreground lg:block" />}
         >
-          {line.target ? renderHighlightedText(line.target.split('::').pop() ?? '', query) : ''}
+          {target ? renderHighlightedText(target, query) : '—'}
         </TooltipTrigger>
-        <TooltipContent>{tooltip}</TooltipContent>
+        <TooltipContent>{line.target ?? `#${originalIndex + 1}`}</TooltipContent>
       </Tooltip>
-      <span className="min-w-0 flex-1 whitespace-pre-wrap break-all text-app-text">
-        {renderHighlightedText(line.message, query)}
+      <span
+        className="min-w-0 truncate whitespace-nowrap leading-5 text-foreground"
+      >
+        {renderHighlightedText(message, query)}
       </span>
     </button>
+  );
+};
+
+const OverviewStat: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  tone?: 'default' | 'error' | 'warning';
+}> = ({ icon, label, value, tone = 'default' }) => (
+  <div className="flex min-w-24 items-center gap-2">
+    <span
+      className={cn(
+        'flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground [&>svg]:size-3.5',
+        tone === 'error' && 'bg-app-error/10 text-app-error',
+        tone === 'warning' && 'bg-app-warning/10 text-app-warning',
+      )}
+    >
+      {icon}
+    </span>
+    <div className="flex min-w-0 flex-col">
+      <span className="font-mono text-sm font-semibold leading-4 text-foreground">
+        {value.toLocaleString()}
+      </span>
+      <span className="truncate text-[10px] leading-4 text-muted-foreground">{label}</span>
+    </div>
+  </div>
+);
+
+const ActivityHistogram: React.FC<{ buckets: ActivityBucket[]; label: string }> = ({
+  buckets,
+  label,
+}) => {
+  const { t } = useI18n();
+  const maxCount = Math.max(1, ...buckets.map((bucket) => bucket.total));
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </span>
+        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="size-1.5 rounded-full bg-app-primary/60" />
+            {t('workbench.logs.activity.events')}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-1.5 rounded-full bg-app-error" />
+            {t('workbench.logs.activity.errors')}
+          </span>
+        </div>
+      </div>
+      <div
+        className="flex h-10 items-end gap-px overflow-hidden rounded-sm bg-muted/40 px-1 pt-1"
+        aria-label={label}
+        role="img"
+      >
+        {buckets.map((bucket, index) => {
+          const totalHeight = Math.max(
+            bucket.total > 0 ? 8 : 2,
+            Math.round((bucket.total / maxCount) * 36),
+          );
+          const errorRatio = bucket.total > 0 ? bucket.errors / bucket.total : 0;
+          return (
+            <span
+              key={index}
+              className="relative min-w-px flex-1 overflow-hidden rounded-t-[1px] bg-app-primary/50"
+              style={{ height: `${totalHeight}px` }}
+              aria-hidden="true"
+            >
+              {errorRatio > 0 && (
+                <span
+                  className="absolute inset-x-0 bottom-0 bg-app-error"
+                  style={{ height: `${Math.max(2, errorRatio * 100)}%` }}
+                />
+              )}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const LogInspector: React.FC<{
+  entry: IndexedLogLine;
+  source: LogSource;
+  onClose: () => void;
+  onCopy: () => void;
+}> = ({ entry, source, onClose, onCopy }) => {
+  const { t } = useI18n();
+  const { line, originalIndex } = entry;
+  const timestamp = line.date && line.time ? `${line.date} ${line.time}` : '—';
+  const fields = [
+    [t('workbench.logs.inspector.timestamp'), timestamp],
+    [t('workbench.logs.level'), line.level ?? 'RAW'],
+    [t('workbench.logs.source'), t(source === 'frontend'
+      ? 'workbench.logs.frontend'
+      : 'workbench.logs.backend')],
+    [t('workbench.logs.inspector.target'), line.target ?? '—'],
+    [t('workbench.logs.inspector.line'), String(originalIndex + 1)],
+  ];
+
+  return (
+    <aside className="flex min-h-0 w-72 shrink-0 flex-col border-l border-border bg-card">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <ChevronRightIcon className="size-3.5 text-muted-foreground" />
+          <span className="truncate text-xs font-medium text-foreground">
+            {t('workbench.logs.inspector.title')}
+          </span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={onClose}
+          aria-label={t('common.close')}
+        >
+          <XIcon />
+        </Button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex flex-col gap-4 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <LevelBadge level={line.level} />
+            <Button variant="outline" size="xs" onClick={onCopy}>
+              <CopyIcon data-icon="inline-start" />
+              {t('workbench.logs.inspector.copy')}
+            </Button>
+          </div>
+          <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-[11px]">
+            {fields.map(([fieldLabel, value]) => (
+              <React.Fragment key={fieldLabel}>
+                <dt className="text-muted-foreground">{fieldLabel}</dt>
+                <dd className="break-all font-mono text-foreground">{value}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] text-muted-foreground">
+              {t('workbench.logs.inspector.message')}
+            </span>
+            <pre className="whitespace-pre-wrap break-all rounded-md bg-muted/60 p-2.5 font-mono text-[11px] leading-5 text-foreground">
+              {line.message ?? line.raw}
+            </pre>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] text-muted-foreground">
+              {t('workbench.logs.inspector.raw')}
+            </span>
+            <pre className="whitespace-pre-wrap break-all rounded-md bg-muted/60 p-2.5 font-mono text-[10px] leading-4 text-muted-foreground">
+              {line.raw}
+            </pre>
+          </div>
+        </div>
+      </ScrollArea>
+    </aside>
   );
 };
 
@@ -253,10 +442,12 @@ export const LogPanel: React.FC = () => {
   const { t } = useI18n();
   const { success, error: showError } = useToast();
   const {
+    files,
     activeFileName,
     activeSource,
     content,
     loading,
+    error,
     loadFiles,
     refreshActiveFile,
     setActiveSource,
@@ -265,30 +456,19 @@ export const LogPanel: React.FC = () => {
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
   const [query, setQuery] = useState('');
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number>();
   const scrollRef = useRef<HTMLDivElement>(null);
-  // The workbench stays mounted (CSS-hidden) in other sections, so polling
-  // must be gated on the active section to avoid needless backend calls.
   const activeSection = useAppStore((state) => state.activeSection);
 
   const parsedLines = useMemo(() => parseLogContent(content), [content]);
-
   const normalizedQuery = query.trim().toLowerCase();
-
   const searchFilteredLines = useMemo(() => {
-    // Computed at filter time so relative date filters stay correct across midnight.
     const today = new Date();
     return parsedLines
-      .map((line, index) => ({
-        line,
-        originalIndex: index,
-      }))
+      .map((line, index) => ({ line, originalIndex: index }))
       .filter(({ line }) => {
-        if (!matchesDateFilter(line.date, dateFilter, today)) {
-          return false;
-        }
-        if (normalizedQuery && !line.raw.toLowerCase().includes(normalizedQuery)) {
-          return false;
-        }
+        if (!matchesDateFilter(line.date, dateFilter, today)) return false;
+        if (normalizedQuery && !line.raw.toLowerCase().includes(normalizedQuery)) return false;
         return true;
       });
   }, [parsedLines, dateFilter, normalizedQuery]);
@@ -303,16 +483,25 @@ export const LogPanel: React.FC = () => {
     }
     return counts;
   }, [searchFilteredLines]);
-
   const filteredLines = useMemo(() => {
     if (levelFilter === 'all') return searchFilteredLines;
     return searchFilteredLines.filter(({ line }) => line.level === levelFilter);
   }, [searchFilteredLines, levelFilter]);
+  const uniqueTargetCount = useMemo(
+    () => new Set(searchFilteredLines.map(({ line }) => line.target).filter(Boolean)).size,
+    [searchFilteredLines],
+  );
+  const activityBuckets = useMemo(() => buildActivityBuckets(searchFilteredLines), [searchFilteredLines]);
+  const selectedEntry = useMemo(
+    () => filteredLines.find(({ originalIndex }) => originalIndex === selectedOriginalIndex),
+    [filteredLines, selectedOriginalIndex],
+  );
+  const activeFile = files.find((file) => file.name === activeFileName);
 
   const virtualizer = useVirtualizer({
     count: filteredLines.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 20,
+    estimateSize: () => 32,
     measureElement: (element) => element.getBoundingClientRect().height,
     overscan: 20,
   });
@@ -320,7 +509,6 @@ export const LogPanel: React.FC = () => {
   const updateIsAtBottom = useCallback((): void => {
     const viewport = scrollRef.current;
     if (!viewport) return;
-
     const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     setIsAtBottom(distanceFromBottom <= 8);
   }, []);
@@ -328,7 +516,6 @@ export const LogPanel: React.FC = () => {
   useEffect(() => {
     const viewport = scrollRef.current;
     if (!viewport) return;
-
     viewport.addEventListener('scroll', updateIsAtBottom, { passive: true });
     updateIsAtBottom();
     return () => viewport.removeEventListener('scroll', updateIsAtBottom);
@@ -340,34 +527,26 @@ export const LogPanel: React.FC = () => {
   }, [filteredLines.length, updateIsAtBottom]);
 
   useEffect(() => {
-    loadFiles();
+    void loadFiles();
   }, [loadFiles]);
 
-  const copyLogContent = useCallback(
-    (contentToCopy: string): void => {
-      if (!navigator.clipboard?.writeText) {
-        showError(t('workbench.logs.copyFailed'));
-        return;
-      }
-      void navigator.clipboard
-        .writeText(contentToCopy)
-        .then(() => success(t('workbench.logs.copied')))
-        .catch(() => showError(t('workbench.logs.copyFailed')));
-    },
-    [success, showError, t],
-  );
+  const copyLogContent = useCallback((contentToCopy: string): void => {
+    if (!navigator.clipboard?.writeText) {
+      showError(t('workbench.logs.copyFailed'));
+      return;
+    }
+    void navigator.clipboard.writeText(contentToCopy)
+      .then(() => success(t('workbench.logs.copied')))
+      .catch(() => showError(t('workbench.logs.copyFailed')));
+  }, [success, showError, t]);
 
   useEffect(() => {
     if (!activeFileName || activeSection !== 'workbench') return;
-    const timer = setInterval(() => {
-      refreshActiveFile();
-    }, 2000);
+    const timer = setInterval(() => { void refreshActiveFile(); }, 2000);
     return () => clearInterval(timer);
   }, [activeFileName, activeSection, refreshActiveFile]);
 
   useEffect(() => {
-    // Follow new lines only while the viewport stays pinned to the bottom;
-    // any manual scroll moves away from the bottom and pauses following.
     if (isAtBottom && filteredLines.length > 0) {
       virtualizer.scrollToIndex(filteredLines.length - 1, { align: 'end' });
     }
@@ -375,274 +554,270 @@ export const LogPanel: React.FC = () => {
 
   const handleScrollToBottom = (): void => {
     if (filteredLines.length === 0) return;
-    virtualizer.scrollToIndex(filteredLines.length - 1, {
-      align: 'end',
-      behavior: 'smooth',
-    });
+    virtualizer.scrollToIndex(filteredLines.length - 1, { align: 'end', behavior: 'smooth' });
     setIsAtBottom(true);
   };
-
   const handleRefresh = (): void => {
     void loadFiles().then(() => {
-      if (activeFileName) {
-        void refreshActiveFile();
-      }
+      if (activeFileName) void refreshActiveFile();
     });
   };
-
   const handleExport = useCallback(async (): Promise<void> => {
     if (!content) return;
     const defaultName = activeFileName ?? 'termbridge-logs.txt';
     try {
       const savedPath = await invokeExportLogFile(defaultName, content);
-      if (savedPath) {
-        success(t('workbench.logs.exported', { path: savedPath }));
-      }
+      if (savedPath) success(t('workbench.logs.exported', { path: savedPath }));
     } catch {
       showError(t('workbench.logs.exportFailed'));
     }
   }, [content, activeFileName, success, showError, t]);
-
   const handleSourceChange = (value: LogSource | undefined): void => {
     if (!value) return;
+    setSelectedOriginalIndex(undefined);
     setActiveSource(value);
   };
-
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
     <TooltipProvider>
-    <div className="flex h-full flex-col">
-      <div className="flex shrink-0 flex-col gap-2 border-b border-app-border/50 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="min-w-0">
-            <h1 className="text-sm font-medium text-app-text">
-              {t('workbench.logs.title')}
-            </h1>
-            {activeFileName && (
-              <p className="truncate text-[11px] text-muted-foreground font-mono">
-                {activeFileName}
+      <div className="flex h-full min-w-0 flex-col bg-background">
+        <header className="flex shrink-0 flex-col gap-3 border-b border-border bg-card px-4 pb-3 pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-semibold tracking-tight text-foreground">
+                  {t('workbench.logs.title')}
+                </h1>
+                <Badge variant="outline" className="gap-1.5 font-normal text-muted-foreground">
+                  <span className={cn('size-1.5 rounded-full', isAtBottom ? 'bg-app-success' : 'bg-app-warning')} />
+                  {t(isAtBottom ? 'workbench.logs.live' : 'workbench.logs.followPaused')}
+                </Badge>
+              </div>
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="truncate font-mono">
+                  {activeFileName ?? t('workbench.logs.noActiveFile')}
+                </span>
+                {activeFile && <span className="shrink-0">· {formatBytes(activeFile.size)}</span>}
               </p>
-            )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <ToggleGroup
+                value={[activeSource]}
+                onValueChange={(value) => handleSourceChange(value[0] as LogSource | undefined)}
+                variant="outline"
+                size="sm"
+                spacing={0}
+                aria-label={t('workbench.logs.source')}
+              >
+                <ToggleGroupItem value="frontend">{t('workbench.logs.frontend')}</ToggleGroupItem>
+                <ToggleGroupItem value="backend">{t('workbench.logs.backend')}</ToggleGroupItem>
+              </ToggleGroup>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-8"
+                      aria-label={t('common.refresh')}
+                      onClick={handleRefresh}
+                    />
+                  }
+                >
+                  <RefreshCwIcon />
+                </TooltipTrigger>
+                <TooltipContent>{t('common.refresh')}</TooltipContent>
+              </Tooltip>
+              <Button variant="outline" size="sm" onClick={handleExport} disabled={!content}>
+                <DownloadIcon data-icon="inline-start" />
+                {t('workbench.logs.export')}
+              </Button>
+            </div>
           </div>
-        </div>
-        <div className="flex w-full items-center gap-1.5 sm:w-auto">
-          <div className="relative min-w-0 flex-1 sm:w-52">
-            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
+
+          <div className="flex min-w-0 items-center gap-5 rounded-lg border border-border bg-background px-3 py-2">
+            <div className="grid shrink-0 grid-cols-2 gap-x-5 gap-y-2 xl:grid-cols-4">
+              <OverviewStat icon={<Layers3Icon />} label={t('workbench.logs.stats.results')} value={filteredLines.length} />
+              <OverviewStat icon={<CircleAlertIcon />} label={t('workbench.logs.stats.errors')} value={levelCounts.ERROR ?? 0} tone="error" />
+              <OverviewStat icon={<CircleAlertIcon />} label={t('workbench.logs.stats.warnings')} value={levelCounts.WARN ?? 0} tone="warning" />
+              <OverviewStat icon={<BugIcon />} label={t('workbench.logs.stats.targets')} value={uniqueTargetCount} />
+            </div>
+            <div className="h-12 w-px shrink-0 bg-border" />
+            <ActivityHistogram buckets={activityBuckets} label={t('workbench.logs.activity')} />
+          </div>
+        </header>
+
+        <section className="flex shrink-0 flex-col gap-2 border-b border-border bg-card px-4 py-2.5">
+          <InputGroup className="h-9 bg-background">
+            <InputGroupAddon><SearchIcon /></InputGroupAddon>
+            <InputGroupInput
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('workbench.logs.searchPlaceholder')}
               aria-label={t('workbench.logs.searchPlaceholder')}
-              className="h-8 pl-7 text-xs"
+              className="font-mono text-xs"
             />
+            {query && (
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton size="icon-xs" onClick={() => setQuery('')} aria-label={t('workbench.logs.clearSearch')}>
+                  <XIcon />
+                </InputGroupButton>
+              </InputGroupAddon>
+            )}
+          </InputGroup>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.date')}</span>
+                <ToggleGroup
+                  value={[dateFilter]}
+                  onValueChange={(value) => {
+                    const nextValue = value[0] as DateFilterOption | undefined;
+                    if (nextValue) setDateFilter(nextValue);
+                  }}
+                  variant="tag"
+                  size="xs"
+                  spacing={1}
+                  aria-label={t('workbench.logs.date')}
+                >
+                  {DATE_FILTER_OPTIONS.map((option) => (
+                    <ToggleGroupItem key={option.key} value={option.key}>{t(option.labelKey)}</ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+              <div className="h-4 w-px bg-border" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.level')}</span>
+                <ToggleGroup
+                  value={[levelFilter]}
+                  onValueChange={(value) => {
+                    const nextValue = value[0] as LogLevel | 'all' | undefined;
+                    if (nextValue) setLevelFilter(nextValue);
+                  }}
+                  variant="tag"
+                  size="xs"
+                  spacing={1}
+                  aria-label={t('workbench.logs.level')}
+                >
+                  <ToggleGroupItem value="all">{t('workbench.logs.all')}</ToggleGroupItem>
+                  {LOG_LEVELS.map((level) => (
+                    <ToggleGroupItem key={level} value={level}>
+                      {level}<span aria-hidden="true" className="ml-1 opacity-50">{levelCounts[level] ?? 0}</span>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>{t('workbench.logs.resultCount', { count: filteredLines.length })}</span>
+            </div>
           </div>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 text-app-text hover:bg-app-text/10"
-                  aria-label={t('common.refresh')}
-                  onClick={handleRefresh}
-                />
-              }
-            >
-              <RefreshCwIcon />
-            </TooltipTrigger>
-            <TooltipContent>{t('common.refresh')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 text-app-text hover:bg-app-text/10"
-                  aria-label={t('workbench.logs.export')}
-                  onClick={handleExport}
-                  disabled={!content}
-                />
-              }
-            >
-              <DownloadIcon />
-            </TooltipTrigger>
-            <TooltipContent>{t('workbench.logs.export')}</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-      <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-1.5">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground">
-              {t('workbench.logs.source')}
-            </span>
-            <ToggleGroup
-              value={[activeSource]}
-              onValueChange={(value) => {
-                handleSourceChange(value[0] as LogSource | undefined);
-              }}
-              variant="tag"
-              size="xs"
-              spacing={1.5}
-              aria-label={t('workbench.logs.source')}
-            >
-              <ToggleGroupItem value="frontend">
-                {t('workbench.logs.frontend')}
-              </ToggleGroupItem>
-              <ToggleGroupItem value="backend">
-                {t('workbench.logs.backend')}
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground">
-              {t('workbench.logs.date')}
-            </span>
-            <ToggleGroup
-              value={[dateFilter]}
-              onValueChange={(value) => {
-                const nextValue = value[0] as DateFilterOption | undefined;
-                if (nextValue) setDateFilter(nextValue);
-              }}
-              variant="tag"
-              size="xs"
-              spacing={1.5}
-              aria-label={t('workbench.logs.date')}
-            >
-              {DATE_FILTER_OPTIONS.map((option) => (
-                <ToggleGroupItem key={option.key} value={option.key}>
-                  {t(option.labelKey)}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground">
-              {t('workbench.logs.level')}
-            </span>
-            <ToggleGroup
-              value={[levelFilter]}
-              onValueChange={(value) => {
-                const nextValue = value[0] as LogLevel | 'all' | undefined;
-                if (nextValue) setLevelFilter(nextValue);
-              }}
-              variant="tag"
-              size="xs"
-              spacing={1.5}
-              aria-label={t('workbench.logs.level')}
-            >
-              <ToggleGroupItem value="all">
-                {t('workbench.logs.all')}
-              </ToggleGroupItem>
-              {LOG_LEVELS.map((level) => (
-                <ToggleGroupItem key={level} value={level}>
-                  {level}
-                  <span aria-hidden="true" className="ml-1 opacity-50">
-                    {levelCounts[level] ?? 0}
-                  </span>
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
-        </div>
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
-            <PanelLoadingState />
-          </div>
+        </section>
+
+        {error && (
+          <Alert variant="destructive" className="mx-4 mt-3 shrink-0">
+            <CircleAlertIcon />
+            <AlertTitle>{t('workbench.logs.loadFailed')}</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
-        <ScrollArea
-          className="min-h-0 flex-1 font-mono text-xs"
-          viewportRef={scrollRef}
-        >
-          <div className={cn('p-1.5', filteredLines.length === 0 && !loading && 'h-full')}>
-            {filteredLines.length > 0 ? (
-              <div
-                style={{
-                  height: `${virtualizer.getTotalSize()}px`,
-                  width: '100%',
-                  position: 'relative',
-                }}
-              >
-                {virtualItems.map((virtualItem) => {
-                  const { line, originalIndex } = filteredLines[virtualItem.index];
-                  return (
-                    <div
-                      key={virtualItem.key}
-                      data-index={virtualItem.index}
-                      ref={virtualizer.measureElement}
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        transform: `translateY(${virtualItem.start}px)`,
-                      }}
-                    >
-                      <LogLine
-                        line={line}
-                        originalIndex={originalIndex}
-                        query={normalizedQuery}
-                        onDoubleClick={() => copyLogContent(line.raw)}
+
+        <div className="relative flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="grid h-8 shrink-0 grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-center gap-2 border-b border-border bg-muted/35 px-3 font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]">
+              <span>{t('workbench.logs.columns.time')}</span>
+              <span>{t('workbench.logs.level')}</span>
+              <span className="hidden lg:block">{t('workbench.logs.columns.target')}</span>
+              <span>{t('workbench.logs.columns.message')}</span>
+            </div>
+            {loading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
+                <PanelLoadingState />
+              </div>
+            )}
+            <ScrollArea className="min-h-0 flex-1" viewportRef={scrollRef}>
+              <div className={cn(filteredLines.length === 0 && !loading && 'h-full')}>
+                {filteredLines.length > 0 ? (
+                  <div style={{ height: `${virtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
+                    {virtualItems.map((virtualItem) => {
+                      const entry = filteredLines[virtualItem.index];
+                      return (
+                        <div
+                          key={virtualItem.key}
+                          data-index={virtualItem.index}
+                          ref={virtualizer.measureElement}
+                          className="border-b border-border/50"
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            transform: `translateY(${virtualItem.start}px)`,
+                          }}
+                        >
+                          <LogLine
+                            line={entry.line}
+                            originalIndex={entry.originalIndex}
+                            query={normalizedQuery}
+                            selected={entry.originalIndex === selectedOriginalIndex}
+                            onSelect={() => setSelectedOriginalIndex(entry.originalIndex)}
+                            onDoubleClick={() => copyLogContent(entry.line.raw)}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  !loading && (
+                    <div className="flex h-full min-h-48 items-center justify-center">
+                      <EmptyState
+                        icon={content ? <SearchXIcon className="size-5" /> : <FileSearchIcon className="size-5" />}
+                        title={t(content ? 'workbench.logs.noMatches' : 'workbench.logs.empty')}
+                        description={content
+                          ? t('workbench.logs.noMatchesDescription')
+                          : t('workbench.logs.emptyDescription', {
+                              source: t(activeSource === 'frontend'
+                                ? 'workbench.logs.frontend'
+                                : 'workbench.logs.backend'),
+                            })}
                       />
                     </div>
-                  );
-                })}
+                  )
+                )}
               </div>
-            ) : (
-              !loading && (
-                <div className="flex h-full min-h-40 items-center justify-center">
-                  <EmptyState
-                    icon={
-                      content ? (
-                        <SearchXIcon className="size-5" />
-                      ) : (
-                        <FileSearchIcon className="size-5" />
-                      )
-                    }
-                    title={t(
-                      content
-                        ? 'workbench.logs.noMatches'
-                        : 'workbench.logs.empty',
-                    )}
-                    description={
-                      content
-                        ? t('workbench.logs.noMatchesDescription')
-                        : t('workbench.logs.emptyDescription', {
-                            source: t(
-                              activeSource === 'frontend'
-                                ? 'workbench.logs.frontend'
-                                : 'workbench.logs.backend',
-                            ),
-                          })
-                    }
-                  />
-                </div>
-              )
-            )}
+            </ScrollArea>
           </div>
-        </ScrollArea>
-        {!isAtBottom && filteredLines.length > 0 && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="absolute bottom-3 right-4 z-10 size-8 rounded-full border border-app-border shadow-md"
-                  aria-label={t('workbench.logs.scrollToBottom')}
-                  onClick={handleScrollToBottom}
-                />
-              }
-            >
-              <ArrowDownToLineIcon />
-            </TooltipTrigger>
-            <TooltipContent>{t('workbench.logs.scrollToBottom')}</TooltipContent>
-          </Tooltip>
-        )}
+
+          {selectedEntry && (
+            <LogInspector
+              entry={selectedEntry}
+              source={activeSource}
+              onClose={() => setSelectedOriginalIndex(undefined)}
+              onCopy={() => copyLogContent(selectedEntry.line.raw)}
+            />
+          )}
+
+          {!isAtBottom && filteredLines.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute bottom-3 right-4 size-8 rounded-full border border-border shadow-md"
+                    aria-label={t('workbench.logs.scrollToBottom')}
+                    onClick={handleScrollToBottom}
+                  />
+                }
+              >
+                <ArrowDownToLineIcon />
+              </TooltipTrigger>
+              <TooltipContent>{t('workbench.logs.scrollToBottom')}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
       </div>
-    </div>
     </TooltipProvider>
   );
 };
