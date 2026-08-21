@@ -850,9 +850,27 @@ fn is_loopback_host(host: Option<&str>) -> bool {
 
 fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> {
     validate_provider_config(provider, false)?;
-    let base = provider.base_url.trim().trim_end_matches('/');
-    Url::parse(&format!("{base}/{path}"))
-        .map_err(|_| "failed to build AI provider endpoint".to_string())
+    let mut url = Url::parse(provider.base_url.trim())
+        .map_err(|_| "failed to build AI provider endpoint".to_string())?;
+    let mut base_path = url.path().trim_end_matches('/').to_string();
+    for endpoint_suffix in [
+        "/chat/completions",
+        "/responses",
+        "/models",
+        "/api/chat",
+        "/api/tags",
+    ] {
+        if let Some(api_root) = base_path.strip_suffix(endpoint_suffix) {
+            base_path = api_root.to_string();
+            break;
+        }
+    }
+    url.set_path(&format!(
+        "{}/{}",
+        base_path.trim_end_matches('/'),
+        path.trim_start_matches('/'),
+    ));
+    Ok(url)
 }
 
 fn api_key_for_provider(
@@ -1063,6 +1081,40 @@ mod tests {
             ..local
         };
         assert!(validate_provider_config(&remote, true).is_err());
+    }
+
+    #[test]
+    fn accepts_an_api_root_or_a_full_provider_endpoint() {
+        let provider = AiProviderConfig {
+            id: "minimax".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.minimaxi.com/v1/chat/completions".to_string(),
+            model: "MiniMax-M3".to_string(),
+            requires_api_key: true,
+            structured_output: AiStructuredOutputMode::Prompt,
+        };
+
+        assert_eq!(
+            endpoint_url(&provider, "chat/completions")
+                .unwrap()
+                .as_str(),
+            "https://api.minimaxi.com/v1/chat/completions"
+        );
+        assert_eq!(
+            endpoint_url(&provider, "models").unwrap().as_str(),
+            "https://api.minimaxi.com/v1/models"
+        );
+
+        let api_root = AiProviderConfig {
+            base_url: "https://api.minimaxi.com/v1".to_string(),
+            ..provider
+        };
+        assert_eq!(
+            endpoint_url(&api_root, "chat/completions")
+                .unwrap()
+                .as_str(),
+            "https://api.minimaxi.com/v1/chat/completions"
+        );
     }
 
     #[test]
