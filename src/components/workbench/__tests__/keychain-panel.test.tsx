@@ -84,6 +84,25 @@ describe('KeychainPanel', () => {
     expect(
       screen.getByText('workbench.keychain.newSubtitle'),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText('common.label')).toHaveAttribute('autocomplete', 'off');
+    expect(screen.getByLabelText('common.privateKey')).toHaveAttribute('autocomplete', 'off');
+  });
+
+  it('focuses the first invalid field when saving an empty key', async () => {
+    render(<KeychainPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.create' }));
+    const publicKeyInput = screen.getByLabelText('common.publicKey');
+    publicKeyInput.focus();
+    expect(publicKeyInput).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    const labelInput = screen.getByLabelText('common.label');
+    await waitFor(() => expect(labelInput).toHaveFocus());
+    expect(labelInput).toHaveAttribute('aria-invalid', 'true');
+    expect(labelInput).toHaveAttribute('aria-describedby', 'keychain-label-error');
+    expect(screen.getByText('keychain.form.labelRequired')).toHaveAttribute('role', 'alert');
   });
 
   it('clears dangling keychain references on profiles after deleting a key', async () => {

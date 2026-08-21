@@ -21,9 +21,25 @@ export default defineConfig({
   },
   clearScreen: false,
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+      },
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor-react',
+              test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
+              priority: 30,
+            },
+            {
+              name: 'vendor-terminal',
+              test: /node_modules[\\/]@xterm[\\/]/,
+              priority: 30,
+            },
+          ],
+        },
       },
     },
   },
