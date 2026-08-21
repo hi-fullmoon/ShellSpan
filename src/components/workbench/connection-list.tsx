@@ -9,7 +9,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
-import { CARD_GRID_BREAKPOINTS } from './shared';
+import { MANAGEMENT_CARD_MIN_WIDTH } from './shared';
 import type { ConnectionProfile } from '@/types';
 import {
   CopyIcon,
@@ -135,7 +135,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           ) : (
             <ResponsiveCardGrid
               columns={1}
-              breakpoints={CARD_GRID_BREAKPOINTS}
+              minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
               gap="0.375rem"
             >
               {filteredProfiles.map((profile) => (

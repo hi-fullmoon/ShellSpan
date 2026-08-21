@@ -21,7 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
-import { CARD_GRID_BREAKPOINTS, keyTypeBadgeClass } from './shared';
+import { MANAGEMENT_CARD_MIN_WIDTH, keyTypeBadgeClass } from './shared';
 
 export interface KnownHostsPanelProps {
   onCreateConnection?: (host: string, port: number) => void;
@@ -139,7 +139,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
         {filteredHosts.length > 0 && (
           <ResponsiveCardGrid
             columns={1}
-            breakpoints={CARD_GRID_BREAKPOINTS}
+            minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
             gap="0.375rem"
           >
             {filteredHosts.map((host) => (
