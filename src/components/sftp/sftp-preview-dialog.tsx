@@ -216,7 +216,7 @@ const BinaryPreview: React.FC<{ content: string; isArchive: boolean }> = ({ cont
   const hex = useMemo(() => formatHexPreview(content), [content]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Alert className="m-3 mb-0 w-fit max-w-[calc(100%-1.5rem)] self-start rounded-md">
+      <Alert className="m-3 w-fit max-w-[calc(100%-1.5rem)] self-start rounded-md">
         <FileWarningIcon />
         <AlertTitle>{isArchive ? t('sftp.preview.archiveTitle') : t('sftp.preview.binaryTitle')}</AlertTitle>
         <AlertDescription>{t('sftp.preview.hexDescription')}</AlertDescription>
