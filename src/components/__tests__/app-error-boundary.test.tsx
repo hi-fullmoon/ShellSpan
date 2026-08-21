@@ -54,7 +54,9 @@ describe('AppErrorBoundary', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByText('app.errorBoundary.title')).toBeInTheDocument();
     expect(screen.getByText('shortcut.split failed')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'common.retry' })).toBeInTheDocument();
+    const retryButton = screen.getByRole('button', { name: 'common.retry' });
+    expect(retryButton).toHaveClass('leading-none');
+    expect(retryButton.className).toContain('[&_svg]:size-3.5');
     expect(
       screen.getByRole('button', { name: 'app.errorBoundary.reload' }),
     ).toBeInTheDocument();
