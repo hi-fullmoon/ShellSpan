@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -295,12 +296,18 @@ async fn run_request(
             if matches!(request.task, AiTaskKind::DiagnosticAgent) {
                 body["format"] = diagnostic_agent_schema();
             }
-            let response = client
-                .post(endpoint_url(&request.provider, "api/chat")?)
-                .json(&body)
-                .send()
-                .await
-                .map_err(format_transport_error)?;
+            let Some(response) = await_with_cancellation(
+                &cancellation,
+                client
+                    .post(endpoint_url(&request.provider, "api/chat")?)
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            else {
+                return Ok(());
+            };
+            let response = response.map_err(format_transport_error)?;
             stream_ollama(app, &request.request_id, response, cancellation).await
         }
         AiProviderKind::OpenAi => {
@@ -321,13 +328,19 @@ async fn run_request(
                     }
                 });
             }
-            let response = client
-                .post(endpoint_url(&request.provider, "responses")?)
-                .bearer_auth(api_key.ok_or_else(|| "API key is required".to_string())?)
-                .json(&body)
-                .send()
-                .await
-                .map_err(format_transport_error)?;
+            let Some(response) = await_with_cancellation(
+                &cancellation,
+                client
+                    .post(endpoint_url(&request.provider, "responses")?)
+                    .bearer_auth(api_key.ok_or_else(|| "API key is required".to_string())?)
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            else {
+                return Ok(());
+            };
+            let response = response.map_err(format_transport_error)?;
             stream_openai(app, &request.request_id, response, cancellation).await
         }
         AiProviderKind::OpenAiCompatible => {
@@ -372,12 +385,24 @@ async fn run_request(
             } else {
                 request_builder
             };
-            let response = request_builder
-                .send()
-                .await
-                .map_err(format_transport_error)?;
+            let Some(response) =
+                await_with_cancellation(&cancellation, request_builder.send()).await
+            else {
+                return Ok(());
+            };
+            let response = response.map_err(format_transport_error)?;
             stream_openai_compatible(app, &request.request_id, response, cancellation).await
         }
+    }
+}
+
+async fn await_with_cancellation<F, T>(cancellation: &CancellationToken, future: F) -> Option<T>
+where
+    F: Future<Output = T>,
+{
+    tokio::select! {
+        _ = cancellation.cancelled() => None,
+        result = future => Some(result),
     }
 }
 
@@ -449,7 +474,9 @@ async fn stream_openai(
     response: Response,
     cancellation: CancellationToken,
 ) -> Result<(), String> {
-    let response = checked_response(response).await?;
+    let Some(response) = checked_response_with_cancellation(response, &cancellation).await? else {
+        return Ok(());
+    };
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
     let mut completed = false;
@@ -497,7 +524,9 @@ async fn stream_openai_compatible(
     response: Response,
     cancellation: CancellationToken,
 ) -> Result<(), String> {
-    let response = checked_response(response).await?;
+    let Some(response) = checked_response_with_cancellation(response, &cancellation).await? else {
+        return Ok(());
+    };
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
     let mut completed = false;
@@ -545,7 +574,9 @@ async fn stream_ollama(
     response: Response,
     cancellation: CancellationToken,
 ) -> Result<(), String> {
-    let response = checked_response(response).await?;
+    let Some(response) = checked_response_with_cancellation(response, &cancellation).await? else {
+        return Ok(());
+    };
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
     let mut completed = false;
@@ -871,6 +902,26 @@ async fn checked_response(response: Response) -> Result<Response, String> {
     })
 }
 
+async fn checked_response_with_cancellation(
+    response: Response,
+    cancellation: &CancellationToken,
+) -> Result<Option<Response>, String> {
+    if response.status().is_success() {
+        return Ok(Some(response));
+    }
+    let status = response.status();
+    let Some(body) = await_with_cancellation(cancellation, response.text()).await else {
+        return Ok(None);
+    };
+    let body = body.unwrap_or_default();
+    let body = body.chars().take(MAX_ERROR_BODY_BYTES).collect::<String>();
+    Err(if body.trim().is_empty() {
+        format!("AI provider returned HTTP {status}")
+    } else {
+        format!("AI provider returned HTTP {status}: {body}")
+    })
+}
+
 async fn checked_json(response: Response) -> Result<Value, String> {
     checked_response(response)
         .await?
@@ -892,6 +943,23 @@ fn format_transport_error(error: reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancellation_interrupts_a_pending_ai_operation() {
+        let cancellation = CancellationToken::new();
+        let canceller = cancellation.clone();
+        let cancel = async move {
+            tokio::task::yield_now().await;
+            canceller.cancel();
+        };
+
+        let (result, ()) = tokio::join!(
+            await_with_cancellation(&cancellation, std::future::pending::<()>()),
+            cancel,
+        );
+
+        assert!(result.is_none());
+    }
 
     #[test]
     fn parses_openai_text_delta() {
