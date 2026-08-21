@@ -357,6 +357,8 @@ export interface ReadRemoteFileResponse {
   content: string;
   size: number;
   isText: boolean;
+  contentEncoding: 'utf8' | 'base64' | 'none';
+  truncated: boolean;
 }
 
 export interface UpdateRemotePermissionsRequest
