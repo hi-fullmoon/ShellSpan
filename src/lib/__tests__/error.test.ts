@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { getErrorMessage, getLocalizedErrorMessage } from '../error';
+import {
+  getErrorMessage,
+  getLocalizedErrorMessage,
+  getToastErrorMessage,
+} from '../error';
 import { t } from '@/locales';
 
 describe('getErrorMessage', () => {
@@ -59,7 +63,30 @@ describe('getLocalizedErrorMessage', () => {
     );
   });
 
-  it('leaves unknown messages untouched', () => {
+  it('leaves unknown messages untouched for non-Toast error details', () => {
     expect(getLocalizedErrorMessage(new Error('something else'))).toBe('something else');
+  });
+});
+
+describe('getToastErrorMessage', () => {
+  it('does not expose unknown backend messages', () => {
+    expect(getToastErrorMessage(new Error('/secret/path: internal library exploded'))).toBe(
+      t('error.operationFailed'),
+    );
+  });
+
+  it.each([
+    ['password auth failed: rejected', 'error.authenticationFailed'],
+    ['tcp connect timed out after 10s', 'error.connectionTimedOut'],
+    ['ssh handshake failed: connection reset', 'error.connectionFailed'],
+    ['permission denied: /private/path', 'error.permissionDenied'],
+    ['no such file or directory: /private/path', 'error.pathNotFound'],
+    ['remote path already exists: private.txt', 'error.pathConflict'],
+    ['write failed: no space left on device', 'error.storageFull'],
+    ['failed to check the host key for private.example:22', 'error.hostKeyCheckFailed'],
+  ])('maps %s to a safe category', (message, key) => {
+    expect(getToastErrorMessage(new Error(message))).toBe(
+      t(key as Parameters<typeof t>[0]),
+    );
   });
 });

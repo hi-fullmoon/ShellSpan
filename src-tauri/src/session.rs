@@ -1,9 +1,10 @@
 #[cfg(unix)]
 use libc::{poll, pollfd, POLLIN, POLLOUT};
 use log::{error, info, warn};
-use ssh2::{Channel, ExtendedData, Session};
+use ssh2::{BlockDirections, Channel, ExtendedData, Session};
 use std::{
     io::{ErrorKind, Read, Write},
+    net::{Ipv4Addr, TcpListener, TcpStream},
     sync::mpsc::{Receiver, TryRecvError},
     thread,
     time::{Duration, Instant},
@@ -11,18 +12,73 @@ use std::{
 use tauri::AppHandle;
 
 #[cfg(unix)]
-use ssh2::BlockDirections;
-#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
 
 use crate::{
     connection::{connect_tcp_stream, connect_through_jump_host, open_authenticated_session, summarize_session_request, SSH_SESSION_KEEPALIVE_INTERVAL_SECS},
-    emit_data, emit_session_error, emit_status,
+    drain_decoded_output, emit_data, emit_session_error, emit_status, flush_pending_output,
     known_hosts::known_hosts_path,
     models::{ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent, SessionStatus},
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
+const SSH_OUTPUT_FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
+
+/// Write half of the session self-pipe. Command senders poke it after
+/// enqueueing a command so the session loop wakes from its idle poll
+/// immediately instead of discovering the command on the next 20ms slice.
+pub(crate) struct SessionWaker {
+    stream: TcpStream,
+}
+
+/// Read half of the session self-pipe, polled by the session loop alongside
+/// the SSH socket.
+pub(crate) struct SessionWakeSource {
+    stream: TcpStream,
+}
+
+pub(crate) fn session_wake_pair() -> std::io::Result<(SessionWaker, SessionWakeSource)> {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+    let address = listener.local_addr()?;
+    let writer = TcpStream::connect(address)?;
+    let (reader, _) = listener.accept()?;
+    writer.set_nodelay(true)?;
+    writer.set_nonblocking(true)?;
+    reader.set_nonblocking(true)?;
+    Ok((SessionWaker { stream: writer }, SessionWakeSource { stream: reader }))
+}
+
+impl SessionWaker {
+    pub(crate) fn wake(&self) {
+        // The stream is nonblocking: a full send buffer means wakeups are
+        // already queued, so dropping this one loses nothing.
+        let _ = (&self.stream).write_all(&[1_u8]);
+    }
+}
+
+impl SessionWakeSource {
+    #[cfg(unix)]
+    fn fd(&self) -> std::os::fd::RawFd {
+        self.stream.as_raw_fd()
+    }
+
+    #[cfg(windows)]
+    fn socket(&self) -> std::os::windows::io::RawSocket {
+        self.stream.as_raw_socket()
+    }
+
+    fn drain(&self) {
+        let mut buffer = [0_u8; 256];
+        loop {
+            match (&self.stream).read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    }
+}
 
 pub(crate) fn run_ssh_session<
     F: FnOnce() + Send,
@@ -31,8 +87,9 @@ pub(crate) fn run_ssh_session<
     session_id: &str,
     request: &SessionCreateRequest,
     rx: Receiver<SessionCommand>,
+    wake: SessionWakeSource,
     on_connected: F,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, ConnectionError> {
     info!(
         "SSH session connecting session_id={} {}",
         session_id,
@@ -43,7 +100,8 @@ pub(crate) fn run_ssh_session<
         session_id,
         SessionStatus::Connecting,
         Some(format!("dialing {}:{}...", request.host, request.port)),
-    )?;
+    )
+    .map_err(|message| ConnectionError::Other { message })?;
 
     let mut _jump_session_holder: Option<Box<ssh2::Session>> = None;
     let known_hosts = known_hosts_path(app).ok();
@@ -88,32 +146,31 @@ pub(crate) fn run_ssh_session<
             session
         }
         Err(connection_error) => {
-            let message = connection_error.message();
             match connection_error {
-                ConnectionError::HostKeyUnknown { host, port, fingerprint } => {
+                ConnectionError::HostKeyUnknown { ref host, ref port, ref fingerprint } => {
                     let _ = emit_session_error(
                         app,
                         SessionErrorEvent::HostKeyUnknown {
                             session_id: session_id.to_string(),
-                            host,
-                            port,
-                            fingerprint,
+                            host: host.clone(),
+                            port: *port,
+                            fingerprint: fingerprint.clone(),
                         },
                     );
                 }
-                ConnectionError::HostKeyMismatch { host, port } => {
+                ConnectionError::HostKeyMismatch { ref host, ref port } => {
                     let _ = emit_session_error(
                         app,
                         SessionErrorEvent::HostKeyMismatch {
                             session_id: session_id.to_string(),
-                            host,
-                            port,
+                            host: host.clone(),
+                            port: *port,
                         },
                     );
                 }
                 ConnectionError::Other { .. } => {}
             }
-            return Err(message);
+            return Err(connection_error);
         }
     };
 
@@ -121,7 +178,9 @@ pub(crate) fn run_ssh_session<
         .channel_session()
         .map_err(|error| {
             error!("Failed to open SSH channel session_id={session_id}: {error}");
-            format!("failed to open ssh channel: {error}")
+            ConnectionError::Other {
+                message: format!("failed to open ssh channel: {error}"),
+            }
         })?;
     channel
         .request_pty(
@@ -131,19 +190,25 @@ pub(crate) fn run_ssh_session<
         )
         .map_err(|error| {
             error!("Failed to allocate PTY session_id={session_id}: {error}");
-            format!("failed to allocate PTY: {error}")
+            ConnectionError::Other {
+                message: format!("failed to allocate PTY: {error}"),
+            }
         })?;
     channel
         .handle_extended_data(ExtendedData::Merge)
         .map_err(|error| {
             error!("Failed to configure extended-data mode session_id={session_id}: {error}");
-            format!("failed to configure extended-data mode: {error}")
+            ConnectionError::Other {
+                message: format!("failed to configure extended-data mode: {error}"),
+            }
         })?;
     channel
         .shell()
         .map_err(|error| {
             error!("Failed to start remote shell session_id={session_id}: {error}");
-            format!("failed to start remote shell: {error}")
+            ConnectionError::Other {
+                message: format!("failed to start remote shell: {error}"),
+            }
         })?;
     session.set_blocking(false);
 
@@ -153,27 +218,38 @@ pub(crate) fn run_ssh_session<
         session_id,
         SessionStatus::Connected,
         Some("shell ready".to_string()),
-    )?;
+    )
+    .map_err(|message| ConnectionError::Other { message })?;
 
-    session_loop(app, session_id, &session, &mut channel, rx)
+    session_loop(app, session_id, &session, &mut channel, rx, &wake)
+        .map_err(|message| ConnectionError::Other { message })
 }
 
-fn coalesce_write_commands(commands: Vec<SessionCommand>) -> Vec<SessionCommand> {
+fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionCommand> {
     let mut merged = Vec::with_capacity(commands.len());
     let mut pending_write = String::new();
+    let mut pending_resize: Option<(u32, u32)> = None;
 
     for command in commands {
         match command {
             SessionCommand::Write(data) => {
+                if let Some((cols, rows)) = pending_resize.take() {
+                    merged.push(SessionCommand::Resize { cols, rows });
+                }
                 pending_write.push_str(&data);
             }
             SessionCommand::Resize { cols, rows } => {
                 if !pending_write.is_empty() {
                     merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
                 }
-                merged.push(SessionCommand::Resize { cols, rows });
+                // Only the latest size matters: adjacent resizes collapse into
+                // the most recent one instead of replaying every step.
+                pending_resize = Some((cols, rows));
             }
             SessionCommand::Close => {
+                if let Some((cols, rows)) = pending_resize.take() {
+                    merged.push(SessionCommand::Resize { cols, rows });
+                }
                 if !pending_write.is_empty() {
                     merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
                 }
@@ -182,6 +258,9 @@ fn coalesce_write_commands(commands: Vec<SessionCommand>) -> Vec<SessionCommand>
         }
     }
 
+    if let Some((cols, rows)) = pending_resize.take() {
+        merged.push(SessionCommand::Resize { cols, rows });
+    }
     if !pending_write.is_empty() {
         merged.push(SessionCommand::Write(pending_write));
     }
@@ -195,6 +274,44 @@ fn session_loop(
     session: &Session,
     channel: &mut Channel,
     rx: Receiver<SessionCommand>,
+    wake: &SessionWakeSource,
+) -> Result<Option<String>, String> {
+    let mut pending_bytes: Vec<u8> = Vec::new();
+    let mut pending_output = String::new();
+    let result = session_loop_inner(
+        app,
+        session_id,
+        session,
+        channel,
+        rx,
+        wake,
+        &mut pending_bytes,
+        &mut pending_output,
+    );
+    // Emit whatever decoded output remains so the final screen state is not
+    // lost when the session ends.
+    flush_pending_output(app, session_id, &mut pending_bytes, &mut pending_output);
+    result
+}
+
+/// Emits a decoded output chunk to the frontend. A failed emit (e.g. the
+/// window is gone) must not tear down an otherwise healthy SSH session, so
+/// the error is logged and the chunk is dropped.
+fn emit_data_tolerant(app: &AppHandle, session_id: &str, chunk: String) {
+    if let Err(error) = emit_data(app, session_id, chunk) {
+        warn!("Failed to emit SSH output session_id={session_id}: {error}");
+    }
+}
+
+fn session_loop_inner(
+    app: &AppHandle,
+    session_id: &str,
+    session: &Session,
+    channel: &mut Channel,
+    rx: Receiver<SessionCommand>,
+    wake: &SessionWakeSource,
+    pending_bytes: &mut Vec<u8>,
+    pending_output: &mut String,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
     let mut next_keepalive_at =
@@ -202,7 +319,6 @@ fn session_loop(
 
     loop {
         let mut made_progress = false;
-        let mut blocked_on_socket = false;
         let mut pending_commands = Vec::new();
 
         loop {
@@ -217,7 +333,7 @@ fn session_loop(
             }
         }
 
-        for command in coalesce_write_commands(pending_commands) {
+        for command in coalesce_session_commands(pending_commands) {
             match command {
                 SessionCommand::Write(data) => {
                     write_all_nonblocking(session, channel, data.as_bytes())?;
@@ -243,12 +359,17 @@ fn session_loop(
                 }
             }
             Ok(read) => {
-                let chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
-                emit_data(app, session_id, chunk)?;
+                pending_bytes.extend_from_slice(&buffer[..read]);
+                drain_decoded_output(pending_bytes, pending_output);
+                if pending_output.len() >= SSH_OUTPUT_FLUSH_THRESHOLD_BYTES {
+                    emit_data_tolerant(app, session_id, std::mem::take(pending_output));
+                }
                 made_progress = true;
             }
             Err(error) if is_retryable_channel_error_kind(error.kind()) => {
-                blocked_on_socket = true;
+                if !pending_output.is_empty() {
+                    emit_data_tolerant(app, session_id, std::mem::take(pending_output));
+                }
             }
             Err(error) => {
                 warn!(
@@ -278,27 +399,11 @@ fn session_loop(
             continue;
         }
 
-        let keepalive_due_in = Some(next_keepalive_at.saturating_duration_since(now));
-        if let Some(wait_timeout) = session_idle_wait_timeout(blocked_on_socket, keepalive_due_in) {
-            wait_for_session_socket(session, wait_timeout)?;
-        } else {
-            thread::yield_now();
-        }
-    }
-}
-
-fn session_idle_wait_timeout(
-    blocked_on_socket: bool,
-    keepalive_due_in: Option<Duration>,
-) -> Option<Duration> {
-    let socket_wait = blocked_on_socket.then_some(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS));
-    let keepalive_wait = keepalive_due_in.filter(|wait| !wait.is_zero());
-
-    match (socket_wait, keepalive_wait) {
-        (Some(socket_wait), Some(keepalive_wait)) => Some(socket_wait.min(keepalive_wait)),
-        (Some(socket_wait), None) => Some(socket_wait),
-        (None, Some(keepalive_wait)) => Some(keepalive_wait),
-        (None, None) => None,
+        // Idle: sleep until the SSH socket becomes ready, a command wakes us
+        // through the self-pipe, or the keepalive deadline expires — whichever
+        // comes first.
+        let keepalive_due_in = next_keepalive_at.saturating_duration_since(now);
+        wait_for_session_events(session, wake, keepalive_due_in)?;
     }
 }
 
@@ -473,6 +578,120 @@ fn session_poll_events(directions: BlockDirections) -> i16 {
     }
 }
 
+#[cfg(windows)]
+fn session_poll_events(directions: BlockDirections) -> i16 {
+    use windows_sys::Win32::Networking::WinSock::{POLLIN, POLLOUT};
+    match directions {
+        BlockDirections::None => 0,
+        BlockDirections::Inbound => POLLIN,
+        BlockDirections::Outbound => POLLOUT,
+        BlockDirections::Both => POLLIN | POLLOUT,
+    }
+}
+
+/// Waits until the SSH socket is ready, the self-pipe signals a pending
+/// command, or `timeout` elapses. Falls back to polling inbound readiness
+/// when the last blocked direction is unknown, so incoming data can never
+/// stall until the keepalive deadline.
+#[cfg(unix)]
+fn wait_for_session_events(
+    session: &Session,
+    wake: &SessionWakeSource,
+    timeout: Duration,
+) -> Result<(), String> {
+    let events = match session_poll_events(session.block_directions()) {
+        0 => POLLIN,
+        events => events,
+    };
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128);
+    let timeout_ms = i32::try_from(timeout_ms).unwrap_or(i32::MAX);
+    let mut fds = [
+        pollfd {
+            fd: session.as_raw_fd(),
+            events,
+            revents: 0,
+        },
+        pollfd {
+            fd: wake.fd(),
+            events: POLLIN,
+            revents: 0,
+        },
+    ];
+
+    loop {
+        let result = unsafe { poll(fds.as_mut_ptr(), 2, timeout_ms) };
+        if result >= 0 {
+            wake.drain();
+            return Ok(());
+        }
+
+        let error = std::io::Error::last_os_error();
+        if error.kind() == ErrorKind::Interrupted {
+            continue;
+        }
+
+        return Err(format!("failed to wait for ssh socket readiness: {error}"));
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_session_events(
+    session: &Session,
+    wake: &SessionWakeSource,
+    timeout: Duration,
+) -> Result<(), String> {
+    use windows_sys::Win32::Networking::WinSock::{
+        WSAGetLastError, WSAPoll, WSAEINTR, WSAPOLLFD, POLLIN,
+    };
+
+    let events = match session_poll_events(session.block_directions()) {
+        0 => POLLIN,
+        events => events,
+    };
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128);
+    let timeout_ms = i32::try_from(timeout_ms).unwrap_or(i32::MAX);
+    let mut fds = [
+        WSAPOLLFD {
+            fd: session.as_raw_socket() as _,
+            events,
+            revents: 0,
+        },
+        WSAPOLLFD {
+            fd: wake.socket() as _,
+            events: POLLIN,
+            revents: 0,
+        },
+    ];
+
+    loop {
+        let result = unsafe { WSAPoll(fds.as_mut_ptr(), 2, timeout_ms) };
+        if result >= 0 {
+            wake.drain();
+            return Ok(());
+        }
+
+        // Winsock reports errors through WSAGetLastError, not GetLastError.
+        let code = unsafe { WSAGetLastError() };
+        if code == WSAEINTR {
+            continue;
+        }
+
+        let error = std::io::Error::from_raw_os_error(code);
+        return Err(format!("failed to wait for ssh socket readiness: {error}"));
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn wait_for_session_events(
+    session: &Session,
+    wake: &SessionWakeSource,
+    timeout: Duration,
+) -> Result<(), String> {
+    let _ = (session, wake);
+    thread::sleep(timeout.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS)));
+    Ok(())
+}
+
 #[cfg(unix)]
 fn wait_for_session_socket(session: &Session, timeout: Duration) -> Result<(), String> {
     let events = session_poll_events(session.block_directions());
@@ -538,34 +757,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_idle_wait_timeout_uses_short_slice_when_socket_is_blocked() {
-        let wait = session_idle_wait_timeout(true, None)
-            .expect("blocked sockets should use a short wait slice instead of busy spinning");
+    fn session_wake_pair_passes_wakeups_and_drains_without_blocking() {
+        let (waker, source) = session_wake_pair().expect("wake pair should be creatable");
 
-        assert_eq!(wait, Duration::from_millis(20));
-    }
+        source.drain();
 
-    #[test]
-    fn session_idle_wait_timeout_skips_wait_when_no_signal_is_pending() {
-        let wait = session_idle_wait_timeout(false, None);
-
-        assert_eq!(wait, None);
-    }
-
-    #[test]
-    fn session_idle_wait_timeout_prefers_earlier_keepalive_deadline() {
-        let wait = session_idle_wait_timeout(true, Some(Duration::from_millis(8)))
-            .expect("keepalive deadline should cap the socket wait");
-
-        assert_eq!(wait, Duration::from_millis(8));
-    }
-
-    #[test]
-    fn session_idle_wait_timeout_uses_keepalive_deadline_without_socket_block() {
-        let wait = session_idle_wait_timeout(false, Some(Duration::from_secs(5)))
-            .expect("keepalive should wake the loop even when the socket is idle");
-
-        assert_eq!(wait, Duration::from_secs(5));
+        waker.wake();
+        waker.wake();
+        // Give the loopback byte a moment to arrive, then drain must consume
+        // it and return immediately instead of blocking.
+        thread::sleep(Duration::from_millis(50));
+        source.drain();
     }
 
     #[test]
@@ -605,14 +807,14 @@ mod tests {
     }
 
     #[test]
-    fn coalesce_write_commands_merges_adjacent_write_chunks() {
+    fn coalesce_session_commands_merges_adjacent_write_chunks() {
         let commands = vec![
             SessionCommand::Write("a".to_string()),
             SessionCommand::Write("bc".to_string()),
             SessionCommand::Write("123".to_string()),
         ];
 
-        let merged = coalesce_write_commands(commands);
+        let merged = coalesce_session_commands(commands);
 
         assert_eq!(merged.len(), 1);
         match &merged[0] {
@@ -622,9 +824,35 @@ mod tests {
     }
 
     #[test]
-    fn coalesce_write_commands_preserves_non_write_boundaries() {
+    fn coalesce_session_commands_keeps_only_the_last_adjacent_resize() {
+        let commands = vec![
+            SessionCommand::Resize { cols: 80, rows: 24 },
+            SessionCommand::Resize {
+                cols: 100,
+                rows: 30,
+            },
+            SessionCommand::Resize {
+                cols: 120,
+                rows: 40,
+            },
+        ];
+
+        let merged = coalesce_session_commands(commands);
+
+        assert_eq!(merged.len(), 1);
+        match &merged[0] {
+            SessionCommand::Resize { cols, rows } => {
+                assert_eq!((cols, rows), (&120, &40));
+            }
+            _ => panic!("expected a single merged resize command"),
+        }
+    }
+
+    #[test]
+    fn coalesce_session_commands_preserves_resize_write_resize_boundaries() {
         let commands = vec![
             SessionCommand::Write("ab".to_string()),
+            SessionCommand::Resize { cols: 80, rows: 24 },
             SessionCommand::Resize {
                 cols: 120,
                 rows: 40,
@@ -634,7 +862,7 @@ mod tests {
             SessionCommand::Write("ef".to_string()),
         ];
 
-        let merged = coalesce_write_commands(commands);
+        let merged = coalesce_session_commands(commands);
 
         assert_eq!(merged.len(), 5);
         match &merged[0] {
@@ -645,7 +873,7 @@ mod tests {
             SessionCommand::Resize { cols, rows } => {
                 assert_eq!((cols, rows), (&120, &40));
             }
-            _ => panic!("second command should stay resize"),
+            _ => panic!("adjacent resizes should merge into the latest size"),
         }
         match &merged[2] {
             SessionCommand::Write(data) => assert_eq!(data, "cd"),

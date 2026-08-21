@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 
 interface SearchOptions {
@@ -16,6 +16,9 @@ export function useActiveController(
   clearSearch: () => void;
 } {
   const attachedIdRef = useRef<string | null>(null);
+  const controller = useSyncExternalStore(terminalRegistry.subscribe, () =>
+    activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
+  );
 
   useEffect(() => {
     const attachedId = attachedIdRef.current;
@@ -29,7 +32,6 @@ export function useActiveController(
       return;
     }
 
-    const controller = terminalRegistry.get(activeSessionId);
     if (!controller) {
       return;
     }
@@ -44,7 +46,7 @@ export function useActiveController(
       c?.detach();
       attachedIdRef.current = null;
     };
-  }, [activeSessionId, paneRef]);
+  }, [activeSessionId, controller, paneRef]);
 
   useEffect(() => {
     if (!shouldFocus || activeSessionId === null) return;

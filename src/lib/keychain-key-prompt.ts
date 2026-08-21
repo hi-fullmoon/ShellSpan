@@ -1,32 +1,86 @@
 import { useKeychainKeyPromptStore } from '@/stores/keychainKeyPromptStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useKeychainStore } from '@/stores/keychainStore';
-import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
-import { getLocalizedErrorMessage } from '@/lib/error';
-import { promptForMissingPassword } from '@/lib/password-prompt';
 import type { ConnectionProfile } from '@/types';
 
 const logger = createLogger('keychain-key-prompt');
 
+export type KeychainKeyPromptTarget = 'main' | 'jump';
+
+function getPromptHost(profile: ConnectionProfile, target: KeychainKeyPromptTarget): {
+  host: string;
+  username: string;
+} | null {
+  if (target === 'jump') {
+    if (!profile.jumpHost) return null;
+    return {
+      host: profile.jumpHost.host,
+      username: profile.jumpHost.username,
+    };
+  }
+  return {
+    host: profile.host,
+    username: profile.username,
+  };
+}
+
+function keychainKeyExists(keyId: string): boolean {
+  return useKeychainStore
+    .getState()
+    .keys.some((key) => key.id === keyId);
+}
+
+function getMissingKeychainKeyId(message: string): string | null {
+  const normalized = message.toLowerCase();
+  const prefix = 'keychain key not found:';
+  if (!normalized.startsWith(prefix)) return null;
+  return message.slice(prefix.length).trim() || null;
+}
+
+export function getMissingKeychainKeyTarget(
+  profile: ConnectionProfile,
+  message: string,
+): KeychainKeyPromptTarget | null {
+  const missingKeyId = getMissingKeychainKeyId(message);
+  if (!missingKeyId) return null;
+  if (profile.authMethod === 'key' && profile.keychainKeyId === missingKeyId) {
+    return 'main';
+  }
+  if (
+    profile.jumpHost?.authMethod === 'key' &&
+    profile.jumpHost.keychainKeyId === missingKeyId
+  ) {
+    return 'jump';
+  }
+  return null;
+}
+
 /**
  * Prompts the user to recover a connection whose saved keychain key is missing.
  *
- * The user can select another saved key, or cancel. Unlike the previous flow,
- * switching to password authentication is no longer offered because the profile
- * authentication method is fixed to "key".
+ * The user can select another saved key, or cancel. The target can be the main
+ * host or a jump host; switching authentication methods is left to the profile
+ * editor so this recovery path only updates the referenced key.
  *
  * @returns A copy of the profile with the chosen key, or null if cancelled.
  */
 export async function promptForMissingKeychainKey(
   profile: ConnectionProfile,
+  target: KeychainKeyPromptTarget = 'main',
 ): Promise<ConnectionProfile | null> {
-  logger.info(`Prompting for replacement key for ${profile.host}:${profile.port}`);
+  const promptHost = getPromptHost(profile, target);
+  if (!promptHost) {
+    logger.warn(`Cannot prompt for ${target} key: profile has no jump host`);
+    return null;
+  }
+
+  logger.info(`Prompting for replacement ${target} key for ${promptHost.host}`);
 
   const result = await useKeychainKeyPromptStore.getState().requestKey({
     profileId: profile.id,
-    host: profile.host,
-    username: profile.username,
+    host: promptHost.host,
+    username: promptHost.username,
   });
 
   if (!result) {
@@ -35,13 +89,21 @@ export async function promptForMissingKeychainKey(
   }
 
   logger.info(`Updating profile ${profile.id} to use key ${result.keyId}`);
-  await useProfileStore.getState().updateProfile(profile.id, {
-    keychainKeyId: result.keyId,
-  });
-  return {
-    ...profile,
-    keychainKeyId: result.keyId,
-  };
+  if (target === 'jump') {
+    if (!profile.jumpHost) return null;
+    const jumpHost = {
+      ...profile.jumpHost,
+      keychainKeyId: result.keyId,
+    };
+    await useProfileStore.getState().updateProfile(profile.id, { jumpHost });
+    return {
+      ...profile,
+      jumpHost,
+    };
+  }
+
+  await useProfileStore.getState().updateProfile(profile.id, { keychainKeyId: result.keyId });
+  return { ...profile, keychainKeyId: result.keyId };
 }
 
 /**
@@ -56,7 +118,9 @@ export async function promptForMissingKeychainKey(
 export async function ensureKeychainKeyForProfile(
   profile: ConnectionProfile,
 ): Promise<ConnectionProfile | null> {
-  if (profile.authMethod !== 'key' || !profile.keychainKeyId) {
+  const hasMainKey = profile.authMethod === 'key' && !!profile.keychainKeyId;
+  const hasJumpKey = profile.jumpHost?.authMethod === 'key' && !!profile.jumpHost.keychainKeyId;
+  if (!hasMainKey && !hasJumpKey) {
     return profile;
   }
 
@@ -64,98 +128,31 @@ export async function ensureKeychainKeyForProfile(
   if (!initialized) {
     await hydrate();
   }
-
-  const keyExists = useKeychainStore
-    .getState()
-    .keys.some((key) => key.id === profile.keychainKeyId);
-  if (keyExists) {
-    return profile;
+  const { loadError } = useKeychainStore.getState();
+  if (loadError) {
+    throw new Error(`failed to load keychain keys: ${loadError}`);
   }
 
-  return promptForMissingKeychainKey(profile);
+  let preparedProfile = profile;
+  if (
+    preparedProfile.authMethod === 'key' &&
+    preparedProfile.keychainKeyId &&
+    !keychainKeyExists(preparedProfile.keychainKeyId)
+  ) {
+    const recovered = await promptForMissingKeychainKey(preparedProfile, 'main');
+    if (!recovered) return null;
+    preparedProfile = recovered;
+  }
+
+  if (
+    preparedProfile.jumpHost?.authMethod === 'key' &&
+    preparedProfile.jumpHost.keychainKeyId &&
+    !keychainKeyExists(preparedProfile.jumpHost.keychainKeyId)
+  ) {
+    const recovered = await promptForMissingKeychainKey(preparedProfile, 'jump');
+    if (!recovered) return null;
+    preparedProfile = recovered;
+  }
+
+  return preparedProfile;
 }
-
-/**
- * Prepares a profile that uses a keychain key for connection.
- *
- * Password-derived ECDSA keys now store the derived private key in the
- * keychain, so no extra prompt is required. Key file keys are also returned
- * unchanged. This function still ensures the referenced key exists.
- *
- * @returns The same profile if no action is needed, or null if the user
- *          cancelled the replacement prompt.
- */
-export async function prepareKeychainKeyForProfile(
-  profile: ConnectionProfile,
-): Promise<ConnectionProfile | null> {
-  if (profile.authMethod !== 'key' || !profile.keychainKeyId) {
-    return profile;
-  }
-
-  const { initialized, hydrate, getKey } = useKeychainStore.getState();
-  if (!initialized) {
-    await hydrate();
-  }
-
-  let key = await getKey(profile.keychainKeyId);
-  if (!key) {
-    const recovered = await promptForMissingKeychainKey(profile);
-    if (!recovered) {
-      return null;
-    }
-    if (!recovered.keychainKeyId) {
-      return null;
-    }
-    key = await getKey(recovered.keychainKeyId);
-    if (!key) {
-      return null;
-    }
-    profile = recovered;
-  }
-
-  return profile;
-}
-
-/**
- * Loads an existing password keychain for a password-authenticated profile.
- *
- * If the profile already references a password keychain, the password is
- * loaded from it. When the referenced entry is missing, the dangling
- * keychain reference is cleared: the profile's own password is used if
- * present, otherwise the user is prompted for a password so the connection
- * can still proceed.
- *
- * @returns The profile ready for authentication, or null if the user
- *          cancelled the password prompt.
- */
-export async function preparePasswordKeychain(
-  profile: ConnectionProfile,
-): Promise<ConnectionProfile | null> {
-  if (profile.authMethod !== 'password' || !profile.keychainKeyId) {
-    return profile;
-  }
-
-  const { initialized, hydrate, getKey } = useKeychainStore.getState();
-  if (!initialized) {
-    await hydrate();
-  }
-  const key = await getKey(profile.keychainKeyId);
-  if (!key || !key.privateKey) {
-    logger.warn(`Password keychain missing for profile ${profile.id}`);
-    useToastStore.getState().addToast(
-      getLocalizedErrorMessage(new Error('Stored password is missing')),
-      'error',
-    );
-    if (profile.password) {
-      useProfileStore.getState().clearKeychainKeyIds([profile.id]);
-      return { ...profile, keychainKeyId: undefined };
-    }
-    useProfileStore.getState().clearKeychainKeyIds([profile.id]);
-    return promptForMissingPassword({ ...profile, keychainKeyId: undefined });
-  }
-  return {
-    ...profile,
-    password: key.privateKey,
-  };
-}
-

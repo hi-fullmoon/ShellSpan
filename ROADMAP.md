@@ -32,7 +32,7 @@
 
 ### 0.1 终端输出缓冲区
 
-- **现状**：`terminalStore.appendData` 为空操作（`src/stores/terminalStore.ts:182`），终端输出只活在 xterm 实例里，没有可供 AI 消费的中央数据源。
+- **现状**：终端输出只活在 xterm 实例里，没有可供 AI 消费的中央数据源。
 - **方案**：为每个会话维护环形输出缓冲区（保留最近 ~200KB 或 ~2000 行），在 `TerminalPane` 的 xterm `onData` 处写入；提供 `getRecentBuffer(sessionId)` 供 AI 上下文使用。
 - **产出**：`src/stores/terminalBufferStore.ts` + 单测。
 - **验收**：任意会话的最近输出可被读取；缓冲有上限；高频写入不引发重渲染（纯 store，不入 React 渲染树）。

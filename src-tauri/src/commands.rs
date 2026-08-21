@@ -1,27 +1,29 @@
 use super::*;
-use crate::sftp_pool::SftpPool;
 use crate::db::Database;
 use crate::models::{
-    AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest,
-    CreateSessionError, DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, RemoteFsError,
-    HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing,
-    LocalFileEntry, LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig,
-    ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RemoteFileKind, RenameRemotePathRequest, SessionCommand, SftpBookmarkRow,
-    SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary, TrustHostRequest,
+    AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest,
+    CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
+    DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
+    JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry,
+    LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig, ProfileRow,
+    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind,
+    RemoteFsError, RenameRemotePathRequest, SessionCommand, SessionCreateRequest, SessionIdentity,
+    SessionStatus, SessionSummary, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
+use crate::sftp_pool::SftpPool;
 use base64::Engine;
 use log::{debug, error, info, warn};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
-    Arc, mpsc,
+    mpsc, Arc,
 };
 use std::thread;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
@@ -49,7 +51,6 @@ pub(crate) struct KeyCredentialResponse {
     pub(crate) updated_at: i64,
 }
 
-
 #[tauri::command]
 pub(crate) async fn create_session(
     app: AppHandle,
@@ -75,79 +76,11 @@ pub(crate) async fn create_session(
 
     let session_id = Uuid::new_v4().to_string();
 
-    if request.jump_host.is_none() {
-        let host_key_check = {
-            let app = app.clone();
-            let host = request.host.clone();
-            let port = request.port;
-            tauri::async_runtime::spawn_blocking(move || {
-                crate::known_hosts::check_host_key_blocking(
-                    &app,
-                    &HostKeyCheckRequest { host, port },
-                )
-            })
-            .await
-            .map_err(|error| {
-                error!("Failed to join host key check task: {error}");
-                CreateSessionError::Other {
-                    message: format!("failed to join host key check task: {error}"),
-                }
-            })?
-            .map_err(|message| {
-                if let Some(kind) = crate::known_hosts::classify_host_key_error(&message) {
-                    match kind {
-                        crate::known_hosts::HostKeyErrorKind::Unknown => {
-                            CreateSessionError::HostKeyUnknown {
-                                host: request.host.clone(),
-                                port: request.port,
-                                fingerprint: None,
-                            }
-                        }
-                        crate::known_hosts::HostKeyErrorKind::Mismatch => {
-                            CreateSessionError::HostKeyMismatch {
-                                host: request.host.clone(),
-                                port: request.port,
-                            }
-                        }
-                    }
-                } else {
-                    error!(
-                        "Host key check failed host={} port={}: {message}",
-                        request.host, request.port
-                    );
-                    CreateSessionError::Other { message }
-                }
-            })?
-        };
-
-        match host_key_check.status {
-            HostKeyCheckStatus::Match => {}
-            HostKeyCheckStatus::NotFound => {
-                return Err(CreateSessionError::HostKeyUnknown {
-                    host: request.host.clone(),
-                    port: request.port,
-                    fingerprint: host_key_check.fingerprint,
-                });
-            }
-            HostKeyCheckStatus::Mismatch => {
-                return Err(CreateSessionError::HostKeyMismatch {
-                    host: request.host.clone(),
-                    port: request.port,
-                });
-            }
-            HostKeyCheckStatus::Failure => {
-                let message = host_key_check
-                    .message
-                    .unwrap_or_else(|| "host key check failed".to_string());
-                error!(
-                    "Host key check failed host={} port={}: {message}",
-                    request.host, request.port
-                );
-                return Err(CreateSessionError::Other { message });
-            }
-        }
-    }
-
+    // The host key is verified once, inside the session's own SSH handshake
+    // (open_authenticated_session), so there is no separate pre-check
+    // connection here: an extra handshake per session would double the
+    // connect cost. Host-key failures still come back as typed
+    // CreateSessionError variants via the connection result channel below.
     let summary = SessionSummary {
         session_id: session_id.clone(),
         title: request.name.clone(),
@@ -157,22 +90,35 @@ pub(crate) async fn create_session(
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
-    let (connection_result_tx, connection_result_rx) = mpsc::channel::<Result<(), String>>();
-    state.insert(session_id.clone(), ManagedSession {
-        sender: tx,
-        status: StatusEvent {
-            session_id: session_id.clone(),
-            status: SessionStatus::Connecting,
-            message: Some("connecting".to_string()),
-        },
-        // SSH output trickles in over the network, so by the time the
-        // frontend listeners attach nothing has been emitted yet; keep the
-        // SSH worker ungated.
-        output_ready: Arc::new(AtomicBool::new(true)),
-    }).map_err(|message| {
-        error!("Failed to register SSH session session_id={session_id}: {message}");
-        CreateSessionError::Other { message }
+    let (connection_result_tx, connection_result_rx) =
+        mpsc::channel::<Result<(), CreateSessionError>>();
+    let (waker, wake_source) = session_wake_pair().map_err(|error| {
+        error!("Failed to create session wake channel session_id={session_id}: {error}");
+        CreateSessionError::Other {
+            message: format!("failed to create session wake channel: {error}"),
+        }
     })?;
+    state
+        .insert(
+            session_id.clone(),
+            ManagedSession {
+                sender: tx,
+                waker: Some(waker),
+                status: StatusEvent {
+                    session_id: session_id.clone(),
+                    status: SessionStatus::Connecting,
+                    message: Some("connecting".to_string()),
+                },
+                // SSH output trickles in over the network, so by the time the
+                // frontend listeners attach nothing has been emitted yet; keep the
+                // SSH worker ungated.
+                output_ready: Arc::new(AtomicBool::new(true)),
+            },
+        )
+        .map_err(|message| {
+            error!("Failed to register SSH session session_id={session_id}: {message}");
+            CreateSessionError::Other { message }
+        })?;
 
     info!(
         "Created SSH session session_id={} title={} host={} port={} username={}",
@@ -184,6 +130,7 @@ pub(crate) async fn create_session(
         session_id.clone(),
         request,
         rx,
+        wake_source,
         pool.inner().clone(),
         connection_request,
         Some(connection_result_tx),
@@ -207,15 +154,15 @@ pub(crate) async fn create_session(
 
     match connection_result {
         Ok(()) => Ok(summary),
-        Err(message) => {
-            error!("SSH session connection failed session_id={session_id}: {message}");
+        Err(create_error) => {
+            error!("SSH session connection failed session_id={session_id}: {create_error:?}");
             // The frontend never receives this session id and will not call
             // close_session, so drop the registry entry here to avoid leaking
             // it. The worker thread has already sent its result; its later
             // emit_status calls tolerate the missing entry (set_status error
             // is ignored in emit_status).
             let _ = state.remove(&session_id);
-            Err(CreateSessionError::Other { message })
+            Err(create_error)
         }
     }
 }
@@ -267,41 +214,36 @@ pub(crate) fn create_local_session(
     if !cfg!(target_os = "windows") {
         command.arg("-l");
     }
-    let mut child = pair
-        .slave
-        .spawn_command(command)
-        .map_err(|error| {
-            error!("Failed to start local shell session_id={session_id} shell={shell}: {error}");
-            format!("failed to start local shell: {error}")
-        })?;
+    let mut child = pair.slave.spawn_command(command).map_err(|error| {
+        error!("Failed to start local shell session_id={session_id} shell={shell}: {error}");
+        format!("failed to start local shell: {error}")
+    })?;
     drop(pair.slave);
-    let mut reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|error| {
-            error!("Failed to clone local terminal reader session_id={session_id}: {error}");
-            format!("failed to read local terminal: {error}")
-        })?;
-    let mut writer = pair
-        .master
-        .take_writer()
-        .map_err(|error| {
-            error!("Failed to take local terminal writer session_id={session_id}: {error}");
-            format!("failed to write local terminal: {error}")
-        })?;
+    let mut reader = pair.master.try_clone_reader().map_err(|error| {
+        error!("Failed to clone local terminal reader session_id={session_id}: {error}");
+        format!("failed to read local terminal: {error}")
+    })?;
+    let mut writer = pair.master.take_writer().map_err(|error| {
+        error!("Failed to take local terminal writer session_id={session_id}: {error}");
+        format!("failed to write local terminal: {error}")
+    })?;
     let master = pair.master;
     let (tx, rx) = mpsc::channel::<SessionCommand>();
     let output_ready = Arc::new(AtomicBool::new(false));
     state
-        .insert(session_id.clone(), ManagedSession {
-            sender: tx,
-            status: StatusEvent {
-                session_id: session_id.clone(),
-                status: SessionStatus::Connected,
-                message: Some("local shell ready".to_string()),
+        .insert(
+            session_id.clone(),
+            ManagedSession {
+                sender: tx,
+                waker: None,
+                status: StatusEvent {
+                    session_id: session_id.clone(),
+                    status: SessionStatus::Connected,
+                    message: Some("local shell ready".to_string()),
+                },
+                output_ready: output_ready.clone(),
             },
-            output_ready: output_ready.clone(),
-        })
+        )
         .map_err(|message| {
             error!("Failed to register local session session_id={session_id}: {message}");
             message
@@ -318,7 +260,7 @@ pub(crate) fn create_local_session(
     thread::spawn(move || {
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
         let reader_id = worker_id.clone();
-        thread::spawn(move || {
+        let reader_handle = thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
             loop {
                 match reader.read(&mut buffer) {
@@ -329,7 +271,9 @@ pub(crate) fn create_local_session(
                     }
                     Ok(count) => {
                         if let Err(error) = output_tx.send(buffer[..count].to_vec()) {
-                            warn!("Local shell output channel closed session_id={reader_id}: {error}");
+                            warn!(
+                                "Local shell output channel closed session_id={reader_id}: {error}"
+                            );
                             break;
                         }
                     }
@@ -354,6 +298,8 @@ pub(crate) fn create_local_session(
         let output_wait_started = Instant::now();
         let mut output_live = false;
         let mut closed_by_user = false;
+        let mut pending_bytes: Vec<u8> = Vec::new();
+        let mut pending_output = String::new();
         loop {
             if !output_live
                 && (worker_output_ready.load(AtomicOrdering::Relaxed)
@@ -366,12 +312,15 @@ pub(crate) fn create_local_session(
                 }
             }
             while let Ok(bytes) = output_rx.try_recv() {
-                let chunk = String::from_utf8_lossy(&bytes).into_owned();
+                pending_bytes.extend_from_slice(&bytes);
+            }
+            drain_decoded_output(&mut pending_bytes, &mut pending_output);
+            if !pending_output.is_empty() {
                 if output_live {
-                    let _ = emit_data(&app, &worker_id, chunk);
+                    let _ = emit_data(&app, &worker_id, std::mem::take(&mut pending_output));
                 } else {
-                    buffered_bytes += chunk.len();
-                    buffered_output.push(chunk);
+                    buffered_bytes += pending_output.len();
+                    buffered_output.push(std::mem::take(&mut pending_output));
                 }
             }
             match rx.recv_timeout(Duration::from_millis(16)) {
@@ -402,19 +351,45 @@ pub(crate) fn create_local_session(
                     }
                     break;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    // The controller went away without a Close command; kill
+                    // the shell so it does not outlive the session and the
+                    // reader thread below can observe EOF and finish.
+                    if let Err(error) = child.kill() {
+                        warn!("Failed to kill local shell session_id={worker_id}: {error}");
+                    }
+                    break;
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
             if matches!(child.try_wait(), Ok(Some(_))) {
                 break;
             }
         }
+        // Wait for the reader thread to finish so output still in flight
+        // (e.g. the shell's final exit message) is not lost, then flush.
+        // Releasing the PTY lets a reader blocked in read observe EOF, and
+        // the watchdog bounds the wait: a grandchild process can keep the
+        // slave open and block the reader forever, in which case the reader
+        // stays detached and its next send fails once the output receiver is
+        // dropped at the end of this closure.
+        drop(writer);
+        drop(master);
+        let (reader_done_tx, reader_done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = reader_handle.join();
+            let _ = reader_done_tx.send(());
+        });
+        if reader_done_rx.recv_timeout(Duration::from_secs(2)).is_err() {
+            warn!("Local shell reader did not stop session_id={worker_id}; detaching it");
+        }
         for chunk in buffered_output.drain(..) {
             let _ = emit_data(&app, &worker_id, chunk);
         }
         while let Ok(bytes) = output_rx.try_recv() {
-            let _ = emit_data(&app, &worker_id, String::from_utf8_lossy(&bytes).into_owned());
+            pending_bytes.extend_from_slice(&bytes);
         }
+        flush_pending_output(&app, &worker_id, &mut pending_bytes, &mut pending_output);
         let reason = if closed_by_user {
             "local shell closed"
         } else {
@@ -530,7 +505,8 @@ pub(crate) async fn list_remote_directory(
     pool: State<'_, SftpPool>,
     cache: State<'_, RemoteIdentityCache>,
 ) -> Result<RemoteDirectoryListing, RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
     debug!(
         "Listing remote directory path={} {}",
@@ -544,7 +520,9 @@ pub(crate) async fn list_remote_directory(
         list_remote_directory_blocking(request, Some(&pool), Some(&cache), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join directory listing task: {error}") })?;
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join directory listing task: {error}"),
+    })?;
     match &result {
         Ok(listing) => {
             debug!(
@@ -561,13 +539,61 @@ pub(crate) async fn list_remote_directory(
 }
 
 #[tauri::command]
+pub(crate) async fn resolve_remote_entry_owners(
+    app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RemoteEntryOwnersRequest,
+    pool: State<'_, SftpPool>,
+    cache: State<'_, RemoteIdentityCache>,
+) -> Result<RemoteEntryOwners, RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let pool = pool.inner().clone();
+    let cache = cache.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_remote_entry_owners_blocking(
+            request,
+            Some(&pool),
+            Some(&cache),
+            known_hosts.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join owner lookup task: {error}"),
+    })?
+}
+
+#[tauri::command]
+pub(crate) async fn warm_remote_connection(
+    app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: RemoteConnectionRequest,
+    pool: State<'_, SftpPool>,
+) -> Result<(), RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let pool = pool.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        warm_remote_connection_blocking(request, Some(&pool), known_hosts.as_deref())
+    })
+    .await
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join warm-up task: {error}"),
+    })?
+}
+
+#[tauri::command]
 pub(crate) async fn create_remote_entry(
     app: AppHandle,
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: CreateRemoteEntryRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Creating remote entry parent_path={} name={} kind={:?} {}",
         request.parent_path,
@@ -581,7 +607,9 @@ pub(crate) async fn create_remote_entry(
         create_remote_entry_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join create entry task: {error}") })?;
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join create entry task: {error}"),
+    })?;
     if let Err(error) = &result {
         error!("Create remote entry failed: {error:?}");
     } else {
@@ -597,7 +625,8 @@ pub(crate) async fn rename_remote_path(
     mut request: RenameRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Renaming remote path path={} new_name={} {}",
         request.path,
@@ -610,7 +639,9 @@ pub(crate) async fn rename_remote_path(
         rename_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join rename task: {error}") })?;
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join rename task: {error}"),
+    })?;
     if let Err(error) = &result {
         error!("Rename remote path failed: {error:?}");
     } else {
@@ -627,14 +658,17 @@ pub(crate) async fn delete_remote_path(
     mut request: DeleteRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Deleting remote paths operation_id={} paths={:?} {}",
         request.operation_id,
         request.paths,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = deletes.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
+    let cancel_flag = deletes
+        .register(request.operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -644,8 +678,9 @@ pub(crate) async fn delete_remote_path(
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = deletes.remove(&operation_id);
-    let result = result
-        .map_err(|error| RemoteFsError::Other { message: format!("failed to join delete task: {error}") })?;
+    let result = result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join delete task: {error}"),
+    })?;
     if let Err(error) = &result {
         warn!("Delete remote path failed operation_id={operation_id}: {error:?}");
     } else {
@@ -662,7 +697,8 @@ pub(crate) async fn copy_remote_path(
     mut request: CopyRemotePathRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Copying remote path operation_id={} source_path={} destination_directory={} {}",
         request.operation_id,
@@ -670,7 +706,9 @@ pub(crate) async fn copy_remote_path(
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = copies.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
+    let cancel_flag = copies
+        .register(request.operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
@@ -681,8 +719,9 @@ pub(crate) async fn copy_remote_path(
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = copies.remove(&operation_id);
-    let result = result
-        .map_err(|error| RemoteFsError::Other { message: format!("failed to join copy task: {error}") })?;
+    let result = result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join copy task: {error}"),
+    })?;
     if let Err(error) = &result {
         error!("Copy remote path failed: {error:?}");
     } else {
@@ -699,21 +738,32 @@ pub(crate) async fn copy_remote_to_remote(
     mut request: CopyRemoteToRemoteRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.source_connection).map_err(|message| RemoteFsError::Other { message })?;
-    resolve_keychain_key_for_remote(&credentials, &mut request.destination_connection).map_err(|message| RemoteFsError::Other { message })?;
-    let cancel_flag = copies.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.source_connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.destination_connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let cancel_flag = copies
+        .register(request.operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        copy_remote_to_remote_blocking(app, request, cancel_flag, Some(&pool), known_hosts.as_deref())
+        copy_remote_to_remote_blocking(
+            app,
+            request,
+            cancel_flag,
+            Some(&pool),
+            known_hosts.as_deref(),
+        )
     })
     .await;
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = copies.remove(&operation_id);
-    let result = result
-        .map_err(|error| RemoteFsError::Other { message: format!("failed to join remote transfer task: {error}") })?;
+    let result = result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join remote transfer task: {error}"),
+    })?;
     if let Err(error) = &result {
         error!("Copy remote to remote failed: {error:?}");
     }
@@ -736,8 +786,9 @@ pub(crate) async fn upload_local_paths(
     uploads: State<'_, UploadCancellationRegistry>,
     mut request: UploadLocalPathsRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+) -> Result<TransferBatchResult, RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Uploading local paths operation_id={} count={} destination_directory={} {}",
         request.operation_id,
@@ -745,7 +796,9 @@ pub(crate) async fn upload_local_paths(
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = uploads.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
+    let cancel_flag = uploads
+        .register(request.operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -755,20 +808,21 @@ pub(crate) async fn upload_local_paths(
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = uploads.remove(&operation_id);
-    let result = result
-        .map_err(|error| RemoteFsError::Other { message: format!("failed to join upload task: {error}") })?;
-    if let Err(error) = &result {
-        warn!("Upload failed operation_id={operation_id}: {error:?}");
-    } else {
-        info!("Upload completed operation_id={operation_id}");
+    let result = result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join upload task: {error}"),
+    })?;
+    match &result {
+        Err(error) => warn!("Upload failed operation_id={operation_id}: {error:?}"),
+        Ok(batch) if batch.items.iter().any(|item| item.error.is_some()) => {
+            warn!("Upload partially failed operation_id={operation_id}: {batch:?}");
+        }
+        Ok(_) => info!("Upload completed operation_id={operation_id}"),
     }
     result
 }
 
 #[tauri::command]
-pub(crate) async fn copy_local_paths(
-    request: CopyLocalPathsRequest,
-) -> Result<(), String> {
+pub(crate) async fn copy_local_paths(request: CopyLocalPathsRequest) -> Result<(), String> {
     info!(
         "Copying local paths operation_id={} count={} destination_directory={}",
         request.operation_id,
@@ -776,11 +830,10 @@ pub(crate) async fn copy_local_paths(
         request.destination_directory,
     );
     let operation_id = request.operation_id.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        crate::copy_local_paths_blocking(request)
-    })
-    .await
-    .map_err(|error| format!("failed to join copy local paths task: {error}"))?;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || crate::copy_local_paths_blocking(request))
+            .await
+            .map_err(|error| format!("failed to join copy local paths task: {error}"))?;
     if let Err(error) = &result {
         warn!("Copy local paths failed operation_id={operation_id}: {error}");
     } else {
@@ -827,11 +880,10 @@ pub(crate) async fn paste_local_paths(
 #[tauri::command]
 pub(crate) async fn trash_local_paths(paths: Vec<String>) -> Result<(), String> {
     info!("Trashing local paths count={}", paths.len());
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        crate::trash_local_paths_blocking(paths)
-    })
-    .await
-    .map_err(|error| format!("failed to join trash local paths task: {error}"))?;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || crate::trash_local_paths_blocking(paths))
+            .await
+            .map_err(|error| format!("failed to join trash local paths task: {error}"))?;
     if let Err(error) = &result {
         warn!("Trash local paths failed: {error}");
     }
@@ -863,8 +915,9 @@ pub(crate) async fn download_remote_paths(
     downloads: State<'_, DownloadCancellationRegistry>,
     mut request: DownloadRemotePathsRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+) -> Result<TransferBatchResult, RemoteFsError> {
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Downloading remote paths operation_id={} count={} destination_directory={} {}",
         request.operation_id,
@@ -872,7 +925,9 @@ pub(crate) async fn download_remote_paths(
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = downloads.register(request.operation_id.clone()).map_err(|message| RemoteFsError::Other { message })?;
+    let cancel_flag = downloads
+        .register(request.operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -882,12 +937,15 @@ pub(crate) async fn download_remote_paths(
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = downloads.remove(&operation_id);
-    let result = result
-        .map_err(|error| RemoteFsError::Other { message: format!("failed to join download task: {error}") })?;
-    if let Err(error) = &result {
-        warn!("Download failed operation_id={operation_id}: {error:?}");
-    } else {
-        info!("Download completed operation_id={operation_id}");
+    let result = result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join download task: {error}"),
+    })?;
+    match &result {
+        Err(error) => warn!("Download failed operation_id={operation_id}: {error:?}"),
+        Ok(batch) if batch.items.iter().any(|item| item.error.is_some()) => {
+            warn!("Download partially failed operation_id={operation_id}: {batch:?}");
+        }
+        Ok(_) => info!("Download completed operation_id={operation_id}"),
     }
     result
 }
@@ -909,7 +967,8 @@ pub(crate) async fn disconnect_sftp(
 ) -> Result<(), RemoteFsError> {
     // The pool key hashes the resolved credentials, so keychain references
     // must be resolved here exactly as the connecting commands do.
-    resolve_keychain_key_for_remote(&credentials, &mut request).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Disconnecting pooled SFTP connection {}",
         summarize_remote_connection_request(&request)
@@ -919,7 +978,9 @@ pub(crate) async fn disconnect_sftp(
         pool.invalidate(&request);
     })
     .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join disconnect task: {error}") })?;
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join disconnect task: {error}"),
+    })?;
     Ok(())
 }
 
@@ -1007,7 +1068,8 @@ pub(crate) async fn open_remote_file(
     mut request: OpenRemoteFileRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Opening remote file path={} {}",
         request.path,
@@ -1015,11 +1077,23 @@ pub(crate) async fn open_remote_file(
     );
     let pool = pool.inner().clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let open_root = app
+        .path()
+        .home_dir()
+        .ok()
+        .map(|home| home.join(".termbridge").join("open-cache"));
     let result = tauri::async_runtime::spawn_blocking(move || {
-        open_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
+        open_remote_file_blocking(
+            request,
+            Some(&pool),
+            known_hosts.as_deref(),
+            open_root.as_deref(),
+        )
     })
     .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join open file task: {error}") })?;
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join open file task: {error}"),
+    })?;
     if let Err(error) = &result {
         error!("Open remote file failed: {error:?}");
     } else {
@@ -1035,7 +1109,8 @@ pub(crate) async fn preview_remote_file(
     mut request: ReadRemoteFileRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<ReadRemoteFileResponse, RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Previewing remote file path={} {}",
         request.path,
@@ -1047,7 +1122,9 @@ pub(crate) async fn preview_remote_file(
         read_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join file preview task: {error}") })?;
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join file preview task: {error}"),
+    })?;
     match &result {
         Ok(response) => {
             info!(
@@ -1069,7 +1146,8 @@ pub(crate) async fn update_remote_permissions(
     mut request: UpdateRemotePermissionsRequest,
     pool: State<'_, SftpPool>,
 ) -> Result<(), RemoteFsError> {
-    resolve_keychain_key_for_remote(&credentials, &mut request.connection).map_err(|message| RemoteFsError::Other { message })?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)
+        .map_err(|message| RemoteFsError::Other { message })?;
     info!(
         "Updating remote permissions path={} permissions={:04o} {}",
         request.path,
@@ -1082,7 +1160,9 @@ pub(crate) async fn update_remote_permissions(
         update_remote_permissions_blocking(request, Some(&pool), known_hosts.as_deref())
     })
     .await
-    .map_err(|error| RemoteFsError::Other { message: format!("failed to join permissions update task: {error}") })?;
+    .map_err(|error| RemoteFsError::Other {
+        message: format!("failed to join permissions update task: {error}"),
+    })?;
     if let Err(error) = &result {
         error!("Update remote permissions failed: {error:?}");
     } else {
@@ -1110,15 +1190,12 @@ fn detect_key_type(private_key: &str) -> &'static str {
             .lines()
             .map(str::trim)
             .filter(|line| {
-                !line.is_empty()
-                    && !line.starts_with("-----BEGIN")
-                    && !line.starts_with("-----END")
+                !line.is_empty() && !line.starts_with("-----BEGIN") && !line.starts_with("-----END")
             })
             .collect();
-        if let Ok(decoded) = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            base64_body,
-        ) {
+        if let Ok(decoded) =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, base64_body)
+        {
             if let Ok(text) = String::from_utf8(decoded) {
                 let lower = text.to_lowercase();
                 if lower.contains("ssh-ed25519") {
@@ -1140,28 +1217,30 @@ fn detect_key_type(private_key: &str) -> &'static str {
 }
 
 #[tauri::command]
-pub(crate) fn derive_ecdsa_key_from_password(
-    password: String,
-) -> Result<(String, String), String> {
-    crate::ecdsa_key::derive_ecdsa_key_from_password(&password)
-}
-
-#[tauri::command]
 pub(crate) fn store_key_credential(
     credentials: State<'_, crate::keychain::CredentialManager>,
     database: State<'_, Database>,
     request: KeyCredentialRequest,
 ) -> Result<(), String> {
+    if request.kind != crate::models::KeyCredentialKind::KeyFile {
+        return Err("generic key credentials must contain a private key file".to_string());
+    }
+    if request.id.trim().is_empty() {
+        return Err("key credential id cannot be empty".to_string());
+    }
+    if request.label.trim().is_empty() {
+        return Err("key credential label cannot be empty".to_string());
+    }
+    let private_key = request
+        .private_key
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "key credential private key cannot be empty".to_string())?;
     let updated_at = crate::db::current_timestamp_ms();
     let key_type = request
         .key_type
         .filter(|t| !t.is_empty() && t != "unknown")
-        .unwrap_or_else(|| match request.kind {
-            crate::models::KeyCredentialKind::Password => "ecdsa".to_string(),
-            crate::models::KeyCredentialKind::KeyFile => {
-                detect_key_type(request.private_key.as_deref().unwrap_or("")).to_string()
-            }
-        });
+        .unwrap_or_else(|| detect_key_type(private_key).to_string());
     let payload = serde_json::json!({
         "kind": request.kind.to_string(),
         "label": request.label,
@@ -1170,8 +1249,9 @@ pub(crate) fn store_key_credential(
         "keyType": key_type,
         "updatedAt": updated_at,
     });
-    let is_new = !database.key_credential_exists(&request.id)?;
-    database.upsert_key_credential(
+    let previous_payload = credentials.retrieve_key_credential(&request.id)?;
+    credentials.store_key_credential(&request.id, &payload.to_string())?;
+    if let Err(error) = database.upsert_key_credential(
         &request.id,
         &request.label,
         &key_type,
@@ -1180,21 +1260,20 @@ pub(crate) fn store_key_credential(
         request.public_key.as_deref(),
         None,
         updated_at,
-    )?;
-    if let Err(error) = credentials.store_key_credential(&request.id, &payload.to_string()) {
+    ) {
         warn!(
-            "Failed to persist key credential for id={}, rolling back: {}",
+            "Failed to persist key credential metadata for id={}, rolling back native value: {}",
             request.id, error
         );
-        // Only roll back rows created by this call — deleting a pre-existing
-        // row would destroy metadata the user already had.
-        if is_new {
-            if let Err(rollback_error) = database.delete_key_credential(&request.id) {
-                warn!(
-                    "Failed to roll back key credential metadata id={}: {}",
-                    request.id, rollback_error
-                );
-            }
+        let rollback_result = match previous_payload {
+            Some(previous) => credentials.store_key_credential(&request.id, &previous),
+            None => credentials.delete_credential(crate::keychain::KEY_SERVICE, &request.id),
+        };
+        if let Err(rollback_error) = rollback_result {
+            warn!(
+                "Failed to roll back native key credential id={}: {}",
+                request.id, rollback_error
+            );
         }
         return Err(error);
     }
@@ -1234,17 +1313,20 @@ pub(crate) fn retrieve_key_credential(
             .unwrap_or(&id)
             .to_string(),
         kind,
-        private_key: value.get("privateKey").and_then(|v| v.as_str()).map(String::from),
-        public_key: value.get("publicKey").and_then(|v| v.as_str()).map(String::from),
+        private_key: value
+            .get("privateKey")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        public_key: value
+            .get("publicKey")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         key_type: value
             .get("keyType")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string(),
-        updated_at: value
-            .get("updatedAt")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0),
+        updated_at: value.get("updatedAt").and_then(|v| v.as_i64()).unwrap_or(0),
     }))
 }
 
@@ -1254,10 +1336,19 @@ pub(crate) fn delete_key_credential(
     database: State<'_, Database>,
     id: String,
 ) -> Result<Vec<String>, String> {
-    let referencing = database.list_profiles_referencing_key(&id)?;
-    credentials.delete_key_credential(&id)?;
+    let service = database
+        .key_credential_service(&id)?
+        .unwrap_or_else(|| crate::keychain::KEY_SERVICE.to_string());
+    let referencing = if service == crate::keychain::KEY_SERVICE {
+        database.list_profiles_referencing_key(&id)?
+    } else {
+        Vec::new()
+    };
+    credentials.delete_credential(&service, &id)?;
     database.delete_key_credential(&id)?;
-    database.clear_keychain_key_id_references(&id)?;
+    if service == crate::keychain::KEY_SERVICE {
+        database.clear_keychain_key_id_references(&id)?;
+    }
     if !referencing.is_empty() {
         log::info!(
             "Cleared keychain_key_id for {} profile(s) referencing deleted key {id}",
@@ -1269,8 +1360,12 @@ pub(crate) fn delete_key_credential(
 
 #[tauri::command]
 pub(crate) fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read file {}: {e}", std::path::Path::new(&path).display()))
+    std::fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "failed to read file {}: {e}",
+            std::path::Path::new(&path).display()
+        )
+    })
 }
 
 #[tauri::command]
@@ -1285,7 +1380,9 @@ pub(crate) fn store_profile_password(
         .get_profile(&profile_id)?
         .map(|p| p.name)
         .unwrap_or_else(|| profile_id.clone());
-    database.upsert_key_credential(
+    let previous_password = credentials.retrieve_profile_password(&profile_id)?;
+    credentials.store_profile_password(&profile_id, &password)?;
+    if let Err(error) = database.upsert_key_credential(
         &profile_id,
         &profile_name,
         "profile",
@@ -1294,11 +1391,14 @@ pub(crate) fn store_profile_password(
         None,
         None,
         updated_at,
-    )?;
-    if let Err(error) = credentials.store_profile_password(&profile_id, &password) {
-        if let Err(rollback_error) = database.delete_key_credential(&profile_id) {
+    ) {
+        let rollback_result = match previous_password {
+            Some(previous) => credentials.store_profile_password(&profile_id, &previous),
+            None => credentials.delete_profile_password(&profile_id),
+        };
+        if let Err(rollback_error) = rollback_result {
             warn!(
-                "Failed to roll back profile password metadata id={}: {}",
+                "Failed to roll back native profile password id={}: {}",
                 profile_id, rollback_error
             );
         }
@@ -1318,9 +1418,11 @@ pub(crate) fn retrieve_profile_password(
 #[tauri::command]
 pub(crate) fn delete_profile_password(
     credentials: State<'_, crate::keychain::CredentialManager>,
+    database: State<'_, Database>,
     profile_id: String,
 ) -> Result<(), String> {
-    credentials.delete_profile_password(&profile_id)
+    credentials.delete_profile_password(&profile_id)?;
+    database.delete_key_credential_metadata(&profile_id, crate::keychain::PROFILE_PASSWORD_SERVICE)
 }
 
 #[tauri::command]
@@ -1345,9 +1447,11 @@ pub(crate) fn retrieve_profile_secret(
 #[tauri::command]
 pub(crate) fn delete_profile_secrets(
     credentials: State<'_, crate::keychain::CredentialManager>,
+    database: State<'_, Database>,
     profile_id: String,
 ) -> Result<(), String> {
-    credentials.delete_all_profile_secrets(&profile_id)
+    credentials.delete_all_profile_secrets(&profile_id)?;
+    database.delete_key_credential_metadata(&profile_id, crate::keychain::PROFILE_PASSWORD_SERVICE)
 }
 
 #[tauri::command]
@@ -1429,7 +1533,10 @@ pub(crate) fn start_port_forwards(
     jump_host: Option<JumpHostConfig>,
     forwards: Vec<PortForwardConfig>,
 ) -> Result<(), String> {
-    info!("Starting port forwards operation_id={operation_id} count={}", forwards.len());
+    info!(
+        "Starting port forwards operation_id={operation_id} count={}",
+        forwards.len()
+    );
     validate_connection_fields(&host, &username)?;
 
     let mut private_key_data: Option<String> = None;
@@ -1452,10 +1559,18 @@ pub(crate) fn start_port_forwards(
         .map(|p| p.to_string_lossy().to_string());
     thread::spawn(move || {
         crate::port_forward::start_port_forwards(
-            manager, operation_id,
-            host, port, username, auth_method,
-            password, private_key_data, passphrase,
-            jump_host, forwards, cancel_flag,
+            manager,
+            operation_id,
+            host,
+            port,
+            username,
+            auth_method,
+            password,
+            private_key_data,
+            passphrase,
+            jump_host,
+            forwards,
+            cancel_flag,
             known_hosts,
         );
     });
@@ -1491,10 +1606,7 @@ pub(crate) async fn check_host_key(
 }
 
 #[tauri::command]
-pub(crate) async fn trust_host(
-    app: AppHandle,
-    request: TrustHostRequest,
-) -> Result<(), String> {
+pub(crate) async fn trust_host(app: AppHandle, request: TrustHostRequest) -> Result<(), String> {
     info!("Trusting host {}:{}", request.host, request.port);
     let result = tauri::async_runtime::spawn_blocking(move || {
         crate::known_hosts::trust_host_blocking(&app, &request)
@@ -1522,7 +1634,9 @@ pub(crate) fn open_url(url: String) -> Result<(), String> {
         return Err("refused to open URL containing newline characters".to_string());
     }
     if contains_shell_metacharacters(&url) {
-        return Err(format!("refused to open URL containing shell metacharacters: {url}"));
+        return Err(format!(
+            "refused to open URL containing shell metacharacters: {url}"
+        ));
     }
 
     #[cfg(target_os = "windows")]
@@ -1560,9 +1674,13 @@ pub(crate) fn list_known_hosts(app: AppHandle) -> Result<Vec<KnownHostEntry>, St
         return Ok(Vec::new());
     }
 
-    let content = fs::read_to_string(&path).map_err(|error| format!("failed to read known hosts file: {error}"))?;
-    let session = Session::new().map_err(|error| format!("failed to create ssh session: {error}"))?;
-    let mut known_hosts = session.known_hosts().map_err(|error| format!("failed to initialize known hosts: {error}"))?;
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read known hosts file: {error}"))?;
+    let session =
+        Session::new().map_err(|error| format!("failed to create ssh session: {error}"))?;
+    let mut known_hosts = session
+        .known_hosts()
+        .map_err(|error| format!("failed to initialize known hosts: {error}"))?;
 
     if let Err(error) = known_hosts.read_file(&path, KnownHostFileKind::OpenSSH) {
         warn!("Failed to parse known hosts file: {error}");
@@ -1614,7 +1732,9 @@ pub(crate) fn list_known_hosts(app: AppHandle) -> Result<Vec<KnownHostEntry>, St
         let type_prefix = match key_type {
             ssh2::HostKeyType::Rsa => "RSA",
             ssh2::HostKeyType::Dss => "DSA",
-            ssh2::HostKeyType::Ecdsa256 | ssh2::HostKeyType::Ecdsa384 | ssh2::HostKeyType::Ecdsa521 => "ECDSA",
+            ssh2::HostKeyType::Ecdsa256
+            | ssh2::HostKeyType::Ecdsa384
+            | ssh2::HostKeyType::Ecdsa521 => "ECDSA",
             ssh2::HostKeyType::Ed25519 => "ED25519",
             ssh2::HostKeyType::Unknown => "UNKNOWN",
         };
@@ -1644,7 +1764,8 @@ pub(crate) fn remove_known_host(app: AppHandle, host: String, port: u16) -> Resu
         return Ok(());
     }
 
-    let content = fs::read_to_string(&path).map_err(|error| format!("failed to read known hosts file: {error}"))?;
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read known hosts file: {error}"))?;
     let target_prefix = if port == 22 {
         format!("{host} ")
     } else {
@@ -1663,7 +1784,8 @@ pub(crate) fn remove_known_host(app: AppHandle, host: String, port: u16) -> Resu
         .map(|line| line.to_string())
         .collect();
 
-    fs::write(&path, filtered.join("\n")).map_err(|error| format!("failed to write known hosts file: {error}"))?;
+    fs::write(&path, filtered.join("\n"))
+        .map_err(|error| format!("failed to write known hosts file: {error}"))?;
     Ok(())
 }
 
@@ -1681,14 +1803,19 @@ pub(crate) fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String>
     }
 
     let mut files = Vec::new();
-    for entry in fs::read_dir(&log_dir).map_err(|error| format!("failed to read log dir: {error}"))? {
+    for entry in
+        fs::read_dir(&log_dir).map_err(|error| format!("failed to read log dir: {error}"))?
+    {
         let entry = entry.map_err(|error| format!("failed to read log dir entry: {error}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if !(name.starts_with("backend") || name.starts_with("frontend")) || !name.ends_with(".log") {
+        if !(name.starts_with("backend") || name.starts_with("frontend")) || !name.ends_with(".log")
+        {
             continue;
         }
 
-        let metadata = entry.metadata().map_err(|error| format!("failed to read log file metadata: {error}"))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("failed to read log file metadata: {error}"))?;
         let modified_at = metadata
             .modified()
             .ok()
@@ -1721,14 +1848,16 @@ pub(crate) fn read_log_file(app: AppHandle, name: String) -> Result<String, Stri
         return Err(format!("log file not found: {name}"));
     }
 
-    let metadata = fs::metadata(&path).map_err(|error| format!("failed to read log file metadata: {error}"))?;
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("failed to read log file metadata: {error}"))?;
     const MAX_SIZE: u64 = 2 * 1024 * 1024;
     let size = metadata.len().min(MAX_SIZE);
 
     let content = if size == metadata.len() {
         fs::read_to_string(&path).map_err(|error| format!("failed to read log file: {error}"))?
     } else {
-        let mut file = fs::File::open(&path).map_err(|error| format!("failed to open log file: {error}"))?;
+        let mut file =
+            fs::File::open(&path).map_err(|error| format!("failed to open log file: {error}"))?;
         use std::io::Read;
         let mut buffer = vec![0u8; size as usize];
         file.read_exact(&mut buffer)
@@ -1740,7 +1869,10 @@ pub(crate) fn read_log_file(app: AppHandle, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub(crate) async fn export_log_file(name: String, content: String) -> Result<Option<String>, String> {
+pub(crate) async fn export_log_file(
+    name: String,
+    content: String,
+) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let path = rfd::FileDialog::new()
             .set_title("导出日志")
@@ -1760,29 +1892,37 @@ pub(crate) async fn export_log_file(name: String, content: String) -> Result<Opt
 }
 
 #[tauri::command]
-pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<LocalDirectoryListing, String> {
+pub(crate) fn list_local_directory(
+    app: AppHandle,
+    path: String,
+) -> Result<LocalDirectoryListing, String> {
     use std::fs;
     use std::path::PathBuf;
 
     let target = if path.is_empty() {
-        app.path().home_dir().map_err(|error| format!("failed to resolve home directory: {error}"))?
+        app.path()
+            .home_dir()
+            .map_err(|error| format!("failed to resolve home directory: {error}"))?
     } else {
         PathBuf::from(&path)
     };
 
-    let canonical = fs::canonicalize(&target).map_err(|error| format!("failed to resolve path: {error}"))?;
+    let canonical =
+        fs::canonicalize(&target).map_err(|error| format!("failed to resolve path: {error}"))?;
     if !canonical.is_dir() {
         return Err(format!("path is not a directory: {}", canonical.display()));
     }
 
-    let parent_path = canonical
-        .parent()
-        .map(portable_local_path);
+    let parent_path = canonical.parent().map(portable_local_path);
 
     let mut entries = Vec::new();
-    for entry in fs::read_dir(&canonical).map_err(|error| format!("failed to read directory: {error}"))? {
+    for entry in
+        fs::read_dir(&canonical).map_err(|error| format!("failed to read directory: {error}"))?
+    {
         let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
-        let metadata = entry.metadata().map_err(|error| format!("failed to read entry metadata: {error}"))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("failed to read entry metadata: {error}"))?;
         let path = portable_local_path(&entry.path());
         let name = entry.file_name().to_string_lossy().to_string();
 
@@ -1806,7 +1946,11 @@ pub(crate) fn list_local_directory(app: AppHandle, path: String) -> Result<Local
             path,
             name,
             kind,
-            size: if metadata.is_dir() { None } else { Some(metadata.len()) },
+            size: if metadata.is_dir() {
+                None
+            } else {
+                Some(metadata.len())
+            },
             modified_at,
         });
     }
@@ -1838,7 +1982,9 @@ fn configure_local_terminal_environment(command: &mut CommandBuilder) {
 }
 
 fn contains_shell_metacharacters(input: &str) -> bool {
-    input.chars().any(|c| matches!(c, '&' | '|' | '<' | '>' | '(' | ')' | '^' | '"' | '%' | '!'))
+    input
+        .chars()
+        .any(|c| matches!(c, '&' | '|' | '<' | '>' | '(' | ')' | '^' | '"' | '%' | '!'))
 }
 
 fn remote_connection_request_from_session(
@@ -1873,9 +2019,10 @@ pub(crate) fn spawn_ssh_thread(
     session_id: String,
     request: SessionCreateRequest,
     rx: std::sync::mpsc::Receiver<SessionCommand>,
+    wake: SessionWakeSource,
     pool: SftpPool,
     connection_request: RemoteConnectionRequest,
-    connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), String>>>,
+    connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), CreateSessionError>>>,
 ) {
     thread::spawn(move || {
         debug!("Spawned SSH worker session_id={session_id}");
@@ -1896,13 +2043,7 @@ pub(crate) fn spawn_ssh_thread(
                 let _ = tx.send(Ok(()));
             }
         };
-        let run_result = run_ssh_session(&app, &session_id, &request, rx, on_connected);
-
-        if let Some(tx) = connection_result_tx.as_ref() {
-            if let Err(ref error) = run_result {
-                let _ = tx.send(Err(error.clone()));
-            }
-        }
+        let run_result = run_ssh_session(&app, &session_id, &request, rx, wake, on_connected);
 
         match run_result {
             Ok(message) => {
@@ -1919,17 +2060,33 @@ pub(crate) fn spawn_ssh_thread(
                     SessionStatus::Disconnected,
                     message.clone(),
                 );
-                let _ = emit_closed(&app, &session_id, Some(identity), message, reason_kind, retryable);
-            }
-            Err(error) => {
-                error!("SSH session failed session_id={session_id}: {error}");
-                let retryable = is_transport_disconnect_message(&error);
-                let _ = emit_status(&app, &session_id, SessionStatus::Error, Some(error.clone()));
                 let _ = emit_closed(
                     &app,
                     &session_id,
                     Some(identity),
-                    Some(error),
+                    message,
+                    reason_kind,
+                    retryable,
+                );
+            }
+            Err(connection_error) => {
+                if let Some(tx) = connection_result_tx.as_ref() {
+                    let _ = tx.send(Err(connection_error.to_create_session_error()));
+                }
+                let message = connection_error.message();
+                error!("SSH session failed session_id={session_id}: {message}");
+                let retryable = is_transport_disconnect_message(&message);
+                let _ = emit_status(
+                    &app,
+                    &session_id,
+                    SessionStatus::Error,
+                    Some(message.clone()),
+                );
+                let _ = emit_closed(
+                    &app,
+                    &session_id,
+                    Some(identity),
+                    Some(message),
                     if retryable {
                         ClosedReasonKind::TransportDisconnect
                     } else {
@@ -1945,17 +2102,12 @@ pub(crate) fn spawn_ssh_thread(
 // --- Database commands ---
 
 #[tauri::command]
-pub(crate) fn list_profiles(
-    db: State<'_, Database>,
-) -> Result<Vec<ProfileRow>, String> {
+pub(crate) fn list_profiles(db: State<'_, Database>) -> Result<Vec<ProfileRow>, String> {
     db.list_profiles()
 }
 
 #[tauri::command]
-pub(crate) fn add_profile(
-    db: State<'_, Database>,
-    profile: ProfileRow,
-) -> Result<(), String> {
+pub(crate) fn add_profile(db: State<'_, Database>, profile: ProfileRow) -> Result<(), String> {
     db.insert_profile(&profile)
 }
 
@@ -1969,17 +2121,12 @@ pub(crate) fn update_profile(
 }
 
 #[tauri::command]
-pub(crate) fn remove_profile(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), String> {
+pub(crate) fn remove_profile(db: State<'_, Database>, id: String) -> Result<(), String> {
     db.delete_profile(&id)
 }
 
 #[tauri::command]
-pub(crate) fn load_preferences(
-    db: State<'_, Database>,
-) -> Result<Vec<(String, String)>, String> {
+pub(crate) fn load_preferences(db: State<'_, Database>) -> Result<Vec<(String, String)>, String> {
     db.load_preferences()
 }
 
@@ -1992,9 +2139,7 @@ pub(crate) fn save_preferences(
 }
 
 #[tauri::command]
-pub(crate) fn list_recent_profiles(
-    db: State<'_, Database>,
-) -> Result<Vec<String>, String> {
+pub(crate) fn list_recent_profiles(db: State<'_, Database>) -> Result<Vec<String>, String> {
     db.list_recent_profiles()
 }
 
@@ -2033,17 +2178,12 @@ pub(crate) fn add_sftp_bookmark(
 }
 
 #[tauri::command]
-pub(crate) fn remove_sftp_bookmark(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), String> {
+pub(crate) fn remove_sftp_bookmark(db: State<'_, Database>, id: String) -> Result<(), String> {
     db.delete_sftp_bookmark(&id)
 }
 
 #[tauri::command]
-pub(crate) fn load_terminal_workspace(
-    db: State<'_, Database>,
-) -> Result<Option<String>, String> {
+pub(crate) fn load_terminal_workspace(db: State<'_, Database>) -> Result<Option<String>, String> {
     db.load_terminal_workspace()
 }
 
@@ -2056,9 +2196,7 @@ pub(crate) fn save_terminal_workspace(
 }
 
 #[tauri::command]
-pub(crate) fn clear_terminal_workspace(
-    db: State<'_, Database>,
-) -> Result<(), String> {
+pub(crate) fn clear_terminal_workspace(db: State<'_, Database>) -> Result<(), String> {
     db.clear_terminal_workspace()
 }
 
@@ -2076,7 +2214,10 @@ mod tests {
 
         assert_eq!(command.get_env("TERM"), Some(OsStr::new("xterm-256color")));
         assert_eq!(command.get_env("COLORTERM"), Some(OsStr::new("truecolor")));
-        assert_eq!(command.get_env("TERM_PROGRAM"), Some(OsStr::new("TermBridge")));
+        assert_eq!(
+            command.get_env("TERM_PROGRAM"),
+            Some(OsStr::new("TermBridge"))
+        );
         assert_eq!(
             command.get_env("TERM_PROGRAM_VERSION"),
             Some(OsStr::new(env!("CARGO_PKG_VERSION"))),

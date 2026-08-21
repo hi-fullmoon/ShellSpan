@@ -44,6 +44,7 @@ vi.mock('@/hooks/useSftpConnection', () => ({
   useSftpConnection: () => ({
     loadRemoteDirectory: vi.fn().mockResolvedValue(undefined),
     downloadRemotePaths: vi.fn().mockResolvedValue(undefined),
+    invalidatePaneListingCache: vi.fn(),
   }),
 }));
 
@@ -157,7 +158,7 @@ describe('SftpContent system drop', () => {
     );
 
     capturedOnDrop!(['/local/file.txt'], 'remote');
-    await waitFor(() => expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/file.txt'], '/remote', ['fail']));
+    await waitFor(() => expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/file.txt'], '/remote', ['fail'], undefined));
     expect(copyWithPolicies).not.toHaveBeenCalled();
   });
 
@@ -191,7 +192,7 @@ describe('SftpContent system drop', () => {
     );
 
     capturedOnDrop!(['/remote/file.txt'], 'local');
-    await waitFor(() => expect(copyWithPolicies).toHaveBeenCalledWith(['/remote/file.txt'], '/local', ['fail']));
+    await waitFor(() => expect(copyWithPolicies).toHaveBeenCalledWith(['/remote/file.txt'], '/local', ['fail'], undefined));
     expect(uploadWithPolicies).not.toHaveBeenCalled();
   });
 

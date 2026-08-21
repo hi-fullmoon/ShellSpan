@@ -5,7 +5,6 @@ import {
   type DragMoveEvent,
   type DragStartEvent,
   type Modifier,
-  PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -14,15 +13,14 @@ import {
 import { SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { createPortal } from 'react-dom';
-import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
+import { PinIcon, XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
+import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,8 +41,6 @@ interface ConnectionTabProps {
   connection: SftpConnection;
   active: boolean;
   dragging?: boolean;
-  renaming?: boolean;
-  renameValue?: string;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
   showSeparatorAfter?: boolean;
@@ -52,18 +48,12 @@ interface ConnectionTabProps {
   onContextMenu: (connection: SftpConnection, x: number, y: number) => void;
   onClose: (id: string) => void;
   onTogglePin?: (id: string) => void;
-  onRenameStart?: (connection: SftpConnection) => void;
-  onRenameChange?: (value: string) => void;
-  onRenameCommit?: () => void;
-  onRenameCancel?: () => void;
 }
 
 const ConnectionTab: React.FC<ConnectionTabProps> = ({
   connection,
   active,
   dragging = false,
-  renaming = false,
-  renameValue = '',
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
   showSeparatorAfter = false,
@@ -71,10 +61,6 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
   onContextMenu,
   onClose,
   onTogglePin,
-  onRenameStart,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
 }) => {
   return (
     <div
@@ -82,12 +68,17 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       tabIndex={0}
       aria-selected={active}
       data-sftp-tab={connection.id}
-      onClick={() => onActivate(connection.id)}
+      // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
+      // swallows the click after any drag, so a trackpad tap that jitters past
+      // the sensor threshold would otherwise both start a drag and lose the
+      // activation.
+      onPointerDown={(e) => {
+        if (e.button === 0) onActivate(connection.id);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(connection, e.clientX, e.clientY);
       }}
-      onDoubleClick={() => onRenameStart?.(connection)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -111,7 +102,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
         active ? 'h-[31px] bg-app-surface text-app-text' : 'h-[31px] bg-app-border/25 text-app-text-soft',
-        renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80 shadow-md' : 'cursor-pointer',
+        dragging ? 'cursor-default opacity-80 shadow-md' : 'cursor-pointer',
       )}
     >
       {active && (
@@ -135,69 +126,38 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       {showDropIndicatorRight && (
         <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
-      {renaming ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="min-w-0 flex-1">
-            <Input
-              autoFocus
-              value={renameValue}
-              onChange={(e) => onRenameChange?.(e.target.value)}
-              onBlur={onRenameCommit}
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRenameCommit?.();
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRenameCancel?.();
-                }
-              }}
-              className="h-5 border-0 bg-transparent p-0 text-xs font-medium leading-none shadow-none focus-visible:ring-0"
-            />
-          </span>
-        </div>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
+      </div>
+      {connection.pinned ? (
+        <button
+          type="button"
+          aria-label="unpin"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin?.(connection.id);
+          }}
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+        >
+          <PinIcon className="size-3" strokeWidth={1.5} />
+        </button>
       ) : (
-        <>
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
-          </div>
-          {connection.pinned ? (
-            <button
-              type="button"
-              aria-label="unpin"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onTogglePin?.(connection.id);
-              }}
-              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
-            >
-              <PinIcon className="size-3" strokeWidth={1.5} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              aria-label="close"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(connection.id);
-              }}
-              className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-                !dragging && active ? 'flex' : 'hidden group-hover:flex',
-              )}
-            >
-              <XIcon className="h-3 w-3" strokeWidth={1.5} />
-            </button>
+        <button
+          type="button"
+          aria-label="close"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose(connection.id);
+          }}
+          className={cn(
+            'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+            !dragging && active ? 'flex' : 'hidden group-hover:flex',
           )}
-        </>
+        >
+          <XIcon className="h-3 w-3" strokeWidth={1.5} />
+        </button>
       )}
     </div>
   );
@@ -210,12 +170,6 @@ interface SortableTabProps {
   onContextMenu: (connection: SftpConnection, x: number, y: number) => void;
   onClose: (id: string) => void;
   onTogglePin: (id: string) => void;
-  renaming: boolean;
-  renameValue: string;
-  onRenameStart: (connection: SftpConnection) => void;
-  onRenameChange: (value: string) => void;
-  onRenameCommit: () => void;
-  onRenameCancel: () => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
   showSeparatorAfter?: boolean;
@@ -228,19 +182,13 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onContextMenu,
   onClose,
   onTogglePin,
-  renaming,
-  renameValue,
-  onRenameStart,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
   showDropIndicatorLeft,
   showDropIndicatorRight,
   showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: connection.id,
-    disabled: renaming || connection.pinned,
+    disabled: connection.pinned,
   });
 
   return (
@@ -258,8 +206,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         connection={connection}
         active={active}
         dragging={isDragging}
-        renaming={renaming}
-        renameValue={renameValue}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
         showSeparatorAfter={showSeparatorAfter}
@@ -267,10 +213,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         onContextMenu={onContextMenu}
         onClose={onClose}
         onTogglePin={onTogglePin}
-        onRenameStart={onRenameStart}
-        onRenameChange={onRenameChange}
-        onRenameCommit={onRenameCommit}
-        onRenameCancel={onRenameCancel}
       />
     </div>
   );
@@ -284,8 +226,19 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const setActiveConnection = useSftpStore((state) => state.setActiveConnection);
   const removeConnection = useSftpStore((state) => state.removeConnection);
   const reorderConnections = useSftpStore((state) => state.reorderConnections);
-  const updateTitle = useSftpStore((state) => state.updateTitle);
   const togglePin = useSftpStore((state) => state.togglePin);
+
+  // macOS tap-to-click in WKWebView can drop the pointerdown of a tap that
+  // immediately follows another one (the single-tap gesture recognizer stays
+  // blocked until the double-tap recognizer fails). Activation already runs on
+  // pointerdown; when the pointerdown is lost the release still lands on the
+  // tab, so track the last pointerdown target and use a pointerup on a
+  // different tab as the fallback activation signal. See handleTabPointerUp.
+  const lastPointerDownTabRef = useRef<string | null>(null);
+  const activateTabRef = useRef<(id: string) => void>(() => {});
+  activateTabRef.current = setActiveConnection;
+  const tabBarConnectionsRef = useRef(connections);
+  tabBarConnectionsRef.current = connections;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -295,13 +248,13 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
 
   const [draggingConnectionId, setDraggingConnectionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
-  const [renamingConnectionId, setRenamingConnectionId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
   const [closingConnectionId, setClosingConnectionId] = useState<string | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
+    useSensor(TrackpadSafePointerSensor, {
+      // 10px dead zone: trackpad taps (tap-to-click) often jitter a few px;
+      // a low threshold misreads them as drags.
+      activationConstraint: { distance: 10 },
     }),
   );
 
@@ -349,15 +302,61 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     return () => container.removeEventListener('wheel', handleWheel);
   }, [connections.length]);
 
+  // Force the default cursor for the whole drag via a body class (see
+  // base.css); removed automatically when the drag ends or is cancelled.
+  useEffect(() => {
+    if (!draggingConnectionId) return;
+    document.body.classList.add('tab-dragging');
+    return () => document.body.classList.remove('tab-dragging');
+  }, [draggingConnectionId]);
+
+  // Fallback tab activation for a pointerdown that WKWebView dropped (see
+  // lastPointerDownTabRef). Listeners run in the capture phase so they see the
+  // events before the close/pin buttons can stop their propagation.
+  useEffect(() => {
+    const getElement = (target: EventTarget | null): Element | null =>
+      target instanceof Element ? target : null;
+    const isInteractiveControl = (target: EventTarget | null): boolean =>
+      Boolean(getElement(target)?.closest('button, a[href], input, select, textarea'));
+    const getTabId = (target: EventTarget | null): string | null =>
+      getElement(target)?.closest('[data-sftp-tab]')
+        ?.getAttribute('data-sftp-tab') ?? null;
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      lastPointerDownTabRef.current = getTabId(event.target);
+    };
+    const handlePointerUp = (event: PointerEvent): void => {
+      if (event.button !== 0) return;
+      // A release that ends a reorder drag is not an activation: dropping a tab
+      // onto another one must stay a pure reorder.
+      if (document.body.classList.contains('tab-dragging')) return;
+      // Close/pin buttons stop their own pointerdown, but this fallback exists
+      // for taps whose pointerdown was never delivered. Do not turn their
+      // release into a tab activation before the button action runs.
+      if (isInteractiveControl(event.target)) return;
+      const tabId = getTabId(event.target);
+      if (!tabId) return;
+      if (!tabBarConnectionsRef.current.some((connection) => connection.id === tabId)) return;
+      // The pointerdown for this tap was delivered on the tab itself: it
+      // already activated, nothing to do.
+      if (lastPointerDownTabRef.current === tabId) return;
+      activateTabRef.current(tabId);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('pointerup', handlePointerUp, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('pointerup', handlePointerUp, true);
+    };
+  }, []);
+
   const finishDrag = (): void => {
     setDraggingConnectionId(null);
     setInsertIndex(null);
   };
 
   const handleDragStart = (event: DragStartEvent): void => {
-    if (renamingConnectionId) {
-      return;
-    }
     const nextId = String(event.active.id);
     setDraggingConnectionId(nextId);
     const activatorEvent = event.activatorEvent as PointerEvent;
@@ -450,24 +449,6 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     finishDrag();
   };
 
-  const handleRenameStart = (connection: SftpConnection): void => {
-    setRenamingConnectionId(connection.id);
-    setRenameValue(connection.title);
-  };
-
-  const handleRenameCommit = (): void => {
-    if (renamingConnectionId && renameValue.trim()) {
-      updateTitle(renamingConnectionId, renameValue.trim());
-    }
-    setRenamingConnectionId(null);
-    setRenameValue('');
-  };
-
-  const handleRenameCancel = (): void => {
-    setRenamingConnectionId(null);
-    setRenameValue('');
-  };
-
   const handleCloseConnection = (id: string): void => {
     setClosingConnectionId(id);
   };
@@ -505,7 +486,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   }
 
   return (
-    <div className="group/tabbar relative flex h-8 items-start gap-0 border-b border-app-border/50 bg-app-surface-muted px-0">
+    <div
+      // Double-clicking empty tab bar space opens a new tab; ignore events
+      // coming from inside a tab itself.
+      onDoubleClick={(e) => {
+        if (!onNewTabClick) return;
+        if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
+        onNewTabClick();
+      }}
+      className="group/tabbar relative flex h-8 items-start gap-0 border-b border-app-border/50 bg-app-surface-muted px-0"
+    >
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -541,12 +531,6 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                   onContextMenu={(conn, x, y) => onTabContextMenu?.(conn, x, y)}
                   onClose={handleCloseConnection}
                   onTogglePin={togglePin}
-                  renaming={renamingConnectionId === connection.id}
-                  renameValue={renameValue}
-                  onRenameStart={handleRenameStart}
-                  onRenameChange={setRenameValue}
-                  onRenameCommit={handleRenameCommit}
-                  onRenameCancel={handleRenameCancel}
                   showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
                   showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
                   showSeparatorAfter={showSeparatorAfter}
@@ -575,21 +559,6 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
               document.body,
             )}
       </DndContext>
-      {connections.length > 0 && onNewTabClick && (
-        // Overlays the tab strip instead of taking layout space, so scrollable
-        // tabs never leave an empty block at the right edge. The gradient keeps
-        // the icon readable over the last tab; pointer events pass through
-        // while hidden.
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onNewTabClick}
-          aria-label={t('sftp.newTab')}
-          className="pointer-events-none absolute inset-y-0 right-0 z-10 h-[31px] w-11 rounded-none bg-gradient-to-l from-app-surface-muted from-60% to-transparent pl-4 opacity-0 transition-opacity hover:bg-transparent hover:text-app-primary focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tabbar:pointer-events-auto group-hover/tabbar:opacity-100"
-        >
-          <PlusIcon strokeWidth={1.5} />
-        </Button>
-      )}
       <AlertDialog
         open={!!closingConnectionId}
         onOpenChange={(open) => {

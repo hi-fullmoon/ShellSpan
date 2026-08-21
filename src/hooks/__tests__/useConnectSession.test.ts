@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useConnectSession } from '../useConnectSession';
+import { useHostKeyDialogStore } from '@/stores/hostKeyDialogStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
@@ -11,6 +12,8 @@ vi.mock('@/lib/tauri', () => ({
   invokeCreateSession: vi.fn(),
   invokeTrustHost: vi.fn(),
   invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfilePassword: vi.fn().mockResolvedValue(undefined),
+  invokeRetrieveProfileSecret: vi.fn().mockResolvedValue(undefined),
   buildSessionCreateRequest: vi.fn((p: ConnectionProfile) => p),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
@@ -22,10 +25,18 @@ vi.mock('@/lib/tauri', () => ({
 }));
 
 vi.mock('@/locales', () => ({
-  t: (key: string) =>
-    key === 'error.keychainKeyNotFound'
-      ? '该连接配置的已保存密钥已不存在，请选择其他密钥。'
-      : key,
+  t: (key: string) => {
+    if (key === 'error.keychainKeyNotFound') {
+      return '该连接配置的已保存密钥已不存在，请选择其他密钥。';
+    }
+    if (key === 'error.authenticationFailed') {
+      return '身份验证失败，请检查用户名、密码或 SSH 密钥。';
+    }
+    if (key === 'error.operationFailed') {
+      return '操作失败，请重试；详细错误信息已记录到日志。';
+    }
+    return key;
+  },
   changeLocale: vi.fn(),
   initI18n: vi.fn(),
 }));
@@ -44,21 +55,21 @@ vi.mock('@/lib/password-prompt', async (importActual) => {
 
 vi.mock('@/lib/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
+  getMissingKeychainKeyTarget: vi.fn().mockReturnValue(null),
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
-  preparePasswordKeychain: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
-  prepareKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
 }));
 
 import {
   invokeCreateSession,
+  invokeRetrieveProfilePassword,
+  invokeRetrieveProfileSecret,
   invokeTrustHost,
   invokeStoreProfilePassword,
 } from '@/lib/tauri';
 import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
   ensureKeychainKeyForProfile,
-  prepareKeychainKeyForProfile,
-  preparePasswordKeychain,
+  getMissingKeychainKeyTarget,
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
 
@@ -85,6 +96,9 @@ const initialTerminal = useTerminalStore.getState();
 const initialApp = useAppStore.getState();
 const initialProfile = useProfileStore.getState();
 const initialRecent = useRecentProfilesStore.getState();
+const initialHostKeyDialog = useHostKeyDialogStore.getState();
+
+const hostKeyDialog = () => useHostKeyDialogStore.getState().dialog;
 
 describe('useConnectSession', () => {
   beforeEach(() => {
@@ -92,21 +106,24 @@ describe('useConnectSession', () => {
     useAppStore.setState(initialApp, true);
     useProfileStore.setState(initialProfile, true);
     useRecentProfilesStore.setState(initialRecent, true);
+    useHostKeyDialogStore.setState(initialHostKeyDialog, true);
     vi.mocked(invokeCreateSession).mockReset();
     vi.mocked(invokeTrustHost).mockReset();
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
     vi.mocked(invokeStoreProfilePassword).mockReset();
     vi.mocked(invokeStoreProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(invokeRetrieveProfilePassword).mockReset();
+    vi.mocked(invokeRetrieveProfilePassword).mockResolvedValue(undefined);
+    vi.mocked(invokeRetrieveProfileSecret).mockReset();
+    vi.mocked(invokeRetrieveProfileSecret).mockResolvedValue(undefined);
     vi.mocked(promptForMissingPassword).mockReset();
     vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(promptForMissingKeychainKey).mockReset();
     vi.mocked(promptForMissingKeychainKey).mockResolvedValue(null);
+    vi.mocked(getMissingKeychainKeyTarget).mockReset();
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValue(null);
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
-    vi.mocked(preparePasswordKeychain).mockReset();
-    vi.mocked(preparePasswordKeychain).mockImplementation((profile) => Promise.resolve(profile));
-    vi.mocked(prepareKeychainKeyForProfile).mockReset();
-    vi.mocked(prepareKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
   });
 
   afterEach(() => {
@@ -128,7 +145,7 @@ describe('useConnectSession', () => {
     expect(sessions[0]).toMatchObject({ sessionId: 's1', profileId: 'p1' });
     expect(useAppStore.getState().activeSection).toBe('terminal');
     expect(useRecentProfilesStore.getState().recentIds).toEqual(['p1']);
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(hostKeyDialog().open).toBe(false);
   });
 
   it('opens dialog on HostKeyUnknown and trusts then retries', async () => {
@@ -145,7 +162,7 @@ describe('useConnectSession', () => {
       await result.current.connect(profile);
     });
 
-    expect(result.current.hostKeyDialog).toMatchObject({
+    expect(hostKeyDialog()).toMatchObject({
       open: true,
       host: 'h',
       port: 22,
@@ -154,14 +171,14 @@ describe('useConnectSession', () => {
     });
 
     await act(async () => {
-      result.current.hostKeyDialog.onTrust();
+      hostKeyDialog().onTrust();
     });
 
     await waitFor(() =>
       expect(vi.mocked(invokeCreateSession)).toHaveBeenCalledTimes(2),
     );
     expect(vi.mocked(invokeTrustHost)).toHaveBeenCalledWith('h', 22);
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(hostKeyDialog().open).toBe(false);
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
       sessionId: 's1',
       profileId: 'p1',
@@ -180,13 +197,13 @@ describe('useConnectSession', () => {
       await result.current.connect(profile);
     });
 
-    expect(result.current.hostKeyDialog).toMatchObject({
+    expect(hostKeyDialog()).toMatchObject({
       open: true,
       host: 'h',
       port: 2222,
       mismatch: true,
     });
-    expect(result.current.hostKeyDialog.fingerprint).toBeUndefined();
+    expect(hostKeyDialog().fingerprint).toBeUndefined();
   });
 
   it('shows a toast and keeps dialog closed on other errors', async () => {
@@ -207,8 +224,11 @@ describe('useConnectSession', () => {
       await result.current.connect(profile);
     });
 
-    expect(addToast).toHaveBeenCalledWith('boom', 'error');
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(addToast).toHaveBeenCalledWith(
+      '操作失败，请重试；详细错误信息已记录到日志。',
+      'error',
+    );
+    expect(hostKeyDialog().open).toBe(false);
   });
 
   it('shows the original message for non-recoverable Other errors', async () => {
@@ -233,8 +253,11 @@ describe('useConnectSession', () => {
       await result.current.connect(passwordProfile);
     });
 
-    expect(addToast).toHaveBeenCalledWith('authentication failed', 'error');
-    expect(result.current.hostKeyDialog.open).toBe(false);
+    expect(addToast).toHaveBeenCalledWith(
+      '身份验证失败，请检查用户名、密码或 SSH 密钥。',
+      'error',
+    );
+    expect(hostKeyDialog().open).toBe(false);
   });
 
   it('prompts for replacement key on keychain key not found and retries', async () => {
@@ -254,6 +277,7 @@ describe('useConnectSession', () => {
         payload: { message: 'keychain key not found: old-key' },
       })
       .mockResolvedValueOnce(SUMMARY);
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValueOnce('main');
     vi.mocked(promptForMissingKeychainKey).mockResolvedValueOnce(recoveredProfile);
 
     const { result } = renderHook(() => useConnectSession());
@@ -262,7 +286,7 @@ describe('useConnectSession', () => {
       await result.current.connect(keychainProfile);
     });
 
-    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile);
+    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile, 'main');
     expect(invokeCreateSession).toHaveBeenCalledTimes(2);
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
@@ -290,6 +314,7 @@ describe('useConnectSession', () => {
       type: 'Other',
       payload: { message: 'keychain key not found: old-key' },
     });
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValueOnce('main');
 
     const { result } = renderHook(() => useConnectSession());
 
@@ -297,12 +322,53 @@ describe('useConnectSession', () => {
       await result.current.connect(keychainProfile);
     });
 
-    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile);
+    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile, 'main');
     expect(addToast).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().sessions).toHaveLength(0);
   });
 
-  it('closeHostKeyDialog resets to the closed default', async () => {
+  it('recovers a missing jump-host key and retries', async () => {
+    const jumpProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+      password: 'target-pass',
+      jumpHost: {
+        host: 'jump',
+        port: 22,
+        username: 'ju',
+        authMethod: 'key',
+        keychainKeyId: 'old-jump-key',
+      },
+    };
+    const recoveredProfile: ConnectionProfile = {
+      ...jumpProfile,
+      jumpHost: {
+        ...jumpProfile.jumpHost!,
+        keychainKeyId: 'new-jump-key',
+      },
+    };
+
+    vi.mocked(invokeCreateSession)
+      .mockRejectedValueOnce({
+        type: 'Other',
+        payload: { message: 'keychain key not found: old-jump-key' },
+      })
+      .mockResolvedValueOnce(SUMMARY);
+    vi.mocked(getMissingKeychainKeyTarget).mockReturnValueOnce('jump');
+    vi.mocked(promptForMissingKeychainKey).mockResolvedValueOnce(recoveredProfile);
+
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(jumpProfile);
+    });
+
+    expect(promptForMissingKeychainKey).toHaveBeenCalledWith(jumpProfile, 'jump');
+    expect(invokeCreateSession).toHaveBeenCalledTimes(2);
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+  });
+
+  it('closeDialog resets to the closed default', async () => {
     vi.mocked(invokeCreateSession).mockRejectedValueOnce({
       type: 'HostKeyUnknown',
       payload: { host: 'h', port: 22, fingerprint: 'fp' },
@@ -313,19 +379,19 @@ describe('useConnectSession', () => {
     await act(async () => {
       await result.current.connect(profile);
     });
-    expect(result.current.hostKeyDialog.open).toBe(true);
+    expect(hostKeyDialog().open).toBe(true);
 
     act(() => {
-      result.current.closeHostKeyDialog();
+      useHostKeyDialogStore.getState().closeDialog();
     });
 
-    expect(result.current.hostKeyDialog).toMatchObject({
+    expect(hostKeyDialog()).toMatchObject({
       open: false,
       host: '',
       port: 22,
       mismatch: false,
     });
-    expect(result.current.hostKeyDialog.onTrust).toBeInstanceOf(Function);
+    expect(hostKeyDialog().onTrust).toBeInstanceOf(Function);
   });
 
   it('persists a password entered via the prompt after a successful connection', async () => {
@@ -363,6 +429,29 @@ describe('useConnectSession', () => {
       await result.current.connect(passwordProfile);
     });
 
+    expect(invokeStoreProfilePassword).not.toHaveBeenCalled();
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+  });
+
+  it('does not re-persist a password loaded from the profile keychain', async () => {
+    const passwordProfile: ConnectionProfile = {
+      ...profile,
+      authMethod: 'password',
+    };
+    useProfileStore.setState({ profiles: [passwordProfile] });
+    vi.mocked(invokeRetrieveProfilePassword).mockResolvedValueOnce('saved-secret');
+    vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
+
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(passwordProfile);
+    });
+
+    expect(invokeRetrieveProfilePassword).toHaveBeenCalledWith('p1');
+    expect(invokeCreateSession).toHaveBeenCalledWith(expect.objectContaining({
+      password: 'saved-secret',
+    }));
     expect(invokeStoreProfilePassword).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
   });

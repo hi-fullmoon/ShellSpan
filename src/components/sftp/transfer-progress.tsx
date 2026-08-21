@@ -22,10 +22,10 @@ function normalizeTransferPath(path: string): string {
 // Remote-scoped operations (delete/download/remote-copy) identify their batch
 // by top-level paths; display the current entry as `topName/sub/...` so deep
 // folder trees stay readable. Uploads carry a local source path that is not
-// relative to the operation's `paths`, so they show the full path instead.
+// relative to the operation's `paths`, so they show just the file name.
 function displayTransferPath(operation: TransferOperation): string {
   const current = normalizeTransferPath(operation.currentPath ?? operation.operationId);
-  if (operation.kind === 'upload') return current;
+  if (operation.kind === 'upload') return current.split('/').pop() || current;
   for (const root of operation.paths ?? []) {
     const normalizedRoot = normalizeTransferPath(root);
     if (normalizedRoot === '/') continue;
@@ -103,10 +103,11 @@ export const TransferProgress: React.FC = () => {
   const cancelOperation = useTransferStore((state) => state.cancelOperation);
   const completedTimers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  // The store prepends new operations; render oldest-first so the list reads
-  // in enqueue order — a queued batch that starts keeps its row position
-  // instead of jumping above rows enqueued earlier.
-  const orderedOperations = React.useMemo(() => [...operations].reverse(), [operations]);
+  // The store prepends new operations, so the list renders newest-first: a
+  // freshly queued batch lands on top while the running batch sinks to the
+  // bottom. A queued batch that starts keeps its row — the real operation
+  // reuses the pending row's id instead of being prepended as a new entry.
+  const orderedOperations = operations;
 
   React.useEffect(() => {
     const completedIds = new Set(

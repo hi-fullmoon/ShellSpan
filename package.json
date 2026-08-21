@@ -1,7 +1,7 @@
 {
   "name": "termbridge",
   "private": true,
-  "version": "2.0.36",
+  "version": "2.0.47",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "version": "bash scripts/bump-version.sh",
+    "version": "node scripts/bump-version.mjs",
     "changelog": "git-cliff -o CHANGELOG.md"
   },
   "dependencies": {
@@ -26,6 +26,7 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
+    "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

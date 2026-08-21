@@ -41,7 +41,7 @@ describe('TransferProgress', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByText('/tmp/apple-touch-icon.png')).toBeInTheDocument();
+    expect(screen.getByText('apple-touch-icon.png')).toBeInTheDocument();
 
     await user.hover(screen.getByText('sftp.transfer.uploadFailed'));
     expect(await screen.findByText('connection lost')).toHaveAttribute(
@@ -95,7 +95,7 @@ describe('TransferProgress', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
-    expect(screen.getByText('/tmp/apple-touch-icon.png').parentElement).toHaveClass(
+    expect(screen.getByText('apple-touch-icon.png').parentElement).toHaveClass(
       'h-8',
       'bg-app-surface-muted/60',
     );
@@ -336,10 +336,10 @@ describe('TransferProgress', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
-    expect(screen.getByText('/tmp/apple-touch-icon.png')).toHaveClass(
+    expect(screen.getByText('apple-touch-icon.png')).toHaveClass(
       'text-app-text',
     );
-    expect(screen.getByText('/tmp/apple-touch-icon.png')).not.toHaveClass(
+    expect(screen.getByText('apple-touch-icon.png')).not.toHaveClass(
       'text-destructive',
       'line-through',
     );
@@ -349,6 +349,6 @@ describe('TransferProgress', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
-    expect(screen.getByText('/tmp/apple-touch-icon.png').parentElement!.querySelector('svg')).toHaveClass('size-4');
+    expect(screen.getByText('apple-touch-icon.png').parentElement!.querySelector('svg')).toHaveClass('size-4');
   });
 });

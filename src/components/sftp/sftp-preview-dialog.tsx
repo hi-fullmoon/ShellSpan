@@ -1,5 +1,6 @@
 import React from 'react';
 import { Dialog } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useLastValue } from '@/hooks/useLastValue';
 import { formatSize } from '@/lib/sftp-utils';
@@ -35,9 +36,16 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
         <SftpDialogHeader title={t('sftp.preview.title')} />
         <SftpDialogBody className="gap-3">
           <div className="flex items-center justify-between gap-4 rounded-md border border-app-border bg-app-surface-muted/35 px-3 py-2 text-xs text-app-text-soft">
-            <span className="truncate font-medium text-app-text" title={displayContent.name}>
-              {displayContent.name}
-            </span>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="truncate font-medium text-app-text" />
+                }
+              >
+                {displayContent.name}
+              </TooltipTrigger>
+              <TooltipContent className="break-all">{displayContent.name}</TooltipContent>
+            </Tooltip>
             <span className="shrink-0 font-mono">{formatSize(Number(displayContent.size))}</span>
           </div>
           {!displayContent.isText ? (

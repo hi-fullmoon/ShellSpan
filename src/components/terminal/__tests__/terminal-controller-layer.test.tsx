@@ -91,6 +91,48 @@ describe('TerminalControllerLayer', () => {
     expect(terminalRegistry.get('s1')).toBeUndefined();
   });
 
+  it('writes a disconnected hint into restored sessions', async () => {
+    render(<TerminalControllerLayer />);
+    act(() => {
+      useTerminalStore.getState().addRestoredSessions([
+        {
+          sessionId: 's1',
+          title: 's1',
+          host: 'h',
+          port: 22,
+          username: 'u',
+          profileId: 'p1',
+        },
+      ]);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const controller = terminalRegistry.get('s1');
+    expect(controller).toBeDefined();
+    const buffer = controller!.terminal.buffer.active;
+    const content = Array.from(
+      { length: buffer.length },
+      (_, index) => buffer.getLine(index)?.translateToString(true) ?? '',
+    ).join('\n');
+    expect(content).toContain('terminal.notice.disconnectedHint');
+  });
+
+  it('does not write a disconnected hint for fresh connecting sessions', () => {
+    render(<TerminalControllerLayer />);
+    act(() => {
+      addSession('s1');
+    });
+    const controller = terminalRegistry.get('s1');
+    expect(controller).toBeDefined();
+    const buffer = controller!.terminal.buffer.active;
+    const content = Array.from(
+      { length: buffer.length },
+      (_, index) => buffer.getLine(index)?.translateToString(true) ?? '',
+    ).join('\n');
+    expect(content).not.toContain('terminal.notice.disconnectedHint');
+  });
+
   it('renders null', () => {
     const { container } = render(<TerminalControllerLayer />);
     expect(container.firstChild).toBeNull();

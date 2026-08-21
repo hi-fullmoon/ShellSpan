@@ -68,21 +68,41 @@ describe('detectKeyType', () => {
 describe('keychainStore hydrate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useKeychainStore.setState({ keys: [], initialized: false });
+    useKeychainStore.setState({ keys: [], initialized: false, loadError: undefined });
   });
 
-  it('maps password-kind credentials to ecdsa key type on hydrate', async () => {
+  it('preserves backend metadata on hydrate', async () => {
     invokeListKeyCredentials.mockResolvedValue([
-      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password' },
-      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile' },
+      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.termbridge.profile-password' },
+      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.termbridge.key' },
     ]);
 
     await useKeychainStore.getState().hydrate();
 
     expect(useKeychainStore.getState().keys).toEqual([
-      { id: 'profile-1', label: 'Server password', keyType: 'ecdsa', kind: 'password' },
-      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile' },
+      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.termbridge.profile-password' },
+      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.termbridge.key' },
     ]);
+  });
+
+  it('preserves existing keys and records the error when hydrate fails', async () => {
+    const existing = {
+      id: 'key-existing',
+      label: 'Existing key',
+      keyType: 'ed25519',
+      kind: 'keyFile' as const,
+      service: 'com.termbridge.key',
+    };
+    useKeychainStore.setState({ keys: [existing] });
+    invokeListKeyCredentials.mockRejectedValueOnce(new Error('database unavailable'));
+
+    await useKeychainStore.getState().hydrate();
+
+    expect(useKeychainStore.getState()).toMatchObject({
+      keys: [existing],
+      initialized: false,
+      loadError: 'database unavailable',
+    });
   });
 });
 

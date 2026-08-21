@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -16,7 +16,6 @@ import { TerminalTabBar } from './terminal-tab-bar';
 import { TerminalPane } from './terminal-pane';
 import { NewTabMenu } from './new-tab-menu';
 import { TerminalContextMenu } from './terminal-context-menu';
-import { HostKeyDialog } from './host-key-dialog';
 import {
   findAdjacentTerminalGroup,
   findTerminalGroup,
@@ -46,7 +45,8 @@ const Terminal: React.FC = () => {
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
   const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
-  const { connect, openLocal, hostKeyDialog, closeHostKeyDialog } = useConnectSession();
+  const activeSection = useAppStore((state) => state.activeSection);
+  const { connect, openLocal } = useConnectSession();
 
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
@@ -67,6 +67,11 @@ const Terminal: React.FC = () => {
   const [focusedSlot, setFocusedSlot] = useState<TerminalGroupSlot>('first');
   const nextGroupIdRef = useRef(3);
   const restoredLayoutAppliedRef = useRef(false);
+  const pinnedSessionKey = useMemo(
+    () => sessions.filter((session) => session.pinned).map((session) => session.sessionId).join('\0'),
+    [sessions],
+  );
+  const splitEnabled = split !== null;
 
   const focusGroup = useCallback((slot: TerminalGroupSlot): void => {
     focusedGroupRef.current = slot;
@@ -84,6 +89,18 @@ const Terminal: React.FC = () => {
       terminalRegistry.get(sessionId)?.focus();
     });
   }, []);
+
+  // Switching back to the terminal section refocuses the terminal in the
+  // group the user focused last (or the active session when not split).
+  const prevSectionRef = useRef(activeSection);
+  useEffect(() => {
+    const prevSection = prevSectionRef.current;
+    prevSectionRef.current = activeSection;
+    if (prevSection === 'terminal' || activeSection !== 'terminal') return;
+    const focusedGroup = split ? findTerminalGroup(split, focusedGroupRef.current) : null;
+    const sessionId = focusedGroup?.activeSessionId || activeSessionId;
+    if (sessionId) focusSession(sessionId);
+  }, [activeSection, activeSessionId, split, focusSession]);
 
   useEffect(() => {
     if (restoredLayoutAppliedRef.current) return;
@@ -121,19 +138,26 @@ const Terminal: React.FC = () => {
     const availableIds = new Set(sessions.map((session) => session.sessionId));
     const syncNode = (node: TerminalLayoutNode): TerminalLayoutNode => {
       if (node.kind === 'split') {
-        return { ...node, first: syncNode(node.first), second: syncNode(node.second) };
+        const first = syncNode(node.first);
+        const second = syncNode(node.second);
+        return first === node.first && second === node.second ? node : { ...node, first, second };
       }
       const ids = node.sessionIds.filter((id) => availableIds.has(id));
-      return {
-        ...node,
-        sessionIds: ids,
-        activeSessionId:
-          node.id === focusedGroupRef.current && activeSessionId && ids.includes(activeSessionId)
-            ? activeSessionId
-            : ids.includes(node.activeSessionId)
-              ? node.activeSessionId
-              : ids[ids.length - 1] ?? '',
-      };
+      const nextActiveSessionId =
+        node.id === focusedGroupRef.current && activeSessionId && ids.includes(activeSessionId)
+          ? activeSessionId
+          : ids.includes(node.activeSessionId)
+            ? node.activeSessionId
+            : ids[ids.length - 1] ?? '';
+      // Return the original node when nothing changed so the layout keeps
+      // referential equality and the setSplit below can be skipped.
+      const unchanged =
+        nextActiveSessionId === node.activeSessionId
+        && ids.length === node.sessionIds.length
+        && ids.every((id, index) => id === node.sessionIds[index]);
+      return unchanged
+        ? node
+        : { ...node, sessionIds: ids, activeSessionId: nextActiveSessionId };
     };
     let nextLayout = syncNode(split);
     const assignedIds = new Set(getTerminalGroups(nextLayout).flatMap((group) => group.sessionIds));
@@ -160,21 +184,20 @@ const Terminal: React.FC = () => {
       if (nextActiveId) useTerminalStore.getState().setActiveSession(nextActiveId);
       return;
     }
-    setSplit(pruned);
+    // Skip the state update (and the re-renders, pin repartition and workspace
+    // save it would trigger) when the layout is referentially unchanged.
+    if (pruned !== split) setSplit(pruned);
   }, [sessions]);
 
   // The layout's sessionIds are the source of truth for tab order while split,
   // so pin toggles (which only reorder the global sessions array) are mirrored
   // into every group to keep pinned tabs at the front.
   useEffect(() => {
-    if (!split) return;
-    const pinnedIds = new Set(
-      sessions.filter((session) => session.pinned).map((session) => session.sessionId),
-    );
+    const pinnedIds = new Set(pinnedSessionKey ? pinnedSessionKey.split('\0') : []);
     setSplit((current) => (current
       ? repartitionTerminalLayoutPinnedFirst(current, (id) => pinnedIds.has(id)) as TerminalSplitState
       : current));
-  }, [sessions, split]);
+  }, [pinnedSessionKey, splitEnabled]);
 
   // Shortcut-based tab changes target the active group, just like VS Code editor groups.
   useEffect(() => {
@@ -183,8 +206,10 @@ const Terminal: React.FC = () => {
     if (!group) return;
     focusGroup(group.id);
     if (group.activeSessionId === activeSessionId) return;
-    setSplit(updateTerminalGroup(split, group.id, (current) => ({ ...current, activeSessionId })) as TerminalSplitState);
-  }, [activeSessionId, focusGroup]);
+    setSplit((current) => (current
+      ? updateTerminalGroup(current, group.id, (currentGroup) => ({ ...currentGroup, activeSessionId })) as TerminalSplitState
+      : current));
+  }, [activeSessionId, focusGroup, split]);
 
   const getGroupRegionAtPoint = useCallback((x: number, y: number): {
     slot: TerminalGroupSlot;
@@ -499,7 +524,28 @@ const Terminal: React.FC = () => {
           'relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-app-bg',
           focused && 'ring-1 ring-inset ring-app-primary/70',
         )}
-        onPointerDown={() => {
+        onPointerDownCapture={(e) => {
+          // macOS tap-to-click: the tap that focuses an inactive group would
+          // otherwise reach xterm as mousedown, so the continued touchpad
+          // motion is treated as a drag and starts a selection. Swallow
+          // pointerdowns landing on the terminal screen of an inactive group
+          // and just focus the group; tab bar presses are left untouched.
+          if (focused) return;
+          if (!(e.target as HTMLElement).closest('[data-terminal-content]')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          focusGroup(slot);
+          if (groupActiveSession) {
+            useTerminalStore.getState().setActiveSession(groupActiveSession.sessionId);
+            focusSession(groupActiveSession.sessionId);
+          }
+        }}
+        onPointerDown={(e) => {
+          // Tab presses activate on pointerdown too and already focus the
+          // group via activateGroupTab. Handling them here as well would
+          // re-activate the render-time groupActiveSession, clobbering a
+          // same-press tab switch with the stale session.
+          if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
           focusGroup(slot);
           if (groupActiveSession) {
             useTerminalStore.getState().setActiveSession(groupActiveSession.sessionId);
@@ -542,6 +588,11 @@ const Terminal: React.FC = () => {
             />
           )}
         </div>
+        {!focused && (
+          // Mask marking this split group as inactive. Clicks pass through to
+          // the wrapper's onPointerDown, which refocuses the group.
+          <div className="pointer-events-none absolute inset-0 z-10 bg-app-bg/30" />
+        )}
       </div>
     );
   };
@@ -628,15 +679,6 @@ const Terminal: React.FC = () => {
         isSplit={Boolean(split)}
         onSplit={createOrArrangeSplit}
         onUnsplit={() => setSplit(null)}
-      />
-      <HostKeyDialog
-        open={hostKeyDialog.open}
-        onClose={closeHostKeyDialog}
-        host={hostKeyDialog.host}
-        port={hostKeyDialog.port}
-        fingerprint={hostKeyDialog.fingerprint}
-        mismatch={hostKeyDialog.mismatch}
-        onTrust={hostKeyDialog.onTrust}
       />
     </div>
   );

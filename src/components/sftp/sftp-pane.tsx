@@ -140,6 +140,12 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       }
     }, [showSearch]);
 
+    // The filter only applies to the directory it was typed in; carrying it
+    // across a path change would hide the new listing behind a stale query.
+    useEffect(() => {
+      setSearchQuery('');
+    }, [path]);
+
     // Escape dismisses the search the same way the icon and ✕ do (clear +
     // collapse). It stands down while a context/bookmark menu owns the key so
     // the menu still handles its own Escape first.

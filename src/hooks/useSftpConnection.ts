@@ -13,9 +13,15 @@ import {
   invokeOpenRemoteFile,
   invokePreviewRemoteFile,
   invokeRenameRemotePath,
+  invokeResolveRemoteEntryOwners,
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
 } from '@/lib/tauri';
+import {
+  getCachedDirectoryListing,
+  invalidateDirectoryListingCache,
+  setCachedDirectoryListing,
+} from '@/lib/directory-listing-cache';
 import {
   getSftpPaneConnection,
   getSftpPaneConnectionKey,
@@ -26,6 +32,7 @@ import { useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
+import { normalizePortablePath } from '@/lib/path-utils';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import {
@@ -35,6 +42,9 @@ import {
 import type { SftpSide } from '@/stores/sftpStore';
 import type {
   ReadRemoteFileResponse,
+  RemoteDirectoryListing,
+  RemoteFileEntry,
+  TransferBatchResult,
   UploadConflictPolicy,
 } from '@/types';
 
@@ -42,6 +52,29 @@ const logger = createLogger('sftp');
 
 function createOperationId(connectionId: string, kind: string): string {
   return `${connectionId}-${kind}-${crypto.randomUUID()}`;
+}
+
+function pathBaseName(path: string): string {
+  const normalized = normalizePortablePath(path).replace(/\/+$/, '');
+  return normalized.split('/').filter(Boolean).pop() ?? path;
+}
+
+function remoteJoin(directory: string, name: string): string {
+  const base = directory === '/' ? '' : directory.replace(/\/+$/, '');
+  return `${base}/${name}`;
+}
+
+function failedTransferItems(result: TransferBatchResult) {
+  return result.items.filter((item) => item.status === 'failed');
+}
+
+function summarizeFailedItems(kind: 'upload' | 'download', result: TransferBatchResult): string | null {
+  const failed = failedTransferItems(result);
+  if (!failed.length) return null;
+  const details = failed
+    .map((item) => `${item.sourcePath}: ${item.error ?? 'unknown error'}`)
+    .join('; ');
+  return `failed to ${kind} ${failed.length} of ${result.items.length} entries: ${details}`;
 }
 
 async function runWithConfiguredRetries(
@@ -85,6 +118,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   downloadRemotePaths: (remotePaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[]) => Promise<void>;
   openRemoteFile: (path: string) => Promise<void>;
   previewRemoteFile: (path: string) => Promise<ReadRemoteFileResponse>;
+  invalidatePaneListingCache: () => void;
 } {
   const remoteConnection = getSftpPaneConnection(connection, side);
   const remoteConnectionKey = getSftpPaneConnectionKey(connection, side);
@@ -108,21 +142,96 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
     (state) => state.markOperationCancelled,
   );
 
+  // Fills in owner/group names after the listing is already on screen: ids
+  // that miss the backend identity cache are resolved via a single remote
+  // exec, then merged into the entries if the pane is still on this path.
+  const resolveEntryOwners = useCallback(
+    async (listing: RemoteDirectoryListing, isLatest: () => boolean) => {
+      const ownerIds = [
+        ...new Set(
+          listing.entries
+            .filter((entry) => entry.ownerUid !== undefined && !entry.ownerName)
+            .map((entry) => entry.ownerUid as number),
+        ),
+      ];
+      const groupIds = [
+        ...new Set(
+          listing.entries
+            .filter((entry) => entry.groupGid !== undefined && !entry.groupName)
+            .map((entry) => entry.groupGid as number),
+        ),
+      ];
+      if (ownerIds.length === 0 && groupIds.length === 0) return;
+      try {
+        const owners = await invokeResolveRemoteEntryOwners({
+          ...remoteConnection,
+          ownerIds,
+          groupIds,
+        });
+        if (!isLatest()) return;
+        const current = useSftpStore
+          .getState()
+          .connections.find((item) => item.id === connection.id);
+        if (!current) return;
+        const currentPath = side === 'local' ? current.localPath : current.remotePath;
+        if (currentPath !== listing.path) return;
+        const currentEntries = (side === 'local'
+          ? current.localEntries
+          : current.remoteEntries) as RemoteFileEntry[];
+        const merged = currentEntries.map((entry) => ({
+          ...entry,
+          ownerName:
+            entry.ownerName ??
+            (entry.ownerUid !== undefined ? owners.ownerNames[entry.ownerUid] : undefined),
+          groupName:
+            entry.groupName ??
+            (entry.groupGid !== undefined ? owners.groupNames[entry.groupGid] : undefined),
+        }));
+        setEntries(connection.id, side, merged);
+        // Keep the directory cache in sync so revisiting this path shows the
+        // resolved names instantly too.
+        const requestKey = `${connection.id}:${side}`;
+        setCachedDirectoryListing(`${requestKey}:${listing.path}`, {
+          ...listing,
+          entries: merged,
+        });
+      } catch (error) {
+        logger.warn('Failed to resolve remote entry owners', error);
+      }
+    },
+    [connection.id, remoteConnection, setEntries, side],
+  );
+
   const loadRemoteDirectory = useCallback(
     async (path?: string) => {
       const requestKey = `${connection.id}:${side}`;
       const requestId = nextDirectoryListRequestId(requestKey);
       const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId);
-      setLoading(connection.id, side, true);
+      const cacheKey = `${requestKey}:${path ?? ''}`;
+      const cached = getCachedDirectoryListing(cacheKey);
+      if (cached) {
+        // Render the cached listing instantly and revalidate below; only a
+        // cold load shows the loading state.
+        setPath(connection.id, side, cached.path);
+        setEntries(connection.id, side, cached.entries);
+      } else {
+        setLoading(connection.id, side, true);
+      }
       setError(connection.id, side);
+      const applyListing = (listing: RemoteDirectoryListing): void => {
+        setPath(connection.id, side, listing.path);
+        setEntries(connection.id, side, listing.entries);
+        setCachedDirectoryListing(cacheKey, listing);
+        setCachedDirectoryListing(`${requestKey}:${listing.path}`, listing);
+        void resolveEntryOwners(listing, isLatest);
+      };
       try {
         const listing = await invokeListRemoteDirectory({
           ...remoteConnection,
           path,
         });
         if (!isLatest()) return;
-        setPath(connection.id, side, listing.path);
-        setEntries(connection.id, side, listing.entries);
+        applyListing(listing);
       } catch (error) {
         logger.error(`Failed to list remote directory${path ? `: ${path}` : ''}`, error);
 
@@ -146,8 +255,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
                   path,
                 });
                 if (!isLatest()) return;
-                setPath(connection.id, side, retryListing.path);
-                setEntries(connection.id, side, retryListing.entries);
+                applyListing(retryListing);
                 return;
               } catch (retryError) {
                 // Fall through to the shared error path instead of letting the
@@ -176,11 +284,18 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         }
       }
     },
-    [connection.id, connection.leftProfileId, connection.profileId, remoteConnection, setPath, setEntries, setLoading, setError, updateConnectionRequest, side],
+    [connection.id, connection.leftProfileId, connection.profileId, remoteConnection, setPath, setEntries, setLoading, setError, updateConnectionRequest, resolveEntryOwners, side],
   );
+
+  // Mutating operations invalidate this pane's cached listings up front so
+  // the reload after the mutation never flashes the pre-mutation entries.
+  const invalidatePaneListingCache = useCallback((): void => {
+    invalidateDirectoryListingCache(`${connection.id}:${side}:`);
+  }, [connection.id, side]);
 
   const createRemoteEntry = useCallback(
     async (parentPath: string, name: string, kind: 'file' | 'directory') => {
+      invalidatePaneListingCache();
       await invokeCreateRemoteEntry({
         ...remoteConnection,
         parentPath,
@@ -189,11 +304,12 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       });
       await loadRemoteDirectory(panePath);
     },
-    [remoteConnection, panePath, loadRemoteDirectory],
+    [remoteConnection, panePath, loadRemoteDirectory, invalidatePaneListingCache],
   );
 
   const renameRemotePath = useCallback(
     async (path: string, newName: string) => {
+      invalidatePaneListingCache();
       await invokeRenameRemotePath({
         ...remoteConnection,
         path,
@@ -201,11 +317,12 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       });
       await loadRemoteDirectory(panePath);
     },
-    [remoteConnection, panePath, loadRemoteDirectory],
+    [remoteConnection, panePath, loadRemoteDirectory, invalidatePaneListingCache],
   );
 
   const copyRemotePath = useCallback(
     async (sourcePath: string, destinationDirectory: string) => {
+      invalidatePaneListingCache();
       const operationId = createOperationId(connection.id, 'copy');
       const runCopy = async (): Promise<void> => {
         markOperationRunning(operationId);
@@ -263,6 +380,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const deleteRemotePaths = useCallback(
     async (paths: string[]) => {
+      invalidatePaneListingCache();
       const operationId = createOperationId(connection.id, 'delete');
       addOperation({
         operationId,
@@ -324,6 +442,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const updateRemotePermissions = useCallback(
     async (path: string, permissions: number) => {
+      invalidatePaneListingCache();
       await invokeUpdateRemotePermissions({
         ...remoteConnection,
         path,
@@ -336,18 +455,63 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const uploadLocalPaths = useCallback(
     async (localPaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'upload'), conflictPolicies: UploadConflictPolicy[] = []) => {
-      const runUpload = async (): Promise<void> => {
+      let currentLocalPaths = localPaths;
+      let currentConflictPolicies = conflictPolicies;
+      let runUpload: () => Promise<void>;
+      const setUploadOperationRunning = () => {
+        const currentTargetPaths = currentLocalPaths.map((path) =>
+          remoteJoin(destinationDirectory, pathBaseName(path)),
+        );
+        addOperation({
+          operationId,
+          kind: 'upload',
+          connectionId: remoteConnectionKey,
+          paths: currentTargetPaths,
+          currentPath: currentLocalPaths[0],
+          totalBytes: 0,
+          processedBytes: 0,
+          totalSteps: currentLocalPaths.length,
+          completedSteps: 0,
+          status: 'running',
+          retry: runUpload,
+          cancel: () => invokeCancelUpload(operationId),
+        });
+      };
+      runUpload = async (): Promise<void> => {
         markOperationRunning(operationId);
         try {
+          setUploadOperationRunning();
           await runWithConfiguredRetries(
-            () =>
-              invokeUploadLocalPaths({
+            async () => {
+              const batchResult = await invokeUploadLocalPaths({
                 ...remoteConnection,
                 destinationDirectory,
-                localPaths,
-                conflictPolicies,
+                localPaths: currentLocalPaths,
+                conflictPolicies: currentConflictPolicies,
                 operationId,
-              }),
+              });
+              const failureMessage = summarizeFailedItems('upload', batchResult);
+              if (failureMessage) {
+                const failedSources = new Set(
+                  failedTransferItems(batchResult).map((item) =>
+                    normalizePortablePath(item.sourcePath),
+                  ),
+                );
+                const previousLocalPaths = currentLocalPaths;
+                const previousPolicies = currentConflictPolicies;
+                const nextLocalPaths = previousLocalPaths.filter((path) =>
+                  failedSources.has(normalizePortablePath(path)),
+                );
+                if (nextLocalPaths.length > 0) {
+                  currentLocalPaths = nextLocalPaths;
+                  currentConflictPolicies = previousPolicies.filter((_, index) =>
+                    failedSources.has(normalizePortablePath(previousLocalPaths[index] ?? '')),
+                  );
+                  setUploadOperationRunning();
+                }
+                throw new Error(failureMessage);
+              }
+            },
             () =>
               useTransferStore.getState().operations.find(
                 (item) => item.operationId === operationId,
@@ -380,20 +544,6 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         }
       };
 
-      addOperation({
-        operationId,
-        kind: 'upload',
-        connectionId: remoteConnectionKey,
-        paths: [destinationDirectory],
-        currentPath: localPaths[0],
-        totalBytes: 0,
-        processedBytes: 0,
-        totalSteps: localPaths.length,
-        completedSteps: 0,
-        status: 'running',
-        retry: runUpload,
-        cancel: () => invokeCancelUpload(operationId),
-      });
       await runUpload();
     },
     [
@@ -411,16 +561,59 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const downloadRemotePaths = useCallback(
     async (remotePaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'download'), conflictPolicies: UploadConflictPolicy[] = []) => {
-      const runDownload = async (): Promise<void> => {
+      let currentRemotePaths = remotePaths;
+      let currentConflictPolicies = conflictPolicies;
+      let runDownload: () => Promise<void>;
+      const setDownloadOperationRunning = () => {
+        addOperation({
+          operationId,
+          kind: 'download',
+          connectionId: remoteConnectionKey,
+          paths: currentRemotePaths,
+          currentPath: currentRemotePaths[0],
+          totalBytes: 0,
+          processedBytes: 0,
+          totalSteps: currentRemotePaths.length,
+          completedSteps: 0,
+          status: 'running',
+          retry: runDownload,
+          cancel: () => invokeCancelDownload(operationId),
+        });
+      };
+      runDownload = async (): Promise<void> => {
         try {
+          setDownloadOperationRunning();
           await runWithConfiguredRetries(
-            () => invokeDownloadRemotePaths({
-              ...remoteConnection,
-              remotePaths,
-              destinationDirectory,
-              conflictPolicies,
-              operationId,
-            }),
+            async () => {
+              const batchResult = await invokeDownloadRemotePaths({
+                ...remoteConnection,
+                remotePaths: currentRemotePaths,
+                destinationDirectory,
+                conflictPolicies: currentConflictPolicies,
+                operationId,
+              });
+              const failureMessage = summarizeFailedItems('download', batchResult);
+              if (failureMessage) {
+                const failedSources = new Set(
+                  failedTransferItems(batchResult).map((item) =>
+                    normalizePortablePath(item.sourcePath),
+                  ),
+                );
+                const previousRemotePaths = currentRemotePaths;
+                const previousPolicies = currentConflictPolicies;
+                const nextRemotePaths = previousRemotePaths.filter((path) =>
+                  failedSources.has(normalizePortablePath(path)),
+                );
+                if (nextRemotePaths.length > 0) {
+                  currentRemotePaths = nextRemotePaths;
+                  currentConflictPolicies = previousPolicies.filter((_, index) =>
+                    failedSources.has(normalizePortablePath(previousRemotePaths[index] ?? '')),
+                  );
+                  setDownloadOperationRunning();
+                }
+                throw new Error(failureMessage);
+              }
+            },
             () =>
               useTransferStore.getState().operations.find(
                 (item) => item.operationId === operationId,
@@ -452,20 +645,6 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           throw error;
         }
       };
-      addOperation({
-        operationId,
-        kind: 'download',
-        connectionId: remoteConnectionKey,
-        paths: remotePaths,
-        currentPath: remotePaths[0],
-        totalBytes: 0,
-        processedBytes: 0,
-        totalSteps: remotePaths.length,
-        completedSteps: 0,
-        status: 'running',
-        retry: runDownload,
-        cancel: () => invokeCancelDownload(operationId),
-      });
       await runDownload();
     },
     [remoteConnection, remoteConnectionKey, connection.id, addOperation, markOperationFailed, markOperationCompleted, markOperationCancelled],
@@ -502,5 +681,6 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
     downloadRemotePaths,
     openRemoteFile,
     previewRemoteFile,
+    invalidatePaneListingCache,
   };
 }

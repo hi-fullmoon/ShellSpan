@@ -71,6 +71,20 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
 
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
+const RESIZE_DEBOUNCE_MS = 100;
+
+// After a reconnect the channel reports connected while the remote shell is
+// still starting up (sourcing rc files, printing its first prompt). Input
+// sent in that window is echoed into the middle of the prompt output,
+// leaving garbled duplicate prompt lines, so it is dropped briefly.
+const RECONNECT_INPUT_GRACE_MS = 800;
+
+// Hides the DOM renderer's scroll viewport layer. With the webgl renderer
+// the viewport only carries the scrollbar, so it must stay visible.
+const VIEWPORT_HIDDEN_CLASS = '[&_.xterm-viewport]:opacity-0';
+
+type RendererMode = 'webgl' | 'dom';
+
 function trimUrlPunctuation(url: string): string {
   return url.replace(/[),.;!?\]}]+$/g, '');
 }
@@ -167,6 +181,7 @@ export interface TerminalController {
   focus(): void;
   simulateInput(data: string): void;
   write(chunk: string): void;
+  writeDisconnectedHint(): void;
   rebindSession(sessionId: string): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
   dispose(): void;
@@ -190,9 +205,19 @@ class TerminalControllerImpl implements TerminalController {
   private readonly requestReconnect: RequestReconnectCallback;
   private inputBlockedNoticeRef = false;
   private reconnectRequestedRef = false;
+  private inputGraceDeadlineRef = 0;
   private listenerGeneration = 0;
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
+  private resizeDebounceTimer: number | null = null;
+  private pendingDimensions: { cols: number; rows: number } | null = null;
+  // Last size forwarded to the pty. The backend relays every resize as an
+  // SSH window-change even when the size is unchanged, and the resulting
+  // SIGWINCH makes the remote shell redraw its prompt — sometimes leaving
+  // duplicated/garbled prompt lines — so identical resizes are dropped here.
+  private lastSentDimensions: { cols: number; rows: number } | null = null;
+  private rendererMode: RendererMode = 'dom';
+  private rendererInitialized = false;
 
   constructor(
     sessionId: string,
@@ -227,8 +252,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.loadAddon(this.searchAddon);
 
     this.container = document.createElement('div');
-    this.container.className =
-      'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-1';
+    this.container.className = 'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-[4px_0_4px_4px]';
 
     this.unlisten = {
       data: undefined,
@@ -251,6 +275,10 @@ class TerminalControllerImpl implements TerminalController {
     const status = this.getStatus(this.sessionId);
 
     if (status === 'connected') {
+      if (Date.now() < this.inputGraceDeadlineRef) {
+        logger.debug(`Dropped input during post-reconnect grace period session=${this.sessionId}`);
+        return;
+      }
       void invokeWriteSession(this.sessionId, data).catch((error) => {
         logger.error(`Failed to write input to session ${this.sessionId}`, error);
         this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
@@ -300,6 +328,22 @@ class TerminalControllerImpl implements TerminalController {
       element.style.removeProperty('background-color');
       viewport?.style.removeProperty('background-color');
     }
+  }
+
+  // Renderer addons need the terminal element, so they are loaded once after
+  // the first successful open().
+  // NOTE: the WebGL renderer (@xterm/addon-webgl) is temporarily disabled;
+  // the DOM renderer is always used. To restore it, re-add the WebglAddon
+  // import and the try/catch block that loads it here.
+  private setupRenderer(): void {
+    if (this.rendererInitialized) return;
+    this.rendererInitialized = true;
+    this.setRendererMode('dom');
+  }
+
+  private setRendererMode(mode: RendererMode): void {
+    this.rendererMode = mode;
+    this.container.classList.toggle(VIEWPORT_HIDDEN_CLASS, mode === 'dom');
   }
 
   private writeSystemLine(line: string): void {
@@ -357,7 +401,7 @@ class TerminalControllerImpl implements TerminalController {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
-      this.terminal.write(event.payload.chunk);
+      this.terminal.write(event.payload);
     });
     if (this.disposed || generation !== this.listenerGeneration) {
       dataUnlisten();
@@ -389,10 +433,14 @@ class TerminalControllerImpl implements TerminalController {
       this.inputBlockedNoticeRef = true;
       if (event.payload.retryable && this.preferences.autoReconnect && !this.reconnectRequestedRef) {
         this.reconnectRequestedRef = true;
+        const reconnectSessionId = this.sessionId;
         window.setTimeout(() => {
-          if (this.disposed) return;
+          if (this.disposed || this.sessionId !== reconnectSessionId) return;
           this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.reconnectingLabel'), t('terminal.notice.reconnectingMessage'), '36'));
-          this.requestReconnect(this.sessionId);
+          Promise.resolve(this.requestReconnect(reconnectSessionId)).finally(() => {
+            if (this.disposed || this.sessionId !== reconnectSessionId) return;
+            this.reconnectRequestedRef = false;
+          });
         }, 1500);
       }
     });
@@ -443,6 +491,10 @@ class TerminalControllerImpl implements TerminalController {
       }
     }
 
+    if (this.opened) {
+      this.setupRenderer();
+    }
+
     this.updateElementStyles();
 
     try {
@@ -454,23 +506,44 @@ class TerminalControllerImpl implements TerminalController {
     if (!this.resizeObserver) {
       this.resizeObserver = new ResizeObserver(() => {
         if (this.container.offsetParent === null) return;
-        try {
-          this.fitAddon.fit();
-        } catch {
+        const dimensions = this.fitAddon.proposeDimensions();
+        if (!dimensions) return;
+        if (dimensions.cols === this.terminal.cols && dimensions.rows === this.terminal.rows) {
+          // Grid size unchanged (most drag frames): nothing to do — the pty
+          // size is unchanged too, so no IPC either.
           return;
         }
-        invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
-          logger.warn(`Failed to resize session ${this.sessionId}`, error);
-        });
+        // Debounce the reflow itself, not just the IPC: with the webgl
+        // renderer each terminal.resize() updates the canvas CSS size
+        // immediately while the glyph texture is redrawn one frame later, so
+        // resizing on every drag frame shows the old texture squeezed into
+        // the new size — a constant compression flicker. Coalescing to a
+        // single reflow once the size settles avoids it; overflow is simply
+        // clipped while dragging.
+        this.pendingDimensions = dimensions;
+        if (this.resizeDebounceTimer !== null) {
+          window.clearTimeout(this.resizeDebounceTimer);
+        }
+        this.resizeDebounceTimer = window.setTimeout(() => {
+          this.resizeDebounceTimer = null;
+          if (this.disposed) return;
+          const pending = this.pendingDimensions;
+          this.pendingDimensions = null;
+          if (!pending) return;
+          try {
+            this.terminal.resize(pending.cols, pending.rows);
+          } catch {
+            // resize() can fail mid-teardown; harmless.
+          }
+          this.sendResize(pending.cols, pending.rows);
+        }, RESIZE_DEBOUNCE_MS);
       });
       this.resizeObserver.observe(this.container);
     }
 
     // Initial resize now that cols/rows are measurable after open().
     if (this.opened) {
-      invokeResizeSession(this.sessionId, this.terminal.cols, this.terminal.rows).catch((error) => {
-        logger.warn(`Failed to resize session ${this.sessionId}`, error);
-      });
+      this.sendResize(this.terminal.cols, this.terminal.rows);
     }
 
     this.host = host;
@@ -479,8 +552,28 @@ class TerminalControllerImpl implements TerminalController {
   detach(): void {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.cancelPendingResize();
     this.container.remove();
     this.host = null;
+  }
+
+  // Drop any scheduled debounced resize so a disposed or rebound
+  // controller never reflows or sends a resize IPC for a stale session.
+  private cancelPendingResize(): void {
+    if (this.resizeDebounceTimer !== null) {
+      window.clearTimeout(this.resizeDebounceTimer);
+      this.resizeDebounceTimer = null;
+    }
+    this.pendingDimensions = null;
+  }
+
+  private sendResize(cols: number, rows: number): void {
+    const last = this.lastSentDimensions;
+    if (last && last.cols === cols && last.rows === rows) return;
+    this.lastSentDimensions = { cols, rows };
+    invokeResizeSession(this.sessionId, cols, rows).catch((error) => {
+      logger.warn(`Failed to resize session ${this.sessionId}`, error);
+    });
   }
 
   focus(): void {
@@ -500,11 +593,18 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.write(chunk);
   }
 
+  writeDisconnectedHint(): void {
+    this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
+    this.inputBlockedNoticeRef = true;
+  }
+
   rebindSession(sessionId: string): void {
     if (this.disposed || sessionId === this.sessionId) return;
     this.clearListeners();
+    this.cancelPendingResize();
     this.sessionId = sessionId;
     this.resetNoticeState();
+    this.inputGraceDeadlineRef = Date.now() + RECONNECT_INPUT_GRACE_MS;
     void this.setupListeners();
   }
 
@@ -555,11 +655,19 @@ interface TerminalRegistry {
   updateOptions(preferences: TerminalDisplayPreferences): void;
   dispose(sessionId: string): void;
   disposeAll(): void;
+  subscribe(listener: () => void): () => void;
 }
 
 export const terminalRegistry: TerminalRegistry = (() => {
   const controllers = new Map<string, TerminalController>();
+  const listeners = new Set<() => void>();
   let preferences = DEFAULT_TERMINAL_PREFERENCES;
+
+  const notify = (): void => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
 
   return {
     create(sessionId, setStatus, setClosed, getStatus, requestReconnect) {
@@ -573,10 +681,14 @@ export const terminalRegistry: TerminalRegistry = (() => {
         setClosed,
         getStatus,
         requestReconnect,
-        (currentSessionId) => controllers.delete(currentSessionId),
+        (currentSessionId) => {
+          controllers.delete(currentSessionId);
+          notify();
+        },
         preferences,
       );
       controllers.set(sessionId, controller);
+      notify();
       return controller;
     },
     get(sessionId) {
@@ -590,6 +702,7 @@ export const terminalRegistry: TerminalRegistry = (() => {
       controllers.delete(oldSessionId);
       controller.rebindSession(newSessionId);
       controllers.set(newSessionId, controller);
+      notify();
     },
     updateOptions(nextPreferences) {
       preferences = nextPreferences;
@@ -602,12 +715,18 @@ export const terminalRegistry: TerminalRegistry = (() => {
       if (!controller) return;
       controller.dispose();
       controllers.delete(sessionId);
+      notify();
     },
     disposeAll() {
       for (const controller of controllers.values()) {
         controller.dispose();
       }
       controllers.clear();
+      notify();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
   };
 })();

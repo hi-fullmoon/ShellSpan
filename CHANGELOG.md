@@ -3,6 +3,156 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.47](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.47) - 2026-08-20
+
+
+### Bug Fixes
+
+- **tauri:** harden connection routing and local copy safety
+
+### Features
+
+- add jump-host keychain key recovery
+- connect session supports jump-host key recovery
+- **term:** prevent re-persisting keychain passwords on reconnect
+- reconnect session prompts for missing keychain key
+- **sftp:** return per-item transfer results for uploads and downloads
+- **build:** sync Cargo.lock version and avoid slow cargo check
+
+### Testing
+
+- **term:** cover paste warning and reconnect guard edge cases
+
+## [v2.0.46](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.46) - 2026-08-20
+
+
+### Bug Fixes
+
+- **terminal:** debounce copy-on-select and suppress tap-and-slide drags
+
+### Features
+
+- **sftp:** add pointerup fallback for tab activation
+- **terminal:** add pointerup fallback for tab activation
+
+## [v2.0.45](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.45) - 2026-08-20
+
+
+### Bug Fixes
+
+- **keychain:** trust current app instead of refreshing ACL on every read
+
+## [v2.0.44](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.44) - 2026-08-20
+
+
+### Features
+
+- **tauri:** use native macOS keychain APIs for credential storage
+
+### Style
+
+- **ui:** refine terminal padding and update section spacing
+
+### Testing
+
+- **hook:** mock new profile secret retrieval commands and verify lazy loading
+
+## [v2.0.43](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.43) - 2026-08-20
+
+
+### Bug Fixes
+
+- **term:** debounce reflow to eliminate canvas flicker during drag
+- decode UTF-8 incrementally across SSH output drains
+
+### Chore
+
+- add aicommit config and update gitignore
+
+### Features
+
+- **term:** add WebGL renderer with DOM fallback
+- **tauri:** add event-driven session wake and host key classification
+- **term:** polish terminal reconnect, focus, and tab rename behavior
+- **ui:** replace title attributes with tooltip components for truncated text
+- stream SSH output as session-scoped events
+- subscribe to terminal registry changes
+
+### Performance
+
+- **term:** reduce redundant work in terminal layout and resize paths
+
+### Refactoring
+
+- **term:** disable WebGL renderer, fall back to DOM
+- extract host-key dialog into its own store and host
+
+### Testing
+
+- **sftp:** scope conflict-dialog queries to dialog content
+
+## [v2.0.42](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.42) - 2026-08-19
+
+
+### Bug Fixes
+
+- **sftp:** clear filter query when path changes
+- **ui:** force default cursor during tab drag via body class
+- **term:** ignore stray pointer moves after trackpad taps
+
+### Refactoring
+
+- **sftp:** replace new-tab button with double-click on empty space
+- **terminal:** replace new-tab button with double-click on empty space
+
+## [v2.0.41](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.41) - 2026-08-19
+
+
+### Bug Fixes
+
+- **term:** stabilize tab activation and CI cache key
+
+### CI/CD
+
+- remove pnpm cache from setup-node in release workflow
+
+## [v2.0.40](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.40) - 2026-08-14
+
+
+### CI/CD
+
+- **release:** use adhoc signing for macOS CI builds
+
+### Features
+
+- add lazy owner/group name resolution for remote listings
+- integrate lazy owner resolution and connection warm-up in frontend
+
+### Testing
+
+- update tests for lazy owner resolution and connection warm-up
+
+## [v2.0.39](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.39) - 2026-08-14
+
+
+### Bug Fixes
+
+- persist remote file open cache under user home dir
+
+## [v2.0.38](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.38) - 2026-08-12
+
+
+### Features
+
+- **sftp:** reuse pending row id when queued batch starts
+
+## [v2.0.37](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.37) - 2026-08-12
+
+
+### Bug Fixes
+
+- **build:** sort ICO entries largest-first for crisp tray icon
+
 ## [v2.0.36](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.36) - 2026-08-12
 
 

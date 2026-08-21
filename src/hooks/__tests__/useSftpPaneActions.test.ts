@@ -374,7 +374,7 @@ describe('useSftpPaneActions', () => {
     });
     await act(() => pastePromise!);
     expect(vi.mocked(invokeCopyRemoteToRemote)).toHaveBeenCalled();
-    expect(toastMocks.error).toHaveBeenCalledWith('No such file');
+    expect(toastMocks.error).toHaveBeenCalledWith('error.pathNotFound');
   });
 
   it('queues delete until the path operation finishes', async () => {
@@ -487,7 +487,7 @@ describe('useSftpPaneActions', () => {
     });
     await act(() => downloadPromise!);
     expect(connectionMocks.downloadRemotePaths).toHaveBeenCalledWith(['/home/file.txt'], '/downloads');
-    expect(toastMocks.error).toHaveBeenCalledWith('No such file');
+    expect(toastMocks.error).toHaveBeenCalledWith('error.pathNotFound');
   });
 
   it('copies local entries into the local clipboard', async () => {

@@ -18,14 +18,6 @@ vi.mock('@/hooks/useI18n', () => ({
 vi.mock('@/hooks/useConnectSession', () => ({
   useConnectSession: () => ({
     connect: mockConnect,
-    hostKeyDialog: {
-      open: false,
-      host: '',
-      port: 22,
-      mismatch: false,
-      onTrust: () => {},
-    },
-    closeHostKeyDialog: vi.fn(),
   }),
 }));
 
@@ -76,10 +68,6 @@ vi.mock('../terminal-context-menu', () => ({
       <button type="button" onClick={onUnsplit}>unsplit</button>
     </div>
   ) : null,
-}));
-
-vi.mock('../host-key-dialog', () => ({
-  HostKeyDialog: () => null,
 }));
 
 const initialState = useTerminalStore.getState();
@@ -166,7 +154,7 @@ describe('Terminal', () => {
     vi.spyOn(terminalRegistry, 'get').mockReturnValue({ focus } as never);
 
     render(<Terminal />);
-    fireEvent.click(screen.getByRole('tab'));
+    fireEvent.pointerDown(screen.getByRole('tab'), { button: 0 });
     await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 
     expect(focus).toHaveBeenCalledTimes(1);
@@ -267,7 +255,7 @@ describe('Terminal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
 
     const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
-    fireEvent.click(within(firstGroup).getByRole('tab', { name: /s3/ }));
+    fireEvent.pointerDown(within(firstGroup).getByRole('tab', { name: /s3/ }), { button: 0 });
 
     expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s3', 's1']);
     expect(within(firstGroup).getAllByRole('tab')).toHaveLength(2);

@@ -28,7 +28,7 @@ import {
   type PathOperationScope,
 } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
-import { getLocalizedErrorMessage } from '@/lib/error';
+import { getLocalizedErrorMessage, getToastErrorMessage } from '@/lib/error';
 import type { FileEntry } from '@/components/sftp/utils';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 import { useAppStore } from '@/stores/appStore';
@@ -56,8 +56,8 @@ export interface UseSftpPaneActionsResult {
   onPreview: (entry?: FileEntry) => Promise<void>;
   onDownload: (entry?: FileEntry) => Promise<void>;
   onBatchDownload: () => Promise<void>;
-  uploadWithPolicies: (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => Promise<void>;
-  copyWithPolicies: (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => Promise<void>;
+  uploadWithPolicies: (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => Promise<void>;
+  copyWithPolicies: (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => Promise<void>;
   onCopy: (entry?: FileEntry) => void;
   onPaste: () => Promise<void>;
   onRename: (entry?: FileEntry) => void;
@@ -226,7 +226,7 @@ export function useSftpPaneActions(
         await openRemoteFile(target.path);
       } catch (err) {
         logger.warn(`Failed to open remote file: ${target.path}`, err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
     },
     [isLocal, openRemoteFile, selectedEntries, error],
@@ -242,7 +242,7 @@ export function useSftpPaneActions(
         setPreviewContent(content);
       } catch (err) {
         logger.warn(`Failed to preview remote file: ${target.path}`, err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
     },
     [isLocal, previewRemoteFile, selectedEntries, error],
@@ -263,7 +263,7 @@ export function useSftpPaneActions(
         await downloadRemotePaths([target.path], folders[0]);
       } catch (err) {
         logger.warn(`Failed to download: ${target.path}`, err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
     },
     [downloadRemotePaths, isLocal, remoteConnectionKey, waitForPathsIdle, selectedEntries, error],
@@ -283,7 +283,7 @@ export function useSftpPaneActions(
         await downloadRemotePaths(selectedRemotePaths, folders[0]);
       } catch (err) {
         logger.warn('Batch download failed', err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
     },
     [downloadRemotePaths, isLocal, remoteConnectionKey, waitForPathsIdle, selectedEntries, error],
@@ -326,7 +326,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn('Local paste failed', err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
       return;
     }
@@ -398,7 +398,7 @@ export function useSftpPaneActions(
       clearSelection();
     } catch (err) {
       logger.warn('Paste failed', err);
-      error(getLocalizedErrorMessage(err));
+      error(getToastErrorMessage(err));
     }
   }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, waitForPathsIdle, reload, remoteConnection, remoteConnectionKey, t, error]);
 
@@ -411,10 +411,10 @@ export function useSftpPaneActions(
         success('Copied name');
       } catch (err) {
         logger.warn('Failed to copy name', err);
-        error('Failed to copy name');
+        error(t('sftp.feedback.copyNameFailed'));
       }
     },
-    [selectedEntries, error, success],
+    [selectedEntries, error, success, t],
   );
 
   const onCopyPath = useCallback(
@@ -426,10 +426,10 @@ export function useSftpPaneActions(
         success('Copied path');
       } catch (err) {
         logger.warn('Failed to copy path', err);
-        error('Failed to copy path');
+        error(t('sftp.feedback.copyPathFailed'));
       }
     },
-    [selectedEntries, error, success],
+    [selectedEntries, error, success, t],
   );
 
   const onCopyContainingDirectory = useCallback(
@@ -442,10 +442,10 @@ export function useSftpPaneActions(
         success('Copied directory path');
       } catch (err) {
         logger.warn('Failed to copy directory path', err);
-        error('Failed to copy directory path');
+        error(t('sftp.feedback.copyDirectoryFailed'));
       }
     },
-    [selectedEntries, error, success],
+    [selectedEntries, error, success, t],
   );
 
   const onCopyCurrentDirectoryPath = useCallback(async () => {
@@ -455,9 +455,9 @@ export function useSftpPaneActions(
       success('Copied current directory path');
     } catch (err) {
       logger.warn('Failed to copy current directory path', err);
-      error('Failed to copy current directory path');
+      error(t('sftp.feedback.copyCurrentDirectoryFailed'));
     }
-  }, [path, error, success]);
+  }, [path, error, success, t]);
 
   const onNewFile = useCallback(() => {
     if (isLocal) return;
@@ -477,7 +477,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to create ${kind}: ${name}`, err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       } finally {
         setCreateMode(null);
       }
@@ -510,7 +510,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to rename: ${renameTarget.path}`, err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       } finally {
         setRenameTarget(undefined);
       }
@@ -529,7 +529,7 @@ export function useSftpPaneActions(
           clearSelection();
         } catch (err) {
           logger.warn('Failed to trash local paths', err);
-          error(getLocalizedErrorMessage(err));
+          error(getToastErrorMessage(err));
         }
         return;
       }
@@ -541,7 +541,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn('Failed to delete remote paths', err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
     },
     [clearSelection, deleteRemotePaths, isLocal, waitForPathsIdle, remoteConnectionKey, selectedEntries, error],
@@ -561,7 +561,7 @@ export function useSftpPaneActions(
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload files', err);
-      error(getLocalizedErrorMessage(err));
+      error(getToastErrorMessage(err));
     }
   }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
 
@@ -579,47 +579,49 @@ export function useSftpPaneActions(
       clearSelection();
     } catch (err) {
       logger.warn('Failed to upload folders', err);
-      error(getLocalizedErrorMessage(err));
+      error(getToastErrorMessage(err));
     }
   }, [clearSelection, isLocal, path, reload, uploadLocalPaths, error]);
 
   const uploadWithPolicies = useCallback(
-    async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
+    async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
       if (isLocal) return;
       try {
-        await uploadLocalPaths(localPaths, destinationDirectory, undefined, policies);
+        // A queued batch passes its pending row's id so the real operation
+        // replaces that row in place; undefined lets uploadLocalPaths mint one.
+        await uploadLocalPaths(localPaths, destinationDirectory, operationId, policies);
       } catch (err) {
         logger.warn('Upload with conflict policies failed', err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
     },
     [isLocal, uploadLocalPaths, error],
   );
 
   const copyWithPolicies = useCallback(
-    async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[]) => {
+    async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
       if (!isLocal) return;
-      const operationId = `${connection.id}-copy-${Date.now()}`;
+      const resolvedOperationId = operationId ?? `${connection.id}-copy-${Date.now()}`;
       const runCopy = async () => {
-        markOperationRunning(operationId);
+        markOperationRunning(resolvedOperationId);
         try {
           await invokeCopyLocalPaths({
             sourcePaths,
             destinationDirectory,
             conflictPolicies: policies,
-            operationId,
+            operationId: resolvedOperationId,
           });
-          removeOperation(operationId);
+          removeOperation(resolvedOperationId);
         } catch (err) {
           markOperationFailed(
-            operationId,
+            resolvedOperationId,
             getLocalizedErrorMessage(err),
           );
           throw err;
         }
       };
       addOperation({
-        operationId,
+        operationId: resolvedOperationId,
         kind: 'upload',
         currentPath: sourcePaths[0],
         totalBytes: 0,
@@ -633,7 +635,7 @@ export function useSftpPaneActions(
         await runCopy();
       } catch (err) {
         logger.warn('Copy with conflict policies failed', err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       }
     },
     [addOperation, connection.id, error, isLocal, markOperationFailed, markOperationRunning, removeOperation],
@@ -657,7 +659,7 @@ export function useSftpPaneActions(
         clearSelection();
       } catch (err) {
         logger.warn(`Failed to update permissions: ${permissionsTarget.path}`, err);
-        error(getLocalizedErrorMessage(err));
+        error(getToastErrorMessage(err));
       } finally {
         setPermissionsTarget(undefined);
       }
@@ -693,7 +695,7 @@ export function useSftpPaneActions(
       await reload();
     } catch (err) {
       logger.warn('Failed to refresh directory', err);
-      error(getLocalizedErrorMessage(err));
+      error(getToastErrorMessage(err));
     }
   }, [reload, error]);
 

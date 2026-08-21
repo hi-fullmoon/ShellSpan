@@ -123,4 +123,25 @@ describe('updateStore', () => {
 
     finishDownload();
   });
+
+  it('keeps update failure details out of the Toast and state', async () => {
+    mocks.checkForUpdate.mockRejectedValue(
+      new Error('/private/update/path: signature parser failed'),
+    );
+
+    await useUpdateStore.getState().runCheck('manual');
+
+    expect(useUpdateStore.getState()).toMatchObject({
+      phase: 'error',
+      error: 'update.failedFriendly',
+    });
+    expect(mocks.addToast).toHaveBeenCalledWith(
+      'update.failedFriendly',
+      'error',
+    );
+    expect(mocks.addToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('/private/update/path'),
+      'error',
+    );
+  });
 });

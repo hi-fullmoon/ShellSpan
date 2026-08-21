@@ -6,7 +6,6 @@ import {
   type DragStartEvent,
   KeyboardSensor,
   type Modifier,
-  PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -18,12 +17,11 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { PlusIcon, PinIcon, XIcon } from 'lucide-react';
+import { PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
+import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import {
   AlertDialog,
@@ -72,8 +70,6 @@ interface SessionTabProps {
   session: TerminalSession;
   active: boolean;
   dragging?: boolean;
-  renaming?: boolean;
-  renameValue?: string;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
   showSeparatorAfter?: boolean;
@@ -81,18 +77,12 @@ interface SessionTabProps {
   onContextMenu: (session: TerminalSession, x: number, y: number) => void;
   onClose: (sessionId: string) => void;
   onTogglePin?: (sessionId: string) => void;
-  onRenameStart?: (session: TerminalSession) => void;
-  onRenameChange?: (value: string) => void;
-  onRenameCommit?: () => void;
-  onRenameCancel?: () => void;
 }
 
 const SessionTab: React.FC<SessionTabProps> = ({
   session,
   active,
   dragging = false,
-  renaming = false,
-  renameValue = '',
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
   showSeparatorAfter = false,
@@ -100,10 +90,6 @@ const SessionTab: React.FC<SessionTabProps> = ({
   onContextMenu,
   onClose,
   onTogglePin,
-  onRenameStart,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
 }) => {
   return (
     <div
@@ -111,12 +97,17 @@ const SessionTab: React.FC<SessionTabProps> = ({
       tabIndex={0}
       aria-selected={active}
       data-session-tab={session.sessionId}
-      onClick={() => onActivate(session.sessionId)}
+      // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
+      // swallows the click after any drag, so a trackpad tap that jitters past
+      // the sensor threshold would otherwise both start a drag and lose the
+      // activation.
+      onPointerDown={(e) => {
+        if (e.button === 0) onActivate(session.sessionId);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(session, e.clientX, e.clientY);
       }}
-      onDoubleClick={() => onRenameStart?.(session)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -126,7 +117,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       className={cn(
         'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
         active ? 'h-[31px] bg-app-surface text-app-text' : 'h-[31px] bg-app-border/25 text-app-text-soft',
-        renaming ? 'cursor-text' : dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
+        dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
     >
@@ -152,71 +143,39 @@ const SessionTab: React.FC<SessionTabProps> = ({
       {showDropIndicatorRight && (
         <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
-      {renaming ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
-          <span className="min-w-0 flex-1">
-            <Input
-              autoFocus
-              value={renameValue}
-              onChange={(e) => onRenameChange?.(e.target.value)}
-              onBlur={onRenameCommit}
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRenameCommit?.();
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRenameCancel?.();
-                }
-              }}
-              className="h-5 border-0 bg-transparent p-0 text-xs font-medium leading-none shadow-none focus-visible:ring-0"
-            />
-          </span>
-        </div>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
+        <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
+      </div>
+      {session.pinned ? (
+        <button
+          type="button"
+          aria-label="unpin"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin?.(session.sessionId);
+          }}
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+        >
+          <PinIcon className="size-3" strokeWidth={1.5} />
+        </button>
       ) : (
-        <>
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
-            <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
-          </div>
-          {session.pinned ? (
-            <button
-              type="button"
-              aria-label="unpin"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onTogglePin?.(session.sessionId);
-              }}
-              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
-            >
-              <PinIcon className="size-3" strokeWidth={1.5} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              aria-label="close"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(session.sessionId);
-              }}
-              className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-                !dragging && active ? 'flex' : 'hidden group-hover:flex',
-              )}
-            >
-              <XIcon className="h-3 w-3" strokeWidth={1.5} />
-            </button>
+        <button
+          type="button"
+          aria-label="close"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose(session.sessionId);
+          }}
+          className={cn(
+            'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+            !dragging && active ? 'flex' : 'hidden group-hover:flex',
           )}
-        </>
+        >
+          <XIcon className="h-3 w-3" strokeWidth={1.5} />
+        </button>
       )}
     </div>
   );
@@ -229,12 +188,6 @@ interface SortableTabProps {
   onContextMenu: (session: TerminalSession, x: number, y: number) => void;
   onClose: (sessionId: string) => void;
   onTogglePin: (sessionId: string) => void;
-  renaming: boolean;
-  renameValue: string;
-  onRenameStart: (session: TerminalSession) => void;
-  onRenameChange: (value: string) => void;
-  onRenameCommit: () => void;
-  onRenameCancel: () => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
   showSeparatorAfter?: boolean;
@@ -247,19 +200,12 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onContextMenu,
   onClose,
   onTogglePin,
-  renaming,
-  renameValue,
-  onRenameStart,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
   showDropIndicatorLeft,
   showDropIndicatorRight,
   showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: session.sessionId,
-    disabled: renaming,
   });
 
   return (
@@ -277,8 +223,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         session={session}
         active={active}
         dragging={isDragging}
-        renaming={renaming}
-        renameValue={renameValue}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
         showSeparatorAfter={showSeparatorAfter}
@@ -286,10 +230,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         onContextMenu={onContextMenu}
         onClose={onClose}
         onTogglePin={onTogglePin}
-        onRenameStart={onRenameStart}
-        onRenameChange={onRenameChange}
-        onRenameCommit={onRenameCommit}
-        onRenameCancel={onRenameCancel}
       />
     </div>
   );
@@ -320,8 +260,19 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
   const removeSession = useTerminalStore((state) => state.removeSession);
   const reorderSessions = useTerminalStore((state) => state.reorderSessions);
-  const updateTitle = useTerminalStore((state) => state.updateTitle);
   const togglePin = useTerminalStore((state) => state.togglePin);
+
+  // macOS tap-to-click in WKWebView can drop the pointerdown of a tap that
+  // immediately follows another one (the single-tap gesture recognizer stays
+  // blocked until the double-tap recognizer fails). Activation already runs on
+  // pointerdown; when the pointerdown is lost the release still lands on the
+  // tab, so track the last pointerdown target and use a pointerup on a
+  // different tab as the fallback activation signal. See handleTabPointerUp.
+  const lastPointerDownTabRef = useRef<string | null>(null);
+  const activateTabRef = useRef<(id: string) => void>(() => {});
+  activateTabRef.current = onTabActivate ?? setActiveSession;
+  const tabBarSessionsRef = useRef(sessions);
+  tabBarSessionsRef.current = sessions;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const tabBarRef = useRef<HTMLDivElement>(null);
@@ -334,13 +285,13 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
+    useSensor(TrackpadSafePointerSensor, {
+      // 10px dead zone: trackpad taps (tap-to-click) often jitter a few px;
+      // a low threshold misreads them as drags.
+      activationConstraint: { distance: 10 },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
@@ -398,6 +349,55 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     return () => window.clearInterval(timer);
   }, [draggingSessionId]);
 
+  // Force the default cursor for the whole drag via a body class (see
+  // base.css); removed automatically when the drag ends or is cancelled.
+  useEffect(() => {
+    if (!draggingSessionId) return;
+    document.body.classList.add('tab-dragging');
+    return () => document.body.classList.remove('tab-dragging');
+  }, [draggingSessionId]);
+
+  // Fallback tab activation for a pointerdown that WKWebView dropped (see
+  // lastPointerDownTabRef). Listeners run in the capture phase so they see the
+  // events before the close/pin buttons can stop their propagation.
+  useEffect(() => {
+    const getElement = (target: EventTarget | null): Element | null =>
+      target instanceof Element ? target : null;
+    const isInteractiveControl = (target: EventTarget | null): boolean =>
+      Boolean(getElement(target)?.closest('button, a[href], input, select, textarea'));
+    const getTabId = (target: EventTarget | null): string | null =>
+      getElement(target)?.closest('[data-session-tab]')
+        ?.getAttribute('data-session-tab') ?? null;
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      lastPointerDownTabRef.current = getTabId(event.target);
+    };
+    const handlePointerUp = (event: PointerEvent): void => {
+      if (event.button !== 0) return;
+      // A release that ends a reorder drag is not an activation: dropping a tab
+      // onto another one must stay a pure reorder.
+      if (document.body.classList.contains('tab-dragging')) return;
+      // Close/pin buttons stop their own pointerdown, but this fallback exists
+      // for taps whose pointerdown was never delivered. Do not turn their
+      // release into a tab activation before the button action runs.
+      if (isInteractiveControl(event.target)) return;
+      const tabId = getTabId(event.target);
+      if (!tabId) return;
+      if (!tabBarSessionsRef.current.some((session) => session.sessionId === tabId)) return;
+      // The pointerdown for this tap was delivered on the tab itself: it
+      // already activated, nothing to do.
+      if (lastPointerDownTabRef.current === tabId) return;
+      activateTabRef.current(tabId);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('pointerup', handlePointerUp, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('pointerup', handlePointerUp, true);
+    };
+  }, []);
+
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
     const container = scrollRef.current;
     if (!container) {
@@ -431,9 +431,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   };
 
   const handleDragStart = (event: DragStartEvent): void => {
-    if (renamingSessionId) {
-      return;
-    }
     const nextId = String(event.active.id);
     setDraggingSessionId(nextId);
     const isKeyboardDrag = typeof KeyboardEvent !== 'undefined'
@@ -586,24 +583,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     finishDrag();
   };
 
-  const handleRenameStart = (session: TerminalSession): void => {
-    setRenamingSessionId(session.sessionId);
-    setRenameValue(session.title);
-  };
-
-  const handleRenameCommit = (): void => {
-    if (renamingSessionId && renameValue.trim()) {
-      updateTitle(renamingSessionId, renameValue.trim());
-    }
-    setRenamingSessionId(null);
-    setRenameValue('');
-  };
-
-  const handleRenameCancel = (): void => {
-    setRenamingSessionId(null);
-    setRenameValue('');
-  };
-
   const draggingSession = draggingSessionId ? (sessions.find((s) => s.sessionId === draggingSessionId) ?? null) : null;
 
   const closingSession = closingSessionId ? (sessions.find((s) => s.sessionId === closingSessionId) ?? null) : null;
@@ -627,6 +606,13 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     <div
       ref={tabBarRef}
       data-terminal-tab-bar
+      // Double-clicking empty tab bar space opens a new tab; ignore events
+      // coming from inside a tab itself.
+      onDoubleClick={(e) => {
+        if (!onNewTabClick) return;
+        if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
+        onNewTabClick();
+      }}
       className={cn('group/tabbar relative flex h-8 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
     >
       <DndContext
@@ -666,12 +652,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                   onContextMenu={(s, x, y) => onTabContextMenu?.(s, x, y)}
                   onClose={handleCloseSession}
                   onTogglePin={togglePin}
-                  renaming={renamingSessionId === session.sessionId}
-                  renameValue={renameValue}
-                  onRenameStart={handleRenameStart}
-                  onRenameChange={setRenameValue}
-                  onRenameCommit={handleRenameCommit}
-                  onRenameCancel={handleRenameCancel}
                   showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
                   showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
                   showSeparatorAfter={showSeparatorAfter}
@@ -700,21 +680,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               document.body,
             )}
       </DndContext>
-      {sessions.length > 0 && onNewTabClick && (
-        // Overlays the tab strip instead of taking layout space, so scrollable
-        // tabs never leave an empty block at the right edge. The gradient keeps
-        // the icon readable over the last tab; pointer events pass through
-        // while hidden.
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onNewTabClick}
-          aria-label={t('terminal.newTab')}
-          className="pointer-events-none absolute inset-y-0 right-0 z-10 h-[31px] w-11 rounded-none bg-gradient-to-l from-app-surface-muted from-60% to-transparent pl-4 opacity-0 transition-opacity hover:bg-transparent hover:text-app-primary focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tabbar:pointer-events-auto group-hover/tabbar:opacity-100"
-        >
-          <PlusIcon strokeWidth={1.5} />
-        </Button>
-      )}
       <AlertDialog
         open={!!closingSessionId}
         onOpenChange={(open) => {

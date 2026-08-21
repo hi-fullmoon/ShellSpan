@@ -10,7 +10,6 @@ import type {
   KeychainKeyKind,
   CreateRemoteEntryRequest,
   CreateSessionError,
-  DataEvent,
   DownloadProgressEvent,
   HostKeyCheckResult,
   JumpHostConfig,
@@ -22,6 +21,8 @@ import type {
   RemoteConnectionRequest,
   RemoteDirectoryListing,
   RemoteDirectoryRequest,
+  RemoteEntryOwners,
+  RemoteEntryOwnersRequest,
   RemoteFsError,
   RenameRemotePathRequest,
   DeleteRemotePathRequest,
@@ -39,6 +40,7 @@ import type {
   SessionSummary,
   StatusEvent,
   SystemHealth,
+  TransferBatchResult,
   UploadProgressEvent,
 } from '@/types';
 
@@ -133,6 +135,18 @@ export async function invokeListRemoteDirectory(
   return invokeLogged('list_remote_directory', { request });
 }
 
+export async function invokeResolveRemoteEntryOwners(
+  request: RemoteEntryOwnersRequest,
+): Promise<RemoteEntryOwners> {
+  return invokeLogged('resolve_remote_entry_owners', { request });
+}
+
+export async function invokeWarmRemoteConnection(
+  request: RemoteConnectionRequest,
+): Promise<void> {
+  return invokeLogged('warm_remote_connection', { request });
+}
+
 export async function invokeCreateRemoteEntry(
   request: CreateRemoteEntryRequest,
 ): Promise<void> {
@@ -159,7 +173,7 @@ export async function invokeCopyRemotePath(
 
 export async function invokeUploadLocalPaths(
   request: UploadLocalPathsRequest,
-): Promise<void> {
+): Promise<TransferBatchResult> {
   return invokeLogged('upload_local_paths', { request });
 }
 
@@ -205,7 +219,7 @@ export async function invokeCancelDelete(operationId: string): Promise<void> {
 
 export async function invokeDownloadRemotePaths(
   request: DownloadRemotePathsRequest,
-): Promise<void> {
+): Promise<TransferBatchResult> {
   return invokeLogged('download_remote_paths', { request });
 }
 
@@ -304,19 +318,14 @@ export async function invokeOpenPath(path: string): Promise<void> {
   return invokeLogged('open_path', { path });
 }
 
-export async function invokeDeriveEcdsaKeyFromPassword(
-  password: string,
-): Promise<{ privateKey: string; publicKey: string }> {
-  const [privateKey, publicKey] = await invokeLogged<[string, string]>('derive_ecdsa_key_from_password', { password });
-  return { privateKey, publicKey };
-}
-
 function toBackendKeychainKind(kind: KeychainKeyKind): string {
   return kind === 'keyFile' ? 'keyfile' : kind;
 }
 
 function fromBackendKeychainKind(kind: string): KeychainKeyKind {
-  return kind === 'keyfile' ? 'keyFile' : 'password';
+  if (kind === 'keyfile') return 'keyFile';
+  if (kind === 'password') return 'password';
+  throw new Error(`unknown key credential kind: ${kind}`);
 }
 
 export async function invokeStoreKeyCredential(
@@ -327,8 +336,8 @@ export async function invokeStoreKeyCredential(
   });
 }
 
-export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind }[]> {
-  const credentials = await invokeLogged<Array<{ id: string; label: string; keyType: string; kind: string }>>('list_key_credentials');
+export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind; service: string }[]> {
+  const credentials = await invokeLogged<Array<{ id: string; label: string; keyType: string; kind: string; service: string }>>('list_key_credentials');
   return credentials.map((credential) => ({
     ...credential,
     kind: fromBackendKeychainKind(credential.kind),
@@ -402,7 +411,7 @@ export function buildRemoteConnectionRequest(
     username: profile.username,
     authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
-    keychainKeyId: profile.keychainKeyId,
+    keychainKeyId: profile.authMethod === 'key' ? profile.keychainKeyId : undefined,
     privateKeyData: profile.privateKeyData,
     passphrase: profile.passphrase,
     jumpHost: profile.jumpHost ? mapJumpHostAuthMethod(profile.jumpHost) : undefined,
@@ -421,7 +430,7 @@ export function buildSessionCreateRequest(
     username: profile.username,
     authMethod: mapAuthMethodForBackend(profile.authMethod),
     password: profile.password,
-    keychainKeyId: profile.keychainKeyId,
+    keychainKeyId: profile.authMethod === 'key' ? profile.keychainKeyId : undefined,
     privateKeyData: profile.privateKeyData,
     passphrase: profile.passphrase,
     terminalCols: cols,
@@ -439,18 +448,17 @@ function mapJumpHostAuthMethod(jumpHost: JumpHostConfig): JumpHostConfig {
   return {
     ...jumpHost,
     authMethod: mapAuthMethodForBackend(jumpHost.authMethod),
+    keychainKeyId: jumpHost.authMethod === 'key' ? jumpHost.keychainKeyId : undefined,
     privateKeyData: jumpHost.privateKeyData,
   };
 }
 
 export async function listenToSshData(
   sessionId: string,
-  callback: EventCallback<DataEvent>,
+  callback: EventCallback<string>,
 ): Promise<UnlistenFn> {
-  return listen<DataEvent>('ssh-data', (event) => {
-    if (event.payload.sessionId === sessionId) {
-      callback(event);
-    }
+  return listen<string>(`ssh-data:${sessionId}`, (event) => {
+    callback(event);
   });
 }
 
