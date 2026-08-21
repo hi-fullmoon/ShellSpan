@@ -1132,6 +1132,26 @@ pub(crate) async fn open_remote_file(
 }
 
 #[tauri::command]
+pub(crate) async fn preview_local_file(path: String) -> Result<ReadRemoteFileResponse, String> {
+    info!("Previewing local file path={path}");
+    let result = tauri::async_runtime::spawn_blocking(move || read_local_file_blocking(path))
+        .await
+        .map_err(|error| format!("failed to join local file preview task: {error}"))?;
+    match &result {
+        Ok(response) => {
+            info!(
+                "Previewed local file path={} size={} is_text={} truncated={}",
+                response.path, response.size, response.is_text, response.truncated
+            );
+        }
+        Err(error) => {
+            error!("Preview local file failed: {error}");
+        }
+    }
+    result
+}
+
+#[tauri::command]
 pub(crate) async fn preview_remote_file(
     app: AppHandle,
     credentials: State<'_, crate::keychain::CredentialManager>,

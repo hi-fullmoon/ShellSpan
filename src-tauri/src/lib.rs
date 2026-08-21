@@ -31,8 +31,8 @@ pub(crate) use connection::{
 };
 pub(crate) use identity_cache::RemoteIdentityCache;
 pub(crate) use local_fs::{
-    copy_local_paths_blocking, paste_local_paths_blocking, rename_local_path_blocking,
-    trash_local_paths_blocking,
+    copy_local_paths_blocking, paste_local_paths_blocking, read_local_file_blocking,
+    rename_local_path_blocking, trash_local_paths_blocking,
 };
 pub(crate) use path_utils::{portable_local_path, posix_join};
 pub(crate) use remote_fs::{
@@ -261,6 +261,7 @@ pub fn run() {
             commands::open_path,
             commands::pick_private_key_file,
             commands::open_remote_file,
+            commands::preview_local_file,
             commands::preview_remote_file,
             commands::update_remote_permissions,
             commands::check_host_key,
