@@ -693,6 +693,7 @@ pub(crate) struct KeyCredentialSummary {
     pub(crate) label: String,
     pub(crate) key_type: String,
     pub(crate) kind: KeyCredentialKind,
+    pub(crate) service: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

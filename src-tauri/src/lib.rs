@@ -1,7 +1,6 @@
 mod commands;
 mod connection;
 mod db;
-mod ecdsa_key;
 mod health;
 mod identity_cache;
 mod keychain;
@@ -193,7 +192,7 @@ pub fn run() {
             }
             let termbridge_dir = app.path().home_dir()?.join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
-            app.manage(keychain::CredentialManager::new(database.clone()));
+            app.manage(keychain::CredentialManager::new());
             app.manage(database);
             #[cfg(not(target_os = "macos"))]
             menu::initialize_tray(app)?;
@@ -262,7 +261,6 @@ pub fn run() {
             commands::read_log_file,
             commands::export_log_file,
             commands::list_local_directory,
-            commands::derive_ecdsa_key_from_password,
             commands::store_key_credential,
             commands::list_key_credentials,
             commands::retrieve_key_credential,
