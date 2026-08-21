@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   invokeCopyLocalPaths,
   invokeCancelRemoteCopy,
@@ -52,7 +52,7 @@ export interface UseSftpPaneActionsResult {
   previewContent?: ReadRemoteFileResponse;
   hasLocalClipboard: boolean;
   onOpen: (entry: FileEntry) => void;
-  onOpenWithDefaultEditor: (entry?: FileEntry) => Promise<void>;
+  onOpenWithDefaultEditor: (entry?: Pick<FileEntry, 'path' | 'kind'>) => Promise<void>;
   onPreview: (entry?: FileEntry) => Promise<void>;
   onDownload: (entry?: FileEntry) => Promise<void>;
   onBatchDownload: () => Promise<void>;
@@ -166,6 +166,7 @@ export function useSftpPaneActions(
   const [permissionsTarget, setPermissionsTarget] = useState<RemoteFileEntry | undefined>(undefined);
   const [propertiesTarget, setPropertiesTarget] = useState<FileEntry | undefined>(undefined);
   const [previewContent, setPreviewContent] = useState<ReadRemoteFileResponse | undefined>(undefined);
+  const previewRequestIdRef = useRef(0);
 
   const selectedPaths = pane.selectedPaths;
   const selectedEntries = useMemo(
@@ -218,7 +219,7 @@ export function useSftpPaneActions(
   );
 
   const onOpenWithDefaultEditor = useCallback(
-    async (entry?: FileEntry) => {
+    async (entry?: Pick<FileEntry, 'path' | 'kind'>) => {
       if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target || target.kind === 'directory') return;
@@ -237,10 +238,14 @@ export function useSftpPaneActions(
       if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target || target.kind === 'directory') return;
+      const requestId = ++previewRequestIdRef.current;
       try {
         const content = await previewRemoteFile(target.path);
-        setPreviewContent(content);
+        if (previewRequestIdRef.current === requestId) {
+          setPreviewContent(content);
+        }
       } catch (err) {
+        if (previewRequestIdRef.current !== requestId) return;
         logger.warn(`Failed to preview remote file: ${target.path}`, err);
         error(getToastErrorMessage(err));
       }

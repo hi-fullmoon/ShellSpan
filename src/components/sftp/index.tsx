@@ -816,6 +816,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           content={remoteActions.previewContent}
           open={remoteActions.previewContent !== undefined}
           onClose={() => remoteActions.setPreviewContent(undefined)}
+          onOpenExternally={(path) => {
+            void remoteActions.onOpenWithDefaultEditor({ path, kind: 'file' });
+          }}
         />
 
         <SftpUploadConflictDialog

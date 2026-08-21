@@ -4,11 +4,14 @@ import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokePickLocalFolder, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/tauri';
 import { useTransferStore } from '@/stores/transferStore';
+import type { ReadRemoteFileResponse } from '@/types';
 
 const connectionMocks = vi.hoisted(() => ({
   deleteRemotePaths: vi.fn().mockResolvedValue(undefined),
   renameRemotePath: vi.fn().mockResolvedValue(undefined),
   downloadRemotePaths: vi.fn().mockResolvedValue(undefined),
+  openRemoteFile: vi.fn().mockResolvedValue(undefined),
+  previewRemoteFile: vi.fn(),
 }));
 
 const toastMocks = vi.hoisted(() => ({
@@ -28,14 +31,8 @@ vi.mock('@/hooks/useSftpConnection', () => ({
     updateRemotePermissions: vi.fn().mockResolvedValue(undefined),
     uploadLocalPaths: vi.fn().mockResolvedValue(undefined),
     downloadRemotePaths: connectionMocks.downloadRemotePaths,
-    openRemoteFile: vi.fn().mockResolvedValue(undefined),
-    previewRemoteFile: vi.fn().mockResolvedValue({
-      path: '/home/test.txt',
-      name: 'test.txt',
-      content: 'hello',
-      size: 5,
-      isText: true,
-    }),
+    openRemoteFile: connectionMocks.openRemoteFile,
+    previewRemoteFile: connectionMocks.previewRemoteFile,
   }),
 }));
 
@@ -93,6 +90,18 @@ function addConnection(): SftpConnection {
   return useSftpStore.getState().connections[0]!;
 }
 
+function responseFor(path: string): ReadRemoteFileResponse {
+  return {
+    path,
+    name: path.split('/').pop() ?? path,
+    content: path,
+    size: path.length,
+    isText: true,
+    contentEncoding: 'utf8',
+    truncated: false,
+  };
+}
+
 describe('useSftpPaneActions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -100,6 +109,16 @@ describe('useSftpPaneActions', () => {
     connectionMocks.downloadRemotePaths.mockResolvedValue(undefined);
     connectionMocks.deleteRemotePaths.mockResolvedValue(undefined);
     connectionMocks.renameRemotePath.mockResolvedValue(undefined);
+    connectionMocks.openRemoteFile.mockResolvedValue(undefined);
+    connectionMocks.previewRemoteFile.mockResolvedValue({
+      path: '/home/test.txt',
+      name: 'test.txt',
+      content: 'hello',
+      size: 5,
+      isText: true,
+      contentEncoding: 'utf8',
+      truncated: false,
+    });
     useSftpStore.setState(initialState, true);
     useTransferStore.setState({ operations: [] });
   });
@@ -123,6 +142,45 @@ describe('useSftpPaneActions', () => {
     });
 
     expect(result.current.createMode).toBe('file');
+  });
+
+  it('keeps the newest preview when requests finish out of order', async () => {
+    const connection = addConnection();
+    const firstEntry = { path: '/home/first.txt', name: 'first.txt', kind: 'file' as const, size: 5 };
+    const secondEntry = { path: '/home/second.txt', name: 'second.txt', kind: 'file' as const, size: 6 };
+    let resolveFirst!: (value: ReadRemoteFileResponse) => void;
+    let resolveSecond!: (value: ReadRemoteFileResponse) => void;
+    connectionMocks.previewRemoteFile
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
+
+    let firstRequest!: Promise<void>;
+    let secondRequest!: Promise<void>;
+    act(() => {
+      firstRequest = result.current.onPreview(firstEntry);
+      secondRequest = result.current.onPreview(secondEntry);
+    });
+    await act(async () => {
+      resolveSecond(responseFor('/home/second.txt'));
+      await secondRequest;
+    });
+    expect(result.current.previewContent?.path).toBe('/home/second.txt');
+
+    await act(async () => {
+      resolveFirst(responseFor('/home/first.txt'));
+      await firstRequest;
+    });
+    expect(result.current.previewContent?.path).toBe('/home/second.txt');
+  });
+
+  it('opens the explicitly supplied preview path instead of the live selection', async () => {
+    const connection = addConnection();
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
+
+    await act(() => result.current.onOpenWithDefaultEditor({ path: '/home/previewed.txt', kind: 'file' }));
+
+    expect(connectionMocks.openRemoteFile).toHaveBeenCalledWith('/home/previewed.txt');
   });
 
   it('preserves the current selection when entering batch mode', () => {
