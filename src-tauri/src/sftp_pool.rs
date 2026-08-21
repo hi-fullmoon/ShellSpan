@@ -1,4 +1,6 @@
-use crate::models::{AuthMethod, ConnectedSftp, ConnectionError, JumpHostConfig, RemoteConnectionRequest};
+use crate::models::{
+    AuthMethod, ConnectedSftp, ConnectionError, JumpHostConfig, RemoteConnectionRequest,
+};
 use log::{debug, info, warn};
 use sha2::{Digest, Sha256};
 use std::collections::hash_map::{Entry, HashMap};
@@ -100,8 +102,7 @@ impl Drop for ConnectLeaderGuard {
                     "SFTP connect leader for {} dropped before finishing; failing slot",
                     self.key.label()
                 );
-                *state =
-                    ConnectState::Failed("connection attempt aborted".to_string());
+                *state = ConnectState::Failed("connection attempt aborted".to_string());
                 drop(state);
                 slot.ready.notify_all();
             }
@@ -148,7 +149,10 @@ impl SftpPool {
                 .collect();
             for expired_key in expired_keys {
                 if let Some(entry) = sessions.remove(&expired_key) {
-                    debug!("SFTP pool entry evicted after idle TTL {}", expired_key.label());
+                    debug!(
+                        "SFTP pool entry evicted after idle TTL {}",
+                        expired_key.label()
+                    );
                     evicted.push(entry);
                 }
             }
@@ -308,7 +312,10 @@ impl SftpPool {
             .get(key)
             .is_some_and(|current| Arc::ptr_eq(current, &slot))
         {
-            warn!("SFTP connect wait timed out {}; releasing slot", key.label());
+            warn!(
+                "SFTP connect wait timed out {}; releasing slot",
+                key.label()
+            );
             in_flight.remove(key);
         }
         Err("timed out waiting for the concurrent connection attempt".to_string())
@@ -441,7 +448,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -467,7 +474,10 @@ mod tests {
         // The leader guard must stay bound: dropping it aborts the slot.
         let leader = pool.begin_connect(&key);
         assert!(matches!(leader, ConnectClaim::Leader(_)));
-        assert!(matches!(pool.begin_connect(&key), ConnectClaim::Follower(_)));
+        assert!(matches!(
+            pool.begin_connect(&key),
+            ConnectClaim::Follower(_)
+        ));
 
         // Once the leader finishes, the slot is released and the next caller
         // becomes the leader again.
@@ -501,8 +511,7 @@ mod tests {
 
         let waiter_pool = pool.clone();
         let waiter_key = key.clone();
-        let waiter =
-            std::thread::spawn(move || waiter_pool.wait_connect(&waiter_key, slot));
+        let waiter = std::thread::spawn(move || waiter_pool.wait_connect(&waiter_key, slot));
         drop(guard);
 
         let result = waiter.join().expect("follower thread should finish");
@@ -526,8 +535,7 @@ mod tests {
 
         let waiter_pool = pool.clone();
         let waiter_key = key.clone();
-        let waiter =
-            std::thread::spawn(move || waiter_pool.wait_connect(&waiter_key, slot));
+        let waiter = std::thread::spawn(move || waiter_pool.wait_connect(&waiter_key, slot));
         pool.finish_connect(
             &key,
             Err(crate::models::ConnectionError::Other {
@@ -551,7 +559,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -569,7 +577,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -589,7 +597,7 @@ mod tests {
             password: Some("".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -615,7 +623,7 @@ mod tests {
             password: Some("none".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -744,7 +752,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -756,7 +764,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -771,7 +779,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -783,7 +791,7 @@ mod tests {
             password: Some("bob:secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: None,
         };
@@ -804,7 +812,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: Some(JumpHostConfig {
                 host: "a".to_string(),
@@ -813,7 +821,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 password: None,
                 keychain_key_id: None,
-                
+
                 private_key_data: None,
                 passphrase: None,
             }),
@@ -826,7 +834,7 @@ mod tests {
             password: Some("secret".to_string()),
             keychain_key_id: None,
             private_key_data: None,
-            
+
             passphrase: None,
             jump_host: Some(JumpHostConfig {
                 host: "a:1".to_string(),
@@ -835,7 +843,7 @@ mod tests {
                 auth_method: AuthMethod::Password,
                 password: None,
                 keychain_key_id: None,
-                
+
                 private_key_data: None,
                 passphrase: None,
             }),

@@ -89,11 +89,19 @@ pub(crate) fn start_port_forwards(
                 let remote_host = config.remote_host.clone();
                 handles.push(thread::spawn(move || {
                     local_forward_worker(
-                        &host, port, &username, auth_method,
-                        pwd.as_deref(), key_data.as_deref(), phrase.as_deref(),
+                        &host,
+                        port,
+                        &username,
+                        auth_method,
+                        pwd.as_deref(),
+                        key_data.as_deref(),
+                        phrase.as_deref(),
                         jh.as_ref(),
-                        config.local_port, &remote_host, config.remote_port,
-                        cancel, kh.as_deref(),
+                        config.local_port,
+                        &remote_host,
+                        config.remote_port,
+                        cancel,
+                        kh.as_deref(),
                     )
                 }));
             }
@@ -101,11 +109,19 @@ pub(crate) fn start_port_forwards(
                 let remote_host = config.remote_host.clone();
                 handles.push(thread::spawn(move || {
                     remote_forward_worker(
-                        &host, port, &username, auth_method,
-                        pwd.as_deref(), key_data.as_deref(), phrase.as_deref(),
+                        &host,
+                        port,
+                        &username,
+                        auth_method,
+                        pwd.as_deref(),
+                        key_data.as_deref(),
+                        phrase.as_deref(),
                         jh.as_ref(),
-                        config.local_port, &remote_host, config.remote_port,
-                        cancel, kh.as_deref(),
+                        config.local_port,
+                        &remote_host,
+                        config.remote_port,
+                        cancel,
+                        kh.as_deref(),
                     )
                 }));
             }
@@ -177,9 +193,18 @@ fn local_forward_worker(
     known_hosts_path: Option<&Path>,
 ) {
     let result = local_forward_loop(
-        host, port, username, auth_method,
-        password, private_key_data, passphrase,
-        jump_host, local_port, remote_host, remote_port, cancel_flag,
+        host,
+        port,
+        username,
+        auth_method,
+        password,
+        private_key_data,
+        passphrase,
+        jump_host,
+        local_port,
+        remote_host,
+        remote_port,
+        cancel_flag,
         known_hosts_path,
     );
     if let Err(e) = result {
@@ -202,12 +227,23 @@ fn local_forward_loop(
     cancel_flag: Arc<AtomicBool>,
     known_hosts_path: Option<&Path>,
 ) -> Result<(), String> {
-    let session = open_forward_session(host, port, username, auth_method, password, private_key_data, passphrase, jump_host, known_hosts_path)?;
+    let session = open_forward_session(
+        host,
+        port,
+        username,
+        auth_method,
+        password,
+        private_key_data,
+        passphrase,
+        jump_host,
+        known_hosts_path,
+    )?;
     let remote_host = remote_host.to_owned();
 
     let listener = TcpListener::bind(("127.0.0.1", local_port))
         .map_err(|e| format!("failed to bind 127.0.0.1:{local_port}: {e}"))?;
-    listener.set_nonblocking(true)
+    listener
+        .set_nonblocking(true)
         .map_err(|e| format!("failed to set nonblocking: {e}"))?;
 
     info!("Local forward 127.0.0.1:{local_port} -> {remote_host}:{remote_port}");
@@ -261,9 +297,18 @@ fn remote_forward_worker(
     known_hosts_path: Option<&Path>,
 ) {
     let result = remote_forward_loop(
-        host, port, username, auth_method,
-        password, private_key_data, passphrase,
-        jump_host, local_port, remote_host, remote_port, cancel_flag,
+        host,
+        port,
+        username,
+        auth_method,
+        password,
+        private_key_data,
+        passphrase,
+        jump_host,
+        local_port,
+        remote_host,
+        remote_port,
+        cancel_flag,
         known_hosts_path,
     );
     if let Err(e) = result {
@@ -286,7 +331,17 @@ fn remote_forward_loop(
     cancel_flag: Arc<AtomicBool>,
     known_hosts_path: Option<&Path>,
 ) -> Result<(), String> {
-    let session = open_forward_session(host, port, username, auth_method, password, private_key_data, passphrase, jump_host, known_hosts_path)?;
+    let session = open_forward_session(
+        host,
+        port,
+        username,
+        auth_method,
+        password,
+        private_key_data,
+        passphrase,
+        jump_host,
+        known_hosts_path,
+    )?;
     session.set_blocking(false);
     let remote_host = remote_host.to_owned();
 
@@ -331,10 +386,7 @@ fn remote_forward_loop(
 
 // ---------- Bidirectional bridge ----------
 
-fn bridge_single_connection(
-    mut channel: ssh2::Channel,
-    mut tcp: TcpStream,
-) -> Result<(), String> {
+fn bridge_single_connection(mut channel: ssh2::Channel, mut tcp: TcpStream) -> Result<(), String> {
     let mut tcp_clone = tcp
         .try_clone()
         .map_err(|e| format!("failed to clone tcp: {e}"))?;

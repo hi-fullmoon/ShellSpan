@@ -10,6 +10,7 @@ export interface AiProviderConfig {
   model: string;
   requiresApiKey: boolean;
   structuredOutput: AiStructuredOutputMode;
+  apiKey?: string;
 }
 
 export interface AiProviderProfile extends AiProviderConfig {

@@ -3,7 +3,6 @@ import {
   BoxesIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
-  KeyRoundIcon,
   Layers3Icon,
   MoonStarIcon,
   PlusIcon,
@@ -51,12 +50,7 @@ import { Switch } from '@/components/ui/switch';
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
-import {
-  invokeDeleteAiApiKey,
-  invokeHasAiApiKey,
-  invokeListAiModels,
-  invokeStoreAiApiKey,
-} from '@/lib/tauri';
+import { invokeListAiModels } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import { AI_PROVIDER_PRESETS, useAiSettingsStore } from '@/stores/aiSettingsStore';
 import type { AiProviderKind, AiProviderPreset } from '@/types/ai';
@@ -108,8 +102,6 @@ export const AiSettingsSection: React.FC = () => {
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [hasApiKey, setHasApiKey] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -127,29 +119,14 @@ export const AiSettingsSection: React.FC = () => {
   }, [selectedProvider, selectedProviderId]);
 
   useEffect(() => {
-    let cancelled = false;
-    setApiKey('');
     setModels([]);
     setError(undefined);
     setSuccess(undefined);
-    if (!selectedProvider?.requiresApiKey) {
-      setHasApiKey(false);
-      return;
-    }
-    void invokeHasAiApiKey(selectedProvider.id)
-      .then((value) => {
-        if (!cancelled) setHasApiKey(value);
-      })
-      .catch(() => {
-        if (!cancelled) setHasApiKey(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedProvider?.id, selectedProvider?.requiresApiKey]);
+  }, [selectedProvider?.id]);
 
   if (!selectedProvider) return null;
 
+  const hasApiKey = Boolean(selectedProvider.apiKey?.trim());
   const SelectedIcon = PRESET_ICONS[selectedProvider.preset];
 
   const handleAddProvider = (preset: AiProviderPreset): void => {
@@ -158,55 +135,14 @@ export const AiSettingsSection: React.FC = () => {
     setAddOpen(false);
   };
 
-  const handleSaveKey = async (): Promise<void> => {
-    if (!apiKey.trim()) return;
+  const handleDeleteProvider = (): void => {
     setBusy(true);
     setError(undefined);
-    setSuccess(undefined);
-    try {
-      await invokeStoreAiApiKey(selectedProvider.id, apiKey);
-      setApiKey('');
-      setHasApiKey(true);
-      setSuccess(t('settings.ai.keySaved'));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDeleteKey = async (): Promise<void> => {
-    setBusy(true);
-    setError(undefined);
-    setSuccess(undefined);
-    try {
-      await invokeDeleteAiApiKey(selectedProvider.id);
-      setHasApiKey(false);
-      setSuccess(t('settings.ai.keyDeleted'));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDeleteProvider = async (): Promise<void> => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      if (selectedProvider.requiresApiKey) {
-        await invokeDeleteAiApiKey(selectedProvider.id);
-      }
-      removeProvider(selectedProvider.id);
-      const state = useAiSettingsStore.getState();
-      setSelectedProviderId(state.defaultProviderId);
-      setDeleteOpen(false);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-      setDeleteOpen(false);
-    } finally {
-      setBusy(false);
-    }
+    removeProvider(selectedProvider.id);
+    const state = useAiSettingsStore.getState();
+    setSelectedProviderId(state.defaultProviderId);
+    setDeleteOpen(false);
+    setBusy(false);
   };
 
   const handleTest = async (): Promise<void> => {
@@ -386,31 +322,17 @@ export const AiSettingsSection: React.FC = () => {
                         {hasApiKey ? t('settings.ai.keyStored') : t('settings.ai.keyMissing')}
                       </Badge>
                     </div>
-                    <div className="flex gap-2">
-                      <Input
-                        id="ai-api-key"
-                        type="password"
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                        placeholder={hasApiKey ? t('settings.ai.keyReplacePlaceholder') : 'sk-...'}
-                        autoComplete="off"
-                      />
-                      <Button onClick={() => void handleSaveKey()} disabled={busy || !apiKey.trim()}>
-                        <KeyRoundIcon data-icon="inline-start" />
-                        {t('common.save')}
-                      </Button>
-                      {hasApiKey && (
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => void handleDeleteKey()}
-                          disabled={busy}
-                          aria-label={t('settings.ai.deleteKey')}
-                        >
-                          <Trash2Icon />
-                        </Button>
-                      )}
-                    </div>
+                    <Input
+                      id="ai-api-key"
+                      type="password"
+                      value={selectedProvider.apiKey ?? ''}
+                      onChange={(event) => updateProvider(selectedProvider.id, { apiKey: event.target.value })}
+                      placeholder="sk-..."
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
                     <FieldDescription>{t('settings.ai.keyHint')}</FieldDescription>
                   </Field>
                 )}
@@ -522,7 +444,7 @@ export const AiSettingsSection: React.FC = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void handleDeleteProvider()} disabled={busy}>
+            <AlertDialogAction variant="destructive" onClick={handleDeleteProvider} disabled={busy}>
               {t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>

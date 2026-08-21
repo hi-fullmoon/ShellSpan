@@ -1,30 +1,36 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
+  ArrowUpIcon,
   BotIcon,
   BrainCircuitIcon,
   ClipboardIcon,
   Code2Icon,
   EraserIcon,
   PanelRightCloseIcon,
-  SendIcon,
   SparklesIcon,
+  SquareIcon,
   SquareTerminalIcon,
-  StopCircleIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Spinner } from '@/components/ui/empty-state';
-import { Textarea } from '@/components/ui/textarea';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from '@/components/ui/input-group';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Bubble, Marker, Message, MessageScroller } from './chat-primitives';
+import { AssistantMessageContent } from './assistant-message-content';
 import { AgentRunView } from './agent-run-view';
 import { useI18n } from '@/hooks/useI18n';
 import { invokeCancelAiRequest, invokeStartAiRequest, isTauriRuntime } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
+import { parseAssistantContent } from '@/lib/ai-content';
 import {
   buildAgentExecutionCommand,
   createAgentExecutionMarker,
@@ -60,6 +66,10 @@ function conversationLane(task: ConversationTask): 'conversation' | 'command' {
 }
 
 function messageWithHistoricalContext(message: AiChatMessage): AiMessageInput {
+  if (message.role === 'assistant') {
+    const answer = parseAssistantContent(message.content).answer;
+    return { role: message.role, content: answer || message.content };
+  }
   if (message.role !== 'user' || !message.context) {
     return { role: message.role, content: message.content };
   }
@@ -576,9 +586,18 @@ export const AiPanel: React.FC = () => {
               && (!message.sessionId || message.sessionId === activeSessionId),
             );
             return (
-              <Message key={message.id} role={message.role}>
+              <Message
+                key={message.id}
+                role={message.role}
+                label={message.role === 'assistant' ? model : undefined}
+              >
                 <Bubble role={message.role}>
-                  {message.content || (message.status === 'streaming' ? <Spinner /> : '')}
+                  {message.role === 'assistant' ? (
+                    <AssistantMessageContent
+                      content={message.content}
+                      streaming={message.status === 'streaming'}
+                    />
+                  ) : message.content}
                   {message.status === 'cancelled' && (
                     <div className="text-muted-foreground">{t('ai.message.cancelled')}</div>
                   )}
@@ -621,29 +640,9 @@ export const AiPanel: React.FC = () => {
           </Alert>
         )}
 
-        <div className="shrink-0 border-t border-border p-3">
-          <ToggleGroup
-            value={[task]}
-            onValueChange={(values) => {
-              const value = values[0] as AiTaskKind | undefined;
-              if (value) setTask(value);
-            }}
-            variant="outline"
-            size="xs"
-            spacing={0}
-            className="mb-2"
-            aria-label={t('ai.mode')}
-            disabled={busy || agentNeedsResolution}
-          >
-            <ToggleGroupItem value="chat">{t('ai.mode.chat')}</ToggleGroupItem>
-            <ToggleGroupItem value="generateCommand">{t('ai.mode.command')}</ToggleGroupItem>
-            <ToggleGroupItem value="diagnosticAgent">
-              <BrainCircuitIcon data-icon="inline-start" />
-              {t('ai.mode.agent')}
-            </ToggleGroupItem>
-          </ToggleGroup>
-          <div className="flex items-end gap-2">
-            <Textarea
+        <div className="shrink-0 p-3 pt-2">
+          <InputGroup className="min-h-28 rounded-2xl bg-card shadow-sm">
+            <InputGroupTextarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
@@ -663,30 +662,60 @@ export const AiPanel: React.FC = () => {
                 : task === 'generateCommand'
                   ? t('ai.commandPlaceholder')
                   : t('ai.placeholder')}
-              className="min-h-20 resize-none"
+              className="min-h-18 max-h-48 px-3.5 pt-3 pb-1 leading-5"
               disabled={busy || agentNeedsResolution}
             />
-            {busy ? (
-              <Button variant="outline" size="icon" onClick={handleCancel} aria-label={t('ai.stop')}>
-                <StopCircleIcon />
-              </Button>
-            ) : (
-              <Button
-                size="icon"
-                onClick={() => task === 'diagnosticAgent'
-                  ? void runDiagnosticAgent(draft)
-                  : void send(task, draft)}
-                disabled={
-                  !draft.trim()
-                  || agentNeedsResolution
-                  || (task === 'diagnosticAgent' && !agentContext.context)
-                }
-                aria-label={t('ai.send')}
+            <InputGroupAddon align="block-end" className="justify-between gap-2 px-2 pb-2 pt-1">
+              <ToggleGroup
+                value={[task]}
+                onValueChange={(values) => {
+                  const value = values[0] as AiTaskKind | undefined;
+                  if (value) setTask(value);
+                }}
+                variant="tag"
+                size="xs"
+                spacing={1}
+                className="min-w-0"
+                aria-label={t('ai.mode')}
+                disabled={busy || agentNeedsResolution}
               >
-                <SendIcon />
-              </Button>
-            )}
-          </div>
+                <ToggleGroupItem value="chat">{t('ai.mode.chat')}</ToggleGroupItem>
+                <ToggleGroupItem value="generateCommand">{t('ai.mode.command')}</ToggleGroupItem>
+                <ToggleGroupItem value="diagnosticAgent">
+                  <BrainCircuitIcon data-icon="inline-start" />
+                  {t('ai.mode.agent')}
+                </ToggleGroupItem>
+              </ToggleGroup>
+              {busy ? (
+                <InputGroupButton
+                  variant="default"
+                  size="icon-sm"
+                  className="shrink-0 rounded-full"
+                  onClick={handleCancel}
+                  aria-label={t('ai.stop')}
+                >
+                  <SquareIcon />
+                </InputGroupButton>
+              ) : (
+                <InputGroupButton
+                  variant="default"
+                  size="icon-sm"
+                  className="shrink-0 rounded-full"
+                  onClick={() => task === 'diagnosticAgent'
+                    ? void runDiagnosticAgent(draft)
+                    : void send(task, draft)}
+                  disabled={
+                    !draft.trim()
+                    || agentNeedsResolution
+                    || (task === 'diagnosticAgent' && !agentContext.context)
+                  }
+                  aria-label={t('ai.send')}
+                >
+                  <ArrowUpIcon />
+                </InputGroupButton>
+              )}
+            </InputGroupAddon>
+          </InputGroup>
           {task === 'diagnosticAgent' && !agentContext.context && (
             <p className="mt-1 text-[11px] text-muted-foreground">{t('ai.agent.requiresTerminal')}</p>
           )}

@@ -193,7 +193,11 @@ pub fn run() {
             }
             let termbridge_dir = app.path().home_dir()?.join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
-            app.manage(keychain::CredentialManager::new());
+            let credentials = keychain::CredentialManager::new();
+            if let Err(error) = ai::migrate_legacy_api_keys(&credentials, &database) {
+                log::warn!("Failed to migrate legacy AI API keys to the database: {error}");
+            }
+            app.manage(credentials);
             app.manage(database);
             #[cfg(not(target_os = "macos"))]
             menu::initialize_tray(app)?;
@@ -220,9 +224,6 @@ pub fn run() {
         .manage(RemoteIdentityCache::default())
         .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
-            ai::ai_store_api_key,
-            ai::ai_has_api_key,
-            ai::ai_delete_api_key,
             ai::ai_list_models,
             ai::ai_start_request,
             ai::ai_cancel_request,

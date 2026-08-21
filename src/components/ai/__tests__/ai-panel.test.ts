@@ -84,6 +84,22 @@ describe('selectConversationHistory', () => {
     expect(historicalUser.content).not.toContain('prefix-');
     expect(historicalUser.content).toContain('x'.repeat(8000));
   });
+
+  it('keeps hidden model reasoning out of future conversation history', () => {
+    const messages = [
+      message('reasoning', 'user', 'What model are you?'),
+      message(
+        'reasoning',
+        'assistant',
+        '<think>I should answer briefly.</think>\n\nI am MiniMax-M3.',
+      ),
+    ];
+
+    expect(selectConversationHistory(messages, 'chat')).toEqual([
+      { role: 'user', content: 'What model are you?' },
+      { role: 'assistant', content: 'I am MiniMax-M3.' },
+    ]);
+  });
 });
 
 describe('shouldSubmitAiDraft', () => {

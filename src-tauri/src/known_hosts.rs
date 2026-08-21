@@ -5,7 +5,9 @@ use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 
 use crate::connection::{open_session_for_host_key, validate_host};
-use crate::models::{HostKeyCheckRequest, HostKeyCheckResult, HostKeyCheckStatus, TrustHostRequest};
+use crate::models::{
+    HostKeyCheckRequest, HostKeyCheckResult, HostKeyCheckStatus, TrustHostRequest,
+};
 
 const KNOWN_HOSTS_FILENAME: &str = "known_hosts";
 
@@ -31,23 +33,19 @@ pub(crate) fn check_host_key_against_file(
     port: u16,
     known_hosts_file: &Path,
 ) -> Result<HostKeyCheckResult, HostKeyCheckResult> {
-    let (key, key_type) = session
-        .host_key()
-        .ok_or_else(|| HostKeyCheckResult {
-            status: HostKeyCheckStatus::Failure,
-            fingerprint: None,
-            message: Some("failed to retrieve host key from ssh session".to_string()),
-        })?;
+    let (key, key_type) = session.host_key().ok_or_else(|| HostKeyCheckResult {
+        status: HostKeyCheckStatus::Failure,
+        fingerprint: None,
+        message: Some("failed to retrieve host key from ssh session".to_string()),
+    })?;
 
     let fingerprint = compute_fingerprint(key, key_type);
 
-    let mut known_hosts = session
-        .known_hosts()
-        .map_err(|error| HostKeyCheckResult {
-            status: HostKeyCheckStatus::Failure,
-            fingerprint: Some(fingerprint.clone()),
-            message: Some(format!("failed to initialize known hosts: {error}")),
-        })?;
+    let mut known_hosts = session.known_hosts().map_err(|error| HostKeyCheckResult {
+        status: HostKeyCheckStatus::Failure,
+        fingerprint: Some(fingerprint.clone()),
+        message: Some(format!("failed to initialize known hosts: {error}")),
+    })?;
 
     if known_hosts_file.exists() {
         match known_hosts.read_file(known_hosts_file, KnownHostFileKind::OpenSSH) {
@@ -157,16 +155,16 @@ pub(crate) fn check_host_key_blocking(
 
     let session = open_session_for_host_key(host, port)?;
 
-    let (key, key_type) = session.host_key().ok_or_else(|| {
-        "failed to retrieve host key from ssh session".to_string()
-    })?;
+    let (key, key_type) = session
+        .host_key()
+        .ok_or_else(|| "failed to retrieve host key from ssh session".to_string())?;
 
     let fingerprint = compute_fingerprint(key, key_type);
 
     let known_hosts_path = get_known_hosts_path(app)?;
-    let mut known_hosts = session.known_hosts().map_err(|error| {
-        format!("failed to initialize known hosts: {error}")
-    })?;
+    let mut known_hosts = session
+        .known_hosts()
+        .map_err(|error| format!("failed to initialize known hosts: {error}"))?;
 
     if known_hosts_path.exists() {
         match known_hosts.read_file(&known_hosts_path, KnownHostFileKind::OpenSSH) {
@@ -236,16 +234,16 @@ pub(crate) fn trust_host_blocking(
 
     let session = open_session_for_host_key(host, port)?;
 
-    let (key, key_type) = session.host_key().ok_or_else(|| {
-        "failed to retrieve host key from ssh session".to_string()
-    })?;
+    let (key, key_type) = session
+        .host_key()
+        .ok_or_else(|| "failed to retrieve host key from ssh session".to_string())?;
 
     let known_hosts_path = get_known_hosts_path(app)?;
     ensure_known_hosts_dir(&known_hosts_path)?;
 
-    let mut known_hosts = session.known_hosts().map_err(|error| {
-        format!("failed to initialize known hosts: {error}")
-    })?;
+    let mut known_hosts = session
+        .known_hosts()
+        .map_err(|error| format!("failed to initialize known hosts: {error}"))?;
 
     if known_hosts_path.exists() {
         match known_hosts.read_file(&known_hosts_path, KnownHostFileKind::OpenSSH) {

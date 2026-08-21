@@ -177,6 +177,7 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
         : provider.kind === 'openAi' || provider.kind === 'ollama'
           ? 'jsonSchema'
           : 'prompt',
+      apiKey: typeof provider.apiKey === 'string' ? provider.apiKey : undefined,
     });
   }
   return providers;
@@ -302,6 +303,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         model: provider.model.trim(),
         requiresApiKey: provider.requiresApiKey,
         structuredOutput: provider.structuredOutput,
+        ...(provider.apiKey?.trim() ? { apiKey: provider.apiKey.trim() } : {}),
       };
     },
   })),
