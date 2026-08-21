@@ -58,6 +58,7 @@ export const CredentialPromptDialog: React.FC = () => {
               <Input
                 id="credential-password"
                 type="password"
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => {

@@ -15,6 +15,11 @@ import {
 import { formatTerminalNoticeLine, formatTerminalStatusLine, shouldDisableTerminalInput, shouldReconnectFromInput } from '@/lib/terminal';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
+import {
+  appendTerminalOutput,
+  clearTerminalOutput,
+  rebindTerminalOutput,
+} from '@/lib/terminal-output-buffer';
 import type {
   ClosedEvent,
   SessionStatus,
@@ -401,6 +406,7 @@ class TerminalControllerImpl implements TerminalController {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
+      appendTerminalOutput(sessionId, event.payload);
       this.terminal.write(event.payload);
     });
     if (this.disposed || generation !== this.listenerGeneration) {
@@ -600,9 +606,11 @@ class TerminalControllerImpl implements TerminalController {
 
   rebindSession(sessionId: string): void {
     if (this.disposed || sessionId === this.sessionId) return;
+    const previousSessionId = this.sessionId;
     this.clearListeners();
     this.cancelPendingResize();
     this.sessionId = sessionId;
+    rebindTerminalOutput(previousSessionId, sessionId);
     this.resetNoticeState();
     this.inputGraceDeadlineRef = Date.now() + RECONNECT_INPUT_GRACE_MS;
     void this.setupListeners();
@@ -638,6 +646,7 @@ class TerminalControllerImpl implements TerminalController {
     this.clearListeners();
     this.linkProviderDisposable?.dispose();
     this.terminal.dispose();
+    clearTerminalOutput(this.sessionId);
     this.removeFromRegistry(this.sessionId);
   }
 }
