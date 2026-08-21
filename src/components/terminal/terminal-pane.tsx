@@ -42,6 +42,10 @@ const MIN_CONNECTING_OVERLAY_MS = 600;
 // clipboard.
 const ACCIDENTAL_SELECTION_MAX_DISTANCE_PX = 6;
 const ACCIDENTAL_SELECTION_MAX_DURATION_MS = 140;
+// WKWebView can synthesize tap-to-click mouse down/up events at effectively
+// the same instant while reporting enough coordinate drift to cross cells.
+// Treat that sequence as a click regardless of its reported distance.
+const SYNTHETIC_TAP_MAX_DURATION_MS = 50;
 
 // Wait for the selection to stop changing before copying it, so a real drag
 // that moves the pointer across cells doesn't write every intermediate state
@@ -326,10 +330,18 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
       const completedDrag = dragStart;
       dragStart = null;
 
+      const duration = completedDrag
+        ? Math.max(0, event.timeStamp - completedDrag.startedAt)
+        : Number.POSITIVE_INFINITY;
       if (
         completedDrag
-        && Date.now() - completedDrag.startedAt <= ACCIDENTAL_SELECTION_MAX_DURATION_MS
-        && completedDrag.maxDistance <= ACCIDENTAL_SELECTION_MAX_DISTANCE_PX
+        && (
+          duration <= SYNTHETIC_TAP_MAX_DURATION_MS
+          || (
+            duration <= ACCIDENTAL_SELECTION_MAX_DURATION_MS
+            && completedDrag.maxDistance <= ACCIDENTAL_SELECTION_MAX_DISTANCE_PX
+          )
+        )
       ) {
         // Our document listener is registered before xterm's drag listeners.
         // Defer until the event finishes so xterm cannot recreate/finalize the
@@ -347,7 +359,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
       dragStart = {
         x: event.clientX,
         y: event.clientY,
-        startedAt: Date.now(),
+        startedAt: event.timeStamp,
         maxDistance: 0,
       };
     };

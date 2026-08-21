@@ -110,6 +110,16 @@ function makeMockTerminal(selection = '') {
   return terminal;
 }
 
+function mouseEventAt(
+  type: string,
+  timeStamp: number,
+  init: MouseEventInit,
+): MouseEvent {
+  const event = new MouseEvent(type, init);
+  Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+  return event;
+}
+
 describe('TerminalPane', () => {
   it('renders the pane host without a search toggle button', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
@@ -338,13 +348,13 @@ describe('TerminalPane', () => {
     document.addEventListener('mouseup', xtermMouseUp);
 
     terminal.element?.dispatchEvent(
-      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+      mouseEventAt('mousedown', 1_000, { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 106, clientY: 100, bubbles: true }),
+      mouseEventAt('mousemove', 1_020, { button: 0, buttons: 1, clientX: 106, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      new MouseEvent('mouseup', { button: 0, buttons: 0, clientX: 106, clientY: 100, bubbles: true }),
+      mouseEventAt('mouseup', 1_030, { button: 0, buttons: 0, clientX: 106, clientY: 100, bubbles: true }),
     );
 
     expect(order).toEqual(['xterm']);
@@ -353,7 +363,24 @@ describe('TerminalPane', () => {
     document.removeEventListener('mouseup', xtermMouseUp);
   });
 
-  it('preserves a deliberate drag even when it finishes quickly', () => {
+  it('clears a synthetic instant tap even when WKWebView reports a large coordinate jump', async () => {
+    const terminal = makeMockTerminal('selected');
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.element?.dispatchEvent(
+      mouseEventAt('mousedown', 1_000, { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+    );
+    document.dispatchEvent(
+      mouseEventAt('mousemove', 1_010, { button: 0, buttons: 1, clientX: 140, clientY: 100, bubbles: true }),
+    );
+    document.dispatchEvent(
+      mouseEventAt('mouseup', 1_020, { button: 0, buttons: 0, clientX: 140, clientY: 100, bubbles: true }),
+    );
+
+    await vi.waitFor(() => expect(terminal.clearSelection).toHaveBeenCalledTimes(1));
+  });
+
+  it('preserves a deliberate drag once it lasts beyond the synthetic tap window', () => {
     const terminal = makeMockTerminal('selected');
     render(<TerminalPane activeSession={makeSession()} />);
 
@@ -361,13 +388,13 @@ describe('TerminalPane', () => {
     document.addEventListener('mousemove', downstream);
 
     terminal.element?.dispatchEvent(
-      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+      mouseEventAt('mousedown', 1_000, { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 110, clientY: 100, bubbles: true }),
+      mouseEventAt('mousemove', 1_060, { button: 0, buttons: 1, clientX: 110, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      new MouseEvent('mouseup', { button: 0, buttons: 0, clientX: 110, clientY: 100, bubbles: true }),
+      mouseEventAt('mouseup', 1_080, { button: 0, buttons: 0, clientX: 110, clientY: 100, bubbles: true }),
     );
 
     expect(downstream).toHaveBeenCalledTimes(1);
@@ -378,21 +405,18 @@ describe('TerminalPane', () => {
   it('preserves a small deliberate selection held beyond the tap window', () => {
     const terminal = makeMockTerminal('selected');
     render(<TerminalPane activeSession={makeSession()} />);
-    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
 
     terminal.element?.dispatchEvent(
-      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+      mouseEventAt('mousedown', 1_000, { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 104, clientY: 100, bubbles: true }),
+      mouseEventAt('mousemove', 1_100, { button: 0, buttons: 1, clientX: 104, clientY: 100, bubbles: true }),
     );
-    now.mockReturnValue(1_200);
     document.dispatchEvent(
-      new MouseEvent('mouseup', { button: 0, buttons: 0, clientX: 104, clientY: 100, bubbles: true }),
+      mouseEventAt('mouseup', 1_200, { button: 0, buttons: 0, clientX: 104, clientY: 100, bubbles: true }),
     );
 
     expect(terminal.clearSelection).not.toHaveBeenCalled();
-    now.mockRestore();
   });
 
   it('does not suppress mousemove after the button was released outside the window', () => {
