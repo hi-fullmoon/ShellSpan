@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -135,12 +135,42 @@ const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, na
   const [zoom, setZoom] = useState(1);
   const [failed, setFailed] = useState(false);
   const [renderedSize, setRenderedSize] = useState<{ width: number; height: number }>();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+
+  const fitImageToViewport = useCallback((image: HTMLImageElement) => {
+    const sourceWidth = image.naturalWidth || image.clientWidth;
+    const sourceHeight = image.naturalHeight || image.clientHeight;
+    if (sourceWidth <= 0 || sourceHeight <= 0) return;
+
+    // The canvas uses p-8, so reserve 32 px on every side before calculating
+    // the 100% baseline. Otherwise a fitted image plus its padding overflows
+    // the viewport and produces scrollbars even before the user zooms in.
+    const viewportWidth = viewportRef.current?.clientWidth ?? 0;
+    const viewportHeight = viewportRef.current?.clientHeight ?? 0;
+    const availableWidth = viewportWidth > 64 ? viewportWidth - 64 : sourceWidth;
+    const availableHeight = viewportHeight > 64 ? viewportHeight - 64 : sourceHeight;
+    const scale = Math.min(1, availableWidth / sourceWidth, availableHeight / sourceHeight);
+    setRenderedSize({
+      width: Math.floor(sourceWidth * scale),
+      height: Math.floor(sourceHeight * scale),
+    });
+  }, []);
 
   useEffect(() => {
     setZoom(1);
     setFailed(false);
     setRenderedSize(undefined);
   }, [dataUrl]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const image = imageRef.current;
+    if (!viewport || !image || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => fitImageToViewport(image));
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [dataUrl, fitImageToViewport]);
 
   if (failed) return <MediaUnavailable />;
 
@@ -158,18 +188,14 @@ const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, na
           <ZoomInIcon /><span className="sr-only">{t('sftp.preview.zoomIn')}</span>
         </Button>
       </div>
-      <ScrollArea className="min-h-0 flex-1 bg-muted/35" horizontal size="thin">
+      <ScrollArea viewportRef={viewportRef} className="min-h-0 flex-1 bg-muted/35" horizontal size="thin">
         <div className="grid min-h-full w-max min-w-full place-items-center p-8">
           <img
+            ref={imageRef}
             src={dataUrl}
             alt={name}
             onError={() => setFailed(true)}
-            onLoad={(event) => {
-              const { clientWidth, clientHeight } = event.currentTarget;
-              if (clientWidth > 0 && clientHeight > 0) {
-                setRenderedSize({ width: clientWidth, height: clientHeight });
-              }
-            }}
+            onLoad={(event) => fitImageToViewport(event.currentTarget)}
             className={cn(
               'block rounded-md object-contain shadow-sm',
               renderedSize ? 'max-h-none max-w-none' : 'max-h-[60vh] max-w-full',
