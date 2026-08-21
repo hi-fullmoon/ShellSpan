@@ -1,5 +1,5 @@
 export type AiProviderKind = 'ollama' | 'openAi';
-export type AiTaskKind = 'chat' | 'explainTerminal' | 'generateCommand';
+export type AiTaskKind = 'chat' | 'explainTerminal' | 'generateCommand' | 'diagnosticAgent';
 
 export interface AiProviderConfig {
   id: string;
@@ -35,4 +35,50 @@ export type AiStreamEvent =
 
 export interface AiChatMessage extends AiMessageInput {
   id: string;
+}
+
+export type AgentRunPhase =
+  | 'idle'
+  | 'planning'
+  | 'awaitingApproval'
+  | 'completed'
+  | 'cancelled'
+  | 'error';
+
+export type AgentStepStatus =
+  | 'running'
+  | 'completed'
+  | 'awaitingApproval'
+  | 'approved'
+  | 'rejected'
+  | 'failed';
+
+export interface DiagnosticAgentPlanStep {
+  title: string;
+  description: string;
+  command?: string;
+}
+
+export interface DiagnosticAgentPlan {
+  summary: string;
+  steps: DiagnosticAgentPlanStep[];
+}
+
+export interface AgentRunStep extends DiagnosticAgentPlanStep {
+  id: string;
+  kind: 'tool' | 'analysis' | 'command';
+  status: AgentStepStatus;
+}
+
+export interface AgentRun {
+  id: string;
+  requestId: string;
+  goal: string;
+  sessionId: string;
+  contextLabel: string;
+  phase: AgentRunPhase;
+  summary?: string;
+  responseText: string;
+  steps: AgentRunStep[];
+  error?: string;
 }

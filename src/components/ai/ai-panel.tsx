@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
   BotIcon,
+  BrainCircuitIcon,
   ClipboardIcon,
   Code2Icon,
   EraserIcon,
@@ -19,9 +20,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Bubble, Marker, Message, MessageScroller } from './chat-primitives';
+import { AgentRunView } from './agent-run-view';
 import { useI18n } from '@/hooks/useI18n';
 import { invokeCancelAiRequest, invokeStartAiRequest, isTauriRuntime } from '@/lib/tauri';
 import { generateId } from '@/lib/utils';
+import { isSafeReadOnlyAgentCommand } from '@/lib/diagnostic-agent';
 import {
   getRecentTerminalOutput,
   redactTerminalSecrets,
@@ -29,9 +32,10 @@ import {
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiStore } from '@/stores/aiStore';
+import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import type { AiContext, AiMessageInput, AiStreamEvent, AiTaskKind } from '@/types/ai';
+import type { AgentRunStep, AiContext, AiMessageInput, AiStreamEvent, AiTaskKind } from '@/types/ai';
 
 const AI_STREAM_EVENT = 'ai-stream';
 
@@ -43,7 +47,7 @@ export function extractSingleLineCommand(content: string): string | undefined {
   return command;
 }
 
-function currentTerminalContext(): { context?: AiContext; selection: boolean } {
+function currentTerminalContext(): { context?: AiContext; selection: boolean; sessionId?: string } {
   const app = useAppStore.getState();
   if (app.activeSection !== 'terminal') return { selection: false };
   const terminalState = useTerminalStore.getState();
@@ -57,11 +61,33 @@ function currentTerminalContext(): { context?: AiContext; selection: boolean } {
   if (!content) return { selection: false };
   return {
     selection: Boolean(selection),
+    sessionId: session.sessionId,
     context: {
       label: `${session.username ? `${session.username}@` : ''}${session.host || session.title}`,
       content,
     },
   };
+}
+
+function currentDiagnosticAgentContext(): { context?: AiContext; sessionId?: string } {
+  const app = useAppStore.getState();
+  if (app.activeSection !== 'terminal') return {};
+  const terminalState = useTerminalStore.getState();
+  const session = terminalState.sessions.find((item) => item.sessionId === terminalState.activeSessionId);
+  if (!session) return {};
+  const contextLines = useAiSettingsStore.getState().contextLines;
+  const output = getRecentTerminalOutput(session.sessionId, contextLines);
+  const selection = terminalRegistry.get(session.sessionId)?.terminal.getSelection().trim();
+  const label = `${session.username ? `${session.username}@` : ''}${session.host || session.title}`;
+  const content = [
+    `Connection: ${label}:${session.port}`,
+    `Status: ${session.status}`,
+    '',
+    selection
+      ? `Selected terminal content:\n${redactTerminalSecrets(selection)}`
+      : `Recent terminal output:\n${output || '(no recent output)'}`,
+  ].join('\n');
+  return { sessionId: session.sessionId, context: { label, content } };
 }
 
 export const AiPanel: React.FC = () => {
@@ -73,6 +99,7 @@ export const AiPanel: React.FC = () => {
   const activeRequestId = useAiStore((state) => state.activeRequestId);
   const error = useAiStore((state) => state.error);
   const clear = useAiStore((state) => state.clear);
+  const agentRun = useAgentStore((state) => state.run);
   const providerKind = useAiSettingsStore((state) => state.providerKind);
   const model = useAiSettingsStore((state) =>
     state.providerKind === 'ollama' ? state.ollamaModel : state.openAiModel,
@@ -91,8 +118,16 @@ export const AiPanel: React.FC = () => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<AiStreamEvent>(AI_STREAM_EVENT, (event) => {
-      const state = useAiStore.getState();
       const payload = event.payload;
+      const agent = useAgentStore.getState();
+      if (agent.run?.requestId === payload.requestId) {
+        if (payload.type === 'textDelta') agent.appendDelta(payload.requestId, payload.text);
+        else if (payload.type === 'completed') agent.completePlanning(payload.requestId);
+        else if (payload.type === 'cancelled') agent.cancelRun(payload.requestId);
+        else if (payload.type === 'error') agent.failRun(payload.requestId, payload.message);
+        return;
+      }
+      const state = useAiStore.getState();
       if (payload.type === 'textDelta') state.appendDelta(payload.requestId, payload.text);
       else if (payload.type === 'completed') state.completeRequest(payload.requestId);
       else if (payload.type === 'cancelled') state.cancelRequest(payload.requestId);
@@ -138,6 +173,35 @@ export const AiPanel: React.FC = () => {
     }
   }, [contextEnabled]);
 
+  const runDiagnosticAgent = useCallback(async (text: string): Promise<void> => {
+    const goal = text.trim();
+    if (!goal || useAgentStore.getState().run?.phase === 'planning') return;
+    const snapshot = currentDiagnosticAgentContext();
+    if (!snapshot.context || !snapshot.sessionId) return;
+    const requestId = generateId();
+    useAgentStore.getState().beginRun(
+      requestId,
+      goal,
+      snapshot.sessionId,
+      snapshot.context.label,
+    );
+    setDraft('');
+    try {
+      await invokeStartAiRequest({
+        requestId,
+        provider: useAiSettingsStore.getState().getProviderConfig(),
+        task: 'diagnosticAgent',
+        messages: [{ role: 'user', content: goal }],
+        context: snapshot.context,
+      });
+    } catch (reason) {
+      useAgentStore.getState().failRun(
+        requestId,
+        reason instanceof Error ? reason.message : String(reason),
+      );
+    }
+  }, []);
+
   const handleExplain = (): void => {
     const snapshot = currentTerminalContext();
     const prompt = snapshot.selection
@@ -147,8 +211,21 @@ export const AiPanel: React.FC = () => {
   };
 
   const handleCancel = (): void => {
-    if (!activeRequestId) return;
-    void invokeCancelAiRequest(activeRequestId);
+    const requestId = agentRun?.phase === 'planning' ? agentRun.requestId : activeRequestId;
+    if (!requestId) return;
+    void invokeCancelAiRequest(requestId);
+  };
+
+  const handleApproveAgentStep = (step: AgentRunStep): void => {
+    const run = useAgentStore.getState().run;
+    if (!run || !step.command || !isSafeReadOnlyAgentCommand(step.command)) return;
+    const terminalState = useTerminalStore.getState();
+    const session = terminalState.sessions.find((item) => item.sessionId === run.sessionId);
+    if (terminalState.activeSessionId !== run.sessionId || session?.status !== 'connected') return;
+    const registeredTerminal = terminalRegistry.get(run.sessionId)?.terminal;
+    if (!registeredTerminal) return;
+    registeredTerminal.paste(step.command);
+    useAgentStore.getState().approveStep(step.id);
   };
 
   const handleInsertCommand = (command: string): void => {
@@ -169,6 +246,15 @@ export const AiPanel: React.FC = () => {
 
   const followKey = `${messages.length}:${messages[messages.length - 1]?.content.length ?? 0}`;
   const canExplain = activeSection === 'terminal' && Boolean(contextSnapshot.context);
+  const agentContext = currentDiagnosticAgentContext();
+  const agentPlanning = agentRun?.phase === 'planning';
+  const busy = phase === 'streaming' || agentPlanning;
+  const canInsertAgentCommand = Boolean(
+    agentRun
+    && activeSessionId === agentRun.sessionId
+    && activeSession?.status === 'connected'
+    && terminalRegistry.get(agentRun.sessionId),
+  );
 
   return (
     <TooltipProvider>
@@ -186,7 +272,7 @@ export const AiPanel: React.FC = () => {
           </div>
           <div className="flex items-center gap-1">
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon" onClick={clear} disabled={phase === 'streaming'} aria-label={t('ai.clear')} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon" onClick={() => { clear(); useAgentStore.getState().clear(); }} disabled={busy} aria-label={t('ai.clear')} />}>
                 <EraserIcon />
               </TooltipTrigger>
               <TooltipContent>{t('ai.clear')}</TooltipContent>
@@ -198,11 +284,13 @@ export const AiPanel: React.FC = () => {
         </header>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-          <Button variant="outline" size="xs" onClick={handleExplain} disabled={!canExplain || phase === 'streaming'}>
+          <Button variant="outline" size="xs" onClick={handleExplain} disabled={!canExplain || busy}>
             <SquareTerminalIcon data-icon="inline-start" />
             {t('ai.explainTerminal')}
           </Button>
-          {contextSnapshot.context && (
+          {task === 'diagnosticAgent' && agentContext.context ? (
+            <Badge variant="secondary">{t('ai.agent.contextAttached')}</Badge>
+          ) : contextSnapshot.context && (
             <Button
               variant={contextEnabled ? 'secondary' : 'ghost'}
               size="xs"
@@ -214,6 +302,14 @@ export const AiPanel: React.FC = () => {
           )}
         </div>
 
+        {task === 'diagnosticAgent' ? (
+          <AgentRunView
+            run={agentRun}
+            onApprove={handleApproveAgentStep}
+            onReject={(stepId) => useAgentStore.getState().rejectStep(stepId)}
+            canInsert={canInsertAgentCommand}
+          />
+        ) : (
         <MessageScroller className="flex-1" followKey={followKey}>
           {messages.length === 0 && (
             <Marker>
@@ -249,8 +345,9 @@ export const AiPanel: React.FC = () => {
             );
           })}
         </MessageScroller>
+        )}
 
-        {error && (
+        {task !== 'diagnosticAgent' && error && (
           <Alert variant="destructive" className="mx-3 mb-2 w-auto">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
@@ -268,9 +365,14 @@ export const AiPanel: React.FC = () => {
             spacing={0}
             className="mb-2"
             aria-label={t('ai.mode')}
+            disabled={busy}
           >
             <ToggleGroupItem value="chat">{t('ai.mode.chat')}</ToggleGroupItem>
             <ToggleGroupItem value="generateCommand">{t('ai.mode.command')}</ToggleGroupItem>
+            <ToggleGroupItem value="diagnosticAgent">
+              <BrainCircuitIcon data-icon="inline-start" />
+              {t('ai.mode.agent')}
+            </ToggleGroupItem>
           </ToggleGroup>
           <div className="flex items-end gap-2">
             <Textarea
@@ -279,23 +381,38 @@ export const AiPanel: React.FC = () => {
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
-                  void send(task, draft);
+                  if (task === 'diagnosticAgent') void runDiagnosticAgent(draft);
+                  else void send(task, draft);
                 }
               }}
-              placeholder={task === 'generateCommand' ? t('ai.commandPlaceholder') : t('ai.placeholder')}
+              placeholder={task === 'diagnosticAgent'
+                ? t('ai.agent.placeholder')
+                : task === 'generateCommand'
+                  ? t('ai.commandPlaceholder')
+                  : t('ai.placeholder')}
               className="min-h-20 resize-none"
-              disabled={phase === 'streaming'}
+              disabled={busy}
             />
-            {phase === 'streaming' ? (
+            {busy ? (
               <Button variant="outline" size="icon" onClick={handleCancel} aria-label={t('ai.stop')}>
                 <StopCircleIcon />
               </Button>
             ) : (
-              <Button size="icon" onClick={() => void send(task, draft)} disabled={!draft.trim()} aria-label={t('ai.send')}>
+              <Button
+                size="icon"
+                onClick={() => task === 'diagnosticAgent'
+                  ? void runDiagnosticAgent(draft)
+                  : void send(task, draft)}
+                disabled={!draft.trim() || (task === 'diagnosticAgent' && !agentContext.context)}
+                aria-label={t('ai.send')}
+              >
                 <SendIcon />
               </Button>
             )}
           </div>
+          {task === 'diagnosticAgent' && !agentContext.context && (
+            <p className="mt-1 text-[11px] text-muted-foreground">{t('ai.agent.requiresTerminal')}</p>
+          )}
           {!model.trim() && (
             <Button variant="link" size="xs" className="mt-1 px-0" onClick={openSettings}>
               {t('ai.configure')}
