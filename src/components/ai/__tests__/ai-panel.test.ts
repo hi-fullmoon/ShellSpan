@@ -1,10 +1,16 @@
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { createElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { initI18n } from '@/locales';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAiStore } from '@/stores/aiStore';
 import type { AiChatMessage } from '@/types/ai';
 import {
+  AiPanel,
   cancelActiveAiRequests,
+  clampAiPanelWidth,
   extractSingleLineCommand,
+  getAiPanelWidthBounds,
   selectConversationHistory,
   shouldSubmitAiDraft,
 } from '../ai-panel';
@@ -109,6 +115,73 @@ describe('shouldSubmitAiDraft', () => {
     expect(shouldSubmitAiDraft('Enter', false, true, 13)).toBe(false);
     expect(shouldSubmitAiDraft('Enter', false, false, 229)).toBe(false);
     expect(shouldSubmitAiDraft('a', false, false, 65)).toBe(false);
+  });
+});
+
+describe('AI panel width', () => {
+  it('keeps the panel within its normal width range', () => {
+    expect(getAiPanelWidthBounds(1480)).toEqual({ min: 320, max: 720 });
+    expect(clampAiPanelWidth(200, 1480)).toBe(320);
+    expect(clampAiPanelWidth(800, 1480)).toBe(720);
+    expect(clampAiPanelWidth(461.6, 1480)).toBe(462);
+  });
+
+  it('preserves the minimum main-content width in a smaller container', () => {
+    expect(getAiPanelWidthBounds(1000)).toEqual({ min: 320, max: 520 });
+    expect(clampAiPanelWidth(700, 1000)).toBe(520);
+  });
+
+  it('widens when its left edge is dragged left', async () => {
+    await initI18n('zh-CN');
+    useAiStore.getState().setOpen(true);
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+
+    try {
+      const { container, unmount } = render(
+        createElement('div', null, createElement(AiPanel)),
+      );
+      const wrapper = container.firstElementChild as HTMLElement;
+      vi.spyOn(wrapper, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 1480,
+        height: 900,
+        right: 1480,
+        bottom: 900,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      const panel = container.querySelector('[data-slot="ai-panel"]') as HTMLElement;
+      const handle = screen.getByRole('separator', { name: '调整 AI 助手宽度' });
+      expect(container.querySelector('[data-slot="ai-panel-resize-indicator"]')).toHaveClass(
+        'w-px',
+        'group-hover:w-[3px]',
+        'group-data-[resizing]:w-[3px]',
+      );
+      Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() });
+      Object.defineProperty(handle, 'releasePointerCapture', { value: vi.fn() });
+
+      fireEvent.pointerDown(handle, { button: 0, pointerId: 7, clientX: 1080 });
+      expect(document.body.style.userSelect).toBe('none');
+      fireEvent.pointerMove(handle, { pointerId: 7, clientX: 960 });
+      expect(frames).toHaveLength(1);
+      act(() => frames[0](0));
+      expect(panel).toHaveStyle({ width: '520px' });
+
+      fireEvent.pointerUp(handle, { pointerId: 7, clientX: 960 });
+      expect(document.body.style.userSelect).toBe('');
+      unmount();
+    } finally {
+      useAiStore.getState().setOpen(false);
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+    }
   });
 });
 

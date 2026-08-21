@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
   ArrowUpIcon,
@@ -57,9 +57,24 @@ import type {
 } from '@/types/ai';
 
 const AI_STREAM_EVENT = 'ai-stream';
+const AI_PANEL_DEFAULT_WIDTH = 400;
+const AI_PANEL_MIN_WIDTH = 320;
+const AI_PANEL_MAX_WIDTH = 720;
+const MAIN_CONTENT_MIN_WIDTH = 480;
+const AI_PANEL_KEYBOARD_RESIZE_STEP = 24;
 const logger = createLogger('ai');
 type ConversationTask = Exclude<AiTaskKind, 'diagnosticAgent'>;
 type CancelAiRequest = (requestId: string) => Promise<void>;
+
+export function getAiPanelWidthBounds(containerWidth: number): { min: number; max: number } {
+  const max = Math.max(0, Math.min(AI_PANEL_MAX_WIDTH, containerWidth - MAIN_CONTENT_MIN_WIDTH));
+  return { min: Math.min(AI_PANEL_MIN_WIDTH, max), max };
+}
+
+export function clampAiPanelWidth(width: number, containerWidth: number): number {
+  const bounds = getAiPanelWidthBounds(containerWidth);
+  return Math.round(Math.min(Math.max(width, bounds.min), bounds.max));
+}
 
 function conversationLane(task: ConversationTask): 'conversation' | 'command' {
   return task === 'generateCommand' ? 'command' : 'conversation';
@@ -214,6 +229,61 @@ export const AiPanel: React.FC = () => {
   const [draft, setDraft] = useState('');
   const [task, setTask] = useState<AiTaskKind>('chat');
   const [contextEnabled, setContextEnabled] = useState(true);
+  const [panelWidth, setPanelWidth] = useState(AI_PANEL_DEFAULT_WIDTH);
+  const [resizing, setResizing] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
+  const resizeStartRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    width: number;
+    containerWidth: number;
+  } | null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+  const pendingPanelWidthRef = useRef<number | null>(null);
+
+  const getContainerWidth = useCallback((): number => (
+    panelRef.current?.parentElement?.getBoundingClientRect().width ?? window.innerWidth
+  ), []);
+
+  const applyPendingPanelWidth = useCallback(() => {
+    resizeFrameRef.current = null;
+    if (pendingPanelWidthRef.current === null) return;
+    setPanelWidth(pendingPanelWidthRef.current);
+    pendingPanelWidthRef.current = null;
+  }, []);
+
+  const finishPanelResize = useCallback(() => {
+    if (resizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(resizeFrameRef.current);
+      applyPendingPanelWidth();
+    }
+    resizeStartRef.current = null;
+    setResizing(false);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, [applyPendingPanelWidth]);
+
+  useEffect(() => {
+    const handleWindowResize = (): void => {
+      setPanelWidth((width) => clampAiPanelWidth(width, getContainerWidth()));
+    };
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      if (resizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(resizeFrameRef.current);
+      }
+      resizeFrameRef.current = null;
+      pendingPanelWidthRef.current = null;
+      resizeStartRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [getContainerWidth]);
+
+  useEffect(() => {
+    if (!open && resizeStartRef.current) finishPanelResize();
+  }, [finishPanelResize, open]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -501,10 +571,81 @@ export const AiPanel: React.FC = () => {
     && activeSession?.status === 'connected'
     && terminalRegistry.get(agentRun.sessionId),
   );
+  const panelWidthBounds = getAiPanelWidthBounds(getContainerWidth());
 
   return (
     <TooltipProvider>
-      <aside className="flex h-full w-[400px] shrink-0 flex-col border-l border-app-border bg-background" aria-label={t('ai.title')}>
+      <aside
+        ref={panelRef}
+        data-slot="ai-panel"
+        className="relative flex h-full shrink-0 flex-col border-l border-app-border bg-background"
+        style={{ width: panelWidth }}
+        aria-label={t('ai.title')}
+      >
+        <div
+          data-slot="ai-panel-resize-handle"
+          role="separator"
+          aria-label={t('ai.resize')}
+          aria-orientation="vertical"
+          aria-valuemin={panelWidthBounds.min}
+          aria-valuemax={panelWidthBounds.max}
+          aria-valuenow={panelWidth}
+          tabIndex={0}
+          data-resizing={resizing || undefined}
+          className="group absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none"
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            resizeStartRef.current = {
+              pointerId: event.pointerId,
+              clientX: event.clientX,
+              width: panelWidth,
+              containerWidth: getContainerWidth(),
+            };
+            setResizing(true);
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+          }}
+          onPointerMove={(event) => {
+            const start = resizeStartRef.current;
+            if (!start || start.pointerId !== event.pointerId) return;
+            pendingPanelWidthRef.current = clampAiPanelWidth(
+              start.width + start.clientX - event.clientX,
+              start.containerWidth,
+            );
+            if (resizeFrameRef.current === null) {
+              resizeFrameRef.current = window.requestAnimationFrame(applyPendingPanelWidth);
+            }
+          }}
+          onPointerUp={(event) => {
+            if (resizeStartRef.current?.pointerId !== event.pointerId) return;
+            finishPanelResize();
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onPointerCancel={finishPanelResize}
+          onLostPointerCapture={finishPanelResize}
+          onKeyDown={(event) => {
+            let nextWidth: number | undefined;
+            if (event.key === 'ArrowLeft') {
+              nextWidth = panelWidth + AI_PANEL_KEYBOARD_RESIZE_STEP;
+            } else if (event.key === 'ArrowRight') {
+              nextWidth = panelWidth - AI_PANEL_KEYBOARD_RESIZE_STEP;
+            } else if (event.key === 'Home') {
+              nextWidth = panelWidthBounds.min;
+            } else if (event.key === 'End') {
+              nextWidth = panelWidthBounds.max;
+            }
+            if (nextWidth === undefined) return;
+            event.preventDefault();
+            setPanelWidth(clampAiPanelWidth(nextWidth, getContainerWidth()));
+          }}
+        >
+          <div
+            data-slot="ai-panel-resize-indicator"
+            className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent shadow-none transition-all duration-150 delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200 group-focus-visible:w-[3px] group-focus-visible:bg-app-primary group-data-[resizing]:w-[3px] group-data-[resizing]:bg-app-primary"
+          />
+        </div>
         <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
           <div className="flex min-w-0 items-center gap-2">
             <SparklesIcon className="size-4 text-primary" />
