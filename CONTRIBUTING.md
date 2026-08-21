@@ -156,7 +156,6 @@ Git Hooks 已配置为自动检查：
 2. **调试代码检测** - 标记 console.log / debugger / TODO
 3. **大文件警告** - 改动超过 500 行时警告
 4. **TypeScript 检查** - 运行 `tsc --noEmit`
-5. **测试检查** - 运行 `pnpm test`
 
 ## 代码审查
 
