@@ -63,7 +63,9 @@ export function pruneEmptyTerminalGroups(node: TerminalLayoutNode): TerminalLayo
   const second = pruneEmptyTerminalGroups(node.second);
   if (!first) return second;
   if (!second) return first;
-  return { ...node, first, second };
+  // Keep referential equality when nothing was pruned, so callers can bail
+  // out of state updates.
+  return first === node.first && second === node.second ? node : { ...node, first, second };
 }
 
 export function findAdjacentTerminalGroup(

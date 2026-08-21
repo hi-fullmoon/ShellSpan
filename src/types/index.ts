@@ -196,11 +196,6 @@ export type CreateSessionError =
   | CreateSessionErrorHostKeyMismatch
   | CreateSessionErrorOther;
 
-export interface DataEvent {
-  sessionId: string;
-  chunk: string;
-}
-
 export interface StatusEvent {
   sessionId: string;
   status: SessionStatus;
@@ -315,6 +310,16 @@ export interface RemoteDirectoryRequest extends RemoteConnectionRequest {
   path?: string;
 }
 
+export interface RemoteEntryOwnersRequest extends RemoteConnectionRequest {
+  ownerIds: number[];
+  groupIds: number[];
+}
+
+export interface RemoteEntryOwners {
+  ownerNames: Record<number, string>;
+  groupNames: Record<number, string>;
+}
+
 export interface CreateRemoteEntryRequest extends RemoteConnectionRequest {
   parentPath: string;
   name: string;
@@ -371,6 +376,19 @@ export interface UploadLocalPathsRequest extends RemoteConnectionRequest {
   localPaths: string[];
   conflictPolicies: UploadConflictPolicy[];
   operationId: string;
+}
+
+export type TransferItemStatus = 'completed' | 'failed' | 'skipped';
+
+export interface TransferItemResult {
+  sourcePath: string;
+  destinationPath?: string;
+  status: TransferItemStatus;
+  error?: string;
+}
+
+export interface TransferBatchResult {
+  items: TransferItemResult[];
 }
 
 export interface CopyLocalPathsRequest {

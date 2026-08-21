@@ -135,11 +135,13 @@ export interface KeychainKeySummary {
   label: string;
   keyType: string;
   kind: KeychainKeyKind;
+  service: string;
 }
 
 interface KeychainState {
   keys: KeychainKeySummary[];
   initialized: boolean;
+  loadError?: string;
   hydrate: () => Promise<void>;
   addKey: (
     key: Omit<KeychainKey, 'id' | 'createdAt' | 'updatedAt'>,
@@ -153,34 +155,36 @@ interface KeychainState {
 }
 
 function resolveKeyType(key: Omit<KeychainKey, 'id' | 'createdAt' | 'updatedAt'>): string {
-  if (key.kind === 'password') {
-    return 'ecdsa';
-  }
   return key.privateKey ? detectKeyType(key.privateKey) : (key.keyType ?? 'unknown');
 }
 
 export const useKeychainStore = create<KeychainState>()((set, get) => ({
   keys: [],
   initialized: false,
+  loadError: undefined,
 
   hydrate: async () => {
     try {
-      const keySummaries = await invokeListKeyCredentials();
-      const keys = keySummaries.map((summary) =>
-        summary.kind === 'password' ? { ...summary, keyType: 'ecdsa' } : summary,
-      );
+      const keys = await invokeListKeyCredentials();
       set({
         keys,
         initialized: true,
+        loadError: undefined,
       });
       logger.info(`loaded ${keys.length} key credentials`);
     } catch (error) {
       logger.error('failed to load key credentials', error);
-      set({ keys: [], initialized: true });
+      set({
+        initialized: false,
+        loadError: error instanceof Error ? error.message : String(error),
+      });
     }
   },
 
   addKey: async (key) => {
+    if (key.kind !== 'keyFile') {
+      throw new Error('only private key files can be added as generic key credentials');
+    }
     const id = generateId();
     const now = Date.now();
     const keyType = resolveKeyType(key);
@@ -200,7 +204,13 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       keyType,
     });
     set((state) => ({
-      keys: [...state.keys, { id: newKey.id, label: newKey.label, keyType, kind: newKey.kind }],
+      keys: [...state.keys, {
+        id: newKey.id,
+        label: newKey.label,
+        keyType,
+        kind: newKey.kind,
+        service: 'com.termbridge.key',
+      }],
     }));
     return newKey;
   },
@@ -220,6 +230,9 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       id,
       updatedAt: Date.now(),
     };
+    if (updated.kind !== 'keyFile') {
+      throw new Error('profile password credentials cannot be edited as private keys');
+    }
 
     const keyType = resolveKeyType(updated);
 
@@ -234,7 +247,15 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
 
     set((state) => ({
       keys: state.keys.map((k) =>
-        k.id === id ? { id: updated.id, label: updated.label, keyType, kind: updated.kind } : k,
+        k.id === id
+          ? {
+              id: updated.id,
+              label: updated.label,
+              keyType,
+              kind: updated.kind,
+              service: current.service,
+            }
+          : k,
       ),
     }));
   },

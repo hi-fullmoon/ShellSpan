@@ -136,6 +136,24 @@ pub(crate) struct RemoteDirectoryRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteEntryOwnersRequest {
+    #[serde(flatten)]
+    pub(crate) connection: RemoteConnectionRequest,
+    #[serde(default)]
+    pub(crate) owner_ids: Vec<u32>,
+    #[serde(default)]
+    pub(crate) group_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteEntryOwners {
+    pub(crate) owner_names: HashMap<u32, String>,
+    pub(crate) group_names: HashMap<u32, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CreateRemoteEntryRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,
@@ -237,6 +255,29 @@ pub(crate) struct UploadLocalPathsRequest {
     #[serde(default)]
     pub(crate) conflict_policies: Vec<UploadConflictPolicy>,
     pub(crate) operation_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TransferItemStatus {
+    Completed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TransferItemResult {
+    pub(crate) source_path: String,
+    pub(crate) destination_path: Option<String>,
+    pub(crate) status: TransferItemStatus,
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TransferBatchResult {
+    pub(crate) items: Vec<TransferItemResult>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,12 +394,39 @@ impl ConnectionError {
     pub(crate) fn message(&self) -> String {
         match self {
             ConnectionError::HostKeyUnknown { host, port, .. } => {
-                format!("host key for {host}:{port} is not known — trust this host before connecting")
+                format!(
+                    "host key for {host}:{port} is not known — trust this host before connecting"
+                )
             }
             ConnectionError::HostKeyMismatch { host, port } => {
                 format!("host key for {host}:{port} does not match the known key — possible man-in-the-middle attack")
             }
             ConnectionError::Other { message } => message.clone(),
+        }
+    }
+
+    /// Lossless conversion into the command-facing error so `create_session`
+    /// rejects with the same host-key classification the connection produced.
+    pub(crate) fn to_create_session_error(&self) -> CreateSessionError {
+        match self {
+            ConnectionError::HostKeyUnknown {
+                host,
+                port,
+                fingerprint,
+            } => CreateSessionError::HostKeyUnknown {
+                host: host.clone(),
+                port: *port,
+                fingerprint: fingerprint.clone(),
+            },
+            ConnectionError::HostKeyMismatch { host, port } => {
+                CreateSessionError::HostKeyMismatch {
+                    host: host.clone(),
+                    port: *port,
+                }
+            }
+            ConnectionError::Other { message } => CreateSessionError::Other {
+                message: message.clone(),
+            },
         }
     }
 }
@@ -385,9 +453,15 @@ pub(crate) enum RemoteFsError {
 impl RemoteFsError {
     pub(crate) fn from_connection_error(error: ConnectionError) -> Self {
         match error {
-            ConnectionError::HostKeyUnknown { host, port, fingerprint } => {
-                RemoteFsError::HostKeyUnknown { host, port, fingerprint }
-            }
+            ConnectionError::HostKeyUnknown {
+                host,
+                port,
+                fingerprint,
+            } => RemoteFsError::HostKeyUnknown {
+                host,
+                port,
+                fingerprint,
+            },
             ConnectionError::HostKeyMismatch { host, port } => {
                 RemoteFsError::HostKeyMismatch { host, port }
             }
@@ -480,13 +554,6 @@ pub(crate) struct StatusEvent {
     pub(crate) session_id: String,
     pub(crate) status: SessionStatus,
     pub(crate) message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DataEvent {
-    pub(crate) session_id: String,
-    pub(crate) chunk: String,
 }
 
 /// Host identity attached to a closed event so the frontend can render the
@@ -626,6 +693,7 @@ pub(crate) struct KeyCredentialSummary {
     pub(crate) label: String,
     pub(crate) key_type: String,
     pub(crate) kind: KeyCredentialKind,
+    pub(crate) service: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -670,6 +738,10 @@ pub(crate) enum SessionCommand {
 
 pub(crate) struct ManagedSession {
     pub(crate) sender: Sender<SessionCommand>,
+    /// Poked after each enqueued command so an event-driven session worker
+    /// wakes from its idle poll immediately. Local sessions poll their command
+    /// channel on a timer instead and leave this empty.
+    pub(crate) waker: Option<crate::session::SessionWaker>,
     pub(crate) status: StatusEvent,
     /// Signals that the frontend has attached its event listeners, so the
     /// session worker may emit output live instead of buffering it.
@@ -797,8 +869,7 @@ pub(crate) struct DownloadProgressTracker {
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 
 fn should_emit_progress(last_emitted_at: Option<Instant>) -> bool {
-    last_emitted_at
-        .map_or(true, |instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
+    last_emitted_at.map_or(true, |instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
 }
 
 impl DownloadProgressTracker {
@@ -1149,7 +1220,11 @@ impl SessionManager {
         managed
             .sender
             .send(command)
-            .map_err(|_| format!("session {session_id} is not available"))
+            .map_err(|_| format!("session {session_id} is not available"))?;
+        if let Some(waker) = managed.waker.as_ref() {
+            waker.wake();
+        }
+        Ok(())
     }
 
     pub(crate) fn status(&self, session_id: &str) -> Result<StatusEvent, String> {
@@ -1206,6 +1281,7 @@ mod session_manager_tests {
     fn managed_session(sender: mpsc::Sender<SessionCommand>) -> ManagedSession {
         ManagedSession {
             sender,
+            waker: None,
             status: StatusEvent {
                 session_id: "local-1".to_string(),
                 status: SessionStatus::Connecting,
@@ -1257,8 +1333,8 @@ mod session_manager_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        should_emit_progress, CancellationRegistry, JumpHostConfig, RemoteConnectionRequest,
-        AuthMethod, PROGRESS_EMIT_INTERVAL,
+        should_emit_progress, AuthMethod, CancellationRegistry, JumpHostConfig,
+        RemoteConnectionRequest, PROGRESS_EMIT_INTERVAL,
     };
     use std::sync::atomic::Ordering as AtomicOrdering;
     use std::time::{Duration, Instant};
@@ -1356,4 +1432,3 @@ pub(crate) struct SftpBookmarkRow {
     pub(crate) label: Option<String>,
     pub(crate) created_at: i64,
 }
-

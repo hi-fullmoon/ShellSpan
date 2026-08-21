@@ -20,7 +20,7 @@ const tauri = vi.hoisted(() => ({
   invokeCancelUpload: vi.fn().mockResolvedValue(undefined),
   invokeCreateRemoteEntry: vi.fn().mockResolvedValue(undefined),
   invokeDeleteRemotePath: vi.fn().mockResolvedValue(undefined),
-  invokeDownloadRemotePaths: vi.fn().mockResolvedValue(undefined),
+  invokeDownloadRemotePaths: vi.fn().mockResolvedValue({ items: [] }),
   invokeListRemoteDirectory: vi.fn().mockResolvedValue({
     path: '/remote',
     entries: [],
@@ -29,7 +29,7 @@ const tauri = vi.hoisted(() => ({
   invokePreviewRemoteFile: vi.fn().mockResolvedValue(undefined),
   invokeRenameRemotePath: vi.fn().mockResolvedValue(undefined),
   invokeUpdateRemotePermissions: vi.fn().mockResolvedValue(undefined),
-  invokeUploadLocalPaths: vi.fn().mockResolvedValue(undefined),
+  invokeUploadLocalPaths: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
 vi.mock('@/lib/tauri', () => tauri);
@@ -237,6 +237,58 @@ describe('useSftpConnection uploads', () => {
     await act(() => operation.cancel!());
     expect(tauri.invokeCancelUpload).toHaveBeenCalledWith(operation.operationId);
   });
+
+  it('tracks uploaded target paths instead of locking the whole directory', async () => {
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() =>
+      result.current.uploadLocalPaths(
+        ['/local/a.txt', 'C:\\Users\\tester\\b.txt'],
+        '/remote',
+      ),
+    );
+
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'upload',
+      paths: ['/remote/a.txt', '/remote/b.txt'],
+    });
+  });
+
+  it('retries only failed upload items from a partial batch result', async () => {
+    useAppStore.setState({ sftpRetryCount: 1 });
+    tauri.invokeUploadLocalPaths
+      .mockResolvedValueOnce({
+        items: [
+          { sourcePath: '/local/a.txt', destinationPath: '/remote/a.txt', status: 'completed' },
+          { sourcePath: '/local/b.txt', status: 'failed', error: 'network hiccup' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        items: [
+          { sourcePath: '/local/b.txt', destinationPath: '/remote/b.txt', status: 'completed' },
+        ],
+      });
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() =>
+      result.current.uploadLocalPaths(['/local/a.txt', '/local/b.txt'], '/remote'),
+    );
+
+    expect(tauri.invokeUploadLocalPaths).toHaveBeenCalledTimes(2);
+    expect(tauri.invokeUploadLocalPaths).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        localPaths: ['/local/b.txt'],
+      }),
+    );
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'upload',
+      paths: ['/remote/b.txt'],
+      status: 'completed',
+    });
+  });
 });
 
 describe('useSftpConnection same-host copy', () => {
@@ -353,6 +405,41 @@ describe('useSftpConnection downloads', () => {
     rejectDownload(new Error('download cancelled'));
     await act(() => download);
     expect(useTransferStore.getState().operations[0]?.status).toBe('cancelled');
+  });
+
+  it('retries only failed download items from a partial batch result', async () => {
+    useAppStore.setState({ sftpRetryCount: 1 });
+    tauri.invokeDownloadRemotePaths
+      .mockResolvedValueOnce({
+        items: [
+          { sourcePath: '/remote/a.txt', destinationPath: '/downloads/a.txt', status: 'completed' },
+          { sourcePath: '/remote/b.txt', status: 'failed', error: 'network hiccup' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        items: [
+          { sourcePath: '/remote/b.txt', destinationPath: '/downloads/b.txt', status: 'completed' },
+        ],
+      });
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() =>
+      result.current.downloadRemotePaths(['/remote/a.txt', '/remote/b.txt'], '/downloads'),
+    );
+
+    expect(tauri.invokeDownloadRemotePaths).toHaveBeenCalledTimes(2);
+    expect(tauri.invokeDownloadRemotePaths).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        remotePaths: ['/remote/b.txt'],
+      }),
+    );
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      kind: 'download',
+      paths: ['/remote/b.txt'],
+      status: 'completed',
+    });
   });
 });
 

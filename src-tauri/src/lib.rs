@@ -1,7 +1,6 @@
 mod commands;
 mod connection;
 mod db;
-mod ecdsa_key;
 mod health;
 mod identity_cache;
 mod keychain;
@@ -20,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
 
 use crate::sftp_pool::SftpPool;
-use models::{ClosedEvent, ClosedReasonKind, DataEvent, DeleteCancellationRegistry};
+use models::{ClosedEvent, ClosedReasonKind, DeleteCancellationRegistry};
 use models::{
     DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionErrorEvent,
     SessionIdentity, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry,
@@ -39,13 +38,15 @@ pub(crate) use remote_fs::{
     copy_remote_path_blocking, copy_remote_to_remote_blocking, create_remote_entry_blocking,
     delete_remote_path_blocking, download_remote_paths_blocking, list_remote_directory_blocking,
     open_remote_file_blocking, read_remote_file_blocking, rename_remote_path_blocking,
-    update_remote_permissions_blocking, upload_local_paths_blocking,
+    resolve_remote_entry_owners_blocking, update_remote_permissions_blocking,
+    upload_local_paths_blocking, warm_remote_connection_blocking,
 };
 pub(crate) use session::{
-    classify_closed_reason, is_transport_disconnect_message, run_ssh_session,
+    classify_closed_reason, is_transport_disconnect_message, run_ssh_session, session_wake_pair,
+    SessionWakeSource,
 };
 
-pub(crate) const SSH_DATA_EVENT: &str = "ssh-data";
+pub(crate) const SSH_DATA_EVENT_PREFIX: &str = "ssh-data:";
 pub(crate) const SSH_STATUS_EVENT: &str = "ssh-status";
 pub(crate) const SSH_CLOSED_EVENT: &str = "ssh-closed";
 pub(crate) const SSH_SESSION_ERROR_EVENT: &str = "ssh-session-error";
@@ -73,14 +74,61 @@ pub(crate) fn emit_status(
 }
 
 pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Result<(), String> {
-    app.emit(
-        SSH_DATA_EVENT,
-        DataEvent {
-            session_id: session_id.to_string(),
-            chunk,
-        },
-    )
-    .map_err(|error| format!("failed to emit data event: {error}"))
+    app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), chunk)
+        .map_err(|error| format!("failed to emit data event: {error}"))
+}
+
+/// Incrementally decodes UTF-8 from `pending_bytes` into `output`. An
+/// incomplete multi-byte sequence at the tail stays in `pending_bytes` for
+/// the next call; invalid bytes are replaced with U+FFFD.
+pub(crate) fn drain_decoded_output(pending_bytes: &mut Vec<u8>, output: &mut String) {
+    loop {
+        match std::str::from_utf8(pending_bytes) {
+            Ok(text) => {
+                output.push_str(text);
+                pending_bytes.clear();
+                return;
+            }
+            Err(error) => {
+                let valid_up_to = error.valid_up_to();
+                output.push_str(
+                    std::str::from_utf8(&pending_bytes[..valid_up_to])
+                        .expect("valid_up_to marks a valid UTF-8 prefix"),
+                );
+                match error.error_len() {
+                    Some(invalid_len) => {
+                        output.push('\u{FFFD}');
+                        pending_bytes.drain(..valid_up_to + invalid_len);
+                    }
+                    None => {
+                        pending_bytes.drain(..valid_up_to);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Emits whatever decoded output remains when a session ends, lossy-decoding
+/// any bytes still stuck in the incremental decode buffer. Emit failures are
+/// logged and swallowed: the session is ending anyway, so a dead frontend
+/// listener must not mask the real session result.
+pub(crate) fn flush_pending_output(
+    app: &AppHandle,
+    session_id: &str,
+    pending_bytes: &mut Vec<u8>,
+    pending_output: &mut String,
+) {
+    if !pending_bytes.is_empty() {
+        pending_output.push_str(&String::from_utf8_lossy(pending_bytes));
+        pending_bytes.clear();
+    }
+    if !pending_output.is_empty() {
+        if let Err(error) = emit_data(app, session_id, std::mem::take(pending_output)) {
+            log::warn!("Failed to emit final session output session_id={session_id}: {error}");
+        }
+    }
 }
 
 pub(crate) fn emit_closed(
@@ -144,7 +192,7 @@ pub fn run() {
             }
             let termbridge_dir = app.path().home_dir()?.join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
-            app.manage(keychain::CredentialManager::new(database.clone()));
+            app.manage(keychain::CredentialManager::new());
             app.manage(database);
             #[cfg(not(target_os = "macos"))]
             menu::initialize_tray(app)?;
@@ -180,6 +228,8 @@ pub fn run() {
             commands::request_app_restart,
             commands::request_app_exit,
             commands::list_remote_directory,
+            commands::resolve_remote_entry_owners,
+            commands::warm_remote_connection,
             commands::create_remote_entry,
             commands::rename_remote_path,
             commands::delete_remote_path,
@@ -211,7 +261,6 @@ pub fn run() {
             commands::read_log_file,
             commands::export_log_file,
             commands::list_local_directory,
-            commands::derive_ecdsa_key_from_password,
             commands::store_key_credential,
             commands::list_key_credentials,
             commands::retrieve_key_credential,
@@ -248,4 +297,34 @@ pub fn run() {
     menu::configure_builder(builder)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drain_decoded_output_holds_split_multibyte_sequence() {
+        let mut pending_bytes = Vec::new();
+        let mut output = String::new();
+        // U+6C49 (汉) is three bytes; feed it split across two drains.
+        pending_bytes.extend_from_slice(&[0xE6, 0xB1]);
+        drain_decoded_output(&mut pending_bytes, &mut output);
+        assert_eq!(output, "");
+        assert_eq!(pending_bytes, vec![0xE6, 0xB1]);
+
+        pending_bytes.extend_from_slice(&[0x89, b'!']);
+        drain_decoded_output(&mut pending_bytes, &mut output);
+        assert_eq!(output, "汉!");
+        assert!(pending_bytes.is_empty());
+    }
+
+    #[test]
+    fn drain_decoded_output_replaces_invalid_bytes() {
+        let mut pending_bytes = vec![b'a', 0xFF, b'b'];
+        let mut output = String::new();
+        drain_decoded_output(&mut pending_bytes, &mut output);
+        assert_eq!(output, "a\u{FFFD}b");
+        assert!(pending_bytes.is_empty());
+    }
 }

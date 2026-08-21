@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpTabBar } from '../sftp-tab-bar';
 import { useSftpStore } from '@/stores/sftpStore';
@@ -66,6 +66,52 @@ describe('SftpTabBar', () => {
     expect(useSftpStore.getState().activeConnectionId).toBe(idB);
   });
 
+  it('activates a connection via pointerup fallback when its pointerdown was missed', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    const connections = useSftpStore.getState().connections;
+    const idA = connections[0]?.id ?? '';
+    const idB = connections[1]?.id ?? '';
+    render(
+      <SftpTabBar
+        onNewTabClick={vi.fn()}
+        onTabContextMenu={vi.fn()}
+      />,
+    );
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[0], { button: 0 });
+    expect(useSftpStore.getState().activeConnectionId).toBe(idA);
+
+    // The second tap's pointerdown is swallowed by WKWebView; only the release
+    // reaches the tab. The fallback must still switch.
+    fireEvent.pointerUp(tabs[1], { button: 0 });
+    expect(useSftpStore.getState().activeConnectionId).toBe(idB);
+  });
+
+  it('does not activate a connection when a missed pointerdown releases on its close button', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    const connections = useSftpStore.getState().connections;
+    const idB = connections[1]?.id ?? '';
+    render(
+      <SftpTabBar
+        onNewTabClick={vi.fn()}
+        onTabContextMenu={vi.fn()}
+      />,
+    );
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[1], { button: 0 });
+    expect(useSftpStore.getState().activeConnectionId).toBe(idB);
+
+    // If WKWebView drops the pointerdown for this tap, only the release reaches
+    // the close button. The fallback activation handler must leave the active
+    // connection alone so the button action does not also switch tabs.
+    fireEvent.pointerUp(screen.getAllByRole('button', { name: 'close' })[0], { button: 0 });
+    expect(useSftpStore.getState().activeConnectionId).toBe(idB);
+  });
+
   it('shows separators only between tabs that are not adjacent to the active tab', () => {
     addConnection('Conn A');
     addConnection('Conn B');
@@ -129,32 +175,17 @@ describe('SftpTabBar', () => {
     );
   });
 
-  it('calls onNewTabClick when plus button is clicked', async () => {
+  it('calls onNewTabClick when empty tab bar space is double-clicked', async () => {
     addConnection('Conn A');
     const onNewTabClick = vi.fn();
-    render(
+    const { container } = render(
       <SftpTabBar
         onNewTabClick={onNewTabClick}
         onTabContextMenu={vi.fn()}
       />,
     );
-    const plusButton = screen.getByRole('button', { name: 'sftp.newTab' });
-    await userEvent.click(plusButton);
+    await userEvent.dblClick(container.firstChild as HTMLElement);
     expect(onNewTabClick).toHaveBeenCalled();
-  });
-
-  it('removes input padding while renaming a tab', async () => {
-    addConnection('Conn A');
-    render(
-      <SftpTabBar
-        onNewTabClick={vi.fn()}
-        onTabContextMenu={vi.fn()}
-      />,
-    );
-
-    await userEvent.dblClick(screen.getByText('Conn A'));
-
-    expect(screen.getByRole('textbox')).toHaveClass('p-0', 'leading-none');
   });
 
   it('renders a 1px top line with the theme color on the active tab', () => {

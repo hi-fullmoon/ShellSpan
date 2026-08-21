@@ -52,7 +52,6 @@ interface TerminalState {
   setActiveSession: (sessionId: string | null) => void;
   setRestoredLayout: (layout: TerminalLayoutNode | null) => void;
   clearRestoredLayout: () => void;
-  appendData: (sessionId: string, chunk: string) => void;
   setStatus: (sessionId: string, event: StatusEvent) => void;
   setClosed: (sessionId: string, event: ClosedEvent) => void;
   updateTitle: (sessionId: string, title: string) => void;
@@ -124,6 +123,9 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
   clearRestoredLayout: () => set({ restoredLayout: null }),
   removeSession: (sessionId) =>
     set((state) => {
+      if (!state.sessions.some((session) => session.sessionId === sessionId)) {
+        return state;
+      }
       const sessions = state.sessions.filter(
         (session) => session.sessionId !== sessionId,
       );
@@ -138,23 +140,26 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const oldIndex = state.sessions.findIndex(
         (session) => session.sessionId === oldSessionId,
       );
-      const old = oldIndex >= 0 ? state.sessions[oldIndex] : undefined;
+      // The old session may have been closed while the reconnect was in flight;
+      // never resurrect it.
+      if (oldIndex === -1) return state;
+      const old = state.sessions[oldIndex];
       const newSession: TerminalSession = {
         sessionId: summary.sessionId,
-        title: old?.title ?? summary.title,
+        title: old.title ?? summary.title,
         host: summary.host,
         port: summary.port,
         username: summary.username,
         status: 'connecting',
         profileId,
-        pinned: old?.pinned,
-        color: old?.color,
+        pinned: old.pinned,
+        color: old.color,
         reconnecting: true,
       };
       const sessions = state.sessions.filter(
         (session) => session.sessionId !== oldSessionId,
       );
-      sessions.splice(oldIndex >= 0 ? oldIndex : sessions.length, 0, newSession);
+      sessions.splice(oldIndex, 0, newSession);
       return {
         sessions: sortSessions(sessions),
         activeSessionId: summary.sessionId,
@@ -162,11 +167,15 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
     }),
   setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
   setReconnecting: (sessionId, reconnecting) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.sessionId === sessionId ? { ...session, reconnecting } : session,
-      ),
-    })),
+    set((state) => {
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.sessionId !== sessionId) return session;
+        changed = true;
+        return { ...session, reconnecting };
+      });
+      return changed ? { sessions } : state;
+    }),
   reorderSessions: (activeId, insertIndex) =>
     set((state) => {
       const fromIndex = state.sessions.findIndex(
@@ -179,55 +188,64 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       sessions.splice(clampedIndex, 0, moved);
       return { sessions: sortSessions(sessions) };
     }),
-  appendData: () => {
-    // Terminal component handles data directly via xterm.
-  },
   setStatus: (sessionId, event) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.sessionId === sessionId
-          ? {
-              ...session,
-              status: event.status,
-              statusMessage: event.message,
-              reconnecting:
-                event.status === 'connecting' ? session.reconnecting : false,
-            }
-          : session,
-      ),
-    })),
+    set((state) => {
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.sessionId !== sessionId) return session;
+        changed = true;
+        return {
+          ...session,
+          status: event.status,
+          statusMessage: event.message,
+          reconnecting:
+            event.status === 'connecting' ? session.reconnecting : false,
+        };
+      });
+      return changed ? { sessions } : state;
+    }),
   setClosed: (sessionId, event) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.sessionId === sessionId
-          ? {
-              ...session,
-              closed: event,
-              status: event.reasonKind === 'error' ? 'error' : 'disconnected',
-            }
-          : session,
-      ),
-    })),
+    set((state) => {
+      let changed = false;
+      const sessions: TerminalSession[] = state.sessions.map((session) => {
+        if (session.sessionId !== sessionId) return session;
+        changed = true;
+        return {
+          ...session,
+          closed: event,
+          status: event.reasonKind === 'error' ? 'error' : 'disconnected',
+        };
+      });
+      return changed ? { sessions } : state;
+    }),
   updateTitle: (sessionId, title) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.sessionId === sessionId ? { ...session, title } : session,
-      ),
-    })),
+    set((state) => {
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.sessionId !== sessionId) return session;
+        changed = true;
+        return { ...session, title };
+      });
+      return changed ? { sessions } : state;
+    }),
   togglePin: (sessionId) =>
-    set((state) => ({
-      sessions: sortSessions(
-        state.sessions.map((session) =>
-          session.sessionId === sessionId
-            ? { ...session, pinned: !session.pinned }
-            : session,
-        ),
-      ),
-    })),
+    set((state) => {
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.sessionId !== sessionId) return session;
+        changed = true;
+        return { ...session, pinned: !session.pinned };
+      });
+      return changed ? { sessions: sortSessions(sessions) } : state;
+    }),
   setTabColor: (sessionId, color) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.sessionId === sessionId ? { ...session, color } : session,
-      ),
-    })),
+    set((state) => {
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.sessionId !== sessionId) return session;
+        changed = true;
+        return { ...session, color };
+      });
+      return changed ? { sessions } : state;
+    }),
 }));

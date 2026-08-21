@@ -47,8 +47,88 @@ describe('TerminalTabBar', () => {
 
     const tabs = screen.getAllByRole('tab');
     expect(tabs[1]).not.toHaveClass('shadow-md');
-    fireEvent.click(tabs[1]);
+    // Tabs activate on pointerdown (browser-tab behavior), not click.
+    fireEvent.pointerDown(tabs[1], { button: 0 });
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('activates a tab via pointerup fallback when its pointerdown was missed', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    // First tap lands on s1 and records the last pointerdown target.
+    fireEvent.pointerDown(tabs[0], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+
+    // macOS tap-to-click can swallow the second tap's pointerdown entirely;
+    // only its release reaches the tab. The fallback must still switch.
+    fireEvent.pointerUp(tabs[1], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('does not activate a tab when a missed pointerdown releases on its close button', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[1], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+
+    // If WKWebView drops the pointerdown for this tap, only the release reaches
+    // the close button. The fallback activation handler must leave the active
+    // session alone so the button action does not also switch tabs.
+    fireEvent.pointerUp(screen.getAllByLabelText('close')[0], { button: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('does not activate on pointerup when the pointerdown landed on the same tab', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    fireEvent.pointerDown(tabs[0], { button: 0 });
+    fireEvent.pointerUp(tabs[0], { button: 0 });
+
+    // s1 activated on pointerdown; the matching pointerup is a no-op.
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+  });
+
+  it('does not activate a tab when a reorder drag ends on it', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    render(<TerminalTabBar />);
+
+    document.body.classList.add('tab-dragging');
+    try {
+      const tabs = screen.getAllByRole('tab');
+      fireEvent.pointerDown(tabs[0], { button: 0 });
+      // A release that lands on another tab during a drag is a drop, not a
+      // click: the active session must not switch.
+      fireEvent.pointerUp(tabs[1], { button: 0 });
+      expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    } finally {
+      document.body.classList.remove('tab-dragging');
+    }
+  });
+
+  it('activates a tab on pointerup when the preceding pointerdown was outside any tab', () => {
+    addSession('s1', 'A');
+    render(<TerminalTabBar />);
+
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+    try {
+      fireEvent.pointerDown(outside, { button: 0 });
+      const tab = screen.getAllByRole('tab')[0];
+      fireEvent.pointerUp(tab, { button: 0 });
+      expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    } finally {
+      document.body.removeChild(outside);
+    }
   });
 
   it('shows separators only between tabs that are not adjacent to the active tab', () => {
@@ -119,63 +199,22 @@ describe('TerminalTabBar', () => {
     expect(y).toBe(20);
   });
 
-  it('fires onNewTabClick when the + button is pressed', () => {
+  it('fires onNewTabClick when empty tab bar space is double-clicked', () => {
     addSession('s1', 'A');
     const onNewTabClick = vi.fn();
-    render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
+    const { container } = render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'terminal.newTab' }));
+    fireEvent.doubleClick(container.querySelector('[data-terminal-tab-bar]')!);
     expect(onNewTabClick).toHaveBeenCalledTimes(1);
   });
 
-  it('does not render the + button when there are no sessions', () => {
+  it('does not fire onNewTabClick when a tab itself is double-clicked', () => {
+    addSession('s1', 'A');
     const onNewTabClick = vi.fn();
     render(<TerminalTabBar onNewTabClick={onNewTabClick} />);
 
-    expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
-  });
-
-  it('starts renaming on double-click and commits on Enter', () => {
-    addSession('s1', 'A');
-    const updateTitleSpy = vi.spyOn(
-      useTerminalStore.getState(),
-      'updateTitle',
-    );
-
-    render(<TerminalTabBar />);
-
-    const tab = screen.getByRole('tab');
-    fireEvent.doubleClick(tab);
-
-    const input = screen.getByDisplayValue('A');
-    expect(input).toBeInTheDocument();
-    expect(input).toHaveClass('p-0', 'leading-none');
-
-    fireEvent.change(input, { target: { value: 'Renamed' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    expect(updateTitleSpy).toHaveBeenCalledWith('s1', 'Renamed');
-    expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument();
-  });
-
-  it('cancels renaming on Escape', () => {
-    addSession('s1', 'A');
-    const updateTitleSpy = vi.spyOn(
-      useTerminalStore.getState(),
-      'updateTitle',
-    );
-
-    render(<TerminalTabBar />);
-
-    const tab = screen.getByRole('tab');
-    fireEvent.doubleClick(tab);
-
-    const input = screen.getByDisplayValue('A');
-    fireEvent.change(input, { target: { value: 'Renamed' } });
-    fireEvent.keyDown(input, { key: 'Escape' });
-
-    expect(updateTitleSpy).not.toHaveBeenCalled();
-    expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument();
+    fireEvent.doubleClick(screen.getByRole('tab'));
+    expect(onNewTabClick).not.toHaveBeenCalled();
   });
 
   it('reorders sessions via drag-to-reorder (s3 onto s1 -> [s3,s1,s2])', async () => {
@@ -215,11 +254,14 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[2], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 250,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 260, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 50, clientY: 10 });
+      // The first move must clear the PointerSensor's 10px activation
+      // distance, or the drag never starts and the drop is a no-op.
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 262, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 50, clientY: 10 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 50, clientY: 10 });
@@ -255,11 +297,12 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[0], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 160 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 60, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 60, clientY: 160 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 60, clientY: 160 });
@@ -301,11 +344,12 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[0], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 180, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 62, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 180, clientY: 10 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 180, clientY: 10 });
@@ -347,11 +391,12 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerDown(tabs[0], {
         button: 0,
         isPrimary: true,
+        pointerType: 'mouse',
         clientX: 50,
         clientY: 10,
       });
-      fireEvent.pointerMove(document, { clientX: 60, clientY: 10 });
-      fireEvent.pointerMove(document, { clientX: 260, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 62, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 260, clientY: 10 });
     });
     await act(async () => {
       fireEvent.pointerUp(document, { clientX: 260, clientY: 10 });
@@ -361,6 +406,72 @@ describe('TerminalTabBar', () => {
     expect(state.sessions.map((s) => s.sessionId)).toEqual(['s2', 's3', 's1']);
     expect(state.sessions.find((s) => s.sessionId === 's1')?.pinned).toBe(false);
     expect(state.sessions.find((s) => s.sessionId === 's2')?.pinned).toBe(true);
+  });
+
+  it('forces the default cursor via a body class while dragging', async () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+
+    render(<TerminalTabBar />);
+    const tabs = screen.getAllByRole('tab');
+    tabs[0].getBoundingClientRect = vi.fn(() => ({
+      left: 0, right: 100, top: 0, bottom: 24, x: 0, y: 0,
+      width: 100, height: 24, toJSON: () => ({}),
+    }));
+    tabs[1].getBoundingClientRect = vi.fn(() => ({
+      left: 100, right: 200, top: 0, bottom: 24, x: 100, y: 0,
+      width: 100, height: 24, toJSON: () => ({}),
+    }));
+
+    expect(document.body.classList.contains('tab-dragging')).toBe(false);
+
+    await act(async () => {
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        pointerType: 'mouse',
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 62, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 150, clientY: 10 });
+    });
+    expect(document.body.classList.contains('tab-dragging')).toBe(true);
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 150, clientY: 10 });
+    });
+    expect(document.body.classList.contains('tab-dragging')).toBe(false);
+  });
+
+  it('does not start a drag when a trackpad tap is followed by a buttonless move', async () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setActiveSession('s2');
+    const reorderSpy = vi.spyOn(useTerminalStore.getState(), 'reorderSessions');
+
+    render(<TerminalTabBar />);
+    const tabs = screen.getAllByRole('tab');
+
+    await act(async () => {
+      // Tap-to-click: the pointerdown arrives, but WKWebView can drop the
+      // pointerup. The next move reports no buttons held, so it must end the
+      // pending interaction instead of starting a drag.
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        pointerType: 'mouse',
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 0, clientX: 150, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 0, clientX: 250, clientY: 10 });
+    });
+
+    expect(reorderSpy).not.toHaveBeenCalled();
+    // The tap still activates the tab via pointerdown.
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    expect(useTerminalStore.getState().sessions.map((s) => s.sessionId)).toEqual(['s1', 's2']);
   });
 
   it('does not initiate a drag when clicking the close button (pointerDown stopped)', () => {

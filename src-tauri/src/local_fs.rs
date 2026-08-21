@@ -52,6 +52,7 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
         if paths_refer_to_same_entry(source_path, &destination_path) {
             continue;
         }
+        validate_copy_destination(source_path, &destination_path)?;
         if conflict_policy == UploadConflictPolicy::Replace && destination_path.is_dir() {
             fs::remove_dir_all(&destination_path)
                 .map_err(|error| format!("failed to replace directory {}: {error}", destination_path.display()))?;
@@ -119,6 +120,7 @@ pub(crate) fn paste_local_paths_blocking(
         if paths_refer_to_same_entry(&source_path, &destination_path) {
             continue;
         }
+        validate_copy_destination(&source_path, &destination_path)?;
         copy_local_entry_to_path(&source_path, &destination_path)?;
         existing_names.insert(destination_name);
         written.push(destination_path.to_string_lossy().to_string());
@@ -181,6 +183,37 @@ fn paths_refer_to_same_entry(source: &Path, destination: &Path) -> bool {
         (Ok(source), Ok(destination)) => source == destination,
         _ => false,
     }
+}
+
+fn validate_copy_destination(source: &Path, destination: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(source)
+        .map_err(|error| format!("failed to stat source {}: {error}", source.display()))?;
+    if !metadata.is_dir() {
+        return Ok(());
+    }
+
+    let canonical_source = fs::canonicalize(source)
+        .map_err(|error| format!("failed to canonicalize source {}: {error}", source.display()))?;
+    let canonical_destination_parent = destination
+        .parent()
+        .ok_or_else(|| format!("copy destination has no parent: {}", destination.display()))
+        .and_then(|parent| {
+            fs::canonicalize(parent)
+                .map_err(|error| format!("failed to canonicalize destination parent {}: {error}", parent.display()))
+        })?;
+    let destination_name = destination
+        .file_name()
+        .ok_or_else(|| format!("copy destination has no file name: {}", destination.display()))?;
+    let normalized_destination = canonical_destination_parent.join(destination_name);
+
+    if normalized_destination.starts_with(&canonical_source) {
+        return Err(format!(
+            "cannot copy directory {} into itself",
+            source.display()
+        ));
+    }
+
+    Ok(())
 }
 
 fn local_entry_names(directory: &Path) -> Result<HashSet<String>, String> {
@@ -399,6 +432,25 @@ mod tests {
     }
 
     #[test]
+    fn copy_rejects_directory_into_its_descendant() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let nested_destination = source.join("nested");
+        fs::create_dir_all(&nested_destination).unwrap();
+        fs::write(source.join("keep.txt"), "unchanged").unwrap();
+
+        let request = make_request(
+            vec![source.to_str().unwrap()],
+            nested_destination.to_str().unwrap(),
+            vec![],
+        );
+        let result = copy_local_paths_blocking(request);
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(source.join("keep.txt")).unwrap(), "unchanged");
+    }
+
+    #[test]
     fn renames_a_file_within_the_same_directory() {
         let temp = TempDir::new().unwrap();
         let src = temp.path().join("old.txt");
@@ -516,6 +568,24 @@ mod tests {
         assert!(dest.join("docs copy/a.txt").exists());
         assert_eq!(fs::read_to_string(dest.join("Makefile copy")).unwrap(), "m");
         assert_eq!(written.len(), 2);
+    }
+
+    #[test]
+    fn paste_rejects_directory_into_its_descendant() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let nested_destination = source.join("nested");
+        fs::create_dir_all(&nested_destination).unwrap();
+        fs::write(source.join("keep.txt"), "unchanged").unwrap();
+
+        let result = paste_local_paths_blocking(
+            vec![source.to_str().unwrap().to_string()],
+            nested_destination.to_str().unwrap().to_string(),
+            "copy".to_string(),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(source.join("keep.txt")).unwrap(), "unchanged");
     }
 
     #[test]

@@ -298,3 +298,11 @@ textarea,
 [data-sonner-toaster] [data-sonner-toast][data-x-position='left'][data-y-position='bottom']:not([data-mounted='true']) {
   --y: translateY(0);
 }
+
+/* While a tab drag is active, force the default cursor everywhere — whatever
+   sits under the pointer (tabs, text inputs, the terminal) would otherwise
+   take over the cursor style mid-drag. */
+body.tab-dragging,
+body.tab-dragging * {
+  cursor: default !important;
+}

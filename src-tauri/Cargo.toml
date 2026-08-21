@@ -1,6 +1,6 @@
 [package]
 name = "TermBridge"
-version = "2.0.36"
+version = "2.0.47"
 description = "TermBridge desktop SSH client"
 authors = ["Codex"]
 license = "MIT"
@@ -26,9 +26,6 @@ tauri-plugin-updater = "2.10.1"
 socket2 = "0.6.5"
 libc = "0.2.189"
 sha2 = "0.11"
-p256 = "0.14"
-pbkdf2 = "0.13"
-
 base64 = "0.23"
 portable-pty = "0.9"
 trash = "5"
@@ -38,12 +35,17 @@ sysinfo = "0.39"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+security-framework = "3"
+security-framework-sys = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store = "1"
 windows-sys = { version = "0.60", features = [
   "Win32_Foundation",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_Networking_WinSock",
 ] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]

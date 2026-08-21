@@ -281,9 +281,10 @@ pub(crate) fn summarize_remote_connection_request(request: &RemoteConnectionRequ
 }
 
 pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, String> {
-    let address = format!("{host}:{port}");
+    let address = format!("{}:{port}", format_host_for_socket_address(host));
     debug!("Opening TCP connection address={address}");
     let socket_addrs: Vec<_> = address
+        .as_str()
         .to_socket_addrs()
         .map_err(|error| format!("failed to resolve {address}: {error}"))?
         .collect();
@@ -295,6 +296,9 @@ pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, Str
     // on the first one.
     let mut last_error = None;
     for socket_addr in socket_addrs {
+        if is_blocked_ip(normalize_ip(socket_addr.ip())) {
+            return Err(format!("connections to {} are blocked", socket_addr.ip()));
+        }
         match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(12)) {
             Ok(tcp) => {
                 configure_tcp_stream(&tcp).map_err(|error| {
@@ -313,6 +317,14 @@ pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, Str
         "failed to connect to {address}: {}",
         last_error.expect("at least one address was attempted")
     ))
+}
+
+fn format_host_for_socket_address(host: &str) -> String {
+    if host.parse::<Ipv6Addr>().is_ok() {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
 }
 
 fn configure_tcp_stream(tcp: &TcpStream) -> std::io::Result<()> {
@@ -745,6 +757,21 @@ mod tests {
         assert!(!is_blocked_host("10.0.0.5"));
         assert!(!is_blocked_host("2606:4700:4700::1111"));
         assert!(!is_blocked_host("example.com"));
+    }
+
+    #[test]
+    fn format_host_for_socket_address_brackets_ipv6_literals() {
+        assert_eq!(format_host_for_socket_address("::1"), "[::1]");
+        assert_eq!(format_host_for_socket_address("127.0.0.1"), "127.0.0.1");
+        assert_eq!(format_host_for_socket_address("example.com"), "example.com");
+    }
+
+    #[test]
+    fn connect_tcp_stream_blocks_resolved_metadata_addresses() {
+        let error = connect_tcp_stream("169.254.169.254", 22)
+            .expect_err("metadata endpoint should be blocked before connecting");
+
+        assert!(error.contains("blocked"));
     }
 
     #[test]

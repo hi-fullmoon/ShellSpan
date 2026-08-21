@@ -26,6 +26,7 @@ import { createLogger } from '@/lib/logger';
 import { useAppShortcuts } from '@/hooks/useAppShortcuts';
 import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-dialog';
 import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prompt-dialog';
+import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 const logger = createLogger('app');
 
@@ -194,6 +195,7 @@ export const App: React.FC = () => {
 
       <CredentialPromptDialog />
       <KeychainKeyPromptDialog />
+      <HostKeyDialogHost />
 
       <Toaster />
     </AppShell>
