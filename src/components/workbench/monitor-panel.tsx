@@ -8,7 +8,7 @@ import { useMonitorStore, MONITOR_POLL_INTERVAL_MS } from '@/stores/monitorStore
 import type { ClosedReasonKind, DisconnectEvent, HealthStatus } from '@/types';
 import type { LocaleKey } from '@/locales';
 import { cn, formatBytes } from '@/lib/utils';
-import { formatClockTime, formatUptime } from '@/lib/monitor';
+import { formatClockTime, formatDiskHint, formatUptime } from '@/lib/monitor';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -403,7 +403,7 @@ export const MonitorPanel: React.FC = () => {
                     formatBytes(snapshot.disk.totalBytes),
                   ]}
                   percent={snapshot.disk.usagePercent}
-                  hint={snapshot.disk.name || snapshot.disk.mountPoint}
+                  hint={formatDiskHint(snapshot.disk, snapshot.appInfo.platform)}
                 />
               </div>
 

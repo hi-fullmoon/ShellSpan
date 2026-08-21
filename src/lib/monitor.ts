@@ -1,7 +1,15 @@
-import type { HealthStatus, SystemHealth } from '@/types';
+import type { DiskInfo, HealthStatus, SystemHealth } from '@/types';
 
 export const MEMORY_WARNING_THRESHOLD = 90;
 export const MEMORY_ERROR_THRESHOLD = 95;
+
+/** Uses the mount point on Windows so the monitor identifies the actual drive
+ *  (for example, `C:\\`) instead of showing only its volume label. */
+export function formatDiskHint(disk: DiskInfo, platform: string): string | undefined {
+  const mountPoint = disk.mountPoint.trim();
+  const name = disk.name?.trim();
+  return platform === 'windows' ? mountPoint || name : name || mountPoint || undefined;
+}
 
 /** Derives the overall health status from the latest system memory pressure. */
 export function deriveHealthStatus(health: SystemHealth): HealthStatus {

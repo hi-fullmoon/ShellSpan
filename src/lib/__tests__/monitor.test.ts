@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { deriveHealthStatus, formatClockTime, formatUptime } from '../monitor';
-import type { SystemHealth } from '@/types';
+import { deriveHealthStatus, formatClockTime, formatDiskHint, formatUptime } from '../monitor';
+import type { DiskInfo, SystemHealth } from '@/types';
 
 function healthWithMemoryRatio(ratio: number): SystemHealth {
   return {
@@ -31,6 +31,30 @@ function healthWithMemoryRatio(ratio: number): SystemHealth {
     appInfo: { version: '1.0.0', platform: 'macos', arch: 'aarch64' },
   };
 }
+
+describe('formatDiskHint', () => {
+  const disk: DiskInfo = {
+    totalBytes: 100,
+    usedBytes: 50,
+    freeBytes: 50,
+    usagePercent: 50,
+    mountPoint: 'C:\\',
+    name: 'Windows',
+  };
+
+  it('shows the specific drive on Windows', () => {
+    expect(formatDiskHint(disk, 'windows')).toBe('C:\\');
+  });
+
+  it('keeps the volume name on other platforms', () => {
+    expect(formatDiskHint({ ...disk, mountPoint: '/' }, 'macos')).toBe('Windows');
+  });
+
+  it('falls back when the preferred field is empty', () => {
+    expect(formatDiskHint({ ...disk, mountPoint: '' }, 'windows')).toBe('Windows');
+    expect(formatDiskHint({ ...disk, mountPoint: '/', name: undefined }, 'linux')).toBe('/');
+  });
+});
 
 describe('deriveHealthStatus', () => {
   it('returns ok below the warning threshold', () => {
