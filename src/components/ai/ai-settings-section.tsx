@@ -414,13 +414,13 @@ export const AiSettingsSection: React.FC = () => {
                 <Button
                   key={preset.preset}
                   variant="outline"
-                  className="h-auto justify-start px-3 py-3 text-left"
+                  className="h-auto min-w-0 items-start justify-start whitespace-normal px-3 py-3 text-left"
                   onClick={() => handleAddProvider(preset.preset)}
                 >
                   <PresetIcon data-icon="inline-start" />
-                  <span>
-                    <span className="block">{preset.name}</span>
-                    <span className="block text-xs font-normal text-muted-foreground">
+                  <span className="min-w-0 text-left">
+                    <span className="block truncate">{preset.name}</span>
+                    <span className="block break-words text-xs leading-snug font-normal text-muted-foreground">
                       {t(PRESET_DESCRIPTION_KEYS[preset.preset])}
                     </span>
                   </span>
