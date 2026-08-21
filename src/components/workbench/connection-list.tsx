@@ -9,7 +9,6 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
-import { MANAGEMENT_CARD_MIN_WIDTH } from './shared';
 import type { ConnectionProfile } from '@/types';
 import {
   CopyIcon,
@@ -24,6 +23,10 @@ import {
 } from 'lucide-react';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
+const CONNECTION_CARD_BREAKPOINTS = [
+  { minWidth: 640, columns: 2 },
+  { minWidth: 900, columns: 3 },
+] as const;
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];
@@ -135,7 +138,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           ) : (
             <ResponsiveCardGrid
               columns={1}
-              minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
+              breakpoints={CONNECTION_CARD_BREAKPOINTS}
               gap="0.375rem"
             >
               {filteredProfiles.map((profile) => (

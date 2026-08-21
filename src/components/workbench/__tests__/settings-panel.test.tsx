@@ -91,6 +91,20 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('settings.shortcuts.resetAll')).toBeInTheDocument();
   });
 
+  it('resets the shared settings viewport when switching sections', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const viewport = document.body.querySelector(
+      '[data-slot="scroll-area-viewport"]',
+    ) as HTMLDivElement;
+    viewport.scrollTop = 240;
+
+    openSection('settings.terminal.title');
+
+    expect(viewport.scrollTop).toBe(0);
+  });
+
   it('renders when persisted shortcuts come from an older version', async () => {
     useAppStore.setState({
       shortcuts: {

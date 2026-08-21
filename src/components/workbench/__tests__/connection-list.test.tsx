@@ -72,8 +72,19 @@ describe('ConnectionList', () => {
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
-  it('renders the profile list when profiles exist', () => {
-    render(
+  it('renders the profile list in a grid capped at three columns', () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 1200,
+      height: 0,
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 1200,
+      bottom: 0,
+      left: 0,
+      toJSON: () => ({}),
+    });
+    const { container } = render(
       <ConnectionList
         profiles={[makeProfile()]}
         initialized={true}
@@ -90,6 +101,12 @@ describe('ConnectionList', () => {
     expect(
       screen.queryByText('workbench.connections.empty'),
     ).not.toBeInTheDocument();
+
+    const grid = container.querySelector('[style*="grid-template-columns"]');
+    expect(grid).toHaveStyle({
+      gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    });
+    rectSpy.mockRestore();
   });
 
   it('debounces repeated clicks on every profile-card action', () => {

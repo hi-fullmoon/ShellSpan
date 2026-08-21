@@ -27,7 +27,7 @@ export interface ConnectionFormDrawerProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void | Promise<void>;
-  onConnect?: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void | Promise<void>;
+  onConnect: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void | Promise<void>;
   initial?: ConnectionProfile;
   /** Partial pre-fill values (e.g. host + port from a known-host entry). */
   initialValues?: Pick<FormState, 'host' | 'port'>;
@@ -321,7 +321,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
   };
 
   const handleConnect = (): void => {
-    void submit(onConnect ?? onSubmit);
+    void submit(onConnect);
   };
 
   const handleHostBlur = (): void => {
@@ -469,12 +469,25 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
         </ScrollArea>
 
         <DrawerFooter className="grid grid-cols-2 gap-2 px-5 py-4">
-          <Button variant="outline" onClick={handleSaveOnly} disabled={isSubmitting}>
-            {t('common.save')}
-          </Button>
-          <Button onClick={handleConnect} disabled={isSubmitting}>
-            {t('connection.form.saveAndConnect')}
-          </Button>
+          {initial ? (
+            <>
+              <Button variant="outline" onClick={handleConnect} disabled={isSubmitting}>
+                {t('connection.form.saveAndConnect')}
+              </Button>
+              <Button onClick={handleSaveOnly} disabled={isSubmitting}>
+                {t('common.save')}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={handleSaveOnly} disabled={isSubmitting}>
+                {t('common.save')}
+              </Button>
+              <Button onClick={handleConnect} disabled={isSubmitting}>
+                {t('connection.form.saveAndConnect')}
+              </Button>
+            </>
+          )}
         </DrawerFooter>
       </DrawerContent>
     </Drawer>

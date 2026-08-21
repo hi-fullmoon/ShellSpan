@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { BotIcon, FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon, XIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
@@ -186,6 +186,13 @@ export const SettingsPanel: React.FC = () => {
   const [editingAction, setEditingAction] = useState<ShortcutAction | null>(null);
   const [conflictAction, setConflictAction] = useState<ShortcutAction | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const settingsViewportRef = useRef<HTMLDivElement>(null);
+
+  const handleSectionChange = (value: string): void => {
+    if (value === activeSection) return;
+    if (settingsViewportRef.current) settingsViewportRef.current.scrollTop = 0;
+    setActiveSection(value as SettingsSection);
+  };
 
   const shortcutLabels = useMemo<Record<ShortcutAction, string>>(
     () => ({
@@ -252,7 +259,7 @@ export const SettingsPanel: React.FC = () => {
     <TooltipProvider>
       <Tabs
         value={activeSection}
-        onValueChange={(value) => setActiveSection(value as SettingsSection)}
+        onValueChange={handleSectionChange}
         className="h-full min-h-0 gap-0 overflow-hidden bg-background"
       >
         <header className="flex shrink-0 items-center border-b border-app-border/50 px-3 py-1.5">
@@ -284,7 +291,7 @@ export const SettingsPanel: React.FC = () => {
           </TabsList>
         </div>
 
-        <ScrollArea className="min-h-0 flex-1">
+        <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-4xl flex-col p-3">
               <TabsContent value="appearance" className="w-full">
                 <div>

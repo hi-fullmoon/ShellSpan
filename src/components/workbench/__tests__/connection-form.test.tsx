@@ -30,9 +30,11 @@ const profile: ConnectionProfile = {
   updatedAt: Date.now(),
 };
 
+const noop = (): void => {};
+
 describe('ConnectionFormDrawer', () => {
   it('fills an empty name from the host when the host loses focus', () => {
-    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
     const nameInput = screen.getByPlaceholderText('My Server');
     const hostInput = screen.getByPlaceholderText('192.168.1.1');
@@ -43,7 +45,7 @@ describe('ConnectionFormDrawer', () => {
   });
 
   it('does not overwrite an existing name when the host loses focus', () => {
-    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
     const nameInput = screen.getByPlaceholderText('My Server');
     const hostInput = screen.getByPlaceholderText('192.168.1.1');
@@ -58,8 +60,9 @@ describe('ConnectionFormDrawer', () => {
     render(
       <ConnectionFormDrawer
         open={true}
-        onClose={() => {}}
-        onSubmit={() => {}}
+        onClose={noop}
+        onSubmit={noop}
+        onConnect={noop}
         initial={{ ...profile, name: '' }}
       />,
     );
@@ -72,7 +75,7 @@ describe('ConnectionFormDrawer', () => {
   });
 
   it('renders the form body as a constrained scrollable region', () => {
-    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
     const scrollArea = document.body.querySelector(
       '[data-slot="drawer-content"] > [data-slot="scroll-area"]',
@@ -88,7 +91,7 @@ describe('ConnectionFormDrawer', () => {
   });
 
   it('renders the auth method as a segmented toggle with the translated label', () => {
-    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
     const pressedItem = document.body.querySelector(
       '[data-slot="toggle-group-item"][aria-pressed="true"]',
@@ -97,7 +100,7 @@ describe('ConnectionFormDrawer', () => {
   });
 
   it('renders the translated jump-host auth method label when enabled', () => {
-    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
     const jumpHostSwitch = document.body.querySelector('[data-slot="switch"]');
     expect(jumpHostSwitch).toBeInTheDocument();
@@ -113,7 +116,7 @@ describe('ConnectionFormDrawer', () => {
 
   it('resets form values when opening with a new profile', () => {
     const { rerender } = render(
-      <ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} initial={profile} />,
+      <ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} initial={profile} />,
     );
 
     const nameInput = document.body.querySelector('[data-slot="input"]') as HTMLInputElement;
@@ -124,7 +127,7 @@ describe('ConnectionFormDrawer', () => {
 
     const nextProfile: ConnectionProfile = { ...profile, id: 'p2', name: 'Other Server' };
     rerender(
-      <ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} initial={nextProfile} />,
+      <ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} initial={nextProfile} />,
     );
 
     expect(nameInput.value).toBe('Other Server');
@@ -139,8 +142,9 @@ describe('ConnectionFormDrawer', () => {
     render(
       <ConnectionFormDrawer
         open={true}
-        onClose={() => {}}
+        onClose={noop}
         onSubmit={onSubmit}
+        onConnect={noop}
         initial={storedProfile}
       />,
     );
@@ -154,7 +158,7 @@ describe('ConnectionFormDrawer', () => {
   });
 
   it('focuses the first invalid field after validation fails', async () => {
-    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
+    render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
     const usernameInput = screen.getByLabelText('common.username');
     usernameInput.focus();
@@ -176,8 +180,9 @@ describe('ConnectionFormDrawer', () => {
     render(
       <ConnectionFormDrawer
         open={true}
-        onClose={() => {}}
-        onSubmit={() => {}}
+        onClose={noop}
+        onSubmit={noop}
+        onConnect={noop}
         initial={{ ...profile, password: undefined }}
       />,
     );
@@ -198,8 +203,9 @@ describe('ConnectionFormDrawer', () => {
     render(
       <ConnectionFormDrawer
         open={true}
-        onClose={() => {}}
-        onSubmit={() => {}}
+        onClose={noop}
+        onSubmit={noop}
+        onConnect={noop}
         initial={profile}
       />,
     );
@@ -229,8 +235,9 @@ describe('ConnectionFormDrawer', () => {
     render(
       <ConnectionFormDrawer
         open={true}
-        onClose={() => {}}
-        onSubmit={() => {}}
+        onClose={noop}
+        onSubmit={noop}
+        onConnect={noop}
         initial={profile}
       />,
     );
@@ -254,7 +261,7 @@ describe('ConnectionFormDrawer', () => {
     expect(passwordInput.value).toBe('secret');
   });
 
-  it('calls onConnect instead of onSubmit when the primary action is clicked', async () => {
+  it('calls onConnect instead of onSubmit when save and connect is clicked', async () => {
     const onSubmit = vi.fn();
     const onConnect = vi.fn();
     render(
@@ -277,7 +284,7 @@ describe('ConnectionFormDrawer', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('exposes save as a visible secondary action', async () => {
+  it('uses save as the primary action while editing', async () => {
     const onSubmit = vi.fn();
     const onConnect = vi.fn();
     render(
@@ -290,7 +297,13 @@ describe('ConnectionFormDrawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    const saveButton = screen.getByRole('button', { name: 'common.save' });
+    const connectButton = screen.getByRole('button', { name: 'connection.form.saveAndConnect' });
+    expect(saveButton).toHaveClass('bg-primary');
+    expect(connectButton).toHaveClass('border');
+    expect(connectButton.compareDocumentPosition(saveButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    fireEvent.click(saveButton);
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith(
@@ -298,6 +311,23 @@ describe('ConnectionFormDrawer', () => {
       );
     });
     expect(onConnect).not.toHaveBeenCalled();
+  });
+
+  it('uses save and connect as the primary action while creating', () => {
+    render(
+      <ConnectionFormDrawer
+        open={true}
+        onClose={noop}
+        onSubmit={noop}
+        onConnect={noop}
+      />,
+    );
+
+    const saveButton = screen.getByRole('button', { name: 'common.save' });
+    const connectButton = screen.getByRole('button', { name: 'connection.form.saveAndConnect' });
+    expect(saveButton).toHaveClass('border');
+    expect(connectButton).toHaveClass('bg-primary');
+    expect(saveButton.compareDocumentPosition(connectButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('submits only once when the primary action is clicked repeatedly', async () => {
