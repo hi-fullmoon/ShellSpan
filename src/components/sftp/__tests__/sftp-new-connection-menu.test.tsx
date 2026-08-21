@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SftpNewConnectionMenu } from '../sftp-new-connection-menu';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -64,5 +64,73 @@ describe('SftpNewConnectionMenu', () => {
     expect(onConnect).toHaveBeenCalledTimes(1);
     expect(onConnect).toHaveBeenCalledWith(profile);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders an accessible dialog and focuses search when opened', async () => {
+    useProfileStore.setState({ profiles: [profile] });
+
+    render(
+      <SftpNewConnectionMenu
+        open
+        onClose={vi.fn()}
+        onConnect={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'sftp.newConnectionMenu.title' }),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText('sftp.newConnectionMenu.searchPlaceholder'),
+      ).toHaveFocus();
+    });
+  });
+
+  it('moves selection with arrow keys and connects with Enter', () => {
+    const secondProfile: ConnectionProfile = {
+      ...profile,
+      id: 'p2',
+      name: 'Beta',
+      host: 'host2.io',
+    };
+    useProfileStore.setState({ profiles: [profile, secondProfile] });
+    const onConnect = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <SftpNewConnectionMenu
+        open
+        onClose={onClose}
+        onConnect={onConnect}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    expect(onConnect).toHaveBeenCalledTimes(1);
+    expect(onConnect).toHaveBeenCalledWith(secondProfile);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes on Escape without activating a connection', () => {
+    useProfileStore.setState({ profiles: [profile] });
+    const onConnect = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <SftpNewConnectionMenu
+        open
+        onClose={onClose}
+        onConnect={onConnect}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onConnect).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { ServerIcon, LayoutGridIcon, SearchIcon, FolderIcon } from 'lucide-react';
 import { usePlatform } from '@/hooks/usePlatform';
 import { useI18n } from '@/hooks/useI18n';
@@ -10,8 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { ConnectionProfile } from '@/types';
-
-const ANIMATION_DURATION = 150;
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 interface SftpNewConnectionMenuProps {
   open: boolean;
@@ -38,8 +36,6 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   const setActiveSection = useAppStore((state) => state.setActiveSection);
 
   const [query, setQuery] = useState('');
-  const [mounted, setMounted] = useState(open);
-  const [closing, setClosing] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
   const activatingRef = useRef(false);
@@ -103,35 +99,16 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   }, [selectedIndex]);
 
   useEffect(() => {
-    let timer: number | null = null;
     if (open) {
       activatingRef.current = false;
-      setMounted(true);
-      setClosing(false);
       setQuery('');
       setSelectedIndex(0);
-    } else if (mounted) {
-      setClosing(true);
-      timer = window.setTimeout(() => {
-        setMounted(false);
-      }, ANIMATION_DURATION);
     }
-    return () => {
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [open, mounted]);
+  }, [open]);
 
   useEffect(() => {
-    if (!mounted) {
-      setQuery('');
-      return;
-    }
+    if (!open) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-        return;
-      }
       if (!hasResults) return;
 
       const isNext = event.key === 'ArrowDown' || (event.ctrlKey && event.key.toLowerCase() === 'n');
@@ -160,7 +137,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mounted, onClose, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal, activateOnce]);
+  }, [open, filteredItems, hasResults, itemCount, selectedIndex, onConnect, onOpenLocal, showLocal, activateOnce]);
 
   const handleOpenWorkbench = (): void => {
     setActiveSection('workbench');
@@ -182,28 +159,13 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
     return t('terminal.newTabMenu.savedConnections');
   };
 
-  if (!mounted) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[10vh]">
-      <div
-        className={cn(
-          'absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity',
-          closing ? 'opacity-0' : 'opacity-100',
-        )}
-        role="presentation"
-        onClick={onClose}
-      />
-      <div
-        className={cn(
-          'relative z-10 flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-app-border bg-app-surface shadow-[var(--shadow-dialog)] transition-all',
-          closing
-            ? 'translate-y-2 scale-95 opacity-0'
-            : 'translate-y-0 scale-100 opacity-100',
-        )}
-        role="dialog"
-        aria-label={t('sftp.newConnectionMenu.title')}
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <DialogContent
+        className="top-[10vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 gap-0 overflow-hidden rounded-2xl p-0"
+        showCloseButton={false}
       >
+        <DialogTitle className="sr-only">{t('sftp.newConnectionMenu.title')}</DialogTitle>
         <div className="border-b border-app-border/50 p-4"><div className="relative">
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-app-text-soft" />
           <Input
@@ -304,8 +266,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
             <span>Esc {t('terminal.newTabMenu.close')}</span>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 };
