@@ -16,6 +16,7 @@ const NavItem: React.FC<NavItemProps> = ({ section, label }) => {
   return (
     <button
       onClick={() => setActiveSection(section)}
+      aria-current={active ? 'page' : undefined}
       className={cn(
         'flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
         active
@@ -33,10 +34,10 @@ export const SectionNav: React.FC = () => {
   const { t } = useI18n();
 
   return (
-    <div className="flex h-full items-center gap-1" data-tauri-drag-region="false">
+    <nav aria-label={t('app.primaryNavigation')} className="flex h-full items-center gap-1" data-tauri-drag-region="false">
       <NavItem section="workbench" label={t('section.workbench')} />
       <NavItem section="terminal" label={t('section.terminal')} />
       <NavItem section="sftp" label={t('section.sftp')} />
-    </div>
+    </nav>
   );
 };
