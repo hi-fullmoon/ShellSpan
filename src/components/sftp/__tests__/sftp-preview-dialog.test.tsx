@@ -194,4 +194,37 @@ describe('SftpPreviewDialog', () => {
     expect(image).toHaveStyle({ width: '500px', height: '375px' });
     expect(image.style.transform).toBe('');
   });
+
+  it('reserves the canvas padding when fitting an image at 100%', () => {
+    render(
+      <SftpPreviewDialog
+        open
+        content={response({
+          path: '/srv/large-photo.png',
+          name: 'large-photo.png',
+          content: 'iVBORw0KGgo=',
+          size: 8,
+          isText: false,
+          contentEncoding: 'base64',
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const image = screen.getByRole('img', { name: 'large-photo.png' });
+    const viewport = document.querySelector('[data-slot="scroll-area-viewport"]');
+    expect(viewport).not.toBeNull();
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 600 },
+      clientHeight: { configurable: true, value: 500 },
+    });
+    Object.defineProperties(image, {
+      naturalWidth: { configurable: true, value: 1000 },
+      naturalHeight: { configurable: true, value: 800 },
+    });
+
+    fireEvent.load(image);
+
+    expect(image).toHaveStyle({ width: '536px', height: '428px' });
+  });
 });

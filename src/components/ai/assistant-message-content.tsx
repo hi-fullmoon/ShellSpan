@@ -101,10 +101,13 @@ export const AssistantMessageContent: React.FC<{
       {reasoning && (
         <Collapsible open={reasoningOpen} onOpenChange={setReasoningOpen}>
           <CollapsibleTrigger
-            render={<Button variant="ghost" size="xs" className="group -ml-2 justify-start" />}
+            render={<Button variant="ghost" size="xs" className="group justify-start" />}
           >
-            <ChevronRightIcon className="transition-transform group-data-[state=open]:rotate-90" />
-            <BrainCircuitIcon />
+            <ChevronRightIcon
+              data-icon="inline-start"
+              className={cn('transition-transform', reasoningOpen && 'rotate-90')}
+            />
+            <BrainCircuitIcon data-icon="inline-start" />
             <span className={cn(streaming && !reasoningComplete && 'shimmer')}>
               {streaming && !reasoningComplete
                 ? t('ai.thinking.inProgress')
