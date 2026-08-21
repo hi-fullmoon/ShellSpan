@@ -84,6 +84,35 @@ describe('aiSettingsStore', () => {
     });
   });
 
+  it('loads an API key from provider preferences and includes it in request config', () => {
+    const provider = {
+      id: 'minimax',
+      name: 'MiniMax',
+      preset: 'minimax',
+      kind: 'openAiCompatible',
+      baseUrl: 'https://api.minimaxi.com/v1',
+      model: 'MiniMax-M3',
+      requiresApiKey: true,
+      structuredOutput: 'prompt',
+      apiKey: '  database-key  ',
+    };
+    const preferences = parseAiPreferences([
+      preference('providers', [provider]),
+      preference('defaultProviderId', provider.id),
+    ]);
+    useAiSettingsStore.setState({ ...preferences, initialized: true });
+
+    expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
+      id: 'minimax',
+      kind: 'openAiCompatible',
+      baseUrl: 'https://api.minimaxi.com/v1',
+      model: 'MiniMax-M3',
+      requiresApiKey: true,
+      structuredOutput: 'prompt',
+      apiKey: 'database-key',
+    });
+  });
+
   it('moves the default when deleting a provider and always retains one provider', () => {
     useAiSettingsStore.getState().setDefaultProvider('openai');
     useAiSettingsStore.getState().removeProvider('openai');

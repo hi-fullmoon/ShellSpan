@@ -37,15 +37,30 @@ mod tests {
 
     #[test]
     fn posix_join_appends_child_with_single_separator() {
-        assert_eq!(posix_join("/srv/files", "report.txt"), "/srv/files/report.txt");
-        assert_eq!(posix_join("/srv/files/", "report.txt"), "/srv/files/report.txt");
-        assert_eq!(posix_join("/srv/files//", "report.txt"), "/srv/files/report.txt");
+        assert_eq!(
+            posix_join("/srv/files", "report.txt"),
+            "/srv/files/report.txt"
+        );
+        assert_eq!(
+            posix_join("/srv/files/", "report.txt"),
+            "/srv/files/report.txt"
+        );
+        assert_eq!(
+            posix_join("/srv/files//", "report.txt"),
+            "/srv/files/report.txt"
+        );
     }
 
     #[test]
     fn posix_join_strips_leading_separators_from_child() {
-        assert_eq!(posix_join("/srv/files", "/report.txt"), "/srv/files/report.txt");
-        assert_eq!(posix_join("/srv/files", "//report.txt"), "/srv/files/report.txt");
+        assert_eq!(
+            posix_join("/srv/files", "/report.txt"),
+            "/srv/files/report.txt"
+        );
+        assert_eq!(
+            posix_join("/srv/files", "//report.txt"),
+            "/srv/files/report.txt"
+        );
     }
 
     #[test]

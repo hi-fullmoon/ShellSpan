@@ -1,5 +1,8 @@
 use crate::known_hosts::check_host_key_against_file;
-use crate::models::{AuthMethod, ConnectedSftp, ConnectionError, HostKeyCheckStatus, JumpHostConfig, RemoteConnectionRequest, RemoteFsError, SessionCreateRequest};
+use crate::models::{
+    AuthMethod, ConnectedSftp, ConnectionError, HostKeyCheckStatus, JumpHostConfig,
+    RemoteConnectionRequest, RemoteFsError, SessionCreateRequest,
+};
 use crate::sftp_pool::{connection_key, ConnectClaim, SftpPool};
 use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
@@ -124,11 +127,9 @@ fn create_sftp_connection(
         (session, None)
     };
 
-    let sftp = session
-        .sftp()
-        .map_err(|error| ConnectionError::Other {
-            message: format!("failed to open sftp subsystem: {error}"),
-        })?;
+    let sftp = session.sftp().map_err(|error| ConnectionError::Other {
+        message: format!("failed to open sftp subsystem: {error}"),
+    })?;
 
     let connected = Arc::new(Mutex::new(ConnectedSftp {
         session,
@@ -174,7 +175,9 @@ fn is_blocked_host(host: &str) -> bool {
     if lower == "metadata.google.internal" {
         return true;
     }
-    let candidate = lower.trim_start_matches("http://").trim_start_matches("https://");
+    let candidate = lower
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
     let candidate = candidate.split('/').next().unwrap_or(candidate);
     let candidate = strip_port(candidate);
     // AWS metadata endpoint: an IPv6 unique-local address that falls outside
@@ -354,10 +357,9 @@ pub(crate) fn open_authenticated_session(
         username,
         auth_method.as_str()
     );
-    let mut session = Session::new()
-        .map_err(|error| ConnectionError::Other {
-            message: format!("session init failed: {error}"),
-        })?;
+    let mut session = Session::new().map_err(|error| ConnectionError::Other {
+        message: format!("session init failed: {error}"),
+    })?;
     session.set_tcp_stream(tcp);
     session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
     session.handshake().map_err(|error| {
@@ -382,7 +384,9 @@ pub(crate) fn open_authenticated_session(
                         port,
                     }),
                     _ => Err(ConnectionError::Other {
-                        message: result.message.unwrap_or_else(|| "host key check failed".to_string()),
+                        message: result
+                            .message
+                            .unwrap_or_else(|| "host key check failed".to_string()),
                     }),
                 };
             }
@@ -452,20 +456,27 @@ pub(crate) fn connect_through_jump_host(
     )?;
 
     // 2. Create a local TCP socket pair for bridging
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| ConnectionError::Other { message: format!("failed to bind local bridge socket: {e}") })?;
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| ConnectionError::Other {
+        message: format!("failed to bind local bridge socket: {e}"),
+    })?;
     let local_port = listener
         .local_addr()
-        .map_err(|e| ConnectionError::Other { message: format!("failed to get local bridge address: {e}") })?
+        .map_err(|e| ConnectionError::Other {
+            message: format!("failed to get local bridge address: {e}"),
+        })?
         .port();
     listener
         .set_nonblocking(true)
-        .map_err(|e| ConnectionError::Other { message: format!("failed to set bridge listener nonblocking: {e}") })?;
+        .map_err(|e| ConnectionError::Other {
+            message: format!("failed to set bridge listener nonblocking: {e}"),
+        })?;
 
     // 3. Open direct-tcpip channel through jump host to target
     let channel = jump_session
         .channel_direct_tcpip(target_host, target_port, Some(("127.0.0.1", local_port)))
-        .map_err(|e| ConnectionError::Other { message: format!("failed to open direct-tcpip through jump host: {e}") })?;
+        .map_err(|e| ConnectionError::Other {
+            message: format!("failed to open direct-tcpip through jump host: {e}"),
+        })?;
 
     // 4. Spawn a thread that accepts the bridge connection and bridges data
     //    between the jump channel and the server side. The accept must run
@@ -485,10 +496,13 @@ pub(crate) fn connect_through_jump_host(
     });
 
     // 5. Connect client side of the bridge (this will be the target session's TCP stream)
-    let client_stream = TcpStream::connect(("127.0.0.1", local_port))
-        .map_err(|e| ConnectionError::Other { message: format!("failed to connect to bridge socket: {e}") })?;
-    configure_tcp_stream(&client_stream)
-        .map_err(|e| ConnectionError::Other { message: format!("failed to configure bridge client socket: {e}") })?;
+    let client_stream =
+        TcpStream::connect(("127.0.0.1", local_port)).map_err(|e| ConnectionError::Other {
+            message: format!("failed to connect to bridge socket: {e}"),
+        })?;
+    configure_tcp_stream(&client_stream).map_err(|e| ConnectionError::Other {
+        message: format!("failed to configure bridge client socket: {e}"),
+    })?;
 
     // 6. Open authenticated session on the client stream
     let target_session = open_authenticated_session(
@@ -534,10 +548,7 @@ fn accept_bridge_with_timeout(
     }
 }
 
-fn bridge_channel_tcp(
-    mut channel: ssh2::Channel,
-    mut tcp: TcpStream,
-) -> Result<(), String> {
+fn bridge_channel_tcp(mut channel: ssh2::Channel, mut tcp: TcpStream) -> Result<(), String> {
     let mut tcp_clone = tcp
         .try_clone()
         .map_err(|e| format!("failed to clone bridge TCP stream: {e}"))?;
@@ -690,7 +701,13 @@ mod tests {
     #[test]
     fn connect_sftp_returns_shared_connection() {
         use crate::sftp_pool::SftpPool;
-        fn expect_shared(_result: Result<std::sync::Arc<std::sync::Mutex<crate::models::ConnectedSftp>>, crate::models::RemoteFsError>) {}
+        fn expect_shared(
+            _result: Result<
+                std::sync::Arc<std::sync::Mutex<crate::models::ConnectedSftp>>,
+                crate::models::RemoteFsError,
+            >,
+        ) {
+        }
         fn dummy_call(request: &crate::models::RemoteConnectionRequest, pool: &SftpPool) {
             expect_shared(connect_sftp(request, Some(pool), None));
         }

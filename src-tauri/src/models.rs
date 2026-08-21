@@ -1270,11 +1270,7 @@ impl SessionManager {
         Ok(())
     }
 
-    pub(crate) fn set_output_paused(
-        &self,
-        session_id: &str,
-        paused: bool,
-    ) -> Result<(), String> {
+    pub(crate) fn set_output_paused(&self, session_id: &str, paused: bool) -> Result<(), String> {
         let guard = self
             .sessions
             .lock()
@@ -1282,9 +1278,7 @@ impl SessionManager {
         let managed = guard
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
-        managed
-            .output_paused
-            .store(paused, AtomicOrdering::Relaxed);
+        managed.output_paused.store(paused, AtomicOrdering::Relaxed);
         if let Some(waker) = managed.waker.as_ref() {
             waker.wake();
         }

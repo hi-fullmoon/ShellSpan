@@ -21,10 +21,16 @@ use std::os::fd::AsRawFd;
 use std::os::windows::io::AsRawSocket;
 
 use crate::{
-    connection::{connect_tcp_stream, connect_through_jump_host, open_authenticated_session, summarize_session_request, SSH_SESSION_KEEPALIVE_INTERVAL_SECS},
+    connection::{
+        connect_tcp_stream, connect_through_jump_host, open_authenticated_session,
+        summarize_session_request, SSH_SESSION_KEEPALIVE_INTERVAL_SECS,
+    },
     drain_decoded_output, emit_data, emit_session_error, emit_status, flush_pending_output,
     known_hosts::known_hosts_path,
-    models::{ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent, SessionStatus},
+    models::{
+        ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent,
+        SessionStatus,
+    },
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
@@ -53,7 +59,10 @@ pub(crate) fn session_wake_pair() -> std::io::Result<(SessionWaker, SessionWakeS
     writer.set_nodelay(true)?;
     writer.set_nonblocking(true)?;
     reader.set_nonblocking(true)?;
-    Ok((SessionWaker { stream: writer }, SessionWakeSource { stream: reader }))
+    Ok((
+        SessionWaker { stream: writer },
+        SessionWakeSource { stream: reader },
+    ))
 }
 
 impl SessionWaker {
@@ -86,9 +95,7 @@ impl SessionWakeSource {
     }
 }
 
-pub(crate) fn run_ssh_session<
-    F: FnOnce() + Send,
->(
+pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
     app: &AppHandle,
     session_id: &str,
     request: &SessionCreateRequest,
@@ -155,7 +162,11 @@ pub(crate) fn run_ssh_session<
         }
         Err(connection_error) => {
             match connection_error {
-                ConnectionError::HostKeyUnknown { ref host, ref port, ref fingerprint } => {
+                ConnectionError::HostKeyUnknown {
+                    ref host,
+                    ref port,
+                    ref fingerprint,
+                } => {
                     let _ = emit_session_error(
                         app,
                         SessionErrorEvent::HostKeyUnknown {
@@ -182,14 +193,12 @@ pub(crate) fn run_ssh_session<
         }
     };
 
-    let mut channel = session
-        .channel_session()
-        .map_err(|error| {
-            error!("Failed to open SSH channel session_id={session_id}: {error}");
-            ConnectionError::Other {
-                message: format!("failed to open ssh channel: {error}"),
-            }
-        })?;
+    let mut channel = session.channel_session().map_err(|error| {
+        error!("Failed to open SSH channel session_id={session_id}: {error}");
+        ConnectionError::Other {
+            message: format!("failed to open ssh channel: {error}"),
+        }
+    })?;
     channel
         .request_pty(
             "xterm-256color",
@@ -210,14 +219,12 @@ pub(crate) fn run_ssh_session<
                 message: format!("failed to configure extended-data mode: {error}"),
             }
         })?;
-    channel
-        .shell()
-        .map_err(|error| {
-            error!("Failed to start remote shell session_id={session_id}: {error}");
-            ConnectionError::Other {
-                message: format!("failed to start remote shell: {error}"),
-            }
-        })?;
+    channel.shell().map_err(|error| {
+        error!("Failed to start remote shell session_id={session_id}: {error}");
+        ConnectionError::Other {
+            message: format!("failed to start remote shell: {error}"),
+        }
+    })?;
     session.set_blocking(false);
 
     info!("SSH session connected session_id={session_id}");
@@ -700,7 +707,7 @@ fn wait_for_session_events(
     timeout: Duration,
 ) -> Result<(), String> {
     use windows_sys::Win32::Networking::WinSock::{
-        WSAGetLastError, WSAPoll, WSAEINTR, WSAPOLLFD, POLLIN,
+        WSAGetLastError, WSAPoll, POLLIN, WSAEINTR, WSAPOLLFD,
     };
 
     let events = match session_poll_events(session.block_directions()) {

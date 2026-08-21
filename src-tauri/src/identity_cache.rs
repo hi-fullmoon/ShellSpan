@@ -21,17 +21,14 @@ pub(crate) struct RemoteIdentityCache {
 }
 
 impl RemoteIdentityCache {
-    pub(crate) fn insert(
-        &self,
-        scope: &str,
-        id: u32,
-        kind: RemoteIdentityKind,
-        name: String,
-    ) {
+    pub(crate) fn insert(&self, scope: &str, id: u32, kind: RemoteIdentityKind, name: String) {
         self.entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert((scope.to_string(), id, kind), CachedIdentity::Resolved(name));
+            .insert(
+                (scope.to_string(), id, kind),
+                CachedIdentity::Resolved(name),
+            );
     }
 
     pub(crate) fn insert_unresolved(&self, scope: &str, id: u32, kind: RemoteIdentityKind) {
@@ -42,7 +39,10 @@ impl RemoteIdentityCache {
         self.entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert((scope.to_string(), id, kind), CachedIdentity::Unresolved(at));
+            .insert(
+                (scope.to_string(), id, kind),
+                CachedIdentity::Unresolved(at),
+            );
     }
 
     /// Returns the names found in the cache plus the ids that still need a
@@ -54,7 +54,10 @@ impl RemoteIdentityCache {
         ids: &[u32],
         kind: RemoteIdentityKind,
     ) -> (HashMap<u32, String>, Vec<u32>) {
-        let entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut found = HashMap::new();
         let mut missing = Vec::new();
         for id in ids {
@@ -77,9 +80,15 @@ mod tests {
     #[test]
     fn cache_returns_cached_user_name() {
         let cache = RemoteIdentityCache::default();
-        cache.insert("host1:22:alice", 1000, RemoteIdentityKind::User, "alice".to_string());
+        cache.insert(
+            "host1:22:alice",
+            1000,
+            RemoteIdentityKind::User,
+            "alice".to_string(),
+        );
 
-        let (found, missing) = cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
+        let (found, missing) =
+            cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
 
         assert_eq!(found.get(&1000), Some(&"alice".to_string()));
         assert!(missing.is_empty());
@@ -89,7 +98,8 @@ mod tests {
     fn cache_reports_missing_ids() {
         let cache = RemoteIdentityCache::default();
 
-        let (found, missing) = cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
+        let (found, missing) =
+            cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
 
         assert!(found.is_empty());
         assert_eq!(missing, vec![1000]);
@@ -98,11 +108,19 @@ mod tests {
     #[test]
     fn cache_isolated_by_scope_and_kind() {
         let cache = RemoteIdentityCache::default();
-        cache.insert("host1:22:alice", 1000, RemoteIdentityKind::User, "alice".to_string());
+        cache.insert(
+            "host1:22:alice",
+            1000,
+            RemoteIdentityKind::User,
+            "alice".to_string(),
+        );
 
-        let (found_other_host, _) = cache.resolve_names("host2:22:alice", &[1000], RemoteIdentityKind::User);
-        let (found_other_user, _) = cache.resolve_names("host1:22:bob", &[1000], RemoteIdentityKind::User);
-        let (found_group, _) = cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::Group);
+        let (found_other_host, _) =
+            cache.resolve_names("host2:22:alice", &[1000], RemoteIdentityKind::User);
+        let (found_other_user, _) =
+            cache.resolve_names("host1:22:bob", &[1000], RemoteIdentityKind::User);
+        let (found_group, _) =
+            cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::Group);
 
         assert!(found_other_host.is_empty());
         assert!(found_other_user.is_empty());
@@ -114,7 +132,8 @@ mod tests {
         let cache = RemoteIdentityCache::default();
         cache.insert_unresolved("host1:22:alice", 1000, RemoteIdentityKind::User);
 
-        let (found, missing) = cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
+        let (found, missing) =
+            cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
 
         assert!(found.is_empty());
         assert!(missing.is_empty());
@@ -130,7 +149,8 @@ mod tests {
             Instant::now() - UNRESOLVED_TTL - Duration::from_secs(1),
         );
 
-        let (found, missing) = cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
+        let (found, missing) =
+            cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
 
         assert!(found.is_empty());
         assert_eq!(missing, vec![1000]);
@@ -140,9 +160,15 @@ mod tests {
     fn resolved_insert_overwrites_unresolved_entry() {
         let cache = RemoteIdentityCache::default();
         cache.insert_unresolved("host1:22:alice", 1000, RemoteIdentityKind::User);
-        cache.insert("host1:22:alice", 1000, RemoteIdentityKind::User, "alice".to_string());
+        cache.insert(
+            "host1:22:alice",
+            1000,
+            RemoteIdentityKind::User,
+            "alice".to_string(),
+        );
 
-        let (found, missing) = cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
+        let (found, missing) =
+            cache.resolve_names("host1:22:alice", &[1000], RemoteIdentityKind::User);
 
         assert_eq!(found.get(&1000), Some(&"alice".to_string()));
         assert!(missing.is_empty());

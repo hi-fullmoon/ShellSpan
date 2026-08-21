@@ -40,17 +40,16 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
 
     #[cfg(not(target_os = "macos"))]
     {
-        builder = builder
-            .on_window_event(|window, event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    if window.label() == "main" {
-                        api.prevent_close();
-                        if let Err(error) = window.hide() {
-                            error!("failed to hide window while keeping tray active: {error}");
-                        }
+        builder = builder.on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    if let Err(error) = window.hide() {
+                        error!("failed to hide window while keeping tray active: {error}");
                     }
                 }
-            });
+            }
+        });
     }
 
     #[cfg(target_os = "macos")]
@@ -270,13 +269,8 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
             }
         }
 
-        let about_item = MenuItem::with_id(
-            app,
-            MENU_ABOUT_ID,
-            "About TermBridge",
-            true,
-            None::<&str>,
-        )?;
+        let about_item =
+            MenuItem::with_id(app, MENU_ABOUT_ID, "About TermBridge", true, None::<&str>)?;
         let settings_item = MenuItem::with_id(
             app,
             MENU_OPEN_SETTINGS_ID,

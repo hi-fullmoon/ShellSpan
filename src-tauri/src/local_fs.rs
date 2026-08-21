@@ -40,10 +40,11 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
             .get(index)
             .copied()
             .unwrap_or(UploadConflictPolicy::Fail);
-        let destination_name = match resolve_copy_target_name(&existing_names, &file_name, conflict_policy)? {
-            Some(name) => name,
-            None => continue,
-        };
+        let destination_name =
+            match resolve_copy_target_name(&existing_names, &file_name, conflict_policy)? {
+                Some(name) => name,
+                None => continue,
+            };
         let destination_path = destination_directory.join(&destination_name);
         // A system drag can hand us a path that already lives in the target
         // directory. Treat copying an entry onto itself as a no-op. Besides
@@ -54,8 +55,12 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
         }
         validate_copy_destination(source_path, &destination_path)?;
         if conflict_policy == UploadConflictPolicy::Replace && destination_path.is_dir() {
-            fs::remove_dir_all(&destination_path)
-                .map_err(|error| format!("failed to replace directory {}: {error}", destination_path.display()))?;
+            fs::remove_dir_all(&destination_path).map_err(|error| {
+                format!(
+                    "failed to replace directory {}: {error}",
+                    destination_path.display()
+                )
+            })?;
         }
         copy_local_entry_to_path(source_path, &destination_path)?;
         existing_names.insert(destination_name);
@@ -83,8 +88,12 @@ pub(crate) fn rename_local_path_blocking(path: String, new_name: String) -> Resu
     if destination.exists() {
         return Err(format!("an entry named {trimmed} already exists"));
     }
-    fs::rename(&source, &destination)
-        .map_err(|error| format!("failed to rename {} to {trimmed}: {error}", source.display()))
+    fs::rename(&source, &destination).map_err(|error| {
+        format!(
+            "failed to rename {} to {trimmed}: {error}",
+            source.display()
+        )
+    })
 }
 
 pub(crate) fn paste_local_paths_blocking(
@@ -192,18 +201,29 @@ fn validate_copy_destination(source: &Path, destination: &Path) -> Result<(), St
         return Ok(());
     }
 
-    let canonical_source = fs::canonicalize(source)
-        .map_err(|error| format!("failed to canonicalize source {}: {error}", source.display()))?;
+    let canonical_source = fs::canonicalize(source).map_err(|error| {
+        format!(
+            "failed to canonicalize source {}: {error}",
+            source.display()
+        )
+    })?;
     let canonical_destination_parent = destination
         .parent()
         .ok_or_else(|| format!("copy destination has no parent: {}", destination.display()))
         .and_then(|parent| {
-            fs::canonicalize(parent)
-                .map_err(|error| format!("failed to canonicalize destination parent {}: {error}", parent.display()))
+            fs::canonicalize(parent).map_err(|error| {
+                format!(
+                    "failed to canonicalize destination parent {}: {error}",
+                    parent.display()
+                )
+            })
         })?;
-    let destination_name = destination
-        .file_name()
-        .ok_or_else(|| format!("copy destination has no file name: {}", destination.display()))?;
+    let destination_name = destination.file_name().ok_or_else(|| {
+        format!(
+            "copy destination has no file name: {}",
+            destination.display()
+        )
+    })?;
     let normalized_destination = canonical_destination_parent.join(destination_name);
 
     if normalized_destination.starts_with(&canonical_source) {
@@ -218,7 +238,9 @@ fn validate_copy_destination(source: &Path, destination: &Path) -> Result<(), St
 
 fn local_entry_names(directory: &Path) -> Result<HashSet<String>, String> {
     let mut names = HashSet::new();
-    for entry in fs::read_dir(directory).map_err(|error| format!("failed to read directory: {error}"))? {
+    for entry in
+        fs::read_dir(directory).map_err(|error| format!("failed to read directory: {error}"))?
+    {
         let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
         names.insert(name);
@@ -249,10 +271,17 @@ fn copy_local_entry_to_path(source: &Path, destination: &Path) -> Result<(), Str
         .map_err(|error| format!("failed to stat source {}: {error}", source.display()))?;
 
     if metadata.is_dir() {
-        fs::create_dir_all(destination)
-            .map_err(|error| format!("failed to create directory {}: {error}", destination.display()))?;
-        for entry in fs::read_dir(source).map_err(|error| format!("failed to read directory {}: {error}", source.display()))? {
-            let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+        fs::create_dir_all(destination).map_err(|error| {
+            format!(
+                "failed to create directory {}: {error}",
+                destination.display()
+            )
+        })?;
+        for entry in fs::read_dir(source)
+            .map_err(|error| format!("failed to read directory {}: {error}", source.display()))?
+        {
+            let entry =
+                entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
             let entry_destination = destination.join(entry.file_name());
             copy_local_entry_to_path(&entry.path(), &entry_destination)?;
         }
@@ -262,23 +291,40 @@ fn copy_local_entry_to_path(source: &Path, destination: &Path) -> Result<(), Str
             .map_err(|error| format!("failed to read symlink {}: {error}", source.display()))?;
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&target, destination)
-                .map_err(|error| format!("failed to create symlink {}: {error}", destination.display()))?;
+            std::os::unix::fs::symlink(&target, destination).map_err(|error| {
+                format!(
+                    "failed to create symlink {}: {error}",
+                    destination.display()
+                )
+            })?;
         }
         #[cfg(windows)]
         {
             if target.is_dir() {
-                std::os::windows::fs::symlink_dir(&target, destination)
-                    .map_err(|error| format!("failed to create symlink {}: {error}", destination.display()))?;
+                std::os::windows::fs::symlink_dir(&target, destination).map_err(|error| {
+                    format!(
+                        "failed to create symlink {}: {error}",
+                        destination.display()
+                    )
+                })?;
             } else {
-                std::os::windows::fs::symlink_file(&target, destination)
-                    .map_err(|error| format!("failed to create symlink {}: {error}", destination.display()))?;
+                std::os::windows::fs::symlink_file(&target, destination).map_err(|error| {
+                    format!(
+                        "failed to create symlink {}: {error}",
+                        destination.display()
+                    )
+                })?;
             }
         }
         Ok(())
     } else {
-        fs::copy(source, destination)
-            .map_err(|error| format!("failed to copy {} to {}: {error}", source.display(), destination.display()))?;
+        fs::copy(source, destination).map_err(|error| {
+            format!(
+                "failed to copy {} to {}: {error}",
+                source.display(),
+                destination.display()
+            )
+        })?;
         Ok(())
     }
 }
@@ -288,7 +334,11 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn make_request(sources: Vec<&str>, destination: &str, policies: Vec<UploadConflictPolicy>) -> CopyLocalPathsRequest {
+    fn make_request(
+        sources: Vec<&str>,
+        destination: &str,
+        policies: Vec<UploadConflictPolicy>,
+    ) -> CopyLocalPathsRequest {
         CopyLocalPathsRequest {
             source_paths: sources.into_iter().map(|s| s.to_string()).collect(),
             destination_directory: destination.to_string(),
@@ -304,7 +354,11 @@ mod tests {
         let dest_dir = temp.path().join("dest");
         fs::write(&src, "hello").unwrap();
 
-        let request = make_request(vec![src.to_str().unwrap()], dest_dir.to_str().unwrap(), vec![]);
+        let request = make_request(
+            vec![src.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![],
+        );
         copy_local_paths_blocking(request).unwrap();
 
         let copied = dest_dir.join("file.txt");
@@ -321,7 +375,11 @@ mod tests {
         fs::write(nested.join("inner.txt"), "inner").unwrap();
         let dest_dir = temp.path().join("dest");
 
-        let request = make_request(vec![src_dir.to_str().unwrap()], dest_dir.to_str().unwrap(), vec![]);
+        let request = make_request(
+            vec![src_dir.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![],
+        );
         copy_local_paths_blocking(request).unwrap();
 
         assert!(dest_dir.join("src").exists());
@@ -337,10 +395,17 @@ mod tests {
         fs::write(&src, "new").unwrap();
         fs::write(dest_dir.join("file.txt"), "old").unwrap();
 
-        let request = make_request(vec![src.to_str().unwrap()], dest_dir.to_str().unwrap(), vec![UploadConflictPolicy::Overwrite]);
+        let request = make_request(
+            vec![src.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![UploadConflictPolicy::Overwrite],
+        );
         copy_local_paths_blocking(request).unwrap();
 
-        assert_eq!(fs::read_to_string(dest_dir.join("file.txt")).unwrap(), "new");
+        assert_eq!(
+            fs::read_to_string(dest_dir.join("file.txt")).unwrap(),
+            "new"
+        );
     }
 
     #[test]
@@ -352,10 +417,17 @@ mod tests {
         fs::write(&src, "new").unwrap();
         fs::write(dest_dir.join("file.txt"), "old").unwrap();
 
-        let request = make_request(vec![src.to_str().unwrap()], dest_dir.to_str().unwrap(), vec![UploadConflictPolicy::Skip]);
+        let request = make_request(
+            vec![src.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![UploadConflictPolicy::Skip],
+        );
         copy_local_paths_blocking(request).unwrap();
 
-        assert_eq!(fs::read_to_string(dest_dir.join("file.txt")).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(dest_dir.join("file.txt")).unwrap(),
+            "old"
+        );
     }
 
     #[test]
@@ -367,7 +439,11 @@ mod tests {
         fs::write(&src, "new").unwrap();
         fs::write(dest_dir.join("file.txt"), "old").unwrap();
 
-        let request = make_request(vec![src.to_str().unwrap()], dest_dir.to_str().unwrap(), vec![UploadConflictPolicy::Fail]);
+        let request = make_request(
+            vec![src.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![UploadConflictPolicy::Fail],
+        );
         let result = copy_local_paths_blocking(request);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("file.txt"));
@@ -428,7 +504,10 @@ mod tests {
         );
         copy_local_paths_blocking(request).unwrap();
 
-        assert_eq!(fs::read_to_string(source.join("keep.txt")).unwrap(), "unchanged");
+        assert_eq!(
+            fs::read_to_string(source.join("keep.txt")).unwrap(),
+            "unchanged"
+        );
     }
 
     #[test]
@@ -447,7 +526,10 @@ mod tests {
         let result = copy_local_paths_blocking(request);
 
         assert!(result.is_err());
-        assert_eq!(fs::read_to_string(source.join("keep.txt")).unwrap(), "unchanged");
+        assert_eq!(
+            fs::read_to_string(source.join("keep.txt")).unwrap(),
+            "unchanged"
+        );
     }
 
     #[test]
@@ -456,10 +538,14 @@ mod tests {
         let src = temp.path().join("old.txt");
         fs::write(&src, "hello").unwrap();
 
-        rename_local_path_blocking(src.to_str().unwrap().to_string(), "new.txt".to_string()).unwrap();
+        rename_local_path_blocking(src.to_str().unwrap().to_string(), "new.txt".to_string())
+            .unwrap();
 
         assert!(!src.exists());
-        assert_eq!(fs::read_to_string(temp.path().join("new.txt")).unwrap(), "hello");
+        assert_eq!(
+            fs::read_to_string(temp.path().join("new.txt")).unwrap(),
+            "hello"
+        );
     }
 
     #[test]
@@ -473,7 +559,10 @@ mod tests {
             "new.txt".to_string(),
         );
         assert!(result.is_err());
-        assert_eq!(fs::read_to_string(temp.path().join("old.txt")).unwrap(), "a");
+        assert_eq!(
+            fs::read_to_string(temp.path().join("old.txt")).unwrap(),
+            "a"
+        );
     }
 
     #[test]
@@ -482,9 +571,18 @@ mod tests {
         let src = temp.path().join("old.txt");
         fs::write(&src, "a").unwrap();
 
-        assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "  ".to_string()).is_err());
-        assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "a/b".to_string()).is_err());
-        assert!(rename_local_path_blocking(src.to_str().unwrap().to_string(), "a\\b".to_string()).is_err());
+        assert!(
+            rename_local_path_blocking(src.to_str().unwrap().to_string(), "  ".to_string())
+                .is_err()
+        );
+        assert!(
+            rename_local_path_blocking(src.to_str().unwrap().to_string(), "a/b".to_string())
+                .is_err()
+        );
+        assert!(
+            rename_local_path_blocking(src.to_str().unwrap().to_string(), "a\\b".to_string())
+                .is_err()
+        );
         assert!(src.exists());
     }
 
@@ -502,7 +600,8 @@ mod tests {
             vec![src.to_str().unwrap().to_string()],
             dest.to_str().unwrap().to_string(),
             "copy".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(written.len(), 1);
         assert_eq!(fs::read_to_string(dest.join("report.txt")).unwrap(), "data");
@@ -518,10 +617,21 @@ mod tests {
             vec![src.to_str().unwrap().to_string()],
             temp.path().to_str().unwrap().to_string(),
             "copy".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
-        assert_eq!(written, vec![temp.path().join("report copy.txt").to_string_lossy().to_string()]);
-        assert_eq!(fs::read_to_string(temp.path().join("report copy.txt")).unwrap(), "new");
+        assert_eq!(
+            written,
+            vec![temp
+                .path()
+                .join("report copy.txt")
+                .to_string_lossy()
+                .to_string()]
+        );
+        assert_eq!(
+            fs::read_to_string(temp.path().join("report copy.txt")).unwrap(),
+            "new"
+        );
     }
 
     #[test]
@@ -538,7 +648,8 @@ mod tests {
             vec![src.to_str().unwrap().to_string()],
             temp.path().to_str().unwrap().to_string(),
             "copy".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(written[0].ends_with("report copy 2.txt"));
     }
@@ -563,7 +674,8 @@ mod tests {
             ],
             dest.to_str().unwrap().to_string(),
             "copy".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(dest.join("docs copy/a.txt").exists());
         assert_eq!(fs::read_to_string(dest.join("Makefile copy")).unwrap(), "m");
@@ -585,7 +697,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert_eq!(fs::read_to_string(source.join("keep.txt")).unwrap(), "unchanged");
+        assert_eq!(
+            fs::read_to_string(source.join("keep.txt")).unwrap(),
+            "unchanged"
+        );
     }
 
     #[test]
@@ -598,7 +713,8 @@ mod tests {
             vec![src.to_str().unwrap().to_string()],
             temp.path().to_str().unwrap().to_string(),
             "副本".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(written[0].ends_with("报告 副本.txt"));
     }

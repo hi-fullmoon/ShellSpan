@@ -12,10 +12,11 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::keychain::CredentialManager;
+use crate::{db::Database, keychain::CredentialManager};
 
 pub(crate) const AI_STREAM_EVENT: &str = "ai-stream";
 const AI_KEY_SERVICE: &str = "com.termbridge.ai-provider";
+const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigration";
 const MAX_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
 
@@ -44,6 +45,8 @@ pub(crate) struct AiProviderConfig {
     pub(crate) model: String,
     pub(crate) requires_api_key: bool,
     pub(crate) structured_output: AiStructuredOutputMode,
+    #[serde(default)]
+    pub(crate) api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -80,7 +83,11 @@ pub(crate) struct AiStartRequest {
 }
 
 #[derive(Clone, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub(crate) enum AiStreamEvent {
     Started { request_id: String },
     TextDelta { request_id: String, text: String },
@@ -129,46 +136,75 @@ impl AiRequestRegistry {
     }
 }
 
-#[tauri::command]
-pub(crate) fn ai_store_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-    api_key: String,
-) -> Result<(), String> {
-    validate_provider_id(&provider_id)?;
-    if api_key.trim().is_empty() {
-        return Err("API key cannot be empty".to_string());
+pub(crate) fn migrate_legacy_api_keys(
+    credentials: &CredentialManager,
+    database: &Database,
+) -> Result<usize, String> {
+    let entries = database.load_preferences()?;
+    if entries
+        .iter()
+        .any(|(key, value)| key == AI_KEY_MIGRATION_PREFERENCE && value == "true")
+    {
+        return Ok(0);
     }
-    credentials.set_credential(AI_KEY_SERVICE, &provider_id, api_key.trim())
+    let Some((_, raw_providers)) = entries.iter().find(|(key, _)| key == "ai.providers") else {
+        return Ok(0);
+    };
+    let mut providers: Value = serde_json::from_str(raw_providers)
+        .map_err(|error| format!("invalid stored AI providers: {error}"))?;
+    let Some(provider_items) = providers.as_array_mut() else {
+        return Ok(0);
+    };
+
+    let mut migrated = 0;
+    let mut legacy_provider_ids = Vec::new();
+    for provider in provider_items {
+        let Some(provider) = provider.as_object_mut() else {
+            continue;
+        };
+        let Some(provider_id) = provider
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        validate_provider_id(&provider_id)?;
+        let Some(legacy_key) = credentials
+            .get_credential(AI_KEY_SERVICE, &provider_id)?
+            .filter(|key| !key.trim().is_empty())
+        else {
+            continue;
+        };
+        legacy_provider_ids.push(provider_id);
+        let already_stored = provider
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .is_some_and(|key| !key.trim().is_empty());
+        if !already_stored {
+            provider.insert("apiKey".to_string(), Value::String(legacy_key));
+            migrated += 1;
+        }
+    }
+
+    if migrated > 0 {
+        database.save_preferences(&[(
+            "ai.providers".to_string(),
+            serde_json::to_string(&providers)
+                .map_err(|error| format!("failed to serialize migrated AI providers: {error}"))?,
+        )])?;
+    }
+    for provider_id in legacy_provider_ids {
+        credentials.delete_credential(AI_KEY_SERVICE, &provider_id)?;
+    }
+    database.save_preferences(&[(AI_KEY_MIGRATION_PREFERENCE.to_string(), "true".to_string())])?;
+    Ok(migrated)
 }
 
 #[tauri::command]
-pub(crate) fn ai_has_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-) -> Result<bool, String> {
-    validate_provider_id(&provider_id)?;
-    Ok(credentials
-        .get_credential(AI_KEY_SERVICE, &provider_id)?
-        .is_some_and(|value| !value.trim().is_empty()))
-}
-
-#[tauri::command]
-pub(crate) fn ai_delete_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-) -> Result<(), String> {
-    validate_provider_id(&provider_id)?;
-    credentials.delete_credential(AI_KEY_SERVICE, &provider_id)
-}
-
-#[tauri::command]
-pub(crate) async fn ai_list_models(
-    credentials: State<'_, CredentialManager>,
-    provider: AiProviderConfig,
-) -> Result<Vec<String>, String> {
+pub(crate) async fn ai_list_models(provider: AiProviderConfig) -> Result<Vec<String>, String> {
     validate_provider_config(&provider, false)?;
-    let api_key = api_key_for_provider(&credentials, &provider)?;
+    let api_key = api_key_for_provider(&provider)?;
     let client = build_client()?;
     let response = match provider.kind {
         AiProviderKind::Ollama => client
@@ -213,12 +249,11 @@ pub(crate) async fn ai_list_models(
 #[tauri::command]
 pub(crate) fn ai_start_request(
     app: AppHandle,
-    credentials: State<'_, CredentialManager>,
     registry: State<'_, AiRequestRegistry>,
     request: AiStartRequest,
 ) -> Result<(), String> {
     validate_request(&request)?;
-    let api_key = api_key_for_provider(&credentials, &request.provider)?;
+    let api_key = api_key_for_provider(&request.provider)?;
     let cancellation = registry.register(&request.request_id)?;
     let registry = registry.inner().clone();
     let request_id = request.request_id.clone();
@@ -391,7 +426,14 @@ async fn run_request(
                 return Ok(());
             };
             let response = response.map_err(format_transport_error)?;
-            stream_openai_compatible(app, &request.request_id, response, cancellation).await
+            stream_openai_compatible(
+                app,
+                &request.request_id,
+                response,
+                cancellation,
+                provider_uses_cumulative_content(&request.provider),
+            )
+            .await
         }
     }
 }
@@ -523,12 +565,14 @@ async fn stream_openai_compatible(
     request_id: &str,
     response: Response,
     cancellation: CancellationToken,
+    cumulative_content: bool,
 ) -> Result<(), String> {
     let Some(response) = checked_response_with_cancellation(response, &cancellation).await? else {
         return Ok(());
     };
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
+    let mut previous_content = String::new();
     let mut completed = false;
     loop {
         tokio::select! {
@@ -539,7 +583,13 @@ async fn stream_openai_compatible(
                 buffer.extend_from_slice(&chunk);
                 while let Some(event) = take_sse_event(&mut buffer)? {
                     completed |= openai_compatible_event_is_completed(&event)?;
-                    if let Some(text) = parse_openai_compatible_delta(&event)? {
+                    if let Some(text) = parse_openai_compatible_delta(&event)?
+                        .and_then(|text| normalize_content_delta(
+                            text,
+                            cumulative_content,
+                            &mut previous_content,
+                        ))
+                    {
                         emit(app, AiStreamEvent::TextDelta {
                             request_id: request_id.to_string(),
                             text,
@@ -551,7 +601,9 @@ async fn stream_openai_compatible(
     }
     if let Some(event) = take_final_sse_event(&mut buffer)? {
         completed |= openai_compatible_event_is_completed(&event)?;
-        if let Some(text) = parse_openai_compatible_delta(&event)? {
+        if let Some(text) = parse_openai_compatible_delta(&event)?.and_then(|text| {
+            normalize_content_delta(text, cumulative_content, &mut previous_content)
+        }) {
             emit(
                 app,
                 AiStreamEvent::TextDelta {
@@ -742,6 +794,30 @@ fn parse_openai_compatible_delta(event: &str) -> Result<Option<String>, String> 
         .map(str::to_string))
 }
 
+fn provider_uses_cumulative_content(provider: &AiProviderConfig) -> bool {
+    provider
+        .model
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("minimax-")
+}
+
+fn normalize_content_delta(
+    content: String,
+    cumulative: bool,
+    previous_content: &mut String,
+) -> Option<String> {
+    if !cumulative {
+        return Some(content);
+    }
+    let delta = content
+        .strip_prefix(previous_content.as_str())
+        .unwrap_or(&content)
+        .to_string();
+    *previous_content = content;
+    (!delta.is_empty()).then_some(delta)
+}
+
 fn take_line(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
     let Some(index) = buffer.iter().position(|byte| *byte == b'\n') else {
         return Ok(None);
@@ -873,21 +949,19 @@ fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> 
     Ok(url)
 }
 
-fn api_key_for_provider(
-    credentials: &CredentialManager,
-    provider: &AiProviderConfig,
-) -> Result<Option<String>, String> {
+fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option<String>, String> {
+    let api_key = provider
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_string);
     match provider.kind {
         AiProviderKind::Ollama => Ok(None),
-        AiProviderKind::OpenAi => credentials
-            .get_credential(AI_KEY_SERVICE, &provider.id)?
-            .filter(|key| !key.trim().is_empty())
+        AiProviderKind::OpenAi => api_key
             .map(Some)
             .ok_or_else(|| "API key is required".to_string()),
         AiProviderKind::OpenAiCompatible => {
-            let api_key = credentials
-                .get_credential(AI_KEY_SERVICE, &provider.id)?
-                .filter(|key| !key.trim().is_empty());
             if provider.requires_api_key && api_key.is_none() {
                 Err("API key is required".to_string())
             } else {
@@ -996,6 +1070,77 @@ mod tests {
     }
 
     #[test]
+    fn serializes_ai_stream_event_fields_for_typescript_consumers() {
+        assert_eq!(
+            serde_json::to_value(AiStreamEvent::TextDelta {
+                request_id: "request-1".to_string(),
+                text: "hello".to_string(),
+            })
+            .unwrap(),
+            json!({
+                "type": "textDelta",
+                "requestId": "request-1",
+                "text": "hello",
+            }),
+        );
+        assert_eq!(
+            serde_json::to_value(AiStreamEvent::Completed {
+                request_id: "request-1".to_string(),
+            })
+            .unwrap(),
+            json!({
+                "type": "completed",
+                "requestId": "request-1",
+            }),
+        );
+    }
+
+    #[test]
+    fn emits_only_new_text_from_minimax_cumulative_stream_chunks() {
+        let mut previous = String::new();
+
+        assert_eq!(
+            normalize_content_delta("<think>".to_string(), true, &mut previous).as_deref(),
+            Some("<think>")
+        );
+        assert_eq!(
+            normalize_content_delta("<think>checking".to_string(), true, &mut previous,).as_deref(),
+            Some("checking")
+        );
+        assert_eq!(
+            normalize_content_delta(
+                "<think>checking</think>answer".to_string(),
+                true,
+                &mut previous,
+            )
+            .as_deref(),
+            Some("</think>answer")
+        );
+        assert_eq!(
+            normalize_content_delta(
+                "<think>checking</think>answer".to_string(),
+                true,
+                &mut previous,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn keeps_standard_openai_compatible_stream_chunks_incremental() {
+        let mut previous = String::new();
+        assert_eq!(
+            normalize_content_delta("hello".to_string(), false, &mut previous).as_deref(),
+            Some("hello")
+        );
+        assert_eq!(
+            normalize_content_delta(" world".to_string(), false, &mut previous).as_deref(),
+            Some(" world")
+        );
+        assert!(previous.is_empty());
+    }
+
+    #[test]
     fn returns_openai_compatible_stream_errors() {
         let event = "data: {\"error\":{\"message\":\"quota exceeded\"}}";
         assert_eq!(
@@ -1074,6 +1219,7 @@ mod tests {
             model: "qwen3".to_string(),
             requires_api_key: false,
             structured_output: AiStructuredOutputMode::JsonSchema,
+            api_key: None,
         };
         assert!(validate_provider_config(&local, true).is_ok());
         let remote = AiProviderConfig {
@@ -1092,6 +1238,7 @@ mod tests {
             model: "MiniMax-M3".to_string(),
             requires_api_key: true,
             structured_output: AiStructuredOutputMode::Prompt,
+            api_key: None,
         };
 
         assert_eq!(
@@ -1133,6 +1280,42 @@ mod tests {
         assert_eq!(
             schema.pointer("/properties/steps/items/additionalProperties"),
             Some(&json!(false))
+        );
+    }
+
+    #[test]
+    fn reads_and_trims_api_key_from_provider_configuration() {
+        let provider = AiProviderConfig {
+            id: "minimax".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.minimaxi.com/v1".to_string(),
+            model: "MiniMax-M3".to_string(),
+            requires_api_key: true,
+            structured_output: AiStructuredOutputMode::Prompt,
+            api_key: Some("  database-key  ".to_string()),
+        };
+
+        assert_eq!(
+            api_key_for_provider(&provider).unwrap().as_deref(),
+            Some("database-key")
+        );
+    }
+
+    #[test]
+    fn rejects_a_required_provider_without_a_saved_api_key() {
+        let provider = AiProviderConfig {
+            id: "minimax".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.minimaxi.com/v1".to_string(),
+            model: "MiniMax-M3".to_string(),
+            requires_api_key: true,
+            structured_output: AiStructuredOutputMode::Prompt,
+            api_key: None,
+        };
+
+        assert_eq!(
+            api_key_for_provider(&provider).unwrap_err(),
+            "API key is required"
         );
     }
 }
