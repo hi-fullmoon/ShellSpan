@@ -231,6 +231,8 @@ pub(crate) struct ReadRemoteFileResponse {
     pub(crate) content: String,
     pub(crate) size: u64,
     pub(crate) is_text: bool,
+    pub(crate) content_encoding: String,
+    pub(crate) truncated: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -746,6 +748,9 @@ pub(crate) struct ManagedSession {
     /// Signals that the frontend has attached its event listeners, so the
     /// session worker may emit output live instead of buffering it.
     pub(crate) output_ready: Arc<AtomicBool>,
+    /// Set by the frontend when xterm's parser backlog crosses its high
+    /// watermark. Workers stop reading their PTY until the backlog drains.
+    pub(crate) output_paused: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -1259,6 +1264,30 @@ impl SessionManager {
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
         managed.output_ready.store(true, AtomicOrdering::Relaxed);
+        if let Some(waker) = managed.waker.as_ref() {
+            waker.wake();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn set_output_paused(
+        &self,
+        session_id: &str,
+        paused: bool,
+    ) -> Result<(), String> {
+        let guard = self
+            .sessions
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        let managed = guard
+            .get(session_id)
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        managed
+            .output_paused
+            .store(paused, AtomicOrdering::Relaxed);
+        if let Some(waker) = managed.waker.as_ref() {
+            waker.wake();
+        }
         Ok(())
     }
 
@@ -1288,6 +1317,7 @@ mod session_manager_tests {
                 message: None,
             },
             output_ready: Arc::new(AtomicBool::new(false)),
+            output_paused: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1327,6 +1357,21 @@ mod session_manager_tests {
         manager.mark_output_ready("local-1").unwrap();
         assert!(flag.load(AtomicOrdering::Relaxed));
         assert!(manager.mark_output_ready("missing").is_err());
+    }
+
+    #[test]
+    fn set_output_paused_updates_the_session_flag() {
+        let manager = SessionManager::default();
+        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let managed = managed_session(sender);
+        let flag = managed.output_paused.clone();
+        manager.insert("local-1".to_string(), managed).unwrap();
+
+        manager.set_output_paused("local-1", true).unwrap();
+        assert!(flag.load(AtomicOrdering::Relaxed));
+        manager.set_output_paused("local-1", false).unwrap();
+        assert!(!flag.load(AtomicOrdering::Relaxed));
+        assert!(manager.set_output_paused("missing", true).is_err());
     }
 }
 

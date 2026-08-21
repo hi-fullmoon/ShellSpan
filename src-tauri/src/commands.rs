@@ -98,6 +98,8 @@ pub(crate) async fn create_session(
             message: format!("failed to create session wake channel: {error}"),
         }
     })?;
+    let output_ready = Arc::new(AtomicBool::new(false));
+    let output_paused = Arc::new(AtomicBool::new(false));
     state
         .insert(
             session_id.clone(),
@@ -109,10 +111,13 @@ pub(crate) async fn create_session(
                     status: SessionStatus::Connecting,
                     message: Some("connecting".to_string()),
                 },
-                // SSH output trickles in over the network, so by the time the
-                // frontend listeners attach nothing has been emitted yet; keep the
-                // SSH worker ungated.
-                output_ready: Arc::new(AtomicBool::new(true)),
+                // The shell can emit its first prompt immediately after the
+                // handshake. Hold it until the replacement controller has
+                // attached all event listeners, otherwise early carriage
+                // returns / cursor-control sequences can be lost while later
+                // text survives and leaves a garbled duplicate prompt.
+                output_ready: output_ready.clone(),
+                output_paused: output_paused.clone(),
             },
         )
         .map_err(|message| {
@@ -131,6 +136,8 @@ pub(crate) async fn create_session(
         request,
         rx,
         wake_source,
+        output_ready,
+        output_paused,
         pool.inner().clone(),
         connection_request,
         Some(connection_result_tx),
@@ -230,6 +237,7 @@ pub(crate) fn create_local_session(
     let master = pair.master;
     let (tx, rx) = mpsc::channel::<SessionCommand>();
     let output_ready = Arc::new(AtomicBool::new(false));
+    let output_paused = Arc::new(AtomicBool::new(false));
     state
         .insert(
             session_id.clone(),
@@ -242,6 +250,7 @@ pub(crate) fn create_local_session(
                     message: Some("local shell ready".to_string()),
                 },
                 output_ready: output_ready.clone(),
+                output_paused: output_paused.clone(),
             },
         )
         .map_err(|message| {
@@ -251,6 +260,7 @@ pub(crate) fn create_local_session(
 
     let worker_id = session_id.clone();
     let worker_output_ready = output_ready;
+    let worker_output_paused = output_paused;
     let worker_identity = SessionIdentity {
         title: summary.title.clone(),
         host: summary.host.clone(),
@@ -260,9 +270,13 @@ pub(crate) fn create_local_session(
     thread::spawn(move || {
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
         let reader_id = worker_id.clone();
+        let reader_output_paused = worker_output_paused.clone();
         let reader_handle = thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
             loop {
+                while reader_output_paused.load(AtomicOrdering::Relaxed) {
+                    thread::sleep(Duration::from_millis(8));
+                }
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
                     Err(error) => {
@@ -302,6 +316,7 @@ pub(crate) fn create_local_session(
         let mut pending_output = String::new();
         loop {
             if !output_live
+                && !worker_output_paused.load(AtomicOrdering::Relaxed)
                 && (worker_output_ready.load(AtomicOrdering::Relaxed)
                     || output_wait_started.elapsed() > Duration::from_secs(5)
                     || buffered_bytes > 1_000_000)
@@ -311,16 +326,18 @@ pub(crate) fn create_local_session(
                     let _ = emit_data(&app, &worker_id, chunk);
                 }
             }
-            while let Ok(bytes) = output_rx.try_recv() {
-                pending_bytes.extend_from_slice(&bytes);
-            }
-            drain_decoded_output(&mut pending_bytes, &mut pending_output);
-            if !pending_output.is_empty() {
-                if output_live {
-                    let _ = emit_data(&app, &worker_id, std::mem::take(&mut pending_output));
-                } else {
-                    buffered_bytes += pending_output.len();
-                    buffered_output.push(std::mem::take(&mut pending_output));
+            if !worker_output_paused.load(AtomicOrdering::Relaxed) {
+                while let Ok(bytes) = output_rx.try_recv() {
+                    pending_bytes.extend_from_slice(&bytes);
+                }
+                drain_decoded_output(&mut pending_bytes, &mut pending_output);
+                if !pending_output.is_empty() {
+                    if output_live {
+                        let _ = emit_data(&app, &worker_id, std::mem::take(&mut pending_output));
+                    } else {
+                        buffered_bytes += pending_output.len();
+                        buffered_output.push(std::mem::take(&mut pending_output));
+                    }
                 }
             }
             match rx.recv_timeout(Duration::from_millis(16)) {
@@ -346,6 +363,7 @@ pub(crate) fn create_local_session(
                 }
                 Ok(SessionCommand::Close) => {
                     closed_by_user = true;
+                    worker_output_paused.store(false, AtomicOrdering::Relaxed);
                     if let Err(error) = child.kill() {
                         warn!("Failed to kill local shell session_id={worker_id}: {error}");
                     }
@@ -355,6 +373,7 @@ pub(crate) fn create_local_session(
                     // The controller went away without a Close command; kill
                     // the shell so it does not outlive the session and the
                     // reader thread below can observe EOF and finish.
+                    worker_output_paused.store(false, AtomicOrdering::Relaxed);
                     if let Err(error) = child.kill() {
                         warn!("Failed to kill local shell session_id={worker_id}: {error}");
                     }
@@ -373,6 +392,7 @@ pub(crate) fn create_local_session(
         // slave open and block the reader forever, in which case the reader
         // stays detached and its next send fails once the output receiver is
         // dropped at the end of this closure.
+        worker_output_paused.store(false, AtomicOrdering::Relaxed);
         drop(writer);
         drop(master);
         let (reader_done_tx, reader_done_rx) = mpsc::channel();
@@ -445,6 +465,15 @@ pub(crate) fn mark_session_ready(
     session_id: String,
 ) -> Result<(), String> {
     state.mark_output_ready(&session_id)
+}
+
+#[tauri::command]
+pub(crate) fn set_session_output_paused(
+    state: State<'_, SessionManager>,
+    session_id: String,
+    paused: bool,
+) -> Result<(), String> {
+    state.set_output_paused(&session_id, paused)
 }
 
 #[tauri::command]
@@ -1128,8 +1157,8 @@ pub(crate) async fn preview_remote_file(
     match &result {
         Ok(response) => {
             info!(
-                "Previewed remote file path={} size={} is_text={}",
-                response.path, response.size, response.is_text
+                "Previewed remote file path={} size={} is_text={} truncated={}",
+                response.path, response.size, response.is_text, response.truncated
             );
         }
         Err(error) => {
@@ -2020,6 +2049,8 @@ pub(crate) fn spawn_ssh_thread(
     request: SessionCreateRequest,
     rx: std::sync::mpsc::Receiver<SessionCommand>,
     wake: SessionWakeSource,
+    output_ready: Arc<AtomicBool>,
+    output_paused: Arc<AtomicBool>,
     pool: SftpPool,
     connection_request: RemoteConnectionRequest,
     connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), CreateSessionError>>>,
@@ -2043,7 +2074,16 @@ pub(crate) fn spawn_ssh_thread(
                 let _ = tx.send(Ok(()));
             }
         };
-        let run_result = run_ssh_session(&app, &session_id, &request, rx, wake, on_connected);
+        let run_result = run_ssh_session(
+            &app,
+            &session_id,
+            &request,
+            rx,
+            wake,
+            output_ready,
+            output_paused,
+            on_connected,
+        );
 
         match run_result {
             Ok(message) => {

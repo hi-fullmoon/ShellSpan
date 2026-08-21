@@ -5,7 +5,11 @@ use ssh2::{BlockDirections, Channel, ExtendedData, Session};
 use std::{
     io::{ErrorKind, Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
-    sync::mpsc::{Receiver, TryRecvError},
+    sync::{
+        atomic::{AtomicBool, Ordering as AtomicOrdering},
+        mpsc::{Receiver, TryRecvError},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -25,6 +29,8 @@ use crate::{
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 const SSH_OUTPUT_FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
+const SSH_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
 
 /// Write half of the session self-pipe. Command senders poke it after
 /// enqueueing a command so the session loop wakes from its idle poll
@@ -88,6 +94,8 @@ pub(crate) fn run_ssh_session<
     request: &SessionCreateRequest,
     rx: Receiver<SessionCommand>,
     wake: SessionWakeSource,
+    output_ready: Arc<AtomicBool>,
+    output_paused: Arc<AtomicBool>,
     on_connected: F,
 ) -> Result<Option<String>, ConnectionError> {
     info!(
@@ -221,8 +229,17 @@ pub(crate) fn run_ssh_session<
     )
     .map_err(|message| ConnectionError::Other { message })?;
 
-    session_loop(app, session_id, &session, &mut channel, rx, &wake)
-        .map_err(|message| ConnectionError::Other { message })
+    session_loop(
+        app,
+        session_id,
+        &session,
+        &mut channel,
+        rx,
+        &wake,
+        &output_ready,
+        &output_paused,
+    )
+    .map_err(|message| ConnectionError::Other { message })
 }
 
 fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionCommand> {
@@ -275,9 +292,13 @@ fn session_loop(
     channel: &mut Channel,
     rx: Receiver<SessionCommand>,
     wake: &SessionWakeSource,
+    output_ready: &AtomicBool,
+    output_paused: &AtomicBool,
 ) -> Result<Option<String>, String> {
     let mut pending_bytes: Vec<u8> = Vec::new();
     let mut pending_output = String::new();
+    let output_wait_started = Instant::now();
+    let mut output_live = false;
     let result = session_loop_inner(
         app,
         session_id,
@@ -285,8 +306,12 @@ fn session_loop(
         channel,
         rx,
         wake,
+        output_ready,
+        output_paused,
         &mut pending_bytes,
         &mut pending_output,
+        output_wait_started,
+        &mut output_live,
     );
     // Emit whatever decoded output remains so the final screen state is not
     // lost when the session ends.
@@ -310,8 +335,12 @@ fn session_loop_inner(
     channel: &mut Channel,
     rx: Receiver<SessionCommand>,
     wake: &SessionWakeSource,
+    output_ready: &AtomicBool,
+    output_paused: &AtomicBool,
     pending_bytes: &mut Vec<u8>,
     pending_output: &mut String,
+    output_wait_started: Instant,
+    output_live: &mut bool,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
     let mut next_keepalive_at =
@@ -320,6 +349,19 @@ fn session_loop_inner(
     loop {
         let mut made_progress = false;
         let mut pending_commands = Vec::new();
+
+        if !*output_live
+            && should_release_startup_output(
+                output_ready.load(AtomicOrdering::Relaxed),
+                output_wait_started.elapsed(),
+                pending_output.len(),
+            )
+        {
+            *output_live = true;
+            if !pending_output.is_empty() {
+                emit_data_tolerant(app, session_id, std::mem::take(pending_output));
+            }
+        }
 
         loop {
             match rx.try_recv() {
@@ -351,38 +393,40 @@ fn session_loop_inner(
             }
         }
 
-        match channel.read(&mut buffer) {
-            Ok(0) => {
-                if channel.eof() {
-                    info!("Remote shell exited session_id={session_id}");
-                    return Ok(Some("remote shell exited".to_string()));
+        if !output_paused.load(AtomicOrdering::Relaxed) {
+            match channel.read(&mut buffer) {
+                Ok(0) => {
+                    if channel.eof() {
+                        info!("Remote shell exited session_id={session_id}");
+                        return Ok(Some("remote shell exited".to_string()));
+                    }
                 }
-            }
-            Ok(read) => {
-                pending_bytes.extend_from_slice(&buffer[..read]);
-                drain_decoded_output(pending_bytes, pending_output);
-                if pending_output.len() >= SSH_OUTPUT_FLUSH_THRESHOLD_BYTES {
-                    emit_data_tolerant(app, session_id, std::mem::take(pending_output));
+                Ok(read) => {
+                    pending_bytes.extend_from_slice(&buffer[..read]);
+                    drain_decoded_output(pending_bytes, pending_output);
+                    if *output_live && pending_output.len() >= SSH_OUTPUT_FLUSH_THRESHOLD_BYTES {
+                        emit_data_tolerant(app, session_id, std::mem::take(pending_output));
+                    }
+                    made_progress = true;
                 }
-                made_progress = true;
-            }
-            Err(error) if is_retryable_channel_error_kind(error.kind()) => {
-                if !pending_output.is_empty() {
-                    emit_data_tolerant(app, session_id, std::mem::take(pending_output));
+                Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                    if *output_live && !pending_output.is_empty() {
+                        emit_data_tolerant(app, session_id, std::mem::take(pending_output));
+                    }
                 }
-            }
-            Err(error) => {
-                warn!(
-                    "SSH read failed session_id={} kind={:?} block_directions={:?} error={}",
-                    session_id,
-                    error.kind(),
-                    session.block_directions(),
-                    error
-                );
-                return Err(format_transport_error(
-                    "failed to read remote output",
-                    &error.to_string(),
-                ));
+                Err(error) => {
+                    warn!(
+                        "SSH read failed session_id={} kind={:?} block_directions={:?} error={}",
+                        session_id,
+                        error.kind(),
+                        session.block_directions(),
+                        error
+                    );
+                    return Err(format_transport_error(
+                        "failed to read remote output",
+                        &error.to_string(),
+                    ));
+                }
             }
         }
 
@@ -399,16 +443,31 @@ fn session_loop_inner(
             continue;
         }
 
+        let keepalive_due_in = next_keepalive_at.saturating_duration_since(now);
+        if output_paused.load(AtomicOrdering::Relaxed) {
+            thread::sleep(keepalive_due_in.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS)));
+            continue;
+        }
+
         // Idle: sleep until the SSH socket becomes ready, a command wakes us
         // through the self-pipe, or the keepalive deadline expires — whichever
         // comes first.
-        let keepalive_due_in = next_keepalive_at.saturating_duration_since(now);
         wait_for_session_events(session, wake, keepalive_due_in)?;
     }
 }
 
 fn normalize_keepalive_delay(seconds: u32) -> Duration {
     Duration::from_secs(u64::from(seconds.max(1)))
+}
+
+fn should_release_startup_output(
+    output_ready: bool,
+    elapsed: Duration,
+    buffered_bytes: usize,
+) -> bool {
+    output_ready
+        || elapsed > SSH_OUTPUT_READY_TIMEOUT
+        || buffered_bytes > SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES
 }
 
 fn send_session_keepalive_nonblocking(session: &Session) -> Result<Duration, String> {
@@ -774,6 +833,34 @@ mod tests {
     fn normalize_keepalive_delay_clamps_zero_to_one_second() {
         assert_eq!(normalize_keepalive_delay(0), Duration::from_secs(1));
         assert_eq!(normalize_keepalive_delay(7), Duration::from_secs(7));
+    }
+
+    #[test]
+    fn startup_output_waits_for_the_frontend_before_release() {
+        assert!(!should_release_startup_output(
+            false,
+            Duration::from_secs(1),
+            SSH_OUTPUT_FLUSH_THRESHOLD_BYTES,
+        ));
+        assert!(should_release_startup_output(
+            true,
+            Duration::from_secs(1),
+            SSH_OUTPUT_FLUSH_THRESHOLD_BYTES,
+        ));
+    }
+
+    #[test]
+    fn startup_output_gate_has_timeout_and_memory_safety_valves() {
+        assert!(should_release_startup_output(
+            false,
+            SSH_OUTPUT_READY_TIMEOUT + Duration::from_millis(1),
+            0,
+        ));
+        assert!(should_release_startup_output(
+            false,
+            Duration::ZERO,
+            SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES + 1,
+        ));
     }
 
     #[test]
