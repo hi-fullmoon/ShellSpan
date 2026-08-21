@@ -479,6 +479,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                   <input
                     ref={searchInputRef}
                     type="text"
+                    autoComplete="off"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={t('sftp.filter')}

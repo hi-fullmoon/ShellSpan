@@ -71,6 +71,7 @@ const Sftp: React.FC = () => {
         <div className="relative min-h-0 flex-1">
           <div className="flex h-full items-center justify-center">
             <EmptyState
+              icon={<FolderIcon />}
               title={t('sftp.empty')}
               description={t('sftp.empty.openFromWorkbench')}
               action={
@@ -79,7 +80,7 @@ const Sftp: React.FC = () => {
                   size="sm"
                   onClick={() => setNewConnectionMenuOpen(true)}
                 >
-                  {t('sftp.empty.newConnection')}
+                  {t('sftp.empty.open')}
                 </Button>
               }
             />
