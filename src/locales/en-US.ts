@@ -414,6 +414,8 @@ export default {
   'sftp.preview.mediaUnavailableDescription': 'The system WebView may not support this codec. Try opening it in a system app.',
   'sftp.preview.fontLoading': 'Loading font…',
   'sftp.preview.fontLoaded': 'Font specimen',
+  'sftp.preview.loading': 'Loading remote file…',
+  'sftp.preview.loadingDescription': 'Large files or slower connections may take a moment.',
   'sftp.conflict.title': 'File Already Exists',
   'sftp.conflict.message': '{name} already exists. What would you like to do?',
   'sftp.conflict.overwrite': 'Overwrite',

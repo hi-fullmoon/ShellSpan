@@ -414,6 +414,8 @@ export default {
   'sftp.preview.mediaUnavailableDescription': '系统 WebView 可能不支持此编码，可尝试用系统应用打开。',
   'sftp.preview.fontLoading': '正在载入字体…',
   'sftp.preview.fontLoaded': '字体样张',
+  'sftp.preview.loading': '正在读取远程文件…',
+  'sftp.preview.loadingDescription': '文件较大或网络较慢时可能需要一点时间。',
   'sftp.conflict.title': '文件已存在',
   'sftp.conflict.message': '{name} 已存在。请选择操作：',
   'sftp.conflict.overwrite': '覆盖',
