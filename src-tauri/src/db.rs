@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 1;
+const CURRENT_SCHEMA_VERSION: i32 = 2;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -60,9 +60,47 @@ CREATE TABLE IF NOT EXISTS key_credentials (
     kind TEXT NOT NULL DEFAULT 'keyFile',
     public_key TEXT,
     certificate TEXT,
-    value TEXT,
     service TEXT NOT NULL DEFAULT 'com.termbridge.key'
 );
+";
+
+const SCHEMA_V2: &str = "
+PRAGMA secure_delete=ON;
+BEGIN IMMEDIATE;
+DROP TABLE IF EXISTS key_credentials_v2;
+CREATE TABLE key_credentials_v2 (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    key_type TEXT DEFAULT 'unknown',
+    kind TEXT NOT NULL DEFAULT 'keyFile',
+    public_key TEXT,
+    certificate TEXT,
+    service TEXT NOT NULL DEFAULT 'com.termbridge.key'
+);
+INSERT INTO key_credentials_v2 (
+    id, label, updated_at, key_type, kind, public_key, certificate, service
+)
+SELECT id, label, updated_at, key_type, kind, public_key, certificate, service
+FROM key_credentials;
+DROP TABLE key_credentials;
+ALTER TABLE key_credentials_v2 RENAME TO key_credentials;
+UPDATE profiles
+SET jump_host_config = CASE
+    WHEN json_valid(jump_host_config)
+        THEN json_remove(
+            jump_host_config,
+            '$.password',
+            '$.passphrase',
+            '$.privateKeyData'
+        )
+    ELSE NULL
+END
+WHERE jump_host_config IS NOT NULL;
+INSERT INTO schema_version (version) VALUES (2);
+COMMIT;
+PRAGMA wal_checkpoint(TRUNCATE);
+VACUUM;
 ";
 
 #[derive(Clone)]
@@ -114,6 +152,11 @@ impl Database {
                 .map_err(|e| format!("migration v1 version insert failed: {e}"))?;
         }
 
+        if current < 2 {
+            conn.execute_batch(SCHEMA_V2)
+                .map_err(|e| format!("migration v2 failed: {e}"))?;
+        }
+
         Ok(())
     }
 
@@ -143,7 +186,7 @@ impl Database {
                         let s: String = row.get(5)?;
                         match s.as_str() {
                             "password" => crate::models::ProfileAuthMethod::Password,
-                            "key" | "keychainKey" | "keyPath" => crate::models::ProfileAuthMethod::Key,
+                            "key" => crate::models::ProfileAuthMethod::Key,
                             other => {
                                 return Err(rusqlite::Error::FromSqlConversionFailure(
                                     5,
@@ -192,9 +235,7 @@ impl Database {
                             let s: String = row.get(5)?;
                             match s.as_str() {
                                 "password" => crate::models::ProfileAuthMethod::Password,
-                                "key" | "keychainKey" | "keyPath" => {
-                                    crate::models::ProfileAuthMethod::Key
-                                }
+                                "key" => crate::models::ProfileAuthMethod::Key,
                                 other => Err(rusqlite::Error::FromSqlConversionFailure(
                                     5,
                                     rusqlite::types::Type::Text,
@@ -297,7 +338,9 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         let mut stmt = conn
-            .prepare("SELECT id, label, COALESCE(key_type, 'unknown'), kind FROM key_credentials ORDER BY label")
+            .prepare(
+                "SELECT id, label, COALESCE(key_type, 'unknown'), kind, service FROM key_credentials ORDER BY label",
+            )
             .map_err(|e| format!("failed to prepare list_key_credentials: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
@@ -310,6 +353,7 @@ impl Database {
                         "password" => crate::models::KeyCredentialKind::Password,
                         _ => crate::models::KeyCredentialKind::KeyFile,
                     },
+                    service: row.get(4)?,
                 })
             })
             .map_err(|e| format!("failed to query key_credentials: {e}"))?;
@@ -351,23 +395,9 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) fn key_credential_exists(&self, id: &str) -> Result<bool, String> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("database lock poisoned: {e}"))?;
-        conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM key_credentials WHERE id=?1)",
-            params![id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("failed to check key credential existence: {e}"))
-    }
-
-    pub(crate) fn store_key_credential_value(
+    pub(crate) fn delete_key_credential_metadata(
         &self,
         id: &str,
-        value: &str,
         service: &str,
     ) -> Result<(), String> {
         let conn = self
@@ -375,46 +405,25 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         conn.execute(
-            "INSERT INTO key_credentials (id, label, value, service, updated_at) VALUES (?1, ?1, ?2, ?3, ?4) \
-             ON CONFLICT(id) DO UPDATE SET value=excluded.value, service=excluded.service, updated_at=excluded.updated_at",
-            params![id, value, service, current_timestamp_ms()],
+            "DELETE FROM key_credentials WHERE id=?1 AND service=?2",
+            params![id, service],
         )
-        .map_err(|e| format!("failed to store key credential value: {e}"))?;
+        .map_err(|e| format!("failed to delete key credential metadata: {e}"))?;
         Ok(())
     }
 
-    pub(crate) fn retrieve_key_credential_value(
-        &self,
-        id: &str,
-    ) -> Result<Option<String>, String> {
+    pub(crate) fn key_credential_service(&self, id: &str) -> Result<Option<String>, String> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         conn.query_row(
-            "SELECT value FROM key_credentials WHERE id=?1",
+            "SELECT service FROM key_credentials WHERE id=?1",
             params![id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| row.get(0),
         )
         .optional()
-        .map(|value| value.flatten())
-        .map_err(|e| format!("failed to retrieve key credential value: {e}"))
-    }
-
-    /// Clears the fallback secret value for a key credential without removing
-    /// its metadata row. Used to purge a stale database-fallback copy after a
-    /// successful native keychain write while keeping the key listed.
-    pub(crate) fn clear_key_credential_value(&self, id: &str) -> Result<(), String> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("database lock poisoned: {e}"))?;
-        conn.execute(
-            "UPDATE key_credentials SET value = NULL WHERE id=?1",
-            params![id],
-        )
-        .map_err(|e| format!("failed to clear key credential value: {e}"))?;
-        Ok(())
+        .map_err(|e| format!("failed to retrieve key credential service: {e}"))
     }
 
     pub(crate) fn list_profiles_referencing_key(
@@ -426,29 +435,81 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         let mut stmt = conn
-            .prepare("SELECT id FROM profiles WHERE keychain_key_id = ?1")
+            .prepare("SELECT id, keychain_key_id, jump_host_config FROM profiles")
             .map_err(|e| format!("failed to prepare list_profiles_referencing_key: {e}"))?;
         let rows = stmt
-            .query_map(params![key_id], |row| row.get(0))
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
             .map_err(|e| format!("failed to query profiles referencing key: {e}"))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("failed to collect profiles referencing key: {e}"))
+        let rows = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("failed to collect profiles referencing key: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, main_key_id, jump_host_config)| {
+                let jump_matches = jump_host_config
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+                    .and_then(|jump| {
+                        jump.get("keychainKeyId")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_owned)
+                    })
+                    .is_some_and(|jump_key_id| jump_key_id == key_id);
+                (main_key_id.as_deref() == Some(key_id) || jump_matches).then_some(id)
+            })
+            .collect())
     }
 
-    pub(crate) fn clear_keychain_key_id_references(
-        &self,
-        key_id: &str,
-    ) -> Result<usize, String> {
-        let conn = self
+    pub(crate) fn clear_keychain_key_id_references(&self, key_id: &str) -> Result<usize, String> {
+        let mut conn = self
             .conn
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
-        let updated = conn
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("failed to start key reference cleanup transaction: {e}"))?;
+        let mut updated = tx
             .execute(
                 "UPDATE profiles SET keychain_key_id = NULL, updated_at = ?2 WHERE keychain_key_id = ?1",
                 params![key_id, current_timestamp_ms()],
             )
             .map_err(|e| format!("failed to clear keychain key references: {e}"))?;
+        let mut stmt = tx
+            .prepare("SELECT id, jump_host_config FROM profiles WHERE jump_host_config IS NOT NULL")
+            .map_err(|e| format!("failed to prepare jump-host key cleanup: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| format!("failed to query jump-host key references: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("failed to collect jump-host key references: {e}"))?;
+        drop(stmt);
+        for (profile_id, json) in rows {
+            let Ok(mut jump) = serde_json::from_str::<serde_json::Value>(&json) else {
+                continue;
+            };
+            if jump.get("keychainKeyId").and_then(|value| value.as_str()) != Some(key_id) {
+                continue;
+            }
+            if let Some(object) = jump.as_object_mut() {
+                object.remove("keychainKeyId");
+            }
+            tx.execute(
+                "UPDATE profiles SET jump_host_config=?2, updated_at=?3 WHERE id=?1",
+                params![profile_id, jump.to_string(), current_timestamp_ms()],
+            )
+            .map_err(|e| format!("failed to clear jump-host key reference: {e}"))?;
+            updated += 1;
+        }
+        tx.commit()
+            .map_err(|e| format!("failed to commit key reference cleanup: {e}"))?;
         Ok(updated)
     }
 
@@ -716,6 +777,83 @@ mod tests {
             .unwrap();
         conn.execute("SELECT 1 FROM key_credentials LIMIT 0", [])
             .unwrap();
+        let has_secret_value_column: bool = conn
+            .prepare("PRAGMA table_info(key_credentials)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .any(|name| name.as_deref() == Ok("value"));
+        assert!(!has_secret_value_column);
+    }
+
+    #[test]
+    fn migration_v2_purges_database_secret_values_and_preserves_metadata() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute("ALTER TABLE key_credentials ADD COLUMN value TEXT", [])
+            .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO key_credentials \
+             (id, label, updated_at, key_type, kind, public_key, certificate, service, value) \
+             VALUES ('key-1', 'Server key', 42, 'rsa', 'keyFile', 'ssh-rsa AAA', NULL, \
+                     'com.termbridge.key', 'plaintext-private-key')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO profiles \
+             (id, name, host, port, username, auth_method, jump_host_config, created_at, updated_at) \
+             VALUES ('profile-1', 'Jump profile', 'internal.example.com', 22, 'alice', 'password', \
+                     ?1, 1, 1)",
+            params![serde_json::json!({
+                "host": "jump.example.com",
+                "port": 22,
+                "username": "jump-user",
+                "authMethod": "password",
+                "password": "plaintext-password",
+                "passphrase": "plaintext-passphrase",
+                "privateKeyData": "plaintext-private-key"
+            })
+            .to_string()],
+        )
+        .unwrap();
+        let db = Database {
+            conn: Arc::new(Mutex::new(conn)),
+        };
+
+        db.migrate().unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let columns = conn
+            .prepare("PRAGMA table_info(key_credentials)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(!columns.iter().any(|column| column == "value"));
+        let jump_host_config: String = conn
+            .query_row(
+                "SELECT jump_host_config FROM profiles WHERE id='profile-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let jump_host: serde_json::Value = serde_json::from_str(&jump_host_config).unwrap();
+        assert_eq!(jump_host["host"], "jump.example.com");
+        assert!(jump_host.get("password").is_none());
+        assert!(jump_host.get("passphrase").is_none());
+        assert!(jump_host.get("privateKeyData").is_none());
+        let metadata: (String, String, i64) = conn
+            .query_row(
+                "SELECT label, key_type, updated_at FROM key_credentials WHERE id='key-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(metadata, ("Server key".to_string(), "rsa".to_string(), 42));
     }
 
     #[test]
@@ -732,7 +870,9 @@ mod tests {
 
         assert_eq!(
             error,
-            format!("database schema version 99 is newer than this build ({CURRENT_SCHEMA_VERSION})")
+            format!(
+                "database schema version 99 is newer than this build ({CURRENT_SCHEMA_VERSION})"
+            )
         );
         let conn = db.conn.lock().unwrap();
         let workspace_table_count: i32 = conn
@@ -977,27 +1117,6 @@ mod tests {
     }
 
     #[test]
-    fn key_credential_value_storage_roundtrip() {
-        let db = test_db();
-        db.upsert_key_credential("key-1", "Test Key", "rsa", "keyFile", "com.termbridge.key", None, None, 1000)
-            .unwrap();
-        db.store_key_credential_value("key-1", "private-key-data", "com.termbridge.key")
-            .unwrap();
-
-        let value = db.retrieve_key_credential_value("key-1").unwrap();
-        assert_eq!(value.as_deref(), Some("private-key-data"));
-
-        let summaries = db.list_key_credentials().unwrap();
-        assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].id, "key-1");
-        assert_eq!(summaries[0].key_type, "rsa");
-        assert_eq!(summaries[0].kind, crate::models::KeyCredentialKind::KeyFile);
-
-        db.delete_key_credential("key-1").unwrap();
-        assert!(db.retrieve_key_credential_value("key-1").unwrap().is_none());
-    }
-
-    #[test]
     fn profile_password_is_listed_with_password_kind_and_profile_key_type() {
         let db = test_db();
         let profile = ProfileRow {
@@ -1024,15 +1143,16 @@ mod tests {
             1000,
         )
         .unwrap();
-        db.store_key_credential_value("profile-1", "secret-password", "com.termbridge.profile-password")
-            .unwrap();
-
         let summaries = db.list_key_credentials().unwrap();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].id, "profile-1");
         assert_eq!(summaries[0].label, "Server");
         assert_eq!(summaries[0].key_type, "profile");
-        assert_eq!(summaries[0].kind, crate::models::KeyCredentialKind::Password);
+        assert_eq!(
+            summaries[0].kind,
+            crate::models::KeyCredentialKind::Password
+        );
+        assert_eq!(summaries[0].service, "com.termbridge.profile-password");
     }
 
     #[test]
@@ -1055,7 +1175,12 @@ mod tests {
         let affected = db.clear_keychain_key_id_references("key-1").unwrap();
         assert_eq!(affected, 1);
 
-        let loaded = db.list_profiles().unwrap().into_iter().find(|p| p.id == "profile-1").unwrap();
+        let loaded = db
+            .list_profiles()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == "profile-1")
+            .unwrap();
         assert_eq!(loaded.keychain_key_id, None);
         assert!(loaded.updated_at > profile.updated_at);
 
@@ -1065,88 +1190,34 @@ mod tests {
     }
 
     #[test]
-    fn store_key_credential_value_insert_uses_real_timestamp() {
+    fn key_reference_cleanup_includes_jump_hosts() {
         let db = test_db();
-        db.store_key_credential_value("key-1", "private-key-data", "com.termbridge.key")
-            .unwrap();
+        let profile = ProfileRow {
+            id: "profile-1".to_string(),
+            name: "Server".to_string(),
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: ProfileAuthMethod::Password,
+            keychain_key_id: None,
+            jump_host_config: Some(
+                r#"{"host":"jump.example.com","port":22,"username":"jump","authMethod":"key","keychainKeyId":"jump-key"}"#
+                    .to_string(),
+            ),
+            created_at: 1,
+            updated_at: 1,
+        };
+        db.insert_profile(&profile).unwrap();
 
-        let conn = db.conn.lock().unwrap();
-        let updated_at: i64 = conn
-            .query_row(
-                "SELECT updated_at FROM key_credentials WHERE id='key-1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(updated_at > 0);
-    }
+        assert_eq!(
+            db.list_profiles_referencing_key("jump-key").unwrap(),
+            vec!["profile-1"]
+        );
+        assert_eq!(db.clear_keychain_key_id_references("jump-key").unwrap(), 1);
 
-    #[test]
-    fn store_key_credential_value_conflict_updates_timestamp_and_keeps_metadata() {
-        let db = test_db();
-        db.upsert_key_credential(
-            "key-1",
-            "My Key",
-            "rsa",
-            "keyFile",
-            "com.termbridge.key",
-            None,
-            None,
-            1000,
-        )
-        .unwrap();
-        db.store_key_credential_value("key-1", "new-value", "com.termbridge.key")
-            .unwrap();
-
-        let conn = db.conn.lock().unwrap();
-        let (label, updated_at): (String, i64) = conn
-            .query_row(
-                "SELECT label, updated_at FROM key_credentials WHERE id='key-1'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        // Conflict branch must refresh updated_at without clobbering metadata.
-        assert_eq!(label, "My Key");
-        assert!(updated_at > 1000);
-    }
-
-    #[test]
-    fn clear_key_credential_value_preserves_metadata_row() {
-        let db = test_db();
-        db.upsert_key_credential("key-1", "My Key", "rsa", "keyFile", "com.termbridge.key", None, None, 1000)
-            .unwrap();
-        db.store_key_credential_value("key-1", "stale-fallback-secret", "com.termbridge.key")
-            .unwrap();
-
-        db.clear_key_credential_value("key-1").unwrap();
-
-        // The fallback secret is gone…
-        assert!(db.retrieve_key_credential_value("key-1").unwrap().is_none());
-        // …but the metadata row survives so the key still shows in listings.
-        let summaries = db.list_key_credentials().unwrap();
-        assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].id, "key-1");
-        assert_eq!(summaries[0].label, "My Key");
-        assert_eq!(summaries[0].key_type, "rsa");
-        assert_eq!(summaries[0].kind, crate::models::KeyCredentialKind::KeyFile);
-    }
-
-    #[test]
-    fn key_credential_exists_reports_presence() {
-        let db = test_db();
-        assert!(!db.key_credential_exists("key-1").unwrap());
-        db.upsert_key_credential(
-            "key-1",
-            "My Key",
-            "rsa",
-            "keyFile",
-            "com.termbridge.key",
-            None,
-            None,
-            1000,
-        )
-        .unwrap();
-        assert!(db.key_credential_exists("key-1").unwrap());
+        let loaded = db.get_profile("profile-1").unwrap().unwrap();
+        let jump: serde_json::Value =
+            serde_json::from_str(loaded.jump_host_config.as_deref().unwrap()).unwrap();
+        assert!(jump.get("keychainKeyId").is_none());
     }
 }

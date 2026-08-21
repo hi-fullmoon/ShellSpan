@@ -1217,26 +1217,30 @@ fn detect_key_type(private_key: &str) -> &'static str {
 }
 
 #[tauri::command]
-pub(crate) fn derive_ecdsa_key_from_password(password: String) -> Result<(String, String), String> {
-    crate::ecdsa_key::derive_ecdsa_key_from_password(&password)
-}
-
-#[tauri::command]
 pub(crate) fn store_key_credential(
     credentials: State<'_, crate::keychain::CredentialManager>,
     database: State<'_, Database>,
     request: KeyCredentialRequest,
 ) -> Result<(), String> {
+    if request.kind != crate::models::KeyCredentialKind::KeyFile {
+        return Err("generic key credentials must contain a private key file".to_string());
+    }
+    if request.id.trim().is_empty() {
+        return Err("key credential id cannot be empty".to_string());
+    }
+    if request.label.trim().is_empty() {
+        return Err("key credential label cannot be empty".to_string());
+    }
+    let private_key = request
+        .private_key
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "key credential private key cannot be empty".to_string())?;
     let updated_at = crate::db::current_timestamp_ms();
     let key_type = request
         .key_type
         .filter(|t| !t.is_empty() && t != "unknown")
-        .unwrap_or_else(|| match request.kind {
-            crate::models::KeyCredentialKind::Password => "ecdsa".to_string(),
-            crate::models::KeyCredentialKind::KeyFile => {
-                detect_key_type(request.private_key.as_deref().unwrap_or("")).to_string()
-            }
-        });
+        .unwrap_or_else(|| detect_key_type(private_key).to_string());
     let payload = serde_json::json!({
         "kind": request.kind.to_string(),
         "label": request.label,
@@ -1245,8 +1249,9 @@ pub(crate) fn store_key_credential(
         "keyType": key_type,
         "updatedAt": updated_at,
     });
-    let is_new = !database.key_credential_exists(&request.id)?;
-    database.upsert_key_credential(
+    let previous_payload = credentials.retrieve_key_credential(&request.id)?;
+    credentials.store_key_credential(&request.id, &payload.to_string())?;
+    if let Err(error) = database.upsert_key_credential(
         &request.id,
         &request.label,
         &key_type,
@@ -1255,21 +1260,20 @@ pub(crate) fn store_key_credential(
         request.public_key.as_deref(),
         None,
         updated_at,
-    )?;
-    if let Err(error) = credentials.store_key_credential(&request.id, &payload.to_string()) {
+    ) {
         warn!(
-            "Failed to persist key credential for id={}, rolling back: {}",
+            "Failed to persist key credential metadata for id={}, rolling back native value: {}",
             request.id, error
         );
-        // Only roll back rows created by this call — deleting a pre-existing
-        // row would destroy metadata the user already had.
-        if is_new {
-            if let Err(rollback_error) = database.delete_key_credential(&request.id) {
-                warn!(
-                    "Failed to roll back key credential metadata id={}: {}",
-                    request.id, rollback_error
-                );
-            }
+        let rollback_result = match previous_payload {
+            Some(previous) => credentials.store_key_credential(&request.id, &previous),
+            None => credentials.delete_credential(crate::keychain::KEY_SERVICE, &request.id),
+        };
+        if let Err(rollback_error) = rollback_result {
+            warn!(
+                "Failed to roll back native key credential id={}: {}",
+                request.id, rollback_error
+            );
         }
         return Err(error);
     }
@@ -1332,10 +1336,19 @@ pub(crate) fn delete_key_credential(
     database: State<'_, Database>,
     id: String,
 ) -> Result<Vec<String>, String> {
-    let referencing = database.list_profiles_referencing_key(&id)?;
-    credentials.delete_key_credential(&id)?;
+    let service = database
+        .key_credential_service(&id)?
+        .unwrap_or_else(|| crate::keychain::KEY_SERVICE.to_string());
+    let referencing = if service == crate::keychain::KEY_SERVICE {
+        database.list_profiles_referencing_key(&id)?
+    } else {
+        Vec::new()
+    };
+    credentials.delete_credential(&service, &id)?;
     database.delete_key_credential(&id)?;
-    database.clear_keychain_key_id_references(&id)?;
+    if service == crate::keychain::KEY_SERVICE {
+        database.clear_keychain_key_id_references(&id)?;
+    }
     if !referencing.is_empty() {
         log::info!(
             "Cleared keychain_key_id for {} profile(s) referencing deleted key {id}",
@@ -1367,7 +1380,9 @@ pub(crate) fn store_profile_password(
         .get_profile(&profile_id)?
         .map(|p| p.name)
         .unwrap_or_else(|| profile_id.clone());
-    database.upsert_key_credential(
+    let previous_password = credentials.retrieve_profile_password(&profile_id)?;
+    credentials.store_profile_password(&profile_id, &password)?;
+    if let Err(error) = database.upsert_key_credential(
         &profile_id,
         &profile_name,
         "profile",
@@ -1376,11 +1391,14 @@ pub(crate) fn store_profile_password(
         None,
         None,
         updated_at,
-    )?;
-    if let Err(error) = credentials.store_profile_password(&profile_id, &password) {
-        if let Err(rollback_error) = database.delete_key_credential(&profile_id) {
+    ) {
+        let rollback_result = match previous_password {
+            Some(previous) => credentials.store_profile_password(&profile_id, &previous),
+            None => credentials.delete_profile_password(&profile_id),
+        };
+        if let Err(rollback_error) = rollback_result {
             warn!(
-                "Failed to roll back profile password metadata id={}: {}",
+                "Failed to roll back native profile password id={}: {}",
                 profile_id, rollback_error
             );
         }
@@ -1400,9 +1418,11 @@ pub(crate) fn retrieve_profile_password(
 #[tauri::command]
 pub(crate) fn delete_profile_password(
     credentials: State<'_, crate::keychain::CredentialManager>,
+    database: State<'_, Database>,
     profile_id: String,
 ) -> Result<(), String> {
-    credentials.delete_profile_password(&profile_id)
+    credentials.delete_profile_password(&profile_id)?;
+    database.delete_key_credential_metadata(&profile_id, crate::keychain::PROFILE_PASSWORD_SERVICE)
 }
 
 #[tauri::command]
@@ -1427,9 +1447,11 @@ pub(crate) fn retrieve_profile_secret(
 #[tauri::command]
 pub(crate) fn delete_profile_secrets(
     credentials: State<'_, crate::keychain::CredentialManager>,
+    database: State<'_, Database>,
     profile_id: String,
 ) -> Result<(), String> {
-    credentials.delete_all_profile_secrets(&profile_id)
+    credentials.delete_all_profile_secrets(&profile_id)?;
+    database.delete_key_credential_metadata(&profile_id, crate::keychain::PROFILE_PASSWORD_SERVICE)
 }
 
 #[tauri::command]
