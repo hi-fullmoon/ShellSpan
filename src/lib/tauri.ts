@@ -114,6 +114,13 @@ export async function invokeMarkSessionReady(sessionId: string): Promise<void> {
   return invokeLogged('mark_session_ready', { sessionId });
 }
 
+export async function invokeSetSessionOutputPaused(
+  sessionId: string,
+  paused: boolean,
+): Promise<void> {
+  return invokeLogged('set_session_output_paused', { sessionId, paused });
+}
+
 export async function invokeResizeSession(
   sessionId: string,
   cols: number,

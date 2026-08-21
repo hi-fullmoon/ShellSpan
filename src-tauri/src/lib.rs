@@ -231,6 +231,7 @@ pub fn run() {
             commands::write_session,
             commands::get_session_status,
             commands::mark_session_ready,
+            commands::set_session_output_paused,
             commands::resize_session,
             commands::close_session,
             commands::request_app_restart,
