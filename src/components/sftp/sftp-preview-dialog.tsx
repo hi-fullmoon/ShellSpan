@@ -3,6 +3,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { Spinner } from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -12,6 +13,7 @@ import { formatSize } from '@/lib/sftp-utils';
 import {
   createPreviewDataUrl,
   formatHexPreview,
+  getFileExtension,
   getSftpPreviewDescriptor,
   type SftpPreviewDescriptor,
 } from '@/lib/sftp-preview';
@@ -21,6 +23,7 @@ import {
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
+  FileIcon,
   FileWarningIcon,
   RotateCcwIcon,
   WrapTextIcon,
@@ -34,6 +37,11 @@ import {
 } from './sftp-dialog-layout';
 
 export interface SftpPreviewDialogProps {
+  target?: {
+    path: string;
+    name: string;
+    size?: number;
+  };
   content?: ReadRemoteFileResponse;
   open: boolean;
   onClose: () => void;
@@ -295,24 +303,38 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }
 };
 
 export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
+  target,
   content,
   open,
   onClose,
   onOpenExternally,
 }) => {
   const { t } = useI18n();
+  const liveTarget = useMemo(
+    () => target ?? (content
+      ? { path: content.path, name: content.name, size: content.size }
+      : undefined),
+    [content, target],
+  );
+  const displayTarget = useLastValue(liveTarget);
   const displayContent = useLastValue(content);
+  const loading = target !== undefined && content === undefined;
+  const resolvedContent = loading ? undefined : displayContent;
   const descriptor = useMemo(
-    () => displayContent
-      ? getSftpPreviewDescriptor(displayContent.name, displayContent.contentEncoding)
+    () => resolvedContent
+      ? getSftpPreviewDescriptor(resolvedContent.name, resolvedContent.contentEncoding)
       : undefined,
-    [displayContent],
+    [resolvedContent],
   );
 
-  if (!displayContent || !descriptor) return null;
-  const FileTypeIcon = descriptor.icon;
-  const kindLabel = t(`sftp.preview.kind.${descriptor.kind}`);
-  const extensionLabel = descriptor.extension ? descriptor.extension.toUpperCase() : kindLabel;
+  if (!displayTarget || (!loading && (!resolvedContent || !descriptor))) return null;
+  const FileTypeIcon = descriptor?.icon ?? FileIcon;
+  const kindLabel = descriptor
+    ? t(`sftp.preview.kind.${descriptor.kind}`)
+    : t('sftp.preview.loading');
+  const extension = descriptor?.extension ?? getFileExtension(displayTarget.name);
+  const extensionLabel = extension ? extension.toUpperCase() : t('sftp.preview.kind.unavailable');
+  const displaySize = resolvedContent?.size ?? displayTarget.size;
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -322,28 +344,32 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
             <span className="flex min-w-0 items-center gap-2">
               <FileTypeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               <Tooltip>
-                <TooltipTrigger render={<span className="truncate" />}>{displayContent.name}</TooltipTrigger>
-                <TooltipContent className="max-w-sm break-all">{displayContent.name}</TooltipContent>
+                <TooltipTrigger render={<span className="truncate" />}>{displayTarget.name}</TooltipTrigger>
+                <TooltipContent className="max-w-sm break-all">{displayTarget.name}</TooltipContent>
               </Tooltip>
             </span>
           )}
-          description={displayContent.path}
+          description={displayTarget.path}
         />
         <SftpDialogBody className="min-h-0 gap-0 overflow-hidden border-t p-0">
           <div className="flex min-h-11 items-center gap-2 px-3">
             <Badge variant="secondary">{extensionLabel}</Badge>
             <span className="text-xs text-muted-foreground">{kindLabel}</span>
-            <Separator
-              orientation="vertical"
-              className="mx-1 h-4 data-vertical:self-center"
-            />
-            <span className="font-mono text-xs text-muted-foreground">{formatSize(Number(displayContent.size))}</span>
-            {displayContent.truncated && displayContent.contentEncoding !== 'none' && (
+            {displaySize !== undefined && (
+              <>
+                <Separator
+                  orientation="vertical"
+                  className="mx-1 h-4 data-vertical:self-center"
+                />
+                <span className="font-mono text-xs text-muted-foreground">{formatSize(Number(displaySize))}</span>
+              </>
+            )}
+            {resolvedContent?.truncated && resolvedContent.contentEncoding !== 'none' && (
               <Badge variant="outline">{t('sftp.preview.partial')}</Badge>
             )}
             <div className="ml-auto">
               {onOpenExternally && (
-                <Button variant="outline" size="sm" onClick={() => onOpenExternally(displayContent.path)}>
+                <Button variant="outline" size="sm" onClick={() => onOpenExternally(displayTarget.path)}>
                   <ExternalLinkIcon data-icon="inline-start" />
                   {t('sftp.preview.openExternally')}
                 </Button>
@@ -351,7 +377,21 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
             </div>
           </div>
           <Separator />
-          <PreviewRenderer content={displayContent} descriptor={descriptor} />
+          {loading ? (
+            <div
+              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-muted/20 p-8 text-center"
+              role="status"
+              aria-live="polite"
+            >
+              <Spinner className="text-primary" size={24} />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">{t('sftp.preview.loading')}</p>
+                <p className="text-xs text-muted-foreground">{t('sftp.preview.loadingDescription')}</p>
+              </div>
+            </div>
+          ) : (
+            <PreviewRenderer content={resolvedContent!} descriptor={descriptor!} />
+          )}
         </SftpDialogBody>
       </SftpDialogContent>
     </Dialog>

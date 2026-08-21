@@ -60,6 +60,7 @@ vi.mock('@/lib/tauri', () => ({
   invokeCancelRemoteCopy: vi.fn().mockResolvedValue(undefined),
   invokeCopyLocalPaths: vi.fn().mockResolvedValue(undefined),
   invokeCopyRemoteToRemote: vi.fn().mockResolvedValue(undefined),
+  invokeDisconnectSftp: vi.fn().mockResolvedValue(undefined),
   invokePickLocalFiles: vi.fn().mockResolvedValue([]),
   invokePickLocalFolder: vi.fn().mockResolvedValue([]),
   invokeRenameLocalPath: vi.fn().mockResolvedValue(undefined),
@@ -164,6 +165,12 @@ describe('useSftpPaneActions', () => {
       firstRequest = result.current.onPreview(firstEntry);
       secondRequest = result.current.onPreview(secondEntry);
     });
+    expect(result.current.previewTarget).toEqual({
+      path: '/home/second.txt',
+      name: 'second.txt',
+      size: 6,
+    });
+    expect(result.current.previewContent).toBeUndefined();
     await act(async () => {
       resolveSecond(responseFor('/home/second.txt'));
       await secondRequest;
@@ -175,6 +182,34 @@ describe('useSftpPaneActions', () => {
       await firstRequest;
     });
     expect(result.current.previewContent?.path).toBe('/home/second.txt');
+  });
+
+  it('does not reopen a preview after it is closed while loading', async () => {
+    const connection = addConnection();
+    const entry = { path: '/home/slow.txt', name: 'slow.txt', kind: 'file' as const, size: 8 };
+    let resolvePreview!: (value: ReadRemoteFileResponse) => void;
+    connectionMocks.previewRemoteFile.mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePreview = resolve; }),
+    );
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.onPreview(entry);
+    });
+    expect(result.current.previewTarget?.path).toBe('/home/slow.txt');
+
+    act(() => {
+      result.current.closePreview();
+    });
+    expect(result.current.previewTarget).toBeUndefined();
+
+    await act(async () => {
+      resolvePreview(responseFor('/home/slow.txt'));
+      await request;
+    });
+    expect(result.current.previewTarget).toBeUndefined();
+    expect(result.current.previewContent).toBeUndefined();
   });
 
   it('opens the explicitly supplied preview path instead of the live selection', async () => {
@@ -585,6 +620,35 @@ describe('useSftpPaneActions', () => {
     await act(() => downloadPromise!);
     expect(connectionMocks.downloadRemotePaths).toHaveBeenCalledWith(['/home/file.txt'], '/downloads');
     expect(toastMocks.error).toHaveBeenCalledWith('error.pathNotFound');
+  });
+
+  it('does not start a download after its tab closes while choosing a destination', async () => {
+    const connection = addConnection();
+    const entry = {
+      path: '/home/file.txt',
+      name: 'file.txt',
+      kind: 'file' as const,
+      size: 10,
+    };
+    let resolvePicker!: (paths: string[]) => void;
+    vi.mocked(invokePickLocalFolder).mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePicker = resolve; }),
+    );
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
+
+    let downloadPromise!: Promise<void>;
+    act(() => {
+      downloadPromise = result.current.onDownload(entry);
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    act(() => useSftpStore.getState().removeConnection(connection.id));
+    await act(async () => {
+      resolvePicker(['/downloads']);
+      await downloadPromise;
+    });
+
+    expect(connectionMocks.downloadRemotePaths).not.toHaveBeenCalled();
   });
 
   it('copies local entries into the local clipboard', async () => {

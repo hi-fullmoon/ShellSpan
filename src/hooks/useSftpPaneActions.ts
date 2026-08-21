@@ -22,10 +22,8 @@ import {
   type SftpSide,
 } from '@/stores/sftpStore';
 import {
-  hasActivePathOperation,
   runPathOperation,
   useTransferStore,
-  waitForPathIdle,
   type PathOperationScope,
 } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
@@ -45,11 +43,14 @@ export interface PendingUploadConflict {
   remainingConflicts: number;
 }
 
+export type SftpPreviewTarget = Pick<FileEntry, 'path' | 'name' | 'size'>;
+
 export interface UseSftpPaneActionsResult {
   createMode: 'file' | 'folder' | null;
   renameTarget?: FileEntry;
   permissionsTarget?: RemoteFileEntry;
   propertiesTarget?: FileEntry;
+  previewTarget?: SftpPreviewTarget;
   previewContent?: ReadRemoteFileResponse;
   hasLocalClipboard: boolean;
   onOpen: (entry: FileEntry) => void;
@@ -80,7 +81,7 @@ export interface UseSftpPaneActionsResult {
   setRenameTarget: (entry?: FileEntry) => void;
   setPermissionsTarget: (entry?: RemoteFileEntry) => void;
   setPropertiesTarget: (entry?: FileEntry) => void;
-  setPreviewContent: (content?: ReadRemoteFileResponse) => void;
+  closePreview: () => void;
   handleCreate: (name: string, kind: 'file' | 'directory') => Promise<void>;
   handleRename: (newName: string) => Promise<void>;
   handlePermissions: (permissions: number) => Promise<void>;
@@ -173,6 +174,7 @@ export function useSftpPaneActions(
   const [renameTarget, setRenameTarget] = useState<FileEntry | undefined>(undefined);
   const [permissionsTarget, setPermissionsTarget] = useState<RemoteFileEntry | undefined>(undefined);
   const [propertiesTarget, setPropertiesTarget] = useState<FileEntry | undefined>(undefined);
+  const [previewTarget, setPreviewTarget] = useState<SftpPreviewTarget | undefined>(undefined);
   const [previewContent, setPreviewContent] = useState<ReadRemoteFileResponse | undefined>(undefined);
   const previewRequestIdRef = useRef(0);
 
@@ -180,25 +182,6 @@ export function useSftpPaneActions(
   const selectedEntries = useMemo(
     () => entries.filter((entry) => selectedPaths.includes(entry.path)),
     [entries, selectedPaths],
-  );
-
-  // Instead of rejecting an action while its paths are busy, queue it: notify
-  // once, wait for the active operations to finish, then run. If an earlier
-  // queued operation removed the files, the backend error surfaces through the
-  // caller's normal catch path.
-  const waitForPathsIdle = useCallback(
-    async (scopes: PathOperationScope[]) => {
-      const isBusy = () =>
-        scopes.some((scope) =>
-          hasActivePathOperation(scope.connectionId, scope.paths),
-        );
-      if (!isBusy()) return;
-      info(t('sftp.transfer.queued'));
-      while (isBusy()) {
-        await waitForPathIdle(scopes);
-      }
-    },
-    [info, t],
   );
 
   const runAfterPathsIdle = useCallback(
@@ -261,13 +244,18 @@ export function useSftpPaneActions(
       const target = entry ?? selectedEntries[0];
       if (!target || target.kind === 'directory') return;
       const requestId = ++previewRequestIdRef.current;
+      setPreviewTarget({ path: target.path, name: target.name, size: target.size });
+      setPreviewContent(undefined);
       try {
         const content = await previewRemoteFile(target.path);
         if (previewRequestIdRef.current === requestId) {
+          setPreviewTarget({ path: content.path, name: content.name, size: content.size });
           setPreviewContent(content);
         }
       } catch (err) {
         if (previewRequestIdRef.current !== requestId) return;
+        setPreviewTarget(undefined);
+        setPreviewContent(undefined);
         logger.warn(`Failed to preview remote file: ${target.path}`, err);
         error(getToastErrorMessage(err));
       }
@@ -275,13 +263,18 @@ export function useSftpPaneActions(
     [isLocal, previewRemoteFile, selectedEntries, error],
   );
 
+  const closePreview = useCallback(() => {
+    previewRequestIdRef.current += 1;
+    setPreviewTarget(undefined);
+    setPreviewContent(undefined);
+  }, []);
+
   const onDownload = useCallback(
     async (entry?: FileEntry) => {
       if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target) return;
       const targetScope = [{ connectionId: remoteConnectionKey, paths: [target.path] }];
-      await waitForPathsIdle(targetScope);
       try {
         const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
         const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
@@ -294,7 +287,7 @@ export function useSftpPaneActions(
         error(getToastErrorMessage(err));
       }
     },
-    [downloadRemotePaths, isLocal, remoteConnectionKey, runAfterPathsIdle, waitForPathsIdle, selectedEntries, error],
+    [downloadRemotePaths, isLocal, remoteConnectionKey, runAfterPathsIdle, selectedEntries, error],
   );
 
   const onBatchDownload = useCallback(
@@ -302,7 +295,6 @@ export function useSftpPaneActions(
       if (isLocal || !selectedEntries.length) return;
       const selectedRemotePaths = selectedEntries.map((entry) => entry.path);
       const selectedScopes = [{ connectionId: remoteConnectionKey, paths: selectedRemotePaths }];
-      await waitForPathsIdle(selectedScopes);
       try {
         const configuredDirectory = useAppStore.getState().sftpDownloadDirectory;
         const folders = configuredDirectory ? [configuredDirectory] : await invokePickLocalFolder();
@@ -315,7 +307,7 @@ export function useSftpPaneActions(
         error(getToastErrorMessage(err));
       }
     },
-    [downloadRemotePaths, isLocal, remoteConnectionKey, runAfterPathsIdle, waitForPathsIdle, selectedEntries, error],
+    [downloadRemotePaths, isLocal, remoteConnectionKey, runAfterPathsIdle, selectedEntries, error],
   );
 
   const onCopy = useCallback(
@@ -755,6 +747,7 @@ export function useSftpPaneActions(
     renameTarget,
     permissionsTarget,
     propertiesTarget,
+    previewTarget,
     previewContent,
     hasLocalClipboard: localClipboard.length > 0,
     onOpen,
@@ -784,7 +777,7 @@ export function useSftpPaneActions(
     setRenameTarget,
     setPermissionsTarget,
     setPropertiesTarget,
-    setPreviewContent,
+    closePreview,
     handleCreate,
     handleRename,
     handlePermissions,
