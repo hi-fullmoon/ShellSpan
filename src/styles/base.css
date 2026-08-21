@@ -20,13 +20,13 @@
 }
 
 :root {
-  --app-bg: #edf4fb;
+  --app-bg: #f6f8fb;
   --app-surface: #ffffff;
-  --app-surface-muted: #f1f5f9;
+  --app-surface-muted: #e9eff5;
   --app-text: #0f172a;
   --app-text-soft: #475569;
-  --app-border: rgba(148, 163, 184, 0.35);
-  --app-primary: #0891b2;
+  --app-border: rgba(100, 116, 139, 0.28);
+  --app-primary: #0e7490;
   --app-primary-text: #ffffff;
   --app-error: #dc2626;
   --app-warning: #d97706;

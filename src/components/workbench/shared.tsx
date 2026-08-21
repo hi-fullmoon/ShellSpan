@@ -1,6 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { Label } from '@/components/ui/label';
+import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import type { ResponsiveGridBreakpoint } from '@/components/ui/responsive-card-grid';
 
 /** Shared key-type badge styling for management cards (keychain, known hosts). */
@@ -25,14 +25,15 @@ interface FormRowProps {
   error?: string;
   children: React.ReactNode;
   className?: string;
+  controlId?: string;
 }
 
-export const FormRow: React.FC<FormRowProps> = ({ label, error, children, className }) => {
+export const FormRow: React.FC<FormRowProps> = ({ label, error, children, className, controlId }) => {
   return (
-    <div className={cn('flex flex-col gap-1', className)}>
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+    <Field data-invalid={Boolean(error)} className={className}>
+      <FieldLabel htmlFor={controlId}>{label}</FieldLabel>
       {children}
-      {error && <span className="text-xs text-app-error">{error}</span>}
-    </div>
+      <FieldError id={controlId && error ? `${controlId}-error` : undefined}>{error}</FieldError>
+    </Field>
   );
 };
