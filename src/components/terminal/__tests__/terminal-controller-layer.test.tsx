@@ -18,6 +18,7 @@ vi.mock('@/lib/tauri', () => ({
     message: 'ready',
   }),
   invokeMarkSessionReady: vi.fn().mockResolvedValue(undefined),
+  invokeSetSessionOutputPaused: vi.fn().mockResolvedValue(undefined),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
@@ -136,6 +137,15 @@ describe('TerminalControllerLayer', () => {
   it('renders null', () => {
     const { container } = render(<TerminalControllerLayer />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it('refreshes app terminal colors when the resolved app theme changes', async () => {
+    const refreshTheme = vi.spyOn(terminalRegistry, 'refreshTheme');
+    render(<TerminalControllerLayer />);
+
+    document.documentElement.setAttribute('data-theme', 'dark');
+    await vi.waitFor(() => expect(refreshTheme).toHaveBeenCalled());
+    refreshTheme.mockRestore();
   });
 
   it('wires the setStatus callback from registry.create to the store', () => {

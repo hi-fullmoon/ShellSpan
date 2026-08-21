@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
+  invokeSetSessionOutputPaused,
   invokeResizeSession,
   invokeWriteSession,
   invokeOpenUrl,
@@ -77,6 +78,8 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
 const RESIZE_DEBOUNCE_MS = 100;
+const OUTPUT_PAUSE_HIGH_WATERMARK = 512 * 1024;
+const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
 
 // After a reconnect the channel reports connected while the remote shell is
 // still starting up (sourcing rc files, printing its first prompt). Input
@@ -121,12 +124,9 @@ function playBellSound(): void {
   oscillator.addEventListener('ended', () => void context.close(), { once: true });
 }
 
-const TERMINAL_COLOR_SCHEMES: Record<TerminalColorScheme, NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme']> = {
-  app: {
-    background: '#000000',
-    foreground: 'var(--app-text)',
-    cursor: 'var(--app-primary)',
-  },
+type TerminalTheme = NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme'];
+
+const TERMINAL_COLOR_SCHEMES: Record<Exclude<TerminalColorScheme, 'app'>, TerminalTheme> = {
   oneDark: {
     background: '#282c34',
     foreground: '#abb2bf',
@@ -168,6 +168,21 @@ const TERMINAL_COLOR_SCHEMES: Record<TerminalColorScheme, NonNullable<Constructo
   },
 };
 
+function readAppColor(variable: string, lightFallback: string, darkFallback: string): string {
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  if (resolved) return resolved;
+  return document.documentElement.dataset.theme === 'dark' ? darkFallback : lightFallback;
+}
+
+export function resolveTerminalTheme(colorScheme: TerminalColorScheme): TerminalTheme {
+  if (colorScheme !== 'app') return TERMINAL_COLOR_SCHEMES[colorScheme];
+  return {
+    background: readAppColor('--app-surface', '#ffffff', '#0f172a'),
+    foreground: readAppColor('--app-text', '#0f172a', '#f8fafc'),
+    cursor: readAppColor('--app-primary', '#0e7490', '#22d3ee'),
+  };
+}
+
 export interface TerminalController {
   sessionId: string;
   terminal: Terminal;
@@ -189,6 +204,7 @@ export interface TerminalController {
   writeDisconnectedHint(): void;
   rebindSession(sessionId: string): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
+  refreshTheme(): void;
   dispose(): void;
 }
 
@@ -223,6 +239,10 @@ class TerminalControllerImpl implements TerminalController {
   private lastSentDimensions: { cols: number; rows: number } | null = null;
   private rendererMode: RendererMode = 'dom';
   private rendererInitialized = false;
+  private pendingOutputCharacters = 0;
+  private outputPaused = false;
+  private outputGeneration = 0;
+  private outputPauseCommand: Promise<void> = Promise.resolve();
 
   constructor(
     sessionId: string,
@@ -244,7 +264,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal = new Terminal({
       fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
       fontSize: preferences.fontSize,
-      theme: TERMINAL_COLOR_SCHEMES[preferences.colorScheme],
+      theme: resolveTerminalTheme(preferences.colorScheme),
       cursorBlink: preferences.cursorBlink,
       cursorStyle: preferences.cursorStyle,
       scrollback: preferences.scrollback,
@@ -317,14 +337,14 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
-  private updateElementStyles(): void {
+  private updateElementStyles(theme = resolveTerminalTheme(this.preferences.colorScheme)): void {
     const element = this.terminal.element;
     if (!element) return;
 
     element.style.width = '100%';
     element.style.height = '100%';
 
-    const background = TERMINAL_COLOR_SCHEMES[this.preferences.colorScheme]?.background;
+    const background = theme?.background;
     const viewport = element.querySelector<HTMLElement>('.xterm-viewport');
     if (background) {
       element.style.setProperty('background-color', background, 'important');
@@ -407,7 +427,7 @@ class TerminalControllerImpl implements TerminalController {
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
       appendTerminalOutput(sessionId, event.payload);
-      this.terminal.write(event.payload);
+      this.writeSessionOutput(event.payload);
     });
     if (this.disposed || generation !== this.listenerGeneration) {
       dataUnlisten();
@@ -477,6 +497,46 @@ class TerminalControllerImpl implements TerminalController {
     // delivers ConPTY's startup cursor query so the shell can proceed.
     void invokeMarkSessionReady(sessionId).catch((error) => {
       logger.warn(`Failed to mark session ${sessionId} ready`, error);
+    });
+  }
+
+  private writeSessionOutput(chunk: string): void {
+    const generation = this.outputGeneration;
+    const length = chunk.length;
+    this.pendingOutputCharacters += length;
+    if (
+      !this.outputPaused
+      && this.pendingOutputCharacters >= OUTPUT_PAUSE_HIGH_WATERMARK
+    ) {
+      this.setOutputPaused(true);
+    }
+    this.terminal.write(chunk, () => {
+      if (this.disposed || generation !== this.outputGeneration) return;
+      this.pendingOutputCharacters = Math.max(0, this.pendingOutputCharacters - length);
+      if (
+        this.outputPaused
+        && this.pendingOutputCharacters <= OUTPUT_RESUME_LOW_WATERMARK
+      ) {
+        this.setOutputPaused(false);
+      }
+    });
+  }
+
+  private setOutputPaused(paused: boolean): void {
+    if (this.outputPaused === paused) return;
+    this.outputPaused = paused;
+    const sessionId = this.sessionId;
+    const command = this.outputPauseCommand.then(() =>
+      invokeSetSessionOutputPaused(sessionId, paused),
+    );
+    this.outputPauseCommand = command.catch((error) => {
+      if (!this.disposed && this.sessionId === sessionId && this.outputPaused === paused) {
+        this.outputPaused = false;
+      }
+      logger.warn(
+        `Failed to ${paused ? 'pause' : 'resume'} session output ${sessionId}`,
+        error,
+      );
     });
   }
 
@@ -609,6 +669,11 @@ class TerminalControllerImpl implements TerminalController {
     const previousSessionId = this.sessionId;
     this.clearListeners();
     this.cancelPendingResize();
+    if (this.outputPaused) {
+      this.setOutputPaused(false);
+    }
+    this.pendingOutputCharacters = 0;
+    this.outputGeneration += 1;
     this.sessionId = sessionId;
     rebindTerminalOutput(previousSessionId, sessionId);
     this.resetNoticeState();
@@ -618,18 +683,44 @@ class TerminalControllerImpl implements TerminalController {
 
   updateOptions(preferences: TerminalDisplayPreferences): void {
     if (this.disposed) return;
+    const previous = this.preferences;
     this.preferences = preferences;
-    this.terminal.options.fontSize = preferences.fontSize;
-    this.terminal.options.fontFamily = TERMINAL_FONT_FAMILIES[preferences.fontFamily];
-    this.terminal.options.cursorBlink = preferences.cursorBlink;
-    this.terminal.options.cursorStyle = preferences.cursorStyle;
-    this.terminal.options.scrollback = preferences.scrollback;
-    this.terminal.options.theme = TERMINAL_COLOR_SCHEMES[preferences.colorScheme];
-    this.updateElementStyles();
-    this.terminal.options.lineHeight = preferences.lineHeight;
-    this.terminal.options.letterSpacing = preferences.letterSpacing;
-    this.updateLinkProvider();
-    if (this.host) {
+    const geometryChanged =
+      previous.fontSize !== preferences.fontSize
+      || previous.fontFamily !== preferences.fontFamily
+      || previous.lineHeight !== preferences.lineHeight
+      || previous.letterSpacing !== preferences.letterSpacing;
+
+    if (previous.fontSize !== preferences.fontSize) {
+      this.terminal.options.fontSize = preferences.fontSize;
+    }
+    if (previous.fontFamily !== preferences.fontFamily) {
+      this.terminal.options.fontFamily = TERMINAL_FONT_FAMILIES[preferences.fontFamily];
+    }
+    if (previous.cursorBlink !== preferences.cursorBlink) {
+      this.terminal.options.cursorBlink = preferences.cursorBlink;
+    }
+    if (previous.cursorStyle !== preferences.cursorStyle) {
+      this.terminal.options.cursorStyle = preferences.cursorStyle;
+    }
+    if (previous.scrollback !== preferences.scrollback) {
+      this.terminal.options.scrollback = preferences.scrollback;
+    }
+    if (previous.colorScheme !== preferences.colorScheme) {
+      const theme = resolveTerminalTheme(preferences.colorScheme);
+      this.terminal.options.theme = theme;
+      this.updateElementStyles(theme);
+    }
+    if (previous.lineHeight !== preferences.lineHeight) {
+      this.terminal.options.lineHeight = preferences.lineHeight;
+    }
+    if (previous.letterSpacing !== preferences.letterSpacing) {
+      this.terminal.options.letterSpacing = preferences.letterSpacing;
+    }
+    if (previous.urlDetection !== preferences.urlDetection) {
+      this.updateLinkProvider();
+    }
+    if (geometryChanged && this.host) {
       try {
         this.fitAddon.fit();
       } catch {
@@ -638,10 +729,20 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
+  refreshTheme(): void {
+    if (this.disposed || this.preferences.colorScheme !== 'app') return;
+    const theme = resolveTerminalTheme('app');
+    this.terminal.options.theme = theme;
+    this.updateElementStyles(theme);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     logger.debug(`Terminal disposed for session ${this.sessionId}`);
+    if (this.outputPaused) {
+      this.setOutputPaused(false);
+    }
     this.detach();
     this.clearListeners();
     this.linkProviderDisposable?.dispose();
@@ -662,6 +763,7 @@ interface TerminalRegistry {
   get(sessionId: string): TerminalController | undefined;
   rebindSession(oldSessionId: string, newSessionId: string): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
+  refreshTheme(): void;
   dispose(sessionId: string): void;
   disposeAll(): void;
   subscribe(listener: () => void): () => void;
@@ -717,6 +819,11 @@ export const terminalRegistry: TerminalRegistry = (() => {
       preferences = nextPreferences;
       for (const controller of controllers.values()) {
         controller.updateOptions(preferences);
+      }
+    },
+    refreshTheme() {
+      for (const controller of controllers.values()) {
+        controller.refreshTheme();
       }
     },
     dispose(sessionId) {

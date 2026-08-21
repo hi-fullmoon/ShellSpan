@@ -40,8 +40,10 @@ const MIN_CONNECTING_OVERLAY_MS = 600;
 // subsequent slide is treated as a held-button drag, so tapping and sliding
 // slightly selects a run of cells unintentionally. Native terminals apply a
 // click-slop threshold; mirror it here by swallowing sub-threshold mousemove
-// events before xterm's document-level selection handler sees them.
-const CLICK_DRAG_THRESHOLD_PX = 4;
+// events before xterm's document-level selection handler sees them. Eight CSS
+// pixels is roughly one terminal cell at the default font size: large enough
+// to absorb trackpad tap drift without delaying an intentional cell drag.
+const CLICK_DRAG_THRESHOLD_PX = 8;
 
 // Wait for the selection to stop changing before copying it, so a real drag
 // that moves the pointer across cells doesn't write every intermediate state
@@ -312,6 +314,19 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
 
     let dragStart: { x: number; y: number } | null = null;
 
+    const finishPotentialTap = (): void => {
+      const wasPotentialTap = dragStart !== null;
+      dragStart = null;
+
+      // Normally the suppressed mousemove prevents xterm from creating a
+      // selection at all. Clear a transient selection as a fallback in case
+      // another listener observed the move first (browser/xterm versions can
+      // differ in listener ordering).
+      if (wasPotentialTap && terminal.hasSelection()) {
+        terminal.clearSelection();
+      }
+    };
+
     const handleMouseDown = (event: MouseEvent): void => {
       if (event.button !== 0) return;
       dragStart = { x: event.clientX, y: event.clientY };
@@ -320,7 +335,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
       if (dragStart === null) return;
       // The pointer was released outside the window so mouseup was never seen.
       if (!(event.buttons & 1)) {
-        dragStart = null;
+        finishPotentialTap();
         return;
       }
       const distance = Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y);
@@ -334,7 +349,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
       }
     };
     const handleMouseUp = (): void => {
-      dragStart = null;
+      finishPotentialTap();
     };
 
     element.addEventListener('mousedown', handleMouseDown);

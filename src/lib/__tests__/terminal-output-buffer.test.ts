@@ -30,4 +30,22 @@ describe('terminal output buffer', () => {
     expect(getRecentTerminalOutput('session-1', 20)).toBe('');
     expect(getRecentTerminalOutput('session-2', 20)).toBe('before reconnect');
   });
+
+  it('keeps only the newest 256 KiB without corrupting UTF-8 boundaries', () => {
+    appendTerminalOutput('session-1', `${'x'.repeat(256 * 1024)}你`);
+
+    const output = getRecentTerminalOutput('session-1', 1);
+    expect(output.endsWith('你')).toBe(true);
+    expect(output).not.toContain('\uFFFD');
+    expect(new TextEncoder().encode(output).length).toBeLessThanOrEqual(256 * 1024);
+  });
+
+  it('retains ordering across many small chunks after trimming', () => {
+    for (let index = 0; index < 20_000; index += 1) {
+      appendTerminalOutput('session-1', `${String(index).padStart(5, '0')}\n`);
+    }
+
+    const output = getRecentTerminalOutput('session-1', 3);
+    expect(output).toBe('19997\n19998\n19999');
+  });
 });

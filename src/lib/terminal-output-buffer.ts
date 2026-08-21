@@ -1,10 +1,24 @@
 const MAX_BUFFER_BYTES = 256 * 1024;
 
-const buffers = new Map<string, string>();
+interface TerminalOutputBuffer {
+  chunks: Uint8Array[];
+  head: number;
+  byteLength: number;
+}
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: false });
+const buffers = new Map<string, TerminalOutputBuffer>();
 
 export function appendTerminalOutput(sessionId: string, chunk: string): void {
-  const next = (buffers.get(sessionId) ?? '') + chunk;
-  buffers.set(sessionId, trimUtf8Tail(next, MAX_BUFFER_BYTES));
+  if (!chunk) return;
+
+  const bytes = encoder.encode(chunk);
+  const buffer = buffers.get(sessionId) ?? { chunks: [], head: 0, byteLength: 0 };
+  buffer.chunks.push(bytes);
+  buffer.byteLength += bytes.length;
+  trimBufferHead(buffer, MAX_BUFFER_BYTES);
+  buffers.set(sessionId, buffer);
 }
 
 export function clearTerminalOutput(sessionId: string): void {
@@ -12,13 +26,13 @@ export function clearTerminalOutput(sessionId: string): void {
 }
 
 export function rebindTerminalOutput(oldSessionId: string, newSessionId: string): void {
-  const content = buffers.get(oldSessionId);
+  const buffer = buffers.get(oldSessionId);
   buffers.delete(oldSessionId);
-  if (content !== undefined) buffers.set(newSessionId, content);
+  if (buffer !== undefined) buffers.set(newSessionId, buffer);
 }
 
 export function getRecentTerminalOutput(sessionId: string, maxLines: number): string {
-  const raw = buffers.get(sessionId) ?? '';
+  const raw = decodeBuffer(buffers.get(sessionId));
   const normalized = redactTerminalSecrets(renderTerminalText(stripAnsi(raw)));
   return normalized.split('\n').slice(-Math.max(1, maxLines)).join('\n').trim();
 }
@@ -59,10 +73,43 @@ export function redactTerminalSecrets(value: string): string {
     .replace(/\b(api[_-]?key|access[_-]?token|secret|password|passwd)\s*[:=]\s*([^\s]+)/gi, '$1=[REDACTED]');
 }
 
-function trimUtf8Tail(value: string, maxBytes: number): string {
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(value);
-  if (bytes.length <= maxBytes) return value;
-  const tail = bytes.slice(bytes.length - maxBytes);
-  return new TextDecoder('utf-8', { fatal: false }).decode(tail).replace(/^\uFFFD/, '');
+function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): void {
+  let excess = buffer.byteLength - maxBytes;
+  while (excess > 0 && buffer.head < buffer.chunks.length) {
+    const current = buffer.chunks[buffer.head];
+    if (current.length <= excess) {
+      excess -= current.length;
+      buffer.byteLength -= current.length;
+      buffer.head += 1;
+      continue;
+    }
+
+    let offset = excess;
+    // The retained tail must start at a UTF-8 code point boundary. Dropping
+    // continuation bytes can make the buffer a few bytes smaller than the
+    // nominal cap, which is preferable to introducing U+FFFD into AI context.
+    while (offset < current.length && (current[offset] & 0xc0) === 0x80) {
+      offset += 1;
+    }
+    buffer.chunks[buffer.head] = current.slice(offset);
+    buffer.byteLength -= offset;
+    excess = 0;
+  }
+
+  // Avoid retaining an ever-growing prefix of already-consumed chunk slots.
+  if (buffer.head > 64 && buffer.head * 2 >= buffer.chunks.length) {
+    buffer.chunks = buffer.chunks.slice(buffer.head);
+    buffer.head = 0;
+  }
+}
+
+function decodeBuffer(buffer: TerminalOutputBuffer | undefined): string {
+  if (!buffer || buffer.byteLength === 0) return '';
+  const bytes = new Uint8Array(buffer.byteLength);
+  let offset = 0;
+  for (let index = buffer.head; index < buffer.chunks.length; index += 1) {
+    bytes.set(buffer.chunks[index], offset);
+    offset += buffer.chunks[index].length;
+  }
+  return decoder.decode(bytes);
 }
