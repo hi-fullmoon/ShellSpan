@@ -11,10 +11,10 @@ export interface EmptyStateProps {
 
 export const EmptyState: React.FC<EmptyStateProps> = ({ title, description, icon, action, className }) => {
   return (
-    <div className={cn('flex flex-col items-center justify-center gap-4 p-4 text-muted-foreground', className)}>
-      {icon && <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">{icon}</div>}
-      <span className="text-xs">{title}</span>
-      {description && <span className="text-center text-xs text-muted-foreground/80">{description}</span>}
+    <div className={cn('flex flex-col items-center justify-center gap-3 p-4 text-muted-foreground', className)}>
+      {icon && <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">{icon}</div>}
+      <span className="text-sm font-medium text-foreground">{title}</span>
+      {description && <span className="max-w-sm text-center text-xs leading-5 text-muted-foreground">{description}</span>}
       {action}
     </div>
   );
