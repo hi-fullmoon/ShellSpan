@@ -11,6 +11,7 @@ import {
 import {
   Message as MessagePrimitive,
   MessageContent,
+  MessageHeader,
 } from '@/components/ui/message';
 import {
   MessageScroller as MessageScrollerPrimitive,
@@ -21,6 +22,7 @@ import {
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller';
 import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
 
 export const MessageScroller: React.FC<{
   children: React.ReactNode;
@@ -32,7 +34,7 @@ export const MessageScroller: React.FC<{
     <MessageScrollerProvider autoScroll>
       <MessageScrollerPrimitive className={className} data-follow-key={followKey}>
         <MessageScrollerViewport>
-          <MessageScrollerContent className="gap-3 p-3">
+          <MessageScrollerContent className="gap-5 px-4 py-5">
             {React.Children.map(children, (child, index) => (
               <MessageScrollerItem
                 key={React.isValidElement(child) && child.key !== null ? child.key : index}
@@ -57,9 +59,13 @@ export const MessageScroller: React.FC<{
 export const Message: React.FC<{
   role: 'user' | 'assistant';
   children: React.ReactNode;
-}> = ({ role, children }) => (
+  label?: string;
+}> = ({ role, children, label }) => (
   <MessagePrimitive align={role === 'user' ? 'end' : 'start'}>
-    <MessageContent>{children}</MessageContent>
+    <MessageContent>
+      {role === 'assistant' && label && <MessageHeader>{label}</MessageHeader>}
+      {children}
+    </MessageContent>
   </MessagePrimitive>
 );
 
@@ -69,10 +75,16 @@ export const Bubble: React.FC<{
 }> = ({ role, children }) => (
   <BubblePrimitive
     align={role === 'user' ? 'end' : 'start'}
-    variant={role === 'user' ? 'default' : 'outline'}
-    className="max-w-[92%]"
+    variant={role === 'user' ? 'secondary' : 'ghost'}
+    className={cn(role === 'user' ? 'max-w-[86%]' : 'w-full max-w-full')}
   >
-    <BubbleContent className="whitespace-pre-wrap text-xs leading-5">
+    <BubbleContent
+      className={cn(
+        role === 'user'
+          ? 'whitespace-pre-wrap text-[13px] leading-5'
+          : 'w-full text-[13px] leading-6',
+      )}
+    >
       {children}
     </BubbleContent>
   </BubblePrimitive>
