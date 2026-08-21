@@ -19,6 +19,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { UpdateSection } from './update-section';
 import type {
@@ -35,7 +36,6 @@ import type {
 } from '@/types';
 import { invokePickLocalFolder } from '@/lib/tauri';
 import type { LocaleKey } from '@/locales';
-import { cn } from '@/lib/utils';
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
 
 interface ShortcutGroup {
@@ -250,7 +250,11 @@ export const SettingsPanel: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col overflow-hidden bg-background">
+      <Tabs
+        value={activeSection}
+        onValueChange={(value) => setActiveSection(value as SettingsSection)}
+        className="h-full min-h-0 gap-0 overflow-hidden bg-background"
+      >
         <header className="flex shrink-0 items-center border-b border-app-border/50 px-3 py-1.5">
           <div className="min-w-0">
             <h1 className="text-base font-semibold text-app-text">{t('workbench.settings.title')}</h1>
@@ -258,34 +262,31 @@ export const SettingsPanel: React.FC = () => {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1">
-          <nav aria-label={t('settings.sectionNavigation')} className="flex w-44 shrink-0 flex-col gap-1 border-r border-app-border/50 p-2">
+        <div className="shrink-0 border-b border-app-border/50 px-3">
+          <TabsList
+            aria-label={t('settings.sectionNavigation')}
+            variant="line"
+            className="h-9 max-w-full justify-start overflow-x-auto"
+          >
             {SETTINGS_SECTIONS.map((section) => {
               const Icon = section.icon;
-              const isActive = activeSection === section.id;
               return (
-                <button
+                <TabsTrigger
                   key={section.id}
-                  type="button"
-                  onClick={() => setActiveSection(section.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    'flex items-center gap-2 whitespace-nowrap rounded-r-md border-l-2 px-2.5 py-2 text-left text-[13px] transition-colors',
-                    isActive
-                      ? 'border-primary bg-background font-medium text-foreground shadow-sm'
-                      : 'border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                  )}
+                  value={section.id}
+                  className="flex-none px-2.5 text-[13px]"
                 >
-                  <Icon className="size-4" />
+                  <Icon data-icon="inline-start" />
                   {t(section.titleKey)}
-                </button>
+                </TabsTrigger>
               );
             })}
-          </nav>
+          </TabsList>
+        </div>
 
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-2 p-3">
-              {activeSection === 'appearance' && (
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="mx-auto flex w-full max-w-4xl flex-col p-3">
+              <TabsContent value="appearance" className="w-full">
                 <div>
                   <div className="px-3 pb-2 pt-1">
                     <p className="text-xs text-muted-foreground">{t('settings.appearance.description')}</p>
@@ -321,9 +322,9 @@ export const SettingsPanel: React.FC = () => {
                   </Select>
                 </SettingRow>
                 </div>
-              )}
+              </TabsContent>
 
-              {activeSection === 'general' && (
+              <TabsContent value="general" className="w-full">
                 <div>
                   <div className="px-3 pb-2 pt-1">
                     <p className="text-xs text-muted-foreground">{t('settings.general.description')}</p>
@@ -370,9 +371,9 @@ export const SettingsPanel: React.FC = () => {
                 <Separator className="data-horizontal:border-border/40" />
                 <UpdateSection />
                 </div>
-              )}
+              </TabsContent>
 
-              {activeSection === 'terminal' && (
+              <TabsContent value="terminal" className="w-full">
                 <div>
                   <div className="px-3 pb-2 pt-1">
                     <p className="text-xs text-muted-foreground">{t('settings.terminal.description')}</p>
@@ -627,9 +628,9 @@ export const SettingsPanel: React.FC = () => {
                   </div>
                 </SettingRow>
                 </div>
-              )}
+              </TabsContent>
 
-              {activeSection === 'sftp' && (
+              <TabsContent value="sftp" className="w-full">
                 <div>
                   <div className="px-3 pb-2 pt-1">
                     <p className="text-xs text-muted-foreground">{t('settings.sftp.description')}</p>
@@ -735,11 +736,13 @@ export const SettingsPanel: React.FC = () => {
                   </div>
                 </SettingRow>
                 </div>
-              )}
+              </TabsContent>
 
-              {activeSection === 'ai' && <AiSettingsSection />}
+              <TabsContent value="ai" className="w-full">
+                <AiSettingsSection />
+              </TabsContent>
 
-              {activeSection === 'shortcuts' && (
+              <TabsContent value="shortcuts" className="w-full">
                 <div>
                   <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
                     <p className="min-w-0 text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
@@ -807,10 +810,9 @@ export const SettingsPanel: React.FC = () => {
                   </React.Fragment>
                 ))}
                 </div>
-              )}
-            </div>
-          </ScrollArea>
-        </div>
+              </TabsContent>
+          </div>
+        </ScrollArea>
 
         <Dialog
           open={editingAction !== null}
@@ -845,7 +847,7 @@ export const SettingsPanel: React.FC = () => {
             )}
           </DialogContent>
         </Dialog>
-      </div>
+      </Tabs>
     </TooltipProvider>
   );
 };

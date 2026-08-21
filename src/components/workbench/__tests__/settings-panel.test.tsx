@@ -26,10 +26,10 @@ describe('SettingsPanel', () => {
   });
 
   const openSection = (titleKey: string): void => {
-    fireEvent.click(screen.getByRole('button', { name: titleKey }));
+    fireEvent.click(screen.getByRole('tab', { name: titleKey }));
   };
 
-  it('renders one section at a time with sidebar navigation', async () => {
+  it('renders one section at a time with tab navigation', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
@@ -41,7 +41,7 @@ describe('SettingsPanel', () => {
       'settings.sftp.title',
       'settings.shortcuts.title',
     ]) {
-      expect(screen.getByRole('button', { name: titleKey })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: titleKey })).toBeInTheDocument();
     }
 
     // General is the default section.
