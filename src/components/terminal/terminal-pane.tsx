@@ -34,16 +34,14 @@ const effectiveShortcuts = (): ShortcutBindings => ({
 // don't make it flash.
 const MIN_CONNECTING_OVERLAY_MS = 600;
 
-// xterm's selection service extends the selection on ANY mousemove while the
-// button is held — it has no click-drag threshold. On macOS trackpads with
-// "tap to click" enabled, a light tap is delivered as a mousedown and any
-// subsequent slide is treated as a held-button drag, so tapping and sliding
-// slightly selects a run of cells unintentionally. Native terminals apply a
-// click-slop threshold; mirror it here by swallowing sub-threshold mousemove
-// events before xterm's document-level selection handler sees them. Eight CSS
-// pixels is roughly one terminal cell at the default font size: large enough
-// to absorb trackpad tap drift without delaying an intentional cell drag.
-const CLICK_DRAG_THRESHOLD_PX = 8;
+// macOS "tap to click" can briefly look like a held-button drag. Do not block
+// xterm's mousemove events — doing so prevents short, intentional selections.
+// Instead, discard only a selection produced by a very short, very small
+// gesture after it ends. The copy-on-select debounce below is longer than this
+// window, so accidental selections are also cleared before they reach the
+// clipboard.
+const ACCIDENTAL_SELECTION_MAX_DISTANCE_PX = 6;
+const ACCIDENTAL_SELECTION_MAX_DURATION_MS = 140;
 
 // Wait for the selection to stop changing before copying it, so a real drag
 // that moves the pointer across cells doesn't write every intermediate state
@@ -301,55 +299,61 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     };
   }, [activeSession?.status, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
 
-  // Enforce a click-drag threshold (see CLICK_DRAG_THRESHOLD_PX). xterm
-  // registers its selection mousemove handler on document only after the first
-  // mousedown; this document-level listener is registered first, so a
-  // sub-threshold move is stopped before xterm can extend the selection. The
-  // linkifier hover and vim/tmux mouse-reporting handlers live on the terminal
-  // element (or are registered later for the same document), so they are
-  // unaffected — only the accidental tap-and-slide selection is swallowed.
+  // Observe click-drag geometry without intercepting xterm's event stream.
+  // Once the gesture ends, clear only a quick trackpad-like micro-drag.
   useEffect(() => {
     const element = terminal?.element;
     if (!element) return;
 
-    let dragStart: { x: number; y: number } | null = null;
+    let dragStart: {
+      x: number;
+      y: number;
+      startedAt: number;
+      maxDistance: number;
+    } | null = null;
 
-    const finishPotentialTap = (): void => {
-      const wasPotentialTap = dragStart !== null;
+    const updateDistance = (event: MouseEvent): void => {
+      if (!dragStart) return;
+      dragStart.maxDistance = Math.max(
+        dragStart.maxDistance,
+        Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y),
+      );
+    };
+
+    const finishPotentialTap = (event: MouseEvent): void => {
+      updateDistance(event);
+      const completedDrag = dragStart;
       dragStart = null;
 
-      // Normally the suppressed mousemove prevents xterm from creating a
-      // selection at all. Clear a transient selection as a fallback in case
-      // another listener observed the move first (browser/xterm versions can
-      // differ in listener ordering).
-      if (wasPotentialTap && terminal.hasSelection()) {
+      if (
+        completedDrag
+        && Date.now() - completedDrag.startedAt <= ACCIDENTAL_SELECTION_MAX_DURATION_MS
+        && completedDrag.maxDistance <= ACCIDENTAL_SELECTION_MAX_DISTANCE_PX
+        && terminal.hasSelection()
+      ) {
         terminal.clearSelection();
       }
     };
 
     const handleMouseDown = (event: MouseEvent): void => {
       if (event.button !== 0) return;
-      dragStart = { x: event.clientX, y: event.clientY };
+      dragStart = {
+        x: event.clientX,
+        y: event.clientY,
+        startedAt: Date.now(),
+        maxDistance: 0,
+      };
     };
     const handleMouseMove = (event: MouseEvent): void => {
       if (dragStart === null) return;
+      updateDistance(event);
       // The pointer was released outside the window so mouseup was never seen.
       if (!(event.buttons & 1)) {
-        finishPotentialTap();
-        return;
-      }
-      const distance = Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y);
-      if (distance < CLICK_DRAG_THRESHOLD_PX) {
-        // stopImmediatePropagation is required here: xterm's selection handler
-        // is another listener on the same document node and must not run.
-        event.stopImmediatePropagation();
-      } else {
-        // Threshold crossed: this is a real drag, let xterm select normally.
-        dragStart = null;
+        finishPotentialTap(event);
       }
     };
-    const handleMouseUp = (): void => {
-      finishPotentialTap();
+    const handleMouseUp = (event: MouseEvent): void => {
+      finishPotentialTap(event);
     };
 
     element.addEventListener('mousedown', handleMouseDown);

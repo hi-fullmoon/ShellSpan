@@ -303,16 +303,13 @@ describe('TerminalPane', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
-  it('swallows sub-threshold mousemove so a tap-and-slide cannot extend the selection', () => {
+  it('always lets xterm observe mousemove so short intentional selections work', () => {
     const terminal = makeMockTerminal();
     render(<TerminalPane activeSession={makeSession()} />);
 
     const downstream = vi.fn();
     document.addEventListener('mousemove', downstream);
 
-    // macOS "tap to click": a light tap is a mousedown, and sliding slightly
-    // while the finger is down is a held-button drag. A 6px drift must not
-    // reach xterm's selection handler (registered on document after ours).
     terminal.element?.dispatchEvent(
       new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
     );
@@ -320,7 +317,7 @@ describe('TerminalPane', () => {
       new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 106, clientY: 100, bubbles: true }),
     );
 
-    expect(downstream).not.toHaveBeenCalled();
+    expect(downstream).toHaveBeenCalledTimes(1);
     document.removeEventListener('mousemove', downstream);
   });
 
@@ -335,13 +332,15 @@ describe('TerminalPane', () => {
     document.dispatchEvent(
       new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 106, clientY: 100, bubbles: true }),
     );
-    document.dispatchEvent(new MouseEvent('mouseup', { button: 0, buttons: 0, bubbles: true }));
+    document.dispatchEvent(
+      new MouseEvent('mouseup', { button: 0, buttons: 0, clientX: 106, clientY: 100, bubbles: true }),
+    );
 
     expect(terminal.clearSelection).toHaveBeenCalledTimes(1);
   });
 
-  it('lets the selection extend once a drag crosses the threshold', () => {
-    const terminal = makeMockTerminal();
+  it('preserves a deliberate drag even when it finishes quickly', () => {
+    const terminal = makeMockTerminal('selected');
     render(<TerminalPane activeSession={makeSession()} />);
 
     const downstream = vi.fn();
@@ -353,9 +352,33 @@ describe('TerminalPane', () => {
     document.dispatchEvent(
       new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 110, clientY: 100, bubbles: true }),
     );
+    document.dispatchEvent(
+      new MouseEvent('mouseup', { button: 0, buttons: 0, clientX: 110, clientY: 100, bubbles: true }),
+    );
 
     expect(downstream).toHaveBeenCalledTimes(1);
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
     document.removeEventListener('mousemove', downstream);
+  });
+
+  it('preserves a small deliberate selection held beyond the tap window', () => {
+    const terminal = makeMockTerminal('selected');
+    render(<TerminalPane activeSession={makeSession()} />);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+
+    terminal.element?.dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
+    );
+    document.dispatchEvent(
+      new MouseEvent('mousemove', { button: 0, buttons: 1, clientX: 104, clientY: 100, bubbles: true }),
+    );
+    now.mockReturnValue(1_200);
+    document.dispatchEvent(
+      new MouseEvent('mouseup', { button: 0, buttons: 0, clientX: 104, clientY: 100, bubbles: true }),
+    );
+
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
+    now.mockRestore();
   });
 
   it('does not suppress mousemove after the button was released outside the window', () => {

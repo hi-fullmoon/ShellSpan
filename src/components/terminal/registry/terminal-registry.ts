@@ -180,6 +180,16 @@ export function resolveTerminalTheme(colorScheme: TerminalColorScheme): Terminal
     background: readAppColor('--app-surface', '#ffffff', '#0f172a'),
     foreground: readAppColor('--app-text', '#0f172a', '#f8fafc'),
     cursor: readAppColor('--app-primary', '#0e7490', '#22d3ee'),
+    selectionBackground: readAppColor(
+      '--app-terminal-selection',
+      'rgba(14, 116, 144, 0.28)',
+      'rgba(34, 211, 238, 0.3)',
+    ),
+    selectionInactiveBackground: readAppColor(
+      '--app-terminal-selection-inactive',
+      'rgba(14, 116, 144, 0.16)',
+      'rgba(34, 211, 238, 0.18)',
+    ),
   };
 }
 

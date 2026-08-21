@@ -43,6 +43,8 @@ describe('terminalRegistry', () => {
     document.documentElement.style.setProperty('--app-surface', '#ffffff');
     document.documentElement.style.setProperty('--app-text', '#0f172a');
     document.documentElement.style.setProperty('--app-primary', '#0e7490');
+    document.documentElement.style.setProperty('--app-terminal-selection', 'rgba(14, 116, 144, 0.28)');
+    document.documentElement.style.setProperty('--app-terminal-selection-inactive', 'rgba(14, 116, 144, 0.16)');
     terminalRegistry.disposeAll();
     terminalRegistry.updateOptions({
       fontSize: 14,
@@ -115,18 +117,24 @@ describe('terminalRegistry', () => {
       background: '#ffffff',
       foreground: '#0f172a',
       cursor: '#0e7490',
+      selectionBackground: 'rgba(14, 116, 144, 0.28)',
+      selectionInactiveBackground: 'rgba(14, 116, 144, 0.16)',
     });
 
     document.documentElement.dataset.theme = 'dark';
     document.documentElement.style.setProperty('--app-surface', '#0f172a');
     document.documentElement.style.setProperty('--app-text', '#f8fafc');
     document.documentElement.style.setProperty('--app-primary', '#22d3ee');
+    document.documentElement.style.setProperty('--app-terminal-selection', 'rgba(34, 211, 238, 0.3)');
+    document.documentElement.style.setProperty('--app-terminal-selection-inactive', 'rgba(34, 211, 238, 0.18)');
     terminalRegistry.refreshTheme();
 
     expect(controller.terminal.options.theme).toMatchObject({
       background: '#0f172a',
       foreground: '#f8fafc',
       cursor: '#22d3ee',
+      selectionBackground: 'rgba(34, 211, 238, 0.3)',
+      selectionInactiveBackground: 'rgba(34, 211, 238, 0.18)',
     });
     expect(controller.terminal.element?.style.backgroundColor).toBe('rgb(15, 23, 42)');
   });
