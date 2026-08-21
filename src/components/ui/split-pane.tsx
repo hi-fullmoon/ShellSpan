@@ -30,6 +30,8 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
   const [dragging, setDragging] = useState(false);
   const [suppressGroup, setSuppressGroup] = useState(false);
   const draggingRef = useRef(false);
+  const dragFrameRef = useRef<number | null>(null);
+  const pendingPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
 
   const setSplit = useCallback(
     (next: number) => {
@@ -55,13 +57,41 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
     [direction],
   );
 
+  const applyPendingSplit = useCallback(() => {
+    dragFrameRef.current = null;
+    const pointer = pendingPointerRef.current;
+    pendingPointerRef.current = null;
+    if (!pointer || !containerRef.current) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const size = direction === 'horizontal' ? rect.width : rect.height;
+    if (size <= 0) return;
+    const position = direction === 'horizontal'
+      ? pointer.clientX - rect.left
+      : pointer.clientY - rect.top;
+    const minimumFraction = Math.min(minWidth / size, 0.5);
+    const nextSplit = Math.min(
+      Math.max(position / size, minimumFraction),
+      1 - minimumFraction,
+    );
+    setSplit(nextSplit);
+  }, [direction, minWidth, setSplit]);
+
+  const flushPendingSplit = useCallback(() => {
+    if (dragFrameRef.current !== null) {
+      cancelAnimationFrame(dragFrameRef.current);
+    }
+    applyPendingSplit();
+  }, [applyPendingSplit]);
+
   const handleMouseUp = useCallback(() => {
+    flushPendingSplit();
     draggingRef.current = false;
     setDragging(false);
     setSuppressGroup(true);
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-  }, []);
+  }, [flushPendingSplit]);
 
   const handleMouseEnter = useCallback(() => {
     setSuppressGroup(false);
@@ -70,13 +100,12 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (!draggingRef.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const size = direction === 'horizontal' ? rect.width : rect.height;
-      const position = direction === 'horizontal' ? e.clientX - rect.left : e.clientY - rect.top;
-      const nextSplit = Math.min(Math.max(position / size, minWidth / size), 1 - minWidth / size);
-      setSplit(nextSplit);
+      pendingPointerRef.current = { clientX: e.clientX, clientY: e.clientY };
+      if (dragFrameRef.current === null) {
+        dragFrameRef.current = requestAnimationFrame(applyPendingSplit);
+      }
     },
-    [direction, minWidth, setSplit],
+    [applyPendingSplit],
   );
 
   React.useEffect(() => {
@@ -85,6 +114,11 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
     return () => {
       document.removeEventListener('mouseup', handleMouseUp);
       document.removeEventListener('mousemove', handleMouseMove);
+      if (dragFrameRef.current !== null) {
+        cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+      }
+      pendingPointerRef.current = null;
       // Restore global styles if the component unmounts mid-drag.
       document.body.style.cursor = '';
       document.body.style.userSelect = '';

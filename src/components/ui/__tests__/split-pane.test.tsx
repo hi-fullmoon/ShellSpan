@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { SplitPane } from '../split-pane';
 
 describe('SplitPane', () => {
@@ -103,5 +103,51 @@ describe('SplitPane', () => {
     unmount();
     expect(document.body.style.userSelect).toBe('');
     expect(document.body.style.cursor).toBe('');
+  });
+
+  it('coalesces drag updates to one split change per animation frame', () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    const onSplitChange = vi.fn();
+    try {
+      const { container } = render(
+        <SplitPane
+          left={<div>Left</div>}
+          right={<div>Right</div>}
+          minWidth={100}
+          onSplitChange={onSplitChange}
+        />,
+      );
+      const root = container.firstElementChild as HTMLElement;
+      vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 1000,
+        height: 500,
+        right: 1000,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      const handle = container.querySelector('[data-slot="split-pane-handle"]')!;
+
+      fireEvent.mouseDown(handle);
+      fireEvent.mouseMove(document, { clientX: 300, clientY: 0 });
+      fireEvent.mouseMove(document, { clientX: 700, clientY: 0 });
+
+      expect(frames).toHaveLength(1);
+      expect(onSplitChange).not.toHaveBeenCalled();
+      act(() => frames[0](0));
+      expect(onSplitChange).toHaveBeenCalledTimes(1);
+      expect(onSplitChange).toHaveBeenCalledWith(0.7);
+    } finally {
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+    }
   });
 });
