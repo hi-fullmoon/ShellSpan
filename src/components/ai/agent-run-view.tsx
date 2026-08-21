@@ -33,7 +33,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Spinner } from '@/components/ui/empty-state';
+import { PanelEmptyState, Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import type { AgentRun, AgentRunStep } from '@/types/ai';
 import { Marker, MessageScroller } from './chat-primitives';
@@ -71,12 +71,13 @@ export const AgentRunView: React.FC<{
 
   if (!run) {
     return (
-      <MessageScroller className="flex-1" followKey="empty-agent">
-        <Marker>
-          <ShieldAlertIcon className="mx-auto mb-2 size-6" />
-          {t('ai.agent.empty')}
-        </Marker>
-      </MessageScroller>
+      <div className="min-h-0 flex-1">
+        <PanelEmptyState
+          icon={<ShieldAlertIcon />}
+          title={t('ai.mode.agent')}
+          description={t('ai.agent.empty')}
+        />
+      </div>
     );
   }
 
@@ -140,7 +141,7 @@ export const AgentRunView: React.FC<{
         <div>
           <div className="text-xs font-medium text-foreground">{t('ai.agent.steps')}</div>
           {commandSteps.length > 0 && (
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               {t('ai.agent.progress', { completed: resolvedCommands, total: commandSteps.length })}
             </div>
           )}
@@ -209,7 +210,7 @@ export const AgentRunView: React.FC<{
           {(step.command || step.result) && (
             <CardContent className="flex flex-col gap-2">
               {step.command && (
-                <code className="block overflow-x-auto rounded-md bg-muted px-2 py-1.5 font-mono text-[11px] text-foreground">
+                <code className="block overflow-x-auto rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-foreground">
                   {step.command}
                 </code>
               )}
@@ -220,10 +221,10 @@ export const AgentRunView: React.FC<{
               )}
               {step.result && (
                 <div className="flex flex-col gap-1">
-                  <span className="text-[11px] font-medium text-muted-foreground">
+                  <span className="text-xs font-medium text-muted-foreground">
                     {t('ai.agent.capturedOutput')}
                   </span>
-                  <pre className="max-h-40 overflow-auto rounded-md bg-muted px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-foreground">
+                  <pre className="max-h-40 overflow-auto rounded-md bg-muted px-2 py-1.5 font-mono text-xs whitespace-pre-wrap text-foreground">
                     {step.result}
                   </pre>
                 </div>
@@ -244,7 +245,7 @@ export const AgentRunView: React.FC<{
           )}
           {step.status === 'inserted' && step.command && (
             <CardFooter className="items-center justify-between gap-2">
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 {t('ai.agent.waitingForCommand')}
               </span>
               <Button variant="ghost" size="xs" onClick={() => onReject(step.id)}>

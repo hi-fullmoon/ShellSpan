@@ -150,6 +150,19 @@ textarea,
   -webkit-user-select: text;
 }
 
+/* Chat replies, code samples, and diagnostic output need to remain copyable
+   even though the surrounding desktop chrome disables native selection. */
+[data-slot='message-scroller-content'],
+[data-slot='message-scroller-content'] * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+[data-slot='message-scroller-content'] :is(button, button *) {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 *:hover {
   scrollbar-color: var(--app-text-soft) transparent;
 }

@@ -41,6 +41,25 @@ const run: AgentRun = {
 };
 
 describe('AgentRunView', () => {
+  it('uses the shared panel empty state before a run starts', () => {
+    const { container } = render(
+      <AgentRunView
+        run={undefined}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onCancel={vi.fn()}
+        onRetry={vi.fn()}
+        onActivateSession={vi.fn()}
+        canInsert={false}
+        sessionState="unavailable"
+      />,
+    );
+
+    expect(screen.getByText('ai.mode.agent')).toBeInTheDocument();
+    expect(screen.getByText('ai.agent.empty')).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="message-scroller"]')).not.toBeInTheDocument();
+  });
+
   it('renders run steps and delegates explicit command approval', () => {
     const onApprove = vi.fn();
     render(

@@ -726,6 +726,7 @@ export default {
   'ai.explainTerminal': 'Analyze terminal',
   'ai.context.selection': 'Selection attached',
   'ai.context.recentOutput': 'Recent output attached',
+  'ai.emptyTitle': 'How can I help?',
   'ai.empty': 'Ask about a terminal error or describe an operations task you want to complete.',
   'ai.insertCommand': 'Insert into terminal',
   'ai.scrollToLatest': 'Scroll to latest message',
