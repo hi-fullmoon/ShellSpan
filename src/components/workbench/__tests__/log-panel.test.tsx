@@ -242,6 +242,38 @@ describe('LogPanel', () => {
     expect(setActiveSource).toHaveBeenCalledWith('backend');
   });
 
+  it('opens a structured log entry in the details inspector', () => {
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    mockContent =
+      `[${todayString}][12:34:57][ERROR][termbridge::connect] something failed badly`;
+
+    render(<LogPanel />);
+
+    fireEvent.click(screen.getByText('something failed badly'));
+
+    expect(screen.getByText('workbench.logs.inspector.title')).toBeInTheDocument();
+    expect(screen.getByText('termbridge::connect')).toBeInTheDocument();
+    expect(screen.getByText('workbench.logs.inspector.raw')).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'workbench.logs.inspector.copy',
+    })).toBeInTheDocument();
+  });
+
+  it('keeps multiline entries in uniform single-line rows', () => {
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    mockContent =
+      `[${todayString}][12:34:57][ERROR][termbridge] something failed\n` +
+      'Error: stack trace\n    at render (app.tsx:1:1)';
+
+    render(<LogPanel />);
+
+    const logRow = screen.getByRole('button', { name: /something failed/ });
+    const message = logRow.querySelector('span:last-child');
+    expect(message).toHaveClass('truncate', 'whitespace-nowrap');
+  });
+
   it('shows the current source in the empty state description', () => {
     mockActiveFileName = undefined;
     mockContent = '';
