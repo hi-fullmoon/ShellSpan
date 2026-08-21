@@ -105,7 +105,7 @@ describe('ResponsiveCardGrid', () => {
     expect(grid).toHaveStyle({ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' });
   });
 
-  it('can auto-fit columns without shrinking cards below a minimum width', () => {
+  it('preserves empty tracks so incomplete rows keep the full-row card width', () => {
     render(
       <ResponsiveCardGrid minColumnWidth="22rem" gap="0.375rem">
         <div>Card</div>
@@ -115,7 +115,7 @@ describe('ResponsiveCardGrid', () => {
     const grid = screen.getByText('Card').parentElement;
     expect(grid).toHaveStyle({
       gap: '0.375rem',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 22rem), 1fr))',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 22rem), 1fr))',
     });
   });
 });
