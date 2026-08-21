@@ -1,3 +1,4 @@
+mod ai;
 mod commands;
 mod connection;
 mod db;
@@ -209,6 +210,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
+        .manage(ai::AiRequestRegistry::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
@@ -218,6 +220,12 @@ pub fn run() {
         .manage(RemoteIdentityCache::default())
         .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
+            ai::ai_store_api_key,
+            ai::ai_has_api_key,
+            ai::ai_delete_api_key,
+            ai::ai_list_models,
+            ai::ai_start_request,
+            ai::ai_cancel_request,
             commands::create_session,
             commands::create_local_session,
             commands::write_session,
