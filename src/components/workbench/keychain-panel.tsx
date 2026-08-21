@@ -16,7 +16,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '
 import { FieldGroup } from '@/components/ui/field';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
-import { CARD_GRID_BREAKPOINTS, FormRow, keyTypeBadgeClass } from './shared';
+import { FormRow, MANAGEMENT_CARD_MIN_WIDTH, keyTypeBadgeClass } from './shared';
 import type { KeychainKey, KeychainKeyKind } from '@/types';
 
 interface KeyFormState {
@@ -225,7 +225,7 @@ export const KeychainPanel: React.FC = () => {
           {filteredKeys.length > 0 && (
             <ResponsiveCardGrid
               columns={1}
-              breakpoints={CARD_GRID_BREAKPOINTS}
+              minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
               gap="0.375rem"
             >
               {filteredKeys.map((key) => {

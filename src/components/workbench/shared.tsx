@@ -1,7 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import type { ResponsiveGridBreakpoint } from '@/components/ui/responsive-card-grid';
 
 /** Shared key-type badge styling for management cards (keychain, known hosts). */
 export const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
@@ -14,11 +13,8 @@ export const KEY_TYPE_BADGE_STYLES: Record<string, string> = {
 export const keyTypeBadgeClass = (keyType: string): string =>
   KEY_TYPE_BADGE_STYLES[keyType.toUpperCase()] ?? 'bg-app-surface-muted text-muted-foreground';
 
-/** Shared column breakpoints for the management-card grids. */
-export const CARD_GRID_BREAKPOINTS: readonly ResponsiveGridBreakpoint[] = [
-  { minWidth: 800, columns: 2 },
-  { minWidth: 900, columns: 3 },
-];
+/** Minimum width that keeps management-card content and actions comfortable. */
+export const MANAGEMENT_CARD_MIN_WIDTH = '22rem';
 
 interface FormRowProps {
   label: string;
