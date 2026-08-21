@@ -153,6 +153,78 @@ describe('ConnectionFormDrawer', () => {
     ).toBeInTheDocument();
   });
 
+  it('focuses the first invalid field after validation fails', async () => {
+    render(<ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />);
+
+    const usernameInput = screen.getByLabelText('common.username');
+    usernameInput.focus();
+    expect(usernameInput).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
+
+    const nameInput = screen.getByLabelText('common.name');
+    await waitFor(() => expect(nameInput).toHaveFocus());
+    expect(nameInput).toHaveAttribute('aria-invalid', 'true');
+    expect(nameInput).toHaveAttribute('aria-describedby', 'connection-name-error');
+    expect(screen.getByText('connection.form.validation.nameRequired')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+  });
+
+  it('focuses the password field when it is the only validation error', async () => {
+    render(
+      <ConnectionFormDrawer
+        open={true}
+        onClose={() => {}}
+        onSubmit={() => {}}
+        initial={{ ...profile, password: undefined }}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText('common.name');
+    await waitFor(() => expect(nameInput).toHaveFocus());
+    const usernameInput = screen.getByLabelText('common.username');
+    usernameInput.focus();
+    expect(usernameInput).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
+
+    const passwordInput = screen.getByLabelText('common.password');
+    await waitFor(() => expect(passwordInput).toHaveFocus());
+    expect(passwordInput).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('toggles password visibility without changing its value', () => {
+    render(
+      <ConnectionFormDrawer
+        open={true}
+        onClose={() => {}}
+        onSubmit={() => {}}
+        initial={profile}
+      />,
+    );
+
+    const passwordInput = screen.getByLabelText('common.password');
+    const showButton = screen.getByRole('button', { name: 'common.showPassword' });
+
+    expect(passwordInput).toHaveAttribute('type', 'password');
+    expect(passwordInput).toHaveAttribute('autocomplete', 'new-password');
+    expect(passwordInput).toHaveValue('secret');
+    expect(showButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(showButton);
+
+    expect(passwordInput).toHaveAttribute('type', 'text');
+    expect(passwordInput).toHaveValue('secret');
+    const hideButton = screen.getByRole('button', { name: 'common.hidePassword' });
+    expect(hideButton).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(hideButton);
+
+    expect(passwordInput).toHaveAttribute('type', 'password');
+    expect(passwordInput).toHaveValue('secret');
+  });
+
   it('preserves password when toggling auth method away and back', () => {
     render(
       <ConnectionFormDrawer
