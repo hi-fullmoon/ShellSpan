@@ -265,6 +265,12 @@ export async function invokePreviewRemoteFile(
   return invokeLogged('preview_remote_file', { request });
 }
 
+export async function invokePreviewLocalFile(
+  path: string,
+): Promise<ReadRemoteFileResponse> {
+  return invokeLogged('preview_local_file', { path });
+}
+
 export async function invokeUpdateRemotePermissions(
   request: UpdateRemotePermissionsRequest,
 ): Promise<void> {

@@ -15,6 +15,11 @@ const connectionMocks = vi.hoisted(() => ({
   previewRemoteFile: vi.fn(),
 }));
 
+const localDirectoryMocks = vi.hoisted(() => ({
+  openLocalPath: vi.fn().mockResolvedValue(undefined),
+  previewLocalFile: vi.fn(),
+}));
+
 const toastMocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -40,7 +45,8 @@ vi.mock('@/hooks/useSftpConnection', () => ({
 vi.mock('@/hooks/useLocalDirectory', () => ({
   useLocalDirectory: () => ({
     loadLocalDirectory: vi.fn().mockResolvedValue(undefined),
-    openLocalPath: vi.fn().mockResolvedValue(undefined),
+    openLocalPath: localDirectoryMocks.openLocalPath,
+    previewLocalFile: localDirectoryMocks.previewLocalFile,
   }),
 }));
 
@@ -119,6 +125,16 @@ describe('useSftpPaneActions', () => {
       name: 'test.txt',
       content: 'hello',
       size: 5,
+      isText: true,
+      contentEncoding: 'utf8',
+      truncated: false,
+    });
+    localDirectoryMocks.openLocalPath.mockResolvedValue(undefined);
+    localDirectoryMocks.previewLocalFile.mockResolvedValue({
+      path: '/local/test.txt',
+      name: 'test.txt',
+      content: 'local hello',
+      size: 11,
       isText: true,
       contentEncoding: 'utf8',
       truncated: false,
@@ -219,6 +235,53 @@ describe('useSftpPaneActions', () => {
     await act(() => result.current.onOpenWithDefaultEditor({ path: '/home/previewed.txt', kind: 'file' }));
 
     expect(connectionMocks.openRemoteFile).toHaveBeenCalledWith('/home/previewed.txt');
+  });
+
+  it('previews a local file through the local reader', async () => {
+    const connection = addConnection();
+    const entry = { path: '/local/test.txt', name: 'test.txt', kind: 'file' as const, size: 11 };
+    let resolveLocalPreview!: (value: ReadRemoteFileResponse) => void;
+    localDirectoryMocks.previewLocalFile.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveLocalPreview = resolve; }),
+    );
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.onPreview(entry);
+    });
+
+    expect(localDirectoryMocks.previewLocalFile).toHaveBeenCalledWith('/local/test.txt');
+    expect(connectionMocks.previewRemoteFile).not.toHaveBeenCalled();
+    expect(result.current.previewTarget?.path).toBe('/local/test.txt');
+    expect(result.current.previewContent).toBeUndefined();
+
+    await act(async () => {
+      resolveLocalPreview({
+        path: '/local/test.txt',
+        name: 'test.txt',
+        content: 'local hello',
+        size: 11,
+        isText: true,
+        contentEncoding: 'utf8',
+        truncated: false,
+      });
+      await request;
+    });
+    expect(result.current.previewContent?.content).toBe('local hello');
+  });
+
+  it('opens a local preview in the system application', async () => {
+    const connection = addConnection();
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'local', true));
+
+    await act(() => result.current.onOpenWithDefaultEditor({
+      path: '/local/test.txt',
+      kind: 'file',
+    }));
+
+    expect(localDirectoryMocks.openLocalPath).toHaveBeenCalledWith('/local/test.txt');
+    expect(connectionMocks.openRemoteFile).not.toHaveBeenCalled();
   });
 
   it('preserves the current selection when entering batch mode', () => {

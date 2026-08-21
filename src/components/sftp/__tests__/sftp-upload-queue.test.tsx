@@ -61,6 +61,7 @@ vi.mock('@/hooks/useLocalDirectory', () => ({
   useLocalDirectory: () => ({
     loadLocalDirectory: connectionMocks.loadLocalDirectory,
     openLocalPath: vi.fn().mockResolvedValue(undefined),
+    previewLocalFile: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 
