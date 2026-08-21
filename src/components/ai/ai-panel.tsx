@@ -23,6 +23,7 @@ import { Bubble, Marker, Message, MessageScroller } from './chat-primitives';
 import { AgentRunView } from './agent-run-view';
 import { useI18n } from '@/hooks/useI18n';
 import { invokeCancelAiRequest, invokeStartAiRequest, isTauriRuntime } from '@/lib/tauri';
+import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
 import {
   buildAgentExecutionCommand,
@@ -50,7 +51,9 @@ import type {
 } from '@/types/ai';
 
 const AI_STREAM_EVENT = 'ai-stream';
+const logger = createLogger('ai');
 type ConversationTask = Exclude<AiTaskKind, 'diagnosticAgent'>;
+type CancelAiRequest = (requestId: string) => Promise<void>;
 
 function conversationLane(task: ConversationTask): 'conversation' | 'command' {
   return task === 'generateCommand' ? 'command' : 'conversation';
@@ -113,6 +116,30 @@ export function extractSingleLineCommand(content: string): string | undefined {
   return command;
 }
 
+export function cancelActiveAiRequests(
+  cancelBackend: CancelAiRequest = invokeCancelAiRequest,
+): string[] {
+  const ai = useAiStore.getState();
+  const agent = useAgentStore.getState();
+  const requestIds = new Set<string>();
+
+  if (ai.activeRequestId) {
+    requestIds.add(ai.activeRequestId);
+    ai.cancelRequest(ai.activeRequestId);
+  }
+  if (agent.run && ['planning', 'evaluating'].includes(agent.run.phase)) {
+    requestIds.add(agent.run.requestId);
+    agent.cancelRun(agent.run.requestId);
+  }
+
+  for (const requestId of requestIds) {
+    void cancelBackend(requestId).catch((reason) => {
+      logger.warn(`Failed to cancel AI request ${requestId}`, reason);
+    });
+  }
+  return [...requestIds];
+}
+
 function currentTerminalContext(): { context?: AiContext; selection: boolean; sessionId?: string } {
   const app = useAppStore.getState();
   if (app.activeSection !== 'terminal') return { selection: false };
@@ -162,7 +189,6 @@ export const AiPanel: React.FC = () => {
   const setOpen = useAiStore((state) => state.setOpen);
   const messages = useAiStore((state) => state.messages);
   const phase = useAiStore((state) => state.phase);
-  const activeRequestId = useAiStore((state) => state.activeRequestId);
   const error = useAiStore((state) => state.error);
   const clear = useAiStore((state) => state.clear);
   const agentRun = useAgentStore((state) => state.run);
@@ -377,11 +403,7 @@ export const AiPanel: React.FC = () => {
   };
 
   const handleCancel = (): void => {
-    const requestId = agentRun && ['planning', 'evaluating'].includes(agentRun.phase)
-      ? agentRun.requestId
-      : activeRequestId;
-    if (!requestId) return;
-    void invokeCancelAiRequest(requestId);
+    cancelActiveAiRequests();
   };
 
   const handleApproveAgentStep = (step: AgentRunStep): void => {
