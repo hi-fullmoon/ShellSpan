@@ -36,6 +36,8 @@ vi.mock('@/lib/tauri', () => ({
 }));
 
 describe('ConnectionFormDrawer form reset', () => {
+  const noop = (): void => {};
+
   beforeEach(() => {
     mockInitialized = false;
     mockHydrate.mockClear();
@@ -43,7 +45,7 @@ describe('ConnectionFormDrawer form reset', () => {
 
   it('does not wipe user input when keychain hydration finishes after opening', () => {
     const { rerender } = render(
-      <ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />,
+      <ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />,
     );
     expect(mockHydrate).toHaveBeenCalledTimes(1);
 
@@ -53,7 +55,7 @@ describe('ConnectionFormDrawer form reset', () => {
     // Hydration completes while the drawer is open.
     mockInitialized = true;
     rerender(
-      <ConnectionFormDrawer open={true} onClose={() => {}} onSubmit={() => {}} />,
+      <ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />,
     );
 
     expect(nameInput).toHaveValue('Typed while loading');
