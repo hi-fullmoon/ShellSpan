@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { ActivityIcon, PauseIcon, PlayIcon, RefreshCwIcon } from 'lucide-react';
+import { ActivityIcon, CircleAlertIcon, PauseIcon, PlayIcon, RefreshCwIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendArea } from '@/components/ui/trend-area';
 import { IconActionButton } from './icon-action-button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const DISCONNECT_REASON_KEY: Record<ClosedReasonKind, LocaleKey> = {
   local_close: 'workbench.monitor.reason.localClose',
@@ -325,9 +326,17 @@ export const MonitorPanel: React.FC = () => {
         <ScrollArea className="min-h-0 flex-1">
           <div className="p-2">
           {error && !snapshot && (
-            <div className="mb-2 rounded-lg border border-app-error/30 bg-app-error/10 px-3 py-2 text-xs text-app-error">
-              {t('workbench.monitor.loadFailed')}: {error}
-            </div>
+            <Alert variant="destructive" className="mb-2">
+              <CircleAlertIcon />
+              <AlertTitle>{t('workbench.monitor.loadFailed')}</AlertTitle>
+              <AlertDescription>
+                <p>{t('common.loadFailedDescription')}</p>
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-xs">{t('common.errorDetails')}</summary>
+                  <code className="mt-1 block break-all text-xs">{error}</code>
+                </details>
+              </AlertDescription>
+            </Alert>
           )}
           {loading && !snapshot && <PanelLoadingState />}
           {!snapshot && !loading && !error && (

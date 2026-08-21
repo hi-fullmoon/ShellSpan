@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
+  CircleAlertIcon,
   FingerprintIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -105,14 +107,22 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
       </div>
       <div className="flex-1 overflow-y-auto p-2">
         {error && (
-          <div className="mb-2 rounded-lg border border-app-error/30 bg-app-error/10 px-3 py-2 text-xs text-app-error">
-            {t('workbench.knownHosts.loadFailed')}: {error}
-          </div>
+          <Alert variant="destructive" className="mb-2">
+            <CircleAlertIcon />
+            <AlertTitle>{t('workbench.knownHosts.loadFailed')}</AlertTitle>
+            <AlertDescription>
+              <p>{t('common.loadFailedDescription')}</p>
+              <details className="mt-1">
+                <summary className="cursor-pointer text-xs">{t('common.errorDetails')}</summary>
+                <code className="mt-1 block break-all text-xs">{error}</code>
+              </details>
+            </AlertDescription>
+          </Alert>
         )}
         {loading && hosts.length === 0 && (
           <PanelLoadingState />
         )}
-        {!loading && hosts.length === 0 && (
+        {!loading && !error && hosts.length === 0 && (
           <PanelEmptyState
             title={t('workbench.knownHosts.empty')}
             description={t('workbench.knownHosts.emptyDescription')}

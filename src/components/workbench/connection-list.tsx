@@ -6,6 +6,7 @@ import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { Badge } from '@/components/ui/badge';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { CARD_GRID_BREAKPOINTS } from './shared';
@@ -206,17 +207,15 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
           </div>
         </div>
         <div className="flex flex-wrap gap-1">
-          <span className={profile.authMethod === 'password'
-            ? 'rounded-md bg-amber-500/10 px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400'
-            : 'rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-600 dark:text-emerald-400'}>
+          <Badge variant={profile.authMethod === 'password' ? 'secondary' : 'outline'}>
             {profile.authMethod === 'password'
               ? t('connection.form.auth.password')
               : t('connection.form.auth.key')}
-          </span>
+          </Badge>
           {profile.jumpHost && (
-            <span className="rounded-md bg-app-surface-muted px-2 py-1 text-[10px] text-muted-foreground">
+            <Badge variant="outline">
               {t('connection.form.jumpHost')}
-            </span>
+            </Badge>
           )}
         </div>
       </div>
@@ -232,13 +231,10 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
       )}
       <div className="flex flex-wrap items-center gap-1">
         <div className="flex flex-wrap items-center gap-1 sm:justify-end">
-          <IconActionButton
-            onClick={handleConnectTerminal}
-            aria-label={t('workbench.connections.connectTerminal')}
-            tooltip={t('workbench.connections.connectTerminal')}
-          >
+          <Button size="xs" onClick={handleConnectTerminal}>
             <TerminalIcon data-icon="inline-start" />
-          </IconActionButton>
+            {t('workbench.connections.connectTerminal')}
+          </Button>
           <IconActionButton
             onClick={handleConnectSftp}
             aria-label={t('workbench.connections.connectSftp')}

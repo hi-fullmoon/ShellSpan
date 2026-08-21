@@ -13,6 +13,7 @@ import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
+import { FieldGroup } from '@/components/ui/field';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { CARD_GRID_BREAKPOINTS, FormRow, keyTypeBadgeClass } from './shared';
@@ -101,6 +102,12 @@ export const KeychainPanel: React.FC = () => {
       nextErrors.privateKey = t('keychain.form.privateKeyRequired');
     }
     setErrors(nextErrors);
+    const firstError = Object.keys(nextErrors)[0];
+    if (firstError) {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`keychain-${firstError}`)?.focus();
+      });
+    }
     return Object.keys(nextErrors).length === 0;
   };
 
@@ -290,21 +297,25 @@ export const KeychainPanel: React.FC = () => {
             <DrawerTitle>{editing ? t('workbench.keychain.edit') : t('workbench.keychain.new')}</DrawerTitle>
             <p className="text-xs text-muted-foreground">{editing ? t('workbench.keychain.editSubtitle') : t('workbench.keychain.newSubtitle')}</p>
           </DrawerHeader>
-          <div className="flex flex-col gap-5 px-5 py-4">
-            <FormRow label={t('common.label')} error={errors.label}>
-              <Input value={form.label} onChange={(e) => updateField('label', e.target.value)} placeholder={t('keychain.form.labelPlaceholder')} />
+          <FieldGroup className="gap-5 px-5 py-4">
+            <FormRow controlId="keychain-label" label={t('common.label')} error={errors.label}>
+              <Input id="keychain-label" aria-invalid={Boolean(errors.label)} aria-describedby={errors.label ? 'keychain-label-error' : undefined} value={form.label} onChange={(e) => updateField('label', e.target.value)} placeholder={t('keychain.form.labelPlaceholder')} />
             </FormRow>
 
-            <FormRow label={t('common.privateKey')} error={errors.privateKey}>
+            <FormRow controlId="keychain-privateKey" label={t('common.privateKey')} error={errors.privateKey}>
               <Textarea
+                id="keychain-privateKey"
+                aria-invalid={Boolean(errors.privateKey)}
+                aria-describedby={errors.privateKey ? 'keychain-privateKey-error' : undefined}
                 value={form.privateKey}
                 onChange={(e) => updateField('privateKey', e.target.value)}
                 placeholder={t('keychain.form.privateKeyPlaceholder')}
                 rows={6}
               />
             </FormRow>
-            <FormRow label={t('common.publicKey')}>
+            <FormRow controlId="keychain-publicKey" label={t('common.publicKey')}>
               <Textarea
+                id="keychain-publicKey"
                 value={form.publicKey}
                 onChange={(e) => updateField('publicKey', e.target.value)}
                 placeholder={t('keychain.form.publicKeyOptionalPlaceholder')}
@@ -321,7 +332,7 @@ export const KeychainPanel: React.FC = () => {
                 }
               }}
             />
-          </div>
+          </FieldGroup>
           <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
             <Button onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
               {t('common.save')}

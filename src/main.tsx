@@ -14,6 +14,7 @@ import { useAppStore } from './stores/appStore';
 import { useProfileStore } from './stores/profileStore';
 import { useRecentProfilesStore } from './stores/recentProfilesStore';
 import { useTerminalStore } from './stores/terminalStore';
+import { useAiSettingsStore } from './stores/aiSettingsStore';
 
 initGlobalErrorLogging();
 
@@ -22,6 +23,7 @@ async function bootstrap(): Promise<void> {
     useAppStore.getState().hydrateFromDb(),
     useProfileStore.getState().hydrateFromDb(),
     useRecentProfilesStore.getState().hydrateFromDb(),
+    useAiSettingsStore.getState().hydrateFromDb(),
   ]);
   if (useAppStore.getState().restoreWorkspace) {
     try {

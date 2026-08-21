@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon, XIcon } from 'lucide-react';
+import { BotIcon, FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon, XIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
@@ -36,6 +36,7 @@ import type {
 import { invokePickLocalFolder } from '@/lib/tauri';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
+import { AiSettingsSection } from '@/components/ai/ai-settings-section';
 
 interface ShortcutGroup {
   id: 'app' | 'terminal' | 'sftp';
@@ -45,7 +46,7 @@ interface ShortcutGroup {
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     id: 'app',
-    actions: ['openWorkbench', 'openTerminal', 'openSftp', 'openSettings'],
+    actions: ['openWorkbench', 'openTerminal', 'openSftp', 'openSettings', 'toggleAiPanel'],
   },
   {
     id: 'terminal',
@@ -77,13 +78,14 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
   sftp: 'settings.shortcuts.groupSftp',
 };
 
-type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'shortcuts';
+type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts';
 
 const SETTINGS_SECTIONS: { id: SettingsSection; icon: React.ElementType; titleKey: LocaleKey }[] = [
   { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title' },
   { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title' },
   { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title' },
   { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title' },
+  { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title' },
   { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title' },
 ];
 
@@ -94,12 +96,18 @@ interface SettingRowProps {
 }
 
 const SettingRow: React.FC<SettingRowProps> = ({ description, label, children }) => (
-  <div className="flex min-h-14 items-center justify-between gap-4 px-3 py-2">
+  <div className="grid min-h-16 grid-cols-[minmax(0,1fr)_11rem] items-center gap-6 px-4 py-2.5">
     <div className="flex min-w-0 flex-col gap-0.5">
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <p className="text-xs leading-5 text-muted-foreground">{description}</p>
     </div>
-    <div className="w-44 shrink-0">{children}</div>
+    <div>{children}</div>
+  </div>
+);
+
+const SettingGroupLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    {children}
   </div>
 );
 
@@ -185,6 +193,7 @@ export const SettingsPanel: React.FC = () => {
       openTerminal: t('settings.shortcuts.openTerminal'),
       openSftp: t('settings.shortcuts.openSftp'),
       openSettings: t('settings.shortcuts.openSettings'),
+      toggleAiPanel: t('settings.shortcuts.toggleAiPanel'),
       newTerminalTab: t('settings.shortcuts.newTerminalTab'),
       closeTerminalTab: t('settings.shortcuts.closeTerminalTab'),
       nextTerminalTab: t('settings.shortcuts.nextTerminalTab'),
@@ -244,13 +253,13 @@ export const SettingsPanel: React.FC = () => {
       <div className="flex h-full flex-col overflow-hidden bg-background">
         <header className="flex shrink-0 items-center border-b border-app-border/50 px-3 py-1.5">
           <div className="min-w-0">
-            <h1 className="text-sm font-medium text-app-text">{t('workbench.settings.title')}</h1>
-            <p className="text-[11px] text-muted-foreground">{t('settings.description')}</p>
+            <h1 className="text-base font-semibold text-app-text">{t('workbench.settings.title')}</h1>
+            <p className="text-xs text-muted-foreground">{t('settings.description')}</p>
           </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <nav className="flex w-48 shrink-0 flex-col gap-0.5 border-r border-app-border/50 p-2">
+          <nav aria-label={t('settings.sectionNavigation')} className="flex w-44 shrink-0 flex-col gap-1 border-r border-app-border/50 p-2">
             {SETTINGS_SECTIONS.map((section) => {
               const Icon = section.icon;
               const isActive = activeSection === section.id;
@@ -261,10 +270,10 @@ export const SettingsPanel: React.FC = () => {
                   onClick={() => setActiveSection(section.id)}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'flex items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors',
+                    'flex items-center gap-2 whitespace-nowrap rounded-r-md border-l-2 px-2.5 py-2 text-left text-[13px] transition-colors',
                     isActive
-                      ? 'bg-primary/15 font-medium text-primary'
-                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                      ? 'border-primary bg-background font-medium text-foreground shadow-sm'
+                      : 'border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
                   )}
                 >
                   <Icon className="size-4" />
@@ -275,7 +284,7 @@ export const SettingsPanel: React.FC = () => {
           </nav>
 
           <ScrollArea className="min-h-0 flex-1">
-            <div className="flex flex-col gap-2 p-2">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-2 p-3">
               {activeSection === 'appearance' && (
                 <div>
                   <div className="px-3 pb-2 pt-1">
@@ -369,6 +378,7 @@ export const SettingsPanel: React.FC = () => {
                     <p className="text-xs text-muted-foreground">{t('settings.terminal.description')}</p>
                   </div>
                   <Separator className="data-horizontal:border-border/40" />
+                <SettingGroupLabel>{t('settings.terminal.groupAppearance')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
                   <Select value={terminalFontFamily} onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.fontFamily')}>
@@ -471,6 +481,7 @@ export const SettingsPanel: React.FC = () => {
                   </Select>
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
+                <SettingGroupLabel>{t('settings.terminal.groupInteraction')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.cursorBlink')} description={t('settings.terminal.cursorBlinkDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.terminal.cursorBlink')} checked={terminalCursorBlink} onCheckedChange={setTerminalCursorBlink} />
@@ -568,6 +579,7 @@ export const SettingsPanel: React.FC = () => {
                   </Select>
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
+                <SettingGroupLabel>{t('settings.terminal.groupSafety')}</SettingGroupLabel>
                 <SettingRow
                   label={t('settings.terminal.multiLinePasteWarning')}
                   description={t('settings.terminal.multiLinePasteWarningDescription')}
@@ -591,6 +603,7 @@ export const SettingsPanel: React.FC = () => {
                   </div>
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
+                <SettingGroupLabel>{t('settings.terminal.groupSessions')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.autoReconnect')} description={t('settings.terminal.autoReconnectDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -723,6 +736,8 @@ export const SettingsPanel: React.FC = () => {
                 </SettingRow>
                 </div>
               )}
+
+              {activeSection === 'ai' && <AiSettingsSection />}
 
               {activeSection === 'shortcuts' && (
                 <div>

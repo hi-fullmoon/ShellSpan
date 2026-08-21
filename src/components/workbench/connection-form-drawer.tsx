@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FolderOpen, ChevronDown, KeyRound, Network, Server } from 'lucide-react';
+import { ChevronDown, EyeIcon, EyeOffIcon, FolderOpen, KeyRound, Network, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { FieldGroup } from '@/components/ui/field';
 import { FormRow } from './shared';
 import { invokePickPrivateKeyFile, invokeReadTextFile } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
@@ -209,6 +210,24 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
     }
 
     setErrors(nextErrors);
+    const firstError = Object.keys(nextErrors)[0];
+    if (firstError) {
+      const controlIds: Record<string, string> = {
+        name: 'connection-name',
+        host: 'connection-host',
+        port: 'connection-port',
+        username: 'connection-username',
+        password: 'connection-password',
+        keychainKeyId: 'connection-keychain-key',
+        jumpHostHost: 'jump-host',
+        jumpHostUsername: 'jump-username',
+        jumpHostPassword: 'jump-password',
+        jumpHostKeychainKeyId: 'jump-keychain-key',
+      };
+      window.requestAnimationFrame(() => {
+        document.getElementById(controlIds[firstError] ?? '')?.focus();
+      });
+    }
     return Object.keys(nextErrors).length === 0;
   };
 
@@ -345,32 +364,33 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-5 px-5 py-4">
             <FormSection icon={Server} title={t('connection.form.section.general')}>
-              <FormRow label={t('common.name')} error={errors.name}>
-                <Input value={form.name} onChange={(e) => updateField('name', e.target.value)} placeholder="My Server" autoComplete="off" autoCapitalize="none" />
+              <FormRow controlId="connection-name" label={t('common.name')} error={errors.name}>
+                <Input id="connection-name" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? 'connection-name-error' : undefined} value={form.name} onChange={(e) => updateField('name', e.target.value)} placeholder="My Server" autoComplete="off" autoCapitalize="none" />
               </FormRow>
               <div className="grid grid-cols-3 gap-2">
-                <FormRow className="col-span-2" label={t('common.host')} error={errors.host}>
-                  <Input value={form.host} onChange={(e) => updateField('host', e.target.value)} onBlur={handleHostBlur} placeholder="192.168.1.1" autoComplete="off" autoCapitalize="none" />
+                <FormRow controlId="connection-host" className="col-span-2" label={t('common.host')} error={errors.host}>
+                  <Input id="connection-host" aria-invalid={Boolean(errors.host)} aria-describedby={errors.host ? 'connection-host-error' : undefined} value={form.host} onChange={(e) => updateField('host', e.target.value)} onBlur={handleHostBlur} placeholder="192.168.1.1" autoComplete="off" autoCapitalize="none" />
                 </FormRow>
-                <FormRow label={t('common.port')} error={errors.port}>
-                  <Input value={form.port} onChange={(e) => updateField('port', e.target.value)} type="number" placeholder="22" autoComplete="off" autoCapitalize="none" />
+                <FormRow controlId="connection-port" label={t('common.port')} error={errors.port}>
+                  <Input id="connection-port" aria-invalid={Boolean(errors.port)} aria-describedby={errors.port ? 'connection-port-error' : undefined} value={form.port} onChange={(e) => updateField('port', e.target.value)} type="number" placeholder="22" autoComplete="off" autoCapitalize="none" />
                 </FormRow>
               </div>
-              <FormRow label={t('common.username')} error={errors.username}>
-                <Input value={form.username} onChange={(e) => updateField('username', e.target.value)} placeholder="root" autoComplete="off" autoCapitalize="none" />
+              <FormRow controlId="connection-username" label={t('common.username')} error={errors.username}>
+                <Input id="connection-username" aria-invalid={Boolean(errors.username)} aria-describedby={errors.username ? 'connection-username-error' : undefined} value={form.username} onChange={(e) => updateField('username', e.target.value)} placeholder="root" autoComplete="off" autoCapitalize="none" />
               </FormRow>
             </FormSection>
 
             <FormSection icon={KeyRound} title={t('connection.form.section.auth')}>
               <AuthMethodToggle value={form.authMethod} onChange={(value) => handleAuthMethodChange(value, 'main')} />
               {form.authMethod === 'password' && (
-                <FormRow label={t('common.password')} error={errors.password}>
-                  <Input type="password" value={form.password} onChange={(e) => updateField('password', e.target.value)} placeholder={t('common.password')} autoComplete="off" autoCapitalize="none" />
+                <FormRow controlId="connection-password" label={t('common.password')} error={errors.password}>
+                  <PasswordInput id="connection-password" ariaInvalid={Boolean(errors.password)} describedBy={errors.password ? 'connection-password-error' : undefined} value={form.password} onChange={(value) => updateField('password', value)} placeholder={t('common.password')} />
                 </FormRow>
               )}
               {form.authMethod === 'key' && (
                 <>
                   <KeyAuthInput
+                    idPrefix="connection"
                     keychainKeyId={form.keychainKeyId}
                     privateKeyPath={form.privateKeyPath}
                     keys={keyFileKeys}
@@ -382,8 +402,8 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                     onPrivateKeyPathChange={(value) => setForm((prev) => ({ ...prev, privateKeyPath: value }))}
                     onBrowse={() => pickPrivateKey('main')}
                   />
-                  <FormRow label={t('common.passphrase')}>
-                    <Input type="password" value={form.passphrase} onChange={(e) => updateField('passphrase', e.target.value)} placeholder={t('common.passphrase')} autoComplete="off" autoCapitalize="none" />
+                  <FormRow controlId="connection-passphrase" label={t('common.passphrase')}>
+                    <PasswordInput id="connection-passphrase" value={form.passphrase} onChange={(value) => updateField('passphrase', value)} placeholder={t('common.passphrase')} />
                   </FormRow>
                 </>
               )}
@@ -396,30 +416,31 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                     <span className="text-sm font-medium text-app-text">{t('connection.form.useJumpHost')}</span>
                     <span className="text-xs text-muted-foreground">{t('connection.form.jumpHostHint')}</span>
                   </div>
-                  <Switch checked={form.useJumpHost} onCheckedChange={(checked) => updateField('useJumpHost', checked)} />
+                  <Switch id="use-jump-host" aria-label={t('connection.form.useJumpHost')} checked={form.useJumpHost} onCheckedChange={(checked) => updateField('useJumpHost', checked)} />
                 </div>
                 {form.useJumpHost && (
                   <div className="flex flex-col gap-2.5 border-t border-app-border px-3.5 py-3">
                     <div className="grid grid-cols-3 gap-3">
-                      <FormRow className="col-span-2" label={t('common.host')} error={errors.jumpHostHost}>
-                        <Input value={form.jumpHost.host} onChange={(e) => updateJumpHost('host', e.target.value)} placeholder="192.168.1.1" autoComplete="off" autoCapitalize="none" />
+                      <FormRow controlId="jump-host" className="col-span-2" label={t('common.host')} error={errors.jumpHostHost}>
+                        <Input id="jump-host" aria-invalid={Boolean(errors.jumpHostHost)} aria-describedby={errors.jumpHostHost ? 'jump-host-error' : undefined} value={form.jumpHost.host} onChange={(e) => updateJumpHost('host', e.target.value)} placeholder="192.168.1.1" autoComplete="off" autoCapitalize="none" />
                       </FormRow>
-                      <FormRow label={t('common.port')}>
-                        <Input value={form.jumpHost.port} onChange={(e) => updateJumpHost('port', Number(e.target.value))} type="number" placeholder="22" autoComplete="off" autoCapitalize="none" />
+                      <FormRow controlId="jump-port" label={t('common.port')}>
+                        <Input id="jump-port" value={form.jumpHost.port} onChange={(e) => updateJumpHost('port', Number(e.target.value))} type="number" placeholder="22" autoComplete="off" autoCapitalize="none" />
                       </FormRow>
                     </div>
-                    <FormRow label={t('common.username')} error={errors.jumpHostUsername}>
-                      <Input value={form.jumpHost.username} onChange={(e) => updateJumpHost('username', e.target.value)} placeholder="root" autoComplete="off" autoCapitalize="none" />
+                    <FormRow controlId="jump-username" label={t('common.username')} error={errors.jumpHostUsername}>
+                      <Input id="jump-username" aria-invalid={Boolean(errors.jumpHostUsername)} aria-describedby={errors.jumpHostUsername ? 'jump-username-error' : undefined} value={form.jumpHost.username} onChange={(e) => updateJumpHost('username', e.target.value)} placeholder="root" autoComplete="off" autoCapitalize="none" />
                     </FormRow>
                     <AuthMethodToggle value={form.jumpHost.authMethod} onChange={(value) => handleAuthMethodChange(value, 'jump')} />
                     {form.jumpHost.authMethod === 'password' && (
-                      <FormRow label={t('common.password')} error={errors.jumpHostPassword}>
-                        <Input type="password" value={form.jumpHost.password ?? ''} onChange={(e) => updateJumpHost('password', e.target.value)} placeholder={t('common.password')} autoComplete="off" autoCapitalize="none" />
+                      <FormRow controlId="jump-password" label={t('common.password')} error={errors.jumpHostPassword}>
+                        <PasswordInput id="jump-password" ariaInvalid={Boolean(errors.jumpHostPassword)} describedBy={errors.jumpHostPassword ? 'jump-password-error' : undefined} value={form.jumpHost.password ?? ''} onChange={(value) => updateJumpHost('password', value)} placeholder={t('common.password')} />
                       </FormRow>
                     )}
                     {form.jumpHost.authMethod === 'key' && (
                       <>
                         <KeyAuthInput
+                          idPrefix="jump"
                           keychainKeyId={form.jumpHost.keychainKeyId ?? ''}
                           privateKeyPath={form.jumpHost.privateKeyPath ?? ''}
                           keys={keyFileKeys}
@@ -431,14 +452,12 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                           onPrivateKeyPathChange={(value) => updateJumpHost('privateKeyPath', value)}
                           onBrowse={() => pickPrivateKey('jump')}
                         />
-                        <FormRow label={t('common.passphrase')}>
-                          <Input
-                            type="password"
+                        <FormRow controlId="jump-passphrase" label={t('common.passphrase')}>
+                          <PasswordInput
+                            id="jump-passphrase"
                             value={form.jumpHost.passphrase ?? ''}
-                            onChange={(e) => updateJumpHost('passphrase', e.target.value)}
+                            onChange={(value) => updateJumpHost('passphrase', value)}
                             placeholder={t('common.passphrase')}
-                            autoComplete="off"
-                            autoCapitalize="none"
                           />
                         </FormRow>
                       </>
@@ -469,15 +488,66 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                 <ChevronDown />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="top" className="w-40 rounded-md">
-                <DropdownMenuItem onClick={handleSaveOnly} disabled={isSubmitting}>
-                  {t('connection.form.saveOnly')}
-                </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={handleSaveOnly} disabled={isSubmitting}>
+                    {t('connection.form.saveOnly')}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
+  );
+};
+
+interface PasswordInputProps {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  ariaInvalid?: boolean;
+  describedBy?: string;
+}
+
+const PasswordInput: React.FC<PasswordInputProps> = ({
+  id,
+  value,
+  onChange,
+  placeholder,
+  ariaInvalid,
+  describedBy,
+}) => {
+  const { t } = useI18n();
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <div className="flex w-full">
+      <Input
+        id={id}
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        autoComplete="new-password"
+        autoCapitalize="none"
+        aria-invalid={ariaInvalid}
+        aria-describedby={describedBy}
+        className="rounded-r-none"
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="shrink-0 rounded-l-none border-l-0"
+        aria-label={visible ? t('common.hidePassword') : t('common.showPassword')}
+        aria-pressed={visible}
+        onClick={() => setVisible((current) => !current)}
+      >
+        {visible ? <EyeOffIcon /> : <EyeIcon />}
+      </Button>
+    </div>
   );
 };
 
@@ -494,7 +564,7 @@ const FormSection: React.FC<FormSectionProps> = ({ icon: Icon, title, children }
         <Icon className="size-3.5 text-muted-foreground" />
         <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{title}</span>
       </div>
-      {children}
+      <FieldGroup className="gap-2.5">{children}</FieldGroup>
     </section>
   );
 };
@@ -527,6 +597,7 @@ const AuthMethodToggle: React.FC<AuthMethodToggleProps> = ({ value, onChange }) 
 };
 
 interface KeyAuthInputProps {
+  idPrefix: 'connection' | 'jump';
   keychainKeyId: string;
   privateKeyPath: string;
   keys: { id: string; label: string }[];
@@ -540,6 +611,7 @@ interface KeyAuthInputProps {
 }
 
 const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
+  idPrefix,
   keychainKeyId,
   privateKeyPath,
   keys,
@@ -551,36 +623,40 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
   const { t } = useI18n();
   const isKeyMissing = keychainKeyId !== '' && !keys.some((k) => k.id === keychainKeyId);
   const displayError = isKeyMissing ? t('connection.form.validation.keyNotFound') : errors.keychainKeyId;
+  const keyControlId = `${idPrefix}-keychain-key`;
+  const pathControlId = `${idPrefix}-private-key`;
 
   return (
     <div className="flex flex-col gap-2.5">
-      <FormRow label={t('common.keychainKey')} error={displayError}>
+      <FormRow controlId={keyControlId} label={t('common.keychainKey')} error={displayError}>
         {keys.length === 0 && !isKeyMissing ? (
           <div className="flex items-center justify-between rounded-lg border border-dashed border-app-border px-3 py-2 text-sm text-muted-foreground">
             <span>{t('connection.form.noKeychainKeys')}</span>
           </div>
         ) : (
           <Select value={(!isKeyMissing && keychainKeyId) || undefined} onValueChange={(next) => onKeychainKeyIdChange(next ?? '')}>
-            <SelectTrigger>
+            <SelectTrigger id={keyControlId} aria-invalid={Boolean(displayError)} aria-describedby={displayError ? `${keyControlId}-error` : undefined}>
               <SelectValue placeholder={isKeyMissing ? t('connection.form.validation.keyNotFound') : t('connection.form.selectKeychainKey')}>
                 {(!isKeyMissing && keys.find((key) => key.id === keychainKeyId)?.label) || undefined}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {keys.map((key) => (
-                <SelectItem key={key.id} value={key.id}>
-                  {key.label}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {keys.map((key) => (
+                  <SelectItem key={key.id} value={key.id}>
+                    {key.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         )}
       </FormRow>
 
-      <FormRow label={t('common.privateKey')} error={errors.privateKeyPath}>
+      <FormRow controlId={pathControlId} label={t('common.privateKey')} error={errors.privateKeyPath}>
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-2">
-            <Input value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="flex-1" autoComplete="off" autoCapitalize="none" />
+            <Input id={pathControlId} aria-invalid={Boolean(errors.privateKeyPath)} aria-describedby={errors.privateKeyPath ? `${pathControlId}-error` : undefined} value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="flex-1" autoComplete="off" autoCapitalize="none" />
             <Button variant="outline" className="shrink-0" onClick={onBrowse}>
               <FolderOpen />
               {t('connection.form.browse')}
