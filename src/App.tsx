@@ -28,6 +28,7 @@ import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-
 import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prompt-dialog';
 import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
+import { AiPanel } from '@/components/ai/ai-panel';
 const logger = createLogger('app');
 
 export const App: React.FC = () => {
@@ -131,40 +132,43 @@ export const App: React.FC = () => {
 
   return (
     <AppShell>
-      <MainContent>
-        <Suspense
-          fallback={
-            <div className="flex h-full w-full items-center justify-center">
-              <Spinner size={24} />
+      <div className="flex min-h-0 flex-1">
+        <MainContent>
+          <Suspense
+            fallback={
+              <div className="flex h-full w-full items-center justify-center">
+                <Spinner size={24} />
+              </div>
+            }
+          >
+            <div
+              className={cn(
+                'h-full',
+                activeSection !== 'workbench' && 'hidden',
+              )}
+            >
+              <Workbench />
             </div>
-          }
-        >
-          <div
-            className={cn(
-              'h-full',
-              activeSection !== 'workbench' && 'hidden',
-            )}
-          >
-            <Workbench />
-          </div>
-          <div
-            className={cn(
-              'h-full',
-              activeSection !== 'terminal' && 'hidden',
-            )}
-          >
-            <Terminal />
-          </div>
-          <div
-            className={cn(
-              'h-full',
-              activeSection !== 'sftp' && 'hidden',
-            )}
-          >
-            <Sftp />
-          </div>
-        </Suspense>
-      </MainContent>
+            <div
+              className={cn(
+                'h-full',
+                activeSection !== 'terminal' && 'hidden',
+              )}
+            >
+              <Terminal />
+            </div>
+            <div
+              className={cn(
+                'h-full',
+                activeSection !== 'sftp' && 'hidden',
+              )}
+            >
+              <Sftp />
+            </div>
+          </Suspense>
+        </MainContent>
+        <AiPanel />
+      </div>
 
       <AboutDialog open={aboutDialogOpen} onClose={() => setAboutDialogOpen(false)} />
 

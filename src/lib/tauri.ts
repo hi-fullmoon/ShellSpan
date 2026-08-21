@@ -43,6 +43,7 @@ import type {
   TransferBatchResult,
   UploadProgressEvent,
 } from '@/types';
+import type { AiProviderConfig, AiStartRequest } from '@/types/ai';
 
 const logger = createLogger('ipc');
 
@@ -123,6 +124,30 @@ export async function invokeResizeSession(
 
 export async function invokeCloseSession(sessionId: string): Promise<void> {
   return invokeLogged('close_session', { sessionId });
+}
+
+export async function invokeStoreAiApiKey(providerId: string, apiKey: string): Promise<void> {
+  return invokeLogged('ai_store_api_key', { providerId, apiKey });
+}
+
+export async function invokeHasAiApiKey(providerId: string): Promise<boolean> {
+  return invokeLogged<boolean>('ai_has_api_key', { providerId });
+}
+
+export async function invokeDeleteAiApiKey(providerId: string): Promise<void> {
+  return invokeLogged('ai_delete_api_key', { providerId });
+}
+
+export async function invokeListAiModels(provider: AiProviderConfig): Promise<string[]> {
+  return invokeLogged<string[]>('ai_list_models', { provider });
+}
+
+export async function invokeStartAiRequest(request: AiStartRequest): Promise<void> {
+  return invokeLogged('ai_start_request', { request });
+}
+
+export async function invokeCancelAiRequest(requestId: string): Promise<void> {
+  return invokeLogged('ai_cancel_request', { requestId });
 }
 
 export async function invokeOpenUrl(url: string): Promise<void> {
