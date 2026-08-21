@@ -21,6 +21,7 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
+  InputGroupText,
   InputGroupTextarea,
 } from '@/components/ui/input-group';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -787,7 +788,7 @@ export const AiPanel: React.FC = () => {
         )}
 
         <div className="shrink-0 p-3 pt-2">
-          <InputGroup className="min-h-28 rounded-2xl bg-card shadow-sm">
+          <InputGroup className="min-h-28 rounded-2xl bg-card shadow-xs has-[[data-slot=input-group-control]:focus-visible]:ring-1">
             <InputGroupTextarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -811,84 +812,93 @@ export const AiPanel: React.FC = () => {
               className="min-h-18 max-h-48 px-3.5 pt-3 pb-1 leading-5"
               disabled={busy || agentNeedsResolution}
             />
-            <InputGroupAddon align="block-end" className="justify-between gap-2 px-2 pb-2 pt-1">
-              <ToggleGroup
-                value={[task]}
-                onValueChange={(values) => {
-                  const value = values[0] as AiTaskKind | undefined;
-                  if (value) setTask(value);
-                }}
-                variant="tag"
-                size="xs"
-                spacing={1}
-                className="min-w-0"
-                aria-label={t('ai.mode')}
-                disabled={busy || agentNeedsResolution}
-              >
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}
-                  >
-                    <MessageCircleIcon data-icon="inline-start" />
-                    {!compactModeControls && t('ai.mode.chat')}
-                  </TooltipTrigger>
-                  <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
-                  >
-                    <SquareTerminalIcon data-icon="inline-start" />
-                    {!compactModeControls && t('ai.mode.command')}
-                  </TooltipTrigger>
-                  <TooltipContent>{t('ai.mode.command')}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<ToggleGroupItem value="diagnosticAgent" aria-label={t('ai.mode.agent')} />}
-                  >
-                    <BrainCircuitIcon data-icon="inline-start" />
-                    {!compactModeControls && t('ai.mode.agent')}
-                  </TooltipTrigger>
-                  <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
-                </Tooltip>
-              </ToggleGroup>
-              {busy ? (
-                <InputGroupButton
-                  variant="default"
-                  size="icon-sm"
-                  className="shrink-0 rounded-full"
-                  onClick={handleCancel}
-                  aria-label={t('ai.stop')}
+            <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
+              {(agentNeedsResolution || (task === 'diagnosticAgent' && !agentContext.context)) && (
+                <InputGroupText
+                  className="min-w-0 px-1 text-xs leading-4"
+                  aria-live="polite"
                 >
-                  <SquareIcon />
-                </InputGroupButton>
-              ) : (
-                <InputGroupButton
-                  variant="default"
-                  size="icon-sm"
-                  className="shrink-0 rounded-full"
-                  onClick={() => task === 'diagnosticAgent'
-                    ? void runDiagnosticAgent(draft)
-                    : void send(task, draft)}
-                  disabled={
-                    !draft.trim()
-                    || agentNeedsResolution
-                    || (task === 'diagnosticAgent' && !agentContext.context)
-                  }
-                  aria-label={t('ai.send')}
-                >
-                  <ArrowUpIcon />
-                </InputGroupButton>
+                  <SquareTerminalIcon />
+                  <span>
+                    {agentNeedsResolution
+                      ? t('ai.agent.resolvePending')
+                      : t('ai.agent.requiresTerminal')}
+                  </span>
+                </InputGroupText>
               )}
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <ToggleGroup
+                  value={[task]}
+                  onValueChange={(values) => {
+                    const value = values[0] as AiTaskKind | undefined;
+                    if (value) setTask(value);
+                  }}
+                  variant="tag"
+                  size="xs"
+                  spacing={1}
+                  className="min-w-0"
+                  aria-label={t('ai.mode')}
+                  disabled={busy || agentNeedsResolution}
+                >
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}
+                    >
+                      <MessageCircleIcon data-icon="inline-start" />
+                      {!compactModeControls && t('ai.mode.chat')}
+                    </TooltipTrigger>
+                    <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
+                    >
+                      <SquareTerminalIcon data-icon="inline-start" />
+                      {!compactModeControls && t('ai.mode.command')}
+                    </TooltipTrigger>
+                    <TooltipContent>{t('ai.mode.command')}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<ToggleGroupItem value="diagnosticAgent" aria-label={t('ai.mode.agent')} />}
+                    >
+                      <BrainCircuitIcon data-icon="inline-start" />
+                      {!compactModeControls && t('ai.mode.agent')}
+                    </TooltipTrigger>
+                    <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
+                  </Tooltip>
+                </ToggleGroup>
+                {busy ? (
+                  <InputGroupButton
+                    variant="default"
+                    size="icon-sm"
+                    className="shrink-0 rounded-full"
+                    onClick={handleCancel}
+                    aria-label={t('ai.stop')}
+                  >
+                    <SquareIcon />
+                  </InputGroupButton>
+                ) : (
+                  <InputGroupButton
+                    variant="default"
+                    size="icon-sm"
+                    className="shrink-0 rounded-full"
+                    onClick={() => task === 'diagnosticAgent'
+                      ? void runDiagnosticAgent(draft)
+                      : void send(task, draft)}
+                    disabled={
+                      !draft.trim()
+                      || agentNeedsResolution
+                      || (task === 'diagnosticAgent' && !agentContext.context)
+                    }
+                    aria-label={t('ai.send')}
+                  >
+                    <ArrowUpIcon />
+                  </InputGroupButton>
+                )}
+              </div>
             </InputGroupAddon>
           </InputGroup>
-          {task === 'diagnosticAgent' && !agentContext.context && (
-            <p className="mt-1 text-xs text-muted-foreground">{t('ai.agent.requiresTerminal')}</p>
-          )}
-          {agentNeedsResolution && (
-            <p className="mt-1 text-xs text-muted-foreground">{t('ai.agent.resolvePending')}</p>
-          )}
           {!model.trim() && (
             <Button variant="link" size="xs" className="mt-1 px-0" onClick={openSettings}>
               {t('ai.configure')}

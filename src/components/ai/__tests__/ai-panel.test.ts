@@ -212,6 +212,30 @@ describe('AI panel width', () => {
   });
 });
 
+describe('AI composer status', () => {
+  it('keeps the missing-terminal guidance inside the composer', async () => {
+    await act(async () => {
+      await initI18n('zh-CN');
+    });
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    fireEvent.click(screen.getByRole('button', { name: '诊断 Agent' }));
+
+    const guidance = await screen.findByText(
+      '诊断 Agent 需要先打开一个终端会话。',
+    );
+    expect(guidance.closest('[data-slot="input-group"]')).not.toBeNull();
+    expect(guidance.parentElement).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
+
+    unmount();
+    useAiStore.getState().setOpen(false);
+  });
+});
+
 describe('cancelActiveAiRequests', () => {
   beforeEach(() => {
     useAiStore.getState().clear();

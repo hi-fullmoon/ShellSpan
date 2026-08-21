@@ -225,6 +225,8 @@ describe('SftpPreviewDialog', () => {
 
     fireEvent.load(image);
 
-    expect(image).toHaveStyle({ width: '536px', height: '428px' });
+    expect(image.parentElement).toHaveClass('p-4');
+    expect(image.parentElement).not.toHaveClass('p-8');
+    expect(image).toHaveStyle({ width: '568px', height: '454px' });
   });
 });
