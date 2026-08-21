@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { getSftpPaneConnectionKey, useSftpStore } from '../sftpStore';
-import { useTransferStore } from '../transferStore';
+import { runPathOperation, useTransferStore } from '../transferStore';
 import { invokeAddSftpBookmark, invokeDisconnectSftp, invokeRemoveSftpBookmark } from '@/lib/tauri';
 
 vi.mock('@/lib/tauri', () => ({
@@ -449,5 +449,43 @@ describe('sftpStore', () => {
 
     expect(invokeDisconnectSftp).not.toHaveBeenCalled();
     expect(useSftpStore.getState().connections).toHaveLength(0);
+  });
+
+  it('cancels unstarted path tasks owned by a closing tab', async () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'c1',
+        title: 'Test',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+    );
+    const connection = useSftpStore.getState().connections[0]!;
+    const connectionKey = getSftpPaneConnectionKey(connection, 'remote');
+    useTransferStore.getState().addOperation({
+      operationId: 'blocking-transfer',
+      kind: 'download',
+      connectionId: connectionKey,
+      paths: ['/remote/file.txt'],
+      totalBytes: 100,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+    const task = vi.fn().mockResolvedValue(undefined);
+    const queued = runPathOperation(
+      [{ connectionId: connectionKey, paths: ['/remote/file.txt'] }],
+      task,
+      { ownerId: connection.id },
+    );
+
+    useSftpStore.getState().removeConnection(connection.id);
+    useTransferStore.getState().markOperationCompleted('blocking-transfer');
+    await queued;
+
+    expect(task).not.toHaveBeenCalled();
   });
 });

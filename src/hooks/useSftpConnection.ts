@@ -358,6 +358,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       addOperation({
         operationId,
         kind: 'remote-copy',
+        ownerId: connection.id,
         connectionId: remoteConnectionKey,
         paths: [sourcePath],
         pathScopes: [
@@ -385,6 +386,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       addOperation({
         operationId,
         kind: 'delete',
+        ownerId: connection.id,
         connectionId: remoteConnectionKey,
         paths,
         currentPath: paths[0],
@@ -465,6 +467,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         addOperation({
           operationId,
           kind: 'upload',
+          ownerId: connection.id,
           connectionId: remoteConnectionKey,
           paths: currentTargetPaths,
           currentPath: currentLocalPaths[0],
@@ -568,6 +571,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         addOperation({
           operationId,
           kind: 'download',
+          ownerId: connection.id,
           connectionId: remoteConnectionKey,
           paths: currentRemotePaths,
           currentPath: currentRemotePaths[0],

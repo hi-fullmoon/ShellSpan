@@ -15,7 +15,11 @@ import {
 } from '@/lib/tauri';
 import { safeInvoke } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
-import { hasActivePathOperation, useTransferStore } from './transferStore';
+import {
+  cancelQueuedPathOperationsForOwner,
+  hasActivePathOperation,
+  useTransferStore,
+} from './transferStore';
 import type { FileEntry } from '@/components/sftp/utils';
 
 const logger = createLogger('sftpStore');
@@ -397,6 +401,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
           ? connections[connections.length - 1]?.id ?? null
           : state.activeConnectionId;
       if (closing) {
+        cancelQueuedPathOperationsForOwner(id);
         disconnectRemotePanes(closing);
       }
       return { connections, activeConnectionId };

@@ -202,9 +202,17 @@ export function useSftpPaneActions(
   );
 
   const runAfterPathsIdle = useCallback(
-    <T,>(scopes: PathOperationScope[], task: () => Promise<T> | T) =>
-      runPathOperation(scopes, task, () => info(t('sftp.transfer.queued'))),
-    [info, t],
+    <T,>(
+      scopes: PathOperationScope[],
+      task: () => Promise<T> | T,
+      queueKey?: string,
+    ) =>
+      runPathOperation(scopes, task, {
+        ownerId: connection.id,
+        queueKey,
+        onQueued: () => info(t('sftp.transfer.queued')),
+      }),
+    [connection.id, info, t],
   );
 
   const reload = useCallback(async () => {
@@ -397,6 +405,7 @@ export function useSftpPaneActions(
           addOperation({
             operationId,
             kind: 'remote-copy',
+            ownerId: connection.id,
             connectionId: clipboard.sourceConnectionKey,
             paths: [clipboard.sourcePath],
             pathScopes: transferScopes,
@@ -621,6 +630,7 @@ export function useSftpPaneActions(
         await runAfterPathsIdle(
           [{ connectionId: remoteConnectionKey, paths: targetPaths }],
           () => uploadLocalPaths(localPaths, destinationDirectory, operationId, policies),
+          operationId,
         );
       } catch (err) {
         logger.warn('Upload with conflict policies failed', err);
@@ -655,6 +665,7 @@ export function useSftpPaneActions(
       addOperation({
         operationId: resolvedOperationId,
         kind: 'upload',
+        ownerId: connection.id,
         currentPath: sourcePaths[0],
         totalBytes: 0,
         processedBytes: 0,
