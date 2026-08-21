@@ -14,6 +14,7 @@ export type ShortcutAction =
   | 'openTerminal'
   | 'openSftp'
   | 'openSettings'
+  | 'toggleAiPanel'
   | 'newTerminalTab'
   | 'closeTerminalTab'
   | 'nextTerminalTab'
