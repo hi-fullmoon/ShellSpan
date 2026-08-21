@@ -493,4 +493,17 @@ describe('transferStore', () => {
 
     expect(task).not.toHaveBeenCalled();
   });
+
+  it('rejects path tasks submitted after their owner has already closed', async () => {
+    const task = vi.fn().mockResolvedValue(undefined);
+    cancelQueuedPathOperationsForOwner('closed-tab');
+
+    await runPathOperation(
+      [{ connectionId: 'connection-1', paths: ['/remote/file.txt'] }],
+      task,
+      { ownerId: 'closed-tab' },
+    );
+
+    expect(task).not.toHaveBeenCalled();
+  });
 });
