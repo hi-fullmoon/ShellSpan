@@ -116,6 +116,7 @@ function createActions(
     renameTarget: undefined,
     permissionsTarget: undefined,
     propertiesTarget: undefined,
+    previewTarget: undefined,
     previewContent: undefined,
     hasLocalClipboard: false,
     onOpen: vi.fn(),
@@ -146,7 +147,7 @@ function createActions(
     setRenameTarget: vi.fn(),
     setPermissionsTarget: vi.fn(),
     setPropertiesTarget: vi.fn(),
-    setPreviewContent: vi.fn(),
+    closePreview: vi.fn(),
     handleCreate: vi.fn().mockResolvedValue(undefined),
     handleRename: vi.fn().mockResolvedValue(undefined),
     handlePermissions: vi.fn().mockResolvedValue(undefined),
@@ -154,9 +155,10 @@ function createActions(
   return { ...base, ...overrides };
 }
 
-function renderContent(connection: ReturnType<typeof createConnection>) {
-  return render(
+function contentElement(connection: ReturnType<typeof createConnection>) {
+  return (
     <SftpContent
+      key={connection.id}
       connection={connection}
       newConnectionMenuOpen={false}
       setNewConnectionMenuOpen={vi.fn()}
@@ -164,8 +166,12 @@ function renderContent(connection: ReturnType<typeof createConnection>) {
       setTabContextMenu={vi.fn()}
       openSftpConnection={vi.fn().mockResolvedValue(undefined)}
       verifyHostKey={vi.fn().mockResolvedValue(undefined)}
-    />,
+    />
   );
+}
+
+function renderContent(connection: ReturnType<typeof createConnection>) {
+  return render(contentElement(connection));
 }
 
 function lastDragEnd(): (payload: SftpDndPayload, targetSide: 'local' | 'remote') => void {
@@ -282,6 +288,40 @@ describe('SftpContent upload queue', () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  it('isolates upload conflicts when switching SFTP tabs', async () => {
+    const uploadWithPolicies = vi.fn().mockResolvedValue(undefined);
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions({ uploadWithPolicies }));
+
+    const first = createConnection(['a.txt']);
+    const rendered = renderContent(first);
+    await capturedOnDrop!(['/local/a.txt'], 'remote');
+    expect(await findConflictFileName('a.txt')).toBeInTheDocument();
+    await capturedOnDrop!(['/local/b.txt'], 'remote');
+
+    const second = {
+      ...first,
+      id: 'second-tab',
+      remoteEntries: [],
+      remotePane: { ...first.remotePane, selectedPaths: [] },
+      localPane: { ...first.localPane, selectedPaths: [] },
+    };
+    rendered.rerender(contentElement(second));
+
+    await waitFor(() => expect(queryConflictFileName('a.txt')).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        useTransferStore.getState().operations.every((op) => op.status !== 'pending'),
+      ).toBe(true),
+    );
+    expect(uploadWithPolicies).not.toHaveBeenCalled();
   });
 
   it('passes the overwrite policy through to remote-to-local downloads', async () => {

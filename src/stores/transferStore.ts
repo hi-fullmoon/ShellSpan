@@ -184,6 +184,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
       .getState()
       .operations.find((item) => item.operationId === operationId);
     if (!operation?.retry) return;
+    if (operation.ownerId && closedPathOwners.has(operation.ownerId)) return;
     retryingOperationIds.add(operationId);
 
     const scopes = operation.pathScopes ??
@@ -313,6 +314,7 @@ let nextPathOperationSequence = 0;
 const queuedPathOperations: QueuedPathOperation[] = [];
 let drainingPathOperations = false;
 const pathOwnerCancellationHandlers = new Map<string, Set<() => void>>();
+const closedPathOwners = new Set<string>();
 
 function scopeHasActiveOperation(
   scope: PathOperationScope,
@@ -408,6 +410,9 @@ export function runPathOperation<T>(
   task: () => Promise<T> | T,
   options: PathOperationOptions = {},
 ): Promise<T | undefined> {
+  if (options.ownerId && closedPathOwners.has(options.ownerId)) {
+    return Promise.resolve(undefined);
+  }
   return new Promise<T | undefined>((resolve, reject) => {
     const request: QueuedPathOperation = {
       sequence: nextPathOperationSequence++,
@@ -446,6 +451,7 @@ export function cancelQueuedPathOperation(queueKey: string): void {
 }
 
 export function cancelQueuedPathOperationsForOwner(ownerId: string): void {
+  closedPathOwners.add(ownerId);
   cancelQueuedPathOperations((request) => request.ownerId === ownerId);
   const handlers = pathOwnerCancellationHandlers.get(ownerId);
   if (!handlers) return;
@@ -456,6 +462,10 @@ export function registerPathOwnerCancellation(
   ownerId: string,
   handler: () => void,
 ): () => void {
+  if (closedPathOwners.has(ownerId)) {
+    queueMicrotask(handler);
+    return () => {};
+  }
   const handlers = pathOwnerCancellationHandlers.get(ownerId) ?? new Set();
   handlers.add(handler);
   pathOwnerCancellationHandlers.set(ownerId, handlers);
@@ -463,6 +473,10 @@ export function registerPathOwnerCancellation(
     handlers.delete(handler);
     if (handlers.size === 0) pathOwnerCancellationHandlers.delete(ownerId);
   };
+}
+
+export function activatePathOperationOwner(ownerId: string): void {
+  closedPathOwners.delete(ownerId);
 }
 
 /**
