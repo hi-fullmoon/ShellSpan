@@ -138,7 +138,7 @@ export function useSftpPaneActions(
   const remoteConnection = getSftpPaneConnection(connection, side);
   const remoteConnectionKey = getSftpPaneConnectionKey(connection, side);
 
-  const { loadLocalDirectory } = useLocalDirectory(connection, side);
+  const { loadLocalDirectory, openLocalPath, previewLocalFile } = useLocalDirectory(connection, side);
   const {
     loadRemoteDirectory,
     createRemoteEntry,
@@ -225,29 +225,33 @@ export function useSftpPaneActions(
 
   const onOpenWithDefaultEditor = useCallback(
     async (entry?: Pick<FileEntry, 'path' | 'kind'>) => {
-      if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target || target.kind === 'directory') return;
       try {
-        await openRemoteFile(target.path);
+        if (isLocal) {
+          await openLocalPath(target.path);
+        } else {
+          await openRemoteFile(target.path);
+        }
       } catch (err) {
-        logger.warn(`Failed to open remote file: ${target.path}`, err);
+        logger.warn(`Failed to open ${isLocal ? 'local' : 'remote'} file: ${target.path}`, err);
         error(getToastErrorMessage(err));
       }
     },
-    [isLocal, openRemoteFile, selectedEntries, error],
+    [isLocal, openLocalPath, openRemoteFile, selectedEntries, error],
   );
 
   const onPreview = useCallback(
     async (entry?: FileEntry) => {
-      if (isLocal) return;
       const target = entry ?? selectedEntries[0];
       if (!target || target.kind === 'directory') return;
       const requestId = ++previewRequestIdRef.current;
       setPreviewTarget({ path: target.path, name: target.name, size: target.size });
       setPreviewContent(undefined);
       try {
-        const content = await previewRemoteFile(target.path);
+        const content = isLocal
+          ? await previewLocalFile(target.path)
+          : await previewRemoteFile(target.path);
         if (previewRequestIdRef.current === requestId) {
           setPreviewTarget({ path: content.path, name: content.name, size: content.size });
           setPreviewContent(content);
@@ -256,11 +260,11 @@ export function useSftpPaneActions(
         if (previewRequestIdRef.current !== requestId) return;
         setPreviewTarget(undefined);
         setPreviewContent(undefined);
-        logger.warn(`Failed to preview remote file: ${target.path}`, err);
+        logger.warn(`Failed to preview ${isLocal ? 'local' : 'remote'} file: ${target.path}`, err);
         error(getToastErrorMessage(err));
       }
     },
-    [isLocal, previewRemoteFile, selectedEntries, error],
+    [isLocal, previewLocalFile, previewRemoteFile, selectedEntries, error],
   );
 
   const closePreview = useCallback(() => {

@@ -9,6 +9,15 @@ const tauri = vi.hoisted(() => ({
     entries: [],
   }),
   invokeOpenPath: vi.fn().mockResolvedValue(undefined),
+  invokePreviewLocalFile: vi.fn().mockResolvedValue({
+    path: '/local/draft.txt',
+    name: 'draft.txt',
+    content: 'hello',
+    size: 5,
+    isText: true,
+    contentEncoding: 'utf8',
+    truncated: false,
+  }),
 }));
 
 vi.mock('@/lib/tauri', () => tauri);
@@ -110,5 +119,15 @@ describe('useLocalDirectory', () => {
     const state = useSftpStore.getState().connections[0]!;
     expect(state.localError).toBe('permission denied');
     expect(state.localLoading).toBe(false);
+  });
+
+  it('loads local preview content through the Tauri command', async () => {
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useLocalDirectory(connection));
+
+    const preview = await result.current.previewLocalFile('/local/draft.txt');
+
+    expect(tauri.invokePreviewLocalFile).toHaveBeenCalledWith('/local/draft.txt');
+    expect(preview.content).toBe('hello');
   });
 });

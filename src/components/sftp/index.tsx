@@ -885,6 +885,16 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         />
 
         <SftpPreviewDialog
+          target={localActions.previewTarget}
+          content={localActions.previewContent}
+          open={localActions.previewTarget !== undefined}
+          onClose={localActions.closePreview}
+          onOpenExternally={(path) => {
+            void localActions.onOpenWithDefaultEditor({ path, kind: 'file' });
+          }}
+        />
+
+        <SftpPreviewDialog
           target={remoteActions.previewTarget}
           content={remoteActions.previewContent}
           open={remoteActions.previewTarget !== undefined}

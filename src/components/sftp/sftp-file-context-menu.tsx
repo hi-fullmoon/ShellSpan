@@ -143,7 +143,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   const hasSelection = selectedEntries.length > 0;
   const canOpen = singleSelection?.kind === 'directory';
   const canOpenWithDefaultEditor = !isLocal && singleSelection?.kind === 'file';
-  const canPreview = !isLocal && singleSelection?.kind === 'file';
+  const canPreview = singleSelection?.kind === 'file';
   const canDownload = !isLocal && singleSelection !== undefined && !selectionBusy;
   const canRename = singleSelection !== undefined && !selectionBusy;
   const canCopy = isLocal ? hasSelection : singleSelection !== undefined;
@@ -214,19 +214,18 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
       )}
 
       {!isLocal && (
-        <>
-          <MenuItem
-            onClick={() => handleAction('openWithDefaultEditor')}
-            disabled={!canOpenWithDefaultEditor}
-            icon={<FileTextIcon className="h-3.5 w-3.5" />}
-          >
-            {t('sftp.contextMenu.openWithDefaultEditor')}
-          </MenuItem>
-          <MenuItem onClick={() => handleAction('preview')} disabled={!canPreview} icon={<EyeIcon className="h-3.5 w-3.5" />}>
-            {t('sftp.contextMenu.preview')}
-          </MenuItem>
-        </>
+        <MenuItem
+          onClick={() => handleAction('openWithDefaultEditor')}
+          disabled={!canOpenWithDefaultEditor}
+          icon={<FileTextIcon className="h-3.5 w-3.5" />}
+        >
+          {t('sftp.contextMenu.openWithDefaultEditor')}
+        </MenuItem>
       )}
+
+      <MenuItem onClick={() => handleAction('preview')} disabled={!canPreview} icon={<EyeIcon className="h-3.5 w-3.5" />}>
+        {t('sftp.contextMenu.preview')}
+      </MenuItem>
 
       <MenuItem onClick={() => handleAction('batchMode')} icon={<Grid3X3Icon className="h-3.5 w-3.5" />}>
         {batchMode ? t('sftp.contextMenu.batch.exit') : t('sftp.contextMenu.batch.enter')}

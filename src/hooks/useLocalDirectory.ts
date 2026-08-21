@@ -1,15 +1,17 @@
 import { useCallback } from 'react';
-import { invokeListLocalDirectory, invokeOpenPath } from '@/lib/tauri';
+import { invokeListLocalDirectory, invokeOpenPath, invokePreviewLocalFile } from '@/lib/tauri';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
 import {
   isLatestDirectoryListRequest,
   nextDirectoryListRequestId,
 } from '@/hooks/utils';
+import type { ReadRemoteFileResponse } from '@/types';
 
 export function useLocalDirectory(connection: SftpConnection, side: SftpSide = 'local'): {
   loadLocalDirectory: (path?: string) => Promise<void>;
   openLocalPath: (path: string) => Promise<void>;
+  previewLocalFile: (path: string) => Promise<ReadRemoteFileResponse>;
 } {
   const setPath = useSftpStore((state) => state.setPath);
   const setEntries = useSftpStore((state) => state.setEntries);
@@ -48,5 +50,9 @@ export function useLocalDirectory(connection: SftpConnection, side: SftpSide = '
     await invokeOpenPath(path);
   }, []);
 
-  return { loadLocalDirectory, openLocalPath };
+  const previewLocalFile = useCallback(async (path: string) => {
+    return invokePreviewLocalFile(path);
+  }, []);
+
+  return { loadLocalDirectory, openLocalPath, previewLocalFile };
 }

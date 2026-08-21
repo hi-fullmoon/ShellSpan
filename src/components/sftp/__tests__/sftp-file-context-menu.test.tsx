@@ -180,6 +180,8 @@ describe('SftpFileContextMenu', () => {
     expect(screen.queryByText('sftp.contextMenu.newFile')).not.toBeInTheDocument();
     expect(screen.queryByText('sftp.contextMenu.uploadFile')).not.toBeInTheDocument();
     expect(screen.queryByText('common.download')).not.toBeInTheDocument();
+    expect(screen.queryByText('sftp.contextMenu.openWithDefaultEditor')).not.toBeInTheDocument();
+    expect(screen.getByText('sftp.contextMenu.preview').closest('button')).not.toBeDisabled();
   });
 
   it('enables rename, copy, and delete for the local side', () => {
