@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useAgentStore } from '@/stores/agentStore';
+import { useAiStore } from '@/stores/aiStore';
 import type { AiChatMessage } from '@/types/ai';
 import {
+  cancelActiveAiRequests,
   extractSingleLineCommand,
   selectConversationHistory,
   shouldSubmitAiDraft,
@@ -90,5 +93,45 @@ describe('shouldSubmitAiDraft', () => {
     expect(shouldSubmitAiDraft('Enter', false, true, 13)).toBe(false);
     expect(shouldSubmitAiDraft('Enter', false, false, 229)).toBe(false);
     expect(shouldSubmitAiDraft('a', false, false, 65)).toBe(false);
+  });
+});
+
+describe('cancelActiveAiRequests', () => {
+  beforeEach(() => {
+    useAiStore.getState().clear();
+    useAgentStore.getState().clear();
+  });
+
+  it('immediately clears the loading state and cancels every backend request', () => {
+    useAiStore.getState().beginRequest({
+      requestId: 'chat-request',
+      task: 'chat',
+      userContent: 'hello',
+      providerId: 'provider-1',
+    });
+    useAgentStore.getState().beginRun(
+      'agent-request',
+      'diagnose',
+      'session-1',
+      'root@server',
+    );
+    const cancelBackend = vi.fn().mockResolvedValue(undefined);
+
+    expect(cancelActiveAiRequests(cancelBackend)).toEqual([
+      'chat-request',
+      'agent-request',
+    ]);
+
+    expect(useAiStore.getState()).toMatchObject({
+      phase: 'idle',
+      activeRequestId: undefined,
+    });
+    expect(useAiStore.getState().messages.some((message) => (
+      message.requestId === 'chat-request' && message.status === 'streaming'
+    ))).toBe(false);
+    expect(useAgentStore.getState().run?.phase).toBe('cancelled');
+    expect(cancelBackend).toHaveBeenCalledTimes(2);
+    expect(cancelBackend).toHaveBeenCalledWith('chat-request');
+    expect(cancelBackend).toHaveBeenCalledWith('agent-request');
   });
 });
