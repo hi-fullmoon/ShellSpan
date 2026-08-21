@@ -16,6 +16,7 @@ export type TransferOperationKind = 'upload' | 'download' | 'delete' | 'remote-c
 export interface TransferOperation {
   operationId: string;
   kind: TransferOperationKind;
+  ownerId?: string;
   connectionId?: string;
   paths?: string[];
   pathScopes?: Array<{ connectionId: string; paths: string[] }>;
@@ -110,12 +111,14 @@ export const useTransferStore = create<TransferState>()((set) => ({
           : op,
       ),
     })),
-  removeOperation: (operationId) =>
+  removeOperation: (operationId) => {
+    cancelQueuedPathOperation(operationId);
     set((state) => ({
       operations: state.operations.filter(
         (o) => o.operationId !== operationId,
       ),
-    })),
+    }));
+  },
   markOperationRunning: (operationId) =>
     set((state) => ({
       operations: state.operations.map((operation) =>
@@ -193,7 +196,10 @@ export const useTransferStore = create<TransferState>()((set) => ({
     };
     try {
       if (scopes.length > 0) {
-        await runPathOperation(scopes, retry);
+        await runPathOperation(scopes, retry, {
+          ownerId: operation.ownerId,
+          queueKey: operationId,
+        });
       } else {
         await retry();
       }
@@ -293,11 +299,20 @@ interface QueuedPathOperation {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
   granted: boolean;
+  ownerId?: string;
+  queueKey?: string;
+}
+
+export interface PathOperationOptions {
+  onQueued?: () => void;
+  ownerId?: string;
+  queueKey?: string;
 }
 
 let nextPathOperationSequence = 0;
 const queuedPathOperations: QueuedPathOperation[] = [];
 let drainingPathOperations = false;
+const pathOwnerCancellationHandlers = new Map<string, Set<() => void>>();
 
 function scopeHasActiveOperation(
   scope: PathOperationScope,
@@ -391,9 +406,9 @@ useTransferStore.subscribe(drainPathOperations);
 export function runPathOperation<T>(
   scopes: PathOperationScope[],
   task: () => Promise<T> | T,
-  onQueued?: () => void,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
+  options: PathOperationOptions = {},
+): Promise<T | undefined> {
+  return new Promise<T | undefined>((resolve, reject) => {
     const request: QueuedPathOperation = {
       sequence: nextPathOperationSequence++,
       scopes,
@@ -401,13 +416,53 @@ export function runPathOperation<T>(
       resolve: (value) => resolve(value as T),
       reject,
       granted: false,
+      ownerId: options.ownerId,
+      queueKey: options.queueKey,
     };
     queuedPathOperations.push(request);
     if (!canGrantPathOperation(request)) {
-      onQueued?.();
+      options.onQueued?.();
     }
     drainPathOperations();
   });
+}
+
+function cancelQueuedPathOperations(
+  predicate: (request: QueuedPathOperation) => boolean,
+): void {
+  let changed = false;
+  for (let index = queuedPathOperations.length - 1; index >= 0; index -= 1) {
+    const request = queuedPathOperations[index];
+    if (request.granted || !predicate(request)) continue;
+    queuedPathOperations.splice(index, 1);
+    request.resolve(undefined);
+    changed = true;
+  }
+  if (changed) drainPathOperations();
+}
+
+export function cancelQueuedPathOperation(queueKey: string): void {
+  cancelQueuedPathOperations((request) => request.queueKey === queueKey);
+}
+
+export function cancelQueuedPathOperationsForOwner(ownerId: string): void {
+  cancelQueuedPathOperations((request) => request.ownerId === ownerId);
+  const handlers = pathOwnerCancellationHandlers.get(ownerId);
+  if (!handlers) return;
+  for (const handler of [...handlers]) handler();
+}
+
+export function registerPathOwnerCancellation(
+  ownerId: string,
+  handler: () => void,
+): () => void {
+  const handlers = pathOwnerCancellationHandlers.get(ownerId) ?? new Set();
+  handlers.add(handler);
+  pathOwnerCancellationHandlers.set(ownerId, handlers);
+  return () => {
+    handlers.delete(handler);
+    if (handlers.size === 0) pathOwnerCancellationHandlers.delete(ownerId);
+  };
 }
 
 /**

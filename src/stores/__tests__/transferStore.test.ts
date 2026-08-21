@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  cancelQueuedPathOperationsForOwner,
   hasActivePathOperation,
   isTransferComplete,
   runPathOperation,
@@ -84,6 +85,38 @@ describe('transferStore', () => {
         (item) => item.operationId === 'retry-target',
       )?.status,
     ).toBe('running');
+  });
+
+  it('does not run a queued retry after its transfer row is discarded', async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'retry-target',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.txt'],
+      status: 'failed',
+      retry,
+    });
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'blocking-transfer',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.txt'],
+      status: 'running',
+    });
+
+    const retrying = useTransferStore.getState().retryOperation('retry-target');
+    await Promise.resolve();
+    useTransferStore.getState().removeOperation('retry-target');
+    useTransferStore.getState().markOperationCompleted('blocking-transfer');
+    await retrying;
+
+    expect(retry).not.toHaveBeenCalled();
+    expect(
+      useTransferStore.getState().operations.some(
+        (item) => item.operationId === 'retry-target',
+      ),
+    ).toBe(false);
   });
 
   it('places new transfers before existing transfers', () => {
@@ -437,5 +470,27 @@ describe('transferStore', () => {
     await first;
     await second;
     expect(started).toEqual(['first', 'second']);
+  });
+
+  it('cancels an unstarted path task when its owner closes', async () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'blocking-transfer',
+      connectionId: 'connection-1',
+      paths: ['/remote/file.txt'],
+      status: 'running',
+    });
+    const task = vi.fn().mockResolvedValue(undefined);
+    const queued = runPathOperation(
+      [{ connectionId: 'connection-1', paths: ['/remote/file.txt'] }],
+      task,
+      { ownerId: 'tab-1' },
+    );
+
+    cancelQueuedPathOperationsForOwner('tab-1');
+    useTransferStore.getState().markOperationCompleted('blocking-transfer');
+    await queued;
+
+    expect(task).not.toHaveBeenCalled();
   });
 });

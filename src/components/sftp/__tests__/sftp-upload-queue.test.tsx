@@ -450,6 +450,43 @@ describe('SftpContent upload queue', () => {
     },
   );
 
+  it('cancels queued batches when the SFTP content unmounts', async () => {
+    let resolveFirstUpload!: () => void;
+    const firstUpload = new Promise<void>((resolve) => {
+      resolveFirstUpload = resolve;
+    });
+    const uploadWithPolicies = vi.fn().mockImplementation(() => firstUpload);
+    let capturedOnDrop: ((paths: string[], side: 'local' | 'remote') => void) | undefined;
+
+    vi.mocked(useSystemFileDrop).mockImplementation(({ onDrop }: UseSystemFileDropOptions) => {
+      capturedOnDrop = onDrop;
+      return { dragActive: false, hoveredSide: null };
+    });
+    vi.mocked(useSftpPaneActions).mockReturnValue(createActions({ uploadWithPolicies }));
+
+    const rendered = renderContent(createConnection());
+    await capturedOnDrop!(['/local/a.txt'], 'remote');
+    await waitFor(() => expect(uploadWithPolicies).toHaveBeenCalledTimes(1));
+    await capturedOnDrop!(['/local/b.txt'], 'remote');
+    await waitFor(() =>
+      expect(
+        useTransferStore.getState().operations.some((op) => op.status === 'pending'),
+      ).toBe(true),
+    );
+
+    rendered.unmount();
+    await waitFor(() =>
+      expect(
+        useTransferStore.getState().operations.every((op) => op.status !== 'pending'),
+      ).toBe(true),
+    );
+
+    resolveFirstUpload();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(uploadWithPolicies).toHaveBeenCalledTimes(1);
+  });
+
   it('lists queued batches newest first', async () => {
     const firstUpload = new Promise<void>(() => {
       // Never settles: the first batch stays in flight for the whole test.
