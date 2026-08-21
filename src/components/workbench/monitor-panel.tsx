@@ -30,7 +30,6 @@ import {
   CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
@@ -99,6 +98,12 @@ function usageRatio(used: number, total: number): number {
   return (used / total) * 100;
 }
 
+function usageTone(percent: number): HealthStatus {
+  if (!Number.isFinite(percent) || percent >= 95) return 'error';
+  if (percent >= 80) return 'warning';
+  return 'ok';
+}
+
 const HealthBadge: React.FC<{ status: HealthStatus }> = ({ status }) => {
   const { t } = useI18n();
   const label = {
@@ -145,7 +150,9 @@ const MetricCard: React.FC<{
         </div>
       </CardAction>
     </CardHeader>
-    <CardContent className="flex flex-1 flex-col gap-1">
+    <CardContent
+      className={cn('flex flex-1 flex-col gap-1', !data && 'justify-center pb-4')}
+    >
       <div className="font-mono text-xl font-semibold tracking-tight text-foreground tabular-nums">
         {value}
       </div>
@@ -205,9 +212,15 @@ const ResourceCard: React.FC<{
     </CardHeader>
     <CardContent className="flex flex-col gap-2">
       <UsageBar percent={percent} tone={tone} />
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="font-mono text-foreground tabular-nums">{value}</span>
-        {hint && <span className="truncate text-right text-muted-foreground">{hint}</span>}
+      <div className="flex min-w-0 items-center justify-between gap-3 text-xs">
+        <span className="shrink-0 whitespace-nowrap font-mono text-foreground tabular-nums">
+          {value}
+        </span>
+        {hint && (
+          <span className="min-w-0 truncate text-right text-muted-foreground" title={hint}>
+            {hint}
+          </span>
+        )}
       </div>
     </CardContent>
   </Card>
@@ -327,6 +340,7 @@ export const MonitorPanel: React.FC = () => {
     () => sftpRemotePanes.filter((pane) => pane.error).length,
     [sftpRemotePanes],
   );
+  const sftpActiveCount = sftpRemotePanes.length - sftpErrorCount;
   const recentDisconnects = useMemo(() => [...disconnectEvents].reverse(), [disconnectEvents]);
 
   return (
@@ -450,7 +464,7 @@ export const MonitorPanel: React.FC = () => {
                       label={t('workbench.monitor.memory')}
                       value={`${formatBytes(snapshot.system.usedMemoryBytes)} / ${formatBytes(snapshot.system.totalMemoryBytes)}`}
                       percent={snapshot.system.memoryUsagePercent}
-                      tone={status}
+                      tone={usageTone(snapshot.system.memoryUsagePercent)}
                     />
                     <ResourceCard
                       icon={Layers3Icon}
@@ -460,20 +474,26 @@ export const MonitorPanel: React.FC = () => {
                         snapshot.system.usedSwapBytes,
                         snapshot.system.totalSwapBytes,
                       )}
-                      tone="muted"
+                      tone={usageTone(
+                        usageRatio(
+                          snapshot.system.usedSwapBytes,
+                          snapshot.system.totalSwapBytes,
+                        ),
+                      )}
                     />
                     <ResourceCard
                       icon={CpuIcon}
                       label={t('workbench.monitor.cpu')}
                       value={`${snapshot.system.cpuPercent.toFixed(1)}%`}
                       percent={snapshot.system.cpuPercent}
+                      tone={usageTone(snapshot.system.cpuPercent)}
                     />
                     <ResourceCard
                       icon={HardDriveIcon}
                       label={t('workbench.monitor.disk')}
                       value={`${formatBytes(snapshot.disk.usedBytes)} / ${formatBytes(snapshot.disk.totalBytes)}`}
                       percent={snapshot.disk.usagePercent}
-                      tone={status}
+                      tone={usageTone(snapshot.disk.usagePercent)}
                       hint={formatDiskHint(snapshot.disk, snapshot.appInfo.platform)}
                     />
                   </div>
@@ -485,7 +505,7 @@ export const MonitorPanel: React.FC = () => {
                     title={t('workbench.monitor.connectionHealth')}
                   />
                   <div className="grid grid-cols-1 items-stretch gap-2.5 xl:grid-cols-2">
-                    <Card>
+                    <Card className="h-full">
                       <CardHeader>
                         <div className="flex items-center gap-2">
                           <TerminalIcon className="size-4 text-muted-foreground" aria-hidden />
@@ -493,7 +513,7 @@ export const MonitorPanel: React.FC = () => {
                         </div>
                         <CardDescription>{t('workbench.monitor.recentDisconnects')}</CardDescription>
                       </CardHeader>
-                      <CardContent className="flex flex-col gap-3">
+                      <CardContent className="flex flex-1 flex-col gap-3">
                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                           <StatusCount
                             tone="ok"
@@ -527,24 +547,33 @@ export const MonitorPanel: React.FC = () => {
                             ))}
                           </div>
                         ) : (
-                          <div className="flex min-h-20 items-center justify-center text-xs text-muted-foreground">
+                          <div className="flex min-h-20 flex-1 items-center justify-center text-xs text-muted-foreground">
                             {t('workbench.monitor.noDisconnects')}
                           </div>
                         )}
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="h-full">
                       <CardHeader>
                         <div className="flex items-center gap-2">
                           <NetworkIcon className="size-4 text-muted-foreground" aria-hidden />
                           <CardTitle>{t('workbench.monitor.sftpConnections')}</CardTitle>
                         </div>
+                        <CardDescription>
+                          {t('workbench.monitor.sftpDescription')}
+                        </CardDescription>
                         <CardAction>
                           <div className="flex items-center gap-1.5">
-                            <Badge variant="outline">
-                              <span aria-hidden className="size-1.5 rounded-full bg-app-success" />
-                              {sftpRemotePanes.length} {t('workbench.monitor.active')}
+                            <Badge variant={sftpActiveCount > 0 ? 'outline' : 'secondary'}>
+                              <span
+                                aria-hidden
+                                className={cn(
+                                  'size-1.5 rounded-full',
+                                  sftpActiveCount > 0 ? 'bg-app-success' : 'bg-muted-foreground',
+                                )}
+                              />
+                              {sftpActiveCount} {t('workbench.monitor.active')}
                             </Badge>
                             {sftpErrorCount > 0 && (
                               <Badge variant="destructive">
@@ -554,7 +583,7 @@ export const MonitorPanel: React.FC = () => {
                           </div>
                         </CardAction>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="flex flex-1 flex-col">
                         {sftpRemotePanes.length > 0 ? (
                           <div className="flex max-h-64 flex-col overflow-auto">
                             {sftpRemotePanes.map((pane, index) => {
@@ -592,7 +621,7 @@ export const MonitorPanel: React.FC = () => {
                             })}
                           </div>
                         ) : (
-                          <div className="flex min-h-32 items-center justify-center text-xs text-muted-foreground">
+                          <div className="flex min-h-32 flex-1 items-center justify-center text-xs text-muted-foreground">
                             {t('workbench.monitor.noSftpConnections')}
                           </div>
                         )}
@@ -601,23 +630,6 @@ export const MonitorPanel: React.FC = () => {
                   </div>
                 </section>
 
-                <Card size="sm">
-                  <CardHeader>
-                    <CardTitle>{t('workbench.monitor.appInfo')}</CardTitle>
-                  </CardHeader>
-                  <CardFooter className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
-                    <span>
-                      {t('workbench.monitor.version')}:{' '}
-                      <code className="font-mono text-foreground">{snapshot.appInfo.version}</code>
-                    </span>
-                    <span>
-                      {t('workbench.monitor.platform')}:{' '}
-                      <code className="font-mono text-foreground">
-                        {snapshot.appInfo.platform}-{snapshot.appInfo.arch}
-                      </code>
-                    </span>
-                  </CardFooter>
-                </Card>
               </>
             )}
           </main>
