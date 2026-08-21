@@ -1,4 +1,6 @@
-export type AiProviderKind = 'ollama' | 'openAi';
+export type AiProviderKind = 'ollama' | 'openAi' | 'openAiCompatible';
+export type AiProviderPreset = 'ollama' | 'openai' | 'deepseek' | 'minimax' | 'kimi' | 'custom';
+export type AiStructuredOutputMode = 'jsonSchema' | 'jsonObject' | 'prompt';
 export type AiTaskKind = 'chat' | 'explainTerminal' | 'generateCommand' | 'diagnosticAgent';
 
 export interface AiProviderConfig {
@@ -6,6 +8,13 @@ export interface AiProviderConfig {
   kind: AiProviderKind;
   baseUrl: string;
   model: string;
+  requiresApiKey: boolean;
+  structuredOutput: AiStructuredOutputMode;
+}
+
+export interface AiProviderProfile extends AiProviderConfig {
+  name: string;
+  preset: AiProviderPreset;
 }
 
 export interface AiMessageInput {
@@ -35,12 +44,20 @@ export type AiStreamEvent =
 
 export interface AiChatMessage extends AiMessageInput {
   id: string;
+  requestId: string;
+  task: Exclude<AiTaskKind, 'diagnosticAgent'>;
+  status: 'streaming' | 'completed' | 'cancelled' | 'failed';
+  providerId: string;
+  sessionId?: string;
+  context?: AiContext;
 }
 
 export type AgentRunPhase =
   | 'idle'
   | 'planning'
   | 'awaitingApproval'
+  | 'awaitingExecution'
+  | 'evaluating'
   | 'completed'
   | 'cancelled'
   | 'error';
@@ -48,8 +65,11 @@ export type AgentRunPhase =
 export type AgentStepStatus =
   | 'running'
   | 'completed'
+  | 'informational'
+  | 'queued'
   | 'awaitingApproval'
-  | 'approved'
+  | 'inserted'
+  | 'superseded'
   | 'rejected'
   | 'failed';
 
@@ -68,6 +88,10 @@ export interface AgentRunStep extends DiagnosticAgentPlanStep {
   id: string;
   kind: 'tool' | 'analysis' | 'command';
   status: AgentStepStatus;
+  outputBaseline?: string;
+  executionMarker?: string;
+  exitCode?: number;
+  result?: string;
 }
 
 export interface AgentRun {
