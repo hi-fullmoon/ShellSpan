@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, EyeIcon, EyeOffIcon, FolderOpen, KeyRound, Network, Server } from 'lucide-react';
+import { EyeIcon, EyeOffIcon, FolderOpen, KeyRound, Network, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FieldGroup } from '@/components/ui/field';
@@ -469,33 +468,13 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
           </div>
         </ScrollArea>
 
-        <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
-          <div className="flex w-full">
-            <Button variant="default" className="flex-1 rounded-r-none" onClick={handleConnect} disabled={isSubmitting}>
-              {t('common.connect')}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="default"
-                    className="rounded-l-none border-l border-primary-foreground/20 px-2"
-                    aria-label={t('connection.form.moreActions')}
-                    disabled={isSubmitting}
-                  />
-                }
-              >
-                <ChevronDown />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="top" className="w-40 rounded-md">
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={handleSaveOnly} disabled={isSubmitting}>
-                    {t('connection.form.saveOnly')}
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+        <DrawerFooter className="grid grid-cols-2 gap-2 px-5 py-4">
+          <Button variant="outline" onClick={handleSaveOnly} disabled={isSubmitting}>
+            {t('common.save')}
+          </Button>
+          <Button onClick={handleConnect} disabled={isSubmitting}>
+            {t('connection.form.saveAndConnect')}
+          </Button>
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
