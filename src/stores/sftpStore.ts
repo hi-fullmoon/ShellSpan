@@ -16,6 +16,7 @@ import {
 import { safeInvoke } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 import {
+  activatePathOperationOwner,
   cancelQueuedPathOperationsForOwner,
   hasActivePathOperation,
   useTransferStore,
@@ -284,6 +285,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
   addConnection: (summary, connection, profileId, options) =>
     set((state) => {
       const id = generateId();
+      activatePathOperationOwner(id);
       const conn = createDefaultConnection(id, summary, connection, profileId);
       conn.pinned = options?.pinned ?? false;
 
@@ -308,6 +310,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
   addLocalConnection: () =>
     set((state) => {
       const id = generateId();
+      activatePathOperationOwner(id);
       const conn = createDefaultConnection(
         id,
         { sessionId: id, title: 'Local', host: '', port: 0, username: '' },

@@ -22,6 +22,22 @@ const response = (overrides: Partial<ReadRemoteFileResponse> = {}): ReadRemoteFi
 });
 
 describe('SftpPreviewDialog', () => {
+  it('opens immediately with a loading state before remote content arrives', () => {
+    render(
+      <SftpPreviewDialog
+        open
+        target={{ path: '/srv/slow-video.mp4', name: 'slow-video.mp4', size: 4096 }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('slow-video.mp4')).toBeInTheDocument();
+    expect(screen.getByText('/srv/slow-video.mp4')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('sftp.preview.loading');
+    expect(screen.getByText('4.0 KB')).toBeInTheDocument();
+    expect(screen.queryByRole('video')).not.toBeInTheDocument();
+  });
+
   it('renders text metadata, line count, and external-open action', () => {
     const onOpenExternally = vi.fn();
     render(

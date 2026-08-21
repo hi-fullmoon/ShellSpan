@@ -119,6 +119,7 @@ const Sftp: React.FC = () => {
   return (
     <>
       <SftpContent
+        key={connection.id}
         connection={connection}
         newConnectionMenuOpen={newConnectionMenuOpen}
         setNewConnectionMenuOpen={setNewConnectionMenuOpen}
@@ -884,9 +885,10 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         />
 
         <SftpPreviewDialog
+          target={remoteActions.previewTarget}
           content={remoteActions.previewContent}
-          open={remoteActions.previewContent !== undefined}
-          onClose={() => remoteActions.setPreviewContent(undefined)}
+          open={remoteActions.previewTarget !== undefined}
+          onClose={remoteActions.closePreview}
           onOpenExternally={(path) => {
             void remoteActions.onOpenWithDefaultEditor({ path, kind: 'file' });
           }}
