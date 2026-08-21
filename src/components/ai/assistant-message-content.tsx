@@ -122,7 +122,7 @@ export const AssistantMessageContent: React.FC<{
         </Collapsible>
       )}
       {hasAnswer && (
-        <div className="flex min-w-0 flex-col gap-3 text-[13px] leading-6 [&>*]:min-w-0">
+        <div className="flex min-w-0 flex-col gap-3 [&>*]:min-w-0">
           <MarkdownContent>{answer}</MarkdownContent>
         </div>
       )}

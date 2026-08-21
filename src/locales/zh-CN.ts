@@ -725,6 +725,7 @@ export default {
   'ai.explainTerminal': '分析终端',
   'ai.context.selection': '已附加选中内容',
   'ai.context.recentOutput': '已附加最近输出',
+  'ai.emptyTitle': '我能帮你处理什么？',
   'ai.empty': '询问当前终端报错，或描述你想完成的运维任务。',
   'ai.insertCommand': '插入终端',
   'ai.scrollToLatest': '滚动到最新消息',

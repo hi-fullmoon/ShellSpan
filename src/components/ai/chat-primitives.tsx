@@ -11,7 +11,6 @@ import {
 import {
   Message as MessagePrimitive,
   MessageContent,
-  MessageHeader,
 } from '@/components/ui/message';
 import {
   MessageScroller as MessageScrollerPrimitive,
@@ -59,11 +58,9 @@ export const MessageScroller: React.FC<{
 export const Message: React.FC<{
   role: 'user' | 'assistant';
   children: React.ReactNode;
-  label?: string;
-}> = ({ role, children, label }) => (
+}> = ({ role, children }) => (
   <MessagePrimitive align={role === 'user' ? 'end' : 'start'}>
     <MessageContent>
-      {role === 'assistant' && label && <MessageHeader>{label}</MessageHeader>}
       {children}
     </MessageContent>
   </MessagePrimitive>
@@ -81,8 +78,8 @@ export const Bubble: React.FC<{
     <BubbleContent
       className={cn(
         role === 'user'
-          ? 'whitespace-pre-wrap text-[13px] leading-5'
-          : 'w-full text-[13px] leading-6',
+          ? 'whitespace-pre-wrap'
+          : 'w-full',
       )}
     >
       {children}

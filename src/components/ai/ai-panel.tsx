@@ -7,6 +7,7 @@ import {
   ClipboardIcon,
   Code2Icon,
   EraserIcon,
+  MessageCircleIcon,
   PanelRightCloseIcon,
   SparklesIcon,
   SquareIcon,
@@ -15,6 +16,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PanelEmptyState } from '@/components/ui/empty-state';
 import {
   InputGroup,
   InputGroupAddon,
@@ -23,7 +25,7 @@ import {
 } from '@/components/ui/input-group';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Bubble, Marker, Message, MessageScroller } from './chat-primitives';
+import { Bubble, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
 import { AgentRunView } from './agent-run-view';
 import { useI18n } from '@/hooks/useI18n';
@@ -62,6 +64,7 @@ const AI_PANEL_MIN_WIDTH = 320;
 const AI_PANEL_MAX_WIDTH = 720;
 const MAIN_CONTENT_MIN_WIDTH = 480;
 const AI_PANEL_KEYBOARD_RESIZE_STEP = 24;
+const AI_PANEL_COMPACT_CONTROLS_WIDTH = 380;
 const logger = createLogger('ai');
 type ConversationTask = Exclude<AiTaskKind, 'diagnosticAgent'>;
 type CancelAiRequest = (requestId: string) => Promise<void>;
@@ -572,6 +575,7 @@ export const AiPanel: React.FC = () => {
     && terminalRegistry.get(agentRun.sessionId),
   );
   const panelWidthBounds = getAiPanelWidthBounds(getContainerWidth());
+  const compactModeControls = panelWidth < AI_PANEL_COMPACT_CONTROLS_WIDTH;
 
   return (
     <TooltipProvider>
@@ -651,7 +655,7 @@ export const AiPanel: React.FC = () => {
             <SparklesIcon className="size-4 text-primary" />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-foreground">{t('ai.title')}</div>
-              <div className="truncate text-[11px] text-muted-foreground">
+              <div className="truncate text-xs text-muted-foreground">
                 {defaultProvider
                   ? `${defaultProvider.name} · ${model || t('ai.modelMissing')}`
                   : t('ai.modelMissing')}
@@ -707,72 +711,73 @@ export const AiPanel: React.FC = () => {
             canInsert={canInsertAgentCommand}
             sessionState={agentSessionState}
           />
+        ) : visibleMessages.length === 0 ? (
+          <div className="min-h-0 flex-1">
+            <PanelEmptyState
+              icon={<BotIcon />}
+              title={t('ai.emptyTitle')}
+              description={t('ai.empty')}
+            />
+          </div>
         ) : (
-        <MessageScroller className="flex-1" followKey={followKey}>
-          {visibleMessages.length === 0 && (
-            <Marker>
-              <BotIcon className="mx-auto mb-2 size-6" />
-              {t('ai.empty')}
-            </Marker>
-          )}
-          {visibleMessages.map((message) => {
-            const command = message.role === 'assistant'
-              && message.task === 'generateCommand'
-              && message.status === 'completed'
-              ? extractSingleLineCommand(message.content)
-              : undefined;
-            const commandIsInsertable = Boolean(
-              command
-              && isSafeReadOnlyAgentCommand(command)
-              && (!message.sessionId || message.sessionId === activeSessionId),
-            );
-            return (
-              <Message
-                key={message.id}
-                role={message.role}
-                label={message.role === 'assistant' ? model : undefined}
-              >
-                <Bubble role={message.role}>
-                  {message.role === 'assistant' ? (
-                    <AssistantMessageContent
-                      content={message.content}
-                      streaming={message.status === 'streaming'}
-                    />
-                  ) : message.content}
-                  {message.status === 'cancelled' && (
-                    <div className="text-muted-foreground">{t('ai.message.cancelled')}</div>
-                  )}
-                  {message.status === 'failed' && (
-                    <div className="text-destructive">{t('ai.message.failed')}</div>
-                  )}
-                  {command && (
-                    <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
-                      <Button variant="outline" size="xs" onClick={() => void navigator.clipboard.writeText(command)}>
-                        <ClipboardIcon data-icon="inline-start" />
-                        {t('common.copy')}
-                      </Button>
-                      {isSafeReadOnlyAgentCommand(command) && (
-                        <Button
-                          variant="secondary"
-                          size="xs"
-                          onClick={() => handleInsertCommand(command, message.sessionId)}
-                          disabled={
-                            !commandIsInsertable
-                            || !activeSession
-                            || activeSession.status !== 'connected'
-                          }
-                        >
-                          <Code2Icon data-icon="inline-start" />
-                          {t('ai.insertCommand')}
+          <MessageScroller className="flex-1" followKey={followKey}>
+            {visibleMessages.map((message) => {
+              const command = message.role === 'assistant'
+                && message.task === 'generateCommand'
+                && message.status === 'completed'
+                ? extractSingleLineCommand(message.content)
+                : undefined;
+              const commandIsInsertable = Boolean(
+                command
+                && isSafeReadOnlyAgentCommand(command)
+                && (!message.sessionId || message.sessionId === activeSessionId),
+              );
+              return (
+                <Message
+                  key={message.id}
+                  role={message.role}
+                >
+                  <Bubble role={message.role}>
+                    {message.role === 'assistant' ? (
+                      <AssistantMessageContent
+                        content={message.content}
+                        streaming={message.status === 'streaming'}
+                      />
+                    ) : message.content}
+                    {message.status === 'cancelled' && (
+                      <div className="text-muted-foreground">{t('ai.message.cancelled')}</div>
+                    )}
+                    {message.status === 'failed' && (
+                      <div className="text-destructive">{t('ai.message.failed')}</div>
+                    )}
+                    {command && (
+                      <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
+                        <Button variant="outline" size="xs" onClick={() => void navigator.clipboard.writeText(command)}>
+                          <ClipboardIcon data-icon="inline-start" />
+                          {t('common.copy')}
                         </Button>
-                      )}
-                    </div>
-                  )}
-                </Bubble>
-              </Message>
-            );
-          })}
-        </MessageScroller>
+                        {isSafeReadOnlyAgentCommand(command) && (
+                          <Button
+                            variant="secondary"
+                            size="xs"
+                            onClick={() => handleInsertCommand(command, message.sessionId)}
+                            disabled={
+                              !commandIsInsertable
+                              || !activeSession
+                              || activeSession.status !== 'connected'
+                            }
+                          >
+                            <Code2Icon data-icon="inline-start" />
+                            {t('ai.insertCommand')}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </Bubble>
+                </Message>
+              );
+            })}
+          </MessageScroller>
         )}
 
         {task !== 'diagnosticAgent' && error && (
@@ -820,12 +825,33 @@ export const AiPanel: React.FC = () => {
                 aria-label={t('ai.mode')}
                 disabled={busy || agentNeedsResolution}
               >
-                <ToggleGroupItem value="chat">{t('ai.mode.chat')}</ToggleGroupItem>
-                <ToggleGroupItem value="generateCommand">{t('ai.mode.command')}</ToggleGroupItem>
-                <ToggleGroupItem value="diagnosticAgent">
-                  <BrainCircuitIcon data-icon="inline-start" />
-                  {t('ai.mode.agent')}
-                </ToggleGroupItem>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}
+                  >
+                    <MessageCircleIcon data-icon="inline-start" />
+                    {!compactModeControls && t('ai.mode.chat')}
+                  </TooltipTrigger>
+                  <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
+                  >
+                    <SquareTerminalIcon data-icon="inline-start" />
+                    {!compactModeControls && t('ai.mode.command')}
+                  </TooltipTrigger>
+                  <TooltipContent>{t('ai.mode.command')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<ToggleGroupItem value="diagnosticAgent" aria-label={t('ai.mode.agent')} />}
+                  >
+                    <BrainCircuitIcon data-icon="inline-start" />
+                    {!compactModeControls && t('ai.mode.agent')}
+                  </TooltipTrigger>
+                  <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
+                </Tooltip>
               </ToggleGroup>
               {busy ? (
                 <InputGroupButton
@@ -858,10 +884,10 @@ export const AiPanel: React.FC = () => {
             </InputGroupAddon>
           </InputGroup>
           {task === 'diagnosticAgent' && !agentContext.context && (
-            <p className="mt-1 text-[11px] text-muted-foreground">{t('ai.agent.requiresTerminal')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t('ai.agent.requiresTerminal')}</p>
           )}
           {agentNeedsResolution && (
-            <p className="mt-1 text-[11px] text-muted-foreground">{t('ai.agent.resolvePending')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t('ai.agent.resolvePending')}</p>
           )}
           {!model.trim() && (
             <Button variant="link" size="xs" className="mt-1 px-0" onClick={openSettings}>

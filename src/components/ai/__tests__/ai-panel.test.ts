@@ -131,6 +131,33 @@ describe('AI panel width', () => {
     expect(clampAiPanelWidth(700, 1000)).toBe(520);
   });
 
+  it('keeps compact mode controls accessible when the panel narrows', async () => {
+    await initI18n('zh-CN');
+    useAiStore.getState().setOpen(true);
+
+    try {
+      const { unmount } = render(createElement(AiPanel));
+      const handle = screen.getByRole('separator', { name: '调整 AI 助手宽度' });
+      const chatMode = screen.getByRole('button', { name: '问答' });
+      const commandMode = screen.getByRole('button', { name: '生成命令' });
+      const agentMode = screen.getByRole('button', { name: '诊断 Agent' });
+
+      expect(chatMode).toHaveTextContent('问答');
+      expect(commandMode).toHaveTextContent('生成命令');
+      expect(agentMode).toHaveTextContent('诊断 Agent');
+
+      fireEvent.keyDown(handle, { key: 'ArrowRight' });
+
+      expect(chatMode).not.toHaveTextContent('问答');
+      expect(commandMode).not.toHaveTextContent('生成命令');
+      expect(agentMode).not.toHaveTextContent('诊断 Agent');
+      expect(screen.getByText('我能帮你处理什么？')).toBeInTheDocument();
+      unmount();
+    } finally {
+      useAiStore.getState().setOpen(false);
+    }
+  });
+
   it('widens when its left edge is dragged left', async () => {
     await initI18n('zh-CN');
     useAiStore.getState().setOpen(true);
