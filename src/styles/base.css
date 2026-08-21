@@ -28,6 +28,8 @@
   --app-border: rgba(100, 116, 139, 0.28);
   --app-primary: #0e7490;
   --app-primary-text: #ffffff;
+  --app-terminal-selection: rgba(14, 116, 144, 0.28);
+  --app-terminal-selection-inactive: rgba(14, 116, 144, 0.16);
   --app-error: #dc2626;
   --app-warning: #d97706;
   --app-success: #16a34a;
@@ -77,6 +79,8 @@
   --app-border: rgba(30, 41, 59, 1);
   --app-primary: #22d3ee;
   --app-primary-text: #020617;
+  --app-terminal-selection: rgba(34, 211, 238, 0.3);
+  --app-terminal-selection-inactive: rgba(34, 211, 238, 0.18);
   --app-error: #ef4444;
   --app-warning: #f59e0b;
   --app-success: #22c55e;
