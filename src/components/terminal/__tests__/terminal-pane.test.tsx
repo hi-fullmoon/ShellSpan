@@ -321,10 +321,21 @@ describe('TerminalPane', () => {
     document.removeEventListener('mousemove', downstream);
   });
 
-  it('clears a transient selection when a trackpad-like tap drift ends', () => {
+  it('clears a transient selection after xterm finishes handling a trackpad-like tap drift', async () => {
     const terminal = makeMockTerminal();
     vi.mocked(terminal.hasSelection).mockReturnValue(true);
+    const order: string[] = [];
+    vi.mocked(terminal.clearSelection).mockImplementation(() => {
+      order.push('clear');
+    });
     render(<TerminalPane activeSession={makeSession()} />);
+
+    // xterm registers its document mouseup listener after ours on mousedown.
+    // The deferred clear must run after that listener, not before it.
+    const xtermMouseUp = (): void => {
+      order.push('xterm');
+    };
+    document.addEventListener('mouseup', xtermMouseUp);
 
     terminal.element?.dispatchEvent(
       new MouseEvent('mousedown', { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
@@ -336,7 +347,10 @@ describe('TerminalPane', () => {
       new MouseEvent('mouseup', { button: 0, buttons: 0, clientX: 106, clientY: 100, bubbles: true }),
     );
 
+    expect(order).toEqual(['xterm']);
+    await vi.waitFor(() => expect(order).toEqual(['xterm', 'clear']));
     expect(terminal.clearSelection).toHaveBeenCalledTimes(1);
+    document.removeEventListener('mouseup', xtermMouseUp);
   });
 
   it('preserves a deliberate drag even when it finishes quickly', () => {

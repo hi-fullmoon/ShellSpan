@@ -305,6 +305,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     const element = terminal?.element;
     if (!element) return;
 
+    let active = true;
     let dragStart: {
       x: number;
       y: number;
@@ -329,9 +330,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
         completedDrag
         && Date.now() - completedDrag.startedAt <= ACCIDENTAL_SELECTION_MAX_DURATION_MS
         && completedDrag.maxDistance <= ACCIDENTAL_SELECTION_MAX_DISTANCE_PX
-        && terminal.hasSelection()
       ) {
-        terminal.clearSelection();
+        // Our document listener is registered before xterm's drag listeners.
+        // Defer until the event finishes so xterm cannot recreate/finalize the
+        // accidental selection after we clear it.
+        queueMicrotask(() => {
+          if (active && terminal.hasSelection()) {
+            terminal.clearSelection();
+          }
+        });
       }
     };
 
@@ -361,6 +368,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     document.addEventListener('mouseup', handleMouseUp);
 
     return () => {
+      active = false;
       element.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
