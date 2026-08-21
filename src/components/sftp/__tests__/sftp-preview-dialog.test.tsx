@@ -142,7 +142,13 @@ describe('SftpPreviewDialog', () => {
       />,
     );
 
-    expect(screen.getByText('sftp.preview.binaryTitle')).toBeInTheDocument();
+    const binaryTitle = screen.getByText('sftp.preview.binaryTitle');
+    expect(binaryTitle).toBeInTheDocument();
+    expect(binaryTitle.closest('[data-slot="alert"]')).toHaveClass(
+      'w-fit',
+      'max-w-[calc(100%-1.5rem)]',
+      'self-start',
+    );
     expect(document.querySelector('pre')).toHaveTextContent('00 41 42 43');
   });
 
