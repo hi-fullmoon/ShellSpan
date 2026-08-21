@@ -3,10 +3,17 @@ import { cn } from '@/lib/utils';
 import { usePlatform } from '@/hooks/usePlatform';
 import { SectionNav } from './section-nav';
 import { WindowControls } from './window-controls';
+import { SparklesIcon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useAiStore } from '@/stores/aiStore';
+import { useI18n } from '@/hooks/useI18n';
 
 export const TitleBar: React.FC = () => {
   const platform = usePlatform();
   const isMacOS = platform === 'macos';
+  const { t } = useI18n();
+  const aiOpen = useAiStore((state) => state.open);
+  const toggleAi = useAiStore((state) => state.toggleOpen);
 
   return (
     <div
@@ -17,7 +24,19 @@ export const TitleBar: React.FC = () => {
       data-tauri-drag-region
     >
       <SectionNav />
-      {!isMacOS && <WindowControls />}
+      <div className="flex h-full items-center" data-tauri-drag-region="false">
+        <Button
+          variant={aiOpen ? 'secondary' : 'ghost'}
+          size="icon"
+          className="size-7"
+          onClick={toggleAi}
+          aria-pressed={aiOpen}
+          aria-label={t('ai.toggle')}
+        >
+          <SparklesIcon />
+        </Button>
+        {!isMacOS && <WindowControls />}
+      </div>
     </div>
   );
 };
