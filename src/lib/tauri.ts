@@ -318,19 +318,14 @@ export async function invokeOpenPath(path: string): Promise<void> {
   return invokeLogged('open_path', { path });
 }
 
-export async function invokeDeriveEcdsaKeyFromPassword(
-  password: string,
-): Promise<{ privateKey: string; publicKey: string }> {
-  const [privateKey, publicKey] = await invokeLogged<[string, string]>('derive_ecdsa_key_from_password', { password });
-  return { privateKey, publicKey };
-}
-
 function toBackendKeychainKind(kind: KeychainKeyKind): string {
   return kind === 'keyFile' ? 'keyfile' : kind;
 }
 
 function fromBackendKeychainKind(kind: string): KeychainKeyKind {
-  return kind === 'keyfile' ? 'keyFile' : 'password';
+  if (kind === 'keyfile') return 'keyFile';
+  if (kind === 'password') return 'password';
+  throw new Error(`unknown key credential kind: ${kind}`);
 }
 
 export async function invokeStoreKeyCredential(
@@ -341,8 +336,8 @@ export async function invokeStoreKeyCredential(
   });
 }
 
-export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind }[]> {
-  const credentials = await invokeLogged<Array<{ id: string; label: string; keyType: string; kind: string }>>('list_key_credentials');
+export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind; service: string }[]> {
+  const credentials = await invokeLogged<Array<{ id: string; label: string; keyType: string; kind: string; service: string }>>('list_key_credentials');
   return credentials.map((credential) => ({
     ...credential,
     kind: fromBackendKeychainKind(credential.kind),

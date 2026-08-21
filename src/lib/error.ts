@@ -3,6 +3,10 @@ import { t } from '@/locales';
 const KEYCHAIN_KEY_NOT_FOUND_PREFIX = 'keychain key not found:';
 const STORED_PASSWORD_MISSING_MESSAGE = 'stored password is missing';
 
+function containsAny(message: string, fragments: string[]): boolean {
+  return fragments.some((fragment) => message.includes(fragment));
+}
+
 /**
  * Extracts a human-readable message from an error value.
  *
@@ -40,8 +44,8 @@ export function getErrorMessage(error: unknown): string {
 }
 
 /**
- * Returns a human-readable message for an error, localizing common backend
- * messages for a better user experience.
+ * Returns a human-readable message for non-Toast error details, localizing
+ * the backend cases that have a dedicated frontend message.
  */
 export function getLocalizedErrorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null) {
@@ -67,5 +71,84 @@ export function getLocalizedErrorMessage(error: unknown): string {
   if (raw.toLowerCase() === STORED_PASSWORD_MISSING_MESSAGE) {
     return t('error.storedPasswordMissing');
   }
+
   return raw;
+}
+
+/**
+ * Returns a concise, localized message suitable for an error Toast.
+ *
+ * Unlike getLocalizedErrorMessage, this never falls back to backend-provided
+ * details. Callers should keep the original error in the application log.
+ */
+export function getToastErrorMessage(error: unknown): string {
+  const localized = getLocalizedErrorMessage(error);
+  const raw = getErrorMessage(error);
+  if (localized !== raw) {
+    return localized;
+  }
+
+  const normalized = raw.toLowerCase();
+  if (
+    containsAny(normalized, [
+      'authentication failed',
+      'auth failed',
+      'invalid credentials',
+      'password auth',
+      'public key auth',
+    ])
+  ) {
+    return t('error.authenticationFailed');
+  }
+  if (containsAny(normalized, ['timed out', 'timeout'])) {
+    return t('error.connectionTimedOut');
+  }
+  if (
+    containsAny(normalized, [
+      'connection refused',
+      'connection reset',
+      'connection closed',
+      'no route to host',
+      'network is unreachable',
+      'ssh handshake failed',
+    ])
+  ) {
+    return t('error.connectionFailed');
+  }
+  if (
+    containsAny(normalized, [
+      'permission denied',
+      'operation not permitted',
+      'access denied',
+    ])
+  ) {
+    return t('error.permissionDenied');
+  }
+  if (
+    containsAny(normalized, [
+      'no such file or directory',
+      'no such file',
+      'path does not exist',
+      'file not found',
+    ])
+  ) {
+    return t('error.pathNotFound');
+  }
+  if (containsAny(normalized, ['already exists', 'conflict'])) {
+    return t('error.pathConflict');
+  }
+  if (containsAny(normalized, ['no space left', 'disk full'])) {
+    return t('error.storageFull');
+  }
+  if (
+    containsAny(normalized, [
+      'failed to check the host key',
+      'host key check failed',
+      'failed to verify host key',
+    ])
+  ) {
+    return t('error.hostKeyCheckFailed');
+  }
+
+  return t('error.operationFailed');
 }

@@ -43,24 +43,9 @@ describe('keychain kind serialization', () => {
     });
   });
 
-  it('sends password kind unchanged', async () => {
-    invokeMock.mockResolvedValue(undefined);
-
-    await invokeStoreKeyCredential({
-      id: 'profile-1',
-      label: 'My Password',
-      kind: 'password',
-      privateKey: 'secret',
-    });
-
-    expect(invokeMock).toHaveBeenCalledWith('store_key_credential', {
-      request: expect.objectContaining({ kind: 'password' }),
-    });
-  });
-
   it('maps lowercase keyfile from the backend to keyFile', async () => {
     invokeMock.mockResolvedValue([
-      { id: 'key-1', label: 'My Key', keyType: 'rsa', kind: 'keyfile' },
+      { id: 'key-1', label: 'My Key', keyType: 'rsa', kind: 'keyfile', service: 'com.termbridge.key' },
     ]);
 
     const result = await invokeListKeyCredentials();

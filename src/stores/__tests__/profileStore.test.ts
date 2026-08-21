@@ -76,7 +76,7 @@ describe('profileStore', () => {
     useProfileStore.setState({ profiles: [], initialized: false });
   });
 
-  it('adds a password profile without persisting the password to legacy storage', async () => {
+  it('adds a password profile without persisting the password to profile metadata', async () => {
     const profile = await useProfileStore.getState().addProfile(profileValues);
 
     expect(invokeAddProfile).toHaveBeenCalledWith(expect.objectContaining({
@@ -86,7 +86,7 @@ describe('profileStore', () => {
       password: 'secret',
     }));
     expect(profile.password).toBe('secret');
-    expect(useProfileStore.getState().profiles[0].password).toBe('secret');
+    expect(useProfileStore.getState().profiles[0].password).toBeUndefined();
   });
 
   it('does not persist a profile when the database insert fails', async () => {
@@ -96,6 +96,19 @@ describe('profileStore', () => {
       useProfileStore.getState().addProfile(profileValues),
     ).rejects.toThrow('database unavailable');
 
+    expect(useProfileStore.getState().profiles).toHaveLength(0);
+  });
+
+  it('rolls back profile metadata when storing its password fails', async () => {
+    invokeStoreProfilePassword.mockRejectedValueOnce(new Error('keychain locked'));
+
+    await expect(
+      useProfileStore.getState().addProfile(profileValues),
+    ).rejects.toThrow('keychain locked');
+
+    const createdId = invokeAddProfile.mock.calls[0][0].id;
+    expect(invokeDeleteProfileSecrets).toHaveBeenCalledWith(createdId);
+    expect(invokeRemoveProfile).toHaveBeenCalledWith(createdId);
     expect(useProfileStore.getState().profiles).toHaveLength(0);
   });
 
@@ -146,7 +159,7 @@ describe('profileStore', () => {
     });
   });
 
-  it('does not rewrite the stored password when it is unchanged', async () => {
+  it('drops invalid key references from password profiles', async () => {
     useProfileStore.setState({
       profiles: [{
         ...profileValues,
@@ -167,7 +180,7 @@ describe('profileStore', () => {
     expect(invokeStoreProfilePassword).not.toHaveBeenCalled();
     expect(useProfileStore.getState().profiles[0]).toMatchObject({
       name: 'Renamed',
-      keychainKeyId: 'key-1',
+      keychainKeyId: undefined,
     });
   });
 
@@ -185,11 +198,40 @@ describe('profileStore', () => {
 
     await useProfileStore.getState().updateProfile('profile-1', { password: 'new-secret' });
 
-    expect(invokeDeleteProfilePassword).toHaveBeenCalledWith('profile-1');
+    expect(invokeDeleteProfilePassword).not.toHaveBeenCalled();
     expect(invokeStoreProfilePassword).toHaveBeenCalledWith('profile-1', 'new-secret');
     expect(useProfileStore.getState().profiles[0]).toMatchObject({
-      password: 'new-secret',
+      password: undefined,
       keychainKeyId: undefined,
+    });
+  });
+
+  it('rolls back profile metadata when updating its password fails', async () => {
+    useProfileStore.setState({
+      profiles: [{
+        ...profileValues,
+        password: undefined,
+        id: 'profile-1',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    });
+    invokeRetrieveProfilePassword.mockResolvedValueOnce('old-secret');
+    invokeStoreProfilePassword.mockRejectedValueOnce(new Error('keychain locked'));
+
+    await expect(
+      useProfileStore.getState().updateProfile('profile-1', { password: 'new-secret' }),
+    ).rejects.toThrow('keychain locked');
+
+    expect(invokeUpdateProfile).toHaveBeenCalledTimes(2);
+    expect(invokeUpdateProfile.mock.calls[1][1]).toMatchObject({
+      id: 'profile-1',
+      name: 'Production',
+      updatedAt: 1,
+    });
+    expect(useProfileStore.getState().profiles[0]).toMatchObject({
+      updatedAt: 1,
+      password: undefined,
     });
   });
 
@@ -292,6 +334,37 @@ describe('profileStore', () => {
     expect(invokeDeleteProfileSecrets).toHaveBeenCalledWith('profile-1');
   });
 
+  it('rolls back a duplicate when copying its credentials fails', async () => {
+    useProfileStore.setState({
+      profiles: [{ ...profileValues, password: undefined, id: 'profile-1', createdAt: 1, updatedAt: 1 }],
+    });
+    invokeRetrieveProfilePassword.mockResolvedValueOnce('secret');
+    invokeStoreProfilePassword.mockRejectedValueOnce(new Error('keychain locked'));
+
+    await expect(useProfileStore.getState().duplicateProfile('profile-1')).rejects.toThrow(
+      'keychain locked',
+    );
+
+    const duplicateId = invokeAddProfile.mock.calls[0][0].id;
+    expect(invokeDeleteProfileSecrets).toHaveBeenCalledWith(duplicateId);
+    expect(invokeRemoveProfile).toHaveBeenCalledWith(duplicateId);
+    expect(useProfileStore.getState().profiles).toHaveLength(1);
+  });
+
+  it('keeps a profile when its native secrets cannot be deleted', async () => {
+    useProfileStore.setState({
+      profiles: [{ ...profileValues, id: 'profile-1', createdAt: 1, updatedAt: 1 }],
+    });
+    invokeDeleteProfileSecrets.mockRejectedValue(new Error('keychain locked'));
+
+    await expect(useProfileStore.getState().removeProfile('profile-1')).rejects.toThrow(
+      'keychain locked',
+    );
+
+    expect(invokeRemoveProfile).not.toHaveBeenCalled();
+    expect(useProfileStore.getState().getProfile('profile-1')).toBeDefined();
+  });
+
   it('hydrates profile metadata without reading keychain secrets', async () => {
     invokeListProfiles.mockResolvedValue([{
       id: 'profile-1',
@@ -320,7 +393,7 @@ describe('profileStore', () => {
     expect(invokeRetrieveProfileSecret).not.toHaveBeenCalled();
   });
 
-  it('loads stored profile secrets on demand and caches them in memory', async () => {
+  it('loads stored profile secrets on demand without caching them in global state', async () => {
     useProfileStore.setState({
       profiles: [{
         id: 'profile-1',
@@ -352,11 +425,11 @@ describe('profileStore', () => {
 
     expect(profile.passphrase).toBe('main-pp');
     expect(profile.jumpHost?.password).toBe('jump-secret');
-    expect(useProfileStore.getState().profiles[0].passphrase).toBe('main-pp');
-    expect(useProfileStore.getState().profiles[0].jumpHost?.password).toBe('jump-secret');
+    expect(useProfileStore.getState().profiles[0].passphrase).toBeUndefined();
+    expect(useProfileStore.getState().profiles[0].jumpHost?.password).toBeUndefined();
   });
 
-  it('migrates plaintext jump-host secrets from legacy rows into the keychain', async () => {
+  it('discards unexpected plaintext secrets from database rows', async () => {
     invokeListProfiles.mockResolvedValue([{
       id: 'profile-1',
       name: 'Jump',
@@ -369,21 +442,21 @@ describe('profileStore', () => {
         port: 22,
         username: 'ju',
         authMethod: 'password',
-        password: 'legacy-jump',
+        password: 'unexpected-plaintext',
+        passphrase: 'unexpected-passphrase',
+        privateKeyData: 'unexpected-private-key',
       }),
       createdAt: 1,
       updatedAt: 1,
     }]);
 
     await useProfileStore.getState().hydrateFromDb();
-    await useProfileStore
-      .getState()
-      .ensurePassword(useProfileStore.getState().profiles[0]);
 
-    expect(invokeStoreProfileSecret).toHaveBeenCalledWith('profile-1', 'jump-password', 'legacy-jump');
-    const scrubbedRow = invokeUpdateProfile.mock.calls[0][1];
-    expect(JSON.parse(scrubbedRow.jumpHostConfig).password).toBeUndefined();
-    // The in-memory profile keeps the secret so it can connect right away.
-    expect(useProfileStore.getState().profiles[0].jumpHost?.password).toBe('legacy-jump');
+    const jumpHost = useProfileStore.getState().profiles[0].jumpHost;
+    expect(jumpHost?.password).toBeUndefined();
+    expect(jumpHost?.passphrase).toBeUndefined();
+    expect(jumpHost?.privateKeyData).toBeUndefined();
+    expect(invokeStoreProfileSecret).not.toHaveBeenCalled();
   });
+
 });

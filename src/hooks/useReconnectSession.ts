@@ -14,8 +14,6 @@ import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
-  prepareKeychainKeyForProfile,
-  preparePasswordKeychain,
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
 
@@ -93,17 +91,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
         return;
       }
 
-      const passwordPreparedProfile = await preparePasswordKeychain(profileWithKey);
-      if (!passwordPreparedProfile) {
-        logger.info(`Reconnect cancelled by user for session ${sessionId}`);
-        return;
-      }
-
-      const preparedProfile = await prepareKeychainKeyForProfile(passwordPreparedProfile);
-      if (!preparedProfile) {
-        logger.info(`Reconnect cancelled by user for session ${sessionId}`);
-        return;
-      }
+      const preparedProfile = profileWithKey;
 
       setReconnecting(sessionId, true);
       logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);

@@ -30,8 +30,8 @@ describe('KeychainPanel', () => {
     useProfileStore.setState(initialProfiles, true);
     useKeychainStore.setState({
       keys: [
-        { id: 'profile-1', label: 'Server password', keyType: 'ecdsa', kind: 'password' },
-        { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile' },
+        { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.termbridge.profile-password' },
+        { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.termbridge.key' },
       ],
       initialized: true,
     });
@@ -104,7 +104,16 @@ describe('KeychainPanel', () => {
     useProfileStore.setState({
       profiles: [
         makeProfile('p1', 'key-1'),
-        makeProfile('p2', 'key-1'),
+        {
+          ...makeProfile('p2'),
+          jumpHost: {
+            host: 'jump',
+            port: 22,
+            username: 'jump',
+            authMethod: 'key',
+            keychainKeyId: 'key-1',
+          },
+        },
         makeProfile('p3', 'other-key'),
       ],
     });
@@ -124,7 +133,38 @@ describe('KeychainPanel', () => {
       expect(useProfileStore.getState().getProfile('p1')?.keychainKeyId).toBeUndefined();
     });
     expect(removeKey).toHaveBeenCalledWith('key-1');
-    expect(useProfileStore.getState().getProfile('p2')?.keychainKeyId).toBeUndefined();
+    expect(useProfileStore.getState().getProfile('p2')?.jumpHost?.keychainKeyId).toBeUndefined();
     expect(useProfileStore.getState().getProfile('p3')?.keychainKeyId).toBe('other-key');
+  });
+
+  it('clears an in-memory profile password after deleting its credential', async () => {
+    const removeKey = vi.fn().mockResolvedValue([]);
+    useKeychainStore.setState({ removeKey });
+    useProfileStore.setState({
+      profiles: [{
+        id: 'profile-1',
+        name: 'Server',
+        host: 'h',
+        port: 22,
+        username: 'u',
+        authMethod: 'password',
+        password: 'secret',
+        createdAt: 0,
+        updatedAt: 0,
+      }],
+    });
+
+    render(<KeychainPanel />);
+    const deleteButtons = screen.getAllByRole('button', {
+      name: 'common.delete',
+      hidden: true,
+    });
+    fireEvent.click(deleteButtons[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
+
+    await waitFor(() => {
+      expect(useProfileStore.getState().getProfile('profile-1')?.password).toBeUndefined();
+    });
+    expect(removeKey).toHaveBeenCalledWith('profile-1');
   });
 });

@@ -25,10 +25,18 @@ vi.mock('@/lib/tauri', () => ({
 }));
 
 vi.mock('@/locales', () => ({
-  t: (key: string) =>
-    key === 'error.keychainKeyNotFound'
-      ? '该连接配置的已保存密钥已不存在，请选择其他密钥。'
-      : key,
+  t: (key: string) => {
+    if (key === 'error.keychainKeyNotFound') {
+      return '该连接配置的已保存密钥已不存在，请选择其他密钥。';
+    }
+    if (key === 'error.authenticationFailed') {
+      return '身份验证失败，请检查用户名、密码或 SSH 密钥。';
+    }
+    if (key === 'error.operationFailed') {
+      return '操作失败，请重试；详细错误信息已记录到日志。';
+    }
+    return key;
+  },
   changeLocale: vi.fn(),
   initI18n: vi.fn(),
 }));
@@ -49,8 +57,6 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
   getMissingKeychainKeyTarget: vi.fn().mockReturnValue(null),
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
-  preparePasswordKeychain: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
-  prepareKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
 }));
 
 import {
@@ -64,8 +70,6 @@ import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
-  prepareKeychainKeyForProfile,
-  preparePasswordKeychain,
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
 
@@ -120,10 +124,6 @@ describe('useConnectSession', () => {
     vi.mocked(getMissingKeychainKeyTarget).mockReturnValue(null);
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
-    vi.mocked(preparePasswordKeychain).mockReset();
-    vi.mocked(preparePasswordKeychain).mockImplementation((profile) => Promise.resolve(profile));
-    vi.mocked(prepareKeychainKeyForProfile).mockReset();
-    vi.mocked(prepareKeychainKeyForProfile).mockImplementation((profile) => Promise.resolve(profile));
   });
 
   afterEach(() => {
@@ -224,7 +224,10 @@ describe('useConnectSession', () => {
       await result.current.connect(profile);
     });
 
-    expect(addToast).toHaveBeenCalledWith('boom', 'error');
+    expect(addToast).toHaveBeenCalledWith(
+      '操作失败，请重试；详细错误信息已记录到日志。',
+      'error',
+    );
     expect(hostKeyDialog().open).toBe(false);
   });
 
@@ -250,7 +253,10 @@ describe('useConnectSession', () => {
       await result.current.connect(passwordProfile);
     });
 
-    expect(addToast).toHaveBeenCalledWith('authentication failed', 'error');
+    expect(addToast).toHaveBeenCalledWith(
+      '身份验证失败，请检查用户名、密码或 SSH 密钥。',
+      'error',
+    );
     expect(hostKeyDialog().open).toBe(false);
   });
 
