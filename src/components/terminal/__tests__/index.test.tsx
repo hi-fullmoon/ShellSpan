@@ -88,7 +88,7 @@ describe('Terminal', () => {
     expect(screen.getByText('terminal.empty')).toBeInTheDocument();
     expect(screen.getByText('terminal.openFromWorkbench')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'terminal.empty.newConnection' }),
+      screen.getByRole('button', { name: 'terminal.empty.open' }),
     ).toBeInTheDocument();
   });
 
@@ -98,7 +98,7 @@ describe('Terminal', () => {
     expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'terminal.empty.newConnection' }),
+      screen.getByRole('button', { name: 'terminal.empty.open' }),
     );
 
     expect(screen.getByTestId('new-tab-menu')).toBeInTheDocument();
@@ -108,7 +108,7 @@ describe('Terminal', () => {
     render(<Terminal />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'terminal.empty.newConnection' }),
+      screen.getByRole('button', { name: 'terminal.empty.open' }),
     );
     fireEvent.click(screen.getByTestId('new-tab-menu'));
 

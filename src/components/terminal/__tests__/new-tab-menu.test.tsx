@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { NewTabMenu } from '../new-tab-menu';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
@@ -123,6 +123,24 @@ describe('NewTabMenu', () => {
 
     expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
+  });
+
+  it('renders an accessible dialog and focuses search when opened', async () => {
+    useProfileStore.setState({
+      profiles: [makeProfile('p1', 'Alpha', 'host1.io', 'user1')],
+    });
+
+    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'terminal.newTabMenu.title' }),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText('terminal.newTabMenu.searchPlaceholder'),
+      ).toHaveFocus();
+    });
   });
 
   it('navigates with arrow keys and connects on enter', () => {

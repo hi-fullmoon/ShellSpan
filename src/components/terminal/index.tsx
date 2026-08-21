@@ -4,6 +4,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { SquareTerminalIcon } from 'lucide-react';
 import { SplitPane } from '@/components/ui/split-pane';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { invokeClearTerminalWorkspace, invokeSaveTerminalWorkspace } from '@/lib/tauri';
@@ -630,11 +631,12 @@ const Terminal: React.FC = () => {
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <EmptyState
+              icon={<SquareTerminalIcon />}
               title={t('terminal.empty')}
               description={t('terminal.openFromWorkbench')}
               action={(
                 <Button variant="default" size="sm" onClick={() => setNewTabMenuOpen(true)}>
-                  {t('terminal.empty.newConnection')}
+                  {t('terminal.empty.open')}
                 </Button>
               )}
             />
