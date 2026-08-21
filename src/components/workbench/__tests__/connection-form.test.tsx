@@ -145,7 +145,7 @@ describe('ConnectionFormDrawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'connection.form.saveAndConnect' }));
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(
@@ -160,7 +160,7 @@ describe('ConnectionFormDrawer', () => {
     usernameInput.focus();
     expect(usernameInput).toHaveFocus();
 
-    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'connection.form.saveAndConnect' }));
 
     const nameInput = screen.getByLabelText('common.name');
     await waitFor(() => expect(nameInput).toHaveFocus());
@@ -187,7 +187,7 @@ describe('ConnectionFormDrawer', () => {
     const usernameInput = screen.getByLabelText('common.username');
     usernameInput.focus();
     expect(usernameInput).toHaveFocus();
-    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'connection.form.saveAndConnect' }));
 
     const passwordInput = screen.getByLabelText('common.password');
     await waitFor(() => expect(passwordInput).toHaveFocus());
@@ -267,7 +267,7 @@ describe('ConnectionFormDrawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'common.connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'connection.form.saveAndConnect' }));
 
     await waitFor(() => {
       expect(onConnect).toHaveBeenCalledWith(
@@ -275,6 +275,29 @@ describe('ConnectionFormDrawer', () => {
       );
     });
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('exposes save as a visible secondary action', async () => {
+    const onSubmit = vi.fn();
+    const onConnect = vi.fn();
+    render(
+      <ConnectionFormDrawer
+        open={true}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+        onConnect={onConnect}
+        initial={profile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'My Server' }),
+      );
+    });
+    expect(onConnect).not.toHaveBeenCalled();
   });
 
   it('submits only once when the primary action is clicked repeatedly', async () => {
@@ -289,7 +312,7 @@ describe('ConnectionFormDrawer', () => {
       />,
     );
 
-    const connectButton = screen.getByRole('button', { name: 'common.connect' });
+    const connectButton = screen.getByRole('button', { name: 'connection.form.saveAndConnect' });
     fireEvent.click(connectButton);
     fireEvent.click(connectButton);
 
@@ -298,7 +321,7 @@ describe('ConnectionFormDrawer', () => {
     });
     expect(connectButton).toBeDisabled();
     expect(
-      screen.getByRole('button', { name: 'connection.form.moreActions' }),
+      screen.getByRole('button', { name: 'common.save' }),
     ).toBeDisabled();
   });
 });
