@@ -1,54 +1,188 @@
 import { create } from 'zustand';
 import { shallow } from 'zustand/shallow';
 import { subscribeWithSelector } from 'zustand/middleware';
-import type { AiProviderConfig, AiProviderKind } from '@/types/ai';
+import type {
+  AiProviderConfig,
+  AiProviderKind,
+  AiProviderPreset,
+  AiProviderProfile,
+  AiStructuredOutputMode,
+} from '@/types/ai';
 import { invokeLoadPreferences, invokeSavePreferences } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
+import { generateId } from '@/lib/utils';
 
 const logger = createLogger('aiSettingsStore');
 
+export interface AiProviderPresetDefinition {
+  preset: AiProviderPreset;
+  name: string;
+  kind: AiProviderKind;
+  baseUrl: string;
+  model: string;
+  requiresApiKey: boolean;
+  structuredOutput: AiStructuredOutputMode;
+}
+
+export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
+  {
+    preset: 'ollama',
+    name: 'Ollama',
+    kind: 'ollama',
+    baseUrl: 'http://127.0.0.1:11434',
+    model: 'qwen3',
+    requiresApiKey: false,
+    structuredOutput: 'jsonSchema',
+  },
+  {
+    preset: 'openai',
+    name: 'OpenAI',
+    kind: 'openAi',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-5.4-mini',
+    requiresApiKey: true,
+    structuredOutput: 'jsonSchema',
+  },
+  {
+    preset: 'deepseek',
+    name: 'DeepSeek',
+    kind: 'openAiCompatible',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-v4-flash',
+    requiresApiKey: true,
+    structuredOutput: 'jsonObject',
+  },
+  {
+    preset: 'minimax',
+    name: 'MiniMax',
+    kind: 'openAiCompatible',
+    baseUrl: 'https://api.minimaxi.com/v1',
+    model: 'MiniMax-M2.7',
+    requiresApiKey: true,
+    structuredOutput: 'prompt',
+  },
+  {
+    preset: 'kimi',
+    name: 'Kimi',
+    kind: 'openAiCompatible',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'kimi-k3',
+    requiresApiKey: true,
+    structuredOutput: 'jsonSchema',
+  },
+  {
+    preset: 'custom',
+    name: 'Custom Provider',
+    kind: 'openAiCompatible',
+    baseUrl: '',
+    model: '',
+    requiresApiKey: true,
+    structuredOutput: 'prompt',
+  },
+] as const;
+
 interface AiPreferences {
-  providerKind: AiProviderKind;
-  ollamaBaseUrl: string;
-  ollamaModel: string;
-  openAiBaseUrl: string;
-  openAiModel: string;
+  providers: AiProviderProfile[];
+  defaultProviderId: string;
   contextLines: number;
 }
 
 interface AiSettingsState extends AiPreferences {
   initialized: boolean;
   hydrateFromDb: () => Promise<void>;
-  setProviderKind: (kind: AiProviderKind) => void;
-  setBaseUrl: (url: string) => void;
-  setModel: (model: string) => void;
+  addProvider: (preset: AiProviderPreset) => string;
+  updateProvider: (id: string, changes: Partial<Omit<AiProviderProfile, 'id'>>) => void;
+  removeProvider: (id: string) => void;
+  setDefaultProvider: (id: string) => void;
   setContextLines: (lines: number) => void;
-  getProviderConfig: () => AiProviderConfig;
+  getProviderConfig: (id?: string) => AiProviderConfig;
 }
 
+function presetDefinition(preset: AiProviderPreset): AiProviderPresetDefinition {
+  return AI_PROVIDER_PRESETS.find((definition) => definition.preset === preset)
+    ?? AI_PROVIDER_PRESETS[AI_PROVIDER_PRESETS.length - 1];
+}
+
+function createProviderProfile(
+  preset: AiProviderPreset,
+  existing: AiProviderProfile[],
+  preferredId?: string,
+): AiProviderProfile {
+  const definition = presetDefinition(preset);
+  const baseId = preferredId ?? definition.preset;
+  const id = existing.some((provider) => provider.id === baseId)
+    ? `${baseId}-${generateId()}`
+    : baseId;
+  return { id, ...definition };
+}
+
+const initialProviders = [
+  createProviderProfile('ollama', []),
+  createProviderProfile('openai', [], 'openai'),
+];
+
 const defaults: AiPreferences = {
-  providerKind: 'ollama',
-  ollamaBaseUrl: 'http://127.0.0.1:11434',
-  ollamaModel: 'qwen3',
-  openAiBaseUrl: 'https://api.openai.com/v1',
-  openAiModel: 'gpt-5.4-mini',
+  providers: initialProviders,
+  defaultProviderId: 'ollama',
   contextLines: 200,
 };
 
-const PREFERENCE_KEYS = [
-  'providerKind',
-  'ollamaBaseUrl',
-  'ollamaModel',
-  'openAiBaseUrl',
-  'openAiModel',
-  'contextLines',
-] as const;
+const PREFERENCE_KEYS = ['providers', 'defaultProviderId', 'contextLines'] as const;
 
 function storageKey(key: keyof AiPreferences): string {
   return `ai.${key}`;
 }
 
-function parseStored(entries: [string, string][]): Partial<AiPreferences> {
+function isProviderKind(value: unknown): value is AiProviderKind {
+  return value === 'ollama' || value === 'openAi' || value === 'openAiCompatible';
+}
+
+function isProviderPreset(value: unknown): value is AiProviderPreset {
+  return ['ollama', 'openai', 'deepseek', 'minimax', 'kimi', 'custom'].includes(String(value));
+}
+
+function isStructuredOutputMode(value: unknown): value is AiStructuredOutputMode {
+  return value === 'jsonSchema' || value === 'jsonObject' || value === 'prompt';
+}
+
+function sanitizeProviders(value: unknown): AiProviderProfile[] {
+  if (!Array.isArray(value)) return [];
+  const providers: AiProviderProfile[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const provider = candidate as Record<string, unknown>;
+    const id = typeof provider.id === 'string' ? provider.id.trim() : '';
+    const preset = isProviderPreset(provider.preset) ? provider.preset : 'custom';
+    const name = typeof provider.name === 'string' && provider.name.trim()
+      ? provider.name.trim()
+      : presetDefinition(preset).name;
+    if (
+      !id
+      || !/^[A-Za-z0-9._-]{1,80}$/.test(id)
+      || providers.some((item) => item.id === id)
+      || !isProviderKind(provider.kind)
+    ) continue;
+    providers.push({
+      id,
+      name,
+      kind: provider.kind,
+      preset,
+      baseUrl: typeof provider.baseUrl === 'string' ? provider.baseUrl : '',
+      model: typeof provider.model === 'string' ? provider.model : '',
+      requiresApiKey: typeof provider.requiresApiKey === 'boolean'
+        ? provider.requiresApiKey
+        : provider.kind !== 'ollama',
+      structuredOutput: isStructuredOutputMode(provider.structuredOutput)
+        ? provider.structuredOutput
+        : provider.kind === 'openAi' || provider.kind === 'ollama'
+          ? 'jsonSchema'
+          : 'prompt',
+    });
+  }
+  return providers;
+}
+
+function parseRawEntries(entries: [string, string][]): Record<string, unknown> {
   const parsed: Record<string, unknown> = {};
   for (const [key, value] of entries) {
     if (!key.startsWith('ai.')) continue;
@@ -58,12 +192,45 @@ function parseStored(entries: [string, string][]): Partial<AiPreferences> {
       parsed[key.slice(3)] = value;
     }
   }
+  return parsed;
+}
+
+export function parseAiPreferences(entries: [string, string][]): AiPreferences {
+  const parsed = parseRawEntries(entries);
+  const storedProviders = sanitizeProviders(parsed.providers);
+  if (storedProviders.length > 0) {
+    const defaultProviderId = typeof parsed.defaultProviderId === 'string'
+      && storedProviders.some((provider) => provider.id === parsed.defaultProviderId)
+      ? parsed.defaultProviderId
+      : storedProviders[0].id;
+    return {
+      providers: storedProviders,
+      defaultProviderId,
+      contextLines: typeof parsed.contextLines === 'number' ? parsed.contextLines : defaults.contextLines,
+    };
+  }
+
+  const ollama = {
+    ...createProviderProfile('ollama', []),
+    baseUrl: typeof parsed.ollamaBaseUrl === 'string'
+      ? parsed.ollamaBaseUrl
+      : presetDefinition('ollama').baseUrl,
+    model: typeof parsed.ollamaModel === 'string'
+      ? parsed.ollamaModel
+      : presetDefinition('ollama').model,
+  };
+  const openai = {
+    ...createProviderProfile('openai', [ollama], 'openai'),
+    baseUrl: typeof parsed.openAiBaseUrl === 'string'
+      ? parsed.openAiBaseUrl
+      : presetDefinition('openai').baseUrl,
+    model: typeof parsed.openAiModel === 'string'
+      ? parsed.openAiModel
+      : presetDefinition('openai').model,
+  };
   return {
-    providerKind: parsed.providerKind === 'openAi' ? 'openAi' : defaults.providerKind,
-    ollamaBaseUrl: typeof parsed.ollamaBaseUrl === 'string' ? parsed.ollamaBaseUrl : defaults.ollamaBaseUrl,
-    ollamaModel: typeof parsed.ollamaModel === 'string' ? parsed.ollamaModel : defaults.ollamaModel,
-    openAiBaseUrl: typeof parsed.openAiBaseUrl === 'string' ? parsed.openAiBaseUrl : defaults.openAiBaseUrl,
-    openAiModel: typeof parsed.openAiModel === 'string' ? parsed.openAiModel : defaults.openAiModel,
+    providers: [ollama, openai],
+    defaultProviderId: parsed.providerKind === 'openAi' ? openai.id : ollama.id,
     contextLines: typeof parsed.contextLines === 'number' ? parsed.contextLines : defaults.contextLines,
   };
 }
@@ -90,37 +257,51 @@ export const useAiSettingsStore = create<AiSettingsState>()(
     hydrateFromDb: async () => {
       try {
         const entries = await invokeLoadPreferences();
-        set({ ...parseStored(entries), initialized: true });
+        set({ ...parseAiPreferences(entries), initialized: true });
       } catch (error) {
         logger.error('failed to load AI preferences', error);
         set({ initialized: true });
       }
     },
-    setProviderKind: (providerKind) => set({ providerKind }),
-    setBaseUrl: (baseUrl) => {
-      if (get().providerKind === 'ollama') set({ ollamaBaseUrl: baseUrl });
-      else set({ openAiBaseUrl: baseUrl });
+    addProvider: (preset) => {
+      const provider = createProviderProfile(preset, get().providers);
+      set((state) => ({ providers: [...state.providers, provider] }));
+      return provider.id;
     },
-    setModel: (model) => {
-      if (get().providerKind === 'ollama') set({ ollamaModel: model });
-      else set({ openAiModel: model });
-    },
-    setContextLines: (contextLines) => set({ contextLines }),
-    getProviderConfig: () => {
-      const state = get();
-      if (state.providerKind === 'ollama') {
-        return {
-          id: 'ollama',
-          kind: 'ollama',
-          baseUrl: state.ollamaBaseUrl.trim(),
-          model: state.ollamaModel.trim(),
-        };
-      }
+    updateProvider: (id, changes) => set((state) => ({
+      providers: state.providers.map((provider) => (
+        provider.id === id ? { ...provider, ...changes, id } : provider
+      )),
+    })),
+    removeProvider: (id) => set((state) => {
+      if (state.providers.length <= 1) return state;
+      const providers = state.providers.filter((provider) => provider.id !== id);
+      if (providers.length === state.providers.length) return state;
       return {
-        id: 'openai',
-        kind: 'openAi',
-        baseUrl: state.openAiBaseUrl.trim(),
-        model: state.openAiModel.trim(),
+        providers,
+        defaultProviderId: state.defaultProviderId === id
+          ? providers[0].id
+          : state.defaultProviderId,
+      };
+    }),
+    setDefaultProvider: (defaultProviderId) => set((state) => (
+      state.providers.some((provider) => provider.id === defaultProviderId)
+        ? { defaultProviderId }
+        : state
+    )),
+    setContextLines: (contextLines) => set({ contextLines }),
+    getProviderConfig: (id) => {
+      const state = get();
+      const provider = state.providers.find((item) => item.id === (id ?? state.defaultProviderId))
+        ?? state.providers[0];
+      if (!provider) throw new Error('No AI provider is configured');
+      return {
+        id: provider.id,
+        kind: provider.kind,
+        baseUrl: provider.baseUrl.trim(),
+        model: provider.model.trim(),
+        requiresApiKey: provider.requiresApiKey,
+        structuredOutput: provider.structuredOutput,
       };
     },
   })),
@@ -128,11 +309,8 @@ export const useAiSettingsStore = create<AiSettingsState>()(
 
 useAiSettingsStore.subscribe(
   (state): AiPreferences => ({
-    providerKind: state.providerKind,
-    ollamaBaseUrl: state.ollamaBaseUrl,
-    ollamaModel: state.ollamaModel,
-    openAiBaseUrl: state.openAiBaseUrl,
-    openAiModel: state.openAiModel,
+    providers: state.providers,
+    defaultProviderId: state.defaultProviderId,
     contextLines: state.contextLines,
   }),
   (preferences) => {
