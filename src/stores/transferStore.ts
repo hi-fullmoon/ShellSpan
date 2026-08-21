@@ -9,6 +9,7 @@ import type {
 } from '@/types';
 
 const logger = createLogger('transfer');
+const retryingOperationIds = new Set<string>();
 
 export type TransferOperationKind = 'upload' | 'download' | 'delete' | 'remote-copy';
 
@@ -175,19 +176,34 @@ export const useTransferStore = create<TransferState>()((set) => ({
     }));
   },
   retryOperation: async (operationId) => {
+    if (retryingOperationIds.has(operationId)) return;
     const operation = useTransferStore
       .getState()
       .operations.find((item) => item.operationId === operationId);
     if (!operation?.retry) return;
+    retryingOperationIds.add(operationId);
 
-    useTransferStore.getState().markOperationRunning(operationId);
+    const scopes = operation.pathScopes ??
+      (operation.connectionId && operation.paths
+        ? [{ connectionId: operation.connectionId, paths: operation.paths }]
+        : []);
+    const retry = async () => {
+      useTransferStore.getState().markOperationRunning(operationId);
+      await operation.retry?.();
+    };
     try {
-      await operation.retry();
+      if (scopes.length > 0) {
+        await runPathOperation(scopes, retry);
+      } else {
+        await retry();
+      }
     } catch (error) {
       useTransferStore.getState().markOperationFailed(
         operationId,
         getLocalizedErrorMessage(error),
       );
+    } finally {
+      retryingOperationIds.delete(operationId);
     }
   },
   cancelOperation: async (operationId) => {
@@ -270,6 +286,19 @@ export interface PathOperationScope {
   paths: string[];
 }
 
+interface QueuedPathOperation {
+  sequence: number;
+  scopes: PathOperationScope[];
+  task: () => Promise<unknown> | unknown;
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+  granted: boolean;
+}
+
+let nextPathOperationSequence = 0;
+const queuedPathOperations: QueuedPathOperation[] = [];
+let drainingPathOperations = false;
+
 function scopeHasActiveOperation(
   scope: PathOperationScope,
   operations: TransferOperation[],
@@ -299,11 +328,92 @@ export function hasActivePathOperation(
   return scopeHasActiveOperation({ connectionId, paths }, operations);
 }
 
+function pathScopesOverlap(
+  left: PathOperationScope[],
+  right: PathOperationScope[],
+): boolean {
+  return left.some((leftScope) =>
+    right.some((rightScope) =>
+      leftScope.connectionId === rightScope.connectionId &&
+      leftScope.paths.some((leftPath) =>
+        rightScope.paths.some((rightPath) => pathsOverlap(leftPath, rightPath)),
+      ),
+    ),
+  );
+}
+
+function canGrantPathOperation(request: QueuedPathOperation): boolean {
+  const operations = useTransferStore.getState().operations;
+  if (request.scopes.some((scope) => scopeHasActiveOperation(scope, operations))) {
+    return false;
+  }
+
+  return !queuedPathOperations.some(
+    (other) =>
+      other !== request &&
+      (other.granted || other.sequence < request.sequence) &&
+      pathScopesOverlap(other.scopes, request.scopes),
+  );
+}
+
+function drainPathOperations(): void {
+  if (drainingPathOperations) return;
+  drainingPathOperations = true;
+  try {
+    for (const request of queuedPathOperations) {
+      if (request.granted || !canGrantPathOperation(request)) continue;
+      request.granted = true;
+      Promise.resolve()
+        .then(request.task)
+        .then(request.resolve, request.reject)
+        .finally(() => {
+          const index = queuedPathOperations.indexOf(request);
+          if (index >= 0) queuedPathOperations.splice(index, 1);
+          drainPathOperations();
+        });
+    }
+  } finally {
+    drainingPathOperations = false;
+  }
+}
+
+// Active transfer state is one of the conditions that can release the head of
+// the path queue. The subscription is module-scoped so callers do not need to
+// keep a React component mounted while they wait.
+useTransferStore.subscribe(drainPathOperations);
+
 /**
- * Resolves once no active operation overlaps any of the given scopes. Used to
- * queue path operations instead of rejecting them while a transfer is busy.
- * The check re-runs on every store change, so competing waiters that lose the
- * race to a newly started operation simply keep waiting.
+ * Runs a task while owning all supplied path scopes. Overlapping tasks are
+ * granted in FIFO order; unrelated scopes may run concurrently. Ownership is
+ * acquired atomically before the task callback starts, closing the race where
+ * multiple waiters observe the same idle transition and all proceed.
+ */
+export function runPathOperation<T>(
+  scopes: PathOperationScope[],
+  task: () => Promise<T> | T,
+  onQueued?: () => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const request: QueuedPathOperation = {
+      sequence: nextPathOperationSequence++,
+      scopes,
+      task,
+      resolve: (value) => resolve(value as T),
+      reject,
+      granted: false,
+    };
+    queuedPathOperations.push(request);
+    if (!canGrantPathOperation(request)) {
+      onQueued?.();
+    }
+    drainPathOperations();
+  });
+}
+
+/**
+ * Resolves once no active transfer overlaps any of the given scopes. This is a
+ * notification primitive only; callers that will start an operation must use
+ * runPathOperation so the idle check and path ownership are atomic.
  */
 export function waitForPathIdle(scopes: PathOperationScope[]): Promise<void> {
   const isIdle = () =>
