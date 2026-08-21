@@ -11,6 +11,11 @@ export interface ResponsiveCardGridProps {
   children: React.ReactNode;
   className?: string;
   gridClassName?: string;
+  /**
+   * When provided, columns are fitted automatically and never render narrower
+   * than this value. This is preferable for cards with intrinsic action rows.
+   */
+  minColumnWidth?: number | string;
   /** Column count below the first breakpoint. */
   columns?: number;
   /** Container-width breakpoints. Order does not matter. */
@@ -34,6 +39,7 @@ export const ResponsiveCardGrid: React.FC<ResponsiveCardGridProps> = ({
   children,
   className,
   gridClassName,
+  minColumnWidth,
   columns = 3,
   breakpoints = DEFAULT_BREAKPOINTS,
   gap = '0.5rem',
@@ -99,13 +105,28 @@ export const ResponsiveCardGrid: React.FC<ResponsiveCardGridProps> = ({
     return result;
   }, [breakpoints, columns, containerWidth]);
 
+  const gridTemplateColumns = useMemo(() => {
+    if (minColumnWidth === undefined) {
+      return `repeat(${currentColumns}, minmax(0, 1fr))`;
+    }
+
+    const cssWidth = typeof minColumnWidth === 'number'
+      ? `${positiveInteger(minColumnWidth, 'minColumnWidth')}px`
+      : minColumnWidth.trim();
+    if (!cssWidth) {
+      throw new Error('minColumnWidth must not be empty');
+    }
+
+    return `repeat(auto-fit, minmax(min(100%, ${cssWidth}), 1fr))`;
+  }, [currentColumns, minColumnWidth]);
+
   return (
     <div ref={containerRef} className={cn('w-full', className)}>
       <div
         className={cn('grid', gridClassName)}
         style={{
           gap,
-          gridTemplateColumns: `repeat(${currentColumns}, minmax(0, 1fr))`,
+          gridTemplateColumns,
         }}
       >
         {children}
