@@ -11,12 +11,10 @@ import {
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
-import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
+import { getErrorMessage, getToastErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
-  prepareKeychainKeyForProfile,
-  preparePasswordKeychain,
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
 import { openHostKeyPrompt } from '@/lib/host-key-prompt';
@@ -62,7 +60,7 @@ export function useConnectSession(): {
         return;
       }
     }
-    useToastStore.getState().addToast(getLocalizedErrorMessage(error), 'error');
+    useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
     logger.error('Connection failed', error);
   }, []);
 
@@ -94,17 +92,7 @@ export function useConnectSession(): {
         return;
       }
 
-      const passwordPreparedProfile = await preparePasswordKeychain(ensuredProfile);
-      if (!passwordPreparedProfile) {
-        logger.info('Connection cancelled (password keychain unavailable)');
-        return;
-      }
-
-      const preparedProfile = await prepareKeychainKeyForProfile(passwordPreparedProfile);
-      if (!preparedProfile) {
-        logger.info('Connection cancelled by user (keychain password prompt dismissed)');
-        return;
-      }
+      const preparedProfile = ensuredProfile;
 
       try {
         const summary = await invokeCreateSession(
@@ -150,7 +138,7 @@ export function useConnectSession(): {
       addSession(summary);
       setActiveSection('terminal');
     } catch (error) {
-      useToastStore.getState().addToast(getLocalizedErrorMessage(error), 'error');
+      useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
     }
   };
 

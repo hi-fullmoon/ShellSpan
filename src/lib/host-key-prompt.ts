@@ -2,7 +2,7 @@ import type { SessionErrorEvent } from '@/types';
 import { invokeTrustHost } from '@/lib/tauri';
 import { useHostKeyDialogStore } from '@/stores/hostKeyDialogStore';
 import { useToastStore } from '@/stores/toastStore';
-import { getLocalizedErrorMessage } from '@/lib/error';
+import { getToastErrorMessage } from '@/lib/error';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('connect');
@@ -38,7 +38,7 @@ export function openHostKeyPrompt(options: HostKeyPromptOptions): void {
           })
           .catch((error: unknown) => {
             if (errorSessionId) processingSessionErrors.delete(errorSessionId);
-            useToastStore.getState().addToast(getLocalizedErrorMessage(error), 'error');
+            useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
           });
       },
     },

@@ -33,8 +33,6 @@ vi.mock('@/lib/password-prompt', async (importActual) => {
 
 vi.mock('@/lib/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
-  preparePasswordKeychain: vi.fn().mockImplementation((p) => Promise.resolve(p)),
-  prepareKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
 }));
 
 import {
@@ -48,8 +46,6 @@ import {
 import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
   ensureKeychainKeyForProfile,
-  prepareKeychainKeyForProfile,
-  preparePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
 
 const profile: ConnectionProfile = {
@@ -87,10 +83,6 @@ describe('useSftpConnectionOpener', () => {
     vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(ensureKeychainKeyForProfile).mockReset();
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((p) => Promise.resolve(p));
-    vi.mocked(preparePasswordKeychain).mockReset();
-    vi.mocked(preparePasswordKeychain).mockImplementation((p) => Promise.resolve(p));
-    vi.mocked(prepareKeychainKeyForProfile).mockReset();
-    vi.mocked(prepareKeychainKeyForProfile).mockImplementation((p) => Promise.resolve(p));
   });
 
   it('opens SFTP immediately when the host key matches', async () => {

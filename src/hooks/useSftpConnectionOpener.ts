@@ -14,13 +14,14 @@ import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile, RemoteFsError } from '@/types';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
-import { getLocalizedErrorMessage } from '@/lib/error';
+import { getToastErrorMessage } from '@/lib/error';
+import { createLogger } from '@/lib/logger';
 import {
   ensureKeychainKeyForProfile,
-  prepareKeychainKeyForProfile,
-  preparePasswordKeychain,
 } from '@/lib/keychain-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
+
+const logger = createLogger('sftp');
 
 interface SftpHostKeyDialogState {
   open: boolean;
@@ -114,20 +115,26 @@ export function useSftpConnectionOpener(): {
                 .catch((error: unknown) => {
                   useToastStore
                     .getState()
-                    .addToast(getLocalizedErrorMessage(error), 'error');
+                    .addToast(getToastErrorMessage(error), 'error');
                 });
             },
           });
           return;
         }
 
+        const detail =
+          result.message ?? `Failed to check the host key for ${host}:${port}.`;
+        logger.error('Host key check failed', detail);
         useToastStore
           .getState()
-          .addToast(result.message ?? `Failed to check the host key for ${host}:${port}.`, 'error');
+          .addToast(
+            getToastErrorMessage(detail),
+            'error',
+          );
       } catch (error) {
         useToastStore
           .getState()
-          .addToast(getLocalizedErrorMessage(error), 'error');
+          .addToast(getToastErrorMessage(error), 'error');
       }
     },
     [],
@@ -148,15 +155,7 @@ export function useSftpConnectionOpener(): {
         return;
       }
 
-      const passwordPreparedProfile = await preparePasswordKeychain(profileWithKey);
-      if (!passwordPreparedProfile) {
-        return;
-      }
-
-      const preparedProfile = await prepareKeychainKeyForProfile(passwordPreparedProfile);
-      if (!preparedProfile) {
-        return;
-      }
+      const preparedProfile = profileWithKey;
 
       // Persist a password entered via the prompt once the connection
       // succeeds; failures are swallowed inside persistPromptedPassword.
@@ -208,7 +207,7 @@ export function useSftpConnectionOpener(): {
                   }
                   useToastStore
                     .getState()
-                    .addToast(getLocalizedErrorMessage(retryError), 'error');
+                    .addToast(getToastErrorMessage(retryError), 'error');
                 });
             },
           });
@@ -227,7 +226,7 @@ export function useSftpConnectionOpener(): {
         }
         useToastStore
           .getState()
-          .addToast(getLocalizedErrorMessage(error), 'error');
+          .addToast(getToastErrorMessage(error), 'error');
       }
     },
     [finishOpen, verifyHostKey],

@@ -140,7 +140,11 @@ export const KeychainPanel: React.FC = () => {
     if (!deleting) return;
     try {
       const affectedProfileIds = await removeKey(deleting.id);
-      useProfileStore.getState().clearKeychainKeyIds(affectedProfileIds);
+      if (deleting.service === 'com.termbridge.profile-password') {
+        useProfileStore.getState().clearProfilePassword(deleting.id);
+      } else {
+        useProfileStore.getState().clearKeychainKeyIds(affectedProfileIds, deleting.id, false);
+      }
       setDeleting(undefined);
       showSuccess(t('keychain.form.deleteSuccess'));
     } catch {
@@ -218,7 +222,7 @@ export const KeychainPanel: React.FC = () => {
               gap="0.375rem"
             >
               {filteredKeys.map((key) => {
-                const isProfilePassword = key.kind === 'password';
+                const isProfilePassword = key.service === 'com.termbridge.profile-password';
                 return (
                   <ManagementCard key={key.id}>
                     <div className="flex items-center gap-2.5">

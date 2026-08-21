@@ -122,10 +122,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       set({ restartDialogDismissed: false });
       logger.info(`Update downloaded: ${available.version}`);
     } catch (error) {
-      const message = t('update.failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      logger.error(`Update check/download failed (${mode}): ${message}`);
+      const message = t('update.failedFriendly');
+      logger.error(`Update check/download failed (${mode})`, error);
       set(updateFlowReducer(get(), { type: 'downloadFailed', payload: { message } }));
       if (mode === 'manual') {
         useToastStore.getState().addToast(message, 'error');
@@ -142,9 +140,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       await invokeRequestAppRestart();
       return;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error(`Failed to restart for update: ${message}`);
-      useToastStore.getState().addToast(t('update.failed', { error: message }), 'error');
+      logger.error('Failed to restart for update', error);
+      useToastStore.getState().addToast(t('update.failedFriendly'), 'error');
     }
     set({
       ...updateFlowReducer(get(), { type: 'reset' }),

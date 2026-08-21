@@ -1,10 +1,7 @@
 import { useKeychainKeyPromptStore } from '@/stores/keychainKeyPromptStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useKeychainStore } from '@/stores/keychainStore';
-import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
-import { getLocalizedErrorMessage } from '@/lib/error';
-import { promptForMissingPassword } from '@/lib/password-prompt';
 import type { ConnectionProfile } from '@/types';
 
 const logger = createLogger('keychain-key-prompt');
@@ -131,6 +128,10 @@ export async function ensureKeychainKeyForProfile(
   if (!initialized) {
     await hydrate();
   }
+  const { loadError } = useKeychainStore.getState();
+  if (loadError) {
+    throw new Error(`failed to load keychain keys: ${loadError}`);
+  }
 
   let preparedProfile = profile;
   if (
@@ -154,95 +155,4 @@ export async function ensureKeychainKeyForProfile(
   }
 
   return preparedProfile;
-}
-
-/**
- * Prepares a profile that uses a keychain key for connection.
- *
- * Password-derived ECDSA keys now store the derived private key in the
- * keychain, so no extra prompt is required. Key file keys are also returned
- * unchanged. This function still ensures the referenced key exists.
- *
- * @returns The same profile if no action is needed, or null if the user
- *          cancelled the replacement prompt.
- */
-export async function prepareKeychainKeyForProfile(
-  profile: ConnectionProfile,
-): Promise<ConnectionProfile | null> {
-  const hasMainKey = profile.authMethod === 'key' && !!profile.keychainKeyId;
-  const hasJumpKey = profile.jumpHost?.authMethod === 'key' && !!profile.jumpHost.keychainKeyId;
-  if (!hasMainKey && !hasJumpKey) {
-    return profile;
-  }
-
-  const { initialized, hydrate } = useKeychainStore.getState();
-  if (!initialized) {
-    await hydrate();
-  }
-
-  let preparedProfile = profile;
-  if (
-    preparedProfile.authMethod === 'key' &&
-    preparedProfile.keychainKeyId &&
-    !keychainKeyExists(preparedProfile.keychainKeyId)
-  ) {
-    const recovered = await promptForMissingKeychainKey(preparedProfile, 'main');
-    if (!recovered?.keychainKeyId) return null;
-    preparedProfile = recovered;
-  }
-
-  if (
-    preparedProfile.jumpHost?.authMethod === 'key' &&
-    preparedProfile.jumpHost.keychainKeyId &&
-    !keychainKeyExists(preparedProfile.jumpHost.keychainKeyId)
-  ) {
-    const recovered = await promptForMissingKeychainKey(preparedProfile, 'jump');
-    if (!recovered?.jumpHost?.keychainKeyId) return null;
-    preparedProfile = recovered;
-  }
-
-  return preparedProfile;
-}
-
-/**
- * Loads an existing password keychain for a password-authenticated profile.
- *
- * If the profile already references a password keychain, the password is
- * loaded from it. When the referenced entry is missing, the dangling
- * keychain reference is cleared: the profile's own password is used if
- * present, otherwise the user is prompted for a password so the connection
- * can still proceed.
- *
- * @returns The profile ready for authentication, or null if the user
- *          cancelled the password prompt.
- */
-export async function preparePasswordKeychain(
-  profile: ConnectionProfile,
-): Promise<ConnectionProfile | null> {
-  if (profile.authMethod !== 'password' || !profile.keychainKeyId) {
-    return profile;
-  }
-
-  const { initialized, hydrate, getKey } = useKeychainStore.getState();
-  if (!initialized) {
-    await hydrate();
-  }
-  const key = await getKey(profile.keychainKeyId);
-  if (!key || !key.privateKey) {
-    logger.warn(`Password keychain missing for profile ${profile.id}`);
-    useToastStore.getState().addToast(
-      getLocalizedErrorMessage(new Error('Stored password is missing')),
-      'error',
-    );
-    if (profile.password) {
-      useProfileStore.getState().clearKeychainKeyIds([profile.id]);
-      return { ...profile, keychainKeyId: undefined };
-    }
-    useProfileStore.getState().clearKeychainKeyIds([profile.id]);
-    return promptForMissingPassword({ ...profile, keychainKeyId: undefined });
-  }
-  return {
-    ...profile,
-    password: key.privateKey,
-  };
 }
