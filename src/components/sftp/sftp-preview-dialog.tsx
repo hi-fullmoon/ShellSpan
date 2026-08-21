@@ -1,11 +1,32 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useLastValue } from '@/hooks/useLastValue';
 import { formatSize } from '@/lib/sftp-utils';
+import {
+  createPreviewDataUrl,
+  formatHexPreview,
+  getSftpPreviewDescriptor,
+  type SftpPreviewDescriptor,
+} from '@/lib/sftp-preview';
+import { cn } from '@/lib/utils';
 import type { ReadRemoteFileResponse } from '@/types';
-import { FileWarningIcon } from 'lucide-react';
+import {
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  FileWarningIcon,
+  RotateCcwIcon,
+  WrapTextIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from 'lucide-react';
 import {
   SftpDialogBody,
   SftpDialogContent,
@@ -16,50 +37,321 @@ export interface SftpPreviewDialogProps {
   content?: ReadRemoteFileResponse;
   open: boolean;
   onClose: () => void;
+  onOpenExternally?: (path: string) => void;
 }
+
+interface PreviewRendererProps {
+  content: ReadRemoteFileResponse;
+  descriptor: SftpPreviewDescriptor;
+}
+
+const MediaUnavailable: React.FC = () => {
+  const { t } = useI18n();
+  return (
+    <Alert className="m-auto max-w-md">
+      <FileWarningIcon />
+      <AlertTitle>{t('sftp.preview.mediaUnavailableTitle')}</AlertTitle>
+      <AlertDescription>{t('sftp.preview.mediaUnavailableDescription')}</AlertDescription>
+    </Alert>
+  );
+};
+
+const TextPreview: React.FC<{ content: string }> = ({ content }) => {
+  const { t } = useI18n();
+  const [wrap, setWrap] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const lineCount = useMemo(() => {
+    if (!content) return 0;
+    let count = 1;
+    let index = content.indexOf('\n');
+    while (index !== -1) {
+      count += 1;
+      index = content.indexOf('\n', index + 1);
+    }
+    return count;
+  }, [content]);
+
+  useEffect(() => {
+    setWrap(false);
+    setCopied(false);
+  }, [content]);
+
+  const handleCopy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard access can be denied by the host WebView. Keep the preview
+      // usable and leave the button in its original state.
+    }
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-10 items-center justify-between gap-3 border-b px-3">
+        <span className="text-xs text-muted-foreground">
+          {t('sftp.preview.lineCount', { count: lineCount })}
+        </span>
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger render={<Button variant={wrap ? 'secondary' : 'ghost'} size="icon" className="size-7" onClick={() => setWrap((value) => !value)} />}>
+              <WrapTextIcon />
+              <span className="sr-only">{t('sftp.preview.toggleWrap')}</span>
+            </TooltipTrigger>
+            <TooltipContent>{t('sftp.preview.toggleWrap')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon" className="size-7" onClick={() => { void handleCopy(); }} />}>
+              {copied ? <CheckIcon /> : <CopyIcon />}
+              <span className="sr-only">{t('sftp.preview.copyContent')}</span>
+            </TooltipTrigger>
+            <TooltipContent>{copied ? t('sftp.preview.copied') : t('sftp.preview.copyContent')}</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+      <ScrollArea className="min-h-0 flex-1" horizontal={!wrap} size="thin">
+        <pre className={cn(
+          'min-h-full p-4 font-mono text-xs leading-5 text-foreground selection:bg-primary/20',
+          wrap ? 'whitespace-pre-wrap break-words' : 'w-max min-w-full whitespace-pre',
+        )}>
+          {content || t('sftp.preview.emptyFile')}
+        </pre>
+      </ScrollArea>
+    </div>
+  );
+};
+
+const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, name }) => {
+  const { t } = useI18n();
+  const [zoom, setZoom] = useState(1);
+  const [failed, setFailed] = useState(false);
+  const [renderedSize, setRenderedSize] = useState<{ width: number; height: number }>();
+
+  useEffect(() => {
+    setZoom(1);
+    setFailed(false);
+    setRenderedSize(undefined);
+  }, [dataUrl]);
+
+  if (failed) return <MediaUnavailable />;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-10 items-center justify-end gap-1 border-b px-3">
+        <span className="mr-2 font-mono text-xs text-muted-foreground">{Math.round(zoom * 100)}%</span>
+        <Button variant="ghost" size="icon" className="size-7" onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))} disabled={zoom <= 0.25}>
+          <ZoomOutIcon /><span className="sr-only">{t('sftp.preview.zoomOut')}</span>
+        </Button>
+        <Button variant="ghost" size="icon" className="size-7" onClick={() => setZoom(1)} disabled={zoom === 1}>
+          <RotateCcwIcon /><span className="sr-only">{t('sftp.preview.resetZoom')}</span>
+        </Button>
+        <Button variant="ghost" size="icon" className="size-7" onClick={() => setZoom((value) => Math.min(4, value + 0.25))} disabled={zoom >= 4}>
+          <ZoomInIcon /><span className="sr-only">{t('sftp.preview.zoomIn')}</span>
+        </Button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1 bg-muted/35" horizontal size="thin">
+        <div className="grid min-h-full w-max min-w-full place-items-center p-8">
+          <img
+            src={dataUrl}
+            alt={name}
+            onError={() => setFailed(true)}
+            onLoad={(event) => {
+              const { clientWidth, clientHeight } = event.currentTarget;
+              if (clientWidth > 0 && clientHeight > 0) {
+                setRenderedSize({ width: clientWidth, height: clientHeight });
+              }
+            }}
+            className={cn(
+              'block rounded-md object-contain shadow-sm',
+              renderedSize ? 'max-h-none max-w-none' : 'max-h-[60vh] max-w-full',
+            )}
+            style={renderedSize ? {
+              width: renderedSize.width * zoom,
+              height: renderedSize.height * zoom,
+            } : undefined}
+          />
+        </div>
+      </ScrollArea>
+    </div>
+  );
+};
+
+const MediaPreview: React.FC<{ dataUrl: string; kind: 'audio' | 'video'; name: string }> = ({ dataUrl, kind, name }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [dataUrl]);
+  if (failed) return <MediaUnavailable />;
+
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/35 p-8">
+      {kind === 'audio' ? (
+        <div className="flex w-full max-w-xl flex-col items-center gap-6 rounded-xl border bg-background p-8 shadow-sm">
+          <AudioArtwork />
+          <p className="max-w-full truncate text-sm font-medium">{name}</p>
+          <audio className="w-full" controls src={dataUrl} onError={() => setFailed(true)} />
+        </div>
+      ) : (
+        <video className="max-h-full max-w-full rounded-lg bg-black shadow-sm" controls src={dataUrl} onError={() => setFailed(true)} />
+      )}
+    </div>
+  );
+};
+
+const AudioArtwork: React.FC = () => (
+  <div className="flex size-24 items-center justify-center rounded-full bg-primary/10 text-primary">
+    <span className="text-4xl" aria-hidden="true">♫</span>
+  </div>
+);
+
+const BinaryPreview: React.FC<{ content: string; isArchive: boolean }> = ({ content, isArchive }) => {
+  const { t } = useI18n();
+  const hex = useMemo(() => formatHexPreview(content), [content]);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Alert className="m-3 mb-0 rounded-md">
+        <FileWarningIcon />
+        <AlertTitle>{isArchive ? t('sftp.preview.archiveTitle') : t('sftp.preview.binaryTitle')}</AlertTitle>
+        <AlertDescription>{t('sftp.preview.hexDescription')}</AlertDescription>
+      </Alert>
+      <ScrollArea className="min-h-0 flex-1" horizontal size="thin">
+        <pre className="w-max min-w-full p-4 font-mono text-xs leading-5 text-muted-foreground">{hex}</pre>
+      </ScrollArea>
+    </div>
+  );
+};
+
+const FontPreview: React.FC<{ dataUrl: string }> = ({ dataUrl }) => {
+  const { t } = useI18n();
+  const [family, setFamily] = useState<string>();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFamily(undefined);
+    setFailed(false);
+    if (typeof FontFace === 'undefined' || !document.fonts) {
+      setFailed(true);
+      return undefined;
+    }
+    let active = true;
+    const familyName = `TermBridgePreview-${Date.now().toString(36)}`;
+    const fontFace = new FontFace(familyName, `url("${dataUrl}")`);
+    void fontFace.load().then((loaded) => {
+      if (!active) return;
+      document.fonts.add(loaded);
+      setFamily(familyName);
+    }).catch(() => {
+      if (active) setFailed(true);
+    });
+    return () => {
+      active = false;
+      document.fonts.delete(fontFace);
+    };
+  }, [dataUrl]);
+
+  if (failed) return <MediaUnavailable />;
+  return (
+    <ScrollArea className="min-h-0 flex-1 bg-muted/35" size="thin">
+      <div className="mx-auto flex max-w-4xl flex-col gap-8 p-8" style={{ fontFamily: family }}>
+        <p className="text-xs text-muted-foreground">{family ? t('sftp.preview.fontLoaded') : t('sftp.preview.fontLoading')}</p>
+        <p className="text-6xl leading-tight">Aa 字</p>
+        <p className="text-3xl leading-relaxed">The quick brown fox jumps over the lazy dog.</p>
+        <p className="text-3xl leading-relaxed">天地玄黄，宇宙洪荒。你好，世界。</p>
+        <p className="text-2xl tracking-wide">ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>
+        <p className="text-2xl tracking-wide">abcdefghijklmnopqrstuvwxyz</p>
+        <p className="text-2xl tracking-wide">0123456789 !@#$%^&amp;*()</p>
+      </div>
+    </ScrollArea>
+  );
+};
+
+const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }) => {
+  const { t } = useI18n();
+  if (descriptor.kind === 'unavailable') {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <Alert className="max-w-md">
+          <FileWarningIcon />
+          <AlertTitle>{t('sftp.preview.tooLargeTitle')}</AlertTitle>
+          <AlertDescription>{t('sftp.preview.tooLargeDescription')}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+  if (descriptor.kind === 'text') return <TextPreview content={content.content} />;
+  const dataUrl = content.contentEncoding === 'base64'
+    ? createPreviewDataUrl(content.content, descriptor.mimeType)
+    : (descriptor.kind === 'image' && descriptor.extension === 'svg'
+      ? `data:${descriptor.mimeType};charset=utf-8,${encodeURIComponent(content.content)}`
+      : '');
+  if (descriptor.kind === 'image') return <ImagePreview dataUrl={dataUrl} name={content.name} />;
+  if (descriptor.kind === 'audio' || descriptor.kind === 'video') {
+    return <MediaPreview dataUrl={dataUrl} kind={descriptor.kind} name={content.name} />;
+  }
+  if (descriptor.kind === 'pdf') {
+    return <iframe className="min-h-0 flex-1 bg-muted/35" src={dataUrl} title={content.name} />;
+  }
+  if (descriptor.kind === 'font') return <FontPreview dataUrl={dataUrl} />;
+  return <BinaryPreview content={content.content} isArchive={descriptor.kind === 'archive'} />;
+};
 
 export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
   content,
   open,
   onClose,
+  onOpenExternally,
 }) => {
   const { t } = useI18n();
   const displayContent = useLastValue(content);
+  const descriptor = useMemo(
+    () => displayContent
+      ? getSftpPreviewDescriptor(displayContent.name, displayContent.contentEncoding)
+      : undefined,
+    [displayContent],
+  );
 
-  // Only guard the initial mount: once a payload has been seen, the snapshot
-  // keeps it alive during the exit animation so the fade-out isn't cut off.
-  if (!displayContent) return null;
+  if (!displayContent || !descriptor) return null;
+  const FileTypeIcon = descriptor.icon;
+  const kindLabel = t(`sftp.preview.kind.${descriptor.kind}`);
+  const extensionLabel = descriptor.extension ? descriptor.extension.toUpperCase() : kindLabel;
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <SftpDialogContent className="max-w-2xl">
-        <SftpDialogHeader title={t('sftp.preview.title')} />
-        <SftpDialogBody className="gap-3">
-          <div className="flex items-center justify-between gap-4 rounded-md border border-app-border bg-app-surface-muted/35 px-3 py-2 text-xs text-app-text-soft">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="truncate font-medium text-app-text" />
-                }
-              >
-                {displayContent.name}
-              </TooltipTrigger>
-              <TooltipContent className="break-all">{displayContent.name}</TooltipContent>
-            </Tooltip>
-            <span className="shrink-0 font-mono">{formatSize(Number(displayContent.size))}</span>
-          </div>
-          {!displayContent.isText ? (
-            <div className="flex items-center gap-3 rounded-lg border border-app-warning/25 bg-app-warning/5 p-4 text-sm text-app-text-soft">
-              <FileWarningIcon className="size-5 shrink-0 text-app-warning" aria-hidden="true" />
-              <span>{t('sftp.preview.binaryWarning')}</span>
-            </div>
-          ) : (
-            <textarea
-              readOnly
-              value={displayContent.content}
-              className="h-[60vh] w-full resize-none rounded-lg border border-app-border bg-app-surface-muted/50 p-4 font-mono text-xs leading-5 text-app-text outline-none focus-visible:ring-1 focus-visible:ring-app-primary"
-            />
+      <SftpDialogContent className="h-[min(84vh,780px)] max-w-5xl grid-rows-[auto_minmax(0,1fr)]">
+        <SftpDialogHeader
+          title={(
+            <span className="flex min-w-0 items-center gap-2">
+              <FileTypeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <Tooltip>
+                <TooltipTrigger render={<span className="truncate" />}>{displayContent.name}</TooltipTrigger>
+                <TooltipContent className="max-w-sm break-all">{displayContent.name}</TooltipContent>
+              </Tooltip>
+            </span>
           )}
+          description={displayContent.path}
+        />
+        <SftpDialogBody className="min-h-0 gap-0 overflow-hidden border-t p-0">
+          <div className="flex min-h-11 items-center gap-2 px-3">
+            <Badge variant="secondary">{extensionLabel}</Badge>
+            <span className="text-xs text-muted-foreground">{kindLabel}</span>
+            <Separator
+              orientation="vertical"
+              className="mx-1 h-4 data-vertical:self-center"
+            />
+            <span className="font-mono text-xs text-muted-foreground">{formatSize(Number(displayContent.size))}</span>
+            {displayContent.truncated && displayContent.contentEncoding !== 'none' && (
+              <Badge variant="outline">{t('sftp.preview.partial')}</Badge>
+            )}
+            <div className="ml-auto">
+              {onOpenExternally && (
+                <Button variant="outline" size="sm" onClick={() => onOpenExternally(displayContent.path)}>
+                  <ExternalLinkIcon data-icon="inline-start" />
+                  {t('sftp.preview.openExternally')}
+                </Button>
+              )}
+            </div>
+          </div>
+          <Separator />
+          <PreviewRenderer content={displayContent} descriptor={descriptor} />
         </SftpDialogBody>
       </SftpDialogContent>
     </Dialog>

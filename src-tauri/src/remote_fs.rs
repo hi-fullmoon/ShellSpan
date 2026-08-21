@@ -14,6 +14,7 @@ use crate::models::{
 use crate::portable_local_path;
 use crate::posix_join;
 use crate::sftp_pool::SftpPool;
+use base64::Engine;
 use log::{info, warn};
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::{
@@ -1952,7 +1953,8 @@ fn open_remote_file_inner(
     open_path_with_default_app(&local_path)
 }
 
-const PREVIEW_SIZE_LIMIT: u64 = 1024 * 1024;
+const PREVIEW_COMPLETE_FILE_SIZE_LIMIT: u64 = 16 * 1024 * 1024;
+const PREVIEW_TEXT_PREFIX_SIZE_LIMIT: u64 = 256 * 1024;
 
 pub(crate) fn read_remote_file_blocking(
     request: ReadRemoteFileRequest,
@@ -1995,21 +1997,40 @@ fn read_remote_file_inner(
         });
     }
 
-    let size = stat.size.unwrap_or(0);
-    if size > PREVIEW_SIZE_LIMIT {
-        return Err(RemoteFsError::Other {
-            message: format!(
-                "file too large to preview: {} bytes (limit: {} bytes)",
-                size, PREVIEW_SIZE_LIMIT
-            ),
-        });
-    }
-
     let file_name = remote_path
         .file_name()
         .map(|value| value.to_string_lossy().to_string())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "remote-file".to_string());
+
+    // `sftp.open` follows symlinks, so use the target size rather than the
+    // link entry size. Oversized files still return metadata, allowing the UI
+    // to offer opening them with the system application instead of a toast.
+    let size = connected
+        .sftp
+        .stat(remote_path)
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to inspect remote file target: {error}"),
+        })?
+        .size
+        .unwrap_or(stat.size.unwrap_or(0));
+    let requires_complete_file = preview_extension_requires_complete_file(&file_name);
+    let read_limit = if requires_complete_file {
+        PREVIEW_COMPLETE_FILE_SIZE_LIMIT
+    } else {
+        PREVIEW_TEXT_PREFIX_SIZE_LIMIT
+    };
+    if requires_complete_file && size > read_limit {
+        return Ok(ReadRemoteFileResponse {
+            path: request.path,
+            name: file_name,
+            content: String::new(),
+            size,
+            is_text: false,
+            content_encoding: "none".to_string(),
+            truncated: true,
+        });
+    }
 
     let remote_file = connected
         .sftp
@@ -2018,31 +2039,45 @@ fn read_remote_file_inner(
             message: format!("failed to open remote file: {error}"),
         })?;
 
-    // `sftp.open` follows symlinks while `lstat` above reports the link's own
-    // size, so the size check can be bypassed through a link to a large file.
-    // Read at most LIMIT + 1 bytes and reject anything beyond the limit.
-    let mut buffer = Vec::with_capacity((size.min(PREVIEW_SIZE_LIMIT) + 1) as usize);
+    // Read one byte beyond the relevant limit so growth after `stat` is still
+    // detected. Complete-file formats are rejected; text and inspection
+    // formats keep a bounded prefix and report `truncated`.
+    let mut buffer = Vec::with_capacity((size.min(read_limit) + 1) as usize);
     remote_file
-        .take(PREVIEW_SIZE_LIMIT + 1)
+        .take(read_limit + 1)
         .read_to_end(&mut buffer)
         .map_err(|error| RemoteFsError::Other {
             message: format!("failed to read remote file: {error}"),
         })?;
-    if buffer.len() as u64 > PREVIEW_SIZE_LIMIT {
-        return Err(RemoteFsError::Other {
-            message: format!(
-                "file too large to preview: exceeds limit of {} bytes",
-                PREVIEW_SIZE_LIMIT
-            ),
+    let mut truncated = size > read_limit;
+    if buffer.len() as u64 > read_limit && requires_complete_file {
+        return Ok(ReadRemoteFileResponse {
+            path: request.path,
+            name: file_name,
+            content: String::new(),
+            size,
+            is_text: false,
+            content_encoding: "none".to_string(),
+            truncated: true,
         });
     }
+    if buffer.len() as u64 > read_limit {
+        buffer.truncate(read_limit as usize);
+        truncated = true;
+    }
 
-    let (content, is_text) = match String::from_utf8(buffer) {
-        Ok(text) => (text, true),
-        Err(error) => {
-            let lossy = String::from_utf8_lossy(error.as_bytes()).to_string();
-            (lossy, false)
-        }
+    let decoded_text = if preview_extension_requires_binary(&file_name) {
+        None
+    } else {
+        decode_preview_text(&buffer, truncated)
+    };
+    let (content, is_text, content_encoding) = match decoded_text {
+        Some(text) => (text, true, "utf8".to_string()),
+        None => (
+            base64::engine::general_purpose::STANDARD.encode(&buffer),
+            false,
+            "base64".to_string(),
+        ),
     };
 
     Ok(ReadRemoteFileResponse {
@@ -2051,7 +2086,146 @@ fn read_remote_file_inner(
         content,
         size,
         is_text,
+        content_encoding,
+        truncated,
     })
+}
+
+fn decode_preview_text(buffer: &[u8], allow_incomplete_tail: bool) -> Option<String> {
+    if buffer.starts_with(&[0xff, 0xfe]) || buffer.starts_with(&[0xfe, 0xff]) {
+        if !allow_incomplete_tail && (buffer.len() - 2) % 2 != 0 {
+            return None;
+        }
+        let little_endian = buffer.starts_with(&[0xff, 0xfe]);
+        let mut units = buffer[2..]
+            .chunks_exact(2)
+            .map(|chunk| {
+                if little_endian {
+                    u16::from_le_bytes([chunk[0], chunk[1]])
+                } else {
+                    u16::from_be_bytes([chunk[0], chunk[1]])
+                }
+            })
+            .collect::<Vec<_>>();
+        if allow_incomplete_tail
+            && units
+                .last()
+                .is_some_and(|unit| matches!(unit, 0xd800..=0xdbff))
+        {
+            units.pop();
+        }
+        return String::from_utf16(&units).ok();
+    }
+
+    if buffer.contains(&0) {
+        return None;
+    }
+
+    let text = match std::str::from_utf8(buffer) {
+        Ok(text) => text,
+        Err(error) if allow_incomplete_tail && error.error_len().is_none() => {
+            std::str::from_utf8(&buffer[..error.valid_up_to()]).ok()?
+        }
+        Err(_) => return None,
+    };
+    let suspicious_controls = text
+        .chars()
+        .filter(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+        .count();
+    if suspicious_controls > (text.chars().count() / 50).max(1) {
+        return None;
+    }
+    Some(text.to_string())
+}
+
+fn preview_extension_requires_complete_file(file_name: &str) -> bool {
+    let extension = Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    matches!(
+        extension.as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "ico"
+            | "avif"
+            | "svg"
+            | "mp3"
+            | "wav"
+            | "ogg"
+            | "oga"
+            | "flac"
+            | "m4a"
+            | "aac"
+            | "opus"
+            | "mp4"
+            | "webm"
+            | "ogv"
+            | "mov"
+            | "m4v"
+            | "pdf"
+            | "woff"
+            | "woff2"
+            | "ttf"
+            | "otf"
+    )
+}
+
+fn preview_extension_requires_binary(file_name: &str) -> bool {
+    let extension = Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    matches!(
+        extension.as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "ico"
+            | "avif"
+            | "svg"
+            | "mp3"
+            | "wav"
+            | "ogg"
+            | "oga"
+            | "flac"
+            | "m4a"
+            | "aac"
+            | "opus"
+            | "mp4"
+            | "webm"
+            | "ogv"
+            | "mov"
+            | "m4v"
+            | "pdf"
+            | "woff"
+            | "woff2"
+            | "ttf"
+            | "otf"
+            | "zip"
+            | "gz"
+            | "tgz"
+            | "tar"
+            | "bz2"
+            | "xz"
+            | "7z"
+            | "rar"
+            | "doc"
+            | "docx"
+            | "xls"
+            | "xlsx"
+            | "ppt"
+            | "pptx"
+    )
 }
 
 fn cleanup_stale_open_temp_files(open_root: &Path) {
@@ -3187,6 +3361,54 @@ fn open_path_with_default_app(path: &Path) -> Result<(), RemoteFsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_text_decoder_accepts_utf8_and_utf16_bom() {
+        assert_eq!(
+            decode_preview_text(b"hello\nworld", false),
+            Some("hello\nworld".to_string())
+        );
+        assert_eq!(
+            decode_preview_text(&[0xff, 0xfe, b'h', 0, b'i', 0], false),
+            Some("hi".to_string()),
+        );
+        assert_eq!(
+            decode_preview_text(&[0xfe, 0xff, 0, b'h', 0, b'i'], false),
+            Some("hi".to_string()),
+        );
+    }
+
+    #[test]
+    fn preview_text_decoder_rejects_binary_controls_and_invalid_utf8() {
+        assert_eq!(decode_preview_text(&[0, 1, 2, 3], false), None);
+        assert_eq!(decode_preview_text(&[0xff, 0x00, 0x80], false), None);
+    }
+
+    #[test]
+    fn preview_text_decoder_only_accepts_incomplete_utf8_for_truncated_prefixes() {
+        let partial = [b'h', b'i', 0xe4, 0xbd];
+        assert_eq!(decode_preview_text(&partial, false), None);
+        assert_eq!(decode_preview_text(&partial, true), Some("hi".to_string()));
+
+        let partial_utf16 = [0xff, 0xfe, b'h', 0, 0x3d, 0xd8];
+        assert_eq!(decode_preview_text(&partial_utf16, false), None);
+        assert_eq!(
+            decode_preview_text(&partial_utf16, true),
+            Some("h".to_string())
+        );
+    }
+
+    #[test]
+    fn preview_binary_hint_keeps_ascii_pdf_and_media_as_bytes() {
+        assert!(preview_extension_requires_binary("manual.PDF"));
+        assert!(preview_extension_requires_binary("sound.mp3"));
+        assert!(preview_extension_requires_binary("diagram.svg"));
+        assert!(!preview_extension_requires_binary("settings.toml"));
+        assert!(preview_extension_requires_complete_file("diagram.svg"));
+        assert!(preview_extension_requires_complete_file("manual.pdf"));
+        assert!(!preview_extension_requires_complete_file("server.log"));
+        assert!(!preview_extension_requires_complete_file("backup.zip"));
+    }
 
     #[test]
     fn parse_identity_lookup_output_splits_users_and_groups() {
