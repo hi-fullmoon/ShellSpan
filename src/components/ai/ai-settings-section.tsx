@@ -12,17 +12,6 @@ import {
   Trash2Icon,
   WavesIcon,
 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogMedia,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,6 +24,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import {
   Dialog,
   DialogContent,
@@ -431,25 +421,13 @@ export const AiSettingsSection: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogMedia>
-              <Trash2Icon />
-            </AlertDialogMedia>
-            <AlertDialogTitle>
-              {t('settings.ai.deleteProviderTitle', { name: selectedProvider.name })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>{t('settings.ai.deleteProviderDescription')}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleDeleteProvider} disabled={busy}>
-              {t('common.delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={t('settings.ai.deleteProviderTitle', { name: selectedProvider.name })}
+        description={t('settings.ai.deleteProviderDescription')}
+        onConfirm={handleDeleteProvider}
+      />
     </div>
   );
 };
