@@ -1953,8 +1953,8 @@ fn open_remote_file_inner(
     open_path_with_default_app(&local_path)
 }
 
-const PREVIEW_COMPLETE_FILE_SIZE_LIMIT: u64 = 16 * 1024 * 1024;
-const PREVIEW_TEXT_PREFIX_SIZE_LIMIT: u64 = 256 * 1024;
+pub(crate) const PREVIEW_COMPLETE_FILE_SIZE_LIMIT: u64 = 16 * 1024 * 1024;
+pub(crate) const PREVIEW_TEXT_PREFIX_SIZE_LIMIT: u64 = 256 * 1024;
 
 pub(crate) fn read_remote_file_blocking(
     request: ReadRemoteFileRequest,
@@ -2091,7 +2091,7 @@ fn read_remote_file_inner(
     })
 }
 
-fn decode_preview_text(buffer: &[u8], allow_incomplete_tail: bool) -> Option<String> {
+pub(crate) fn decode_preview_text(buffer: &[u8], allow_incomplete_tail: bool) -> Option<String> {
     if buffer.starts_with(&[0xff, 0xfe]) || buffer.starts_with(&[0xfe, 0xff]) {
         if !allow_incomplete_tail && (buffer.len() - 2) % 2 != 0 {
             return None;
@@ -2138,7 +2138,7 @@ fn decode_preview_text(buffer: &[u8], allow_incomplete_tail: bool) -> Option<Str
     Some(text.to_string())
 }
 
-fn preview_extension_requires_complete_file(file_name: &str) -> bool {
+pub(crate) fn preview_extension_requires_complete_file(file_name: &str) -> bool {
     let extension = Path::new(file_name)
         .extension()
         .and_then(|value| value.to_str())
@@ -2176,7 +2176,7 @@ fn preview_extension_requires_complete_file(file_name: &str) -> bool {
     )
 }
 
-fn preview_extension_requires_binary(file_name: &str) -> bool {
+pub(crate) fn preview_extension_requires_binary(file_name: &str) -> bool {
     let extension = Path::new(file_name)
         .extension()
         .and_then(|value| value.to_str())

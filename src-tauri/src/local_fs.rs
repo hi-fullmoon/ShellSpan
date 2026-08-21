@@ -1,8 +1,98 @@
-use crate::models::{CopyLocalPathsRequest, UploadConflictPolicy};
+use crate::models::{CopyLocalPathsRequest, ReadRemoteFileResponse, UploadConflictPolicy};
 use crate::path_utils::portable_local_path;
+use crate::remote_fs::{
+    decode_preview_text, preview_extension_requires_binary,
+    preview_extension_requires_complete_file, PREVIEW_COMPLETE_FILE_SIZE_LIMIT,
+    PREVIEW_TEXT_PREFIX_SIZE_LIMIT,
+};
+use base64::Engine;
 use std::collections::HashSet;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
+
+pub(crate) fn read_local_file_blocking(path: String) -> Result<ReadRemoteFileResponse, String> {
+    let target = Path::new(&path);
+    let metadata =
+        fs::metadata(target).map_err(|error| format!("failed to inspect local file: {error}"))?;
+    if metadata.is_dir() {
+        return Err("cannot preview a directory".to_string());
+    }
+
+    let file_name = target
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "local-file".to_string());
+    let size = metadata.len();
+    let requires_complete_file = preview_extension_requires_complete_file(&file_name);
+    let read_limit = if requires_complete_file {
+        PREVIEW_COMPLETE_FILE_SIZE_LIMIT
+    } else {
+        PREVIEW_TEXT_PREFIX_SIZE_LIMIT
+    };
+    let response_path = portable_local_path(target);
+
+    if requires_complete_file && size > read_limit {
+        return Ok(ReadRemoteFileResponse {
+            path: response_path,
+            name: file_name,
+            content: String::new(),
+            size,
+            is_text: false,
+            content_encoding: "none".to_string(),
+            truncated: true,
+        });
+    }
+
+    let file =
+        fs::File::open(target).map_err(|error| format!("failed to open local file: {error}"))?;
+    let mut buffer = Vec::with_capacity((size.min(read_limit) + 1) as usize);
+    file.take(read_limit + 1)
+        .read_to_end(&mut buffer)
+        .map_err(|error| format!("failed to read local file: {error}"))?;
+
+    let mut truncated = size > read_limit;
+    if buffer.len() as u64 > read_limit && requires_complete_file {
+        return Ok(ReadRemoteFileResponse {
+            path: response_path,
+            name: file_name,
+            content: String::new(),
+            size,
+            is_text: false,
+            content_encoding: "none".to_string(),
+            truncated: true,
+        });
+    }
+    if buffer.len() as u64 > read_limit {
+        buffer.truncate(read_limit as usize);
+        truncated = true;
+    }
+
+    let decoded_text = if preview_extension_requires_binary(&file_name) {
+        None
+    } else {
+        decode_preview_text(&buffer, truncated)
+    };
+    let (content, is_text, content_encoding) = match decoded_text {
+        Some(text) => (text, true, "utf8".to_string()),
+        None => (
+            base64::engine::general_purpose::STANDARD.encode(&buffer),
+            false,
+            "base64".to_string(),
+        ),
+    };
+
+    Ok(ReadRemoteFileResponse {
+        path: response_path,
+        name: file_name,
+        content,
+        size,
+        is_text,
+        content_encoding,
+        truncated,
+    })
+}
 
 pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Result<(), String> {
     if request.source_paths.is_empty() {
@@ -345,6 +435,79 @@ mod tests {
             conflict_policies: policies,
             operation_id: "test-op".to_string(),
         }
+    }
+
+    #[test]
+    fn previews_a_local_utf8_file() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("notes.txt");
+        fs::write(&source, "hello\nworld").unwrap();
+
+        let response = read_local_file_blocking(source.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(response.name, "notes.txt");
+        assert_eq!(response.content, "hello\nworld");
+        assert_eq!(response.content_encoding, "utf8");
+        assert!(response.is_text);
+        assert!(!response.truncated);
+    }
+
+    #[test]
+    fn previews_local_binary_data_as_base64() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("image.png");
+        fs::write(&source, [0_u8, 1, 2]).unwrap();
+
+        let response = read_local_file_blocking(source.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(response.content, "AAEC");
+        assert_eq!(response.content_encoding, "base64");
+        assert!(!response.is_text);
+        assert!(!response.truncated);
+    }
+
+    #[test]
+    fn returns_metadata_without_loading_an_oversized_complete_file() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("large.mp4");
+        let file = fs::File::create(&source).unwrap();
+        file.set_len(PREVIEW_COMPLETE_FILE_SIZE_LIMIT + 1).unwrap();
+
+        let response = read_local_file_blocking(source.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(response.content_encoding, "none");
+        assert!(response.content.is_empty());
+        assert!(response.truncated);
+        assert_eq!(response.size, PREVIEW_COMPLETE_FILE_SIZE_LIMIT + 1);
+    }
+
+    #[test]
+    fn keeps_a_bounded_prefix_for_large_local_text_files() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("large.log");
+        fs::write(
+            &source,
+            vec![b'a'; (PREVIEW_TEXT_PREFIX_SIZE_LIMIT + 32) as usize],
+        )
+        .unwrap();
+
+        let response = read_local_file_blocking(source.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(response.content_encoding, "utf8");
+        assert_eq!(
+            response.content.len(),
+            PREVIEW_TEXT_PREFIX_SIZE_LIMIT as usize
+        );
+        assert!(response.truncated);
+    }
+
+    #[test]
+    fn rejects_local_directories_for_preview() {
+        let temp = TempDir::new().unwrap();
+
+        let result = read_local_file_blocking(temp.path().to_string_lossy().to_string());
+
+        assert_eq!(result.unwrap_err(), "cannot preview a directory");
     }
 
     #[test]
