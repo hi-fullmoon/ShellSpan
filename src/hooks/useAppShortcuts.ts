@@ -7,6 +7,7 @@ import {
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutAction } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useAiStore } from '@/stores/aiStore';
 
 // The leader binding and its sub-keys live in the terminal input layer
 // (terminal-leader.ts), not at the document level.
@@ -59,6 +60,9 @@ export function useAppShortcuts(): void {
         case 'openSettings':
           setActiveSection('workbench');
           setActiveWorkbenchTab('settings');
+          break;
+        case 'toggleAiPanel':
+          useAiStore.getState().toggleOpen();
           break;
         case 'newTerminalTab':
           document.dispatchEvent(new Event('termbridge:new-terminal-tab'));

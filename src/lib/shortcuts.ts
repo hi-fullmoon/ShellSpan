@@ -10,6 +10,7 @@ export const SHORTCUT_SCOPES: Record<ShortcutAction, ShortcutScope> = {
   openTerminal: 'global',
   openSftp: 'global',
   openSettings: 'global',
+  toggleAiPanel: 'global',
   newTerminalTab: 'terminal',
   closeTerminalTab: 'terminal',
   nextTerminalTab: 'terminal',
