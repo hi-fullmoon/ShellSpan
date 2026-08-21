@@ -613,7 +613,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
         onNewTabClick();
       }}
-      className={cn('group/tabbar relative flex h-8 items-start gap-0 border-b border-app-border bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
+      className={cn('group/tabbar relative flex h-8 items-start gap-0 border-b-[0.5px] border-app-border/40 bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
     >
       <DndContext
         sensors={sensors}
