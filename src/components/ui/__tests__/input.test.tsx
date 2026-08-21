@@ -18,4 +18,13 @@ describe('Input', () => {
     expect(input).toHaveClass('focus-visible:ring-1');
     expect(input).not.toHaveClass('focus-visible:ring-2');
   });
+
+  it('disables browser autocomplete by default', () => {
+    render(<Input placeholder="Test input" />);
+
+    expect(screen.getByPlaceholderText('Test input')).toHaveAttribute(
+      'autocomplete',
+      'off',
+    );
+  });
 });
