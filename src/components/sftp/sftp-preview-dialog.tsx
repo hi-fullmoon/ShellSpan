@@ -10,31 +10,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import { useLastValue } from '@/hooks/useLastValue';
 import { formatSize } from '@/lib/sftp-utils';
-import {
-  createPreviewDataUrl,
-  formatHexPreview,
-  getFileExtension,
-  getSftpPreviewDescriptor,
-  type SftpPreviewDescriptor,
-} from '@/lib/sftp-preview';
+import { createPreviewDataUrl, formatHexPreview, getFileExtension, getSftpPreviewDescriptor, type SftpPreviewDescriptor } from '@/lib/sftp-preview';
 import { cn } from '@/lib/utils';
 import type { ReadRemoteFileResponse } from '@/types';
-import {
-  CheckIcon,
-  CopyIcon,
-  ExternalLinkIcon,
-  FileIcon,
-  FileWarningIcon,
-  RotateCcwIcon,
-  WrapTextIcon,
-  ZoomInIcon,
-  ZoomOutIcon,
-} from 'lucide-react';
-import {
-  SftpDialogBody,
-  SftpDialogContent,
-  SftpDialogHeader,
-} from './sftp-dialog-layout';
+import { CheckIcon, CopyIcon, ExternalLinkIcon, FileIcon, FileWarningIcon, RotateCcwIcon, WrapTextIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react';
+import { SftpDialogBody, SftpDialogContent, SftpDialogHeader } from './sftp-dialog-layout';
 
 export interface SftpPreviewDialogProps {
   target?: {
@@ -98,19 +78,30 @@ const TextPreview: React.FC<{ content: string }> = ({ content }) => {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 items-center justify-between gap-3 border-b px-3">
-        <span className="text-xs text-muted-foreground">
-          {t('sftp.preview.lineCount', { count: lineCount })}
-        </span>
+        <span className="text-xs text-muted-foreground">{t('sftp.preview.lineCount', { count: lineCount })}</span>
         <div className="flex items-center gap-1">
           <Tooltip>
-            <TooltipTrigger render={<Button variant={wrap ? 'secondary' : 'ghost'} size="icon" className="size-7" onClick={() => setWrap((value) => !value)} />}>
+            <TooltipTrigger
+              render={<Button variant={wrap ? 'secondary' : 'ghost'} size="icon" className="size-7" onClick={() => setWrap((value) => !value)} />}
+            >
               <WrapTextIcon />
               <span className="sr-only">{t('sftp.preview.toggleWrap')}</span>
             </TooltipTrigger>
             <TooltipContent>{t('sftp.preview.toggleWrap')}</TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon" className="size-7" onClick={() => { void handleCopy(); }} />}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  onClick={() => {
+                    void handleCopy();
+                  }}
+                />
+              }
+            >
               {copied ? <CheckIcon /> : <CopyIcon />}
               <span className="sr-only">{t('sftp.preview.copyContent')}</span>
             </TooltipTrigger>
@@ -119,10 +110,12 @@ const TextPreview: React.FC<{ content: string }> = ({ content }) => {
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1" horizontal={!wrap} size="thin">
-        <pre className={cn(
-          'min-h-full p-4 font-mono text-xs leading-5 text-foreground selection:bg-primary/20',
-          wrap ? 'whitespace-pre-wrap break-words' : 'w-max min-w-full whitespace-pre',
-        )}>
+        <pre
+          className={cn(
+            'min-h-full p-4 font-mono text-xs leading-5 text-foreground selection:bg-primary/20',
+            wrap ? 'whitespace-pre-wrap break-words' : 'w-max min-w-full whitespace-pre',
+          )}
+        >
           {content || t('sftp.preview.emptyFile')}
         </pre>
       </ScrollArea>
@@ -143,13 +136,13 @@ const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, na
     const sourceHeight = image.naturalHeight || image.clientHeight;
     if (sourceWidth <= 0 || sourceHeight <= 0) return;
 
-    // The canvas uses p-8, so reserve 32 px on every side before calculating
+    // The canvas uses p-4, so reserve 16 px on every side before calculating
     // the 100% baseline. Otherwise a fitted image plus its padding overflows
     // the viewport and produces scrollbars even before the user zooms in.
     const viewportWidth = viewportRef.current?.clientWidth ?? 0;
     const viewportHeight = viewportRef.current?.clientHeight ?? 0;
-    const availableWidth = viewportWidth > 64 ? viewportWidth - 64 : sourceWidth;
-    const availableHeight = viewportHeight > 64 ? viewportHeight - 64 : sourceHeight;
+    const availableWidth = viewportWidth > 32 ? viewportWidth - 32 : sourceWidth;
+    const availableHeight = viewportHeight > 32 ? viewportHeight - 32 : sourceHeight;
     const scale = Math.min(1, availableWidth / sourceWidth, availableHeight / sourceHeight);
     setRenderedSize({
       width: Math.floor(sourceWidth * scale),
@@ -178,32 +171,42 @@ const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, na
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 items-center justify-end gap-1 border-b px-3">
         <span className="mr-2 font-mono text-xs text-muted-foreground">{Math.round(zoom * 100)}%</span>
-        <Button variant="ghost" size="icon" className="size-7" onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))} disabled={zoom <= 0.25}>
-          <ZoomOutIcon /><span className="sr-only">{t('sftp.preview.zoomOut')}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))}
+          disabled={zoom <= 0.25}
+        >
+          <ZoomOutIcon />
+          <span className="sr-only">{t('sftp.preview.zoomOut')}</span>
         </Button>
         <Button variant="ghost" size="icon" className="size-7" onClick={() => setZoom(1)} disabled={zoom === 1}>
-          <RotateCcwIcon /><span className="sr-only">{t('sftp.preview.resetZoom')}</span>
+          <RotateCcwIcon />
+          <span className="sr-only">{t('sftp.preview.resetZoom')}</span>
         </Button>
         <Button variant="ghost" size="icon" className="size-7" onClick={() => setZoom((value) => Math.min(4, value + 0.25))} disabled={zoom >= 4}>
-          <ZoomInIcon /><span className="sr-only">{t('sftp.preview.zoomIn')}</span>
+          <ZoomInIcon />
+          <span className="sr-only">{t('sftp.preview.zoomIn')}</span>
         </Button>
       </div>
       <ScrollArea viewportRef={viewportRef} className="min-h-0 flex-1 bg-muted/35" horizontal size="thin">
-        <div className="grid min-h-full w-max min-w-full place-items-center p-8">
+        <div className="grid min-h-full w-max min-w-full place-items-center p-4">
           <img
             ref={imageRef}
             src={dataUrl}
             alt={name}
             onError={() => setFailed(true)}
             onLoad={(event) => fitImageToViewport(event.currentTarget)}
-            className={cn(
-              'block rounded-md object-contain shadow-sm',
-              renderedSize ? 'max-h-none max-w-none' : 'max-h-[60vh] max-w-full',
-            )}
-            style={renderedSize ? {
-              width: renderedSize.width * zoom,
-              height: renderedSize.height * zoom,
-            } : undefined}
+            className={cn('block rounded-md object-contain shadow-sm', renderedSize ? 'max-h-none max-w-none' : 'max-h-[60vh] max-w-full')}
+            style={
+              renderedSize
+                ? {
+                    width: renderedSize.width * zoom,
+                    height: renderedSize.height * zoom,
+                  }
+                : undefined
+            }
           />
         </div>
       </ScrollArea>
@@ -233,7 +236,9 @@ const MediaPreview: React.FC<{ dataUrl: string; kind: 'audio' | 'video'; name: s
 
 const AudioArtwork: React.FC = () => (
   <div className="flex size-24 items-center justify-center rounded-full bg-primary/10 text-primary">
-    <span className="text-4xl" aria-hidden="true">♫</span>
+    <span className="text-4xl" aria-hidden="true">
+      ♫
+    </span>
   </div>
 );
 
@@ -248,7 +253,7 @@ const BinaryPreview: React.FC<{ content: string; isArchive: boolean }> = ({ cont
         <AlertDescription>{t('sftp.preview.hexDescription')}</AlertDescription>
       </Alert>
       <ScrollArea className="min-h-0 flex-1" horizontal size="thin">
-        <pre className="w-max min-w-full p-4 font-mono text-xs leading-5 text-muted-foreground">{hex}</pre>
+        <pre className="w-max min-w-full px-4 pb-4 font-mono text-xs leading-5 text-muted-foreground">{hex}</pre>
       </ScrollArea>
     </div>
   );
@@ -269,13 +274,16 @@ const FontPreview: React.FC<{ dataUrl: string }> = ({ dataUrl }) => {
     let active = true;
     const familyName = `TermBridgePreview-${Date.now().toString(36)}`;
     const fontFace = new FontFace(familyName, `url("${dataUrl}")`);
-    void fontFace.load().then((loaded) => {
-      if (!active) return;
-      document.fonts.add(loaded);
-      setFamily(familyName);
-    }).catch(() => {
-      if (active) setFailed(true);
-    });
+    void fontFace
+      .load()
+      .then((loaded) => {
+        if (!active) return;
+        document.fonts.add(loaded);
+        setFamily(familyName);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
     return () => {
       active = false;
       document.fonts.delete(fontFace);
@@ -312,11 +320,12 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }
     );
   }
   if (descriptor.kind === 'text') return <TextPreview content={content.content} />;
-  const dataUrl = content.contentEncoding === 'base64'
-    ? createPreviewDataUrl(content.content, descriptor.mimeType)
-    : (descriptor.kind === 'image' && descriptor.extension === 'svg'
-      ? `data:${descriptor.mimeType};charset=utf-8,${encodeURIComponent(content.content)}`
-      : '');
+  const dataUrl =
+    content.contentEncoding === 'base64'
+      ? createPreviewDataUrl(content.content, descriptor.mimeType)
+      : descriptor.kind === 'image' && descriptor.extension === 'svg'
+        ? `data:${descriptor.mimeType};charset=utf-8,${encodeURIComponent(content.content)}`
+        : '';
   if (descriptor.kind === 'image') return <ImagePreview dataUrl={dataUrl} name={content.name} />;
   if (descriptor.kind === 'audio' || descriptor.kind === 'video') {
     return <MediaPreview dataUrl={dataUrl} kind={descriptor.kind} name={content.name} />;
@@ -328,18 +337,10 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }
   return <BinaryPreview content={content.content} isArchive={descriptor.kind === 'archive'} />;
 };
 
-export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
-  target,
-  content,
-  open,
-  onClose,
-  onOpenExternally,
-}) => {
+export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, content, open, onClose, onOpenExternally }) => {
   const { t } = useI18n();
   const liveTarget = useMemo(
-    () => target ?? (content
-      ? { path: content.path, name: content.name, size: content.size }
-      : undefined),
+    () => target ?? (content ? { path: content.path, name: content.name, size: content.size } : undefined),
     [content, target],
   );
   const displayTarget = useLastValue(liveTarget);
@@ -347,26 +348,27 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
   const loading = target !== undefined && content === undefined;
   const resolvedContent = loading ? undefined : displayContent;
   const descriptor = useMemo(
-    () => resolvedContent
-      ? getSftpPreviewDescriptor(resolvedContent.name, resolvedContent.contentEncoding)
-      : undefined,
+    () => (resolvedContent ? getSftpPreviewDescriptor(resolvedContent.name, resolvedContent.contentEncoding) : undefined),
     [resolvedContent],
   );
 
   if (!displayTarget || (!loading && (!resolvedContent || !descriptor))) return null;
   const FileTypeIcon = descriptor?.icon ?? FileIcon;
-  const kindLabel = descriptor
-    ? t(`sftp.preview.kind.${descriptor.kind}`)
-    : t('sftp.preview.loading');
+  const kindLabel = descriptor ? t(`sftp.preview.kind.${descriptor.kind}`) : t('sftp.preview.loading');
   const extension = descriptor?.extension ?? getFileExtension(displayTarget.name);
   const extensionLabel = extension ? extension.toUpperCase() : t('sftp.preview.kind.unavailable');
   const displaySize = resolvedContent?.size ?? displayTarget.size;
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
       <SftpDialogContent className="h-[min(84vh,780px)] max-w-5xl grid-rows-[auto_minmax(0,1fr)]">
         <SftpDialogHeader
-          title={(
+          title={
             <span className="flex min-w-0 items-center gap-2">
               <FileTypeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               <Tooltip>
@@ -374,7 +376,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
                 <TooltipContent className="max-w-sm break-all">{displayTarget.name}</TooltipContent>
               </Tooltip>
             </span>
-          )}
+          }
           description={displayTarget.path}
         />
         <SftpDialogBody className="min-h-0 gap-0 overflow-hidden border-t p-0">
@@ -383,16 +385,11 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({
             <span className="text-xs text-muted-foreground">{kindLabel}</span>
             {displaySize !== undefined && (
               <>
-                <Separator
-                  orientation="vertical"
-                  className="mx-1 h-4 data-vertical:self-center"
-                />
+                <Separator orientation="vertical" className="mx-1 h-4 data-vertical:self-center" />
                 <span className="font-mono text-xs text-muted-foreground">{formatSize(Number(displaySize))}</span>
               </>
             )}
-            {resolvedContent?.truncated && resolvedContent.contentEncoding !== 'none' && (
-              <Badge variant="outline">{t('sftp.preview.partial')}</Badge>
-            )}
+            {resolvedContent?.truncated && resolvedContent.contentEncoding !== 'none' && <Badge variant="outline">{t('sftp.preview.partial')}</Badge>}
             <div className="ml-auto">
               {onOpenExternally && (
                 <Button variant="outline" size="sm" onClick={() => onOpenExternally(displayTarget.path)}>
