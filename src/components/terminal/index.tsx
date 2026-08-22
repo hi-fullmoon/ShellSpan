@@ -20,15 +20,19 @@ import { TerminalContextMenu } from './terminal-context-menu';
 import {
   findAdjacentTerminalGroup,
   findTerminalGroup,
+  ensureUniqueTerminalGroupIds,
   getTerminalGroups,
   getTerminalSplitDirection,
   partitionSessionIdsPinnedFirst,
   pruneEmptyTerminalGroups,
   repartitionTerminalLayoutPinnedFirst,
   replaceTerminalGroup,
+  replaceTerminalSessionId,
   updateTerminalGroup,
+  updateTerminalSplitAtPath,
   type TerminalGroupSlot,
   type TerminalGroupState,
+  type TerminalLayoutPath,
   type TerminalLayoutNode,
   type TerminalSplitDirection,
   type TerminalSplitState,
@@ -38,7 +42,10 @@ const logger = createLogger('terminalWorkspace');
 
 type DropPreview =
   | { kind: 'split'; direction: TerminalSplitDirection; slot: TerminalGroupSlot | null }
+  | { kind: 'move'; slot: TerminalGroupSlot }
   | { kind: 'tab-bar'; slot: TerminalGroupSlot; insertIndex: number };
+
+const TERMINAL_MIN_PANE_SIZE = 120;
 
 const Terminal: React.FC = () => {
   const { t } = useI18n();
@@ -58,7 +65,9 @@ const Terminal: React.FC = () => {
   } | null>(null);
   const [split, setSplit] = useState<TerminalSplitState | null>(() => {
     const restored = useTerminalStore.getState().restoredLayout;
-    return restored?.kind === 'split' ? restored : null;
+    return restored?.kind === 'split'
+      ? ensureUniqueTerminalGroupIds(restored) as TerminalSplitState
+      : null;
   });
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const terminalAreaRef = useRef<HTMLDivElement>(null);
@@ -66,7 +75,18 @@ const Terminal: React.FC = () => {
   // Mirror of focusedGroupRef for rendering: mutating a ref does not trigger a
   // re-render, so the focus ring and activeGroup props read this state instead.
   const [focusedSlot, setFocusedSlot] = useState<TerminalGroupSlot>('first');
-  const nextGroupIdRef = useRef(3);
+  const nextGroupIdRef = useRef(
+    split
+      ? Math.max(3, ...getTerminalGroups(split).map((group) => {
+          const match = /^group-(\d+)$/.exec(group.id);
+          return match ? Number(match[1]) + 1 : 3;
+        }))
+      : 3,
+  );
+  const usedGroupIdsRef = useRef(new Set(
+    split ? getTerminalGroups(split).map((group) => group.id) : [],
+  ));
+  const previousSessionsRef = useRef(sessions);
   const restoredLayoutAppliedRef = useRef(false);
   const pinnedSessionKey = useMemo(
     () => sessions.filter((session) => session.pinned).map((session) => session.sessionId).join('\0'),
@@ -80,7 +100,12 @@ const Terminal: React.FC = () => {
   }, []);
 
   const createGroupId = useCallback((): TerminalGroupSlot => {
-    const id = `group-${nextGroupIdRef.current}`;
+    let id = `group-${nextGroupIdRef.current}`;
+    while (usedGroupIdsRef.current.has(id)) {
+      nextGroupIdRef.current += 1;
+      id = `group-${nextGroupIdRef.current}`;
+    }
+    usedGroupIdsRef.current.add(id);
     nextGroupIdRef.current += 1;
     return id;
   }, []);
@@ -135,7 +160,28 @@ const Terminal: React.FC = () => {
 
   // Keep terminal groups in sync when sessions are opened or closed elsewhere.
   useEffect(() => {
+    const previousSessions = previousSessionsRef.current;
+    previousSessionsRef.current = sessions;
     if (!split) return;
+    let nextLayout: TerminalLayoutNode = split;
+
+    // Reconnects preserve conversation identity while replacing sessionId.
+    // Apply those replacements before filtering unavailable ids so the tab
+    // stays in the same terminal group, including during automatic reconnect.
+    for (const session of sessions) {
+      if (!session.conversationId) continue;
+      const previous = previousSessions.find(
+        (candidate) => candidate.conversationId === session.conversationId,
+      );
+      if (previous && previous.sessionId !== session.sessionId) {
+        nextLayout = replaceTerminalSessionId(
+          nextLayout,
+          previous.sessionId,
+          session.sessionId,
+        );
+      }
+    }
+
     const availableIds = new Set(sessions.map((session) => session.sessionId));
     const syncNode = (node: TerminalLayoutNode): TerminalLayoutNode => {
       if (node.kind === 'split') {
@@ -160,7 +206,7 @@ const Terminal: React.FC = () => {
         ? node
         : { ...node, sessionIds: ids, activeSessionId: nextActiveSessionId };
     };
-    let nextLayout = syncNode(split);
+    nextLayout = syncNode(nextLayout);
     const assignedIds = new Set(getTerminalGroups(nextLayout).flatMap((group) => group.sessionIds));
     const missingIds = sessions
       .map((session) => session.sessionId)
@@ -232,6 +278,25 @@ const Terminal: React.FC = () => {
     return null;
   }, []);
 
+  const canCreateSplitAt = useCallback((
+    direction: TerminalSplitDirection,
+    targetGroupId?: TerminalGroupSlot,
+  ): boolean => {
+    const group = targetGroupId
+      ? Array.from(
+          terminalAreaRef.current?.querySelectorAll<HTMLElement>('[data-terminal-group]') ?? [],
+        ).find((element) => element.dataset.terminalGroup === targetGroupId)
+      : null;
+    const content = group?.querySelector<HTMLElement>('[data-terminal-content]')
+      ?? terminalAreaRef.current?.querySelector<HTMLElement>('[data-terminal-content]');
+    const rect = content?.getBoundingClientRect();
+    if (!rect) return true;
+    const size = direction === 'left' || direction === 'right' ? rect.width : rect.height;
+    // JSDOM and temporarily hidden sections report zero; defer enforcement
+    // until a real measurable region is available.
+    return size <= 0 || size >= TERMINAL_MIN_PANE_SIZE * 2;
+  }, []);
+
   const getTabInsertIndex = useCallback((element: HTMLElement, x: number): number => {
     const tabs = Array.from(element.querySelectorAll<HTMLElement>('[data-session-tab]'));
     for (let index = 0; index < tabs.length; index += 1) {
@@ -274,6 +339,7 @@ const Terminal: React.FC = () => {
         ? findTerminalGroup(split, targetGroupId)
         : sourceGroup;
       if (!sourceGroup || !targetGroup) return false;
+      if (!canCreateSplitAt(direction, targetGroup.id)) return false;
 
       let nextLayout: TerminalLayoutNode = split;
       if (sourceGroup.id === targetGroup.id) {
@@ -297,6 +363,7 @@ const Terminal: React.FC = () => {
           first: incomingFirst ? newGroup : remainingGroup,
           second: incomingFirst ? remainingGroup : newGroup,
           orientation,
+          split: 0.5,
         };
         nextLayout = replaceTerminalGroup(nextLayout, sourceGroup.id, nestedSplit);
         focusGroup(newGroup.id);
@@ -324,6 +391,7 @@ const Terminal: React.FC = () => {
           first: incomingFirst ? newGroup : currentTarget,
           second: incomingFirst ? currentTarget : newGroup,
           orientation,
+          split: 0.5,
         };
         nextLayout = replaceTerminalGroup(nextLayout, currentTarget.id, nestedSplit);
         focusGroup(newGroup.id);
@@ -336,6 +404,7 @@ const Terminal: React.FC = () => {
     }
 
     if (sessions.length < 2) return false;
+    if (!canCreateSplitAt(direction)) return false;
     const remainingIds = sessions
       .map((session) => session.sessionId)
       .filter((id) => id !== sessionId);
@@ -356,11 +425,12 @@ const Terminal: React.FC = () => {
       first: incomingFirst ? targetGroup : baseGroup,
       second: incomingFirst ? baseGroup : targetGroup,
       orientation,
+      split: 0.5,
     });
     useTerminalStore.getState().setActiveSession(sessionId);
     setDropPreview(null);
     return true;
-  }, [activeSessionId, createGroupId, focusGroup, sessions, split]);
+  }, [activeSessionId, canCreateSplitAt, createGroupId, focusGroup, sessions, split]);
 
   const activateGroupTab = useCallback((slot: TerminalGroupSlot, sessionId: string): void => {
     focusGroup(slot);
@@ -377,7 +447,19 @@ const Terminal: React.FC = () => {
     const handlePaneNavigate = (event: Event): void => {
       const { detail } = event as CustomEvent<{ direction: TerminalSplitDirection }>;
       if (!split) return;
-      const target = findAdjacentTerminalGroup(split, focusedGroupRef.current, detail.direction);
+      const rects = new Map<TerminalGroupSlot, DOMRect>();
+      terminalAreaRef.current
+        ?.querySelectorAll<HTMLElement>('[data-terminal-group]')
+        .forEach((element) => {
+          const id = element.dataset.terminalGroup;
+          if (id) rects.set(id, element.getBoundingClientRect());
+        });
+      const target = findAdjacentTerminalGroup(
+        split,
+        focusedGroupRef.current,
+        detail.direction,
+        (id) => rects.get(id) ?? null,
+      );
       if (!target) return;
       activateGroupTab(target.id, target.activeSessionId);
     };
@@ -458,15 +540,23 @@ const Terminal: React.FC = () => {
         return;
       }
       const direction = getTerminalSplitDirection(target.element.getBoundingClientRect(), x, y);
-      setDropPreview(direction ? { kind: 'split', direction, slot: target.slot } : null);
+      if (direction) {
+        setDropPreview(canCreateSplitAt(direction, target.slot)
+          ? { kind: 'split', direction, slot: target.slot }
+          : null);
+      } else {
+        setDropPreview(target.slot !== source ? { kind: 'move', slot: target.slot } : null);
+      }
       return;
     }
     const content = terminalAreaRef.current?.querySelector<HTMLElement>('[data-terminal-content]');
     const direction = content
       ? getTerminalSplitDirection(content.getBoundingClientRect(), x, y)
       : null;
-    setDropPreview(direction && sessions.length > 1 ? { kind: 'split', direction, slot: null } : null);
-  }, [getCrossGroupInsertIndex, getGroupRegionAtPoint, sessions.length, split]);
+    setDropPreview(direction && sessions.length > 1 && canCreateSplitAt(direction)
+      ? { kind: 'split', direction, slot: null }
+      : null);
+  }, [canCreateSplitAt, getCrossGroupInsertIndex, getGroupRegionAtPoint, sessions.length, split]);
 
   const handleTabDragEnd = useCallback((sessionId: string, source: TerminalGroupSlot | null, x: number, y: number): boolean => {
     if (split && source) {
@@ -479,7 +569,12 @@ const Terminal: React.FC = () => {
           : false;
       }
       const direction = getTerminalSplitDirection(target.element.getBoundingClientRect(), x, y);
-      return direction ? createOrArrangeSplit(sessionId, direction, target.slot) : true;
+      if (direction) return createOrArrangeSplit(sessionId, direction, target.slot);
+      if (target.slot === source) return true;
+      const targetGroup = findTerminalGroup(split, target.slot);
+      return targetGroup
+        ? moveTabToGroup(sessionId, source, target.slot, targetGroup.sessionIds.length)
+        : false;
     }
     const content = terminalAreaRef.current?.querySelector<HTMLElement>('[data-terminal-content]');
     const direction = content
@@ -575,16 +670,18 @@ const Terminal: React.FC = () => {
         />
         <div data-terminal-content className="relative min-h-0 flex-1">
           {renderTerminalPane(groupActiveSession, focused && groupActiveSession?.sessionId === activeSessionId)}
-          {dropPreview?.kind === 'split' && dropPreview.slot === slot && (
+          {(dropPreview?.kind === 'split' || dropPreview?.kind === 'move')
+            && dropPreview.slot === slot && (
             <div
               data-testid="terminal-split-drop-preview"
-              data-direction={dropPreview.direction}
+              data-direction={dropPreview.kind === 'split' ? dropPreview.direction : 'center'}
               className={cn(
                 'pointer-events-none absolute z-30 bg-app-primary/15',
-                dropPreview.direction === 'left' && 'inset-y-0 left-0 w-1/2',
-                dropPreview.direction === 'right' && 'inset-y-0 right-0 w-1/2',
-                dropPreview.direction === 'top' && 'inset-x-0 top-0 h-1/2',
-                dropPreview.direction === 'bottom' && 'inset-x-0 bottom-0 h-1/2',
+                dropPreview.kind === 'move' && 'inset-0 ring-1 ring-inset ring-app-primary/60',
+                dropPreview.kind === 'split' && dropPreview.direction === 'left' && 'inset-y-0 left-0 w-1/2',
+                dropPreview.kind === 'split' && dropPreview.direction === 'right' && 'inset-y-0 right-0 w-1/2',
+                dropPreview.kind === 'split' && dropPreview.direction === 'top' && 'inset-x-0 top-0 h-1/2',
+                dropPreview.kind === 'split' && dropPreview.direction === 'bottom' && 'inset-x-0 bottom-0 h-1/2',
               )}
             />
           )}
@@ -598,14 +695,25 @@ const Terminal: React.FC = () => {
     );
   };
 
-  const renderLayout = (node: TerminalLayoutNode): React.ReactNode => {
+  const renderLayout = (
+    node: TerminalLayoutNode,
+    path: TerminalLayoutPath = [],
+  ): React.ReactNode => {
     if (node.kind === 'group') return renderGroup(node.id);
+    const splitId = `terminal-split-${path.length > 0 ? path.join('-') : 'root'}`;
     return (
       <SplitPane
-        left={renderLayout(node.first)}
-        right={renderLayout(node.second)}
+        id={splitId}
+        left={renderLayout(node.first, [...path, 'first'])}
+        right={renderLayout(node.second, [...path, 'second'])}
         direction={node.orientation}
-        minWidth={120}
+        minWidth={TERMINAL_MIN_PANE_SIZE}
+        split={node.split ?? 0.5}
+        onSplitChange={(nextSplit) => {
+          setSplit((current) => current
+            ? updateTerminalSplitAtPath(current, path, nextSplit) as TerminalSplitState
+            : current);
+        }}
         dividerStyle="subtle"
       />
     );
@@ -677,7 +785,9 @@ const Terminal: React.FC = () => {
           ? findTerminalGroup(split, contextMenu.slot)?.sessionIds
           : undefined}
         onClose={() => setContextMenu(null)}
-        canSplit={sessions.length > 1}
+        canSplit={contextMenu?.slot && split
+          ? (findTerminalGroup(split, contextMenu.slot)?.sessionIds.length ?? 0) > 1
+          : sessions.length > 1}
         isSplit={Boolean(split)}
         onSplit={createOrArrangeSplit}
         onUnsplit={() => setSplit(null)}

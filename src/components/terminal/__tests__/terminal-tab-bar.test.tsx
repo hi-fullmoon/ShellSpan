@@ -210,6 +210,19 @@ describe('TerminalTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalledTimes(1);
   });
 
+  it('uses an IDE-style active tab that joins the terminal content', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setActiveSession('s1');
+    const { container } = render(<TerminalTabBar />);
+
+    expect(container.querySelector('[data-terminal-tab-bar]')).toHaveClass('bg-app-surface-muted');
+    expect(screen.getAllByRole('tab')[0]).toHaveClass('bg-app-bg');
+    expect(screen.getAllByRole('tab')[1]).toHaveClass('bg-transparent');
+
+    expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
+  });
+
   it('does not fire onNewTabClick when a tab itself is double-clicked', () => {
     addSession('s1', 'A');
     const onNewTabClick = vi.fn();

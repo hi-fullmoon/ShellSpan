@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ensureUniqueTerminalGroupIds,
   findAdjacentTerminalGroup,
   findTerminalGroup,
+  getTerminalGroups,
   getTerminalSplitDirection,
   partitionSessionIdsPinnedFirst,
   repartitionTerminalLayoutPinnedFirst,
+  replaceTerminalSessionId,
+  updateTerminalSplitAtPath,
   type TerminalGroupState,
   type TerminalLayoutNode,
 } from '../terminal-split';
@@ -115,6 +119,90 @@ describe('findAdjacentTerminalGroup', () => {
       second: group('b'),
     };
     expect(findAdjacentTerminalGroup(layout, 'missing', 'right')).toBeNull();
+  });
+
+  it('uses rendered geometry to stay in the same visual row', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: {
+        kind: 'split',
+        orientation: 'vertical',
+        first: group('a'),
+        second: group('b'),
+      },
+      second: {
+        kind: 'split',
+        orientation: 'vertical',
+        first: group('c'),
+        second: group('d'),
+      },
+    };
+    const rects = new Map([
+      ['a', { left: 0, right: 100, top: 0, bottom: 100, width: 100, height: 100 }],
+      ['b', { left: 0, right: 100, top: 100, bottom: 200, width: 100, height: 100 }],
+      ['c', { left: 100, right: 200, top: 0, bottom: 100, width: 100, height: 100 }],
+      ['d', { left: 100, right: 200, top: 100, bottom: 200, width: 100, height: 100 }],
+    ]);
+
+    expect(findAdjacentTerminalGroup(layout, 'a', 'right', (id) => rects.get(id) ?? null)?.id)
+      .toBe('c');
+    expect(findAdjacentTerminalGroup(layout, 'b', 'right', (id) => rects.get(id) ?? null)?.id)
+      .toBe('d');
+    expect(findAdjacentTerminalGroup(layout, 'd', 'left', (id) => rects.get(id) ?? null)?.id)
+      .toBe('b');
+  });
+});
+
+describe('terminal layout identity and persistence', () => {
+  it('repairs duplicate restored group ids', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: group('group-3'),
+      second: group('group-3'),
+    };
+
+    const repaired = ensureUniqueTerminalGroupIds(layout);
+    expect(getTerminalGroups(repaired).map((item) => item.id)).toEqual(['group-3', 'group-4']);
+  });
+
+  it('replaces a reconnected session id in its original group', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: { ...group('left'), sessionIds: ['s1', 's2'], activeSessionId: 's1' },
+      second: { ...group('right'), sessionIds: ['s3'], activeSessionId: 's3' },
+    };
+
+    const next = replaceTerminalSessionId(layout, 's3', 's3-next');
+    expect(findTerminalGroup(next, 'right')).toMatchObject({
+      sessionIds: ['s3-next'],
+      activeSessionId: 's3-next',
+    });
+    expect(findTerminalGroup(next, 'left')?.sessionIds).toEqual(['s1', 's2']);
+  });
+
+  it('updates only the split at the requested tree path', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'vertical',
+      split: 0.4,
+      first: {
+        kind: 'split',
+        orientation: 'horizontal',
+        split: 0.5,
+        first: group('a'),
+        second: group('b'),
+      },
+      second: group('c'),
+    };
+
+    const next = updateTerminalSplitAtPath(layout, ['first'], 0.65);
+    expect(next.kind).toBe('split');
+    if (next.kind !== 'split') return;
+    expect(next.split).toBe(0.4);
+    expect(next.first).toMatchObject({ kind: 'split', split: 0.65 });
   });
 });
 
