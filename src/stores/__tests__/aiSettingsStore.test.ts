@@ -84,13 +84,20 @@ describe('aiSettingsStore', () => {
     });
   });
 
+  it('keeps API version paths out of provider preset URLs', () => {
+    const id = useAiSettingsStore.getState().addProvider('minimax');
+
+    expect(useAiSettingsStore.getState().getProviderConfig(id).baseUrl)
+      .toBe('https://api.minimaxi.com');
+  });
+
   it('loads an API key from provider preferences and includes it in request config', () => {
     const provider = {
       id: 'minimax',
       name: 'MiniMax',
       preset: 'minimax',
       kind: 'openAiCompatible',
-      baseUrl: 'https://api.minimaxi.com/v1',
+      baseUrl: 'https://api.minimaxi.com',
       model: 'MiniMax-M3',
       requiresApiKey: true,
       structuredOutput: 'prompt',
@@ -105,7 +112,7 @@ describe('aiSettingsStore', () => {
     expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
       id: 'minimax',
       kind: 'openAiCompatible',
-      baseUrl: 'https://api.minimaxi.com/v1',
+      baseUrl: 'https://api.minimaxi.com',
       model: 'MiniMax-M3',
       requiresApiKey: true,
       structuredOutput: 'prompt',
