@@ -3,6 +3,25 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.49](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.49) - 2026-08-22
+
+
+### Bug Fixes
+
+- **ai:** preserve custom provider base path and add User-Agent
+
+### Chore
+
+- minor UI and trackpad activation fixes
+- update AI settings store
+
+### Features
+
+- **ui:** add Combobox primitive
+- add stable streaming Markdown chunker for AI responses
+- register AI stream delta batcher with global registry
+- switch AI model selector to Combobox
+
 ## [v2.0.48](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.48) - 2026-08-22
 
 
