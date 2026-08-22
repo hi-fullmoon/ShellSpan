@@ -3,6 +3,112 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.48](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.48) - 2026-08-22
+
+
+### Bug Fixes
+
+- dedupe rapid terminal mouse clicks with timestamp guard
+- **ai:** default OpenAI-compatible providers to a /v1 base path
+- **ui:** handle WKWebView pointerup for section navigation
+- **tauri:** handle provider base urls that already include an endpoint path
+- improve log panel rendering and tests
+- **sftp:** isolate upload queue conflicts when switching tabs
+- keep SFTP binary preview alert within dialog width
+- **ui:** prevent preset button text overflow in AI settings
+- **ui:** reduce retry button size in update section
+- **ui:** tighten reasoning toggle layout and fit preview images within canvas
+
+### Chore
+
+- **deps:** add @shadcn/react dependency
+- **deps:** add react-markdown and remark-gfm
+- **deps:** add react-resizable-panels and resizable primitive
+- **i18n:** localize the new connection form button labels
+- misc updates
+- **titlebar:** title bar updates
+- **i18n:** update English and Chinese locales
+- **ai:** update ai settings store and tests
+- **terminal:** update terminal registry, dialogs, and tests
+- **i18n:** update translation strings
+- **i18n:** update translations
+
+### Documentation
+
+- remove obsolete test check note from git hooks section
+
+### Features
+
+- **ai:** AI panel and chat UI
+- **docs:** add AI agent feature design document
+- **ai:** add AI assistant panel with chat, settings, and streaming
+- add AI assistant toggle to title bar
+- **titlebar:** add AI panel toggle and improve nav semantics
+- **ui:** add Alert and Field primitive components
+- **ai:** add OpenAI-compatible provider with structured output
+- **ai:** add Rust backend for AI streaming with Ollama and OpenAI providers
+- **ai:** add cancellation for pending AI requests on the backend
+- add diagnostic agent for bounded terminal troubleshooting
+- **sftp:** add local file preview backend command
+- **ai:** add persistent AI conversation history bound to terminals
+- add responsive card grid UI component
+- **ai:** add stream delta batcher
+- **terminal:** add terminal workspace helpers
+- **sftp:** cancel pending upload batches when the SFTP view unmounts
+- **ai-panel:** classify and present AI errors with localized messages
+- **ai:** diagnostic agent frontend and schema
+- **ai:** expose cancel helper to stop active AI requests from the panel
+- **workbench:** improve form accessibility with focus management and aria attributes
+- **ai:** improve panel rendering and agent integration
+- make AI panel resizable with drag handle and keyboard support
+- **ai:** migrate api keys to inline provider config with legacy cleanup
+- **sftp:** open preview dialog immediately and drive its lifecycle by target
+- **ai:** parse and render assistant reasoning blocks
+- **ai:** polish AI panel and refactor terminal selection handling
+- **sftp:** preview local files from the SFTP UI
+- **monitor:** refine metric card layout and usage thresholds
+- **sftp:** remote file preview dialog
+- **sftp:** serialize overlapping path operations via transfer queue
+- **ui:** split pane component updates
+- **ui:** support auto-fit min column width in ResponsiveCardGrid
+- **ui:** surface AI agent guidance in composer and refine SFTP preview
+- **agent:** track active agent runs
+- **workbench:** update connection and settings panels
+- **monitor:** update monitor panel and library
+- **titlebar:** update section navigation
+- **workbench:** update settings panel
+- **sftp:** update tab bar
+- **terminal:** update terminal pane
+
+### Refactoring
+
+- **ui:** adopt container queries in AI and workbench settings layouts
+- **frontend:** align with native keychain credential storage
+- extract AI provider delete dialog into shared component
+- **app:** memoize lazy sections and extract AppSections
+- **src-tauri:** migrate credential storage to native OS keychain
+- **terminal:** migrate layout to resizable panels
+- **settings:** present sections as tabs instead of sidebar buttons
+- **ui:** redesign monitor panel with card-based metric layout
+- **ui:** rework split-pane and button
+- **ai:** share ScrollArea for chat and reveal the copy button on hover
+- **workbench:** share a minimum width for management card panels
+- **connection-form:** split save and save-and-connect into visible buttons
+- **terminal:** terminal registry and output buffer
+- **ui:** unify AI panel empty states and normalize text sizes
+- **terminal:** update terminal pane and registry wiring
+
+### Style
+
+- adjust base styles
+- soften SFTP tab bar bottom border
+- tighten icon button sizing and update tests
+
+### Testing
+
+- **workbench:** cover form validation focus and password visibility
+- **sftp:** cover new connection menu keyboard and accessibility
+
 ## [v2.0.47](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.47) - 2026-08-20
 
 
