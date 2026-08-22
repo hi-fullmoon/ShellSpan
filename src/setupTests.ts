@@ -57,3 +57,48 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: vi.fn(),
   })),
 });
+
+class ResizeObserverMock implements ResizeObserver {
+  disconnect(): void {}
+
+  observe(target: Element): void {
+    // Base UI's scroll viewport assumes Web Animations is available whenever
+    // ResizeObserver is. Keep that polyfill scoped to the observed viewport so
+    // popup/tab exit behavior still matches jsdom's animation-free behavior.
+    if (target.getAttribute('data-slot') === 'scroll-area-viewport') {
+      Object.defineProperty(target, 'getAnimations', {
+        configurable: true,
+        value: () => [],
+      });
+    }
+  }
+
+  unobserve(): void {}
+}
+
+Object.defineProperty(window, 'ResizeObserver', {
+  configurable: true,
+  writable: true,
+  value: ResizeObserverMock,
+});
+
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  configurable: true,
+  writable: true,
+  value: ResizeObserverMock,
+});
+
+// jsdom does not yet expose the ARIA reflection properties used by
+// react-resizable-panels to distinguish enabled separators.
+if (!('ariaDisabled' in Element.prototype)) {
+  Object.defineProperty(Element.prototype, 'ariaDisabled', {
+    configurable: true,
+    get() {
+      return this.getAttribute('aria-disabled');
+    },
+    set(value: string | null) {
+      if (value === null) this.removeAttribute('aria-disabled');
+      else this.setAttribute('aria-disabled', value);
+    },
+  });
+}
