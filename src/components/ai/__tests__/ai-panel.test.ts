@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '@/locales';
@@ -13,6 +13,7 @@ import {
   getAiPanelWidthBounds,
   selectConversationHistory,
   shouldSubmitAiDraft,
+  summarizeAiError,
 } from '../ai-panel';
 
 function message(
@@ -136,6 +137,31 @@ describe('shouldSubmitAiDraft', () => {
   });
 });
 
+describe('summarizeAiError', () => {
+  it('turns an HTML 404 response into a concise endpoint error', () => {
+    const result = summarizeAiError(
+      'AI provider returned HTTP 404 Not Found: <html><body><h1>404 Not Found</h1><p>nginx</p></body></html>',
+    );
+
+    expect(result.key).toBe('ai.error.notFound');
+    expect(result.detail).toBe('AI provider returned HTTP 404 Not Found');
+    expect(result.detail).not.toContain('<html>');
+
+    expect(summarizeAiError(
+      'AI provider returned HTTP 404 Not Found: &lt;html&gt;nginx&lt;/html&gt;',
+    ).detail).toBe('AI provider returned HTTP 404 Not Found');
+  });
+
+  it('classifies authentication, rate-limit, and provider errors', () => {
+    expect(summarizeAiError('AI provider returned HTTP 401 Unauthorized').key)
+      .toBe('ai.error.authentication');
+    expect(summarizeAiError('AI provider returned HTTP 429 Too Many Requests').key)
+      .toBe('ai.error.rateLimited');
+    expect(summarizeAiError('AI provider returned HTTP 503 Service Unavailable'))
+      .toMatchObject({ key: 'ai.error.unavailable', variables: { status: 503 } });
+  });
+});
+
 describe('AI panel width', () => {
   it('keeps the panel within its normal width range', () => {
     expect(getAiPanelWidthBounds(1480)).toEqual({ min: 320, max: 720 });
@@ -230,6 +256,37 @@ describe('AI panel width', () => {
       useAiStore.getState().setOpen(false);
       requestFrame.mockRestore();
       cancelFrame.mockRestore();
+    }
+  });
+});
+
+describe('clear conversation dialog', () => {
+  it('closes after the conversation is cleared', async () => {
+    await initI18n('en-US');
+    useAiStore.getState().clear();
+    useAiStore.getState().beginRequest({
+      requestId: 'clear-dialog',
+      task: 'chat',
+      userContent: 'Hello',
+      providerId: 'provider-1',
+    });
+    useAiStore.getState().appendDelta('clear-dialog', 'Response');
+    useAiStore.getState().completeRequest('clear-dialog');
+
+    const { unmount } = render(createElement(AiPanel));
+    const clearLabel = /Clear conversation|清空对话/;
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: clearLabel }));
+      const dialog = await screen.findByRole('alertdialog');
+      fireEvent.click(within(dialog).getByRole('button', { name: clearLabel }));
+
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+      expect(useAiStore.getState().messages).toHaveLength(0);
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
     }
   });
 });
