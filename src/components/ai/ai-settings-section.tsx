@@ -19,6 +19,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@/components/ui/combobox';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import {
   Dialog,
@@ -275,17 +283,31 @@ export const AiSettingsSection: React.FC = () => {
 
                 <Field>
                   <FieldLabel htmlFor="ai-model">{t('settings.ai.model')}</FieldLabel>
-                  <Input
-                    id="ai-model"
+                  <Combobox
+                    items={models}
                     value={selectedProvider.model}
-                    onChange={(event) => updateProvider(selectedProvider.id, { model: event.target.value })}
-                    list="ai-model-options"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                  />
-                  <datalist id="ai-model-options">
-                    {models.map((model) => <option key={model} value={model} />)}
-                  </datalist>
+                    inputValue={selectedProvider.model}
+                    onValueChange={(model) => {
+                      if (model) updateProvider(selectedProvider.id, { model });
+                    }}
+                    onInputValueChange={(model) => updateProvider(selectedProvider.id, { model })}
+                  >
+                    <ComboboxInput
+                      id="ai-model"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                    />
+                    <ComboboxContent>
+                      <ComboboxEmpty>{t('settings.ai.modelNoResults')}</ComboboxEmpty>
+                      <ComboboxList>
+                        {(model) => (
+                          <ComboboxItem key={model} value={model}>
+                            {model}
+                          </ComboboxItem>
+                        )}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Combobox>
                   <FieldDescription>{t('settings.ai.modelHint')}</FieldDescription>
                 </Field>
 
