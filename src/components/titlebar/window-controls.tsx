@@ -16,7 +16,6 @@ const ControlButton: React.FC<{
         'flex h-full w-10 items-center justify-center text-app-text-soft transition-colors hover:bg-app-surface-muted hover:text-app-text',
         className,
       )}
-      data-tauri-drag-region="false"
     >
       {children}
     </button>
@@ -27,7 +26,7 @@ export const WindowControls: React.FC = () => {
   const { minimize, toggleMaximize, close, isMaximized } = useWindowControls();
 
   return (
-    <div className="flex h-full items-center" data-tauri-drag-region="false">
+    <div className="flex h-full items-center">
       <ControlButton onClick={minimize} ariaLabel="minimize">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
           <line x1="5" y1="12" x2="19" y2="12" />

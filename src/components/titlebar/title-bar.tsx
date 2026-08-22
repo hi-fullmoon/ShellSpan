@@ -24,7 +24,7 @@ export const TitleBar: React.FC = () => {
       data-tauri-drag-region
     >
       <SectionNav />
-      <div className="flex h-full items-center pr-2" data-tauri-drag-region="false">
+      <div className="flex h-full items-center pr-2">
         <Button
           variant={aiOpen ? 'secondary' : 'ghost'}
           size="icon"
