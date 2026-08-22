@@ -494,7 +494,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
         onNewTabClick();
       }}
-      className="group/tabbar relative flex h-8 items-start gap-0 border-b-[0.5px] border-app-border/40 bg-app-surface-muted px-0"
+      className="group/tabbar relative flex h-8 items-start gap-0 border-b-[0.5px] border-app-border/40 bg-app-bg px-0"
     >
       <DndContext
         sensors={sensors}
