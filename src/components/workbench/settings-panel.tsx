@@ -253,18 +253,24 @@ export const SettingsPanel: React.FC = () => {
           </div>
         </header>
 
-        <div className="shrink-0 border-b border-app-border/50 px-0">
-          <TabsList aria-label={t('settings.sectionNavigation')} variant="line" className="h-9 max-w-full justify-start overflow-x-auto">
-            {SETTINGS_SECTIONS.map((section) => {
-              const Icon = section.icon;
-              return (
-                <TabsTrigger key={section.id} value={section.id} className="flex-none px-2.5 text-[13px]">
-                  <Icon data-icon="inline-start" />
-                  {t(section.titleKey)}
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
+        <div className="shrink-0 border-b border-app-border/50">
+          <ScrollArea horizontal vertical={false} size="thin" className="h-9 w-full">
+            <TabsList
+              aria-label={t('settings.sectionNavigation')}
+              variant="line"
+              className="min-w-max justify-start group-data-horizontal/tabs:h-9"
+            >
+              {SETTINGS_SECTIONS.map((section) => {
+                const Icon = section.icon;
+                return (
+                  <TabsTrigger key={section.id} value={section.id} className="flex-none px-2.5 text-[13px]">
+                    <Icon data-icon="inline-start" />
+                    {t(section.titleKey)}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </ScrollArea>
         </div>
 
         <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">

@@ -153,13 +153,13 @@ export const AiSettingsSection: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-3">
+    <div className="@container flex flex-col gap-4 px-4 py-3">
       <div>
         <h2 className="text-sm font-semibold text-foreground">{t('settings.ai.title')}</h2>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
       </div>
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="grid min-w-0 gap-4 @min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]">
         <Card size="sm" className="min-w-0">
           <CardHeader className="border-b">
             <CardTitle>{t('settings.ai.providers')}</CardTitle>
@@ -228,7 +228,7 @@ export const AiSettingsSection: React.FC = () => {
             </CardHeader>
             <CardContent>
               <FieldGroup>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 @min-[36rem]:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="ai-provider-name">{t('settings.ai.providerName')}</FieldLabel>
                     <Input
