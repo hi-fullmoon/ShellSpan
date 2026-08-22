@@ -28,8 +28,38 @@ describe('SectionNav', () => {
 
     fireEvent.pointerUp(screen.getByRole('button', { name: 'section.terminal' }), {
       button: 0,
+      pointerId: 12,
+      pointerType: 'mouse',
     });
 
     expect(useAppStore.getState().activeSection).toBe('terminal');
+  });
+
+  it('activates immediately on pointerdown without duplicating the following click', () => {
+    render(<SectionNav />);
+    const terminal = screen.getByRole('button', { name: 'section.terminal' });
+    const onStoreChange = vi.fn();
+    const unsubscribe = useAppStore.subscribe(onStoreChange);
+
+    try {
+      fireEvent.pointerDown(terminal, { button: 0, pointerId: 12, pointerType: 'mouse' });
+      expect(useAppStore.getState().activeSection).toBe('terminal');
+
+      fireEvent.pointerUp(terminal, { button: 0, pointerId: 12, pointerType: 'mouse' });
+      fireEvent.click(terminal, { detail: 1 });
+
+      expect(useAppStore.getState().activeSection).toBe('terminal');
+      expect(onStoreChange).toHaveBeenCalledOnce();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('retains keyboard click activation', () => {
+    render(<SectionNav />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'section.sftp' }), { detail: 0 });
+
+    expect(useAppStore.getState().activeSection).toBe('sftp');
   });
 });

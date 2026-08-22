@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
+import { useTrackpadSafeActivation } from '@/hooks/useTrackpadSafeActivation';
 import type { AppSection } from '@/types';
 
 interface NavItemProps {
@@ -10,26 +11,21 @@ interface NavItemProps {
 }
 
 const NavItem: React.FC<NavItemProps> = ({ section, label }) => {
-  const { activeSection, setActiveSection } = useAppStore();
+  const activeSection = useAppStore((state) => state.activeSection);
+  const setActiveSection = useAppStore((state) => state.setActiveSection);
   const active = activeSection === section;
+  const activate = React.useCallback(() => setActiveSection(section), [section, setActiveSection]);
+  const activation = useTrackpadSafeActivation(activate);
 
   return (
     <button
+      {...activation}
       type="button"
-      // WKWebView can occasionally lose the pointerdown from a macOS
-      // tap-to-click gesture. Activate on pointerup so the release still
-      // switches sections, while onClick keeps keyboard activation.
-      onPointerUp={(event) => {
-        if (event.button === 0) setActiveSection(section);
-      }}
-      onClick={(event) => {
-        if (event.detail === 0) setActiveSection(section);
-      }}
       aria-current={active ? 'page' : undefined}
       className={cn(
         'flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
         active
-          ? 'bg-app-primary/10 text-app-primary'
+          ? 'bg-app-surface-muted text-app-text font-semibold'
           : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
       )}
     >
