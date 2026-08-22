@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendTerminalOutput,
   clearTerminalOutput,
@@ -6,6 +6,7 @@ import {
   rebindTerminalOutput,
   renderTerminalText,
   stripAnsi,
+  subscribeTerminalOutput,
 } from '../terminal-output-buffer';
 
 describe('terminal output buffer', () => {
@@ -47,5 +48,17 @@ describe('terminal output buffer', () => {
 
     const output = getRecentTerminalOutput('session-1', 3);
     expect(output).toBe('19997\n19998\n19999');
+  });
+
+  it('notifies live consumers when a session buffer changes', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeTerminalOutput(listener);
+
+    appendTerminalOutput('session-1', 'new output\n');
+    unsubscribe();
+    appendTerminalOutput('session-1', 'ignored\n');
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith('session-1');
   });
 });

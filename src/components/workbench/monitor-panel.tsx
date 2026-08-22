@@ -34,6 +34,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
+import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -47,6 +48,15 @@ const DISCONNECT_REASON_KEY: Record<ClosedReasonKind, LocaleKey> = {
   transport_disconnect: 'workbench.monitor.reason.transportDisconnect',
   error: 'workbench.monitor.reason.error',
 };
+
+const METRIC_GRID_BREAKPOINTS = [
+  { minWidth: 420, columns: 2 },
+  { minWidth: 760, columns: 4 },
+] as const;
+
+const CONNECTION_GRID_BREAKPOINTS = [{ minWidth: 760, columns: 2 }] as const;
+
+const STATUS_GRID_BREAKPOINTS = [{ minWidth: 480, columns: 4 }] as const;
 
 type Tone = HealthStatus | 'connecting' | 'muted';
 
@@ -428,7 +438,11 @@ export const MonitorPanel: React.FC = () => {
                     id="monitor-process-heading"
                     title={t('workbench.monitor.appProcess')}
                   />
-                  <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+                  <ResponsiveCardGrid
+                    columns={1}
+                    breakpoints={METRIC_GRID_BREAKPOINTS}
+                    gap="0.625rem"
+                  >
                     <MetricCard
                       icon={MemoryStickIcon}
                       label={t('workbench.monitor.rss')}
@@ -453,12 +467,16 @@ export const MonitorPanel: React.FC = () => {
                       label={t('workbench.monitor.uptime')}
                       value={formatUptime(snapshot.app.uptimeSecs)}
                     />
-                  </div>
+                  </ResponsiveCardGrid>
                 </section>
 
                 <section aria-labelledby="monitor-system-heading" className="flex flex-col gap-2.5">
                   <SectionHeading id="monitor-system-heading" title={t('workbench.monitor.system')} />
-                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+                  <ResponsiveCardGrid
+                    columns={1}
+                    breakpoints={METRIC_GRID_BREAKPOINTS}
+                    gap="0.625rem"
+                  >
                     <ResourceCard
                       icon={MemoryStickIcon}
                       label={t('workbench.monitor.memory')}
@@ -496,7 +514,7 @@ export const MonitorPanel: React.FC = () => {
                       tone={usageTone(snapshot.disk.usagePercent)}
                       hint={formatDiskHint(snapshot.disk, snapshot.appInfo.platform)}
                     />
-                  </div>
+                  </ResponsiveCardGrid>
                 </section>
 
                 <section aria-labelledby="monitor-connections-heading" className="flex flex-col gap-2.5">
@@ -504,7 +522,12 @@ export const MonitorPanel: React.FC = () => {
                     id="monitor-connections-heading"
                     title={t('workbench.monitor.connectionHealth')}
                   />
-                  <div className="grid grid-cols-1 items-stretch gap-2.5 xl:grid-cols-2">
+                  <ResponsiveCardGrid
+                    columns={1}
+                    breakpoints={CONNECTION_GRID_BREAKPOINTS}
+                    gap="0.625rem"
+                    gridClassName="items-stretch"
+                  >
                     <Card className="h-full">
                       <CardHeader>
                         <div className="flex items-center gap-2">
@@ -514,7 +537,11 @@ export const MonitorPanel: React.FC = () => {
                         <CardDescription>{t('workbench.monitor.recentDisconnects')}</CardDescription>
                       </CardHeader>
                       <CardContent className="flex flex-1 flex-col gap-3">
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <ResponsiveCardGrid
+                          columns={2}
+                          breakpoints={STATUS_GRID_BREAKPOINTS}
+                          gap="0.5rem"
+                        >
                           <StatusCount
                             tone="ok"
                             count={sessionCounts.connected}
@@ -535,7 +562,7 @@ export const MonitorPanel: React.FC = () => {
                             count={sessionCounts.error}
                             label={t('workbench.monitor.error')}
                           />
-                        </div>
+                        </ResponsiveCardGrid>
                         <Separator />
                         {recentDisconnects.length > 0 ? (
                           <div className="flex max-h-48 flex-col overflow-auto">
@@ -627,7 +654,7 @@ export const MonitorPanel: React.FC = () => {
                         )}
                       </CardContent>
                     </Card>
-                  </div>
+                  </ResponsiveCardGrid>
                 </section>
 
               </>

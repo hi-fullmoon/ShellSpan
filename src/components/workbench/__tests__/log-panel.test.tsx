@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { HTMLAttributes, ReactNode, Ref } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogPanel } from '../log-panel';
@@ -224,6 +224,7 @@ describe('LogPanel', () => {
   it('renders the source switcher next to the title', () => {
     render(<LogPanel />);
 
+    expect(document.querySelector('[class~="@container"]')).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'workbench.logs.frontend' }),
     ).toHaveAttribute('aria-pressed', 'true');
@@ -255,6 +256,39 @@ describe('LogPanel', () => {
     expect(screen.getByText('workbench.logs.inspector.title')).toBeInTheDocument();
     expect(screen.getByText('termbridge::connect')).toBeInTheDocument();
     expect(screen.getByText('workbench.logs.inspector.raw')).toBeInTheDocument();
+    expect(
+      screen.getByText('workbench.logs.inspector.title').closest('aside'),
+    ).toHaveClass('@max-[760px]:absolute');
+    expect(screen.getByRole('button', {
+      name: 'workbench.logs.inspector.copy',
+    })).toBeInTheDocument();
+  });
+
+  it('shows copy success inside the inspector button without a toast', async () => {
+    vi.useFakeTimers();
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    mockContent =
+      `[${todayString}][12:34:57][ERROR][termbridge] copy this entry`;
+
+    render(<LogPanel />);
+    fireEvent.click(screen.getByText('copy this entry'));
+    mockAddToast.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', {
+        name: 'workbench.logs.inspector.copy',
+      }));
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith(mockContent);
+    expect(screen.getByRole('button', {
+      name: 'workbench.logs.inspector.copied',
+    })).toBeInTheDocument();
+    expect(mockAddToast).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(2000));
     expect(screen.getByRole('button', {
       name: 'workbench.logs.inspector.copy',
     })).toBeInTheDocument();

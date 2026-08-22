@@ -27,11 +27,17 @@ export const MessageScroller: React.FC<{
   children: React.ReactNode;
   followKey: string;
   className?: string;
-}> = ({ children, followKey, className }) => {
+  ariaLabel?: string;
+}> = ({ children, followKey, className, ariaLabel }) => {
   const { t } = useI18n();
   return (
     <MessageScrollerProvider autoScroll>
-      <MessageScrollerPrimitive className={className} data-follow-key={followKey}>
+      <MessageScrollerPrimitive
+        className={className}
+        data-follow-key={followKey}
+        role="log"
+        aria-label={ariaLabel}
+      >
         <MessageScrollerViewport>
           <MessageScrollerContent className="gap-5 px-4 py-5">
             {React.Children.map(children, (child, index) => (
@@ -58,13 +64,20 @@ export const MessageScroller: React.FC<{
 export const Message: React.FC<{
   role: 'user' | 'assistant';
   children: React.ReactNode;
-}> = ({ role, children }) => (
-  <MessagePrimitive align={role === 'user' ? 'end' : 'start'}>
-    <MessageContent>
-      {children}
-    </MessageContent>
-  </MessagePrimitive>
-);
+}> = ({ role, children }) => {
+  const { t } = useI18n();
+  return (
+    <MessagePrimitive
+      align={role === 'user' ? 'end' : 'start'}
+      role="article"
+      aria-label={role === 'user' ? t('ai.message.user') : t('ai.message.assistant')}
+    >
+      <MessageContent>
+        {children}
+      </MessageContent>
+    </MessagePrimitive>
+  );
+};
 
 export const Bubble: React.FC<{
   role: 'user' | 'assistant';

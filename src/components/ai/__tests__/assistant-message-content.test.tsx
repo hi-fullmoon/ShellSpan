@@ -37,4 +37,23 @@ describe('AssistantMessageContent', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(arrow).not.toHaveClass('rotate-90');
   });
+
+  it('copies fenced code blocks', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <AssistantMessageContent
+        content={'Run:\n```bash\ndf -h\n```'}
+        streaming={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.copy' }));
+
+    expect(writeText).toHaveBeenCalledWith('df -h');
+    expect(await screen.findByRole('button', { name: 'common.copied' })).toBeInTheDocument();
+  });
 });

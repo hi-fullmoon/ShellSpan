@@ -71,9 +71,16 @@ function makeMockTerminal(selection = '') {
   const handlers: Array<(event: KeyboardEvent) => boolean> = [];
   const selectionHandlers: Array<() => void> = [];
   const terminal = {
+    cols: 80,
     getSelection: vi.fn().mockReturnValue(selection),
+    getSelectionPosition: vi.fn().mockReturnValue(
+      selection
+        ? { start: { x: 5, y: 2 }, end: { x: 9, y: 2 } }
+        : undefined,
+    ),
     hasSelection: vi.fn().mockReturnValue(Boolean(selection)),
     clearSelection: vi.fn(),
+    select: vi.fn(),
     selectAll: vi.fn(),
     clear: vi.fn(),
     write: vi.fn(),
@@ -115,7 +122,10 @@ function mouseEventAt(
   timeStamp: number,
   init: MouseEventInit,
 ): MouseEvent {
-  const event = new MouseEvent(type, init);
+  const event = new MouseEvent(type, {
+    ...init,
+    detail: init.detail ?? (type === 'mousedown' || type === 'mouseup' ? 1 : 0),
+  });
   Object.defineProperty(event, 'timeStamp', { value: timeStamp });
   return event;
 }
@@ -378,6 +388,64 @@ describe('TerminalPane', () => {
     );
 
     await vi.waitFor(() => expect(terminal.clearSelection).toHaveBeenCalledTimes(1));
+  });
+
+  it('preserves xterm word selection on an instant double click', async () => {
+    const terminal = makeMockTerminal('selected word');
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.element?.dispatchEvent(
+      mouseEventAt('mousedown', 1_000, {
+        button: 0,
+        buttons: 1,
+        clientX: 100,
+        clientY: 100,
+        detail: 2,
+        bubbles: true,
+      }),
+    );
+    document.dispatchEvent(
+      mouseEventAt('mouseup', 1_020, {
+        button: 0,
+        buttons: 0,
+        clientX: 100,
+        clientY: 100,
+        detail: 2,
+        bubbles: true,
+      }),
+    );
+    await Promise.resolve();
+
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
+  });
+
+  it('preserves xterm line selection on an instant triple click', async () => {
+    const terminal = makeMockTerminal('selected line');
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.element?.dispatchEvent(
+      mouseEventAt('mousedown', 1_000, {
+        button: 0,
+        buttons: 1,
+        clientX: 100,
+        clientY: 100,
+        detail: 3,
+        bubbles: true,
+      }),
+    );
+    document.dispatchEvent(
+      mouseEventAt('mouseup', 1_020, {
+        button: 0,
+        buttons: 0,
+        clientX: 100,
+        clientY: 100,
+        detail: 3,
+        bubbles: true,
+      }),
+    );
+    await Promise.resolve();
+
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
   });
 
   it('preserves a deliberate drag once it lasts beyond the synthetic tap window', () => {

@@ -11,6 +11,7 @@ interface AiState {
   activeRequestId?: string;
   activeTask?: AiTaskKind;
   error?: string;
+  errorRequestId?: string;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
   beginRequest: (input: {
@@ -25,7 +26,17 @@ interface AiState {
   completeRequest: (requestId: string) => void;
   cancelRequest: (requestId: string) => void;
   failRequest: (requestId: string, message: string) => void;
+  clearConversation: (
+    sessionId: string | undefined,
+    lane: 'conversation' | 'command',
+  ) => void;
   clear: () => void;
+}
+
+function messageLane(task: AiTaskKind): 'conversation' | 'command' | 'agent' {
+  if (task === 'generateCommand') return 'command';
+  if (task === 'diagnosticAgent') return 'agent';
+  return 'conversation';
 }
 
 export const useAiStore = create<AiState>()((set) => ({
@@ -48,6 +59,7 @@ export const useAiStore = create<AiState>()((set) => ({
       activeRequestId,
       activeTask,
       error: undefined,
+      errorRequestId: undefined,
       messages: [
         ...state.messages,
         {
@@ -95,6 +107,7 @@ export const useAiStore = create<AiState>()((set) => ({
           activeRequestId: undefined,
           activeTask: undefined,
           error: 'AI provider returned an empty response',
+          errorRequestId: requestId,
           messages: state.messages.filter((message) => message.id !== `assistant-${requestId}`),
         };
       }
@@ -136,6 +149,7 @@ export const useAiStore = create<AiState>()((set) => ({
             activeRequestId: undefined,
             activeTask: undefined,
             error,
+            errorRequestId: requestId,
             messages: state.messages
               .filter((message) => (
                 message.id !== `assistant-${requestId}` || message.content.length > 0
@@ -148,5 +162,31 @@ export const useAiStore = create<AiState>()((set) => ({
           }
         : state,
     ),
-  clear: () => set({ messages: [], phase: 'idle', activeRequestId: undefined, activeTask: undefined, error: undefined }),
+  clearConversation: (sessionId, lane) => set((state) => {
+    const clearsFailedRequest = Boolean(
+      state.errorRequestId
+      && state.messages.some((message) => (
+        message.requestId === state.errorRequestId
+        && message.sessionId === sessionId
+        && messageLane(message.task) === lane
+      )),
+    );
+    const messages = state.messages.filter((message) => (
+      message.sessionId !== sessionId || messageLane(message.task) !== lane
+    ));
+    return messages.length === state.messages.length
+      ? state
+      : {
+          messages,
+          ...(clearsFailedRequest ? { error: undefined, errorRequestId: undefined } : {}),
+        };
+  }),
+  clear: () => set({
+    messages: [],
+    phase: 'idle',
+    activeRequestId: undefined,
+    activeTask: undefined,
+    error: undefined,
+    errorRequestId: undefined,
+  }),
 }));

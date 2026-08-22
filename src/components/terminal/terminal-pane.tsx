@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { useActiveController } from '@/components/terminal/hooks/use-active-controller';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { handleTerminalLeaderKeydown } from '@/components/terminal/terminal-leader';
+import { installTerminalSelectionGuard } from '@/components/terminal/terminal-selection-guard';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
@@ -33,19 +34,6 @@ const effectiveShortcuts = (): ShortcutBindings => ({
 // Keep the connecting overlay up for at least this long so fast connections
 // don't make it flash.
 const MIN_CONNECTING_OVERLAY_MS = 600;
-
-// macOS "tap to click" can briefly look like a held-button drag. Do not block
-// xterm's mousemove events — doing so prevents short, intentional selections.
-// Instead, discard only a selection produced by a very short, very small
-// gesture after it ends. The copy-on-select debounce below is longer than this
-// window, so accidental selections are also cleared before they reach the
-// clipboard.
-const ACCIDENTAL_SELECTION_MAX_DISTANCE_PX = 6;
-const ACCIDENTAL_SELECTION_MAX_DURATION_MS = 140;
-// WKWebView can synthesize tap-to-click mouse down/up events at effectively
-// the same instant while reporting enough coordinate drift to cross cells.
-// Treat that sequence as a click regardless of its reported distance.
-const SYNTHETIC_TAP_MAX_DURATION_MS = 50;
 
 // Wait for the selection to stop changing before copying it, so a real drag
 // that moves the pointer across cells doesn't write every intermediate state
@@ -303,88 +291,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     };
   }, [activeSession?.status, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
 
-  // Observe click-drag geometry without intercepting xterm's event stream.
-  // Once the gesture ends, clear only a quick trackpad-like micro-drag.
   useEffect(() => {
-    const element = terminal?.element;
-    if (!element) return;
-
-    let active = true;
-    let dragStart: {
-      x: number;
-      y: number;
-      startedAt: number;
-      maxDistance: number;
-    } | null = null;
-
-    const updateDistance = (event: MouseEvent): void => {
-      if (!dragStart) return;
-      dragStart.maxDistance = Math.max(
-        dragStart.maxDistance,
-        Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y),
-      );
-    };
-
-    const finishPotentialTap = (event: MouseEvent): void => {
-      updateDistance(event);
-      const completedDrag = dragStart;
-      dragStart = null;
-
-      const duration = completedDrag
-        ? Math.max(0, event.timeStamp - completedDrag.startedAt)
-        : Number.POSITIVE_INFINITY;
-      if (
-        completedDrag
-        && (
-          duration <= SYNTHETIC_TAP_MAX_DURATION_MS
-          || (
-            duration <= ACCIDENTAL_SELECTION_MAX_DURATION_MS
-            && completedDrag.maxDistance <= ACCIDENTAL_SELECTION_MAX_DISTANCE_PX
-          )
-        )
-      ) {
-        // Our document listener is registered before xterm's drag listeners.
-        // Defer until the event finishes so xterm cannot recreate/finalize the
-        // accidental selection after we clear it.
-        queueMicrotask(() => {
-          if (active && terminal.hasSelection()) {
-            terminal.clearSelection();
-          }
-        });
-      }
-    };
-
-    const handleMouseDown = (event: MouseEvent): void => {
-      if (event.button !== 0) return;
-      dragStart = {
-        x: event.clientX,
-        y: event.clientY,
-        startedAt: event.timeStamp,
-        maxDistance: 0,
-      };
-    };
-    const handleMouseMove = (event: MouseEvent): void => {
-      if (dragStart === null) return;
-      updateDistance(event);
-      // The pointer was released outside the window so mouseup was never seen.
-      if (!(event.buttons & 1)) {
-        finishPotentialTap(event);
-      }
-    };
-    const handleMouseUp = (event: MouseEvent): void => {
-      finishPotentialTap(event);
-    };
-
-    element.addEventListener('mousedown', handleMouseDown);
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      active = false;
-      element.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
+    if (!terminal) return;
+    return installTerminalSelectionGuard(terminal);
   }, [terminal]);
 
   return (
