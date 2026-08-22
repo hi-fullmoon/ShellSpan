@@ -45,6 +45,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { PanelEmptyState, Spinner } from '@/components/ui/empty-state';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
@@ -67,7 +68,11 @@ import {
   isTauriRuntime,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
-import { generateId } from '@/lib/utils';
+import {
+  createAiStreamDeltaBatcher,
+  type AiStreamDeltaBatcher,
+} from '@/lib/ai-stream-batcher';
+import { cn, generateId } from '@/lib/utils';
 import { parseAssistantContent } from '@/lib/ai-content';
 import {
   buildAgentExecutionCommand,
@@ -78,6 +83,8 @@ import {
 import {
   getRecentTerminalOutput,
   redactTerminalSecrets,
+  renderTerminalText,
+  stripAnsi,
   subscribeTerminalOutput,
 } from '@/lib/terminal-output-buffer';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
@@ -169,6 +176,10 @@ export function summarizeAiError(message: string): AiErrorPresentation {
 }
 
 export function getAiPanelWidthBounds(containerWidth: number): { min: number; max: number } {
+  if (containerWidth < MAIN_CONTENT_MIN_WIDTH) {
+    const max = Math.max(0, Math.min(AI_PANEL_MAX_WIDTH, containerWidth));
+    return { min: Math.min(AI_PANEL_MIN_WIDTH, max), max };
+  }
   const max = Math.max(0, Math.min(AI_PANEL_MAX_WIDTH, containerWidth - MAIN_CONTENT_MIN_WIDTH));
   return { min: Math.min(AI_PANEL_MIN_WIDTH, max), max };
 }
@@ -297,16 +308,39 @@ export function cancelActiveAiRequests(
   return [...requestIds];
 }
 
+export function stopActiveAgentRun(
+  cancelBackend: CancelAiRequest = invokeCancelAiRequest,
+): string | undefined {
+  const agent = useAgentStore.getState();
+  const run = agent.run;
+  if (!run) return undefined;
+  const requestId = ['planning', 'evaluating'].includes(run.phase)
+    ? run.requestId
+    : undefined;
+  agent.stopRun();
+  if (requestId) {
+    void cancelBackend(requestId).catch((reason) => {
+      logger.warn(`Failed to cancel AI request ${requestId}`, reason);
+    });
+  }
+  return requestId;
+}
+
+export function sanitizeTerminalSelection(selection: string): string {
+  return redactTerminalSecrets(renderTerminalText(stripAnsi(selection)));
+}
+
 function currentTerminalContext(): TerminalContextSnapshot {
   const app = useAppStore.getState();
   if (app.activeSection !== 'terminal') return { selection: false, lineCount: 0 };
   const terminalState = useTerminalStore.getState();
   const session = terminalState.sessions.find((item) => item.sessionId === terminalState.activeSessionId);
   if (!session) return { selection: false, lineCount: 0 };
-  const selection = terminalRegistry.get(session.sessionId)?.terminal.getSelection().trim();
+  const rawSelection = terminalRegistry.get(session.sessionId)?.terminal.getSelection().trim();
+  const selection = rawSelection ? sanitizeTerminalSelection(rawSelection) : '';
   const contextLines = useAiSettingsStore.getState().contextLines;
-  const content = selection
-    ? redactTerminalSecrets(selection)
+  const content = rawSelection
+    ? selection
     : getRecentTerminalOutput(session.sessionId, contextLines);
   const label = `${session.username ? `${session.username}@` : ''}${session.host || session.title}`;
   if (!content) {
@@ -319,7 +353,7 @@ function currentTerminalContext(): TerminalContextSnapshot {
     };
   }
   return {
-    selection: Boolean(selection),
+    selection: Boolean(rawSelection),
     conversationId: session.conversationId,
     sessionId: session.sessionId,
     label,
@@ -372,6 +406,24 @@ function useLiveTerminalContext(
   return currentTerminalContext();
 }
 
+function useCompactAiPanelViewport(): boolean {
+  const [compact, setCompact] = useState(() => window.innerWidth <= 479);
+
+  useEffect(() => {
+    const query = window.matchMedia?.('(max-width: 479px)');
+    const update = (): void => setCompact(query ? query.matches : window.innerWidth <= 479);
+    update();
+    query?.addEventListener('change', update);
+    window.addEventListener('resize', update);
+    return () => {
+      query?.removeEventListener('change', update);
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+
+  return compact;
+}
+
 function currentDiagnosticAgentContext(): { context?: AiContext; sessionId?: string } {
   const app = useAppStore.getState();
   if (app.activeSection !== 'terminal') return {};
@@ -380,14 +432,15 @@ function currentDiagnosticAgentContext(): { context?: AiContext; sessionId?: str
   if (!session) return {};
   const contextLines = useAiSettingsStore.getState().contextLines;
   const output = getRecentTerminalOutput(session.sessionId, contextLines);
-  const selection = terminalRegistry.get(session.sessionId)?.terminal.getSelection().trim();
+  const rawSelection = terminalRegistry.get(session.sessionId)?.terminal.getSelection().trim();
+  const selection = rawSelection ? sanitizeTerminalSelection(rawSelection) : '';
   const label = `${session.username ? `${session.username}@` : ''}${session.host || session.title}`;
   const content = [
     `Connection: ${label}:${session.port}`,
     `Status: ${session.status}`,
     '',
-    selection
-      ? `Selected terminal content:\n${redactTerminalSecrets(selection)}`
+    rawSelection
+      ? `Selected terminal content:\n${selection}`
       : `Recent terminal output:\n${output || '(no recent output)'}`,
   ].join('\n');
   return { sessionId: session.sessionId, context: { label, content } };
@@ -425,6 +478,7 @@ export const AiPanel: React.FC = () => {
   const [task, setTask] = useState<AiTaskKind>('chat');
   const [contextEnabled, setContextEnabled] = useState(true);
   const [panelWidth, setPanelWidth] = useState(initialAiPanelWidth);
+  const [containerWidth, setContainerWidth] = useState(() => window.innerWidth);
   const [resizing, setResizing] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [copiedCommandId, setCopiedCommandId] = useState<string | null>(null);
@@ -442,6 +496,8 @@ export const AiPanel: React.FC = () => {
   const resizeFrameRef = useRef<number | null>(null);
   const pendingPanelWidthRef = useRef<number | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
+  const streamDeltaBatcherRef = useRef<AiStreamDeltaBatcher | null>(null);
+  const compactViewport = useCompactAiPanelViewport();
 
   const contextSnapshot = useLiveTerminalContext(open, activeSection, activeSessionId);
 
@@ -477,9 +533,11 @@ export const AiPanel: React.FC = () => {
     if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
   }, []);
 
-  const getContainerWidth = useCallback((): number => (
-    panelRef.current?.parentElement?.getBoundingClientRect().width ?? window.innerWidth
-  ), []);
+  const measureContainerWidth = useCallback((): number => {
+    if (compactViewport) return window.innerWidth;
+    const width = panelRef.current?.parentElement?.getBoundingClientRect().width ?? 0;
+    return width > 0 ? width : window.innerWidth;
+  }, [compactViewport]);
 
   const applyPendingPanelWidth = useCallback(() => {
     resizeFrameRef.current = null;
@@ -500,22 +558,38 @@ export const AiPanel: React.FC = () => {
   }, [applyPendingPanelWidth]);
 
   useEffect(() => {
-    const handleWindowResize = (): void => {
-      setPanelWidth((width) => clampAiPanelWidth(width, getContainerWidth()));
+    const applyContainerWidth = (nextWidth: number): void => {
+      const width = nextWidth > 0 ? nextWidth : window.innerWidth;
+      setContainerWidth((current) => Math.abs(current - width) < 1 ? current : width);
+      setPanelWidth((current) => clampAiPanelWidth(current, width));
     };
+    const handleWindowResize = (): void => applyContainerWidth(measureContainerWidth());
+    const container = compactViewport ? null : panelRef.current?.parentElement;
+
+    applyContainerWidth(measureContainerWidth());
+    if (container && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver((entries) => {
+        const width = entries[0]?.contentRect.width;
+        if (width !== undefined) applyContainerWidth(width);
+      });
+      observer.observe(container);
+      return () => observer.disconnect();
+    }
+
     window.addEventListener('resize', handleWindowResize);
-    return () => {
-      window.removeEventListener('resize', handleWindowResize);
-      if (resizeFrameRef.current !== null) {
-        window.cancelAnimationFrame(resizeFrameRef.current);
-      }
-      resizeFrameRef.current = null;
-      pendingPanelWidthRef.current = null;
-      resizeStartRef.current = null;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [getContainerWidth]);
+    return () => window.removeEventListener('resize', handleWindowResize);
+  }, [compactViewport, measureContainerWidth, open]);
+
+  useEffect(() => () => {
+    if (resizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(resizeFrameRef.current);
+    }
+    resizeFrameRef.current = null;
+    pendingPanelWidthRef.current = null;
+    resizeStartRef.current = null;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
 
   useEffect(() => {
     if (!open && resizeStartRef.current) finishPanelResize();
@@ -526,22 +600,40 @@ export const AiPanel: React.FC = () => {
 
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    const batcher = createAiStreamDeltaBatcher((requestId, text) => {
+      const agent = useAgentStore.getState();
+      if (agent.run?.requestId === requestId) {
+        agent.appendDelta(requestId, text);
+        return;
+      }
+      useAiStore.getState().appendDelta(requestId, text);
+    });
+    streamDeltaBatcherRef.current = batcher;
     void listen<AiStreamEvent>(AI_STREAM_EVENT, (event) => {
       const payload = event.payload;
       const agent = useAgentStore.getState();
       if (agent.run?.requestId === payload.requestId) {
-        if (payload.type === 'textDelta') agent.appendDelta(payload.requestId, payload.text);
-        else if (payload.type === 'completed') agent.completePlanning(payload.requestId);
+        if (!['planning', 'evaluating'].includes(agent.run.phase)) return;
+        if (payload.type === 'textDelta') {
+          batcher.push(payload.requestId, payload.text);
+          return;
+        }
+        batcher.flush(payload.requestId);
+        if (payload.type === 'completed') agent.completePlanning(payload.requestId);
         else if (payload.type === 'cancelled') agent.cancelRun(payload.requestId);
         else if (payload.type === 'error') agent.failRun(payload.requestId, payload.message);
         return;
       }
       const state = useAiStore.getState();
-      if (payload.type === 'textDelta') state.appendDelta(payload.requestId, payload.text);
-      else if (payload.type === 'completed') state.completeRequest(payload.requestId);
+      if (payload.type === 'textDelta') {
+        batcher.push(payload.requestId, payload.text);
+        return;
+      }
+      batcher.flush(payload.requestId);
+      if (payload.type === 'completed') state.completeRequest(payload.requestId);
       else if (payload.type === 'cancelled') state.cancelRequest(payload.requestId);
       else if (payload.type === 'error') state.failRequest(payload.requestId, payload.message);
-      if (payload.type !== 'started' && payload.type !== 'textDelta') {
+      if (payload.type !== 'started') {
         const assistant = useAiStore.getState().messages.find((message) => (
           message.id === `assistant-${payload.requestId}` && message.content.length > 0
         ));
@@ -558,6 +650,8 @@ export const AiPanel: React.FC = () => {
     return () => {
       disposed = true;
       unlisten?.();
+      batcher.dispose();
+      if (streamDeltaBatcherRef.current === batcher) streamDeltaBatcherRef.current = null;
     };
   }, []);
 
@@ -632,7 +726,7 @@ export const AiPanel: React.FC = () => {
 
   const runDiagnosticAgent = useCallback(async (text: string): Promise<void> => {
     const goal = text.trim();
-    if (!goal) return;
+    if (!goal || !contextEnabled) return;
     const snapshot = currentDiagnosticAgentContext();
     if (!snapshot.context || !snapshot.sessionId) return;
     const requestId = generateId();
@@ -663,13 +757,14 @@ export const AiPanel: React.FC = () => {
         reason instanceof Error ? reason.message : String(reason),
       );
     }
-  }, []);
+  }, [contextEnabled]);
 
   const evaluateAgentStep = useCallback(async (
     stepId: string,
     result: string | undefined,
     exitCode: number,
   ): Promise<void> => {
+    if (!contextEnabled) return;
     const run = useAgentStore.getState().run;
     const step = run?.steps.find((item) => item.id === stepId);
     if (!run || step?.status !== 'inserted' || !step.command) return;
@@ -726,7 +821,15 @@ export const AiPanel: React.FC = () => {
         reason instanceof Error ? reason.message : String(reason),
       );
     }
-  }, []);
+  }, [contextEnabled]);
+
+  const handleContextEnabledChange = useCallback((enabled: boolean): void => {
+    if (!enabled && agentRun) {
+      streamDeltaBatcherRef.current?.flush(agentRun.requestId);
+      stopActiveAgentRun();
+    }
+    setContextEnabled(enabled);
+  }, [agentRun]);
 
   const insertedAgentStep = agentRun?.steps.find((step) => step.status === 'inserted');
   useEffect(() => {
@@ -762,6 +865,7 @@ export const AiPanel: React.FC = () => {
 
   const handleCancel = (): void => {
     const requestId = useAiStore.getState().activeRequestId;
+    if (requestId) streamDeltaBatcherRef.current?.flush(requestId);
     cancelActiveAiRequests();
     if (requestId) {
       const assistant = useAiStore.getState().messages.find((message) => (
@@ -773,6 +877,12 @@ export const AiPanel: React.FC = () => {
         });
       }
     }
+  };
+
+  const handleStopAgentRun = (): void => {
+    const requestId = useAgentStore.getState().run?.requestId;
+    if (requestId) streamDeltaBatcherRef.current?.flush(requestId);
+    stopActiveAgentRun();
   };
 
   const handleApproveAgentStep = (step: AgentRunStep): void => {
@@ -916,9 +1026,9 @@ export const AiPanel: React.FC = () => {
   if (!open) return null;
 
   const visibleMessages = messages.filter((message) => (
-    conversationLane(message.task) === conversationLane(
+    (viewingHistory || conversationLane(message.task) === conversationLane(
       task === 'generateCommand' ? 'generateCommand' : 'chat',
-    )
+    ))
     && (visibleConversationId
       ? message.conversationId === visibleConversationId
       : message.conversationId === undefined && message.sessionId === conversationSessionId)
@@ -927,7 +1037,7 @@ export const AiPanel: React.FC = () => {
   const canExplain = !viewingHistory
     && activeSection === 'terminal'
     && Boolean(contextSnapshot.context);
-  const agentContext = currentDiagnosticAgentContext();
+  const agentContext = contextEnabled ? currentDiagnosticAgentContext() : {};
   const agentPlanning = agentRun?.phase === 'planning' || agentRun?.phase === 'evaluating';
   const agentNeedsResolution = task === 'diagnosticAgent'
     && (agentRun?.phase === 'awaitingApproval' || agentRun?.phase === 'awaitingExecution');
@@ -938,7 +1048,7 @@ export const AiPanel: React.FC = () => {
     || !draft.trim()
     || !model.trim()
     || agentNeedsResolution
-    || (task === 'diagnosticAgent' && !agentContext.context);
+    || (task === 'diagnosticAgent' && (!contextEnabled || !agentContext.context));
   const agentSession = agentRun
     ? sessions.find((session) => session.sessionId === agentRun.sessionId)
     : undefined;
@@ -958,7 +1068,7 @@ export const AiPanel: React.FC = () => {
     && activeSession?.status === 'connected'
     && terminalRegistry.get(agentRun.sessionId),
   );
-  const panelWidthBounds = getAiPanelWidthBounds(getContainerWidth());
+  const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
   const compactModeControls = panelWidth < AI_PANEL_COMPACT_CONTROLS_WIDTH;
   const currentLane = conversationLane(task === 'generateCommand' ? 'generateCommand' : 'chat');
   const hasCurrentConversation = task === 'diagnosticAgent'
@@ -993,16 +1103,18 @@ export const AiPanel: React.FC = () => {
       : t('ai.context.lineCount', { count: contextSnapshot.lineCount })}`
     : undefined;
 
-  return (
-    <TooltipProvider>
+  const panelContent = (
       <aside
         ref={panelRef}
         data-slot="ai-panel"
-        className="relative flex h-full shrink-0 flex-col border-l border-app-border bg-background"
-        style={{ width: panelWidth }}
+        className={cn(
+          'relative flex h-full min-w-0 shrink-0 flex-col bg-background',
+          !compactViewport && 'border-l border-app-border',
+        )}
+        style={{ width: compactViewport ? '100%' : panelWidth }}
         aria-label={t('ai.title')}
       >
-        <div
+        {!compactViewport && <div
           data-slot="ai-panel-resize-handle"
           role="separator"
           aria-label={t('ai.resize')}
@@ -1021,7 +1133,7 @@ export const AiPanel: React.FC = () => {
               pointerId: event.pointerId,
               clientX: event.clientX,
               width: panelWidth,
-              containerWidth: getContainerWidth(),
+              containerWidth: measureContainerWidth(),
             };
             setResizing(true);
             document.body.style.cursor = 'col-resize';
@@ -1058,14 +1170,14 @@ export const AiPanel: React.FC = () => {
             }
             if (nextWidth === undefined) return;
             event.preventDefault();
-            setPanelWidth(clampAiPanelWidth(nextWidth, getContainerWidth()));
+            setPanelWidth(clampAiPanelWidth(nextWidth, measureContainerWidth()));
           }}
         >
           <div
             data-slot="ai-panel-resize-indicator"
             className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent shadow-none transition-all duration-150 delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200 group-focus-visible:w-[3px] group-focus-visible:bg-app-primary group-data-[resizing]:w-[3px] group-data-[resizing]:bg-app-primary"
           />
-        </div>
+        </div>}
         <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
           <div className="flex min-w-0 items-center gap-2">
             <SparklesIcon className="size-4 shrink-0 text-primary" />
@@ -1257,7 +1369,7 @@ export const AiPanel: React.FC = () => {
         {activeSection === 'terminal' && !viewingHistory && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
             <Button
-              variant="outline"
+              variant="ghost"
               size="xs"
               onClick={handleExplain}
               disabled={!canExplain || busy || agentNeedsResolution}
@@ -1267,17 +1379,44 @@ export const AiPanel: React.FC = () => {
               {t('ai.explainTerminal')}
             </Button>
             {task === 'diagnosticAgent' && agentContext.context ? (
-              <Badge variant="secondary">
-                {agentContext.context.label} · {t('ai.agent.contextAttached')}
-              </Badge>
+              <HoverCard>
+                <HoverCardTrigger
+                  render={(
+                    <Button
+                      variant="secondary"
+                      size="xs"
+                      onClick={() => handleContextEnabledChange(false)}
+                      aria-pressed
+                    />
+                  )}
+                >
+                  <PaperclipIcon data-icon="inline-start" />
+                  <span className="max-w-48 truncate">
+                    {agentContext.context.label} · {t('ai.agent.contextAttached')}
+                  </span>
+                </HoverCardTrigger>
+                <HoverCardContent align="start" className="w-80">
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs text-muted-foreground">
+                      {t('ai.context.redactedHint')}
+                    </div>
+                    <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 font-mono text-xs leading-5 whitespace-pre-wrap text-foreground">
+                      {agentContext.context.content}
+                    </pre>
+                    <div className="text-xs text-muted-foreground">
+                      {t('ai.context.clickToDisable')}
+                    </div>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
             ) : contextSnapshot.context && contextAttachmentLabel ? (
               <HoverCard>
                 <HoverCardTrigger
                   render={(
                     <Button
-                      variant={contextEnabled ? 'secondary' : 'outline'}
+                      variant={contextEnabled ? 'secondary' : 'ghost'}
                       size="xs"
-                      onClick={() => setContextEnabled((value) => !value)}
+                      onClick={() => handleContextEnabledChange(!contextEnabled)}
                       aria-pressed={contextEnabled}
                     />
                   )}
@@ -1308,6 +1447,15 @@ export const AiPanel: React.FC = () => {
                   </div>
                 </HoverCardContent>
               </HoverCard>
+            ) : task === 'diagnosticAgent' && contextSnapshot.label ? (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => handleContextEnabledChange(true)}
+              >
+                <PaperclipIcon data-icon="inline-start" />
+                {t('ai.context.clickToEnable')}
+              </Button>
             ) : contextSnapshot.label ? (
               <Badge variant="outline">
                 {contextSnapshot.label} · {t('ai.context.noOutput')}
@@ -1321,7 +1469,7 @@ export const AiPanel: React.FC = () => {
             run={agentRun}
             onApprove={handleApproveAgentStep}
             onReject={(stepId) => useAgentStore.getState().rejectStep(stepId)}
-            onCancel={() => useAgentStore.getState().stopRun()}
+            onCancel={handleStopAgentRun}
             onRetry={() => {
               const goal = useAgentStore.getState().run?.goal;
               if (goal) void runDiagnosticAgent(goal);
@@ -1340,23 +1488,23 @@ export const AiPanel: React.FC = () => {
               icon={<BotIcon />}
               title={t('ai.emptyTitle')}
               description={t('ai.empty')}
-              action={(
+              action={!viewingHistory ? (
                 <div className="flex max-w-xs flex-wrap justify-center gap-1.5">
                   {canExplain && (
-                    <Button variant="outline" size="xs" onClick={handleExplain}>
+                    <Button variant="ghost" size="xs" onClick={handleExplain}>
                       <SquareTerminalIcon data-icon="inline-start" />
                       {t('ai.suggestion.analyzeOutput')}
                     </Button>
                   )}
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="xs"
                     onClick={() => applySuggestedPrompt(t('ai.suggestion.troubleshoot'))}
                   >
                     {t('ai.suggestion.troubleshoot')}
                   </Button>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="xs"
                     onClick={() => applySuggestedPrompt(
                       t('ai.suggestion.healthCheck'),
@@ -1366,7 +1514,7 @@ export const AiPanel: React.FC = () => {
                     {t('ai.suggestion.healthCheck')}
                   </Button>
                 </div>
-              )}
+              ) : undefined}
             />
           </div>
         ) : (
@@ -1411,7 +1559,7 @@ export const AiPanel: React.FC = () => {
                     {command && (
                       <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="xs"
                           className="h-5 gap-1 px-1.5 text-[10px] [&_svg]:size-2.5"
                           onClick={() => void handleCopyCommand(message.id, command)}
@@ -1522,16 +1670,18 @@ export const AiPanel: React.FC = () => {
               className="min-h-18 max-h-48 px-3.5 pt-3 pb-1 leading-5"
             />
             <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
-              {(agentNeedsResolution || (task === 'diagnosticAgent' && !agentContext.context)) && (
+              {(agentNeedsResolution || (task === 'diagnosticAgent' && (!contextEnabled || !agentContext.context))) && (
                 <InputGroupText
-                  className="min-w-0 px-1 text-xs leading-4"
+                  className="min-w-0 px-1 text-xs leading-4 text-muted-foreground/80"
                   aria-live="polite"
                 >
                   <SquareTerminalIcon />
                   <span>
                     {agentNeedsResolution
                       ? t('ai.agent.resolvePending')
-                      : t('ai.agent.requiresTerminal')}
+                      : !contextEnabled
+                        ? t('ai.agent.requiresContext')
+                        : t('ai.agent.requiresTerminal')}
                   </span>
                 </InputGroupText>
               )}
@@ -1547,7 +1697,7 @@ export const AiPanel: React.FC = () => {
                   spacing={1}
                   className="min-w-0"
                   aria-label={t('ai.mode')}
-                  disabled={busy || agentNeedsResolution}
+                  disabled={busy || agentNeedsResolution || viewingHistory}
                 >
                   <Tooltip>
                     <TooltipTrigger
@@ -1617,6 +1767,22 @@ export const AiPanel: React.FC = () => {
           )}
         </div>
       </aside>
+  );
+
+  return (
+    <TooltipProvider>
+      {compactViewport ? (
+        <Drawer open={open} onOpenChange={setOpen}>
+          <DrawerContent
+            showCloseButton={false}
+            className="max-w-none gap-0 overflow-hidden rounded-none border-l p-0"
+            style={{ width: `min(100vw, ${panelWidth}px)` }}
+          >
+            <DrawerTitle className="sr-only">{t('ai.title')}</DrawerTitle>
+            {panelContent}
+          </DrawerContent>
+        </Drawer>
+      ) : panelContent}
     </TooltipProvider>
   );
 };

@@ -60,4 +60,18 @@ describe('AssistantMessageContent', () => {
     const copiedButton = await screen.findByRole('button', { name: 'common.copied' });
     expect(copiedButton).not.toHaveClass('opacity-0');
   });
+
+  it('defers Markdown parsing until streaming completes', () => {
+    const content = 'Run:\n```bash\ndf -h\n```';
+    const { rerender } = render(
+      <AssistantMessageContent content={content} streaming />,
+    );
+
+    expect(screen.getByText(/```bash/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'common.copy' })).not.toBeInTheDocument();
+
+    rerender(<AssistantMessageContent content={content} streaming={false} />);
+
+    expect(screen.getByRole('button', { name: 'common.copy' })).toBeInTheDocument();
+  });
 });

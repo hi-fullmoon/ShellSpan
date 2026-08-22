@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '@/locales';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAiStore } from '@/stores/aiStore';
+import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { AiChatMessage } from '@/types/ai';
 import {
@@ -14,8 +15,10 @@ import {
   extractSingleLineCommand,
   getAiPanelWidthBounds,
   isMessageBoundToTerminal,
+  sanitizeTerminalSelection,
   selectConversationHistory,
   shouldSubmitAiDraft,
+  stopActiveAgentRun,
   summarizeAiError,
 } from '../ai-panel';
 
@@ -48,6 +51,13 @@ describe('extractSingleLineCommand', () => {
 
   it('rejects multi-line command blocks so insertion cannot execute earlier lines', () => {
     expect(extractSingleLineCommand('```bash\ncd /tmp\nrm file\n```')).toBeUndefined();
+  });
+});
+
+describe('terminal selection context', () => {
+  it('normalizes control sequences before redacting selected terminal content', () => {
+    expect(sanitizeTerminalSelection('\u001b[31mapi_key=secret\u001b[0m\rAPI_KEY=next'))
+      .toBe('API_KEY=[REDACTED]');
   });
 });
 
@@ -223,6 +233,11 @@ describe('AI panel width', () => {
     expect(clampAiPanelWidth(700, 1000)).toBe(520);
   });
 
+  it('keeps the panel usable as an overlay in a narrow container', () => {
+    expect(getAiPanelWidthBounds(375)).toEqual({ min: 320, max: 375 });
+    expect(clampAiPanelWidth(0, 375)).toBe(320);
+  });
+
   it('keeps compact mode controls accessible when the panel narrows', async () => {
     await initI18n('zh-CN');
     useAiStore.getState().setOpen(true);
@@ -306,6 +321,111 @@ describe('AI panel width', () => {
       cancelFrame.mockRestore();
     }
   });
+
+  it('does not remeasure the panel container while stream content updates', async () => {
+    await initI18n('en-US');
+    useAiStore.getState().clear();
+    useAiStore.getState().beginRequest({
+      requestId: 'layout-stream',
+      task: 'chat',
+      userContent: 'Hello',
+      providerId: 'provider-1',
+    });
+
+    const { container, unmount } = render(
+      createElement('div', null, createElement(AiPanel)),
+    );
+    const wrapper = container.firstElementChild as HTMLElement;
+    const measure = vi.spyOn(wrapper, 'getBoundingClientRect');
+
+    try {
+      act(() => useAiStore.getState().appendDelta('layout-stream', 'Response'));
+
+      expect(measure).not.toHaveBeenCalled();
+      expect(screen.getByText('Response')).toBeInTheDocument();
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+    }
+  });
+});
+
+describe('AI panel compact and context behavior', () => {
+  it('uses a modal drawer instead of an inline overlay on narrow screens', async () => {
+    const initialWidth = window.innerWidth;
+    const initialMatchMedia = window.matchMedia;
+    let unmount: (() => void) | undefined;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375, writable: true });
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    });
+    useAiStore.getState().setOpen(true);
+
+    try {
+      ({ unmount } = render(createElement(AiPanel)));
+      await waitFor(() => expect(document.body.querySelector('[data-slot="drawer-content"]')).toBeInTheDocument());
+      expect(document.body.querySelector('[data-slot="drawer-overlay"]')).toBeInTheDocument();
+      expect(screen.queryByRole('separator', { name: /AI assistant width|调整 AI 助手宽度/i })).toBeNull();
+    } finally {
+      unmount?.();
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: initialWidth, writable: true });
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: initialMatchMedia });
+      useAiStore.getState().setOpen(false);
+    }
+  });
+
+  it('stops a diagnostic run when terminal context is disabled and keeps a transparent re-enable action', async () => {
+    await initI18n('zh-CN');
+    useAppStore.getState().setActiveSection('terminal');
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'agent-session',
+        title: 'Server',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'agent-conversation',
+        conversationStartedAt: '2026-08-22T09:00:00.000Z',
+      }],
+      activeSessionId: 'agent-session',
+    });
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '诊断 Agent' }));
+      act(() => {
+        useAgentStore.getState().beginRun(
+          'agent-context-request',
+          'Diagnose the server',
+          'agent-session',
+          'root@example.com',
+        );
+      });
+
+      fireEvent.click(await screen.findByRole('button', { name: /当前终端已附加/ }));
+
+      expect(useAgentStore.getState().run?.phase).toBe('cancelled');
+      const enableContext = await screen.findByRole('button', {
+        name: '单击可重新附加此上下文。',
+      });
+      expect(enableContext).toHaveClass('hover:bg-accent');
+      expect(enableContext).not.toHaveClass('bg-background');
+    } finally {
+      unmount();
+      useAgentStore.getState().clear();
+      useTerminalStore.setState({ sessions: [], activeSessionId: null });
+      useAppStore.getState().setActiveSection('workbench');
+      useAiStore.getState().setOpen(false);
+    }
+  });
 });
 
 describe('clear conversation dialog', () => {
@@ -359,6 +479,10 @@ describe('conversation history', () => {
       messages: [message('archived-message', 'user', 'Preserved question', {
         conversationId: 'archived-conversation',
         sessionId: 'closed-session',
+      }), message('archived-command', 'assistant', '```bash\ndf -h\n```', {
+        task: 'generateCommand',
+        conversationId: 'archived-conversation',
+        sessionId: 'closed-session',
       })],
     }]);
     useAiStore.getState().setOpen(true);
@@ -369,6 +493,7 @@ describe('conversation history', () => {
       fireEvent.click(await screen.findByText('root@archived.example.com'));
 
       expect(await screen.findByText('Preserved question')).toBeInTheDocument();
+      expect(screen.getByText('df -h')).toBeInTheDocument();
       expect(screen.getByText(/只读方式保留|preserved as read-only/i)).toBeInTheDocument();
       expect(screen.getByRole('textbox')).toBeDisabled();
     } finally {
@@ -460,5 +585,19 @@ describe('cancelActiveAiRequests', () => {
     expect(cancelBackend).toHaveBeenCalledTimes(2);
     expect(cancelBackend).toHaveBeenCalledWith('chat-request');
     expect(cancelBackend).toHaveBeenCalledWith('agent-request');
+  });
+
+  it('cancels an active diagnostic request when its run is stopped', () => {
+    useAgentStore.getState().beginRun(
+      'agent-stop-request',
+      'diagnose',
+      'session-1',
+      'root@server',
+    );
+    const cancelBackend = vi.fn().mockResolvedValue(undefined);
+
+    expect(stopActiveAgentRun(cancelBackend)).toBe('agent-stop-request');
+    expect(useAgentStore.getState().run?.phase).toBe('cancelled');
+    expect(cancelBackend).toHaveBeenCalledWith('agent-stop-request');
   });
 });
