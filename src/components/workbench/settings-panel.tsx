@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { UpdateSection } from './update-section';
+import { TERMINAL_COLOR_SCHEME_IDS } from '@/types';
 import type {
   AppSection,
   Locale,
@@ -393,7 +394,7 @@ export const SettingsPanel: React.FC = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {(['app', 'oneDark', 'solarizedDark', 'light'] as const).map((scheme) => (
+                        {TERMINAL_COLOR_SCHEME_IDS.map((scheme) => (
                           <SelectItem key={scheme} value={scheme}>
                             {t(`settings.terminal.colorScheme.${scheme}`)}
                           </SelectItem>
