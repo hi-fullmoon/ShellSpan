@@ -95,12 +95,17 @@ export const useAgentStore = create<AgentState>()((set) => ({
   appendDelta: (requestId, text) =>
     set((state) =>
       state.run?.requestId === requestId
+      && ['planning', 'evaluating'].includes(state.run.phase)
         ? { run: { ...state.run, responseText: state.run.responseText + text } }
         : state,
     ),
   completePlanning: (requestId) =>
     set((state) => {
-      if (!state.run || state.run.requestId !== requestId) return state;
+      if (
+        !state.run
+        || state.run.requestId !== requestId
+        || !['planning', 'evaluating'].includes(state.run.phase)
+      ) return state;
       try {
         const plan = parseDiagnosticAgentPlan(state.run.responseText);
         const commandBudgetExhausted = state.run.steps.filter((step) => (
