@@ -12,7 +12,7 @@ export function serializeTerminalWorkspace(
 ): string {
   const snapshots: TerminalWorkspaceSession[] = sessions
     .filter((session) => Boolean(session.profileId))
-    .map(({ sessionId, title, host, port, username, profileId, pinned, color }) => ({
+    .map(({
       sessionId,
       title,
       host,
@@ -21,6 +21,19 @@ export function serializeTerminalWorkspace(
       profileId,
       pinned,
       color,
+      conversationId,
+      conversationStartedAt,
+    }) => ({
+      sessionId,
+      title,
+      host,
+      port,
+      username,
+      profileId,
+      pinned,
+      color,
+      conversationId,
+      conversationStartedAt,
     }));
   return JSON.stringify({ sessions: snapshots, layout });
 }
@@ -56,7 +69,9 @@ function isTerminalWorkspaceSession(value: unknown): value is TerminalWorkspaceS
     && typeof session.profileId === 'string'
     && session.profileId.length > 0
     && (session.pinned === undefined || typeof session.pinned === 'boolean')
-    && (session.color === undefined || typeof session.color === 'string');
+    && (session.color === undefined || typeof session.color === 'string')
+    && (session.conversationId === undefined || typeof session.conversationId === 'string')
+    && (session.conversationStartedAt === undefined || typeof session.conversationStartedAt === 'string');
 }
 
 function isTerminalLayoutNode(value: unknown): value is TerminalLayoutNode {

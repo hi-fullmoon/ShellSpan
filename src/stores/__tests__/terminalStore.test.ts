@@ -19,6 +19,8 @@ describe('terminalStore', () => {
     const state = useTerminalStore.getState();
     expect(state.sessions).toHaveLength(1);
     expect(state.activeSessionId).toBe('s1');
+    expect(state.sessions[0]?.conversationId).toBeTruthy();
+    expect(state.sessions[0]?.conversationStartedAt).toBeTruthy();
   });
 
   it('removes a session and updates active session', () => {
@@ -108,6 +110,7 @@ describe('terminalStore', () => {
     store.updateTitle('s1', 'Renamed');
     store.togglePin('s1');
     store.setTabColor('s1', '#ef4444');
+    const conversationId = useTerminalStore.getState().sessions[0]?.conversationId;
 
     store.reconnectSession(
       's1',
@@ -118,6 +121,7 @@ describe('terminalStore', () => {
     const state = useTerminalStore.getState();
     expect(state.sessions).toHaveLength(1);
     expect(state.sessions[0]?.sessionId).toBe('s2');
+    expect(state.sessions[0]?.conversationId).toBe(conversationId);
     expect(state.sessions[0]?.title).toBe('Renamed');
     expect(state.sessions[0]?.profileId).toBe('profile-1');
     expect(state.sessions[0]?.pinned).toBe(true);

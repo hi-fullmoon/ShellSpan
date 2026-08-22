@@ -4,13 +4,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '@/locales';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAiStore } from '@/stores/aiStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 import type { AiChatMessage } from '@/types/ai';
 import {
   AiPanel,
+  canStartAiRequest,
   cancelActiveAiRequests,
   clampAiPanelWidth,
   extractSingleLineCommand,
   getAiPanelWidthBounds,
+  isMessageBoundToTerminal,
   selectConversationHistory,
   shouldSubmitAiDraft,
   summarizeAiError,
@@ -45,6 +48,51 @@ describe('extractSingleLineCommand', () => {
 
   it('rejects multi-line command blocks so insertion cannot execute earlier lines', () => {
     expect(extractSingleLineCommand('```bash\ncd /tmp\nrm file\n```')).toBeUndefined();
+  });
+});
+
+describe('terminal conversation binding', () => {
+  it('keeps commands bound after a terminal reconnect changes sessionId', () => {
+    expect(isMessageBoundToTerminal(
+      { conversationId: 'conversation-1', sessionId: 'old-session' },
+      'conversation-1',
+      'new-session',
+    )).toBe(true);
+    expect(isMessageBoundToTerminal(
+      { conversationId: 'conversation-2', sessionId: 'old-session' },
+      'conversation-1',
+      'new-session',
+    )).toBe(false);
+  });
+
+  it('does not start a request after its terminal conversation closes', () => {
+    useAiStore.getState().clear();
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'session-1',
+        title: 'Server',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'conversation-1',
+        conversationStartedAt: '2026-08-22T09:00:00.000Z',
+      }],
+      activeSessionId: 'session-1',
+    });
+    useAiStore.getState().beginRequest({
+      requestId: 'request-1',
+      task: 'chat',
+      userContent: 'Help',
+      providerId: 'provider-1',
+      conversationId: 'conversation-1',
+      sessionId: 'session-1',
+    });
+
+    expect(canStartAiRequest('request-1', 'conversation-1')).toBe(true);
+    useTerminalStore.setState({ sessions: [], activeSessionId: null });
+    expect(canStartAiRequest('request-1', 'conversation-1')).toBe(false);
+    useAiStore.getState().cancelRequest('request-1');
   });
 });
 
@@ -114,13 +162,13 @@ describe('selectConversationHistory', () => {
 
   it('keeps terminal conversations isolated by session', () => {
     const messages = [
-      message('server-a', 'user', 'Check server A', { sessionId: 'session-a' }),
-      message('server-a', 'assistant', 'Server A is healthy', { sessionId: 'session-a' }),
-      message('server-b', 'user', 'Check server B', { sessionId: 'session-b' }),
-      message('server-b', 'assistant', 'Server B needs attention', { sessionId: 'session-b' }),
+      message('server-a', 'user', 'Check server A', { conversationId: 'conversation-a', sessionId: 'session-a' }),
+      message('server-a', 'assistant', 'Server A is healthy', { conversationId: 'conversation-a', sessionId: 'session-a' }),
+      message('server-b', 'user', 'Check server B', { conversationId: 'conversation-b', sessionId: 'session-b' }),
+      message('server-b', 'assistant', 'Server B needs attention', { conversationId: 'conversation-b', sessionId: 'session-b' }),
     ];
 
-    expect(selectConversationHistory(messages, 'chat', 'session-b')).toEqual([
+    expect(selectConversationHistory(messages, 'chat', 'conversation-b')).toEqual([
       { role: 'user', content: 'Check server B' },
       { role: 'assistant', content: 'Server B needs attention' },
     ]);
@@ -283,6 +331,46 @@ describe('clear conversation dialog', () => {
 
       await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
       expect(useAiStore.getState().messages).toHaveLength(0);
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+    }
+  });
+});
+
+describe('conversation history', () => {
+  it('opens an archived terminal conversation as read-only', async () => {
+    await initI18n('en-US');
+    useTerminalStore.setState({ sessions: [], activeSessionId: null });
+    useAiStore.getState().clear();
+    useAiStore.getState().hydrateSessions([{
+      conversation: {
+        id: 'archived-conversation',
+        startedAt: '2026-08-22T09:00:00.000Z',
+        updatedAt: '2026-08-22T09:01:00.000Z',
+        title: 'root@archived.example.com',
+        archived: true,
+        sessionId: 'closed-session',
+        host: 'archived.example.com',
+        port: 22,
+        username: 'root',
+      },
+      messages: [message('archived-message', 'user', 'Preserved question', {
+        conversationId: 'archived-conversation',
+        sessionId: 'closed-session',
+      })],
+    }]);
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+      fireEvent.click(await screen.findByText('root@archived.example.com'));
+
+      expect(await screen.findByText('Preserved question')).toBeInTheDocument();
+      expect(screen.getByText(/只读方式保留|preserved as read-only/i)).toBeInTheDocument();
+      expect(screen.getByRole('textbox')).toBeDisabled();
     } finally {
       unmount();
       useAiStore.getState().clear();

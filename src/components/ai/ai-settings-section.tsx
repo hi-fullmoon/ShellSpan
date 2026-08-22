@@ -1,16 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  BoxesIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
-  Layers3Icon,
-  MoonStarIcon,
   PlusIcon,
   RefreshCwIcon,
   ServerIcon,
-  SparklesIcon,
   Trash2Icon,
-  WavesIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +39,13 @@ import { invokeListAiModels } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import { AI_PROVIDER_PRESETS, useAiSettingsStore } from '@/stores/aiSettingsStore';
 import type { AiProviderKind, AiProviderPreset } from '@/types/ai';
+import {
+  DeepSeekBrandIcon,
+  KimiBrandIcon,
+  MiniMaxBrandIcon,
+  OllamaBrandIcon,
+  OpenAiBrandIcon,
+} from './provider-brand-icons';
 
 const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
   ollama: 'settings.ai.preset.ollama',
@@ -54,12 +56,12 @@ const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
   custom: 'settings.ai.preset.custom',
 };
 
-const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType> = {
-  ollama: BoxesIcon,
-  openai: SparklesIcon,
-  deepseek: WavesIcon,
-  minimax: Layers3Icon,
-  kimi: MoonStarIcon,
+const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  ollama: OllamaBrandIcon,
+  openai: OpenAiBrandIcon,
+  deepseek: DeepSeekBrandIcon,
+  minimax: MiniMaxBrandIcon,
+  kimi: KimiBrandIcon,
   custom: ServerIcon,
 };
 

@@ -5,6 +5,8 @@ import { useTerminalStore } from '@/stores/terminalStore';
 
 vi.mock('@/lib/tauri', () => ({
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
+  invokeArchiveAiSession: vi.fn().mockResolvedValue(undefined),
+  invokeCancelAiRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/hooks/useI18n', () => ({

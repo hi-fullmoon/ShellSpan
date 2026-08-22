@@ -43,7 +43,14 @@ import type {
   TransferBatchResult,
   UploadProgressEvent,
 } from '@/types';
-import type { AiProviderConfig, AiStartRequest } from '@/types/ai';
+import type {
+  AiChatMessage,
+  AiConversation,
+  AiProviderConfig,
+  AiSessionFile,
+  AiSessionMeta,
+  AiStartRequest,
+} from '@/types/ai';
 
 const logger = createLogger('ipc');
 
@@ -616,6 +623,61 @@ export async function invokeSaveTerminalWorkspace(sessionsJson: string): Promise
 
 export async function invokeClearTerminalWorkspace(): Promise<void> {
   return invokeLogged('clear_terminal_workspace');
+}
+
+export async function invokeCreateAiSession(meta: AiSessionMeta): Promise<void> {
+  return invokeLogged('create_ai_session', { meta });
+}
+
+export async function invokeAppendAiSessionMessage(
+  conversationId: string,
+  startedAt: string,
+  message: AiChatMessage,
+): Promise<void> {
+  return invokeLogged('append_ai_session_message', {
+    conversationId,
+    startedAt,
+    timestamp: new Date().toISOString(),
+    message,
+  });
+}
+
+export async function invokeClearAiSessionLane(
+  conversationId: string,
+  startedAt: string,
+  lane: 'conversation' | 'command',
+): Promise<void> {
+  return invokeLogged('clear_ai_session_lane', {
+    conversationId,
+    startedAt,
+    timestamp: new Date().toISOString(),
+    lane,
+  });
+}
+
+export async function invokeArchiveAiSession(
+  conversationId: string,
+  startedAt: string,
+): Promise<void> {
+  return invokeLogged('archive_ai_session', {
+    conversationId,
+    startedAt,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+export async function invokeListAiSessions(): Promise<AiConversation[]> {
+  return invokeLogged<AiConversation[]>('list_ai_sessions');
+}
+
+export async function invokeLoadAiSession(
+  conversationId: string,
+  startedAt: string,
+): Promise<AiSessionFile | null> {
+  return invokeLogged<AiSessionFile | null>('load_ai_session', {
+    conversationId,
+    startedAt,
+  });
 }
 
 export async function invokeGetSystemHealth(): Promise<SystemHealth> {

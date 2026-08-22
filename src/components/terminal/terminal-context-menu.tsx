@@ -19,6 +19,7 @@ import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
+import { archiveTerminalAiSession } from '@/lib/ai-sessions';
 import type { TerminalSplitDirection } from './terminal-split';
 
 const MENU_WIDTH = 256;
@@ -132,6 +133,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   })();
 
   const closeSession = (sessionId: string): void => {
+    archiveTerminalAiSession(sessionId);
     removeSession(sessionId);
     invokeCloseSession(sessionId).catch(() => {});
   };

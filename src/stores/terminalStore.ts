@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { TerminalLayoutNode } from '@/components/terminal/terminal-split';
 import type { ClosedEvent, SessionStatus, SessionSummary, StatusEvent } from '@/types';
+import { generateId } from '@/lib/utils';
 
 export interface TerminalSession {
   sessionId: string;
@@ -15,12 +16,24 @@ export interface TerminalSession {
   pinned?: boolean;
   color?: string;
   reconnecting?: boolean;
+  conversationId?: string;
+  conversationStartedAt?: string;
 }
 
 export type TerminalWorkspaceSession = Pick<
   TerminalSession,
   'sessionId' | 'title' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color'
+  | 'conversationId' | 'conversationStartedAt'
 >;
+
+function createConversationIdentity(): Pick<TerminalSession, 'conversationId' | 'conversationStartedAt'> {
+  return {
+    conversationId: typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : generateId(),
+    conversationStartedAt: new Date().toISOString(),
+  };
+}
 
 const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
   const pinned = sessions.filter((session) => session.pinned);
@@ -85,6 +98,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId,
         pinned: options?.pinned,
         color: options?.color,
+        ...createConversationIdentity(),
       };
 
       let sessions: TerminalSession[];
@@ -106,6 +120,9 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       if (state.sessions.length > 0 || restored.length === 0) return state;
       const sessions = restored.map((session) => ({
         ...session,
+        ...(!session.conversationId || !session.conversationStartedAt
+          ? createConversationIdentity()
+          : {}),
         status: 'disconnected' as const,
         closed: {
           sessionId: session.sessionId,
@@ -155,6 +172,8 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         pinned: old.pinned,
         color: old.color,
         reconnecting: true,
+        conversationId: old.conversationId,
+        conversationStartedAt: old.conversationStartedAt,
       };
       const sessions = state.sessions.filter(
         (session) => session.sessionId !== oldSessionId,

@@ -23,6 +23,7 @@ import { PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
+import { archiveTerminalAiSession } from '@/lib/ai-sessions';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -417,6 +418,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const confirmCloseSession = (): void => {
     if (closingSessionId) {
+      archiveTerminalAiSession(closingSessionId);
       removeSession(closingSessionId);
       invokeCloseSession(closingSessionId).catch(() => {});
     }

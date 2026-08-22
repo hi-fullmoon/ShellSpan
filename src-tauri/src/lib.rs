@@ -1,4 +1,5 @@
 mod ai;
+mod ai_sessions;
 mod commands;
 mod connection;
 mod db;
@@ -227,6 +228,12 @@ pub fn run() {
             ai::ai_list_models,
             ai::ai_start_request,
             ai::ai_cancel_request,
+            ai_sessions::create_ai_session,
+            ai_sessions::append_ai_session_message,
+            ai_sessions::clear_ai_session_lane,
+            ai_sessions::archive_ai_session,
+            ai_sessions::list_ai_sessions,
+            ai_sessions::load_ai_session,
             commands::create_session,
             commands::create_local_session,
             commands::write_session,
