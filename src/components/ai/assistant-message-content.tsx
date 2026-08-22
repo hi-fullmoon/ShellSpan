@@ -1,4 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { BrainCircuitIcon, CheckIcon, ChevronRightIcon, ClipboardIcon } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,6 +18,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { parseAssistantContent } from '@/lib/ai-content';
+import { splitStreamingMarkdown } from '@/lib/streaming-markdown';
 import { cn } from '@/lib/utils';
 
 function textFromNode(node: React.ReactNode): string {
@@ -22,19 +30,29 @@ function textFromNode(node: React.ReactNode): string {
   return '';
 }
 
-function MarkdownContent({
+const MarkdownContent = React.memo(function MarkdownContent({
   children,
-  copiedCode,
   copiedLabel,
   copyLabel,
-  onCopyCode,
 }: {
   children: string;
-  copiedCode: string | null;
   copiedLabel: string;
   copyLabel: string;
-  onCopyCode: (code: string) => void;
 }): React.JSX.Element {
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
+  const copyCode = useCallback((code: string): void => {
+    void navigator.clipboard.writeText(code).then(() => {
+      setCopiedCode(code);
+      if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
+      copyResetTimerRef.current = window.setTimeout(() => setCopiedCode(null), 1600);
+    }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => () => {
+    if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
+  }, []);
+
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}
@@ -84,7 +102,7 @@ function MarkdownContent({
                   'absolute right-1.5 top-1.5 h-5 gap-1 px-1.5 text-[10px] transition-opacity [&_svg]:size-2.5',
                   !copied && 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
                 )}
-                onClick={() => onCopyCode(code)}
+                onClick={() => copyCode(code)}
               >
                 {copied
                   ? <CheckIcon data-icon="inline-start" />
@@ -116,38 +134,27 @@ function MarkdownContent({
       {children}
     </Markdown>
   );
-}
+});
 
 const AssistantMessageContentComponent: React.FC<{
   content: string;
   streaming: boolean;
 }> = ({ content, streaming }) => {
   const { t } = useI18n();
-  const { answer, reasoning, reasoningComplete } = parseAssistantContent(content);
+  const deferredContent = useDeferredValue(content);
+  const renderedContent = streaming ? deferredContent : content;
+  const { answer, reasoning, reasoningComplete } = parseAssistantContent(renderedContent);
+  const answerChunks = useMemo(() => splitStreamingMarkdown(answer), [answer]);
   const hasAnswer = Boolean(answer.trim());
   const hadAnswer = useRef(hasAnswer);
   const [reasoningOpen, setReasoningOpen] = useState(!hasAnswer && Boolean(reasoning));
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const copyResetTimerRef = useRef<number | null>(null);
-
-  const copyCode = (code: string): void => {
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopiedCode(code);
-      if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
-      copyResetTimerRef.current = window.setTimeout(() => setCopiedCode(null), 1600);
-    }).catch(() => undefined);
-  };
-
-  useEffect(() => () => {
-    if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
-  }, []);
 
   useEffect(() => {
     if (!hadAnswer.current && hasAnswer) setReasoningOpen(false);
     hadAnswer.current = hasAnswer;
   }, [hasAnswer]);
 
-  if (!content) {
+  if (!renderedContent) {
     return <span className="shimmer text-xs">{t('ai.thinking.inProgress')}</span>;
   }
 
@@ -178,18 +185,15 @@ const AssistantMessageContentComponent: React.FC<{
       )}
       {hasAnswer && (
         <div className="flex min-w-0 flex-col gap-3 [&>*]:min-w-0">
-          {streaming ? (
-            <div className="leading-6 whitespace-pre-wrap">{answer}</div>
-          ) : (
+          {answerChunks.map((chunk, index) => (
             <MarkdownContent
-              copiedCode={copiedCode}
+              key={index}
               copiedLabel={t('common.copied')}
               copyLabel={t('common.copy')}
-              onCopyCode={copyCode}
             >
-              {answer}
+              {chunk}
             </MarkdownContent>
-          )}
+          ))}
         </div>
       )}
     </div>
