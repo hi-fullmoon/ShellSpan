@@ -95,7 +95,8 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
-    const viewport = document.body.querySelector(
+    const contentScroller = screen.getByRole('tabpanel').closest('[data-slot="scroll-area"]');
+    const viewport = contentScroller?.querySelector(
       '[data-slot="scroll-area-viewport"]',
     ) as HTMLDivElement;
     viewport.scrollTop = 240;
@@ -103,6 +104,36 @@ describe('SettingsPanel', () => {
     openSection('settings.terminal.title');
 
     expect(viewport.scrollTop).toBe(0);
+  });
+
+  it('uses the built-in horizontal scroll area for the top tabs', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const tabList = screen.getByRole('tablist', { name: 'settings.sectionNavigation' });
+    const tabScroller = tabList.closest('[data-slot="scroll-area"]');
+
+    expect(tabScroller).toBeInTheDocument();
+    expect(tabScroller).toHaveClass('h-9', 'w-full');
+    expect(tabList).toHaveClass('min-w-max', 'group-data-horizontal/tabs:h-9');
+    expect(tabList).not.toHaveClass('overflow-x-auto');
+  });
+
+  it('sizes the AI provider layout from the settings pane instead of the window', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+    openSection('settings.ai.title');
+
+    const providerCard = screen.getByText('settings.ai.providers').closest('[data-slot="card"]');
+    const providerLayout = providerCard?.parentElement;
+    const section = providerLayout?.parentElement;
+    const firstFormRow = screen.getByText('settings.ai.providerName').closest('[data-slot="field"]')?.parentElement;
+
+    expect(section).toHaveClass('@container');
+    expect(providerLayout).toHaveClass('@min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]');
+    expect(providerLayout).not.toHaveClass('lg:grid-cols-[15rem_minmax(0,1fr)]');
+    expect(firstFormRow).toHaveClass('@min-[36rem]:grid-cols-2');
+    expect(firstFormRow).not.toHaveClass('sm:grid-cols-2');
   });
 
   it('renders when persisted shortcuts come from an older version', async () => {
