@@ -61,17 +61,28 @@ describe('AssistantMessageContent', () => {
     expect(copiedButton).not.toHaveClass('opacity-0');
   });
 
-  it('defers Markdown parsing until streaming completes', () => {
-    const content = 'Run:\n```bash\ndf -h\n```';
-    const { rerender } = render(
+  it('renders Markdown while streaming', () => {
+    const content = '## Run\n\n```bash\ndf -h\n```';
+    render(
       <AssistantMessageContent content={content} streaming />,
     );
 
-    expect(screen.getByText(/```bash/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'common.copy' })).not.toBeInTheDocument();
-
-    rerender(<AssistantMessageContent content={content} streaming={false} />);
-
+    expect(screen.getByRole('heading', { name: 'Run' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'common.copy' })).toBeInTheDocument();
+    expect(screen.queryByText(/```bash/)).not.toBeInTheDocument();
+  });
+
+  it('preserves a large loose list across streaming render chunks', () => {
+    const content = `${Array.from(
+      { length: 120 },
+      (_, index) => `${index + 1}. Item ${index + 1}\n\n`,
+    ).join('')}After the list.\n`;
+    const { container } = render(
+      <AssistantMessageContent content={content} streaming />,
+    );
+
+    expect(container.querySelectorAll('ol')).toHaveLength(1);
+    expect(screen.getAllByRole('listitem')).toHaveLength(120);
+    expect(screen.getByText('After the list.')).toBeInTheDocument();
   });
 });
