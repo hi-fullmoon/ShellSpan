@@ -86,7 +86,12 @@ function isTerminalLayoutNode(value: unknown): value is TerminalLayoutNode {
   if (node.kind === 'split') {
     return (
       node.orientation === 'horizontal' || node.orientation === 'vertical'
-    ) && isTerminalLayoutNode(node.first)
+    ) && (node.split === undefined
+      || (typeof node.split === 'number'
+        && Number.isFinite(node.split)
+        && node.split > 0
+        && node.split < 1))
+      && isTerminalLayoutNode(node.first)
       && isTerminalLayoutNode(node.second);
   }
   return false;
