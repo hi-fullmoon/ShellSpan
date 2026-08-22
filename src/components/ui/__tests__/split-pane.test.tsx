@@ -1,34 +1,108 @@
-import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { SplitPane } from '../split-pane';
 
+let rectSpy: ReturnType<typeof vi.spyOn>;
+let originalOffsetWidth: PropertyDescriptor | undefined;
+let originalOffsetHeight: PropertyDescriptor | undefined;
+let originalOffsetLeft: PropertyDescriptor | undefined;
+let originalOffsetTop: PropertyDescriptor | undefined;
+
+beforeEach(() => {
+  rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function mockRect(this: HTMLElement) {
+    const isPanel = this.hasAttribute('data-panel');
+    const width = isPanel ? 500 : 1000;
+    const height = isPanel ? 250 : 500;
+    return {
+      left: 0,
+      top: 0,
+      width,
+      height,
+      right: width,
+      bottom: height,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    };
+  });
+  originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+  originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+  originalOffsetLeft = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetLeft');
+  originalOffsetTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetTop');
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get() {
+      return this.hasAttribute('data-panel') ? 500 : 1000;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get() {
+      return this.hasAttribute('data-panel') ? 250 : 500;
+    },
+  });
+  const getOffset = function getOffset(this: HTMLElement): number {
+    if (this.hasAttribute('data-separator')) return 500;
+    if (this.id.endsWith('-second')) return 501;
+    return 0;
+  };
+  Object.defineProperty(HTMLElement.prototype, 'offsetLeft', {
+    configurable: true,
+    get: getOffset,
+  });
+  Object.defineProperty(HTMLElement.prototype, 'offsetTop', {
+    configurable: true,
+    get: getOffset,
+  });
+});
+
+afterEach(() => {
+  rectSpy.mockRestore();
+  if (originalOffsetWidth) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffsetWidth);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'offsetWidth');
+  }
+  if (originalOffsetHeight) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'offsetHeight');
+  }
+  if (originalOffsetLeft) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetLeft', originalOffsetLeft);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'offsetLeft');
+  }
+  if (originalOffsetTop) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetTop', originalOffsetTop);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'offsetTop');
+  }
+});
+
 describe('SplitPane', () => {
-  it('renders left and right content', () => {
-    const { container } = render(
+  it('renders accessible left and right panels', () => {
+    render(
       <SplitPane
         left={<div data-testid="left">Left</div>}
         right={<div data-testid="right">Right</div>}
       />,
     );
+
     expect(screen.getByTestId('left')).toBeInTheDocument();
     expect(screen.getByTestId('right')).toBeInTheDocument();
-    expect(container.querySelector('[data-slot="split-pane-divider"]')).toHaveClass(
-      'border-l',
-      'border-app-border',
-      'shadow-none',
-    );
-    expect(container.querySelector('[data-slot="split-pane-handle"]')).toHaveClass(
-      'w-[3px]',
-      'bg-transparent',
-      'shadow-none',
-    );
-    expect(
-      container.querySelector('[data-slot="split-pane-indicator"]'),
-    ).toHaveClass('w-px', 'bg-transparent', 'shadow-none');
+    const separator = screen.getByRole('separator');
+    expect(separator).toHaveAttribute('aria-orientation', 'vertical');
+    expect(separator).toHaveAttribute('aria-valuenow', '50');
+    expect(separator).toHaveAttribute('tabindex', '0');
+    expect(separator).toHaveClass('z-20', 'bg-app-border', 'shadow-none');
+    expect(separator).not.toHaveClass('-mt-px');
+    expect(screen.getByTestId('left').closest('[data-slot="resizable-panel-group"]'))
+      .toHaveClass('isolate');
   });
 
-  it('supports a subtle horizontal divider without changing the default style', () => {
-    const { container } = render(
+  it('supports a subtle divider without changing its larger hit target', () => {
+    render(
       <SplitPane
         dividerStyle="subtle"
         left={<div>Left</div>}
@@ -36,13 +110,14 @@ describe('SplitPane', () => {
       />,
     );
 
-    expect(container.querySelector('[data-slot="split-pane-divider"]')).toHaveClass(
-      'border-l-[0.5px]',
-      'border-app-border/15',
+    expect(screen.getByRole('separator')).toHaveClass(
+      'bg-app-border/15',
+      'after:w-[3px]',
+      'hover:after:bg-app-primary',
     );
   });
 
-  it('renders a vertical split with a horizontal divider', () => {
+  it('renders a vertical split with a horizontal separator', () => {
     const { container } = render(
       <SplitPane
         direction="vertical"
@@ -52,118 +127,59 @@ describe('SplitPane', () => {
     );
 
     expect(container.firstChild).toHaveAttribute('data-direction', 'vertical');
-    expect(container.firstChild).toHaveClass('flex-col');
-    expect(container.querySelector('[data-slot="split-pane-divider"]')).toHaveClass('border-t');
-    expect(container.querySelector('[data-slot="split-pane-handle"]')).toHaveClass('cursor-row-resize');
-  });
-
-  it('keeps the standard hover effect for subtle vertical dividers', () => {
-    const { container } = render(
-      <SplitPane
-        direction="vertical"
-        dividerStyle="subtle"
-        left={<div>Top</div>}
-        right={<div>Bottom</div>}
-      />,
-    );
-
-    expect(container.querySelector('[data-slot="split-pane-divider"]')).toHaveClass(
-      'border-t-[0.5px]',
-      'border-app-border/15',
-    );
-    expect(container.querySelector('[data-slot="split-pane-indicator"]')).toHaveClass(
-      'h-px',
-      'group-hover:h-[3px]',
-      'group-hover:bg-app-primary',
+    expect(screen.getByRole('separator')).toHaveAttribute('aria-orientation', 'horizontal');
+    expect(screen.getByRole('separator')).toHaveClass(
+      '-mt-px',
+      'after:w-[3px]',
+      'aria-[orientation=horizontal]:after:h-[3px]',
     );
   });
 
-  it('keeps the standard hover effect for subtle horizontal dividers', () => {
-    const { container } = render(
+  it('reflects a persisted split ratio in separator aria state', () => {
+    render(
       <SplitPane
-        dividerStyle="subtle"
+        split={0.35}
         left={<div>Left</div>}
         right={<div>Right</div>}
       />,
     );
 
-    expect(container.querySelector('[data-slot="split-pane-indicator"]')).toHaveClass(
-      'w-px',
-      'group-hover:w-[3px]',
-      'group-hover:bg-app-primary',
-    );
+    expect(screen.getByRole('separator')).toHaveAttribute('aria-valuenow', '35');
   });
 
-  it('disables text selection while dragging and restores it afterwards', () => {
-    const { container } = render(
-      <SplitPane left={<div>Left</div>} right={<div>Right</div>} />,
-    );
-    const handle = container.querySelector('[data-slot="split-pane-handle"]')!;
-
-    fireEvent.mouseDown(handle);
-    expect(document.body.style.userSelect).toBe('none');
-    expect(document.body.style.cursor).toBe('col-resize');
-
-    fireEvent.mouseUp(document);
-    expect(document.body.style.userSelect).toBe('');
-    expect(document.body.style.cursor).toBe('');
-  });
-
-  it('restores global styles when unmounted mid-drag', () => {
-    const { container, unmount } = render(
-      <SplitPane left={<div>Left</div>} right={<div>Right</div>} />,
-    );
-    const handle = container.querySelector('[data-slot="split-pane-handle"]')!;
-
-    fireEvent.mouseDown(handle);
-    unmount();
-    expect(document.body.style.userSelect).toBe('');
-    expect(document.body.style.cursor).toBe('');
-  });
-
-  it('coalesces drag updates to one split change per animation frame', () => {
-    const frames: FrameRequestCallback[] = [];
-    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      frames.push(callback);
-      return frames.length;
-    });
-    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+  it('resizes from the keyboard and reports the committed ratio', () => {
     const onSplitChange = vi.fn();
-    try {
-      const { container } = render(
-        <SplitPane
-          left={<div>Left</div>}
-          right={<div>Right</div>}
-          minWidth={100}
-          onSplitChange={onSplitChange}
-        />,
-      );
-      const root = container.firstElementChild as HTMLElement;
-      vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 1000,
-        height: 500,
-        right: 1000,
-        bottom: 500,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
-      const handle = container.querySelector('[data-slot="split-pane-handle"]')!;
+    render(
+      <SplitPane
+        minWidth={100}
+        onSplitChange={onSplitChange}
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
 
-      fireEvent.mouseDown(handle);
-      fireEvent.mouseMove(document, { clientX: 300, clientY: 0 });
-      fireEvent.mouseMove(document, { clientX: 700, clientY: 0 });
+    const separator = screen.getByRole('separator');
+    fireEvent.keyDown(separator, { key: 'ArrowRight' });
 
-      expect(frames).toHaveLength(1);
-      expect(onSplitChange).not.toHaveBeenCalled();
-      act(() => frames[0](0));
-      expect(onSplitChange).toHaveBeenCalledTimes(1);
-      expect(onSplitChange).toHaveBeenCalledWith(0.7);
-    } finally {
-      requestFrame.mockRestore();
-      cancelFrame.mockRestore();
-    }
+    expect(onSplitChange).toHaveBeenCalled();
+    expect(onSplitChange.mock.calls[onSplitChange.mock.calls.length - 1]?.[0]).toBeGreaterThan(0.5);
+  });
+
+  it('keeps callback and internal state working together when uncontrolled', () => {
+    const onSplitChange = vi.fn();
+    render(
+      <SplitPane
+        onSplitChange={onSplitChange}
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+
+    const separator = screen.getByRole('separator');
+    fireEvent.keyDown(separator, { key: 'ArrowRight' });
+    fireEvent.keyDown(separator, { key: 'ArrowRight' });
+
+    expect(onSplitChange).toHaveBeenCalledTimes(2);
+    expect(Number(separator.getAttribute('aria-valuenow'))).toBeGreaterThan(50);
   });
 });

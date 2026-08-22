@@ -1,4 +1,10 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { GroupImperativeHandle, Layout } from 'react-resizable-panels';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
 
 export interface SplitPaneProps {
@@ -11,7 +17,10 @@ export interface SplitPaneProps {
   onSplitChange?: (split: number) => void;
   className?: string;
   dividerStyle?: 'default' | 'subtle';
+  id?: string;
 }
+
+const clampSplit = (split: number): number => Math.min(0.99, Math.max(0.01, split));
 
 export const SplitPane: React.FC<SplitPaneProps> = ({
   left,
@@ -23,161 +32,86 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
   onSplitChange,
   className,
   dividerStyle = 'default',
+  id,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [internalSplit, setInternalSplit] = useState(defaultSplit);
-  const split = controlledSplit ?? internalSplit;
-  const [dragging, setDragging] = useState(false);
-  const [suppressGroup, setSuppressGroup] = useState(false);
-  const draggingRef = useRef(false);
-  const dragFrameRef = useRef<number | null>(null);
-  const pendingPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const reactId = React.useId().replace(/:/g, '');
+  const groupId = id ?? `split-pane-${reactId}`;
+  const firstPanelId = `${groupId}-first`;
+  const secondPanelId = `${groupId}-second`;
+  const groupRef = useRef<GroupImperativeHandle | null>(null);
+  const [internalSplit, setInternalSplit] = useState(() => clampSplit(defaultSplit));
+  const effectiveSplit = clampSplit(controlledSplit ?? internalSplit);
+  const effectiveSplitRef = useRef(effectiveSplit);
+  effectiveSplitRef.current = effectiveSplit;
 
-  const setSplit = useCallback(
-    (next: number) => {
-      if (onSplitChange) {
-        onSplitChange(next);
-      } else {
-        setInternalSplit(next);
-      }
-    },
-    [onSplitChange],
-  );
+  const defaultLayout = useMemo<Layout>(() => ({
+    [firstPanelId]: effectiveSplit * 100,
+    [secondPanelId]: (1 - effectiveSplit) * 100,
+  }), [effectiveSplit, firstPanelId, secondPanelId]);
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      // Prevent the browser from starting a text selection when the drag
-      // carries the pointer over pane content.
-      e.preventDefault();
-      draggingRef.current = true;
-      setDragging(true);
-      document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize';
-      document.body.style.userSelect = 'none';
-    },
-    [direction],
-  );
+  const handleLayoutChanged = useCallback((layout: Layout, meta: { isUserInteraction: boolean }) => {
+    if (!meta.isUserInteraction) return;
+    const firstSize = layout[firstPanelId];
+    if (typeof firstSize !== 'number') return;
+    const next = clampSplit(firstSize / 100);
+    if (controlledSplit === undefined) setInternalSplit(next);
+    onSplitChange?.(next);
+  }, [controlledSplit, firstPanelId, onSplitChange]);
 
-  const applyPendingSplit = useCallback(() => {
-    dragFrameRef.current = null;
-    const pointer = pendingPointerRef.current;
-    pendingPointerRef.current = null;
-    if (!pointer || !containerRef.current) return;
-
-    const rect = containerRef.current.getBoundingClientRect();
-    const size = direction === 'horizontal' ? rect.width : rect.height;
-    if (size <= 0) return;
-    const position = direction === 'horizontal'
-      ? pointer.clientX - rect.left
-      : pointer.clientY - rect.top;
-    const minimumFraction = Math.min(minWidth / size, 0.5);
-    const nextSplit = Math.min(
-      Math.max(position / size, minimumFraction),
-      1 - minimumFraction,
-    );
-    setSplit(nextSplit);
-  }, [direction, minWidth, setSplit]);
-
-  const flushPendingSplit = useCallback(() => {
-    if (dragFrameRef.current !== null) {
-      cancelAnimationFrame(dragFrameRef.current);
+  // The resizable primitive owns live drag state. This effect only synchronizes
+  // a genuinely controlled value changed by the parent.
+  useEffect(() => {
+    if (controlledSplit === undefined) return;
+    const currentLayout = groupRef.current?.getLayout();
+    const currentFirstSize = currentLayout?.[firstPanelId];
+    const targetFirstSize = effectiveSplitRef.current * 100;
+    if (typeof currentFirstSize === 'number' && Math.abs(currentFirstSize - targetFirstSize) < 0.05) {
+      return;
     }
-    applyPendingSplit();
-  }, [applyPendingSplit]);
-
-  const handleMouseUp = useCallback(() => {
-    flushPendingSplit();
-    draggingRef.current = false;
-    setDragging(false);
-    setSuppressGroup(true);
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-  }, [flushPendingSplit]);
-
-  const handleMouseEnter = useCallback(() => {
-    setSuppressGroup(false);
-  }, []);
-
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!draggingRef.current || !containerRef.current) return;
-      pendingPointerRef.current = { clientX: e.clientX, clientY: e.clientY };
-      if (dragFrameRef.current === null) {
-        dragFrameRef.current = requestAnimationFrame(applyPendingSplit);
-      }
-    },
-    [applyPendingSplit],
-  );
-
-  React.useEffect(() => {
-    document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('mousemove', handleMouseMove);
-    return () => {
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('mousemove', handleMouseMove);
-      if (dragFrameRef.current !== null) {
-        cancelAnimationFrame(dragFrameRef.current);
-        dragFrameRef.current = null;
-      }
-      pendingPointerRef.current = null;
-      // Restore global styles if the component unmounts mid-drag.
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [handleMouseUp, handleMouseMove]);
+    groupRef.current?.setLayout({
+      [firstPanelId]: targetFirstSize,
+      [secondPanelId]: 100 - targetFirstSize,
+    });
+  }, [controlledSplit, firstPanelId, secondPanelId]);
 
   return (
-    <div
-      ref={containerRef}
+    <ResizablePanelGroup
+      id={groupId}
+      groupRef={groupRef}
+      orientation={direction}
+      defaultLayout={defaultLayout}
+      onLayoutChanged={handleLayoutChanged}
+      resizeTargetMinimumSize={{ fine: 8, coarse: 24 }}
       data-direction={direction}
-      className={cn('flex h-full w-full overflow-hidden', direction === 'vertical' && 'flex-col', className)}
+      className={cn('isolate overflow-hidden', className)}
     >
-      <div style={direction === 'horizontal' ? { width: `${split * 100}%` } : { height: `${split * 100}%` }} className="min-h-0 min-w-0">
+      <ResizablePanel
+        id={firstPanelId}
+        minSize={minWidth}
+        className="min-h-0 min-w-0 overflow-hidden"
+      >
         {left}
-      </div>
-      <div
+      </ResizablePanel>
+      {/* Terminal panes use z-10 status/inactive masks; the divider's 3px
+          indicator crosses the 1px gutter and must paint above those masks.
+          A horizontal divider overlaps the preceding pane by 1px so it does
+          not push the following pane's tab strip down by a visible pixel. */}
+      <ResizableHandle
+        id={`${groupId}-divider`}
         data-slot="split-pane-divider"
         className={cn(
-          'relative z-10 shrink-0 shadow-none scale-[-1]',
-          direction === 'horizontal'
-            ? dividerStyle === 'subtle'
-              ? 'border-l-[0.5px] border-app-border/15 dark:border-l dark:border-app-border'
-              : 'border-l border-app-border'
-            : dividerStyle === 'subtle'
-              ? 'border-t-[0.5px] border-app-border/15 dark:border-t dark:border-app-border'
-              : 'border-t border-app-border',
+          'group z-20 bg-transparent shadow-none after:pointer-events-none after:bg-transparent after:transition-colors after:duration-150 hover:after:bg-app-primary focus-visible:after:bg-app-primary data-[separator=active]:after:bg-app-primary',
+          direction === 'vertical' && '-mt-px',
+          dividerStyle === 'subtle' ? 'bg-app-border/15' : 'bg-app-border',
         )}
+      />
+      <ResizablePanel
+        id={secondPanelId}
+        minSize={minWidth}
+        className="min-h-0 min-w-0 overflow-hidden"
       >
-        <div
-          data-slot="split-pane-handle"
-          onMouseDown={handleMouseDown}
-          onMouseEnter={handleMouseEnter}
-          className={cn(
-            'absolute flex items-center justify-center bg-transparent shadow-none',
-            direction === 'horizontal'
-              ? 'left-1/2 top-0 h-full w-[3px] -translate-x-1/2 cursor-col-resize'
-              : 'left-0 top-1/2 h-[3px] w-full -translate-y-1/2 cursor-row-resize',
-            !suppressGroup && 'group',
-          )}
-        >
-          <div
-            data-slot="split-pane-indicator"
-            className={cn(
-              'transition-all duration-150 shadow-none',
-              direction === 'horizontal' ? 'h-full' : 'w-full',
-              dragging
-                ? direction === 'horizontal'
-                  ? 'w-[3px] bg-app-primary'
-                  : 'h-[3px] bg-app-primary'
-                : direction === 'horizontal'
-                  ? 'w-px bg-transparent delay-0 group-hover:w-[3px] group-hover:bg-app-primary group-hover:delay-200'
-                  : 'h-px bg-transparent delay-0 group-hover:h-[3px] group-hover:bg-app-primary group-hover:delay-200',
-            )}
-          />
-        </div>
-      </div>
-      <div style={direction === 'horizontal' ? { width: `${(1 - split) * 100}%` } : { height: `${(1 - split) * 100}%` }} className="min-h-0 min-w-0">
         {right}
-      </div>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 };
