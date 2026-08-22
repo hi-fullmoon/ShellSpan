@@ -8,6 +8,7 @@ import { applyTheme } from './lib/theme';
 import { parseTerminalWorkspace } from './lib/terminal-workspace';
 import {
   invokeClearTerminalWorkspace,
+  invokeListAiSessions,
   invokeLoadTerminalWorkspace,
 } from './lib/tauri';
 import { useAppStore } from './stores/appStore';
@@ -15,6 +16,7 @@ import { useProfileStore } from './stores/profileStore';
 import { useRecentProfilesStore } from './stores/recentProfilesStore';
 import { useTerminalStore } from './stores/terminalStore';
 import { useAiSettingsStore } from './stores/aiSettingsStore';
+import { useAiStore } from './stores/aiStore';
 
 initGlobalErrorLogging();
 
@@ -25,6 +27,11 @@ async function bootstrap(): Promise<void> {
     useRecentProfilesStore.getState().hydrateFromDb(),
     useAiSettingsStore.getState().hydrateFromDb(),
   ]);
+  try {
+    useAiStore.getState().hydrateSessionIndex(await invokeListAiSessions());
+  } catch {
+    // Local AI history is best-effort and must not block application startup.
+  }
   if (useAppStore.getState().restoreWorkspace) {
     try {
       const rawWorkspace = await invokeLoadTerminalWorkspace();

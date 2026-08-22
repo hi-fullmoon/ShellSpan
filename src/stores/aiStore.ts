@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AiChatMessage, AiContext, AiTaskKind } from '@/types/ai';
+import type { AiChatMessage, AiContext, AiConversation, AiSessionFile, AiTaskKind } from '@/types/ai';
 import { generateId } from '@/lib/utils';
 
 export type AiPhase = 'idle' | 'streaming' | 'error';
@@ -7,6 +7,8 @@ export type AiPhase = 'idle' | 'streaming' | 'error';
 interface AiState {
   open: boolean;
   messages: AiChatMessage[];
+  conversations: AiConversation[];
+  loadedConversationIds: string[];
   phase: AiPhase;
   activeRequestId?: string;
   activeTask?: AiTaskKind;
@@ -19,6 +21,7 @@ interface AiState {
     task: Exclude<AiTaskKind, 'diagnosticAgent'>;
     userContent: string;
     providerId: string;
+    conversationId?: string;
     sessionId?: string;
     context?: AiContext;
   }) => void;
@@ -27,9 +30,14 @@ interface AiState {
   cancelRequest: (requestId: string) => void;
   failRequest: (requestId: string, message: string) => void;
   clearConversation: (
-    sessionId: string | undefined,
+    conversationId: string | undefined,
     lane: 'conversation' | 'command',
   ) => void;
+  hydrateSessionIndex: (conversations: AiConversation[]) => void;
+  hydrateSession: (session: AiSessionFile) => void;
+  hydrateSessions: (sessions: AiSessionFile[]) => void;
+  upsertConversation: (conversation: AiConversation) => void;
+  archiveConversation: (conversationId: string) => void;
   clear: () => void;
 }
 
@@ -42,6 +50,8 @@ function messageLane(task: AiTaskKind): 'conversation' | 'command' | 'agent' {
 export const useAiStore = create<AiState>()((set) => ({
   open: false,
   messages: [],
+  conversations: [],
+  loadedConversationIds: [],
   phase: 'idle',
   setOpen: (open) => set({ open }),
   toggleOpen: () => set((state) => ({ open: !state.open })),
@@ -50,6 +60,7 @@ export const useAiStore = create<AiState>()((set) => ({
     task: activeTask,
     userContent,
     providerId,
+    conversationId,
     sessionId,
     context,
   }) =>
@@ -70,6 +81,7 @@ export const useAiStore = create<AiState>()((set) => ({
           task: activeTask,
           status: 'completed',
           providerId,
+          conversationId,
           sessionId,
           context,
         },
@@ -81,6 +93,7 @@ export const useAiStore = create<AiState>()((set) => ({
           task: activeTask,
           status: 'streaming',
           providerId,
+          conversationId,
           sessionId,
         },
       ],
@@ -162,17 +175,17 @@ export const useAiStore = create<AiState>()((set) => ({
           }
         : state,
     ),
-  clearConversation: (sessionId, lane) => set((state) => {
+  clearConversation: (conversationId, lane) => set((state) => {
     const clearsFailedRequest = Boolean(
       state.errorRequestId
       && state.messages.some((message) => (
         message.requestId === state.errorRequestId
-        && message.sessionId === sessionId
+        && message.conversationId === conversationId
         && messageLane(message.task) === lane
       )),
     );
     const messages = state.messages.filter((message) => (
-      message.sessionId !== sessionId || messageLane(message.task) !== lane
+      message.conversationId !== conversationId || messageLane(message.task) !== lane
     ));
     return messages.length === state.messages.length
       ? state
@@ -181,8 +194,64 @@ export const useAiStore = create<AiState>()((set) => ({
           ...(clearsFailedRequest ? { error: undefined, errorRequestId: undefined } : {}),
         };
   }),
+  hydrateSessionIndex: (conversations) => set({
+    conversations,
+    loadedConversationIds: [],
+  }),
+  hydrateSession: (session) => set((state) => {
+    const loadedIds = new Set(session.messages.map((message) => message.id));
+    return {
+      conversations: [
+        session.conversation,
+        ...state.conversations.filter((item) => item.id !== session.conversation.id),
+      ],
+      messages: [
+        ...session.messages,
+        ...state.messages.filter((message) => !loadedIds.has(message.id)),
+      ],
+      loadedConversationIds: state.loadedConversationIds.includes(session.conversation.id)
+        ? state.loadedConversationIds
+        : [...state.loadedConversationIds, session.conversation.id],
+    };
+  }),
+  hydrateSessions: (sessions) => set((state) => {
+    const loadedMessages = sessions.flatMap((session) => session.messages);
+    const loadedIds = new Set(loadedMessages.map((message) => message.id));
+    return {
+      conversations: sessions.map((session) => session.conversation),
+      messages: [
+        ...loadedMessages,
+        ...state.messages.filter((message) => !loadedIds.has(message.id)),
+      ],
+      loadedConversationIds: sessions.map((session) => session.conversation.id),
+    };
+  }),
+  upsertConversation: (conversation) => set((state) => {
+    const hasInMemoryMessages = state.messages.some((message) => (
+      message.conversationId === conversation.id
+    ));
+    return {
+      conversations: [
+        conversation,
+        ...state.conversations.filter((item) => item.id !== conversation.id),
+      ],
+      loadedConversationIds: hasInMemoryMessages
+        && !state.loadedConversationIds.includes(conversation.id)
+        ? [...state.loadedConversationIds, conversation.id]
+        : state.loadedConversationIds,
+    };
+  }),
+  archiveConversation: (conversationId) => set((state) => ({
+    conversations: state.conversations.map((conversation) => (
+      conversation.id === conversationId
+        ? { ...conversation, archived: true, updatedAt: new Date().toISOString() }
+        : conversation
+    )),
+  })),
   clear: () => set({
     messages: [],
+    conversations: [],
+    loadedConversationIds: [],
     phase: 'idle',
     activeRequestId: undefined,
     activeTask: undefined,

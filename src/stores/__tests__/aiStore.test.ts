@@ -7,6 +7,7 @@ function begin(requestId = 'request-1'): void {
     task: 'explainTerminal',
     userContent: 'Explain the failure',
     providerId: 'deepseek-primary',
+    conversationId: 'conversation-1',
     sessionId: 'session-1',
     context: { label: 'root@server', content: 'service failed' },
   });
@@ -82,14 +83,64 @@ describe('aiStore', () => {
       task: 'generateCommand',
       userContent: 'Show disk usage',
       providerId: 'deepseek-primary',
+      conversationId: 'conversation-2',
       sessionId: 'session-2',
     });
     useAiStore.getState().appendDelta('session-two-command', '```bash\ndf -h\n```');
     useAiStore.getState().completeRequest('session-two-command');
 
-    useAiStore.getState().clearConversation('session-1', 'conversation');
+    useAiStore.getState().clearConversation('conversation-1', 'conversation');
 
     expect(useAiStore.getState().messages.map((message) => message.requestId))
       .toEqual(['session-two-command', 'session-two-command']);
+  });
+
+  it('hydrates Codex-style session files and archives conversations', () => {
+    useAiStore.getState().hydrateSessions([{
+      conversation: {
+        id: 'conversation-history',
+        startedAt: '2026-08-22T09:00:00.000Z',
+        updatedAt: '2026-08-22T09:01:00.000Z',
+        title: 'root@example.com',
+        archived: false,
+        sessionId: 'old-session',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+      },
+      messages: [{
+        id: 'message-1',
+        requestId: 'request-history',
+        role: 'user',
+        content: 'What failed?',
+        task: 'chat',
+        status: 'completed',
+        providerId: 'provider-1',
+        conversationId: 'conversation-history',
+        sessionId: 'old-session',
+      }],
+    }]);
+
+    expect(useAiStore.getState().messages[0]?.content).toBe('What failed?');
+    useAiStore.getState().archiveConversation('conversation-history');
+    expect(useAiStore.getState().conversations[0]?.archived).toBe(true);
+  });
+
+  it('hydrates the session index without eagerly loading message bodies', () => {
+    const conversation = {
+      id: 'indexed-conversation',
+      startedAt: '2026-08-22T09:00:00.000Z',
+      updatedAt: '2026-08-22T09:01:00.000Z',
+      title: 'root@example.com',
+      archived: true,
+      sessionId: 'old-session',
+      host: 'example.com',
+      port: 22,
+      username: 'root',
+    };
+    useAiStore.getState().hydrateSessionIndex([conversation]);
+    expect(useAiStore.getState().conversations).toEqual([conversation]);
+    expect(useAiStore.getState().messages).toEqual([]);
+    expect(useAiStore.getState().loadedConversationIds).toEqual([]);
   });
 });

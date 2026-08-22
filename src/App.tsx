@@ -29,6 +29,7 @@ import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prom
 import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { AiPanel } from '@/components/ai/ai-panel';
+import { finalizeAiSessionsBeforeExit } from '@/lib/ai-sessions';
 const logger = createLogger('app');
 
 export const App: React.FC = () => {
@@ -40,11 +41,20 @@ export const App: React.FC = () => {
 
   const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
   const [exitDialogOpen, setExitDialogOpen] = React.useState(false);
+  const exitInFlightRef = React.useRef(false);
 
   const requestAppExit = React.useCallback((): void => {
-    invoke('request_app_exit').catch((error) => {
-      logger.error('Failed to request app exit', error);
-    });
+    if (exitInFlightRef.current) return;
+    exitInFlightRef.current = true;
+    void finalizeAiSessionsBeforeExit()
+      .catch((error) => {
+        logger.warn('Failed to flush AI session history before exit', error);
+      })
+      .then(() => invoke('request_app_exit'))
+      .catch((error) => {
+        exitInFlightRef.current = false;
+        logger.error('Failed to request app exit', error);
+      });
   }, []);
 
   React.useEffect(() => {

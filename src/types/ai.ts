@@ -49,8 +49,38 @@ export interface AiChatMessage extends AiMessageInput {
   task: Exclude<AiTaskKind, 'diagnosticAgent'>;
   status: 'streaming' | 'completed' | 'cancelled' | 'failed';
   providerId: string;
+  conversationId?: string;
   sessionId?: string;
   context?: AiContext;
+}
+
+export interface AiConversation {
+  id: string;
+  startedAt: string;
+  updatedAt: string;
+  title: string;
+  archived: boolean;
+  sessionId?: string;
+  profileId?: string;
+  host: string;
+  port: number;
+  username: string;
+}
+
+export interface AiSessionMeta {
+  id: string;
+  timestamp: string;
+  title: string;
+  sessionId?: string;
+  profileId?: string;
+  host: string;
+  port: number;
+  username: string;
+}
+
+export interface AiSessionFile {
+  conversation: AiConversation;
+  messages: AiChatMessage[];
 }
 
 export type AgentRunPhase =

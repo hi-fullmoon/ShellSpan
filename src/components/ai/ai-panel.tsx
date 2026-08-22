@@ -10,6 +10,7 @@ import {
   ClipboardIcon,
   Code2Icon,
   EraserIcon,
+  HistoryIcon,
   MessageCircleIcon,
   PaperclipIcon,
   PanelRightCloseIcon,
@@ -44,7 +45,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { PanelEmptyState } from '@/components/ui/empty-state';
+import { PanelEmptyState, Spinner } from '@/components/ui/empty-state';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   InputGroup,
@@ -59,7 +60,12 @@ import { Bubble, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
 import { AgentRunView } from './agent-run-view';
 import { useI18n } from '@/hooks/useI18n';
-import { invokeCancelAiRequest, invokeStartAiRequest, isTauriRuntime } from '@/lib/tauri';
+import {
+  invokeCancelAiRequest,
+  invokeLoadAiSession,
+  invokeStartAiRequest,
+  isTauriRuntime,
+} from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
 import { parseAssistantContent } from '@/lib/ai-content';
@@ -80,6 +86,11 @@ import { useAiStore } from '@/stores/aiStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import {
+  clearPersistedAiConversation,
+  ensureAiSessionFile,
+  persistAiMessage,
+} from '@/lib/ai-sessions';
 import type {
   AgentRunStep,
   AiChatMessage,
@@ -105,6 +116,7 @@ type CancelAiRequest = (requestId: string) => Promise<void>;
 interface TerminalContextSnapshot {
   context?: AiContext;
   selection: boolean;
+  conversationId?: string;
   sessionId?: string;
   label?: string;
   lineCount: number;
@@ -206,7 +218,7 @@ function messageWithHistoricalContext(message: AiChatMessage): AiMessageInput {
 export function selectConversationHistory(
   messages: AiChatMessage[],
   requestTask: ConversationTask,
-  sessionId?: string,
+  conversationId?: string,
 ): AiMessageInput[] {
   const completedRequests = new Set(messages
     .filter((message) => message.role === 'assistant' && message.status === 'completed')
@@ -217,7 +229,7 @@ export function selectConversationHistory(
       message.status === 'completed'
       && completedRequests.has(message.requestId)
       && conversationLane(message.task) === lane
-      && message.sessionId === sessionId
+      && message.conversationId === conversationId
       && message.content.trim()
     ))
     .slice(-12)
@@ -239,6 +251,26 @@ export function extractSingleLineCommand(content: string): string | undefined {
   const command = match[1].trim();
   if (!command || /[\r\n]/.test(command)) return undefined;
   return command;
+}
+
+export function isMessageBoundToTerminal(
+  message: Pick<AiChatMessage, 'conversationId' | 'sessionId'>,
+  activeConversationId: string | undefined,
+  activeSessionId: string | null,
+): boolean {
+  return message.conversationId
+    ? message.conversationId === activeConversationId
+    : !message.sessionId || message.sessionId === activeSessionId;
+}
+
+export function canStartAiRequest(
+  requestId: string,
+  conversationId?: string,
+): boolean {
+  if (useAiStore.getState().activeRequestId !== requestId) return false;
+  return !conversationId || useTerminalStore.getState().sessions.some((session) => (
+    session.conversationId === conversationId
+  ));
 }
 
 export function cancelActiveAiRequests(
@@ -280,6 +312,7 @@ function currentTerminalContext(): TerminalContextSnapshot {
   if (!content) {
     return {
       selection: false,
+      conversationId: session.conversationId,
       sessionId: session.sessionId,
       label,
       lineCount: 0,
@@ -287,6 +320,7 @@ function currentTerminalContext(): TerminalContextSnapshot {
   }
   return {
     selection: Boolean(selection),
+    conversationId: session.conversationId,
     sessionId: session.sessionId,
     label,
     lineCount: content.split('\n').length,
@@ -370,6 +404,8 @@ export const AiPanel: React.FC = () => {
   const open = useAiStore((state) => state.open);
   const setOpen = useAiStore((state) => state.setOpen);
   const messages = useAiStore((state) => state.messages);
+  const conversations = useAiStore((state) => state.conversations);
+  const loadedConversationIds = useAiStore((state) => state.loadedConversationIds);
   const phase = useAiStore((state) => state.phase);
   const error = useAiStore((state) => state.error);
   const errorRequestId = useAiStore((state) => state.errorRequestId);
@@ -392,6 +428,8 @@ export const AiPanel: React.FC = () => {
   const [resizing, setResizing] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [copiedCommandId, setCopiedCommandId] = useState<string | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -406,6 +444,10 @@ export const AiPanel: React.FC = () => {
   const copyResetTimerRef = useRef<number | null>(null);
 
   const contextSnapshot = useLiveTerminalContext(open, activeSection, activeSessionId);
+
+  useEffect(() => {
+    setSelectedConversationId(null);
+  }, [activeSection, activeSessionId]);
 
   useEffect(() => {
     let frame: number | null = null;
@@ -499,6 +541,16 @@ export const AiPanel: React.FC = () => {
       else if (payload.type === 'completed') state.completeRequest(payload.requestId);
       else if (payload.type === 'cancelled') state.cancelRequest(payload.requestId);
       else if (payload.type === 'error') state.failRequest(payload.requestId, payload.message);
+      if (payload.type !== 'started' && payload.type !== 'textDelta') {
+        const assistant = useAiStore.getState().messages.find((message) => (
+          message.id === `assistant-${payload.requestId}` && message.content.length > 0
+        ));
+        if (assistant) {
+          void persistAiMessage(assistant).catch((reason) => {
+            logger.warn('Failed to persist AI response', reason);
+          });
+        }
+      }
     }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
@@ -512,7 +564,7 @@ export const AiPanel: React.FC = () => {
   const send = useCallback(async (
     requestTask: ConversationTask,
     text: string,
-    providedSnapshot?: { context?: AiContext; sessionId?: string },
+    providedSnapshot?: { context?: AiContext; conversationId?: string; sessionId?: string },
   ): Promise<void> => {
     const trimmed = text.trim();
     if (!trimmed || useAiStore.getState().phase === 'streaming') return;
@@ -524,7 +576,7 @@ export const AiPanel: React.FC = () => {
     const previousMessages = selectConversationHistory(
       useAiStore.getState().messages,
       requestTask,
-      snapshot.sessionId,
+      snapshot.conversationId,
     );
     const provider = useAiSettingsStore.getState().getProviderConfig();
     if (!provider.model) {
@@ -536,10 +588,32 @@ export const AiPanel: React.FC = () => {
       task: requestTask,
       userContent: trimmed,
       providerId: provider.id,
+      conversationId: snapshot.conversationId,
       sessionId: snapshot.sessionId,
       context: snapshot.context,
     });
     setDraft('');
+    if (snapshot.conversationId && snapshot.sessionId) {
+      const terminal = useTerminalStore
+        .getState()
+        .sessions.find((session) => session.sessionId === snapshot.sessionId);
+      if (terminal) {
+        try {
+          await ensureAiSessionFile(terminal);
+          const userMessage = useAiStore.getState().messages.find((message) => (
+            message.requestId === requestId && message.role === 'user'
+          ));
+          if (userMessage) await persistAiMessage(userMessage);
+        } catch (reason) {
+          logger.warn('Failed to persist AI request', reason);
+        }
+      }
+    }
+    if (!canStartAiRequest(requestId, snapshot.conversationId)) {
+      const requestState = useAiStore.getState();
+      if (requestState.activeRequestId === requestId) requestState.cancelRequest(requestId);
+      return;
+    }
     try {
       await invokeStartAiRequest({
         requestId,
@@ -687,7 +761,18 @@ export const AiPanel: React.FC = () => {
   };
 
   const handleCancel = (): void => {
+    const requestId = useAiStore.getState().activeRequestId;
     cancelActiveAiRequests();
+    if (requestId) {
+      const assistant = useAiStore.getState().messages.find((message) => (
+        message.id === `assistant-${requestId}` && message.content.length > 0
+      ));
+      if (assistant) {
+        void persistAiMessage(assistant).catch((reason) => {
+          logger.warn('Failed to persist cancelled AI response', reason);
+        });
+      }
+    }
   };
 
   const handleApproveAgentStep = (step: AgentRunStep): void => {
@@ -726,13 +811,21 @@ export const AiPanel: React.FC = () => {
     terminalState.setActiveSession(run.sessionId);
   };
 
-  const handleInsertCommand = (command: string, sourceSessionId?: string): void => {
+  const handleInsertCommand = (
+    command: string,
+    sourceConversationId?: string,
+    sourceSessionId?: string,
+  ): void => {
     if (!isSafeReadOnlyAgentCommand(command)) return;
     const state = useTerminalStore.getState();
     if (!state.activeSessionId) return;
-    if (sourceSessionId && sourceSessionId !== state.activeSessionId) return;
     const session = state.sessions.find((item) => item.sessionId === state.activeSessionId);
     if (session?.status !== 'connected') return;
+    if (sourceConversationId) {
+      if (sourceConversationId !== session.conversationId) return;
+    } else if (sourceSessionId && sourceSessionId !== state.activeSessionId) {
+      return;
+    }
     terminalRegistry.get(state.activeSessionId)?.terminal.paste(command.replace(/[\r\n]+$/g, ''));
   };
 
@@ -760,6 +853,65 @@ export const AiPanel: React.FC = () => {
   const conversationSessionId = activeSection === 'terminal'
     ? activeSessionId ?? undefined
     : undefined;
+  const activeConversationId = activeSection === 'terminal'
+    ? activeSession?.conversationId
+    : undefined;
+  const visibleConversationId = selectedConversationId ?? activeConversationId;
+  const selectedConversation = selectedConversationId
+    ? conversations.find((conversation) => conversation.id === selectedConversationId)
+    : undefined;
+  const viewingHistory = Boolean(
+    selectedConversationId && selectedConversationId !== activeConversationId,
+  );
+  const archivedConversations = conversations.filter((conversation) => (
+    (conversation.archived
+      || !sessions.some((session) => session.conversationId === conversation.id))
+  ));
+  const indexedConversation = visibleConversationId
+    ? conversations.find((conversation) => conversation.id === visibleConversationId)
+    : undefined;
+
+  useEffect(() => {
+    if (
+      !open
+      || !visibleConversationId
+      || !indexedConversation
+      || loadedConversationIds.includes(visibleConversationId)
+      || loadingConversationId === visibleConversationId
+    ) return;
+    let disposed = false;
+    setLoadingConversationId(visibleConversationId);
+    void invokeLoadAiSession(indexedConversation.id, indexedConversation.startedAt)
+      .then((session) => {
+        useAiStore.getState().hydrateSession(session ?? {
+          conversation: indexedConversation,
+          messages: [],
+        });
+      })
+      .catch((reason) => {
+        logger.warn('Failed to load AI conversation history', reason);
+        useAiStore.getState().hydrateSession({
+          conversation: indexedConversation,
+          messages: [],
+        });
+      })
+      .finally(() => {
+        if (!disposed) {
+          setLoadingConversationId((current) => (
+            current === visibleConversationId ? null : current
+          ));
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [
+    indexedConversation,
+    loadedConversationIds,
+    loadingConversationId,
+    open,
+    visibleConversationId,
+  ]);
 
   if (!open) return null;
 
@@ -767,16 +919,22 @@ export const AiPanel: React.FC = () => {
     conversationLane(message.task) === conversationLane(
       task === 'generateCommand' ? 'generateCommand' : 'chat',
     )
-    && message.sessionId === conversationSessionId
+    && (visibleConversationId
+      ? message.conversationId === visibleConversationId
+      : message.conversationId === undefined && message.sessionId === conversationSessionId)
   ));
   const followKey = `${visibleMessages.length}:${visibleMessages[visibleMessages.length - 1]?.content.length ?? 0}`;
-  const canExplain = activeSection === 'terminal' && Boolean(contextSnapshot.context);
+  const canExplain = !viewingHistory
+    && activeSection === 'terminal'
+    && Boolean(contextSnapshot.context);
   const agentContext = currentDiagnosticAgentContext();
   const agentPlanning = agentRun?.phase === 'planning' || agentRun?.phase === 'evaluating';
   const agentNeedsResolution = task === 'diagnosticAgent'
     && (agentRun?.phase === 'awaitingApproval' || agentRun?.phase === 'awaitingExecution');
   const busy = phase === 'streaming' || agentPlanning;
   const composerSubmitDisabled = busy
+    || viewingHistory
+    || loadingConversationId === visibleConversationId
     || !draft.trim()
     || !model.trim()
     || agentNeedsResolution
@@ -814,7 +972,7 @@ export const AiPanel: React.FC = () => {
     : undefined;
   const currentError = error
     && failedRequestMessage
-    && failedRequestMessage.sessionId === conversationSessionId
+    && failedRequestMessage.conversationId === visibleConversationId
     && conversationLane(failedRequestMessage.task) === currentLane
     ? error
     : undefined;
@@ -966,6 +1124,60 @@ export const AiPanel: React.FC = () => {
             </Badge>
           </div>
           <div className="flex items-center gap-1">
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={(
+                    <DropdownMenuTrigger
+                      render={(
+                        <Button
+                          variant={viewingHistory ? 'secondary' : 'ghost'}
+                          size="icon"
+                          aria-label={t('ai.history')}
+                        />
+                      )}
+                    />
+                  )}
+                >
+                  <HistoryIcon />
+                </TooltipTrigger>
+                <TooltipContent>{t('ai.history')}</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="w-72">
+                {activeConversationId && (
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>{t('ai.history.current')}</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => setSelectedConversationId(null)}>
+                      <SquareTerminalIcon />
+                      <span className="truncate">{activeSession?.title}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                )}
+                {activeConversationId && <DropdownMenuSeparator />}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{t('ai.history.archived')}</DropdownMenuLabel>
+                  {archivedConversations.length === 0 ? (
+                    <DropdownMenuItem disabled>{t('ai.history.empty')}</DropdownMenuItem>
+                  ) : archivedConversations.map((conversation) => (
+                    <DropdownMenuItem
+                      key={conversation.id}
+                      onClick={() => {
+                        setTask('chat');
+                        setSelectedConversationId(conversation.id);
+                      }}
+                    >
+                      <HistoryIcon />
+                      <span className="min-w-0">
+                        <span className="block truncate">{conversation.title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {new Date(conversation.updatedAt).toLocaleString()}
+                        </span>
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
               <Tooltip>
                 <TooltipTrigger
@@ -975,7 +1187,7 @@ export const AiPanel: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="icon"
-                          disabled={busy || agentNeedsResolution || !hasCurrentConversation}
+                          disabled={busy || viewingHistory || agentNeedsResolution || !hasCurrentConversation}
                           aria-label={t('ai.clear')}
                         />
                       )}
@@ -1004,7 +1216,21 @@ export const AiPanel: React.FC = () => {
                     size="sm"
                     onClick={() => {
                       if (task === 'diagnosticAgent') useAgentStore.getState().clear();
-                      else clearConversation(conversationSessionId, currentLane);
+                      else {
+                        clearConversation(visibleConversationId, currentLane);
+                        const conversation = conversations.find((item) => (
+                          item.id === visibleConversationId
+                        ));
+                        if (conversation) {
+                          void clearPersistedAiConversation(
+                            conversation.id,
+                            conversation.startedAt,
+                            currentLane,
+                          ).catch((reason) => {
+                            logger.warn('Failed to persist cleared AI conversation', reason);
+                          });
+                        }
+                      }
                       setClearDialogOpen(false);
                     }}
                   >
@@ -1019,7 +1245,16 @@ export const AiPanel: React.FC = () => {
           </div>
         </header>
 
-        {activeSection === 'terminal' && (
+        {viewingHistory && selectedConversation && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+            <HistoryIcon className="size-3.5 shrink-0" />
+            <span className="min-w-0 truncate">
+              {selectedConversation.title} · {t('ai.history.readOnly')}
+            </span>
+          </div>
+        )}
+
+        {activeSection === 'terminal' && !viewingHistory && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
             <Button
               variant="outline"
@@ -1095,6 +1330,10 @@ export const AiPanel: React.FC = () => {
             canInsert={canInsertAgentCommand}
             sessionState={agentSessionState}
           />
+        ) : loadingConversationId === visibleConversationId && visibleMessages.length === 0 ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <Spinner size={20} />
+          </div>
         ) : visibleMessages.length === 0 ? (
           <div className="min-h-0 flex-1">
             <PanelEmptyState
@@ -1145,7 +1384,11 @@ export const AiPanel: React.FC = () => {
               const commandIsInsertable = Boolean(
                 command
                 && isSafeReadOnlyAgentCommand(command)
-                && (!message.sessionId || message.sessionId === activeSessionId),
+                && isMessageBoundToTerminal(
+                  message,
+                  activeConversationId,
+                  activeSessionId,
+                ),
               );
               return (
                 <Message
@@ -1184,7 +1427,11 @@ export const AiPanel: React.FC = () => {
                           <Button
                             variant="secondary"
                             size="xs"
-                            onClick={() => handleInsertCommand(command, message.sessionId)}
+                            onClick={() => handleInsertCommand(
+                              command,
+                              message.conversationId,
+                              message.sessionId,
+                            )}
                             disabled={
                               !commandIsInsertable
                               || !activeSession
@@ -1252,6 +1499,7 @@ export const AiPanel: React.FC = () => {
             <InputGroupTextarea
               ref={composerRef}
               value={draft}
+              disabled={viewingHistory}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (shouldSubmitAiDraft(
@@ -1321,7 +1569,13 @@ export const AiPanel: React.FC = () => {
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger
-                      render={<ToggleGroupItem value="diagnosticAgent" aria-label={t('ai.mode.agent')} />}
+                      render={(
+                        <ToggleGroupItem
+                          value="diagnosticAgent"
+                          aria-label={t('ai.mode.agent')}
+                          disabled={viewingHistory}
+                        />
+                      )}
                     >
                       <BrainCircuitIcon data-icon="inline-start" />
                       {!compactModeControls && t('ai.mode.agent')}

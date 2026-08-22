@@ -69,6 +69,8 @@ describe('terminal workspace serialization', () => {
       username: 'alice',
       status: 'connected',
       profileId: 'profile-1',
+      conversationId: 'conversation-1',
+      conversationStartedAt: '2026-08-22T09:00:00.000Z',
     }];
     const layout: TerminalSplitState = {
       kind: 'split',
@@ -94,6 +96,8 @@ describe('terminal workspace serialization', () => {
       sessionId: 'session-1',
       title: 'Production',
       profileId: 'profile-1',
+      conversationId: 'conversation-1',
+      conversationStartedAt: '2026-08-22T09:00:00.000Z',
     });
     expect(parsed.layout).toEqual(layout);
   });
