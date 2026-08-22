@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAiStore } from '@/stores/aiStore';
 import type { AiChatMessage, AiConversation } from '@/types/ai';
+import {
+  createAiStreamDeltaBatcher,
+  registerAiStreamDeltaBatcher,
+} from '@/lib/ai-stream-batcher';
 
 const tauriMocks = vi.hoisted(() => ({
   append: vi.fn(),
@@ -20,6 +24,7 @@ vi.mock('@/lib/tauri', () => ({
 
 import {
   clearPersistedAiConversation,
+  finalizeAiSessionsBeforeExit,
   flushAiSessionPersistence,
   persistAiMessage,
 } from '../ai-sessions';
@@ -79,5 +84,41 @@ describe('AI session persistence queue', () => {
     finishAppend?.();
     await Promise.all([append, clear]);
     expect(tauriMocks.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushes buffered stream text before persisting on exit', async () => {
+    useAiStore.getState().beginRequest({
+      requestId: 'request-exit',
+      task: 'chat',
+      userContent: 'Question',
+      providerId: 'provider-1',
+      conversationId: conversation.id,
+      sessionId: conversation.sessionId,
+    });
+    const batcher = createAiStreamDeltaBatcher(
+      (requestId, text) => useAiStore.getState().appendDelta(requestId, text),
+      vi.fn(() => 11),
+      vi.fn(),
+    );
+    const unregister = registerAiStreamDeltaBatcher(batcher);
+
+    try {
+      batcher.push('request-exit', 'Buffered ending');
+      await finalizeAiSessionsBeforeExit();
+
+      expect(tauriMocks.append).toHaveBeenCalledWith(
+        conversation.id,
+        conversation.startedAt,
+        expect.objectContaining({
+          id: 'assistant-request-exit',
+          content: 'Buffered ending',
+          status: 'cancelled',
+        }),
+      );
+      expect(tauriMocks.cancel).toHaveBeenCalledWith('request-exit');
+    } finally {
+      unregister();
+      batcher.dispose();
+    }
   });
 });

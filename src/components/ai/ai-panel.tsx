@@ -70,6 +70,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import {
   createAiStreamDeltaBatcher,
+  registerAiStreamDeltaBatcher,
   type AiStreamDeltaBatcher,
 } from '@/lib/ai-stream-batcher';
 import { cn, generateId } from '@/lib/utils';
@@ -608,6 +609,7 @@ export const AiPanel: React.FC = () => {
       }
       useAiStore.getState().appendDelta(requestId, text);
     });
+    const unregisterBatcher = registerAiStreamDeltaBatcher(batcher);
     streamDeltaBatcherRef.current = batcher;
     void listen<AiStreamEvent>(AI_STREAM_EVENT, (event) => {
       const payload = event.payload;
@@ -650,6 +652,8 @@ export const AiPanel: React.FC = () => {
     return () => {
       disposed = true;
       unlisten?.();
+      batcher.flushAll();
+      unregisterBatcher();
       batcher.dispose();
       if (streamDeltaBatcherRef.current === batcher) streamDeltaBatcherRef.current = null;
     };

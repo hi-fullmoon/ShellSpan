@@ -10,6 +10,7 @@ import {
   invokeCreateAiSession,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
+import { flushAiStreamDelta } from '@/lib/ai-stream-batcher';
 
 const logger = createLogger('aiSessions');
 const persistenceQueues = new Map<string, Promise<void>>();
@@ -108,6 +109,7 @@ export async function finalizeAiSessionsBeforeExit(): Promise<void> {
   const ai = useAiStore.getState();
   const requestId = ai.activeRequestId;
   if (requestId) {
+    flushAiStreamDelta(requestId);
     ai.cancelRequest(requestId);
     const partialAssistant = useAiStore.getState().messages.find((message) => (
       message.id === `assistant-${requestId}` && message.content.length > 0
@@ -141,6 +143,7 @@ export function archiveTerminalAiSession(sessionId: string): void {
       ))
     : undefined;
   if (activeRequestId && activeMessage) {
+    flushAiStreamDelta(activeRequestId);
     ai.cancelRequest(activeRequestId);
     const partialAssistant = useAiStore.getState().messages.find((message) => (
       message.id === `assistant-${activeRequestId}` && message.content.length > 0
