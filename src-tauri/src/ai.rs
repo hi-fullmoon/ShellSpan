@@ -941,8 +941,8 @@ fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> 
             break;
         }
     }
-    if !matches!(provider.kind, AiProviderKind::Ollama) && base_path.is_empty() {
-        base_path = "/v1".to_string();
+    if !matches!(provider.kind, AiProviderKind::Ollama) && !base_path.ends_with("/v1") {
+        base_path = format!("{}/v1", base_path.trim_end_matches('/'));
     }
     url.set_path(&format!(
         "{}/{}",
@@ -976,6 +976,7 @@ fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option<String>, S
 
 fn build_client() -> Result<Client, String> {
     Client::builder()
+        .user_agent(concat!("TermBridge/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(120))
         .redirect(reqwest::redirect::Policy::none())
@@ -1267,18 +1268,18 @@ mod tests {
         );
 
         let service_root = AiProviderConfig {
-            base_url: "https://api.minimaxi.com".to_string(),
+            base_url: "https://api.kimi.com/coding".to_string(),
             ..api_root
         };
         assert_eq!(
             endpoint_url(&service_root, "models").unwrap().as_str(),
-            "https://api.minimaxi.com/v1/models"
+            "https://api.kimi.com/coding/v1/models"
         );
         assert_eq!(
             endpoint_url(&service_root, "chat/completions")
                 .unwrap()
                 .as_str(),
-            "https://api.minimaxi.com/v1/chat/completions"
+            "https://api.kimi.com/coding/v1/chat/completions"
         );
     }
 
