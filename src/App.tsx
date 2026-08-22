@@ -8,9 +8,9 @@ import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { Spinner } from '@/components/ui/empty-state';
 import { Toaster } from '@/components/ui/sonner';
 
-const Workbench = React.lazy(() => import('@/components/workbench'));
-const Terminal = React.lazy(() => import('@/components/terminal'));
-const Sftp = React.lazy(() => import('@/components/sftp'));
+const Workbench = React.memo(React.lazy(() => import('@/components/workbench')));
+const Terminal = React.memo(React.lazy(() => import('@/components/terminal')));
+const Sftp = React.memo(React.lazy(() => import('@/components/sftp')));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { useMonitorEvents } from '@/hooks/useMonitorEvents';
@@ -31,6 +31,45 @@ import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { AiPanel } from '@/components/ai/ai-panel';
 import { finalizeAiSessionsBeforeExit } from '@/lib/ai-sessions';
 const logger = createLogger('app');
+
+const AppSections: React.FC = () => {
+  const activeSection = useAppStore((state) => state.activeSection);
+
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-full w-full items-center justify-center">
+          <Spinner size={24} />
+        </div>
+      }
+    >
+      <div
+        className={cn(
+          'h-full',
+          activeSection !== 'workbench' && 'hidden',
+        )}
+      >
+        <Workbench />
+      </div>
+      <div
+        className={cn(
+          'h-full',
+          activeSection !== 'terminal' && 'hidden',
+        )}
+      >
+        <Terminal />
+      </div>
+      <div
+        className={cn(
+          'h-full',
+          activeSection !== 'sftp' && 'hidden',
+        )}
+      >
+        <Sftp />
+      </div>
+    </Suspense>
+  );
+};
 
 export const App: React.FC = () => {
   useDisableContextMenu();
@@ -99,7 +138,6 @@ export const App: React.FC = () => {
   }, [requestAppExit]);
 
   const { ready, t } = useI18n();
-  const activeSection = useAppStore((state) => state.activeSection);
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
   const connectedSessions = useTerminalStore(
     (state) => state.sessions.filter((session) => session.status === 'connected').length,
@@ -142,40 +180,9 @@ export const App: React.FC = () => {
 
   return (
     <AppShell>
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <MainContent>
-          <Suspense
-            fallback={
-              <div className="flex h-full w-full items-center justify-center">
-                <Spinner size={24} />
-              </div>
-            }
-          >
-            <div
-              className={cn(
-                'h-full',
-                activeSection !== 'workbench' && 'hidden',
-              )}
-            >
-              <Workbench />
-            </div>
-            <div
-              className={cn(
-                'h-full',
-                activeSection !== 'terminal' && 'hidden',
-              )}
-            >
-              <Terminal />
-            </div>
-            <div
-              className={cn(
-                'h-full',
-                activeSection !== 'sftp' && 'hidden',
-              )}
-            >
-              <Sftp />
-            </div>
-          </Suspense>
+          <AppSections />
         </MainContent>
         <AiPanel />
       </div>
