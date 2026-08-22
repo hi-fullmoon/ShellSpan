@@ -75,6 +75,7 @@ describe('terminal workspace serialization', () => {
     const layout: TerminalSplitState = {
       kind: 'split',
       orientation: 'vertical',
+      split: 0.37,
       first: {
         kind: 'group',
         id: 'first',
@@ -149,6 +150,21 @@ describe('terminal workspace serialization', () => {
     });
     const parsed = parseTerminalWorkspace(raw);
     expect(parsed.sessions).toHaveLength(1);
+    expect(parsed.layout).toBeNull();
+  });
+
+  it('rejects an invalid persisted split ratio', () => {
+    const parsed = parseTerminalWorkspace(JSON.stringify({
+      sessions: [],
+      layout: {
+        kind: 'split',
+        orientation: 'horizontal',
+        split: 1.5,
+        first: { kind: 'group', id: 'first', sessionIds: [], activeSessionId: '' },
+        second: { kind: 'group', id: 'second', sessionIds: [], activeSessionId: '' },
+      },
+    }));
+
     expect(parsed.layout).toBeNull();
   });
 });
