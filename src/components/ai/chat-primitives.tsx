@@ -20,6 +20,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +39,11 @@ export const MessageScroller: React.FC<{
         role="log"
         aria-label={ariaLabel}
       >
-        <MessageScrollerViewport>
+        <ScrollArea
+          className="size-full"
+          size="thin"
+          viewportRender={<MessageScrollerViewport />}
+        >
           <MessageScrollerContent className="gap-5 px-4 py-5">
             {React.Children.map(children, (child, index) => (
               <MessageScrollerItem
@@ -51,7 +56,7 @@ export const MessageScroller: React.FC<{
               </MessageScrollerItem>
             ))}
           </MessageScrollerContent>
-        </MessageScrollerViewport>
+        </ScrollArea>
         <MessageScrollerButton>
           <ArrowDownIcon />
           <span className="sr-only">{t('ai.scrollToLatest')}</span>

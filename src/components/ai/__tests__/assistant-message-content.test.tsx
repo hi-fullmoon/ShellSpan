@@ -51,9 +51,13 @@ describe('AssistantMessageContent', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'common.copy' }));
+    const copyButton = screen.getByRole('button', { name: 'common.copy' });
+    expect(copyButton).toHaveClass('opacity-0', 'group-hover:opacity-100');
+
+    fireEvent.click(copyButton);
 
     expect(writeText).toHaveBeenCalledWith('df -h');
-    expect(await screen.findByRole('button', { name: 'common.copied' })).toBeInTheDocument();
+    const copiedButton = await screen.findByRole('button', { name: 'common.copied' });
+    expect(copiedButton).not.toHaveClass('opacity-0');
   });
 });

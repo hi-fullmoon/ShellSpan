@@ -7,17 +7,29 @@ type ScrollbarSize = 'default' | 'thin';
 
 interface ScrollAreaProps extends ScrollAreaPrimitive.Root.Props {
   viewportRef?: React.Ref<HTMLDivElement>;
+  viewportRender?: ScrollAreaPrimitive.Viewport.Props['render'];
   horizontal?: boolean;
   vertical?: boolean;
   size?: ScrollbarSize;
   onWheel?: React.WheelEventHandler<HTMLDivElement>;
 }
 
-function ScrollArea({ className, children, viewportRef, horizontal = false, vertical = true, size = 'default', onWheel, ...props }: ScrollAreaProps) {
+function ScrollArea({
+  className,
+  children,
+  viewportRef,
+  viewportRender,
+  horizontal = false,
+  vertical = true,
+  size = 'default',
+  onWheel,
+  ...props
+}: ScrollAreaProps) {
   return (
     <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn('group/scroll-area relative min-h-0', className)} {...props}>
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
+        render={viewportRender}
         data-slot="scroll-area-viewport"
         onWheel={onWheel}
         className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"

@@ -76,11 +76,14 @@ function MarkdownContent({
           const code = textFromNode(codeChildren).replace(/\n$/, '');
           const copied = copiedCode === code;
           return (
-            <div className="relative">
+            <div className="group relative">
               <Button
                 variant="outline"
                 size="xs"
-                className="absolute right-1.5 top-1.5 h-5 gap-1 px-1.5 text-[10px] [&_svg]:size-2.5"
+                className={cn(
+                  'absolute right-1.5 top-1.5 h-5 gap-1 px-1.5 text-[10px] transition-opacity [&_svg]:size-2.5',
+                  !copied && 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
+                )}
                 onClick={() => onCopyCode(code)}
               >
                 {copied
