@@ -299,7 +299,7 @@ describe('ConnectionFormDrawer', () => {
 
     const saveButton = screen.getByRole('button', { name: 'common.save' });
     const connectButton = screen.getByRole('button', { name: 'connection.form.saveAndConnect' });
-    expect(saveButton).toHaveClass('bg-primary');
+    expect(saveButton).toHaveClass('bg-app-button');
     expect(connectButton).toHaveClass('border');
     expect(connectButton.compareDocumentPosition(saveButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
@@ -326,7 +326,7 @@ describe('ConnectionFormDrawer', () => {
     const saveButton = screen.getByRole('button', { name: 'common.save' });
     const connectButton = screen.getByRole('button', { name: 'connection.form.saveAndConnect' });
     expect(saveButton).toHaveClass('border');
-    expect(connectButton).toHaveClass('bg-primary');
+    expect(connectButton).toHaveClass('bg-app-button');
     expect(saveButton.compareDocumentPosition(connectButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
