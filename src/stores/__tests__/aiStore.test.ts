@@ -72,4 +72,24 @@ describe('aiStore', () => {
     expect(useAiStore.getState().error).toBe('AI provider returned an empty response');
     expect(useAiStore.getState().messages).toHaveLength(1);
   });
+
+  it('clears only the selected terminal and conversation lane', () => {
+    begin('session-one-chat');
+    useAiStore.getState().appendDelta('session-one-chat', 'Answer');
+    useAiStore.getState().completeRequest('session-one-chat');
+    useAiStore.getState().beginRequest({
+      requestId: 'session-two-command',
+      task: 'generateCommand',
+      userContent: 'Show disk usage',
+      providerId: 'deepseek-primary',
+      sessionId: 'session-2',
+    });
+    useAiStore.getState().appendDelta('session-two-command', '```bash\ndf -h\n```');
+    useAiStore.getState().completeRequest('session-two-command');
+
+    useAiStore.getState().clearConversation('session-1', 'conversation');
+
+    expect(useAiStore.getState().messages.map((message) => message.requestId))
+      .toEqual(['session-two-command', 'session-two-command']);
+  });
 });

@@ -9,6 +9,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDownToLineIcon,
   BugIcon,
+  CheckIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   CopyIcon,
@@ -256,7 +257,7 @@ const LogLine: React.FC<LogLineProps> = ({
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       className={cn(
-        'relative grid w-full cursor-pointer grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50 lg:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]',
+        'relative grid w-full cursor-pointer grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50 @min-[760px]:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]',
         selected && 'bg-muted/80',
         getLevelRailClass(line.level),
       )}
@@ -266,7 +267,7 @@ const LogLine: React.FC<LogLineProps> = ({
       <LevelBadge level={line.level} />
       <Tooltip>
         <TooltipTrigger
-          render={<span className="hidden truncate text-[11px] leading-5 text-muted-foreground lg:block" />}
+          render={<span className="hidden truncate text-[11px] leading-5 text-muted-foreground @min-[760px]:block" />}
         >
           {target ? renderHighlightedText(target, query) : '—'}
         </TooltipTrigger>
@@ -365,10 +366,12 @@ const LogInspector: React.FC<{
   entry: IndexedLogLine;
   source: LogSource;
   onClose: () => void;
-  onCopy: () => void;
+  onCopy: () => Promise<boolean>;
 }> = ({ entry, source, onClose, onCopy }) => {
   const { t } = useI18n();
   const { line, originalIndex } = entry;
+  const [copied, setCopied] = useState(false);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const timestamp = line.date && line.time ? `${line.date} ${line.time}` : '—';
   const fields = [
     [t('workbench.logs.inspector.timestamp'), timestamp],
@@ -380,8 +383,24 @@ const LogInspector: React.FC<{
     [t('workbench.logs.inspector.line'), String(originalIndex + 1)],
   ];
 
+  useEffect(() => {
+    setCopied(false);
+    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+  }, [originalIndex]);
+
+  useEffect(() => () => {
+    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+  }, []);
+
+  const handleCopy = async (): Promise<void> => {
+    if (!await onCopy()) return;
+    setCopied(true);
+    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+    copyResetTimerRef.current = setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <aside className="flex min-h-0 w-72 shrink-0 flex-col border-l border-border bg-card">
+    <aside className="flex min-h-0 w-72 shrink-0 flex-col border-l border-border bg-card @max-[760px]:absolute @max-[760px]:inset-y-0 @max-[760px]:right-0 @max-[760px]:z-20 @max-[760px]:w-[min(22rem,92%)] @max-[760px]:shadow-xl">
       <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-2">
           <ChevronRightIcon className="size-3.5 text-muted-foreground" />
@@ -403,9 +422,21 @@ const LogInspector: React.FC<{
         <div className="flex flex-col gap-4 p-3">
           <div className="flex items-center justify-between gap-2">
             <LevelBadge level={line.level} />
-            <Button variant="outline" size="xs" onClick={onCopy}>
-              <CopyIcon data-icon="inline-start" />
-              {t('workbench.logs.inspector.copy')}
+            <Button
+              variant="outline"
+              size="xs"
+              className="min-w-16"
+              onClick={() => void handleCopy()}
+              aria-live="polite"
+            >
+              {copied ? (
+                <CheckIcon data-icon="inline-start" />
+              ) : (
+                <CopyIcon data-icon="inline-start" />
+              )}
+              {t(copied
+                ? 'workbench.logs.inspector.copied'
+                : 'workbench.logs.inspector.copy')}
             </Button>
           </div>
           <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-[11px]">
@@ -530,14 +561,22 @@ export const LogPanel: React.FC = () => {
     void loadFiles();
   }, [loadFiles]);
 
-  const copyLogContent = useCallback((contentToCopy: string): void => {
+  const copyLogContent = useCallback(async (
+    contentToCopy: string,
+    showSuccess = true,
+  ): Promise<boolean> => {
     if (!navigator.clipboard?.writeText) {
       showError(t('workbench.logs.copyFailed'));
-      return;
+      return false;
     }
-    void navigator.clipboard.writeText(contentToCopy)
-      .then(() => success(t('workbench.logs.copied')))
-      .catch(() => showError(t('workbench.logs.copyFailed')));
+    try {
+      await navigator.clipboard.writeText(contentToCopy);
+      if (showSuccess) success(t('workbench.logs.copied'));
+      return true;
+    } catch {
+      showError(t('workbench.logs.copyFailed'));
+      return false;
+    }
   }, [success, showError, t]);
 
   useEffect(() => {
@@ -581,9 +620,9 @@ export const LogPanel: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full min-w-0 flex-col bg-background">
+      <div className="@container flex h-full min-w-0 flex-col bg-background">
         <header className="flex shrink-0 flex-col gap-3 border-b border-border bg-card px-4 pb-3 pt-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 @max-[640px]:flex-col @max-[640px]:items-stretch">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-semibold tracking-tight text-foreground">
@@ -601,7 +640,7 @@ export const LogPanel: React.FC = () => {
                 {activeFile && <span className="shrink-0">· {formatBytes(activeFile.size)}</span>}
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 @max-[640px]:justify-between">
               <ToggleGroup
                 value={[activeSource]}
                 onValueChange={(value) => handleSourceChange(value[0] as LogSource | undefined)}
@@ -636,14 +675,14 @@ export const LogPanel: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-5 rounded-lg border border-border bg-background px-3 py-2">
-            <div className="grid shrink-0 grid-cols-2 gap-x-5 gap-y-2 xl:grid-cols-4">
+          <div className="flex min-w-0 items-center gap-5 rounded-lg border border-border bg-background px-3 py-2 @max-[600px]:flex-col @max-[600px]:items-stretch">
+            <div className="grid shrink-0 grid-cols-2 gap-x-5 gap-y-2 @min-[960px]:grid-cols-4">
               <OverviewStat icon={<Layers3Icon />} label={t('workbench.logs.stats.results')} value={filteredLines.length} />
               <OverviewStat icon={<CircleAlertIcon />} label={t('workbench.logs.stats.errors')} value={levelCounts.ERROR ?? 0} tone="error" />
               <OverviewStat icon={<CircleAlertIcon />} label={t('workbench.logs.stats.warnings')} value={levelCounts.WARN ?? 0} tone="warning" />
               <OverviewStat icon={<BugIcon />} label={t('workbench.logs.stats.targets')} value={uniqueTargetCount} />
             </div>
-            <div className="h-12 w-px shrink-0 bg-border" />
+            <div className="h-12 w-px shrink-0 bg-border @max-[600px]:h-px @max-[600px]:w-full" />
             <ActivityHistogram buckets={activityBuckets} label={t('workbench.logs.activity')} />
           </div>
         </header>
@@ -667,8 +706,8 @@ export const LogPanel: React.FC = () => {
             )}
           </InputGroup>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.date')}</span>
                 <ToggleGroup
                   value={[dateFilter]}
@@ -679,6 +718,7 @@ export const LogPanel: React.FC = () => {
                   variant="tag"
                   size="xs"
                   spacing={1}
+                  className="max-w-full flex-wrap"
                   aria-label={t('workbench.logs.date')}
                 >
                   {DATE_FILTER_OPTIONS.map((option) => (
@@ -686,8 +726,8 @@ export const LogPanel: React.FC = () => {
                   ))}
                 </ToggleGroup>
               </div>
-              <div className="h-4 w-px bg-border" />
-              <div className="flex items-center gap-1.5">
+              <div className="h-4 w-px bg-border @max-[760px]:hidden" />
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.level')}</span>
                 <ToggleGroup
                   value={[levelFilter]}
@@ -698,6 +738,7 @@ export const LogPanel: React.FC = () => {
                   variant="tag"
                   size="xs"
                   spacing={1}
+                  className="max-w-full flex-wrap"
                   aria-label={t('workbench.logs.level')}
                 >
                   <ToggleGroupItem value="all">{t('workbench.logs.all')}</ToggleGroupItem>
@@ -725,10 +766,10 @@ export const LogPanel: React.FC = () => {
 
         <div className="relative flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="grid h-8 shrink-0 grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-center gap-2 border-b border-border bg-muted/35 px-3 font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]">
+            <div className="grid h-8 shrink-0 grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-center gap-2 border-b border-border bg-muted/35 px-3 font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground @min-[760px]:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]">
               <span>{t('workbench.logs.columns.time')}</span>
               <span>{t('workbench.logs.level')}</span>
-              <span className="hidden lg:block">{t('workbench.logs.columns.target')}</span>
+              <span className="hidden @min-[760px]:block">{t('workbench.logs.columns.target')}</span>
               <span>{t('workbench.logs.columns.message')}</span>
             </div>
             {loading && (
@@ -762,7 +803,7 @@ export const LogPanel: React.FC = () => {
                             query={normalizedQuery}
                             selected={entry.originalIndex === selectedOriginalIndex}
                             onSelect={() => setSelectedOriginalIndex(entry.originalIndex)}
-                            onDoubleClick={() => copyLogContent(entry.line.raw)}
+                            onDoubleClick={() => void copyLogContent(entry.line.raw)}
                           />
                         </div>
                       );
@@ -794,7 +835,7 @@ export const LogPanel: React.FC = () => {
               entry={selectedEntry}
               source={activeSource}
               onClose={() => setSelectedOriginalIndex(undefined)}
-              onCopy={() => copyLogContent(selectedEntry.line.raw)}
+              onCopy={() => copyLogContent(selectedEntry.line.raw, false)}
             />
           )}
 

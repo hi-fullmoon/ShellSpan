@@ -57,7 +57,7 @@ describe('SplitPane', () => {
     expect(container.querySelector('[data-slot="split-pane-handle"]')).toHaveClass('cursor-row-resize');
   });
 
-  it('matches the subtle horizontal style for vertical dividers', () => {
+  it('keeps the standard hover effect for subtle vertical dividers', () => {
     const { container } = render(
       <SplitPane
         direction="vertical"
@@ -73,8 +73,24 @@ describe('SplitPane', () => {
     );
     expect(container.querySelector('[data-slot="split-pane-indicator"]')).toHaveClass(
       'h-px',
-      'group-hover:h-0.5',
-      'group-hover:bg-app-primary/80',
+      'group-hover:h-[3px]',
+      'group-hover:bg-app-primary',
+    );
+  });
+
+  it('keeps the standard hover effect for subtle horizontal dividers', () => {
+    const { container } = render(
+      <SplitPane
+        dividerStyle="subtle"
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="split-pane-indicator"]')).toHaveClass(
+      'w-px',
+      'group-hover:w-[3px]',
+      'group-hover:bg-app-primary',
     );
   });
 

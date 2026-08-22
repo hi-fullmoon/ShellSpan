@@ -3,13 +3,7 @@ import { BotIcon, FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCc
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
-import {
-  findShortcutConflict,
-  getShortcutKeys,
-  isLeaderShortcutAction,
-  shortcutFromBareKeyEvent,
-  shortcutFromKeyboardEvent,
-} from '@/lib/shortcuts';
+import { findShortcutConflict, getShortcutKeys, isLeaderShortcutAction, shortcutFromBareKeyEvent, shortcutFromKeyboardEvent } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -106,9 +100,7 @@ const SettingRow: React.FC<SettingRowProps> = ({ description, label, children })
 );
 
 const SettingGroupLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-    {children}
-  </div>
+  <div className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</div>
 );
 
 const ShortcutKeys: React.FC<{ shortcut: string }> = ({ shortcut }) => {
@@ -241,11 +233,7 @@ export const SettingsPanel: React.FC = () => {
       : shortcutFromKeyboardEvent(event.nativeEvent, editingAction === 'terminalLeader');
     if (!shortcut) return;
 
-    const conflict = findShortcutConflict(
-      { ...DEFAULT_SHORTCUTS, ...shortcuts },
-      editingAction,
-      shortcut,
-    );
+    const conflict = findShortcutConflict({ ...DEFAULT_SHORTCUTS, ...shortcuts }, editingAction, shortcut);
     if (conflict) {
       setConflictAction(conflict);
       return;
@@ -257,11 +245,7 @@ export const SettingsPanel: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <Tabs
-        value={activeSection}
-        onValueChange={handleSectionChange}
-        className="h-full min-h-0 gap-0 overflow-hidden bg-background"
-      >
+      <Tabs value={activeSection} onValueChange={handleSectionChange} className="h-full min-h-0 gap-0 overflow-hidden bg-background">
         <header className="flex shrink-0 items-center border-b border-app-border/50 px-3 py-1.5">
           <div className="min-w-0">
             <h1 className="text-base font-semibold text-app-text">{t('workbench.settings.title')}</h1>
@@ -269,20 +253,12 @@ export const SettingsPanel: React.FC = () => {
           </div>
         </header>
 
-        <div className="shrink-0 border-b border-app-border/50 px-3">
-          <TabsList
-            aria-label={t('settings.sectionNavigation')}
-            variant="line"
-            className="h-9 max-w-full justify-start overflow-x-auto"
-          >
+        <div className="shrink-0 border-b border-app-border/50 px-0">
+          <TabsList aria-label={t('settings.sectionNavigation')} variant="line" className="h-9 max-w-full justify-start overflow-x-auto">
             {SETTINGS_SECTIONS.map((section) => {
               const Icon = section.icon;
               return (
-                <TabsTrigger
-                  key={section.id}
-                  value={section.id}
-                  className="flex-none px-2.5 text-[13px]"
-                >
+                <TabsTrigger key={section.id} value={section.id} className="flex-none px-2.5 text-[13px]">
                   <Icon data-icon="inline-start" />
                   {t(section.titleKey)}
                 </TabsTrigger>
@@ -293,12 +269,12 @@ export const SettingsPanel: React.FC = () => {
 
         <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-4xl flex-col p-3">
-              <TabsContent value="appearance" className="w-full">
-                <div>
-                  <div className="px-3 pb-2 pt-1">
-                    <p className="text-xs text-muted-foreground">{t('settings.appearance.description')}</p>
-                  </div>
-                  <Separator className="data-horizontal:border-border/40" />
+            <TabsContent value="appearance" className="w-full">
+              <div>
+                <div className="px-3 pb-2 pt-1">
+                  <p className="text-xs text-muted-foreground">{t('settings.appearance.description')}</p>
+                </div>
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
                   <Select value={theme} onValueChange={(value) => setTheme(value as ThemeMode)}>
                     <SelectTrigger size="sm" aria-label={t('settings.appearance.theme')}>
@@ -328,15 +304,15 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                </div>
-              </TabsContent>
+              </div>
+            </TabsContent>
 
-              <TabsContent value="general" className="w-full">
-                <div>
-                  <div className="px-3 pb-2 pt-1">
-                    <p className="text-xs text-muted-foreground">{t('settings.general.description')}</p>
-                  </div>
-                  <Separator className="data-horizontal:border-border/40" />
+            <TabsContent value="general" className="w-full">
+              <div>
+                <div className="px-3 pb-2 pt-1">
+                  <p className="text-xs text-muted-foreground">{t('settings.general.description')}</p>
+                </div>
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
                   <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
                     <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
@@ -377,15 +353,15 @@ export const SettingsPanel: React.FC = () => {
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
                 <UpdateSection />
-                </div>
-              </TabsContent>
+              </div>
+            </TabsContent>
 
-              <TabsContent value="terminal" className="w-full">
-                <div>
-                  <div className="px-3 pb-2 pt-1">
-                    <p className="text-xs text-muted-foreground">{t('settings.terminal.description')}</p>
-                  </div>
-                  <Separator className="data-horizontal:border-border/40" />
+            <TabsContent value="terminal" className="w-full">
+              <div>
+                <div className="px-3 pb-2 pt-1">
+                  <p className="text-xs text-muted-foreground">{t('settings.terminal.description')}</p>
+                </div>
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingGroupLabel>{t('settings.terminal.groupAppearance')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
                   <Select value={terminalFontFamily} onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}>
@@ -622,10 +598,7 @@ export const SettingsPanel: React.FC = () => {
                   </div>
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
-                <SettingRow
-                  label={t('settings.terminal.hideSingleTabBar')}
-                  description={t('settings.terminal.hideSingleTabBarDescription')}
-                >
+                <SettingRow label={t('settings.terminal.hideSingleTabBar')} description={t('settings.terminal.hideSingleTabBarDescription')}>
                   <div className="flex justify-end">
                     <Switch
                       aria-label={t('settings.terminal.hideSingleTabBar')}
@@ -634,15 +607,15 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
-                </div>
-              </TabsContent>
+              </div>
+            </TabsContent>
 
-              <TabsContent value="sftp" className="w-full">
-                <div>
-                  <div className="px-3 pb-2 pt-1">
-                    <p className="text-xs text-muted-foreground">{t('settings.sftp.description')}</p>
-                  </div>
-                  <Separator className="data-horizontal:border-border/40" />
+            <TabsContent value="sftp" className="w-full">
+              <div>
+                <div className="px-3 pb-2 pt-1">
+                  <p className="text-xs text-muted-foreground">{t('settings.sftp.description')}</p>
+                </div>
+                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.showHiddenFiles')} description={t('settings.sftp.showHiddenFilesDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.sftp.showHiddenFiles')} checked={sftpShowHiddenFiles} onCheckedChange={setSftpShowHiddenFiles} />
@@ -702,9 +675,7 @@ export const SettingsPanel: React.FC = () => {
                       >
                         <span className="truncate">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</span>
                       </TooltipTrigger>
-                      <TooltipContent className="break-all">
-                        {sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}
-                      </TooltipContent>
+                      <TooltipContent className="break-all">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</TooltipContent>
                     </Tooltip>
                     {sftpDownloadDirectory && (
                       <Button
@@ -730,10 +701,7 @@ export const SettingsPanel: React.FC = () => {
                   </div>
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
-                <SettingRow
-                  label={t('settings.sftp.hideSingleTabBar')}
-                  description={t('settings.sftp.hideSingleTabBarDescription')}
-                >
+                <SettingRow label={t('settings.sftp.hideSingleTabBar')} description={t('settings.sftp.hideSingleTabBarDescription')}>
                   <div className="flex justify-end">
                     <Switch
                       aria-label={t('settings.sftp.hideSingleTabBar')}
@@ -742,22 +710,22 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                 </SettingRow>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="ai" className="w-full">
+              <AiSettingsSection />
+            </TabsContent>
+
+            <TabsContent value="shortcuts" className="w-full">
+              <div>
+                <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
+                  <p className="min-w-0 text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
+                  <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
+                    <RotateCcwIcon data-icon="inline-start" />
+                    {t('settings.shortcuts.resetAll')}
+                  </Button>
                 </div>
-              </TabsContent>
-
-              <TabsContent value="ai" className="w-full">
-                <AiSettingsSection />
-              </TabsContent>
-
-              <TabsContent value="shortcuts" className="w-full">
-                <div>
-                  <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
-                    <p className="min-w-0 text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
-                    <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
-                      <RotateCcwIcon data-icon="inline-start" />
-                      {t('settings.shortcuts.resetAll')}
-                    </Button>
-                  </div>
                 <Separator className="data-horizontal:border-border/40" />
                 {SHORTCUT_GROUPS.map((group) => (
                   <React.Fragment key={group.id}>
@@ -785,7 +753,9 @@ export const SettingsPanel: React.FC = () => {
                                 {isLeaderShortcutAction(action) ? (
                                   <span className="flex items-center gap-1.5">
                                     <ShortcutKeys shortcut={leaderBinding} />
-                                    <span aria-hidden="true" className="text-muted-foreground">→</span>
+                                    <span aria-hidden="true" className="text-muted-foreground">
+                                      →
+                                    </span>
                                     <ShortcutKeys shortcut={binding} />
                                   </span>
                                 ) : (
@@ -816,8 +786,8 @@ export const SettingsPanel: React.FC = () => {
                     <Separator className="data-horizontal:border-border/40" />
                   </React.Fragment>
                 ))}
-                </div>
-              </TabsContent>
+              </div>
+            </TabsContent>
           </div>
         </ScrollArea>
 

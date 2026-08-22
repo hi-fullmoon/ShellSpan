@@ -94,6 +94,7 @@ export const AgentRunView: React.FC<{
     <MessageScroller
       className="flex-1"
       followKey={`${run.phase}:${run.steps.length}:${run.responseText.length}`}
+      ariaLabel={t('ai.agent.runLog')}
     >
       <Alert>
         <ShieldAlertIcon />

@@ -9,6 +9,18 @@ interface TerminalOutputBuffer {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: false });
 const buffers = new Map<string, TerminalOutputBuffer>();
+const outputListeners = new Set<(sessionId: string) => void>();
+
+function notifyOutputChanged(sessionId: string): void {
+  for (const listener of outputListeners) listener(sessionId);
+}
+
+export function subscribeTerminalOutput(
+  listener: (sessionId: string) => void,
+): () => void {
+  outputListeners.add(listener);
+  return () => outputListeners.delete(listener);
+}
 
 export function appendTerminalOutput(sessionId: string, chunk: string): void {
   if (!chunk) return;
@@ -19,16 +31,20 @@ export function appendTerminalOutput(sessionId: string, chunk: string): void {
   buffer.byteLength += bytes.length;
   trimBufferHead(buffer, MAX_BUFFER_BYTES);
   buffers.set(sessionId, buffer);
+  notifyOutputChanged(sessionId);
 }
 
 export function clearTerminalOutput(sessionId: string): void {
   buffers.delete(sessionId);
+  notifyOutputChanged(sessionId);
 }
 
 export function rebindTerminalOutput(oldSessionId: string, newSessionId: string): void {
   const buffer = buffers.get(oldSessionId);
   buffers.delete(oldSessionId);
   if (buffer !== undefined) buffers.set(newSessionId, buffer);
+  notifyOutputChanged(oldSessionId);
+  notifyOutputChanged(newSessionId);
 }
 
 export function getRecentTerminalOutput(sessionId: string, maxLines: number): string {

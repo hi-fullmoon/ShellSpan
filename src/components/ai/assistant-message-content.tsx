@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BrainCircuitIcon, ChevronRightIcon } from 'lucide-react';
+import { BrainCircuitIcon, CheckIcon, ChevronRightIcon, ClipboardIcon } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,28 @@ import { useI18n } from '@/hooks/useI18n';
 import { parseAssistantContent } from '@/lib/ai-content';
 import { cn } from '@/lib/utils';
 
-function MarkdownContent({ children }: { children: string }): React.JSX.Element {
+function textFromNode(node: React.ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(textFromNode).join('');
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return textFromNode(node.props.children);
+  }
+  return '';
+}
+
+function MarkdownContent({
+  children,
+  copiedCode,
+  copiedLabel,
+  copyLabel,
+  onCopyCode,
+}: {
+  children: string;
+  copiedCode: string | null;
+  copiedLabel: string;
+  copyLabel: string;
+  onCopyCode: (code: string) => void;
+}): React.JSX.Element {
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}
@@ -51,11 +72,28 @@ function MarkdownContent({ children }: { children: string }): React.JSX.Element 
         p: ({ children: paragraphChildren }) => (
           <p className="leading-6">{paragraphChildren}</p>
         ),
-        pre: ({ children: codeChildren }) => (
-          <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
-            {codeChildren}
-          </pre>
-        ),
+        pre: ({ children: codeChildren }) => {
+          const code = textFromNode(codeChildren).replace(/\n$/, '');
+          const copied = copiedCode === code;
+          return (
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="xs"
+                className="absolute right-1.5 top-1.5 h-5 gap-1 px-1.5 text-[10px] [&_svg]:size-2.5"
+                onClick={() => onCopyCode(code)}
+              >
+                {copied
+                  ? <CheckIcon data-icon="inline-start" />
+                  : <ClipboardIcon data-icon="inline-start" />}
+                <span aria-live="polite">{copied ? copiedLabel : copyLabel}</span>
+              </Button>
+              <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 pt-8 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
+                {codeChildren}
+              </pre>
+            </div>
+          );
+        },
         table: ({ children: tableChildren }) => (
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full border-collapse text-left text-xs">{tableChildren}</table>
@@ -86,6 +124,20 @@ export const AssistantMessageContent: React.FC<{
   const hasAnswer = Boolean(answer.trim());
   const hadAnswer = useRef(hasAnswer);
   const [reasoningOpen, setReasoningOpen] = useState(!hasAnswer && Boolean(reasoning));
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
+
+  const copyCode = (code: string): void => {
+    void navigator.clipboard.writeText(code).then(() => {
+      setCopiedCode(code);
+      if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
+      copyResetTimerRef.current = window.setTimeout(() => setCopiedCode(null), 1600);
+    }).catch(() => undefined);
+  };
+
+  useEffect(() => () => {
+    if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!hadAnswer.current && hasAnswer) setReasoningOpen(false);
@@ -123,7 +175,14 @@ export const AssistantMessageContent: React.FC<{
       )}
       {hasAnswer && (
         <div className="flex min-w-0 flex-col gap-3 [&>*]:min-w-0">
-          <MarkdownContent>{answer}</MarkdownContent>
+          <MarkdownContent
+            copiedCode={copiedCode}
+            copiedLabel={t('common.copied')}
+            copyLabel={t('common.copy')}
+            onCopyCode={copyCode}
+          >
+            {answer}
+          </MarkdownContent>
         </div>
       )}
     </div>

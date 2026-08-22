@@ -33,6 +33,10 @@ function message(
   };
 }
 
+beforeEach(() => {
+  window.localStorage.removeItem('termbridge.aiPanelWidth');
+});
+
 describe('extractSingleLineCommand', () => {
   it('extracts a single-line fenced shell command', () => {
     expect(extractSingleLineCommand('Use this:\n```bash\ndf -h\n```')).toBe('df -h');
@@ -104,6 +108,20 @@ describe('selectConversationHistory', () => {
     expect(selectConversationHistory(messages, 'chat')).toEqual([
       { role: 'user', content: 'What model are you?' },
       { role: 'assistant', content: 'I am MiniMax-M3.' },
+    ]);
+  });
+
+  it('keeps terminal conversations isolated by session', () => {
+    const messages = [
+      message('server-a', 'user', 'Check server A', { sessionId: 'session-a' }),
+      message('server-a', 'assistant', 'Server A is healthy', { sessionId: 'session-a' }),
+      message('server-b', 'user', 'Check server B', { sessionId: 'session-b' }),
+      message('server-b', 'assistant', 'Server B needs attention', { sessionId: 'session-b' }),
+    ];
+
+    expect(selectConversationHistory(messages, 'chat', 'session-b')).toEqual([
+      { role: 'user', content: 'Check server B' },
+      { role: 'assistant', content: 'Server B needs attention' },
     ]);
   });
 });
@@ -194,6 +212,10 @@ describe('AI panel width', () => {
       Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() });
       Object.defineProperty(handle, 'releasePointerCapture', { value: vi.fn() });
 
+      act(() => {
+        frames.splice(0).forEach((callback) => callback(0));
+      });
+
       fireEvent.pointerDown(handle, { button: 0, pointerId: 7, clientX: 1080 });
       expect(document.body.style.userSelect).toBe('none');
       fireEvent.pointerMove(handle, { pointerId: 7, clientX: 960 });
@@ -213,6 +235,26 @@ describe('AI panel width', () => {
 });
 
 describe('AI composer status', () => {
+  it('focuses the composer when the panel opens', async () => {
+    await act(async () => {
+      await initI18n('zh-CN');
+      useAiStore.getState().setOpen(true);
+    });
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+
+    try {
+      const { unmount } = render(createElement(AiPanel));
+      expect(screen.getByRole('textbox')).toHaveFocus();
+      unmount();
+    } finally {
+      useAiStore.getState().setOpen(false);
+      requestFrame.mockRestore();
+    }
+  });
+
   it('keeps the missing-terminal guidance inside the composer', async () => {
     await act(async () => {
       await initI18n('zh-CN');
