@@ -62,4 +62,34 @@ describe('SectionNav', () => {
 
     expect(useAppStore.getState().activeSection).toBe('sftp');
   });
+
+  it('does not let a cancelled pointer sequence suppress the next click', () => {
+    render(<SectionNav />);
+    const terminal = screen.getByRole('button', { name: 'section.terminal' });
+    Object.defineProperty(terminal, 'setPointerCapture', { value: vi.fn() });
+
+    fireEvent.pointerDown(terminal, { button: 0, pointerId: 12, pointerType: 'mouse' });
+    fireEvent.pointerCancel(terminal, { pointerId: 12, pointerType: 'mouse' });
+    useAppStore.getState().setActiveSection('workbench');
+    fireEvent.click(terminal, { detail: 1 });
+
+    expect(useAppStore.getState().activeSection).toBe('terminal');
+  });
+
+  it('expires pointerup-only click suppression when no click follows', () => {
+    vi.useFakeTimers();
+    try {
+      render(<SectionNav />);
+      const terminal = screen.getByRole('button', { name: 'section.terminal' });
+
+      fireEvent.pointerUp(terminal, { button: 0, pointerId: 12, pointerType: 'mouse' });
+      vi.runAllTimers();
+      useAppStore.getState().setActiveSection('workbench');
+      fireEvent.click(terminal, { detail: 1 });
+
+      expect(useAppStore.getState().activeSection).toBe('terminal');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

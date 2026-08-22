@@ -356,7 +356,7 @@ export const MonitorPanel: React.FC = () => {
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col bg-background">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b bg-card/80 px-4 py-3">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-app-border/50 bg-card/80 px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <ActivityIcon className="size-4" aria-hidden />
