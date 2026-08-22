@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 /**
  * Makes discrete desktop navigation actions resilient to WKWebView dropping a
@@ -12,10 +12,32 @@ import { useCallback, useRef } from 'react';
 export function useTrackpadSafeActivation(onActivate: () => void): {
   onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
   onClick: (event: React.MouseEvent<HTMLElement>) => void;
 } {
   const pressedPointerIdRef = useRef<number | null>(null);
   const pointerActivationPendingClickRef = useRef(false);
+  const pendingClickResetTimerRef = useRef<number | null>(null);
+
+  const clearPendingClick = useCallback((): void => {
+    if (pendingClickResetTimerRef.current !== null) {
+      window.clearTimeout(pendingClickResetTimerRef.current);
+      pendingClickResetTimerRef.current = null;
+    }
+    pointerActivationPendingClickRef.current = false;
+  }, []);
+
+  const schedulePendingClickReset = useCallback((): void => {
+    if (pendingClickResetTimerRef.current !== null) {
+      window.clearTimeout(pendingClickResetTimerRef.current);
+    }
+    pendingClickResetTimerRef.current = window.setTimeout(() => {
+      pendingClickResetTimerRef.current = null;
+      pointerActivationPendingClickRef.current = false;
+    }, 0);
+  }, []);
+
+  useEffect(() => clearPendingClick, [clearPendingClick]);
 
   const activateFromPointer = useCallback((): void => {
     pointerActivationPendingClickRef.current = true;
@@ -25,6 +47,11 @@ export function useTrackpadSafeActivation(onActivate: () => void): {
   const onPointerDown = useCallback((event: React.PointerEvent<HTMLElement>): void => {
     if (event.pointerType !== 'mouse' || event.button !== 0) return;
     pressedPointerIdRef.current = event.pointerId;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is best-effort in WKWebView.
+    }
     activateFromPointer();
   }, [activateFromPointer]);
 
@@ -36,17 +63,28 @@ export function useTrackpadSafeActivation(onActivate: () => void): {
       activateFromPointer();
     }
     pressedPointerIdRef.current = null;
-  }, [activateFromPointer]);
+    schedulePendingClickReset();
+  }, [activateFromPointer, schedulePendingClickReset]);
+
+  const onPointerCancel = useCallback((event: React.PointerEvent<HTMLElement>): void => {
+    if (
+      pressedPointerIdRef.current !== null
+      && pressedPointerIdRef.current !== event.pointerId
+    ) return;
+    pressedPointerIdRef.current = null;
+    clearPendingClick();
+  }, [clearPendingClick]);
 
   const onClick = useCallback((event: React.MouseEvent<HTMLElement>): void => {
     // Pointer clicks normally follow pointerdown/pointerup. They have a
     // positive detail value, while keyboard-synthesized clicks use 0.
     if (event.detail > 0 && pointerActivationPendingClickRef.current) {
-      pointerActivationPendingClickRef.current = false;
+      clearPendingClick();
       return;
     }
+    clearPendingClick();
     onActivate();
-  }, [onActivate]);
+  }, [clearPendingClick, onActivate]);
 
-  return { onPointerDown, onPointerUp, onClick };
+  return { onPointerDown, onPointerUp, onPointerCancel, onClick };
 }
