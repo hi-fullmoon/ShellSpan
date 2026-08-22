@@ -85,10 +85,15 @@ describe('aiSettingsStore', () => {
   });
 
   it('keeps API version paths out of provider preset URLs', () => {
-    const id = useAiSettingsStore.getState().addProvider('minimax');
+    const minimaxId = useAiSettingsStore.getState().addProvider('minimax');
+    const kimiId = useAiSettingsStore.getState().addProvider('kimi');
 
-    expect(useAiSettingsStore.getState().getProviderConfig(id).baseUrl)
+    expect(useAiSettingsStore.getState().getProviderConfig(minimaxId).baseUrl)
       .toBe('https://api.minimaxi.com');
+    expect(useAiSettingsStore.getState().getProviderConfig(kimiId)).toEqual(expect.objectContaining({
+      baseUrl: 'https://api.kimi.com/coding',
+      model: 'k3',
+    }));
   });
 
   it('loads an API key from provider preferences and includes it in request config', () => {

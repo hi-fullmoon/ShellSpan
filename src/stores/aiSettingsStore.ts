@@ -63,10 +63,10 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   },
   {
     preset: 'kimi',
-    name: 'Kimi',
+    name: 'Kimi Code',
     kind: 'openAiCompatible',
-    baseUrl: 'https://api.moonshot.cn',
-    model: 'kimi-k3',
+    baseUrl: 'https://api.kimi.com/coding',
+    model: 'k3',
     requiresApiKey: true,
     structuredOutput: 'jsonSchema',
   },
