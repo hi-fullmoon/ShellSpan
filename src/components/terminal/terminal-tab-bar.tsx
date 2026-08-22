@@ -116,8 +116,10 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
-        active ? 'h-[31px] bg-app-surface text-app-text' : 'h-[31px] bg-app-border/25 text-app-text-soft',
+        'group relative flex h-[31px] w-40 shrink-0 items-center gap-1.5 rounded-t-sm px-2 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-primary focus-visible:ring-inset',
+        active
+          ? 'z-10 bg-app-bg text-app-text after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-app-bg'
+          : 'bg-transparent text-app-text-soft hover:bg-app-surface/70 hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
@@ -126,7 +128,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         <div
           aria-hidden="true"
           data-active-tab-indicator
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-app-primary"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-sm bg-app-primary"
           style={session.color ? { backgroundColor: session.color } : undefined}
         />
       )}
@@ -145,7 +147,10 @@ const SessionTab: React.FC<SessionTabProps> = ({
         <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className={cn('h-2 w-2 shrink-0 rounded-sm', sessionStatusDotClass(session.status))} />
+        <span
+          aria-hidden="true"
+          className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))}
+        />
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
       </div>
       {session.pinned ? (

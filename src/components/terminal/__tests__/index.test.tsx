@@ -364,4 +364,112 @@ describe('Terminal', () => {
     // The active session (s2, last added) moved into the new right group.
     expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId)).toEqual(['s1', 's2']);
   });
+
+  it('keeps a reconnected session in its original split group', () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    const secondGroup = container.querySelector<HTMLElement>('[data-terminal-group="second"]')!;
+    fireEvent.pointerDown(within(firstGroup).getByRole('tab', { name: /s2/ }), { button: 0 });
+
+    act(() => {
+      useTerminalStore.getState().reconnectSession('s1', {
+        sessionId: 's1-next',
+        title: 's1-next',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      });
+    });
+
+    expect(within(secondGroup).getByRole('tab', { name: /s1/ }))
+      .toHaveAttribute('data-session-tab', 's1-next');
+    expect(within(firstGroup).queryByRole('tab', { name: /s1/ })).toBeNull();
+  });
+
+  it('repairs restored duplicate group ids and allocates a fresh id for the next split', () => {
+    useTerminalStore.getState().addRestoredSessions(
+      ['s1', 's2', 's3'].map((sessionId) => ({
+        sessionId,
+        title: sessionId,
+        host: 'h',
+        port: 22,
+        username: 'u',
+        profileId: `profile-${sessionId}`,
+      })),
+      {
+        kind: 'split',
+        orientation: 'horizontal',
+        first: {
+          kind: 'group',
+          id: 'group-3',
+          sessionIds: ['s1', 's2'],
+          activeSessionId: 's1',
+        },
+        second: {
+          kind: 'group',
+          id: 'group-3',
+          sessionIds: ['s3'],
+          activeSessionId: 's3',
+        },
+      },
+    );
+
+    const { container } = render(<Terminal />);
+    const restoredIds = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-terminal-group]'),
+      (element) => element.dataset.terminalGroup,
+    );
+    expect(new Set(restoredIds).size).toBe(2);
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="group-3"]')!;
+    fireEvent.contextMenu(within(firstGroup).getByRole('tab', { name: /s2/ }), {
+      clientX: 10,
+      clientY: 20,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const nextIds = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-terminal-group]'),
+      (element) => element.dataset.terminalGroup,
+    );
+    expect(nextIds).toHaveLength(3);
+    expect(new Set(nextIds).size).toBe(3);
+  });
+
+  it('does not create a split when the target pane is too small', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    const content = container.querySelector<HTMLElement>('[data-terminal-content]')!;
+    vi.spyOn(content, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 200,
+      height: 500,
+      right: 200,
+      bottom: 500,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    expect(screen.getAllByTestId('terminal-pane')).toHaveLength(1);
+    expect(container.querySelector('[data-terminal-group]')).toBeNull();
+  });
 });

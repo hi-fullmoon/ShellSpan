@@ -473,7 +473,7 @@ describe('TerminalContextMenu', () => {
       />,
     );
 
-    const colorButton = screen.getByRole('button', { name: '#ef4444' });
+    const colorButton = screen.getByRole('menuitemradio', { name: '#ef4444' });
     fireEvent.click(colorButton);
 
     expect(
@@ -482,7 +482,7 @@ describe('TerminalContextMenu', () => {
     ).toBe('#ef4444');
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    const clearButton = screen.getByRole('button', { name: 'terminal.tab.clearColor' });
+    const clearButton = screen.getByRole('menuitemradio', { name: 'terminal.tab.clearColor' });
     fireEvent.click(clearButton);
 
     expect(
@@ -653,6 +653,29 @@ describe('TerminalContextMenu', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('focuses the first action and supports menu arrow-key navigation', async () => {
+    const session = makeSession('s1', 'A', 'p1');
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const pin = screen.getByRole('menuitem', { name: 'terminal.tab.pin' });
+    const rename = screen.getByRole('menuitem', { name: 'common.rename' });
+    await vi.waitFor(() => expect(pin).toHaveFocus());
+
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' });
+    expect(rename).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'End' });
+    expect(screen.getByRole('menuitemradio', { name: '#f43f5e' })).toHaveFocus();
   });
 
   it('closes when the backdrop is clicked', () => {

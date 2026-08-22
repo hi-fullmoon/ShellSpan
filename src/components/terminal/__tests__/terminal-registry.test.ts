@@ -1,7 +1,7 @@
 import { act } from '@testing-library/react';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
-import { findHttpLinksInLine, terminalRegistry } from '../registry/terminal-registry';
+import { findHttpLinksInLine, resolveTerminalTheme, terminalRegistry } from '../registry/terminal-registry';
 
 // xterm + addons work in jsdom for write/buffer; fit yields 0x0 (harmless).
 // Polyfill ResizeObserver if undefined.
@@ -108,6 +108,16 @@ describe('terminalRegistry', () => {
 
     expect(terminalElement?.style.backgroundColor).toBe('rgb(40, 44, 52)');
     expect(viewport?.style.backgroundColor).toBe('rgb(40, 44, 52)');
+  });
+
+  it.each([
+    ['dracula', '#282a36', '#ff5555', '#e5e5df'],
+    ['nord', '#2e3440', '#bf616a', '#d8dee9'],
+    ['gruvboxDark', '#282828', '#cc241d', '#ebdbb2'],
+    ['tokyoNight', '#1a1b26', '#f7768e', '#c0caf5'],
+    ['catppuccinMocha', '#1e1e2e', '#f38ba8', '#cdd6f4'],
+  ] as const)('resolves the %s theme', (scheme, background, red, foreground) => {
+    expect(resolveTerminalTheme(scheme)).toMatchObject({ background, foreground, red });
   });
 
   it('resolves app CSS variables and refreshes them after an app theme change', () => {

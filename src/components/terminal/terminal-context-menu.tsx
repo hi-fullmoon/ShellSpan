@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useI18n } from '@/hooks/useI18n';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -47,6 +47,8 @@ interface MenuItemProps {
 const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
   <button
     type="button"
+    role="menuitem"
+    tabIndex={-1}
     onClick={onClick}
     disabled={disabled}
     className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
@@ -98,6 +100,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const [confirmationTarget, setConfirmationTarget] = useState<TerminalSession | null>(null);
   const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
   const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -111,6 +114,26 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || !session) return;
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const frameId = window.requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')
+        ?.focus({ preventScroll: true });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, [open, session?.sessionId]);
 
   const target = session ?? renameTarget ?? confirmationTarget;
   if (!target) return null;
@@ -224,6 +247,33 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     onClose();
   };
 
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>(
+        '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
+      ) ?? [],
+    );
+    if (items.length === 0) return;
+
+    event.preventDefault();
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+    let nextIndex: number;
+    if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = items.length - 1;
+    } else if (event.key === 'ArrowUp') {
+      nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
+    } else {
+      nextIndex = currentIndex < 0 || currentIndex === items.length - 1
+        ? 0
+        : currentIndex + 1;
+    }
+    items[nextIndex]?.focus({ preventScroll: true });
+  };
+
   return createPortal(
     <>
       {open && session && (
@@ -238,8 +288,12 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             }}
           />
           <div
+            ref={menuRef}
+            role="menu"
+            aria-label={target.title}
             className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
             style={{ left, top }}
+            onKeyDown={handleMenuKeyDown}
           >
         <MenuItem onClick={handleTogglePin}>
           {target.pinned ? t('terminal.tab.unpin') : t('terminal.tab.pin')}
@@ -290,6 +344,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
           <div className="flex flex-nowrap items-center gap-1">
             <button
               type="button"
+              role="menuitemradio"
+              aria-checked={!target.color}
+              tabIndex={-1}
               onClick={() => handleColor(undefined)}
               className={cn(
                 'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-app-border bg-transparent transition-transform hover:scale-110',
@@ -303,6 +360,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
               <button
                 key={color}
                 type="button"
+                role="menuitemradio"
+                aria-checked={target.color === color}
+                tabIndex={-1}
                 onClick={() => handleColor(color)}
                 style={{ backgroundColor: color }}
                 className={cn(
