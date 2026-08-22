@@ -941,6 +941,9 @@ fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> 
             break;
         }
     }
+    if !matches!(provider.kind, AiProviderKind::Ollama) && base_path.is_empty() {
+        base_path = "/v1".to_string();
+    }
     url.set_path(&format!(
         "{}/{}",
         base_path.trim_end_matches('/'),
@@ -1230,7 +1233,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_an_api_root_or_a_full_provider_endpoint() {
+    fn builds_versioned_openai_endpoints_from_a_service_root() {
         let provider = AiProviderConfig {
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
@@ -1258,6 +1261,21 @@ mod tests {
         };
         assert_eq!(
             endpoint_url(&api_root, "chat/completions")
+                .unwrap()
+                .as_str(),
+            "https://api.minimaxi.com/v1/chat/completions"
+        );
+
+        let service_root = AiProviderConfig {
+            base_url: "https://api.minimaxi.com".to_string(),
+            ..api_root
+        };
+        assert_eq!(
+            endpoint_url(&service_root, "models").unwrap().as_str(),
+            "https://api.minimaxi.com/v1/models"
+        );
+        assert_eq!(
+            endpoint_url(&service_root, "chat/completions")
                 .unwrap()
                 .as_str(),
             "https://api.minimaxi.com/v1/chat/completions"
