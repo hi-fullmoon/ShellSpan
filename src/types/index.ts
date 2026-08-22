@@ -3,7 +3,18 @@ export type Locale = 'zh-CN' | 'en-US';
 export type AppSection = 'workbench' | 'terminal' | 'sftp';
 export type TerminalFontFamily = 'system' | 'menlo' | 'monaco' | 'consolas' | 'courierNew';
 export type TerminalCursorStyle = 'block' | 'underline' | 'bar';
-export type TerminalColorScheme = 'app' | 'oneDark' | 'solarizedDark' | 'light';
+export const TERMINAL_COLOR_SCHEME_IDS = [
+  'app',
+  'oneDark',
+  'solarizedDark',
+  'dracula',
+  'nord',
+  'gruvboxDark',
+  'tokyoNight',
+  'catppuccinMocha',
+  'light',
+] as const;
+export type TerminalColorScheme = (typeof TERMINAL_COLOR_SCHEME_IDS)[number];
 export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';

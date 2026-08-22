@@ -14,6 +14,8 @@
   --color-app-border: var(--app-border);
   --color-app-primary: var(--app-primary);
   --color-app-primary-text: var(--app-primary-text);
+  --color-app-button: var(--app-button);
+  --color-app-button-text: var(--app-button-text);
   --color-app-error: var(--app-error);
   --color-app-warning: var(--app-warning);
   --color-app-success: var(--app-success);
@@ -28,6 +30,8 @@
   --app-border: rgba(100, 116, 139, 0.28);
   --app-primary: #0e7490;
   --app-primary-text: #ffffff;
+  --app-button: #0e7490;
+  --app-button-text: #ffffff;
   --app-terminal-selection: rgba(14, 116, 144, 0.28);
   --app-terminal-selection-inactive: rgba(14, 116, 144, 0.16);
   --app-error: #dc2626;
@@ -71,20 +75,25 @@
 }
 
 [data-theme='dark'] {
-  --app-bg: #020617;
-  --app-surface: #0f172a;
-  --app-surface-muted: #1e293b;
-  --app-text: #f8fafc;
-  --app-text-soft: #94a3b8;
-  --app-border: rgba(30, 41, 59, 1);
-  --app-primary: #22d3ee;
-  --app-primary-text: #020617;
-  --app-terminal-selection: rgba(34, 211, 238, 0.3);
-  --app-terminal-selection-inactive: rgba(34, 211, 238, 0.18);
-  --app-error: #ef4444;
-  --app-warning: #f59e0b;
-  --app-success: #22c55e;
-  --shadow-toast: 0 6px 16px 0 rgba(0, 0, 0, 0.32), 0 3px 6px -4px rgba(0, 0, 0, 0.4), 0 9px 28px 8px rgba(0, 0, 0, 0.24);
+  /* Obsidian palette: a near-black canvas with restrained graphite elevation. */
+  --app-bg: #191a1b;
+  --app-surface: #202122;
+  --app-surface-muted: #28292a;
+  --app-text: #d4d4d8;
+  --app-text-soft: #a1a1aa;
+  --app-border: rgba(255, 255, 255, 0.09);
+  --app-primary: #b3b3b8;
+  --app-primary-text: #191a1b;
+  --app-button: #353638;
+  --app-button-text: #f4f4f5;
+  --app-terminal-selection: rgba(244, 244, 245, 0.22);
+  --app-terminal-selection-inactive: rgba(244, 244, 245, 0.12);
+  --app-error: #fb7185;
+  --app-warning: #fbbf24;
+  --app-success: #4ade80;
+  --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.035), 0 16px 32px -20px rgba(0, 0, 0, 0.86);
+  --shadow-dialog: 0 28px 64px -20px rgba(0, 0, 0, 0.88), 0 0 0 1px rgba(255, 255, 255, 0.045);
+  --shadow-toast: 0 14px 32px -12px rgba(0, 0, 0, 0.78), 0 0 0 1px rgba(255, 255, 255, 0.06);
   --background: var(--app-bg);
   --foreground: var(--app-text);
   --card: var(--app-surface);
