@@ -102,7 +102,7 @@ export const UpdateSection: React.FC = () => {
             </TooltipTrigger>
             <TooltipContent className="break-all">{error ?? t('update.failed', { error: '' })}</TooltipContent>
           </Tooltip>
-          <Button variant="outline" size="sm" onClick={() => void runCheck('manual')}>
+          <Button variant="outline" size="xs" onClick={() => void runCheck('manual')}>
             {t('settings.general.retry')}
           </Button>
         </div>
