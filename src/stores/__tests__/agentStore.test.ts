@@ -158,6 +158,23 @@ describe('agentStore', () => {
       ]));
   });
 
+  it('ignores late stream events after the run has stopped', () => {
+    const store = useAgentStore.getState();
+    store.beginRun('request-late', 'diagnose', 'session-1', 'server');
+    store.stopRun();
+    store.appendDelta('request-late', JSON.stringify({
+      summary: 'This response arrived too late.',
+      steps: [{ title: 'Disk', description: 'Inspect disk.', command: 'df -h' }],
+    }));
+    store.completePlanning('request-late');
+
+    expect(useAgentStore.getState().run).toMatchObject({
+      phase: 'cancelled',
+      responseText: '',
+    });
+    expect(useAgentStore.getState().run?.steps.some((step) => step.title === 'Disk')).toBe(false);
+  });
+
   it('caps the complete run at eight executed commands across replans', () => {
     const store = useAgentStore.getState();
     store.beginRun('request-budget-0', 'diagnose', 'session-1', 'server');
