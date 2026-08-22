@@ -129,7 +129,7 @@ export const AgentRunView: React.FC<{
           </AlertDescription>
           {sessionState === 'inactive' && (
             <AlertAction>
-              <Button variant="outline" size="xs" onClick={onActivateSession}>
+              <Button variant="ghost" size="xs" onClick={onActivateSession}>
                 <TerminalIcon data-icon="inline-start" />
                 {t('ai.agent.switchSession')}
               </Button>
@@ -177,7 +177,7 @@ export const AgentRunView: React.FC<{
             </AlertDialog>
           )}
           {(run.phase === 'error' || run.phase === 'cancelled') && (
-            <Button variant="outline" size="xs" onClick={onRetry}>
+            <Button variant="ghost" size="xs" onClick={onRetry}>
               <RotateCcwIcon data-icon="inline-start" />
               {t('ai.agent.retry')}
             </Button>
@@ -249,10 +249,26 @@ export const AgentRunView: React.FC<{
               <span className="text-xs text-muted-foreground">
                 {t('ai.agent.waitingForCommand')}
               </span>
-              <Button variant="ghost" size="xs" onClick={() => onReject(step.id)}>
-                <XCircleIcon data-icon="inline-start" />
-                {t('ai.agent.clearedSkip')}
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger render={<Button variant="ghost" size="xs" />}>
+                  <XCircleIcon data-icon="inline-start" />
+                  {t('ai.agent.clearedSkip')}
+                </AlertDialogTrigger>
+                <AlertDialogContent size="sm">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t('ai.agent.stopInsertedTitle')}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t('ai.agent.stopInsertedDescription')}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                    <AlertDialogAction variant="destructive" onClick={() => onReject(step.id)}>
+                      {t('ai.agent.clearedSkip')}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </CardFooter>
           )}
         </Card>

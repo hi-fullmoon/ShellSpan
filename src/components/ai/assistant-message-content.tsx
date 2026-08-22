@@ -118,7 +118,7 @@ function MarkdownContent({
   );
 }
 
-export const AssistantMessageContent: React.FC<{
+const AssistantMessageContentComponent: React.FC<{
   content: string;
   streaming: boolean;
 }> = ({ content, streaming }) => {
@@ -178,16 +178,23 @@ export const AssistantMessageContent: React.FC<{
       )}
       {hasAnswer && (
         <div className="flex min-w-0 flex-col gap-3 [&>*]:min-w-0">
-          <MarkdownContent
-            copiedCode={copiedCode}
-            copiedLabel={t('common.copied')}
-            copyLabel={t('common.copy')}
-            onCopyCode={copyCode}
-          >
-            {answer}
-          </MarkdownContent>
+          {streaming ? (
+            <div className="leading-6 whitespace-pre-wrap">{answer}</div>
+          ) : (
+            <MarkdownContent
+              copiedCode={copiedCode}
+              copiedLabel={t('common.copied')}
+              copyLabel={t('common.copy')}
+              onCopyCode={copyCode}
+            >
+              {answer}
+            </MarkdownContent>
+          )}
         </div>
       )}
     </div>
   );
 };
+
+export const AssistantMessageContent = React.memo(AssistantMessageContentComponent);
+AssistantMessageContent.displayName = 'AssistantMessageContent';
