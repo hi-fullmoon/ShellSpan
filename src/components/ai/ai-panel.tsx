@@ -6,6 +6,7 @@ import {
   BrainCircuitIcon,
   CheckIcon,
   ChevronDownIcon,
+  CircleAlertIcon,
   ClipboardIcon,
   Code2Icon,
   EraserIcon,
@@ -87,6 +88,7 @@ import type {
   AiStreamEvent,
   AiTaskKind,
 } from '@/types/ai';
+import type { LocaleKey } from '@/locales';
 
 const AI_STREAM_EVENT = 'ai-stream';
 const AI_PANEL_DEFAULT_WIDTH = 400;
@@ -106,6 +108,52 @@ interface TerminalContextSnapshot {
   sessionId?: string;
   label?: string;
   lineCount: number;
+}
+
+export interface AiErrorPresentation {
+  detail: string;
+  key: LocaleKey;
+  variables?: Record<string, string | number>;
+}
+
+function compactAiErrorDetail(message: string): string {
+  const decoded = message
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&');
+  const markupStart = decoded.search(/<[a-z][^>]*>/i);
+  const withoutMarkup = markupStart >= 0 ? decoded.slice(0, markupStart) : decoded;
+  const compact = withoutMarkup
+    .replace(/\s+/g, ' ')
+    .replace(/:\s*$/, '')
+    .trim();
+  return compact.length > 240 ? `${compact.slice(0, 239)}…` : compact;
+}
+
+export function summarizeAiError(message: string): AiErrorPresentation {
+  const detail = compactAiErrorDetail(message);
+  const statusMatch = message.match(/\bHTTP\s+(\d{3})\b/i);
+  const status = statusMatch ? Number(statusMatch[1]) : undefined;
+
+  if (status === 404) return { detail, key: 'ai.error.notFound' };
+  if (status === 401 || status === 403 || /api key is required|unauthori[sz]ed/i.test(message)) {
+    return { detail, key: 'ai.error.authentication' };
+  }
+  if (status === 429) return { detail, key: 'ai.error.rateLimited' };
+  if (status !== undefined && status >= 500) {
+    return { detail, key: 'ai.error.unavailable', variables: { status } };
+  }
+  if (status !== undefined) {
+    return { detail, key: 'ai.error.http', variables: { status } };
+  }
+  if (/timed? out|timeout/i.test(message)) return { detail, key: 'ai.error.timeout' };
+  if (/could not connect|connection (?:failed|refused)|network error/i.test(message)) {
+    return { detail, key: 'ai.error.connection' };
+  }
+  return { detail, key: 'ai.error.generic' };
 }
 
 export function getAiPanelWidthBounds(containerWidth: number): { min: number; max: number } {
@@ -342,6 +390,7 @@ export const AiPanel: React.FC = () => {
   const [contextEnabled, setContextEnabled] = useState(true);
   const [panelWidth, setPanelWidth] = useState(initialAiPanelWidth);
   const [resizing, setResizing] = useState(false);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [copiedCommandId, setCopiedCommandId] = useState<string | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -727,6 +776,11 @@ export const AiPanel: React.FC = () => {
   const agentNeedsResolution = task === 'diagnosticAgent'
     && (agentRun?.phase === 'awaitingApproval' || agentRun?.phase === 'awaitingExecution');
   const busy = phase === 'streaming' || agentPlanning;
+  const composerSubmitDisabled = busy
+    || !draft.trim()
+    || !model.trim()
+    || agentNeedsResolution
+    || (task === 'diagnosticAgent' && !agentContext.context);
   const agentSession = agentRun
     ? sessions.find((session) => session.sessionId === agentRun.sessionId)
     : undefined;
@@ -763,6 +817,9 @@ export const AiPanel: React.FC = () => {
     && failedRequestMessage.sessionId === conversationSessionId
     && conversationLane(failedRequestMessage.task) === currentLane
     ? error
+    : undefined;
+  const currentErrorPresentation = currentError
+    ? summarizeAiError(currentError)
     : undefined;
   const lastAssistantMessage = [...visibleMessages].reverse().find((message) => message.role === 'assistant');
   const statusAnnouncement = phase === 'streaming'
@@ -884,7 +941,7 @@ export const AiPanel: React.FC = () => {
                     onValueChange={setDefaultProvider}
                   >
                     {providers.map((provider) => (
-                      <DropdownMenuRadioItem key={provider.id} value={provider.id}>
+                      <DropdownMenuRadioItem key={provider.id} value={provider.id} closeOnClick>
                         <span className="min-w-0">
                           <span className="block truncate">{provider.name}</span>
                           <span className="block truncate text-xs text-muted-foreground">
@@ -909,7 +966,7 @@ export const AiPanel: React.FC = () => {
             </Badge>
           </div>
           <div className="flex items-center gap-1">
-            <AlertDialog>
+            <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
               <Tooltip>
                 <TooltipTrigger
                   render={(
@@ -929,20 +986,26 @@ export const AiPanel: React.FC = () => {
                 </TooltipTrigger>
                 <TooltipContent>{t('ai.clear')}</TooltipContent>
               </Tooltip>
-              <AlertDialogContent size="sm">
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t('ai.clearConfirmTitle')}</AlertDialogTitle>
-                  <AlertDialogDescription>
+              <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
+                <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+                  <AlertDialogTitle className="text-sm leading-5">
+                    {t('ai.clearConfirmTitle')}
+                  </AlertDialogTitle>
+                </AlertDialogHeader>
+                <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
+                  <AlertDialogDescription className="block min-w-0 max-w-full text-left leading-5 text-app-text">
                     {t('ai.clearConfirmDescription')}
                   </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                </div>
+                <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+                  <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
                   <AlertDialogAction
                     variant="destructive"
+                    size="sm"
                     onClick={() => {
                       if (task === 'diagnosticAgent') useAgentStore.getState().clear();
                       else clearConversation(conversationSessionId, currentLane);
+                      setClearDialogOpen(false);
                     }}
                   >
                     {t('ai.clear')}
@@ -1141,15 +1204,16 @@ export const AiPanel: React.FC = () => {
           </MessageScroller>
         )}
 
-        {task !== 'diagnosticAgent' && currentError && (
-          <Alert variant="destructive" className="mx-3 mb-2 w-auto">
+        {task !== 'diagnosticAgent' && currentError && currentErrorPresentation && (
+          <Alert className="mx-3 mb-2 w-auto border-destructive/30 bg-destructive/5">
+            <CircleAlertIcon className="text-destructive" />
             <AlertTitle>{t('ai.requestFailed')}</AlertTitle>
-            <AlertDescription className="flex flex-col gap-2">
-              <span>{currentError}</span>
-              <span className="flex flex-wrap gap-1.5">
+            <AlertDescription className="flex flex-col gap-2 [&_p:not(:last-child)]:mb-0">
+              <p>{t(currentErrorPresentation.key, currentErrorPresentation.variables)}</p>
+              <div className="flex flex-wrap gap-1.5">
                 {failedRequestMessage && (
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="xs"
                     onClick={() => void send(
                       failedRequestMessage.task,
@@ -1160,11 +1224,21 @@ export const AiPanel: React.FC = () => {
                     {t('common.retry')}
                   </Button>
                 )}
-                <Button variant="outline" size="xs" onClick={openSettings}>
+                <Button variant="ghost" size="xs" onClick={openSettings}>
                   <SettingsIcon data-icon="inline-start" />
-                  {t('ai.configure')}
+                  {t('ai.reviewSettings')}
                 </Button>
-              </span>
+              </div>
+              {currentErrorPresentation.detail && (
+                <details>
+                  <summary className="cursor-pointer text-xs">
+                    {t('common.errorDetails')}
+                  </summary>
+                  <code className="mt-1 block break-all text-xs">
+                    {currentErrorPresentation.detail}
+                  </code>
+                </details>
+              )}
             </AlertDescription>
           </Alert>
         )}
@@ -1187,6 +1261,7 @@ export const AiPanel: React.FC = () => {
                   event.keyCode,
                 )) {
                   event.preventDefault();
+                  if (composerSubmitDisabled) return;
                   if (task === 'diagnosticAgent') void runDiagnosticAgent(draft);
                   else void send(task, draft);
                 }
@@ -1197,7 +1272,6 @@ export const AiPanel: React.FC = () => {
                   ? t('ai.commandPlaceholder')
                   : t('ai.placeholder')}
               className="min-h-18 max-h-48 px-3.5 pt-3 pb-1 leading-5"
-              disabled={busy || agentNeedsResolution}
             />
             <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
               {(agentNeedsResolution || (task === 'diagnosticAgent' && !agentContext.context)) && (
@@ -1273,12 +1347,7 @@ export const AiPanel: React.FC = () => {
                     onClick={() => task === 'diagnosticAgent'
                       ? void runDiagnosticAgent(draft)
                       : void send(task, draft)}
-                    disabled={
-                      !draft.trim()
-                      || !model.trim()
-                      || agentNeedsResolution
-                      || (task === 'diagnosticAgent' && !agentContext.context)
-                    }
+                    disabled={composerSubmitDisabled}
                     aria-label={t('ai.send')}
                   >
                     <ArrowUpIcon />
