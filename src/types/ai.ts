@@ -84,12 +84,9 @@ export interface AiSessionFile {
 }
 
 export type AgentRunPhase =
-  | 'idle'
   | 'planning'
-  | 'awaitingApproval'
-  | 'awaitingExecution'
-  | 'evaluating'
-  | 'completed'
+  | 'awaitingReview'
+  | 'handedOff'
   | 'cancelled'
   | 'error';
 
@@ -97,32 +94,56 @@ export type AgentStepStatus =
   | 'running'
   | 'completed'
   | 'informational'
-  | 'queued'
-  | 'awaitingApproval'
-  | 'inserted'
-  | 'superseded'
-  | 'rejected'
   | 'failed';
 
 export interface DiagnosticAgentPlanStep {
+  id: string;
   title: string;
   description: string;
-  command?: string;
+  command: string;
+  risk: 'readOnly' | 'stateChange' | 'destructive';
+  evidenceIds: string[];
+  impact: string;
+  rollback: string;
+  expected: {
+    exitCode: number;
+    stdoutContains: string[];
+  };
+  timeoutSeconds: number;
+  safeToRetry: boolean;
+}
+
+export interface DiagnosticAgentEvidenceRequirement {
+  id: string;
+  description: string;
+  source: 'context' | 'stepOutput';
+  sourceStepId: string | null;
+  maxAgeSeconds: number;
 }
 
 export interface DiagnosticAgentPlan {
+  objective: string;
+  target: string;
+  assumptions: string[];
   summary: string;
+  evidence: DiagnosticAgentEvidenceRequirement[];
   steps: DiagnosticAgentPlanStep[];
 }
 
-export interface AgentRunStep extends DiagnosticAgentPlanStep {
+export interface AgentRunStep {
   id: string;
   kind: 'tool' | 'analysis' | 'command';
+  title: string;
+  description: string;
+  command?: string;
+  risk?: 'readOnly' | 'stateChange' | 'destructive';
+  evidenceIds?: string[];
+  impact?: string;
+  rollback?: string;
+  expected?: DiagnosticAgentPlanStep['expected'];
+  timeoutSeconds?: number;
+  safeToRetry?: boolean;
   status: AgentStepStatus;
-  outputBaseline?: string;
-  executionMarker?: string;
-  exitCode?: number;
-  result?: string;
 }
 
 export interface AgentRun {
@@ -133,8 +154,10 @@ export interface AgentRun {
   profileId?: string;
   contextLabel: string;
   contextSource?: 'terminal' | 'remoteHealth';
+  contextObservedAt: number;
   phase: AgentRunPhase;
   summary?: string;
+  plan?: DiagnosticAgentPlan;
   responseText: string;
   steps: AgentRunStep[];
   error?: string;

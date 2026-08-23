@@ -216,14 +216,22 @@ function parsePrecheck(value: unknown, index: number): RunbookPrecheck {
 function parseStep(value: unknown, index: number): RunbookStep {
   const field = `steps[${index}]`;
   const entry = objectValue(value, field);
-  exactKeys(entry, ['id', 'description', 'command', 'expected', 'timeoutSeconds', 'risk', 'impact', 'safeToRetry'], field);
+  exactKeys(entry, [
+    'id', 'description', 'command', 'expected', 'timeoutSeconds', 'risk', 'impact', 'rollback',
+    'safeToRetry',
+  ], field);
   const risk: RunbookRisk = entry.risk as RunbookRisk;
   if (risk !== 'readOnly' && risk !== 'stateChange' && risk !== 'destructive') fail(`${field}.risk is invalid`);
   if (typeof entry.safeToRetry !== 'boolean') fail(`${field}.safeToRetry must be boolean`);
+  const rollback = entry.rollback === undefined
+    ? undefined
+    : stringValue(entry.rollback, `${field}.rollback`);
+  if (risk !== 'readOnly' && !rollback) fail(`${field}.rollback is required for modifying actions`);
   const step = {
     ...parseActionBase(entry, field),
     risk,
     impact: stringValue(entry.impact, `${field}.impact`),
+    ...(rollback ? { rollback } : {}),
     safeToRetry: entry.safeToRetry,
   };
   validateDeclaredRisk(step.command, step.risk, field);
@@ -271,8 +279,8 @@ export function parseRunbookText(text: string): RunbookDocument {
   if (!Array.isArray(document.prechecks) || document.prechecks.length === 0 || document.prechecks.length > 16) {
     fail('prechecks must contain 1-16 entries');
   }
-  if (!Array.isArray(document.steps) || document.steps.length === 0 || document.steps.length > 64) {
-    fail('steps must contain 1-64 entries');
+  if (!Array.isArray(document.steps) || document.steps.length > 64) {
+    fail('steps must contain at most 64 entries');
   }
   const result: RunbookDocument = {
     schemaVersion: 1,
@@ -344,6 +352,7 @@ export function prepareRunbook(
       kind: 'precheck' as const,
       risk: 'readOnly' as const,
       impact: 'Read-only prerequisite evidence for this target.',
+      rollback: undefined,
       safeToRetry: true,
       commandPreview: interpolatePreview(precheck.command, variables, values),
       status: 'queued' as const,
@@ -598,6 +607,7 @@ export const RUNBOOK_EXAMPLE = `{
       "command": "sudo systemctl reload {{SERVICE}}",
       "risk": "stateChange",
       "impact": "Reloads the selected service without stopping it.",
+      "rollback": "If the reload fails, keep the current process running and restore the previous validated configuration before retrying.",
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 30,
       "safeToRetry": true

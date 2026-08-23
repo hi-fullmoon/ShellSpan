@@ -26,6 +26,7 @@ export interface RunbookPrecheck {
 export interface RunbookStep extends RunbookPrecheck {
   risk: RunbookRisk;
   impact: string;
+  rollback?: string;
   safeToRetry: boolean;
 }
 
@@ -81,6 +82,7 @@ export interface RunbookRunItem {
   commandPreview: string;
   risk: RunbookRisk;
   impact: string;
+  rollback?: string;
   safeToRetry: boolean;
   timeoutSeconds: number;
   status: RunbookRunItemStatus;

@@ -40,6 +40,7 @@ const RUNBOOK = JSON.stringify({
     command: 'sudo systemctl reload {{SERVICE}}',
     risk: 'stateChange',
     impact: 'Reloads one service on exactly one reviewed host.',
+    rollback: 'Restart the previous service configuration on the same reviewed host.',
     expected: { exitCode: 0 },
     timeoutSeconds: 20,
     safeToRetry: true,

@@ -1,8 +1,14 @@
-import type { DiagnosticAgentPlan, DiagnosticAgentPlanStep } from '@/types/ai';
+import { parseRunbookText, serializeRunbook } from '@/lib/runbook';
+import type {
+  DiagnosticAgentEvidenceRequirement,
+  DiagnosticAgentPlan,
+  DiagnosticAgentPlanStep,
+} from '@/types/ai';
+import type { RunbookDocument } from '@/types/runbook';
 
 const MAX_AGENT_STEPS = 8;
 const MAX_FIELD_LENGTH = 4000;
-const MAX_RESULT_LINES = 40;
+const PLAN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const GENERIC_READ_ONLY_COMMANDS = new Set([
   'cat', 'df', 'du', 'free', 'grep', 'head', 'id', 'ls', 'lsof', 'netstat', 'ps', 'stat',
   'tail', 'uname', 'uptime', 'whoami',
@@ -55,6 +61,38 @@ function requiredString(value: unknown, field: string): string {
     throw new Error(`Agent plan ${field} must be a non-empty string`);
   }
   return value.trim().slice(0, MAX_FIELD_LENGTH);
+}
+
+function objectValue(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Agent plan ${field} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function exactKeys(value: Record<string, unknown>, allowed: string[], field: string): void {
+  const unexpected = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unexpected) throw new Error(`Agent plan ${field} contains unknown field ${unexpected}`);
+}
+
+function idValue(value: unknown, field: string): string {
+  const result = requiredString(value, field);
+  if (!PLAN_ID_PATTERN.test(result)) throw new Error(`Agent plan ${field} is invalid`);
+  return result;
+}
+
+function integerValue(value: unknown, field: string, min: number, max: number): number {
+  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
+    throw new Error(`Agent plan ${field} must be an integer from ${min} to ${max}`);
+  }
+  return value as number;
+}
+
+function stringArray(value: unknown, field: string, max: number, allowEmpty = false): string[] {
+  if (!Array.isArray(value) || value.length > max || (!allowEmpty && value.length === 0)) {
+    throw new Error(`Agent plan ${field} must contain ${allowEmpty ? '0' : '1'}-${max} strings`);
+  }
+  return value.map((item, index) => requiredString(item, `${field}[${index}]`));
 }
 
 export function isSafeReadOnlyAgentCommand(command: string): boolean {
@@ -112,74 +150,70 @@ export function isSafeReadOnlyAgentCommand(command: string): boolean {
   return false;
 }
 
-export function createAgentExecutionMarker(stepId: string): string {
-  const normalizedId = stepId.replace(/[^A-Za-z0-9]/g, '').slice(-32) || 'STEP';
-  return `__TERMBRIDGE_AGENT_RESULT_${normalizedId}__`;
-}
-
-export function buildAgentExecutionCommand(command: string, marker: string): string {
-  if (!isSafeReadOnlyAgentCommand(command) || !/^__TERMBRIDGE_AGENT_RESULT_[A-Za-z0-9]+__$/.test(marker)) {
-    throw new Error('Cannot instrument an unsafe agent command');
+function parseEvidence(value: unknown, index: number): DiagnosticAgentEvidenceRequirement {
+  const field = `evidence ${index + 1}`;
+  const evidence = objectValue(value, field);
+  exactKeys(evidence, ['id', 'description', 'source', 'sourceStepId', 'maxAgeSeconds'], field);
+  if (evidence.source !== 'context' && evidence.source !== 'stepOutput') {
+    throw new Error(`Agent plan ${field} source is invalid`);
   }
-  return `${command}; printf '\\n${marker}:%s\\n' "$?"`;
-}
-
-export interface AgentCommandCompletion {
-  exitCode: number;
-  result?: string;
-}
-
-export function extractAgentCommandCompletion(
-  before: string,
-  after: string,
-  marker: string,
-): AgentCommandCompletion | undefined {
-  if (!/^__TERMBRIDGE_AGENT_RESULT_[A-Za-z0-9]+__$/.test(marker)) return undefined;
-  const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = new RegExp(`(?:^|\\n)${escapedMarker}:(\\d{1,3})(?=\\n|$)`).exec(after);
-  if (!match) return undefined;
-  const outputBeforeMarker = after.slice(0, match.index);
+  const sourceStepId = evidence.sourceStepId === null
+    ? null
+    : idValue(evidence.sourceStepId, `${field} sourceStepId`);
+  if (
+    (evidence.source === 'context' && sourceStepId !== null)
+    || (evidence.source === 'stepOutput' && sourceStepId === null)
+  ) {
+    throw new Error(`Agent plan ${field} sourceStepId does not match its source`);
+  }
   return {
-    exitCode: Number.parseInt(match[1], 10),
-    result: extractAgentCommandResult(before, outputBeforeMarker),
+    id: idValue(evidence.id, `${field} id`),
+    description: requiredString(evidence.description, `${field} description`),
+    source: evidence.source,
+    sourceStepId,
+    maxAgeSeconds: integerValue(evidence.maxAgeSeconds, `${field} maxAgeSeconds`, 30, 3600),
   };
 }
 
-export function extractAgentCommandResult(before: string, after: string): string | undefined {
-  const beforeLines = before.trim().split('\n').filter(Boolean);
-  const afterLines = after.trim().split('\n').filter(Boolean);
-  if (afterLines.length === 0) return undefined;
-
-  let overlap = 0;
-  const maxOverlap = Math.min(beforeLines.length, afterLines.length);
-  for (let length = maxOverlap; length > 0; length -= 1) {
-    const beforeStart = beforeLines.length - length;
-    const matches = beforeLines
-      .slice(beforeStart)
-      .every((line, index) => line === afterLines[index]);
-    if (matches) {
-      overlap = length;
-      break;
-    }
-  }
-
-  const resultLines = afterLines.slice(overlap).slice(-MAX_RESULT_LINES);
-  return resultLines.length > 0 ? resultLines.join('\n') : undefined;
-}
-
 function parseStep(value: unknown, index: number): DiagnosticAgentPlanStep {
-  if (!value || typeof value !== 'object') {
-    throw new Error(`Agent plan step ${index + 1} is invalid`);
+  const field = `step ${index + 1}`;
+  const step = objectValue(value, field);
+  exactKeys(step, [
+    'id', 'title', 'description', 'command', 'risk', 'evidenceIds', 'impact', 'rollback',
+    'expected', 'timeoutSeconds', 'safeToRetry',
+  ], field);
+  if (step.risk !== 'readOnly' && step.risk !== 'stateChange' && step.risk !== 'destructive') {
+    throw new Error(`Agent plan ${field} risk is invalid`);
   }
-  const step = value as Record<string, unknown>;
-  const command = typeof step.command === 'string' ? step.command.trim() : undefined;
-  if (command && !isSafeReadOnlyAgentCommand(command)) {
-    throw new Error(`Agent plan step ${index + 1} contains an unsafe command`);
+  const command = requiredString(step.command, `${field} command`);
+  if (step.risk === 'readOnly' && !isSafeReadOnlyAgentCommand(command)) {
+    throw new Error(`Agent plan ${field} contains an unsafe read-only command`);
+  }
+  const expected = objectValue(step.expected, `${field} expected`);
+  exactKeys(expected, ['exitCode', 'stdoutContains'], `${field} expected`);
+  if (typeof step.safeToRetry !== 'boolean') {
+    throw new Error(`Agent plan ${field} safeToRetry must be boolean`);
   }
   return {
-    title: requiredString(step.title, `step ${index + 1} title`),
-    description: requiredString(step.description, `step ${index + 1} description`),
-    command: command ? command.slice(0, MAX_FIELD_LENGTH) : undefined,
+    id: idValue(step.id, `${field} id`),
+    title: requiredString(step.title, `${field} title`),
+    description: requiredString(step.description, `${field} description`),
+    command,
+    risk: step.risk,
+    evidenceIds: stringArray(step.evidenceIds, `${field} evidenceIds`, 8),
+    impact: requiredString(step.impact, `${field} impact`),
+    rollback: requiredString(step.rollback, `${field} rollback`),
+    expected: {
+      exitCode: integerValue(expected.exitCode, `${field} expected exitCode`, 0, 255),
+      stdoutContains: stringArray(
+        expected.stdoutContains,
+        `${field} expected stdoutContains`,
+        20,
+        true,
+      ),
+    },
+    timeoutSeconds: integerValue(step.timeoutSeconds, `${field} timeoutSeconds`, 1, 300),
+    safeToRetry: step.safeToRetry,
   };
 }
 
@@ -191,12 +225,169 @@ export function parseDiagnosticAgentPlan(value: string): DiagnosticAgentPlan {
     throw new Error('Agent returned an invalid plan');
   }
   if (!parsed || typeof parsed !== 'object') throw new Error('Agent returned an invalid plan');
-  const plan = parsed as Record<string, unknown>;
+  const plan = objectValue(parsed, 'document');
+  exactKeys(plan, ['objective', 'target', 'assumptions', 'summary', 'evidence', 'steps'], 'document');
   if (!Array.isArray(plan.steps) || plan.steps.length === 0 || plan.steps.length > MAX_AGENT_STEPS) {
     throw new Error(`Agent plan must contain 1-${MAX_AGENT_STEPS} steps`);
   }
-  return {
+  if (!Array.isArray(plan.evidence) || plan.evidence.length === 0 || plan.evidence.length > MAX_AGENT_STEPS) {
+    throw new Error(`Agent plan must contain 1-${MAX_AGENT_STEPS} evidence requirements`);
+  }
+  const result: DiagnosticAgentPlan = {
+    objective: requiredString(plan.objective, 'objective'),
+    target: requiredString(plan.target, 'target'),
+    assumptions: stringArray(plan.assumptions, 'assumptions', 8),
     summary: requiredString(plan.summary, 'summary'),
+    evidence: plan.evidence.map(parseEvidence),
     steps: plan.steps.map(parseStep),
   };
+  validatePlanRelationships(result);
+  // Reuse the same parser that guards reviewed Runbooks so a model cannot
+  // understate command risk or smuggle an unsupported command into handoff.
+  parseRunbookText(buildRunbookText(result));
+  return result;
+}
+
+function validatePlanRelationships(plan: DiagnosticAgentPlan): void {
+  const stepIndexes = new Map<string, number>();
+  plan.steps.forEach((step, index) => {
+    if (stepIndexes.has(step.id)) throw new Error(`Agent plan contains duplicate step ${step.id}`);
+    stepIndexes.set(step.id, index);
+  });
+  const evidenceById = new Map<string, DiagnosticAgentEvidenceRequirement>();
+  for (const evidence of plan.evidence) {
+    if (evidenceById.has(evidence.id)) {
+      throw new Error(`Agent plan contains duplicate evidence ${evidence.id}`);
+    }
+    if (evidence.sourceStepId) {
+      const source = plan.steps.find((step) => step.id === evidence.sourceStepId);
+      if (!source || source.risk !== 'readOnly') {
+        throw new Error(`Agent plan evidence ${evidence.id} must come from a read-only step`);
+      }
+    }
+    evidenceById.set(evidence.id, evidence);
+  }
+  const firstModification = plan.steps.findIndex((step) => step.risk !== 'readOnly');
+  if (
+    firstModification >= 0
+    && plan.steps.slice(firstModification + 1).some((step) => step.risk === 'readOnly')
+  ) {
+    throw new Error('Agent plan read-only evidence steps must precede modifying steps');
+  }
+  let modificationSeen = false;
+  for (const step of plan.steps) {
+    if (step.risk === 'readOnly') {
+      if (modificationSeen) {
+        throw new Error('Agent plan read-only evidence steps must precede modifying steps');
+      }
+      if (!plan.evidence.some((evidence) => evidence.sourceStepId === step.id)) {
+        throw new Error(`Agent plan read-only step ${step.id} has no traceable evidence requirement`);
+      }
+    } else {
+      modificationSeen = true;
+    }
+    for (const evidenceId of step.evidenceIds) {
+      const evidence = evidenceById.get(evidenceId);
+      if (!evidence) throw new Error(`Agent plan step ${step.id} cites unknown evidence ${evidenceId}`);
+      if (step.risk !== 'readOnly') {
+        const sourceIndex = evidence.sourceStepId
+          ? stepIndexes.get(evidence.sourceStepId)
+          : undefined;
+        const stepIndex = stepIndexes.get(step.id) ?? -1;
+        if (evidence.source !== 'stepOutput' || sourceIndex === undefined || sourceIndex >= stepIndex) {
+          throw new Error(`Agent plan modifying step ${step.id} lacks prior executable evidence`);
+        }
+      }
+    }
+  }
+}
+
+function runbookId(plan: DiagnosticAgentPlan): string {
+  const slug = plan.objective
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 55);
+  return `ai-${slug || 'assisted-plan'}`;
+}
+
+function buildRunbookText(plan: DiagnosticAgentPlan): string {
+  const stepEvidence = plan.evidence.filter((evidence) => evidence.source === 'stepOutput');
+  const description = [
+    plan.summary,
+    `Objective: ${plan.objective}`,
+    `Target: ${plan.target}`,
+    `Assumptions: ${plan.assumptions.join('; ')}`,
+    'AI-generated draft: review and edit every field before execution.',
+  ].join('\n').slice(0, MAX_FIELD_LENGTH);
+  const document: RunbookDocument = {
+    schemaVersion: 1,
+    id: runbookId(plan),
+    name: plan.objective.slice(0, 200),
+    description,
+    evidenceMaxAgeSeconds: Math.min(...stepEvidence.map((item) => item.maxAgeSeconds)),
+    variables: [],
+    prechecks: plan.steps
+      .filter((step) => step.risk === 'readOnly')
+      .map((step) => ({
+        id: step.id,
+        description: `${step.title}: ${step.description}`.slice(0, MAX_FIELD_LENGTH),
+        command: step.command,
+        expected: {
+          exitCode: step.expected.exitCode,
+          ...(step.expected.stdoutContains.length
+            ? { stdoutContains: step.expected.stdoutContains }
+            : {}),
+        },
+        timeoutSeconds: step.timeoutSeconds,
+      })),
+    steps: plan.steps
+      .filter((step) => step.risk !== 'readOnly')
+      .map((step) => ({
+        id: step.id,
+        description: `${step.title}: ${step.description}`.slice(0, MAX_FIELD_LENGTH),
+        command: step.command,
+        risk: step.risk,
+        impact: step.impact,
+        rollback: step.rollback,
+        expected: {
+          exitCode: step.expected.exitCode,
+          ...(step.expected.stdoutContains.length
+            ? { stdoutContains: step.expected.stdoutContains }
+            : {}),
+        },
+        timeoutSeconds: step.timeoutSeconds,
+        safeToRetry: step.safeToRetry,
+      })),
+  };
+  return serializeRunbook(document);
+}
+
+export function createAgentRunbookDraft(plan: DiagnosticAgentPlan): string {
+  const text = buildRunbookText(plan);
+  return serializeRunbook(parseRunbookText(text));
+}
+
+export const AI_RUNBOOK_DRAFT_EVENT = 'termbridge:review-ai-runbook';
+
+export interface AiRunbookDraftDetail {
+  sourceText: string;
+  profileId?: string;
+  contextLabel: string;
+  contextObservedAt: number;
+  objective: string;
+  target: string;
+}
+
+let pendingAgentRunbookDraft: AiRunbookDraftDetail | undefined;
+
+export function dispatchAgentRunbookDraft(detail: AiRunbookDraftDetail): void {
+  pendingAgentRunbookDraft = detail;
+  window.dispatchEvent(new CustomEvent<AiRunbookDraftDetail>(AI_RUNBOOK_DRAFT_EVENT, { detail }));
+}
+
+export function consumePendingAgentRunbookDraft(): AiRunbookDraftDetail | undefined {
+  const detail = pendingAgentRunbookDraft;
+  pendingAgentRunbookDraft = undefined;
+  return detail;
 }
