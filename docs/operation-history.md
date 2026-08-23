@@ -26,6 +26,8 @@ Database schema v5 adds an append-only `operation_history_events` table. Each ev
 - evidence references containing an operation ID, evidence kind, observation time, and optional digest;
 - Runbook command previews that already passed the Runbook literal-secret policy and keychain substitution, with a second backend check before persistence.
 
+For Runbook execution, the approval event stores the exact redacted command preview that the user reviewed, together with its approved risk and frozen target. The backend result must return the same command, risk, operation ID, run/task ID, profile, host, port, and username before it can be recorded as success. A mismatch is recorded as `identityMismatch`, and the untrusted returned command is not substituted for the reviewed command. Multi-host executions pin these approval and result events to the parent multi-host task while retaining the per-host operation ID.
+
 There is deliberately no arbitrary arguments, detail, stdout, stderr, terminal input, file-content, environment, credential, private-key, or secret-value column. Unknown actions and fields are rejected. Suspicious command previews are replaced in full with `[REDACTED COMMAND]` rather than partially retained.
 
 Writes are idempotent by event ID. A history write failure never authorizes or blocks the controlled operation and never changes its approval, cancellation, host-identity, risk, batch, concurrency, or circuit-breaker behavior. It is logged and shown as a visible warning so the missing audit evidence is not silent.
@@ -47,6 +49,7 @@ Markdown and JSON exports are generated directly from the structured local recor
 - Confirm database migrations create schema v5 without adding secret-bearing columns.
 - Confirm interactive terminal input and raw output never reach a history request.
 - Confirm result identity is checked for remote-health and Runbook results before success is recorded.
+- Confirm every Runbook approval event carries the reviewed command and exact target, and command/risk mismatches fail closed.
 - Confirm partial transfer and multi-host results remain partial.
 - Confirm write failures are visible but cannot become an execution bypass.
 - Confirm retention and clear affect only operation history.

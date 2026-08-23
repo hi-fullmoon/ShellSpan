@@ -458,7 +458,11 @@ fn sanitize_command_preview(
     preview: Option<String>,
 ) -> Option<String> {
     let preview = preview?;
-    if category != OperationCategory::Runbook || preview.is_empty() {
+    if !matches!(
+        category,
+        OperationCategory::Runbook | OperationCategory::MultiHost
+    ) || preview.is_empty()
+    {
         return None;
     }
     if preview.len() > 8 * 1024
@@ -1173,6 +1177,40 @@ mod tests {
         assert!(!json.contains("top-secret"));
         assert!(!markdown.contains("top-secret"));
         assert!(json.contains(REDACTED_COMMAND));
+    }
+
+    #[test]
+    fn retains_reviewed_multi_host_commands_and_applies_the_same_redaction() {
+        let mut approved = request("event-approved", "multi-task", OperationStatus::Running);
+        approved.category = OperationCategory::MultiHost;
+        approved.action = "executeMultiHostRunbook".to_string();
+        approved.event_kind = OperationEventKind::Approved;
+        let event = normalize_request(approved).unwrap();
+        assert_eq!(
+            event.command_preview.as_deref(),
+            Some("systemctl restart nginx")
+        );
+
+        let mut keychain_approval =
+            request("event-keychain", "multi-task", OperationStatus::Running);
+        keychain_approval.category = OperationCategory::MultiHost;
+        keychain_approval.action = "executeMultiHostRunbook".to_string();
+        keychain_approval.event_kind = OperationEventKind::Approved;
+        keychain_approval.command_preview =
+            Some("curl --password '<keychain://profile/password>' host".to_string());
+        let event = normalize_request(keychain_approval).unwrap();
+        assert_eq!(
+            event.command_preview.as_deref(),
+            Some("curl --password '<keychain://profile/password>' host")
+        );
+
+        let mut unsafe_approval = request("event-unsafe", "multi-task", OperationStatus::Running);
+        unsafe_approval.category = OperationCategory::MultiHost;
+        unsafe_approval.action = "executeMultiHostRunbook".to_string();
+        unsafe_approval.event_kind = OperationEventKind::Approved;
+        unsafe_approval.command_preview = Some("curl --token=top-secret host".to_string());
+        let event = normalize_request(unsafe_approval).unwrap();
+        assert_eq!(event.command_preview.as_deref(), Some(REDACTED_COMMAND));
     }
 
     #[test]

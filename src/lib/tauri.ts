@@ -5,6 +5,7 @@ import {
   recordInvocationFailed,
   recordInvocationFinished,
   recordInvocationStarted,
+  type OperationHistoryInvocationMetadata,
 } from '@/lib/operation-history';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
@@ -71,10 +72,14 @@ import type {
 
 const logger = createLogger('ipc');
 
-async function invokeLogged<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+async function invokeLogged<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+  historyMetadata?: OperationHistoryInvocationMetadata,
+): Promise<T> {
   const operationId = findOperationId(args) ?? createOperationId(cmd);
   logger.debug(`invoke ${cmd} started operation_id=${operationId}`);
-  const history = await recordInvocationStarted(cmd, args, operationId);
+  const history = await recordInvocationStarted(cmd, args, operationId, historyMetadata);
   try {
     const result = await invoke<T>(cmd, args);
     logger.debug(`invoke ${cmd} completed operation_id=${operationId}`);
@@ -763,8 +768,13 @@ export async function invokeCancelRemoteHealthSnapshot(operationId: string): Pro
 
 export async function invokeExecuteRunbookStep(
   request: RunbookStepExecutionRequest,
+  historyMetadata?: OperationHistoryInvocationMetadata,
 ): Promise<RunbookStepExecutionResult> {
-  return invokeLogged<RunbookStepExecutionResult>('execute_runbook_step', { request });
+  return invokeLogged<RunbookStepExecutionResult>(
+    'execute_runbook_step',
+    { request },
+    historyMetadata,
+  );
 }
 
 export async function invokeCancelRunbookStep(operationId: string): Promise<void> {

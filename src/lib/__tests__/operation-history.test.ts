@@ -78,6 +78,66 @@ describe('operation history IPC boundary', () => {
     })).toBe('identityMismatch');
   });
 
+  it('pins approval to the reviewed command and task before accepting a result', async () => {
+    const context = await recordInvocationStarted('execute_runbook_step', {
+      request: {
+        operationId: 'step-approval-1',
+        runId: 'host-run-1',
+        profileId: 'p1',
+        itemId: 'reload-service',
+        approvedRisk: 'stateChange',
+        authorized: true,
+        connection: { profileId: 'p1', host: 'a.test', port: 22, username: 'alice' },
+      },
+    }, 'fallback', {
+      taskId: 'multi-host-task-1',
+      commandPreview: 'systemctl reload nginx',
+    });
+
+    expect(context).toMatchObject({
+      taskId: 'multi-host-task-1',
+      operationId: 'step-approval-1',
+      runId: 'host-run-1',
+      risk: 'stateChange',
+      commandPreview: 'systemctl reload nginx',
+      approved: true,
+      targets: [{ profileId: 'p1', host: 'a.test', port: 22, username: 'alice' }],
+    });
+
+    const result = {
+      operationId: 'step-approval-1',
+      runId: 'host-run-1',
+      profileId: 'p1',
+      status: 'success',
+      risk: 'stateChange',
+      commandPreview: 'systemctl reload nginx',
+      source: { host: 'a.test', port: 22, username: 'alice' },
+    };
+    expect(operationHistoryTestApi.statusFromResult(context!, result)).toBe('succeeded');
+    expect(operationHistoryTestApi.statusFromResult(context!, {
+      ...result,
+      commandPreview: 'systemctl restart nginx',
+    })).toBe('identityMismatch');
+    expect(operationHistoryTestApi.statusFromResult(context!, {
+      ...result,
+      risk: 'readOnly',
+    })).toBe('identityMismatch');
+
+    const keychainPreview = "curl --password '<keychain://profile/password>' example.test";
+    const keychainContext = await recordInvocationStarted('execute_runbook_step', {
+      request: {
+        operationId: 'step-keychain-1',
+        runId: 'host-run-2',
+        profileId: 'p1',
+        itemId: 'authenticated-check',
+        approvedRisk: 'stateChange',
+        authorized: true,
+        connection: { profileId: 'p1', host: 'a.test', port: 22, username: 'alice' },
+      },
+    }, 'fallback', { commandPreview: keychainPreview });
+    expect(keychainContext?.commandPreview).toBe(keychainPreview);
+  });
+
   it('makes cancellation, timeout, stale evidence, and target changes first-class errors', () => {
     expect(operationHistoryTestApi.historyError(new Error('operation cancelled'))).toEqual({
       status: 'cancelled',

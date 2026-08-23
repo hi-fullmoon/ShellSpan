@@ -196,6 +196,20 @@
       "testStrategy": "数据库 v5 迁移、任务时间线关联、目标/批准/命令/证据/退出码、交互式输入与原始输出排除、失败/取消/超时/身份错配/部分成功/重试、写入失败告警、Markdown/JSON 二次脱敏、保留策略与确认清除测试，并复跑隔离 SSH/SFTP E2E",
       "evidence": ["docs/operation-history.md", "src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/operation-history.ts", "src/types/operation-history.ts", "src/components/workbench/operation-history-panel.tsx", "src/lib/tauri.ts", "src/stores/transferStore.ts", "src/stores/portForwardStore.ts", "src/stores/remoteHealthStore.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx"],
       "tests": ["src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/operation-history-panel.test.tsx", "src/stores/__tests__/transferStore.test.ts", "src/stores/__tests__/portForwardStore.test.ts", "src/stores/__tests__/remoteHealthStore.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "scripts/run-ssh-e2e.ps1"]
+    },
+    {
+      "id": "later-exit-criteria",
+      "phase": "LATER",
+      "title": "LATER 退出条件验收",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
+      "owner": "maintainers",
+      "risk": "分节点测试全部通过但跨节点的中断/重试、安全边界或批准到结果的审计关联仍存在断点",
+      "failurePath": "任一中断、部分失败、重试、批准/命令/目标/结果关联或 AI 风险/上限/脱敏断言失败即保持 LATER 未验收；结果身份、命令或风险不匹配按 identityMismatch 失败关闭",
+      "recovery": "只允许修复退出条件所需的最小断点并重跑全部前端、Rust 与隔离 SSH 门禁；不创建新产品能力、不扩展执行通道，也不进入 EXPLORE",
+      "testStrategy": "复核 Runbook、多主机、AI 和操作记录的既有状态机与安全测试；新增批准事件精确命令绑定、多主机父任务关联、命令/风险结果错配和多主机命令二次脱敏回归，并运行全套阶段门禁",
+      "evidence": ["docs/later-exit-criteria.md", "docs/operation-history.md", "src/lib/operation-history.ts", "src/lib/tauri.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx", "src-tauri/src/operation_history.rs"],
+      "tests": ["src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/lib/__tests__/diagnostic-agent.test.ts", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "src-tauri/src/runbook.rs", "src-tauri/src/ai.rs", "src-tauri/src/operation_history.rs", "scripts/run-ssh-e2e.ps1"]
     }
   ]
 }
