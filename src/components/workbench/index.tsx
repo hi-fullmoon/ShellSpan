@@ -11,6 +11,7 @@ import { LogPanel } from './log-panel';
 import { MonitorPanel } from './monitor-panel';
 import { SettingsPanel } from './settings-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
+import { RunbookPanel } from './runbook-panel';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
 import type { ConnectionProfile } from '@/types';
@@ -242,6 +243,7 @@ const Workbench: React.FC = () => {
             <KnownHostsPanel onCreateConnection={handleCreateFromKnownHost} />
           )}
           {activeTab === 'keychain' && <KeychainPanel />}
+          {activeTab === 'runbooks' && <RunbookPanel />}
           {activeTab === 'monitor' && <MonitorPanel />}
           {activeTab === 'logs' && <LogPanel />}
           {activeTab === 'settings' && <SettingsPanel />}

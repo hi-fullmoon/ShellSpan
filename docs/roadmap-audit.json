@@ -145,13 +145,15 @@
       "id": "later-runbooks",
       "phase": "LATER",
       "title": "本地 Runbook",
-      "status": "planned",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
       "owner": "maintainers",
-      "risk": "变量注入或高风险步骤未经明确批准",
-      "failurePath": "解析、前置检查或步骤失败即按策略停止",
-      "recovery": "从标记为安全的步骤重试，秘密只保留钥匙串引用",
-      "testStrategy": "文本格式、风险分级、变量解析、暂停/跳过/重试状态机测试",
-      "evidence": ["docs/ai-agent-design.md"]
+      "risk": "变量注入、风险低报、高风险步骤未经明确批准，或秘密进入文本、终端回显、日志与导出",
+      "failurePath": "前后端共同拒绝解析/校验失败、未知字段、明文秘密、未授权或风险错配；前置检查、取消、超时、预期不匹配、步骤失败与结果身份错配均失败停止，不推进后续步骤",
+      "recovery": "仅可从明确 safeToRetry 的步骤或固有安全的只读预检重试；暂停后证据过期必须重跑安全预检；秘密只在 Rust 执行边界解析钥匙串引用并在所有返回内容中按值脱敏",
+      "testStrategy": "规范化 JSON、未知字段与明文秘密拒绝、风险分级、shell 安全变量解析、审批拒绝、暂停/跳过、取消/超时/失败停止、安全重试、证据陈旧和结果身份绑定测试，并在隔离 SSH 服务执行真实 Runbook 步骤",
+      "evidence": ["docs/runbook-format.md", "src/lib/runbook.ts", "src/types/runbook.ts", "src/components/workbench/runbook-panel.tsx", "src-tauri/src/runbook.rs"],
+      "tests": ["src/lib/__tests__/runbook.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src-tauri/src/runbook.rs", "scripts/run-ssh-e2e.ps1"]
     },
     {
       "id": "later-multi-host",

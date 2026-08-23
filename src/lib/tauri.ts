@@ -58,6 +58,11 @@ import type {
   AiSessionMeta,
   AiStartRequest,
 } from '@/types/ai';
+import type {
+  RunbookFile,
+  RunbookStepExecutionRequest,
+  RunbookStepExecutionResult,
+} from '@/types/runbook';
 
 const logger = createLogger('ipc');
 
@@ -744,4 +749,22 @@ export async function invokeCollectRemoteHealthSnapshot(
 
 export async function invokeCancelRemoteHealthSnapshot(operationId: string): Promise<void> {
   return invokeLogged('cancel_remote_health_snapshot', { operationId });
+}
+
+export async function invokeExecuteRunbookStep(
+  request: RunbookStepExecutionRequest,
+): Promise<RunbookStepExecutionResult> {
+  return invokeLogged<RunbookStepExecutionResult>('execute_runbook_step', { request });
+}
+
+export async function invokeCancelRunbookStep(operationId: string): Promise<void> {
+  return invokeLogged('cancel_runbook_step', { operationId });
+}
+
+export async function invokeOpenRunbookFile(): Promise<RunbookFile | null> {
+  return invokeLogged<RunbookFile | null>('open_runbook_file');
+}
+
+export async function invokeSaveRunbookFile(text: string): Promise<RunbookFile | null> {
+  return invokeLogged<RunbookFile | null>('save_runbook_file', { text });
 }

@@ -16,6 +16,7 @@ mod path_utils;
 mod port_forward;
 mod remote_fs;
 mod remote_health;
+mod runbook;
 mod session;
 mod sftp_pool;
 
@@ -29,8 +30,8 @@ use models::{
 };
 use models::{
     DownloadCancellationRegistry, RemoteCopyCancellationRegistry, RemoteHealthCancellationRegistry,
-    SessionErrorEvent, SessionIdentity, SessionManager, SessionStatus, StatusEvent,
-    UploadCancellationRegistry,
+    RunbookCancellationRegistry, SessionErrorEvent, SessionIdentity, SessionManager, SessionStatus,
+    StatusEvent, UploadCancellationRegistry,
 };
 
 pub(crate) use connection::{
@@ -226,6 +227,7 @@ pub fn run() {
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
         .manage(RemoteHealthCancellationRegistry::default())
+        .manage(RunbookCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
         .manage(port_forward::PortForwardManager::default())
@@ -327,6 +329,10 @@ pub fn run() {
             health::get_system_health,
             remote_health::collect_remote_health_snapshot,
             remote_health::cancel_remote_health_snapshot,
+            runbook::execute_runbook_step,
+            runbook::cancel_runbook_step,
+            runbook::open_runbook_file,
+            runbook::save_runbook_file,
         ]);
 
     menu::configure_builder(builder)
