@@ -2,7 +2,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { classifyError } from '@/lib/error';
 import { createLogger } from '@/lib/logger';
 import { createOperationId } from '@/lib/operation-id';
-import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
 import { t } from '@/locales';
 import { useToastStore } from '@/stores/toastStore';
 import type {
@@ -29,6 +28,7 @@ let lastWriteWarningAt = 0;
 interface InvocationHistoryContext {
   taskId: string;
   operationId: string;
+  runId?: string;
   category: OperationHistoryCategory;
   action: OperationHistoryAction;
   risk: OperationHistoryRisk;
@@ -38,7 +38,13 @@ interface InvocationHistoryContext {
   startedAt: number;
   cancelRequest: boolean;
   approved: boolean;
+  commandPreview?: string;
   itemCount?: number;
+}
+
+export interface OperationHistoryInvocationMetadata {
+  taskId?: string;
+  commandPreview?: string;
 }
 
 interface InvocationHistoryDescriptor {
@@ -288,6 +294,7 @@ function newEvent(
     risk: context.risk,
     subjectId: context.subjectId,
     targets: context.targets,
+    commandPreview: context.commandPreview,
     evidence: context.evidence,
     itemCount: context.itemCount,
     ...overrides,
@@ -332,15 +339,18 @@ export async function recordInvocationStarted(
   command: string,
   args: Record<string, unknown> | undefined,
   fallbackOperationId: string,
+  metadata?: OperationHistoryInvocationMetadata,
 ): Promise<InvocationHistoryContext | undefined> {
   const descriptor = descriptorFor(command, args);
   if (!descriptor) return undefined;
   const requestOperationId = stringValue(descriptor.request.operationId)
     ?? stringValue(args?.operationId)
     ?? fallbackOperationId;
+  const reviewedCommand = stringValue(metadata?.commandPreview);
   const context: InvocationHistoryContext = {
-    taskId: descriptor.taskId ?? requestOperationId,
+    taskId: stringValue(metadata?.taskId) ?? descriptor.taskId ?? requestOperationId,
     operationId: requestOperationId,
+    runId: stringValue(descriptor.request.runId),
     category: descriptor.category,
     action: descriptor.action,
     risk: descriptor.risk,
@@ -350,6 +360,7 @@ export async function recordInvocationStarted(
     startedAt: Date.now(),
     cancelRequest: descriptor.cancelRequest ?? false,
     approved: descriptor.approved ?? false,
+    commandPreview: reviewedCommand,
     itemCount: descriptor.itemCount,
   };
   if (context.cancelRequest) {
@@ -380,11 +391,13 @@ function statusFromResult(
     const source = objectValue(record?.source);
     if (
       stringValue(record?.operationId) !== context.operationId
-      || stringValue(record?.runId) !== context.taskId
+      || (context.runId && stringValue(record?.runId) !== context.runId)
       || (context.targets[0]?.profileId && stringValue(record?.profileId) !== context.targets[0].profileId)
       || (context.targets[0]?.host && stringValue(source?.host) !== context.targets[0].host)
       || (context.targets[0]?.port && numberValue(source?.port) !== context.targets[0].port)
       || (context.targets[0]?.username && stringValue(source?.username) !== context.targets[0].username)
+      || stringValue(record?.risk) !== context.risk
+      || (context.commandPreview && stringValue(record?.commandPreview) !== context.commandPreview)
     ) return 'identityMismatch';
   }
   if (context.category === 'remoteHealth') {
@@ -462,7 +475,7 @@ export async function recordInvocationFinished(
   const record = objectValue(result);
   const items = Array.isArray(record?.items) ? record.items : undefined;
   const commandPreview = context.category === 'runbook'
-    ? stringValue(record?.commandPreview)
+    ? context.commandPreview ?? stringValue(record?.commandPreview)
     : undefined;
   await recordOperationHistoryEvent(newEvent(
     context,
@@ -471,7 +484,7 @@ export async function recordInvocationFinished(
     {
       occurredAt: numberValue(record?.completedAt) ?? Date.now(),
       targets: targetsFromResult(context, result),
-      commandPreview: commandPreview ? redactTerminalSecrets(commandPreview) : undefined,
+      commandPreview,
       errorCategory: errorForStatus(status),
       itemCount: items?.length ?? context.itemCount,
       exitCode: numberValue(record?.exitCode),

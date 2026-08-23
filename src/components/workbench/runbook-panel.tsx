@@ -202,6 +202,7 @@ export const RunbookPanel: React.FC = () => {
       status,
       risk: item?.risk ?? 'readOnly',
       subjectId: item?.id,
+      commandPreview: item?.commandPreview,
       targets: [{
         kind: 'remote',
         profileId: current.target.profileId,
@@ -409,26 +410,29 @@ export const RunbookPanel: React.FC = () => {
       const plainValues = Object.fromEntries(document.variables
         .filter((variable) => !variable.keychainRef && variableValues[variable.name] !== undefined)
         .map((variable) => [variable.name, variableValues[variable.name]]));
-      const result = await invokeExecuteRunbookStep({
-        operationId: nextOperationId,
-        runId: run.id,
-        sourceDigest: run.sourceDigest,
-        runbookText: validatedText,
-        itemId: activeItem.id,
-        itemKind: activeItem.kind,
-        profileId: profile.id,
-        authorized: true,
-        approvedRisk: activeItem.risk,
-        variableValues: plainValues,
-        evidenceReferences: run.items.flatMap((item) => item.evidence ? [{
-          operationId: item.evidence.operationId,
-          kind: 'runbookStep' as const,
-          observedAt: item.evidence.completedAt,
-          digest: run.sourceDigest,
-        }] : []),
-        timeoutMs: activeItem.timeoutSeconds * 1000,
-        connection: buildRemoteConnectionRequest(preparedProfile),
-      });
+      const result = await invokeExecuteRunbookStep(
+        {
+          operationId: nextOperationId,
+          runId: run.id,
+          sourceDigest: run.sourceDigest,
+          runbookText: validatedText,
+          itemId: activeItem.id,
+          itemKind: activeItem.kind,
+          profileId: profile.id,
+          authorized: true,
+          approvedRisk: activeItem.risk,
+          variableValues: plainValues,
+          evidenceReferences: run.items.flatMap((item) => item.evidence ? [{
+            operationId: item.evidence.operationId,
+            kind: 'runbookStep' as const,
+            observedAt: item.evidence.completedAt,
+            digest: run.sourceDigest,
+          }] : []),
+          timeoutMs: activeItem.timeoutSeconds * 1000,
+          connection: buildRemoteConnectionRequest(preparedProfile),
+        },
+        { commandPreview: activeItem.commandPreview },
+      );
       if (result.status === 'success') {
         await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
       }

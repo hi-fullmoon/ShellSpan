@@ -177,6 +177,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
       status,
       risk: item?.risk ?? 'readOnly',
       subjectId: item?.id,
+      commandPreview: item?.commandPreview,
       targets: [{
         kind: 'remote',
         profileId: host.target.profileId,
@@ -348,26 +349,32 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
         const settled = await Promise.all(preparedDispatches.map(async ({ dispatch, prepared }) => {
           try {
             const currentHost = taskRef.current.hosts.find((host) => host.target.profileId === dispatch.profileId);
-            const value = await invokeExecuteRunbookStep({
-              operationId: dispatch.operationId,
-              runId: dispatch.runId,
-              sourceDigest: dispatch.sourceDigest,
-              runbookText: dispatch.runbookText,
-              itemId: dispatch.itemId,
-              itemKind: dispatch.itemKind,
-              profileId: dispatch.profileId,
-              authorized: true,
-              approvedRisk: dispatch.risk,
-              variableValues: { ...dispatch.variableValues },
-              evidenceReferences: currentHost?.run.items.flatMap((item) => item.evidence ? [{
-                operationId: item.evidence.operationId,
-                kind: 'runbookStep' as const,
-                observedAt: item.evidence.completedAt,
-                digest: dispatch.sourceDigest,
-              }] : []),
-              timeoutMs: dispatch.timeoutMs,
-              connection: buildRemoteConnectionRequest(prepared.preparedProfile),
-            });
+            const value = await invokeExecuteRunbookStep(
+              {
+                operationId: dispatch.operationId,
+                runId: dispatch.runId,
+                sourceDigest: dispatch.sourceDigest,
+                runbookText: dispatch.runbookText,
+                itemId: dispatch.itemId,
+                itemKind: dispatch.itemKind,
+                profileId: dispatch.profileId,
+                authorized: true,
+                approvedRisk: dispatch.risk,
+                variableValues: { ...dispatch.variableValues },
+                evidenceReferences: currentHost?.run.items.flatMap((item) => item.evidence ? [{
+                  operationId: item.evidence.operationId,
+                  kind: 'runbookStep' as const,
+                  observedAt: item.evidence.completedAt,
+                  digest: dispatch.sourceDigest,
+                }] : []),
+                timeoutMs: dispatch.timeoutMs,
+                connection: buildRemoteConnectionRequest(prepared.preparedProfile),
+              },
+              {
+                taskId: taskRef.current.id,
+                commandPreview: dispatch.commandPreview,
+              },
+            );
             return { dispatch, prepared, value };
           } catch (error) {
             return {
