@@ -20,6 +20,8 @@ import type {
   LocalDirectoryListing,
   LogFileInfo,
   ProfileRow,
+  PortForwardRuntime,
+  PortForwardStartRequest,
   ProfileSecretKind,
   RemoteConnectionRequest,
   RemoteDirectoryListing,
@@ -641,6 +643,24 @@ export async function invokeSaveTerminalWorkspace(sessionsJson: string): Promise
 
 export async function invokeClearTerminalWorkspace(): Promise<void> {
   return invokeLogged('clear_terminal_workspace');
+}
+
+export async function invokeStartPortForward(
+  request: PortForwardStartRequest,
+): Promise<PortForwardRuntime> {
+  return invokeLogged<PortForwardRuntime>('start_port_forward', { request });
+}
+
+export async function invokeStopPortForward(operationId: string): Promise<PortForwardRuntime> {
+  return invokeLogged<PortForwardRuntime>('stop_port_forward', { operationId });
+}
+
+export async function invokeStopAllPortForwards(): Promise<PortForwardRuntime[]> {
+  return invokeLogged<PortForwardRuntime[]>('stop_all_port_forwards');
+}
+
+export async function invokeListPortForwards(): Promise<PortForwardRuntime[]> {
+  return invokeLogged<PortForwardRuntime[]>('list_port_forwards');
 }
 
 export async function invokeLoadSftpWorkspace(): Promise<string | null> {

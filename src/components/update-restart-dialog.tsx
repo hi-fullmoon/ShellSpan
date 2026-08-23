@@ -14,6 +14,7 @@ interface UpdateRestartDialogProps {
   version: string;
   hasActiveSessions: boolean;
   activeTransferCount: number;
+  activePortForwardCount: number;
   downloadProgress?: number;
   onInstallNow: () => void;
   onLater: () => void;
@@ -24,6 +25,7 @@ export const UpdateRestartDialog: React.FC<UpdateRestartDialogProps> = ({
   version,
   hasActiveSessions,
   activeTransferCount,
+  activePortForwardCount,
   downloadProgress,
   onInstallNow,
   onLater,
@@ -52,6 +54,11 @@ export const UpdateRestartDialog: React.FC<UpdateRestartDialogProps> = ({
           {activeTransferCount > 0 ? (
             <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {t('update.restartDialog.activeTransferWarning', { count: activeTransferCount })}
+            </div>
+          ) : null}
+          {activePortForwardCount > 0 ? (
+            <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {t('update.restartDialog.activePortForwardWarning', { count: activePortForwardCount })}
             </div>
           ) : null}
         </CompactDialogBody>

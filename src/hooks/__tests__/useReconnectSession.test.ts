@@ -4,6 +4,7 @@ import { useReconnectSession } from '../useReconnectSession';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 
 vi.mock('@/lib/tauri', () => ({
   invokeGetSessionStatus: vi.fn().mockResolvedValue({
@@ -61,12 +62,14 @@ import {
 
 const initialTerminal = useTerminalStore.getState();
 const initialProfile = useProfileStore.getState();
+const initialPortForward = usePortForwardStore.getState();
 
 describe('useReconnectSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
+    usePortForwardStore.setState(initialPortForward, true);
     terminalRegistry.disposeAll();
     vi.mocked(promptForMissingPassword).mockReset();
     vi.mocked(promptForMissingPassword).mockImplementation((profile) =>
@@ -84,6 +87,7 @@ describe('useReconnectSession', () => {
     terminalRegistry.disposeAll();
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
+    usePortForwardStore.setState(initialPortForward, true);
   });
 
   it('recreates a local session when the session has no profileId', async () => {
@@ -136,6 +140,8 @@ describe('useReconnectSession', () => {
   });
 
   it('creates a new session and replaces the old one on success', async () => {
+    const startAutoForOwner = vi.fn().mockResolvedValue(undefined);
+    usePortForwardStore.setState({ startAutoForOwner });
     useProfileStore.setState({
       profiles: [
         {
@@ -145,6 +151,15 @@ describe('useReconnectSession', () => {
           port: 22,
           username: 'u',
           authMethod: 'password',
+          portForwards: [{
+            id: 'forward-1',
+            name: 'Database',
+            kind: 'local',
+            localPort: 15432,
+            remoteHost: '127.0.0.1',
+            remotePort: 5432,
+            autoStart: true,
+          }],
           createdAt: 0,
           updatedAt: 0,
         },
@@ -177,6 +192,10 @@ describe('useReconnectSession', () => {
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
     expect(terminalRegistry.get('s2')?.terminal).toBe(terminal);
+    expect(startAutoForOwner).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'p1', password: 'mock-pass' }),
+      'terminal:s2',
+    );
   });
 
   it('closes a replacement created after the source session was removed', async () => {

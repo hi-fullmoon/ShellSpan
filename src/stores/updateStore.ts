@@ -10,6 +10,7 @@ import { invokeRequestAppRestart, isTauriRuntime } from '@/lib/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { t } from '@/locales';
 import type { UpdateStatus, UpdateVersionInfo } from '@/types';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 
 const logger = createLogger('update');
 
@@ -137,6 +138,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     set({ restartDialogDismissed: true });
     try {
       logger.info('Installing update now');
+      await usePortForwardStore.getState().stopAll();
       await invokeRequestAppRestart();
       return;
     } catch (error) {

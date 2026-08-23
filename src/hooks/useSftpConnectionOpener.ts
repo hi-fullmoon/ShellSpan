@@ -20,6 +20,7 @@ import {
   ensureKeychainKeyForProfile,
 } from '@/lib/keychain-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 
 const logger = createLogger('sftp');
 
@@ -64,6 +65,12 @@ export function useSftpConnectionOpener(): {
         port: profile.port,
         username: profile.username,
       };
+      const ownerPrefix = targetConnectionId
+        ? `sftp:${targetConnectionId}:${targetSide}:`
+        : undefined;
+      const releasedPreviousOwner = ownerPrefix
+        ? usePortForwardStore.getState().stopOwnersByPrefix(ownerPrefix)
+        : Promise.resolve();
       if (targetConnectionId) {
         attachRemoteConnection(targetConnectionId, targetSide, summary, connection, profile.id);
       } else {
@@ -75,6 +82,9 @@ export function useSftpConnectionOpener(): {
       void invokeWarmRemoteConnection(connection).catch(() => {});
       const connectionId = targetConnectionId ?? useSftpStore.getState().activeConnectionId;
       if (connectionId) {
+        void releasedPreviousOwner.then(() => usePortForwardStore
+          .getState()
+          .startAutoForOwner(profile, `sftp:${connectionId}:${targetSide}:${summary.sessionId}`));
         void hydrateSftpBookmarks(
           profile.host,
           profile.port,

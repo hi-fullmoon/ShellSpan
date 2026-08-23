@@ -115,13 +115,15 @@
       "id": "next-port-forwarding",
       "phase": "NEXT",
       "title": "端口转发生命周期",
-      "status": "in-progress",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
       "owner": "maintainers",
-      "risk": "断线后残留监听端口或错误转发目标",
-      "failurePath": "端口占用和启动错误可见，连接关闭触发停止",
-      "recovery": "允许手动停止、修正配置后重试",
-      "testStrategy": "启动/停止、占用端口、断线清理与重连测试",
-      "evidence": ["src-tauri/src/port_forward.rs", "src/types/index.ts"]
+      "risk": "断线、重连或退出后残留监听端口，错误目标或非预期公网监听，以及转发日志泄露内容",
+      "failurePath": "本地端口在命令返回前完成占用检查；启动与运行期错误进入可见状态；最后一个所属会话关闭或应用退出/重启时前后端共同触发停止",
+      "recovery": "允许手动停止、清除历史、修正配置后重试；失败状态保留稳定错误类别、最近错误、启动时间与流量计数",
+      "testStrategy": "配置持久化/安全导入导出、手动与随连接所有权、启动竞态、端口占用、断线/重连/退出清理、状态 UI，以及隔离 SSH 服务中的本地与远程双向转发和端口释放 E2E",
+      "evidence": ["src-tauri/src/port_forward.rs", "src-tauri/src/commands.rs", "src/stores/portForwardStore.ts", "src/components/workbench/port-forward-dialog.tsx", "src/hooks/usePortForwardEvents.ts", "src/stores/profileStore.ts", "src/lib/connection-import.ts", "src/App.tsx", "src/lib/host-overview.ts"],
+      "tests": ["src-tauri/src/port_forward.rs", "src/stores/__tests__/portForwardStore.test.ts", "src/components/workbench/__tests__/port-forward-dialog.test.tsx", "src/hooks/__tests__/useReconnectSession.test.ts", "src/hooks/__tests__/useMonitorEvents.test.ts", "src/stores/__tests__/profileStore.test.ts", "src/lib/__tests__/connection-import.test.ts", "src/lib/__tests__/host-overview.test.ts", "src/components/__tests__/update-restart-dialog.test.tsx", "scripts/run-ssh-e2e.ps1", "tests/ssh-e2e/Dockerfile"]
     },
     {
       "id": "next-health-snapshot",

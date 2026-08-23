@@ -18,6 +18,7 @@ describe('UpdateRestartDialog', () => {
         version="2.1.0"
         hasActiveSessions={false}
         activeTransferCount={0}
+        activePortForwardCount={0}
         downloadProgress={100}
         onInstallNow={vi.fn()}
         onLater={onLater}
@@ -39,11 +40,28 @@ describe('UpdateRestartDialog', () => {
         version="2.1.0"
         hasActiveSessions={false}
         activeTransferCount={2}
+        activePortForwardCount={0}
         onInstallNow={vi.fn()}
         onLater={vi.fn()}
       />,
     );
 
     expect(screen.getByText('update.restartDialog.activeTransferWarning')).toBeInTheDocument();
+  });
+
+  it('warns when a restart will stop active port forwards', () => {
+    render(
+      <UpdateRestartDialog
+        open
+        version="2.1.0"
+        hasActiveSessions={false}
+        activeTransferCount={0}
+        activePortForwardCount={1}
+        onInstallNow={vi.fn()}
+        onLater={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('update.restartDialog.activePortForwardWarning')).toBeInTheDocument();
   });
 });

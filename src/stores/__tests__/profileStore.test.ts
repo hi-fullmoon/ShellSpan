@@ -104,6 +104,7 @@ describe('profileStore', () => {
       tags: ['api', 'critical'],
       favorite: true,
       notes: 'Primary service',
+      portForwards: [],
     });
     expect(row).not.toHaveProperty('password');
   });
@@ -404,6 +405,15 @@ describe('profileStore', () => {
         tags: ['api', 'critical'],
         favorite: true,
         notes: 'Primary service',
+        portForwards: [{
+          id: 'forward-1',
+          name: 'Database',
+          kind: 'local',
+          localPort: 15432,
+          remoteHost: '127.0.0.1',
+          remotePort: 5432,
+          autoStart: true,
+        }],
       }),
       createdAt: 1,
       updatedAt: 1,
@@ -419,6 +429,10 @@ describe('profileStore', () => {
       tags: ['api', 'critical'],
       favorite: true,
       notes: 'Primary service',
+      portForwards: [expect.objectContaining({
+        id: 'forward-1',
+        autoStart: true,
+      })],
     });
     expect(invokeRetrieveProfilePassword).not.toHaveBeenCalled();
     expect(invokeRetrieveProfileSecret).not.toHaveBeenCalled();

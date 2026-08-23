@@ -221,6 +221,6 @@ describe('ConnectionList', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('hostOverview.title')).toBeInTheDocument();
     expect(screen.getByText('My Server · root@192.168.1.1:22')).toBeInTheDocument();
-    expect(screen.getByText('hostOverview.forwardsUntracked')).toBeInTheDocument();
+    expect(screen.getByText('hostOverview.forwardsDetail')).toBeInTheDocument();
   });
 });

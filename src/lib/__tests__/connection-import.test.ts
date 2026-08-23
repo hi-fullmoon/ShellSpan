@@ -123,6 +123,15 @@ describe('TermBridge connection export', () => {
       tags: ['api'],
       favorite: true,
       notes: 'api_key=must-redact operational note',
+      portForwards: [{
+        id: 'forward-database',
+        name: 'Database',
+        kind: 'local',
+        localPort: 15432,
+        remoteHost: '127.0.0.1',
+        remotePort: 5432,
+        autoStart: true,
+      }],
     }], '2026-08-23T00:00:00.000Z');
     expect(exported).not.toContain('must-not-export');
     expect(exported).not.toContain('device-only-key-id');
@@ -133,6 +142,10 @@ describe('TermBridge connection export', () => {
       tags: ['api'],
       favorite: true,
       notes: 'api_key=[REDACTED] operational note',
+      portForwards: [expect.objectContaining({
+        id: 'forward-database',
+        autoStart: true,
+      })],
     });
   });
 
@@ -153,5 +166,30 @@ describe('TermBridge connection export', () => {
     }));
 
     expect(imported[0]?.jumpHost).toBeUndefined();
+  });
+
+  it('drops a forwarding rule if it contains an unexpected secret-bearing field', () => {
+    const imported = parseConnectionExport(JSON.stringify({
+      schemaVersion: 2,
+      profiles: [{
+        name: 'API',
+        host: 'api.test',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+        portForwards: [{
+          id: 'forward-1',
+          name: 'Database',
+          kind: 'local',
+          localPort: 15432,
+          remoteHost: '127.0.0.1',
+          remotePort: 5432,
+          autoStart: true,
+          password: 'must-not-import',
+        }],
+      }],
+    }));
+
+    expect(imported[0]?.portForwards).toEqual([]);
   });
 });

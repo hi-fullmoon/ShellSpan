@@ -21,6 +21,7 @@ import {
 import { openHostKeyPrompt } from '@/lib/host-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
 import { buildChangeDirectoryCommand } from '@/lib/host-context';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 
 export interface ConnectSessionOptions {
   insertAfterId?: string;
@@ -109,6 +110,9 @@ export function useConnectSession(): {
         );
         await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
         addSession(summary, profile.id, options);
+        void usePortForwardStore
+          .getState()
+          .startAutoForOwner(preparedProfile, `terminal:${summary.sessionId}`);
         if (options?.initialDirectory) {
           const changeDirectoryCommand = buildChangeDirectoryCommand(options.initialDirectory);
           if (changeDirectoryCommand) {

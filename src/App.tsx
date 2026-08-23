@@ -34,6 +34,11 @@ import { flushTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
 import { flushSftpWorkspace } from '@/lib/sftp-workspace-persistence';
 import { CommandPalette } from '@/components/command-palette';
 import { isTransferActive, useTransferStore } from '@/stores/transferStore';
+import {
+  isPortForwardActive,
+  usePortForwardStore,
+} from '@/stores/portForwardStore';
+import { usePortForwardEvents } from '@/hooks/usePortForwardEvents';
 const logger = createLogger('app');
 
 const AppSections: React.FC = () => {
@@ -79,6 +84,7 @@ export const App: React.FC = () => {
   useDisableContextMenu();
   useTheme();
   useTransferListeners();
+  usePortForwardEvents();
   useMonitorEvents();
   useAppShortcuts();
 
@@ -98,6 +104,9 @@ export const App: React.FC = () => {
       }),
       flushSftpWorkspace().catch((error) => {
         logger.warn('Failed to flush SFTP workspace before exit', error);
+      }),
+      usePortForwardStore.getState().stopAll().catch((error) => {
+        logger.warn('Failed to stop port forwards before exit', error);
       }),
     ])
       .then(() => invoke('request_app_exit'))
@@ -156,6 +165,9 @@ export const App: React.FC = () => {
   const activeTransfers = useTransferStore(
     (state) => state.operations.filter(isTransferActive).length,
   );
+  const activePortForwards = usePortForwardStore(
+    (state) => state.runtimes.filter(isPortForwardActive).length,
+  );
 
   const updatePhase = useUpdateStore((state) => state.phase);
   const updateVersion = useUpdateStore((state) => state.version);
@@ -207,8 +219,11 @@ export const App: React.FC = () => {
         open={exitDialogOpen}
         onOpenChange={setExitDialogOpen}
         title={t('app.exitConfirm.title')}
-        description={activeTransfers > 0
-          ? t('app.exitConfirm.activeTransfers', { count: activeTransfers })
+        description={activeTransfers > 0 || activePortForwards > 0
+          ? t('app.exitConfirm.activeOperations', {
+              transfers: activeTransfers,
+              forwards: activePortForwards,
+            })
           : t('app.exitConfirm.description')}
         confirmLabel={t('app.exitConfirm.confirm')}
         onConfirm={() => {
@@ -221,6 +236,7 @@ export const App: React.FC = () => {
         downloadProgress={updateDownloadProgress}
         hasActiveSessions={connectedSessions > 0}
         activeTransferCount={activeTransfers}
+        activePortForwardCount={activePortForwards}
         onInstallNow={installUpdateNow}
         onLater={installUpdateLater}
         open={restartDialogOpen}
