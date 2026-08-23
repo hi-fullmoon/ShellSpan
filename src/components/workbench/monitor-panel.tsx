@@ -40,6 +40,7 @@ import { Separator } from '@/components/ui/separator';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendArea } from '@/components/ui/trend-area';
 import { IconActionButton } from './icon-action-button';
+import { RemoteHealthSection } from './remote-health-section';
 
 const DISCONNECT_REASON_KEY: Record<ClosedReasonKind, LocaleKey> = {
   local_close: 'workbench.monitor.reason.localClose',
@@ -366,6 +367,7 @@ export const MonitorPanel: React.FC = () => {
                 <h1 className="truncate text-base font-semibold text-foreground">
                   {t('workbench.monitor.title')}
                 </h1>
+                <Badge variant="outline">{t('workbench.monitor.local')}</Badge>
                 <HealthBadge status={status} />
               </div>
               <p className="truncate text-xs text-muted-foreground">
@@ -407,6 +409,14 @@ export const MonitorPanel: React.FC = () => {
 
         <ScrollArea className="min-h-0 flex-1">
           <main className="mx-auto flex w-full max-w-screen-2xl flex-col gap-5 p-3 sm:p-4">
+            <RemoteHealthSection />
+            <Separator />
+            <section aria-labelledby="local-monitor-heading" className="flex flex-col gap-4">
+              <SectionHeading
+                id="local-monitor-heading"
+                title={t('workbench.monitor.localTitle')}
+                description={t('workbench.monitor.localDescription')}
+              />
             {error && !snapshot && (
               <Alert variant="destructive">
                 <CircleAlertIcon />
@@ -659,6 +669,7 @@ export const MonitorPanel: React.FC = () => {
 
               </>
             )}
+            </section>
           </main>
         </ScrollArea>
       </div>

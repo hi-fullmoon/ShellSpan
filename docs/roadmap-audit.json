@@ -131,13 +131,15 @@
       "id": "next-health-snapshot",
       "phase": "NEXT",
       "title": "远端健康快照",
-      "status": "planned",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
       "owner": "maintainers",
-      "risk": "未经授权执行命令或展示过期数据",
-      "failurePath": "未授权、超时和平台不支持时返回带时间和来源的错误",
-      "recovery": "重新授权采集或跳转只读诊断",
-      "testStrategy": "授权、只读命令集、时间戳和本机/远端分层测试",
-      "evidence": ["src-tauri/src/health.rs", "src/components/workbench/monitor-panel.tsx"]
+      "risk": "未经授权执行远端命令、命令集越过只读边界、凭证或主机上下文错配，以及失败刷新后仍把旧快照展示为新数据",
+      "failurePath": "前后端双重拒绝未授权采集；取消、超时、平台不支持、凭证/连接失败和结果身份错配均返回或生成带采集时间、SSH 只读来源与正确 profileId 的结果，旧成功快照仅以陈旧状态保留",
+      "recovery": "用户可取消有界采集、修正同一连接的凭证后重新授权；异常快照会明确携带陈旧标记、采集时间与来源，并复用同一 profileId 的已连接终端或连接入口进入只读诊断 Agent，不重新选择主机或凭证",
+      "testStrategy": "固定只读命令集与 Linux/macOS 解析、平台不支持、授权、取消/超时/失败、陈旧数据、来源与 operation/profile 身份校验、本机/远端 UI 分层、连接入口跳转和诊断 Agent 上下文绑定测试，并在隔离 SSH 服务执行真实快照采集",
+      "evidence": ["src-tauri/src/remote_health.rs", "src-tauri/src/health.rs", "src/stores/remoteHealthStore.ts", "src/lib/remote-health.ts", "src/components/workbench/remote-health-section.tsx", "src/components/workbench/monitor-panel.tsx", "src/components/workbench/connection-list.tsx", "src/components/ai/ai-panel.tsx", "src/stores/agentStore.ts", "src/lib/host-overview.ts"],
+      "tests": ["src-tauri/src/remote_health.rs", "src/lib/__tests__/remote-health.test.ts", "src/stores/__tests__/remoteHealthStore.test.ts", "src/components/workbench/__tests__/remote-health-section.test.tsx", "src/components/workbench/__tests__/monitor-panel.test.tsx", "src/components/workbench/__tests__/connection-list.test.tsx", "src/components/ai/__tests__/ai-panel.test.ts", "src/stores/__tests__/agentStore.test.ts", "src/lib/__tests__/host-overview.test.ts", "scripts/run-ssh-e2e.ps1"]
     },
     {
       "id": "later-runbooks",

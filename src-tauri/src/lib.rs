@@ -15,6 +15,7 @@ mod models;
 mod path_utils;
 mod port_forward;
 mod remote_fs;
+mod remote_health;
 mod session;
 mod sftp_pool;
 
@@ -27,8 +28,9 @@ use models::{
     ClosedEvent, ClosedReasonKind, DeleteCancellationRegistry, PreflightCancellationRegistry,
 };
 use models::{
-    DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionErrorEvent,
-    SessionIdentity, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry,
+    DownloadCancellationRegistry, RemoteCopyCancellationRegistry, RemoteHealthCancellationRegistry,
+    SessionErrorEvent, SessionIdentity, SessionManager, SessionStatus, StatusEvent,
+    UploadCancellationRegistry,
 };
 
 pub(crate) use connection::{
@@ -223,6 +225,7 @@ pub fn run() {
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
+        .manage(RemoteHealthCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
         .manage(port_forward::PortForwardManager::default())
@@ -322,6 +325,8 @@ pub fn run() {
             commands::save_sftp_workspace,
             commands::clear_sftp_workspace,
             health::get_system_health,
+            remote_health::collect_remote_health_snapshot,
+            remote_health::cancel_remote_health_snapshot,
         ]);
 
     menu::configure_builder(builder)

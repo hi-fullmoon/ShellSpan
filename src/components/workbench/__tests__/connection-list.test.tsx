@@ -223,4 +223,30 @@ describe('ConnectionList', () => {
     expect(screen.getByText('My Server · root@192.168.1.1:22')).toBeInTheDocument();
     expect(screen.getByText('hostOverview.forwardsDetail')).toBeInTheDocument();
   });
+
+  it('opens remote health for the exact connection profile', () => {
+    const onOpenHealth = vi.fn();
+    const profile = makeProfile({ id: 'health-profile' });
+    render(
+      <ConnectionList
+        profiles={[profile]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onOpenHealth={onOpenHealth}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'remoteHealth.open' }));
+
+    expect(onOpenHealth).toHaveBeenCalledOnce();
+    expect(onOpenHealth).toHaveBeenCalledWith(profile);
+  });
 });

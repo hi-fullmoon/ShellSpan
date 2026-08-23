@@ -1557,7 +1557,7 @@ fn load_keychain_private_key(
         .ok_or_else(|| "key credential missing privateKey".to_string())
 }
 
-fn resolve_keychain_key_for_remote(
+pub(crate) fn resolve_keychain_key_for_remote(
     credentials: &crate::keychain::CredentialManager,
     request: &mut RemoteConnectionRequest,
 ) -> Result<(), String> {

@@ -26,6 +26,27 @@ describe('agentStore', () => {
       .toBe('informational');
   });
 
+  it('keeps remote snapshot diagnosis bound to its profile and evidence source', () => {
+    useAgentStore.getState().beginRun(
+      'request-health',
+      'diagnose health snapshot',
+      'session-health',
+      'root@prod · remote health',
+      'profile-health',
+      'remoteHealth',
+    );
+
+    expect(useAgentStore.getState().run).toMatchObject({
+      sessionId: 'session-health',
+      profileId: 'profile-health',
+      contextSource: 'remoteHealth',
+    });
+    expect(useAgentStore.getState().run?.steps[0]).toMatchObject({
+      title: 'remoteHealth.getSnapshotContext',
+      status: 'completed',
+    });
+  });
+
   it('advances commands one at a time through approval, insertion, and completion', () => {
     const store = useAgentStore.getState();
     store.beginRun('request-2', 'diagnose', 'session-1', 'server');

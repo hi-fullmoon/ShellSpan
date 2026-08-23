@@ -31,6 +31,7 @@ import {
 } from '@/lib/tauri';
 import { useKeychainStore } from '@/stores/keychainStore';
 import { createLogger } from '@/lib/logger';
+import { useRemoteHealthStore } from '@/stores/remoteHealthStore';
 
 const logger = createLogger('connection-import');
 
@@ -131,6 +132,11 @@ const Workbench: React.FC = () => {
     await openSftpConnection(profile);
   }, [openSftpConnection]);
 
+  const openRemoteHealth = useCallback((profile: ConnectionProfile): void => {
+    useRemoteHealthStore.getState().selectProfile(profile.id);
+    setActiveTab('monitor');
+  }, [setActiveTab]);
+
   useEffect(() => {
     const handleConnectProfile = (event: Event): void => {
       const detail = (event as CustomEvent<{
@@ -225,6 +231,7 @@ const Workbench: React.FC = () => {
               onDelete={setDeleting}
               onConnectTerminal={connect}
               onConnectSftp={connectSftp}
+              onOpenHealth={openRemoteHealth}
               onDuplicate={handleDuplicate}
               onToggleFavorite={(profile) => void handleToggleFavorite(profile)}
               onImport={() => void handleOpenImport()}

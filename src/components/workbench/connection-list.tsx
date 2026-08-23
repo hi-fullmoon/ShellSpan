@@ -7,7 +7,14 @@ import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { HostOverviewDialog } from './host-overview-dialog';
@@ -30,6 +37,7 @@ import {
   StarIcon,
   InfoIcon,
   CableIcon,
+  HeartPulseIcon,
   ZapIcon,
 } from 'lucide-react';
 
@@ -47,6 +55,7 @@ export interface ConnectionListProps {
   onDelete: (profile: ConnectionProfile) => void;
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
+  onOpenHealth?: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
   onToggleFavorite: (profile: ConnectionProfile) => void;
   onImport: () => void;
@@ -61,6 +70,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onDelete,
   onConnectTerminal,
   onConnectSftp,
+  onOpenHealth = () => {},
   onDuplicate,
   onToggleFavorite,
   onImport,
@@ -201,8 +211,10 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">{t('workbench.connections.allGroups')}</SelectItem>
-                {groups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}
+                <SelectGroup>
+                  <SelectItem value="all">{t('workbench.connections.allGroups')}</SelectItem>
+                  {groups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}
+                </SelectGroup>
               </SelectContent>
             </Select>
           )}
@@ -229,6 +241,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                   onDelete={onDelete}
                   onConnectTerminal={onConnectTerminal}
                   onConnectSftp={onConnectSftp}
+                  onOpenHealth={onOpenHealth}
                   onDuplicate={onDuplicate}
                   onToggleFavorite={onToggleFavorite}
                   onOverview={setOverviewProfile}
@@ -256,6 +269,7 @@ interface ConnectionCardProps {
   onDelete: (profile: ConnectionProfile) => void;
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
+  onOpenHealth: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
   onToggleFavorite: (profile: ConnectionProfile) => void;
   onOverview: (profile: ConnectionProfile) => void;
@@ -269,6 +283,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
   onDelete,
   onConnectTerminal,
   onConnectSftp,
+  onOpenHealth,
   onDuplicate,
   onToggleFavorite,
   onOverview,
@@ -282,6 +297,10 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
   );
   const handleConnectSftp = useDebouncedCallback(
     () => onConnectSftp(profile),
+    CARD_ACTION_DEBOUNCE_MS,
+  );
+  const handleOpenHealth = useDebouncedCallback(
+    () => onOpenHealth(profile),
     CARD_ACTION_DEBOUNCE_MS,
   );
   const handleEdit = useDebouncedCallback(() => onEdit(profile), CARD_ACTION_DEBOUNCE_MS);
@@ -353,6 +372,13 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
             tooltip={t('workbench.connections.connectSftp')}
           >
             <FolderIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
+            onClick={handleOpenHealth}
+            aria-label={t('remoteHealth.open')}
+            tooltip={t('remoteHealth.open')}
+          >
+            <HeartPulseIcon />
           </IconActionButton>
           <IconActionButton
             onClick={() => onPortForward(profile)}

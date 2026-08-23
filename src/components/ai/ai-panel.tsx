@@ -426,7 +426,11 @@ function useCompactAiPanelViewport(): boolean {
   return compact;
 }
 
-function currentDiagnosticAgentContext(): { context?: AiContext; sessionId?: string } {
+function currentDiagnosticAgentContext(): {
+  context?: AiContext;
+  sessionId?: string;
+  profileId?: string;
+} {
   const app = useAppStore.getState();
   if (app.activeSection !== 'terminal') return {};
   const terminalState = useTerminalStore.getState();
@@ -445,7 +449,18 @@ function currentDiagnosticAgentContext(): { context?: AiContext; sessionId?: str
       ? `Selected terminal content:\n${selection}`
       : `Recent terminal output:\n${output || '(no recent output)'}`,
   ].join('\n');
-  return { sessionId: session.sessionId, context: { label, content } };
+  return {
+    sessionId: session.sessionId,
+    profileId: session.profileId,
+    context: { label, content },
+  };
+}
+
+interface ExternalDiagnosticAgentRequest {
+  profileId: string;
+  sessionId: string;
+  goal: string;
+  context: AiContext;
 }
 
 function navigateToAiSettings(): void {
@@ -732,10 +747,13 @@ export const AiPanel: React.FC = () => {
     }
   }, [contextEnabled]);
 
-  const runDiagnosticAgent = useCallback(async (text: string): Promise<void> => {
+  const runDiagnosticAgent = useCallback(async (
+    text: string,
+    external?: ExternalDiagnosticAgentRequest,
+  ): Promise<void> => {
     const goal = text.trim();
-    if (!goal || !contextEnabled) return;
-    const snapshot = currentDiagnosticAgentContext();
+    if (!goal || (!contextEnabled && !external)) return;
+    const snapshot = external ?? currentDiagnosticAgentContext();
     if (!snapshot.context || !snapshot.sessionId) return;
     const requestId = generateId();
     const provider = useAiSettingsStore.getState().getProviderConfig();
@@ -748,6 +766,8 @@ export const AiPanel: React.FC = () => {
       goal,
       snapshot.sessionId,
       snapshot.context.label,
+      snapshot.profileId,
+      external ? 'remoteHealth' : 'terminal',
     );
     if (!started) return;
     setDraft('');
@@ -766,6 +786,31 @@ export const AiPanel: React.FC = () => {
       );
     }
   }, [contextEnabled]);
+
+  useEffect(() => {
+    const handleHealthDiagnosis = (event: Event): void => {
+      const detail = (event as CustomEvent<ExternalDiagnosticAgentRequest>).detail;
+      if (!detail?.profileId || !detail.sessionId || !detail.goal || !detail.context) return;
+      const terminal = useTerminalStore.getState().sessions.find((session) => (
+        session.sessionId === detail.sessionId
+        && session.profileId === detail.profileId
+        && session.status === 'connected'
+      ));
+      if (!terminal) return;
+      useTerminalStore.getState().setActiveSession(detail.sessionId);
+      useAppStore.getState().setActiveSection('terminal');
+      setSelectedConversationId(null);
+      setContextEnabled(true);
+      setTask('diagnosticAgent');
+      setOpen(true);
+      void runDiagnosticAgent(detail.goal, detail);
+    };
+    document.addEventListener('termbridge:start-health-diagnosis', handleHealthDiagnosis);
+    return () => document.removeEventListener(
+      'termbridge:start-health-diagnosis',
+      handleHealthDiagnosis,
+    );
+  }, [runDiagnosticAgent, setOpen]);
 
   const evaluateAgentStep = useCallback(async (
     stepId: string,

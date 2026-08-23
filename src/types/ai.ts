@@ -130,7 +130,9 @@ export interface AgentRun {
   requestId: string;
   goal: string;
   sessionId: string;
+  profileId?: string;
   contextLabel: string;
+  contextSource?: 'terminal' | 'remoteHealth';
   phase: AgentRunPhase;
   summary?: string;
   responseText: string;

@@ -924,6 +924,7 @@ macro_rules! cancellation_registry {
 cancellation_registry!(UploadCancellationRegistry, "upload");
 cancellation_registry!(DeleteCancellationRegistry, "delete");
 cancellation_registry!(PreflightCancellationRegistry, "connection preflight");
+cancellation_registry!(RemoteHealthCancellationRegistry, "remote health snapshot");
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct DownloadScanStats {

@@ -137,6 +137,55 @@ describe('terminal conversation binding', () => {
     await initI18n(previousApp.locale);
   });
 
+  it('starts snapshot diagnosis on the exact connected profile with snapshot context', async () => {
+    await initI18n('en-US');
+    useAgentStore.getState().clear();
+    useAppStore.getState().setActiveSection('terminal');
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'health-session',
+        title: 'Production',
+        host: 'prod.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        profileId: 'profile-health',
+      }],
+      activeSessionId: 'health-session',
+    });
+    useAiStore.getState().setOpen(true);
+    const { unmount } = render(createElement(AiPanel));
+
+    try {
+      act(() => {
+        document.dispatchEvent(new CustomEvent('termbridge:start-health-diagnosis', {
+          detail: {
+            profileId: 'profile-health',
+            sessionId: 'health-session',
+            goal: 'Diagnose snapshot collected at 2026-08-23T08:00:00Z',
+            context: {
+              label: 'root@prod · remote health',
+              content: 'Profile ID: profile-health\nSource: SSH read-only',
+            },
+          },
+        }));
+      });
+
+      await waitFor(() => expect(useAgentStore.getState().run).toMatchObject({
+        profileId: 'profile-health',
+        sessionId: 'health-session',
+        contextSource: 'remoteHealth',
+        contextLabel: 'root@prod · remote health',
+      }));
+      expect(useAgentStore.getState().run?.steps[0]?.title)
+        .toBe('remoteHealth.getSnapshotContext');
+    } finally {
+      unmount();
+      useAgentStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+    }
+  });
+
   it('keeps commands bound after a terminal reconnect changes sessionId', () => {
     expect(isMessageBoundToTerminal(
       { conversationId: 'conversation-1', sessionId: 'old-session' },

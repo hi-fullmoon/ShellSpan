@@ -194,11 +194,13 @@ export const AgentRunView: React.FC<{
             <CardTitle>
               {index + 1}. {step.title === 'terminal.getContext'
                 ? t('ai.agent.tool.context')
-                : step.title === 'diagnosticAgent.plan'
-                  ? t('ai.agent.tool.plan')
-                  : step.title === 'diagnosticAgent.evaluate'
-                    ? t('ai.agent.tool.evaluate')
-                    : step.title}
+                : step.title === 'remoteHealth.getSnapshotContext'
+                  ? t('ai.agent.tool.remoteHealth')
+                  : step.title === 'diagnosticAgent.plan'
+                    ? t('ai.agent.tool.plan')
+                    : step.title === 'diagnosticAgent.evaluate'
+                      ? t('ai.agent.tool.evaluate')
+                      : step.title}
             </CardTitle>
             {step.description && <CardDescription>{step.description}</CardDescription>}
             <CardAction>
