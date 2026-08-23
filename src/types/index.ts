@@ -19,6 +19,7 @@ export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs' | 'settings';
+export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts';
 export type LogSource = 'frontend' | 'backend';
 export type ShortcutAction =
   | 'openWorkbench'
@@ -88,6 +89,29 @@ export type PortForwardErrorCategory =
   | 'invalidConfiguration'
   | 'other';
 
+export type HostConnectionAction = 'terminal' | 'sftp' | 'portForward' | 'overview';
+
+export type HostQuickAction =
+  | {
+      id: string;
+      kind: 'directory';
+      label: string;
+      path: string;
+      target: 'terminal' | 'sftp';
+    }
+  | {
+      id: string;
+      kind: 'command';
+      label: string;
+      command: string;
+    }
+  | {
+      id: string;
+      kind: 'connection';
+      label: string;
+      action: HostConnectionAction;
+    };
+
 export interface PortForwardRule {
   id: string;
   name: string;
@@ -131,6 +155,7 @@ export interface ConnectionProfile {
   favorite?: boolean;
   notes?: string;
   portForwards?: PortForwardRule[];
+  quickActions?: HostQuickAction[];
   createdAt: number;
   updatedAt: number;
 }

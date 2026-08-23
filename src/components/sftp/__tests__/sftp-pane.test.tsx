@@ -1,11 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { SftpPane } from '../sftp-pane';
 import { useSftpStore } from '@/stores/sftpStore';
 import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import { useAppStore } from '@/stores/appStore';
-import { invokeListLocalDirectory } from '@/lib/tauri';
+import { invokeListLocalDirectory, invokeListRemoteDirectory } from '@/lib/tauri';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -150,6 +150,41 @@ describe('SftpPane', () => {
       />,
     );
     expect(screen.getByText('Test')).toBeInTheDocument();
+  });
+
+  it('navigates only the addressed pane when a host-bound path event arrives', async () => {
+    const connection = createConnection();
+    vi.mocked(invokeListRemoteDirectory).mockResolvedValue({
+      path: '/var/log/api',
+      entries: [],
+    });
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+    vi.mocked(invokeListRemoteDirectory).mockClear();
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent('termbridge:open-sftp-path', {
+        detail: {
+          connectionId: connection.id,
+          side: 'remote',
+          path: '/var/log/api',
+        },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(invokeListRemoteDirectory).toHaveBeenCalledWith(expect.objectContaining({
+        host: 'h',
+        path: '/var/log/api',
+      }));
+    });
   });
 
   it('offers a remote terminal jump only for a remote pane', () => {

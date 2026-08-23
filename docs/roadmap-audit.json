@@ -103,13 +103,15 @@
       "id": "next-quick-actions",
       "phase": "NEXT",
       "title": "快速操作入口",
-      "status": "in-progress",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
       "owner": "maintainers",
-      "risk": "快捷操作绕过确认或触发错误目标",
-      "failurePath": "无可用目标时动作禁用，命令片段永不自动发送回车",
-      "recovery": "取消面板或撤销插入文本",
-      "testStrategy": "键盘导航、搜索范围、目标绑定和仅插入语义测试",
-      "evidence": ["src/components/command-palette.tsx", "src/hooks/useAppShortcuts.ts", "src/components/terminal/new-tab-menu.tsx"]
+      "risk": "快捷操作绕过确认、持久化秘密或触发错误主机",
+      "failurePath": "无同主机已连接终端时命令动作禁用；秘密、换行和控制字符在持久化与执行两层拒绝；命令片段永不发送回车",
+      "recovery": "取消命令面板不改变状态；已插入文本仍停留在 Shell 编辑行，可人工修改或删除；持久化失败保留编辑草稿和原列表",
+      "testStrategy": "键盘上下导航与禁用项跳过、连接/书签/终端与 SFTP 会话/设置/转发搜索范围、主机目标绑定、SFTP 路径跳转，以及秘密拒绝和仅插入语义测试",
+      "evidence": ["src/components/command-palette.tsx", "src/lib/host-quick-action-model.ts", "src/lib/host-quick-actions.ts", "src/components/workbench/host-quick-actions-dialog.tsx", "src/components/workbench/connection-list.tsx", "src/components/workbench/settings-panel.tsx", "src/components/sftp/sftp-pane.tsx", "src/hooks/useAppShortcuts.ts", "src/stores/profileStore.ts", "src/lib/connection-import.ts"],
+      "tests": ["src/components/__tests__/command-palette.test.tsx", "src/lib/__tests__/host-quick-actions.test.ts", "src/components/workbench/__tests__/host-quick-actions-dialog.test.tsx", "src/components/workbench/__tests__/connection-list.test.tsx", "src/components/sftp/__tests__/sftp-pane.test.tsx", "src/hooks/__tests__/useSftpConnectionOpener.test.ts", "src/stores/__tests__/profileStore.test.ts", "src/lib/__tests__/connection-import.test.ts"]
     },
     {
       "id": "next-port-forwarding",

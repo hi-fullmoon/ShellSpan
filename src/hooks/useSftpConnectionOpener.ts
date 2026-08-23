@@ -42,7 +42,12 @@ const CLOSED_DIALOG: SftpHostKeyDialogState = {
 };
 
 export function useSftpConnectionOpener(): {
-  open: (profile: ConnectionProfile, targetConnectionId?: string, targetSide?: SftpSide) => Promise<void>;
+  open: (
+    profile: ConnectionProfile,
+    targetConnectionId?: string,
+    targetSide?: SftpSide,
+    initialDirectory?: string,
+  ) => Promise<void>;
   verifyHostKey: (host: string, port: number, onVerified: () => void) => Promise<void>;
   hostKeyDialog: SftpHostKeyDialogState;
   closeHostKeyDialog: () => void;
@@ -56,7 +61,12 @@ export function useSftpConnectionOpener(): {
     useState<SftpHostKeyDialogState>(CLOSED_DIALOG);
 
   const finishOpen = useCallback(
-    (profile: ConnectionProfile, targetConnectionId?: string, targetSide: SftpSide = 'remote'): void => {
+    (
+      profile: ConnectionProfile,
+      targetConnectionId?: string,
+      targetSide: SftpSide = 'remote',
+      initialDirectory?: string,
+    ): void => {
       const connection = buildRemoteConnectionRequest(profile);
       const summary = {
         sessionId: generateId(),
@@ -82,6 +92,9 @@ export function useSftpConnectionOpener(): {
       void invokeWarmRemoteConnection(connection).catch(() => {});
       const connectionId = targetConnectionId ?? useSftpStore.getState().activeConnectionId;
       if (connectionId) {
+        if (initialDirectory) {
+          useSftpStore.getState().setPath(connectionId, targetSide, initialDirectory);
+        }
         void releasedPreviousOwner.then(() => usePortForwardStore
           .getState()
           .startAutoForOwner(profile, `sftp:${connectionId}:${targetSide}:${summary.sessionId}`));
@@ -151,7 +164,12 @@ export function useSftpConnectionOpener(): {
   );
 
   const open = useCallback(
-    async (profile: ConnectionProfile, targetConnectionId?: string, targetSide: SftpSide = 'remote') => {
+    async (
+      profile: ConnectionProfile,
+      targetConnectionId?: string,
+      targetSide: SftpSide = 'remote',
+      initialDirectory?: string,
+    ) => {
       const profileWithSavedSecrets = await useProfileStore
         .getState()
         .ensurePassword(profile);
@@ -171,7 +189,7 @@ export function useSftpConnectionOpener(): {
       // succeeds; failures are swallowed inside persistPromptedPassword.
       const finish = (): void => {
         void persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
-        finishOpen(preparedProfile, targetConnectionId, targetSide);
+        finishOpen(preparedProfile, targetConnectionId, targetSide, initialDirectory);
       };
 
       // Non-jump-host sessions can be pre-probed with a direct TCP connection.

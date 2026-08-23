@@ -209,6 +209,24 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       [isLocal, loadLocalDirectory, loadRemoteDirectory, onSelectedPathsChange, updateHistory],
     );
 
+    useEffect(() => {
+      const handleOpenPath = (event: Event): void => {
+        const detail = (event as CustomEvent<{
+          connectionId?: string;
+          side?: SftpSide;
+          path?: string;
+        }>).detail;
+        if (
+          detail?.connectionId !== connection.id
+          || detail.side !== side
+          || !detail.path
+        ) return;
+        navigateTo(detail.path);
+      };
+      document.addEventListener('termbridge:open-sftp-path', handleOpenPath);
+      return () => document.removeEventListener('termbridge:open-sftp-path', handleOpenPath);
+    }, [connection.id, navigateTo, side]);
+
     const goBack = useCallback((): void => {
       const current = historyRef.current;
       if (current.index <= 0) return;

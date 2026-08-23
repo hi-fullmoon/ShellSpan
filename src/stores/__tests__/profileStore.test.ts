@@ -105,8 +105,40 @@ describe('profileStore', () => {
       favorite: true,
       notes: 'Primary service',
       portForwards: [],
+      quickActions: [],
     });
     expect(row).not.toHaveProperty('password');
+  });
+
+  it('persists only validated host quick actions and drops secret-bearing snippets', async () => {
+    await useProfileStore.getState().addProfile({
+      ...profileValues,
+      quickActions: [
+        {
+          id: 'directory-1',
+          kind: 'directory',
+          label: 'Releases',
+          path: '/srv/releases',
+          target: 'sftp',
+        },
+        {
+          id: 'secret-1',
+          kind: 'command',
+          label: 'Unsafe',
+          command: 'password=plaintext',
+        },
+      ],
+    });
+
+    const organization = JSON.parse(invokeAddProfile.mock.calls[0][0].organizationJson);
+    expect(organization.quickActions).toEqual([{
+      id: 'directory-1',
+      kind: 'directory',
+      label: 'Releases',
+      path: '/srv/releases',
+      target: 'sftp',
+    }]);
+    expect(invokeAddProfile.mock.calls[0][0].organizationJson).not.toContain('plaintext');
   });
 
   it('does not persist a profile when the database insert fails', async () => {
@@ -414,6 +446,12 @@ describe('profileStore', () => {
           remotePort: 5432,
           autoStart: true,
         }],
+        quickActions: [{
+          id: 'command-1',
+          kind: 'command',
+          label: 'Check status',
+          command: 'systemctl status api',
+        }],
       }),
       createdAt: 1,
       updatedAt: 1,
@@ -432,6 +470,10 @@ describe('profileStore', () => {
       portForwards: [expect.objectContaining({
         id: 'forward-1',
         autoStart: true,
+      })],
+      quickActions: [expect.objectContaining({
+        id: 'command-1',
+        command: 'systemctl status api',
       })],
     });
     expect(invokeRetrieveProfilePassword).not.toHaveBeenCalled();

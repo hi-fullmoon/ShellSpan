@@ -26,6 +26,7 @@ import { useRecentProfilesStore } from './recentProfilesStore';
 import { useToastStore } from './toastStore';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
+import { sanitizeHostQuickActions } from '@/lib/host-quick-action-model';
 
 const logger = createLogger('profileStore');
 
@@ -281,6 +282,7 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
       favorite: Boolean(profile.favorite),
       notes: profile.notes?.trim() || undefined,
       portForwards: sanitizePortForwardRules(profile.portForwards),
+      quickActions: sanitizeHostQuickActions(profile.quickActions),
     }),
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
@@ -289,9 +291,9 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
 
 function parseOrganizationMetadata(value: string | undefined): Pick<
   ConnectionProfile,
-  'group' | 'tags' | 'favorite' | 'notes' | 'portForwards'
+  'group' | 'tags' | 'favorite' | 'notes' | 'portForwards' | 'quickActions'
 > {
-  if (!value) return { tags: [], favorite: false, portForwards: [] };
+  if (!value) return { tags: [], favorite: false, portForwards: [], quickActions: [] };
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
     return {
@@ -307,10 +309,11 @@ function parseOrganizationMetadata(value: string | undefined): Pick<
         ? parsed.notes.trim()
         : undefined,
       portForwards: sanitizePortForwardRules(parsed.portForwards),
+      quickActions: sanitizeHostQuickActions(parsed.quickActions),
     };
   } catch (error) {
     logger.error('ignored invalid profile organization metadata', error);
-    return { tags: [], favorite: false, portForwards: [] };
+    return { tags: [], favorite: false, portForwards: [], quickActions: [] };
   }
 }
 
