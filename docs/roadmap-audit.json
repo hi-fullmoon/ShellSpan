@@ -359,6 +359,60 @@
           "finding": "既有连接、Runbook、主题与设置测试是可复用基础；缺少三格式金色夹具、TS/Rust 共享 corpus、大小/数量与较新格式系统回归、故障注入、主题恢复和 Windows/macOS 文件 E2E。"
         }
       }
+    },
+    {
+      "id": "explore-dynamic-socks-protocol",
+      "phase": "EXPLORE",
+      "title": "受限动态 SOCKS5 转发协议评估",
+      "roadmapItem": "基于真实使用场景评估动态 SOCKS 转发、串口、Mosh 或其他协议，一次只验证一个方向。",
+      "status": "researching",
+      "decision": "candidate",
+      "decisionRationale": "比较动态 SOCKS、串口、Mosh 与未定义的其他协议后，动态 SOCKS 对现有 SSH 端口转发、Known Hosts、钥匙串、跳板机、生命周期和审计链路的复用最高，因此只保留受限的本地 SOCKS5 CONNECT 为唯一研究对象；直接用户需求、目标策略、资源上限、强制取消、版本迁移和两平台故障测试均未满足，不实现协议基础。",
+      "necessary": false,
+      "necessityFinding": "现有静态本地转发已经覆盖已知目标任务，仓库没有可复核的 SOCKS 请求、静态规则数量/耗时基线或真实试用队列，不能证明受限动态代理的增量价值足以承担新的代理与目标授权安全面。",
+      "owner": "maintainers",
+      "risk": "动态代理由本地客户端逐请求选择目标；若缺少回环绑定、显式启动、目标/端口 allowlist、DNS 决策、连接/线程/帧上限和子通道强制关闭，会把已认证 SSH 连接变成无限制内网代理，并在停止、断线或退出后遗留可用通道或泄露敏感目标元数据。",
+      "failurePath": "任一准入证据缺失即保持 candidate/researching 且 protocolGates.implementationGate 为 blocked；未来候选必须让 Known Hosts 路径错误、未知或不匹配 host-key 在认证前失败关闭，在任何 direct-tcpip 前拒绝非 SOCKS5 CONNECT、超限帧、未授权目标/端口、metadata/link-local、非回环监听和并发耗尽，SSH 断线、取消或退出时有界关闭监听及全部子连接。",
+      "recovery": "本次不产生协议实现或配置；未来失败不得自动重试或重放 TCP 流，需关闭监听/SSH channel/客户端 socket，保留不含目标和载荷的稳定错误与计数，用户修正 profile、策略或端口后以新 operation ID 手动重试；崩溃或升级后保持 stopped 并重新授权。",
+      "testStrategy": "SOCKS5 分片/畸形/超限/模糊语料和 CONNECT-only；目标 allowlist、DNS/metadata 绕过；8 个转发、16/64 连接、257/262 字节帧、5/12 秒超时及无无限线程/队列；host-key/钥匙串/跳板机；SSH/direct-tcpip/读写/取消/退出故障注入；v3→v4/N-1/较新版本失败关闭；Windows x86_64、macOS ARM 与隔离 SSH 的真实 TCP 代理 E2E。",
+      "protocolGates": {
+        "selectedDirection": "dynamic-socks",
+        "directionsUnderValidation": ["dynamic-socks"],
+        "implementationGate": "blocked",
+        "finding": "串口、Mosh 与其他协议只参与比较，不并行验证；唯一研究对象仍缺七项准入、必要性和已验证测试，禁止实现候选基础。"
+      },
+      "evidence": ["docs/explore-dynamic-socks-assessment.md", "docs/review-process.md", "README.md", "ROADMAP.md", "src-tauri/src/port_forward.rs", "src-tauri/src/connection.rs", "src-tauri/src/session.rs", "src-tauri/src/models.rs", "src/types/index.ts", "src/stores/portForwardStore.ts", "src/stores/profileStore.ts", "src/lib/connection-import.ts", "src/lib/operation-history.ts", "src-tauri/src/operation_history.rs", ".github/workflows/quality-gate.yml", "scripts/check-roadmap-audit.mjs"],
+      "tests": ["src-tauri/src/port_forward.rs", "src-tauri/src/connection.rs", "src/stores/__tests__/portForwardStore.test.ts", "src/hooks/__tests__/useReconnectSession.test.ts", "src/hooks/__tests__/useMonitorEvents.test.ts", "src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src/lib/__tests__/operation-history.test.ts", "src-tauri/src/operation_history.rs", "scripts/__tests__/check-roadmap-audit.test.mjs", "scripts/run-ssh-e2e.ps1"],
+      "criteria": {
+        "userGroup": {
+          "status": "not-met",
+          "finding": "只有需经 SSH/跳板机让本地 SOCKS5 工具访问多个变化内网 TCP 端点的个人运维人员与开发者假设；SOCKS、serial/串口和 Mosh 公开 issue 查询均为 0 且创建受限，没有直接需求或脱敏试用队列。"
+        },
+        "userValue": {
+          "status": "not-met",
+          "finding": "减少静态转发规则和切换时间只是价值假设；没有每个任务的规则数量、频率、耗时、失败成本，也没有受限 allowlist 候选与现有静态转发的真实对照结果。"
+        },
+        "maintenanceCost": {
+          "status": "unknown",
+          "finding": "动态 SOCKS 可复用现有 SSH 转发，但仍需长期维护协议解析、目标/DNS 策略、连接/线程上限、子通道取消、v4 迁移、两平台 socket E2E 和安全响应；没有候选 CI 时长、内存/线程、缺陷率或月度成本数据。"
+        },
+        "crossPlatformImplementation": {
+          "status": "unknown",
+          "finding": "Rust TCP 与 ssh2 direct-tcpip 理论上可在正式 Windows x86_64/macOS ARM 共用，但隔离 SSH E2E 只运行于 Ubuntu，两个正式平台没有代理监听、端口释放、休眠/网络切换、防火墙和退出清理的真实证据。"
+        },
+        "securityModel": {
+          "status": "not-met",
+          "finding": "现有回环监听、Known Hosts、钥匙串、跳板机、metadata/link-local 显式阻断和脱敏是可复用基础；但转发命令会把 Known Hosts 路径错误降级为无校验路径，且没有逐请求目标/端口 allowlist、远端 DNS 解析后策略、CONNECT-only、帧/连接上限、全部子通道强制取消或目标元数据记录边界。"
+        },
+        "upgradeStrategy": {
+          "status": "not-met",
+          "finding": "连接导出 v3 和内部 organizationJson 只认识 local/remote；动态目标策略需要显式 v4、v3→v4 迁移、N-1/较新版本夹具和失败回滚，当前较新导出还会折叠为空候选而非类型化失败关闭。"
+        },
+        "automatedTesting": {
+          "status": "not-met",
+          "finding": "现有测试覆盖静态本地/远程转发、host-key/PTY、生命周期、配置清洗和操作记录，但没有 SOCKS 解析/模糊测试、策略绕过、资源上限、活动子连接取消、v4 迁移或 Windows/macOS 真实代理 E2E。"
+        }
+      }
     }
   ]
 }

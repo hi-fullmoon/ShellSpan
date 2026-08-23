@@ -18,6 +18,8 @@ const exploreCriteria = [
 ];
 const allowedExploreCriterionStatuses = new Set(['met', 'not-met', 'unknown']);
 const allowedExploreDecisions = new Set(['candidate', 'admit', 'defer']);
+const singleProtocolRoadmapItem = '基于真实使用场景评估动态 SOCKS 转发、串口、Mosh 或其他协议，一次只验证一个方向。';
+const allowedProtocolDirections = new Set(['dynamic-socks', 'serial', 'mosh']);
 const maximumReviewAgeDays = 35;
 
 function fail(message) {
@@ -162,6 +164,33 @@ for (const item of audit.items) {
       }
       if (gates.pluginApi !== 'blocked' && gates.dataContract !== 'stable') {
         fail(`${item.id} plugin API evaluation requires a stable data contract`);
+      }
+    }
+    if (item.roadmapItem === singleProtocolRoadmapItem) {
+      const gates = item.protocolGates;
+      if (!gates || typeof gates !== 'object' || Array.isArray(gates)) {
+        fail(`${item.id} is missing protocolGates`);
+      }
+      if (!allowedProtocolDirections.has(gates.selectedDirection)) {
+        fail(`${item.id} has invalid selected protocol direction ${gates.selectedDirection}`);
+      }
+      if (!Array.isArray(gates.directionsUnderValidation)
+        || gates.directionsUnderValidation.length !== 1
+        || gates.directionsUnderValidation[0] !== gates.selectedDirection) {
+        fail(`${item.id} must validate exactly its one selected protocol direction`);
+      }
+      if (!['blocked', 'eligible'].includes(gates.implementationGate)) {
+        fail(`${item.id} has invalid protocol implementation gate ${gates.implementationGate}`);
+      }
+      if (typeof gates.finding !== 'string' || gates.finding.trim() === '') {
+        fail(`${item.id} protocolGates is missing finding`);
+      }
+      if (gates.implementationGate === 'eligible'
+        && (item.decision !== 'admit'
+          || !item.necessary
+          || item.status !== 'verified'
+          || exploreCriteria.some((criterionName) => item.criteria[criterionName].status !== 'met'))) {
+        fail(`${item.id} cannot enable a protocol candidate foundation before EXPLORE admission evidence is complete`);
       }
     }
   }

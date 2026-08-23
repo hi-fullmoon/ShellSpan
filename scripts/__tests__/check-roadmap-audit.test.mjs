@@ -103,4 +103,57 @@ describe('roadmap audit', () => {
       },
     );
   });
+
+  it('requires the protocol EXPLORE item to record its single-direction gate', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('一次只验证一个方向'));
+        delete item.protocolGates;
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('is missing protocolGates');
+      },
+    );
+  });
+
+  it('does not allow multiple protocol directions to be validated together', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('一次只验证一个方向'));
+        item.protocolGates.directionsUnderValidation.push('serial');
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('must validate exactly its one selected protocol direction');
+      },
+    );
+  });
+
+  it('requires a named protocol instead of a generic other direction', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('一次只验证一个方向'));
+        item.protocolGates.selectedDirection = 'other';
+        item.protocolGates.directionsUnderValidation = ['other'];
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('has invalid selected protocol direction other');
+      },
+    );
+  });
+
+  it('blocks a protocol candidate foundation until every admission gate is complete', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('一次只验证一个方向'));
+        item.protocolGates.implementationGate = 'eligible';
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('cannot enable a protocol candidate foundation');
+      },
+    );
+  });
 });

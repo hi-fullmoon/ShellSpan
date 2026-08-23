@@ -30,6 +30,8 @@ EXPLORE 条目还必须用 `roadmapItem` 精确映射一个现有 ROADMAP 项，
 
 含“插件 API”的 EXPLORE 条目还必须记录 `extensionGates`。`dataContract` 只能在七项准入证据全部满足、必要性为真且自动化测试已验证后标记为 `stable`；在此之前 `pluginApi` 必须保持 `blocked`。稳定数据契约只是评估插件 API 的前置条件，不授权插件运行时、第三方代码执行、市场或新的网络/账户能力。
 
+含“一次只验证一个方向”的协议 EXPLORE 条目还必须记录 `protocolGates`：`selectedDirection` 与 `directionsUnderValidation` 必须精确表示同一个具体方向，比较中的其他协议不得同时进入验证；`implementationGate` 只有在七项准入均为 `met`、`necessary: true`、`status: verified` 且决定为 `admit` 后才能标记为 `eligible`。`eligible` 也只允许独立评审安全、最小的候选基础，不自动授权实现或发布。
+
 ## 四周复盘
 
 审计台账的 `reviewedAt` 最多允许落后 35 天，超期会让 CI 失败。复盘必须逐条检查状态、证据路径、风险和测试策略，并按退出条件决定是否推进阶段。
