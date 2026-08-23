@@ -54,6 +54,13 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
         try {
           const summary = await invokeCreateLocalSession(cols, rows);
 
+          if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) {
+            logger.info(`Discarding replacement local session ${summary.sessionId}; source ${sessionId} was closed`);
+            await invokeCloseSession(summary.sessionId).catch((error) => {
+              logger.warn(`Failed to close orphaned replacement session ${summary.sessionId}`, error);
+            });
+            return;
+          }
           terminalRegistry.rebindSession(sessionId, summary.sessionId);
           reconnectSession(sessionId, summary);
           logger.info(`Reconnected local session ${sessionId} as session ${summary.sessionId}`);
@@ -95,7 +102,16 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
 
       setReconnecting(sessionId, true);
       logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
-      const replaceSession = (summary: Awaited<ReturnType<typeof invokeCreateSession>>): void => {
+      const replaceSession = async (
+        summary: Awaited<ReturnType<typeof invokeCreateSession>>,
+      ): Promise<void> => {
+        if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) {
+          logger.info(`Discarding replacement session ${summary.sessionId}; source ${sessionId} was closed`);
+          await invokeCloseSession(summary.sessionId).catch((error) => {
+            logger.warn(`Failed to close orphaned replacement session ${summary.sessionId}`, error);
+          });
+          return;
+        }
         terminalRegistry.rebindSession(sessionId, summary.sessionId);
         reconnectSession(sessionId, summary, profile.id);
         logger.info(`Reconnected session ${sessionId} as session ${summary.sessionId}`);
@@ -108,7 +124,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
         const summary = await invokeCreateSession(
           buildSessionCreateRequest(preparedProfile, cols, rows),
         );
-        replaceSession(summary);
+        await replaceSession(summary);
       } catch (error) {
         const missingKeyTarget = getMissingKeychainKeyTarget(
           preparedProfile,
@@ -127,7 +143,7 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
             const summary = await invokeCreateSession(
               buildSessionCreateRequest(recoveredProfile, cols, rows),
             );
-            replaceSession(summary);
+            await replaceSession(summary);
             return;
           } catch (retryError) {
             error = retryError;

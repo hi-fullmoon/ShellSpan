@@ -364,6 +364,39 @@ describe('terminalRegistry', () => {
     });
   });
 
+  it('retries resuming backend output after a transient IPC failure', async () => {
+    const { invokeSetSessionOutputPaused, listenToSshData } = await import('@/lib/tauri');
+    vi.mocked(invokeSetSessionOutputPaused)
+      .mockReset()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('transient resume failure'))
+      .mockResolvedValue(undefined);
+    let dataHandler: ((event: TauriEvent<string>) => void) | undefined;
+    vi.mocked(listenToSshData).mockImplementation(async (_sessionId, callback) => {
+      dataHandler = callback;
+      return () => {};
+    });
+    const controller = createController('s1');
+    await vi.waitFor(() => expect(dataHandler).toBeDefined());
+    const parsedCallbacks: Array<() => void> = [];
+    vi.spyOn(controller.terminal, 'write').mockImplementation((_data, callback) => {
+      if (callback) parsedCallbacks.push(callback);
+    });
+
+    dataHandler!({ event: 'ssh-data:s1', id: 1, payload: 'x'.repeat(300 * 1024) });
+    dataHandler!({ event: 'ssh-data:s1', id: 2, payload: 'y'.repeat(300 * 1024) });
+    await vi.waitFor(() => {
+      expect(invokeSetSessionOutputPaused).toHaveBeenCalledWith('s1', true);
+    });
+    parsedCallbacks.forEach((callback) => callback());
+
+    await vi.waitFor(() => {
+      const resumeCalls = vi.mocked(invokeSetSessionOutputPaused).mock.calls
+        .filter(([, paused]) => paused === false);
+      expect(resumeCalls).toHaveLength(2);
+    }, { timeout: 1500 });
+  });
+
   it('reconciles a connected status emitted before listeners were ready', async () => {
     const setStatus = vi.fn();
     terminalRegistry.create(

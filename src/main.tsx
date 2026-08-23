@@ -6,9 +6,12 @@ import { AppErrorBoundary } from './components/app-error-boundary';
 import { initGlobalErrorLogging } from './lib/logger';
 import { applyTheme } from './lib/theme';
 import { parseTerminalWorkspace } from './lib/terminal-workspace';
+import { parseSftpWorkspace } from './lib/sftp-workspace';
 import {
+  invokeClearSftpWorkspace,
   invokeClearTerminalWorkspace,
   invokeListAiSessions,
+  invokeLoadSftpWorkspace,
   invokeLoadTerminalWorkspace,
 } from './lib/tauri';
 import { useAppStore } from './stores/appStore';
@@ -17,6 +20,8 @@ import { useRecentProfilesStore } from './stores/recentProfilesStore';
 import { useTerminalStore } from './stores/terminalStore';
 import { useAiSettingsStore } from './stores/aiSettingsStore';
 import { useAiStore } from './stores/aiStore';
+import { useSftpStore } from './stores/sftpStore';
+import { hydrateTransferResumeCandidates } from './lib/transfer-resume';
 
 initGlobalErrorLogging();
 
@@ -33,20 +38,33 @@ async function bootstrap(): Promise<void> {
     // Local AI history is best-effort and must not block application startup.
   }
   if (useAppStore.getState().restoreWorkspace) {
-    try {
-      const rawWorkspace = await invokeLoadTerminalWorkspace();
-      const workspace = parseTerminalWorkspace(rawWorkspace);
-      useTerminalStore.getState().addRestoredSessions(workspace.sessions, workspace.layout);
-    } catch {
-      // Workspace restoration is best-effort and must not block application startup.
-    }
+    await Promise.all([
+      invokeLoadTerminalWorkspace()
+        .then((rawWorkspace) => {
+          const workspace = parseTerminalWorkspace(rawWorkspace);
+          useTerminalStore.getState().addRestoredSessions(workspace.sessions, workspace.layout);
+        })
+        .catch(() => {}),
+      invokeLoadSftpWorkspace()
+        .then((rawWorkspace) => {
+          const workspace = parseSftpWorkspace(rawWorkspace);
+          useSftpStore.getState().addRestoredConnections(
+            workspace.tabs,
+            workspace.activeConnectionId,
+            useProfileStore.getState().profiles,
+          );
+        })
+        .catch(() => {}),
+    ]);
   } else {
-    try {
-      await invokeClearTerminalWorkspace();
-    } catch {
-      // Clearing stale workspace data is retried when the terminal view mounts.
-    }
+    await Promise.allSettled([
+      invokeClearTerminalWorkspace(),
+      invokeClearSftpWorkspace(),
+    ]);
   }
+  await hydrateTransferResumeCandidates().catch(() => {
+    // Interrupted transfers are optional recovery metadata and never block startup.
+  });
   applyTheme(useAppStore.getState().theme);
 
   ReactDOM.createRoot(document.getElementById('root')!).render(

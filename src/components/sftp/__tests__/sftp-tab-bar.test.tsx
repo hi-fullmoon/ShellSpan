@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpTabBar } from '../sftp-tab-bar';
 import { useSftpStore } from '@/stores/sftpStore';
+import { useTransferStore } from '@/stores/transferStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -16,6 +17,26 @@ const initialState = useSftpStore.getState();
 describe('SftpTabBar', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
+    useTransferStore.setState({ operations: [] });
+  });
+
+  it('warns when closing a tab would interrupt an active transfer', () => {
+    const id = addConnection('Busy connection');
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-upload',
+      kind: 'upload',
+      ownerId: id,
+      totalBytes: 10,
+      processedBytes: 1,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+    render(<SftpTabBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+
+    expect(screen.getByText('sftp.tab.closeTransferWarning')).toBeInTheDocument();
   });
 
   const addConnection = (title: string): string => {

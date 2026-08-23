@@ -1,0 +1,34 @@
+# TermBridge 审核机制
+
+本机制把 `ROADMAP.md` 的承诺转换为合并前可执行的证据。路线图是产品方向，`docs/roadmap-audit.json` 是唯一状态台账；没有测试证据的条目不得标记为 `verified`。
+
+## 每次变更
+
+1. 在 PR 模板中说明对应审计 ID、风险、失败路径和恢复/取消方式。
+2. 修改功能时同步更新测试；改变路线图状态时同步更新审计台账。
+3. 本地运行 `pnpm review:frontend`。修改 Rust 时再运行：
+
+   ```bash
+   cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+   cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+   cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked
+   pnpm test:e2e:ssh
+   ```
+
+4. PR 必须通过 `Quality Gate`，并由至少一名非作者审核者批准。
+
+## 状态规则
+
+- `planned`：边界和测试策略已记录，尚未开始。
+- `in-progress`：已有实现证据，但退出条件尚未全部满足。
+- `verified`：失败/恢复路径已实现，自动化测试存在且全量门禁通过，并填写 `verifiedAt` 与 `tests`。
+- `blocked`：存在明确外部阻断，记录原因和解除条件。
+- `deferred`：复盘后有意移出当前阶段，不得伪装成完成。
+
+## 四周复盘
+
+审计台账的 `reviewedAt` 最多允许落后 35 天，超期会让 CI 失败。复盘必须逐条检查状态、证据路径、风险和测试策略，并按退出条件决定是否推进阶段。
+
+## GitHub 分支保护
+
+仓库管理员需要在 `main` 上启用：禁止直接推送、至少 1 个批准、旧批准在新提交后失效、要求解决全部讨论，并把 `Frontend and Audit`、`Rust (windows)`、`Rust (macos)`、`Isolated SSH/SFTP E2E` 设为必需检查。仓库文件无法代替托管平台上的分支保护设置。

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createLogger } from '@/lib/logger';
-import { getLocalizedErrorMessage } from '@/lib/error';
+import { classifyError, getLocalizedErrorMessage, type ErrorCategory } from '@/lib/error';
 import type {
   DeleteProgressEvent,
   DownloadProgressEvent,
@@ -33,8 +33,10 @@ export interface TransferOperation {
     | 'cancelling'
     | 'cancelled';
   error?: string;
+  errorCategory?: ErrorCategory;
   retry?: () => Promise<void>;
   cancel?: () => Promise<void>;
+  onDiscard?: () => Promise<void> | void;
 }
 
 interface TransferState {
@@ -112,6 +114,10 @@ export const useTransferStore = create<TransferState>()((set) => ({
       ),
     })),
   removeOperation: (operationId) => {
+    const operation = useTransferStore.getState().operations.find(
+      (item) => item.operationId === operationId,
+    );
+    void operation?.onDiscard?.();
     cancelQueuedPathOperation(operationId);
     set((state) => ({
       operations: state.operations.filter(
@@ -123,7 +129,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
-          ? { ...operation, status: 'running', error: undefined }
+          ? { ...operation, status: 'running', error: undefined, errorCategory: undefined }
           : operation,
       ),
     })),
@@ -132,7 +138,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
-          ? { ...operation, status: 'failed', error }
+          ? { ...operation, status: 'failed', error, errorCategory: classifyError(error).category }
           : operation,
       ),
     }));
@@ -163,6 +169,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
               completedSteps: operation.totalSteps,
               processedBytes: operation.totalBytes,
               error: undefined,
+              errorCategory: undefined,
             }
           : operation,
       ),
@@ -173,7 +180,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
-          ? { ...operation, status: 'cancelled', error: undefined }
+          ? { ...operation, status: 'cancelled', error: undefined, errorCategory: undefined }
           : operation,
       ),
     }));
@@ -275,6 +282,18 @@ export function isTransferActive(operation: TransferOperation): boolean {
   return operation.status !== 'failed' &&
     operation.status !== 'cancelled' &&
     !isTransferComplete(operation);
+}
+
+export function countActiveTransfersForOwners(
+  ownerIds: Iterable<string>,
+  operations = useTransferStore.getState().operations,
+): number {
+  const owners = new Set(ownerIds);
+  return operations.filter(
+    (operation) => operation.ownerId
+      && owners.has(operation.ownerId)
+      && isTransferActive(operation),
+  ).length;
 }
 
 function normalizeRemotePath(path: string): string {

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 mod ai;
 mod ai_sessions;
 mod commands;
@@ -21,7 +23,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
 
 use crate::sftp_pool::SftpPool;
-use models::{ClosedEvent, ClosedReasonKind, DeleteCancellationRegistry};
+use models::{
+    ClosedEvent, ClosedReasonKind, DeleteCancellationRegistry, PreflightCancellationRegistry,
+};
 use models::{
     DownloadCancellationRegistry, RemoteCopyCancellationRegistry, SessionErrorEvent,
     SessionIdentity, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry,
@@ -218,6 +222,7 @@ pub fn run() {
         .manage(ai::AiRequestRegistry::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
+        .manage(PreflightCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
         .manage(port_forward::PortForwardManager::default())
@@ -272,6 +277,8 @@ pub fn run() {
             commands::preview_remote_file,
             commands::update_remote_permissions,
             commands::check_host_key,
+            commands::preflight_connection,
+            commands::cancel_connection_preflight,
             commands::trust_host,
             commands::list_known_hosts,
             commands::remove_known_host,
@@ -309,6 +316,9 @@ pub fn run() {
             commands::load_terminal_workspace,
             commands::save_terminal_workspace,
             commands::clear_terminal_workspace,
+            commands::load_sftp_workspace,
+            commands::save_sftp_workspace,
+            commands::clear_sftp_workspace,
             health::get_system_health,
         ]);
 

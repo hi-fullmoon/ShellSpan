@@ -152,6 +152,37 @@ describe('SftpPane', () => {
     expect(screen.getByText('Test')).toBeInTheDocument();
   });
 
+  it('offers a remote terminal jump only for a remote pane', () => {
+    const connection = createConnection();
+    const onOpenTerminal = vi.fn();
+    const { rerender } = render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        onOpenTerminal={onOpenTerminal}
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.openTerminalHere' }));
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        localMode
+        onOpenTerminal={onOpenTerminal}
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'sftp.openTerminalHere' })).not.toBeInTheDocument();
+  });
+
   it('renders the right pane as local with a source switch action', () => {
     const connection = createConnection();
     const onTitleClick = vi.fn();

@@ -222,7 +222,10 @@ pub(crate) fn paste_local_paths_blocking(
         validate_copy_destination(&source_path, &destination_path)?;
         copy_local_entry_to_path(&source_path, &destination_path)?;
         existing_names.insert(destination_name);
-        written.push(destination_path.to_string_lossy().to_string());
+        // IPC path values always use the portable slash form on every OS.
+        // Returning PathBuf's native rendering here produced mixed separators
+        // on Windows because the destination had already been normalized.
+        written.push(portable_local_path(&destination_path));
     }
 
     Ok(written)
@@ -785,11 +788,7 @@ mod tests {
 
         assert_eq!(
             written,
-            vec![temp
-                .path()
-                .join("report copy.txt")
-                .to_string_lossy()
-                .to_string()]
+            vec![portable_local_path(&temp.path().join("report copy.txt"))]
         );
         assert_eq!(
             fs::read_to_string(temp.path().join("report copy.txt")).unwrap(),

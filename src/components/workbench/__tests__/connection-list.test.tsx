@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ConnectionList } from '../connection-list';
 import type { ConnectionProfile } from '@/types';
+import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -26,6 +27,10 @@ const makeProfile = (overrides?: Partial<ConnectionProfile>): ConnectionProfile 
 });
 
 describe('ConnectionList', () => {
+  beforeEach(() => {
+    useRecentProfilesStore.setState({ recentIds: [], initialized: true });
+  });
+
   it('renders an empty state with a new-connection button when there are no profiles', () => {
     const onAdd = vi.fn();
     render(
@@ -38,6 +43,9 @@ describe('ConnectionList', () => {
         onConnectTerminal={() => {}}
         onConnectSftp={() => {}}
         onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
       />,
     );
 
@@ -62,6 +70,9 @@ describe('ConnectionList', () => {
         onConnectTerminal={() => {}}
         onConnectSftp={() => {}}
         onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
       />,
     );
 
@@ -94,6 +105,9 @@ describe('ConnectionList', () => {
         onConnectTerminal={() => {}}
         onConnectSftp={() => {}}
         onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
       />,
     );
 
@@ -116,6 +130,7 @@ describe('ConnectionList', () => {
     const onConnectTerminal = vi.fn();
     const onConnectSftp = vi.fn();
     const onDuplicate = vi.fn();
+    const onToggleFavorite = vi.fn();
     render(
       <ConnectionList
         profiles={[makeProfile()]}
@@ -126,6 +141,9 @@ describe('ConnectionList', () => {
         onConnectTerminal={onConnectTerminal}
         onConnectSftp={onConnectSftp}
         onDuplicate={onDuplicate}
+        onToggleFavorite={onToggleFavorite}
+        onImport={() => {}}
+        onExport={() => {}}
       />,
     );
 
@@ -134,6 +152,7 @@ describe('ConnectionList', () => {
       ['workbench.connections.connectSftp', onConnectSftp],
       ['common.edit', onEdit],
       ['common.duplicate', onDuplicate],
+      ['workbench.connections.favorite', onToggleFavorite],
       ['common.delete', onDelete],
     ] as const;
 
@@ -148,5 +167,60 @@ describe('ConnectionList', () => {
       expect(handler).toHaveBeenCalledTimes(2);
     }
     vi.useRealTimers();
+  });
+
+  it('filters connection assets by favorite and recent activity', () => {
+    useRecentProfilesStore.setState({ recentIds: ['recent'] });
+    render(
+      <ConnectionList
+        profiles={[
+          makeProfile({ id: 'favorite', name: 'Favorite Host', favorite: true }),
+          makeProfile({ id: 'recent', name: 'Recent Host' }),
+        ]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.favorites' }));
+    expect(screen.getByText('Favorite Host')).toBeInTheDocument();
+    expect(screen.queryByText('Recent Host')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.recent' }));
+    expect(screen.queryByText('Favorite Host')).not.toBeInTheDocument();
+    expect(screen.getByText('Recent Host')).toBeInTheDocument();
+  });
+
+  it('opens a live host overview from the connection card', () => {
+    render(
+      <ConnectionList
+        profiles={[makeProfile()]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'hostOverview.open' }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('hostOverview.title')).toBeInTheDocument();
+    expect(screen.getByText('My Server · root@192.168.1.1:22')).toBeInTheDocument();
+    expect(screen.getByText('hostOverview.forwardsUntracked')).toBeInTheDocument();
   });
 });

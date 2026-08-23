@@ -39,6 +39,11 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
 }));
 
 vi.mock('@/lib/error', () => ({
+  classifyError: vi.fn().mockReturnValue({
+    category: 'unknown',
+    retryable: true,
+    messageKey: 'error.operationFailed',
+  }),
   getErrorMessage: vi.fn().mockImplementation((error: unknown) => {
     if (error instanceof Error) return error.message;
     if (typeof error === 'string') return error;

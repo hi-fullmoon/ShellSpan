@@ -52,7 +52,8 @@ describe('AssistantMessageContent', () => {
     );
 
     const copyButton = screen.getByRole('button', { name: 'common.copy' });
-    expect(copyButton).toHaveClass('opacity-0', 'group-hover:opacity-100');
+    expect(copyButton).toHaveClass('h-8');
+    expect(copyButton).not.toHaveClass('opacity-0');
 
     fireEvent.click(copyButton);
 

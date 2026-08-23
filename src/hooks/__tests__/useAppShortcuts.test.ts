@@ -26,6 +26,19 @@ describe('useAppShortcuts', () => {
     expect(useAppStore.getState().activeWorkbenchTab).toBe('settings');
   });
 
+  it('opens the command palette through the configured global shortcut', () => {
+    const listener = vi.fn();
+    document.addEventListener('termbridge:open-command-palette', listener);
+    renderHook(() => useAppShortcuts());
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'p', ctrlKey: true, shiftKey: true, bubbles: true,
+    }));
+
+    expect(listener).toHaveBeenCalledOnce();
+    document.removeEventListener('termbridge:open-command-palette', listener);
+  });
+
   it('uses a customized binding immediately', () => {
     useAppStore.getState().setShortcut('openSftp', 'mod+shift+s');
     renderHook(() => useAppShortcuts());

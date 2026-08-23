@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { ConnectionFormDrawer } from '../connection-form-drawer';
 import type { ConnectionProfile } from '@/types';
@@ -12,9 +12,25 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
+const tauriMocks = vi.hoisted(() => ({
+  cancelPreflight: vi.fn(() => Promise.resolve()),
+  pickPrivateKey: vi.fn<() => Promise<string | null>>(() => Promise.resolve(null)),
+  preflight: vi.fn(() => Promise.resolve({
+    operationId: 'connection-preflight-test',
+    status: 'passed' as const,
+    checkedAt: 1,
+    steps: [],
+  })),
+  readTextFile: vi.fn(() => Promise.resolve('private-key-data')),
+  trustHost: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock('@/lib/tauri', () => ({
-  invokePickPrivateKeyFile: vi.fn(),
-  invokeReadTextFile: vi.fn(() => Promise.resolve('')),
+  invokeCancelConnectionPreflight: tauriMocks.cancelPreflight,
+  invokePickPrivateKeyFile: tauriMocks.pickPrivateKey,
+  invokePreflightConnection: tauriMocks.preflight,
+  invokeReadTextFile: tauriMocks.readTextFile,
+  invokeTrustHost: tauriMocks.trustHost,
   invokeListKeyCredentials: vi.fn(() => Promise.resolve([])),
 }));
 
@@ -33,6 +49,12 @@ const profile: ConnectionProfile = {
 const noop = (): void => {};
 
 describe('ConnectionFormDrawer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tauriMocks.pickPrivateKey.mockResolvedValue(null);
+    tauriMocks.readTextFile.mockResolvedValue('private-key-data');
+  });
+
   it('fills an empty name from the host when the host loses focus', () => {
     render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
@@ -102,9 +124,10 @@ describe('ConnectionFormDrawer', () => {
   it('renders the translated jump-host auth method label when enabled', () => {
     render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
-    const jumpHostSwitch = document.body.querySelector('[data-slot="switch"]');
-    expect(jumpHostSwitch).toBeInTheDocument();
-    fireEvent.click(jumpHostSwitch!);
+    const jumpHostSwitch = screen.getByRole('switch', {
+      name: 'connection.form.useJumpHost',
+    });
+    fireEvent.click(jumpHostSwitch);
 
     const authGroups = document.body.querySelectorAll('[data-slot="toggle-group"]');
     expect(authGroups).toHaveLength(2);
@@ -353,5 +376,40 @@ describe('ConnectionFormDrawer', () => {
     expect(
       screen.getByRole('button', { name: 'common.save' }),
     ).toBeDisabled();
+  });
+
+  it('preflights a private-key file without saving or connecting the profile', async () => {
+    const onSubmit = vi.fn();
+    const onConnect = vi.fn();
+    tauriMocks.pickPrivateKey.mockResolvedValue('C:\\keys\\id_ed25519');
+    render(
+      <ConnectionFormDrawer
+        open={true}
+        onClose={noop}
+        onSubmit={onSubmit}
+        onConnect={onConnect}
+        initial={profile}
+      />,
+    );
+
+    const keyToggle = Array.from(
+      document.body.querySelectorAll('[data-slot="toggle-group-item"]'),
+    ).find((item) => item.textContent === 'connection.form.auth.key');
+    fireEvent.click(keyToggle!);
+    fireEvent.click(screen.getByRole('button', { name: 'connection.form.browse' }));
+
+    await waitFor(() => expect(tauriMocks.pickPrivateKey).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'connection.preflight.action' }));
+
+    await waitFor(() => expect(tauriMocks.preflight).toHaveBeenCalledTimes(1));
+    expect(tauriMocks.readTextFile).toHaveBeenCalledWith('C:\\keys\\id_ed25519');
+    expect(tauriMocks.preflight).toHaveBeenCalledWith(expect.objectContaining({
+      host: profile.host,
+      authMethod: 'key',
+      privateKeyData: 'private-key-data',
+      keychainKeyId: undefined,
+    }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onConnect).not.toHaveBeenCalled();
   });
 });

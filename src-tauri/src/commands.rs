@@ -1,16 +1,17 @@
 use super::*;
 use crate::db::Database;
 use crate::models::{
-    AuthMethod, ClosedReasonKind, CopyLocalPathsRequest, CopyRemotePathRequest,
-    CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
-    DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
-    JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry,
-    LogFileInfo, ManagedSession, OpenRemoteFileRequest, PortForwardConfig, ProfileRow,
-    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind,
-    RemoteFsError, RenameRemotePathRequest, SessionCommand, SessionCreateRequest, SessionIdentity,
-    SessionStatus, SessionSummary, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
-    UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
+    AuthMethod, ClosedReasonKind, ConnectionPreflightRequest, ConnectionPreflightResult,
+    CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest,
+    CreateRemoteEntryRequest, CreateSessionError, DeleteRemotePathRequest,
+    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, JumpHostConfig,
+    KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LogFileInfo,
+    ManagedSession, OpenRemoteFileRequest, PortForwardConfig, PreflightCancellationRegistry,
+    ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
+    RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
+    RemoteFileKind, RemoteFsError, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
+    SessionIdentity, SessionStatus, SessionSummary, SftpBookmarkRow, TransferBatchResult,
+    TrustHostRequest, UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
 };
 use crate::sftp_pool::SftpPool;
 use base64::Engine;
@@ -1068,7 +1069,7 @@ pub(crate) async fn pick_local_files() -> Result<Vec<String>, String> {
 pub(crate) async fn pick_local_folder(title: Option<String>) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let path = rfd::FileDialog::new()
-            .set_title(&title.unwrap_or_else(|| "选择文件夹".to_string()))
+            .set_title(title.unwrap_or_else(|| "选择文件夹".to_string()))
             .pick_folder()
             .map(|path| portable_local_path(&path));
         Ok(path.into_iter().collect())
@@ -1407,14 +1408,31 @@ pub(crate) fn delete_key_credential(
     Ok(referencing)
 }
 
-#[tauri::command]
-pub(crate) fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| {
-        format!(
-            "failed to read file {}: {e}",
-            std::path::Path::new(&path).display()
+fn expand_home_path(path: &str, home: &std::path::Path) -> std::path::PathBuf {
+    if path == "~" {
+        return home.to_path_buf();
+    }
+    path.strip_prefix("~/")
+        .or_else(|| path.strip_prefix("~\\"))
+        .map_or_else(
+            || std::path::PathBuf::from(path),
+            |suffix| home.join(suffix),
         )
-    })
+}
+
+#[tauri::command]
+pub(crate) fn read_text_file(app: AppHandle, path: String) -> Result<String, String> {
+    let resolved = if path == "~" || path.starts_with("~/") || path.starts_with("~\\") {
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|error| format!("failed to resolve home directory: {error}"))?;
+        expand_home_path(&path, &home)
+    } else {
+        std::path::PathBuf::from(&path)
+    };
+    std::fs::read_to_string(&resolved)
+        .map_err(|e| format!("failed to read file {}: {e}", resolved.display()))
 }
 
 #[tauri::command]
@@ -1602,7 +1620,7 @@ pub(crate) fn start_port_forwards(
     let cancel_flag = Arc::new(AtomicBool::new(false));
     forwards_state.register(operation_id.clone(), cancel_flag.clone())?;
 
-    let manager = (&*forwards_state).clone();
+    let manager = (*forwards_state).clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app)
         .ok()
         .map(|p| p.to_string_lossy().to_string());
@@ -1652,6 +1670,67 @@ pub(crate) async fn check_host_key(
         Err(e) => warn!("Host key check failed: {e}"),
     }
     result
+}
+
+#[tauri::command]
+pub(crate) async fn preflight_connection(
+    app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    preflights: State<'_, PreflightCancellationRegistry>,
+    mut request: ConnectionPreflightRequest,
+) -> Result<ConnectionPreflightResult, String> {
+    if request.operation_id.is_empty()
+        || !request.operation_id.is_ascii()
+        || !request
+            .operation_id
+            .chars()
+            .enumerate()
+            .all(|(index, character)| {
+                (index == 0 && character.is_ascii_alphanumeric())
+                    || (index > 0
+                        && (character.is_ascii_alphanumeric()
+                            || matches!(character, '.' | '_' | ':' | '-')))
+            })
+        || request.operation_id.len() > 128
+    {
+        return Err("invalid connection preflight operation id".to_string());
+    }
+
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
+    let operation_id = request.operation_id.clone();
+    let endpoint = summarize_remote_connection_request(&request.connection);
+    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
+    let cancel_flag = preflights.register(operation_id.clone())?;
+    info!("Starting connection preflight operation_id={operation_id} {endpoint}");
+
+    let task_operation_id = operation_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::connection::preflight_connection(
+            request.connection,
+            task_operation_id,
+            &known_hosts_path,
+            &cancel_flag,
+        )
+    })
+    .await;
+
+    // Always release the operation id, including when the blocking task panics.
+    let _ = preflights.remove(&operation_id);
+    let result = result.map_err(|error| format!("failed to join preflight task: {error}"))?;
+    info!(
+        "Finished connection preflight operation_id={} status={:?}",
+        operation_id, result.status
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) fn cancel_connection_preflight(
+    preflights: State<'_, PreflightCancellationRegistry>,
+    operation_id: String,
+) -> Result<(), String> {
+    info!("Cancelling connection preflight operation_id={operation_id}");
+    preflights.cancel(&operation_id)
 }
 
 #[tauri::command]
@@ -1879,7 +1958,7 @@ pub(crate) fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String>
         });
     }
 
-    files.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    files.sort_by_key(|file| std::cmp::Reverse(file.modified_at));
     Ok(files)
 }
 
@@ -2260,9 +2339,27 @@ pub(crate) fn clear_terminal_workspace(db: State<'_, Database>) -> Result<(), St
     db.clear_terminal_workspace()
 }
 
+#[tauri::command]
+pub(crate) fn load_sftp_workspace(db: State<'_, Database>) -> Result<Option<String>, String> {
+    db.load_sftp_workspace()
+}
+
+#[tauri::command]
+pub(crate) fn save_sftp_workspace(
+    db: State<'_, Database>,
+    workspace_json: String,
+) -> Result<(), String> {
+    db.save_sftp_workspace(&workspace_json)
+}
+
+#[tauri::command]
+pub(crate) fn clear_sftp_workspace(db: State<'_, Database>) -> Result<(), String> {
+    db.clear_sftp_workspace()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{configure_local_terminal_environment, detect_key_type};
+    use super::{configure_local_terminal_environment, detect_key_type, expand_home_path};
     use portable_pty::CommandBuilder;
     use std::ffi::OsStr;
 
@@ -2308,5 +2405,22 @@ mod tests {
             body
         );
         assert_eq!(detect_key_type(&key), "rsa");
+    }
+
+    #[test]
+    fn expands_openssh_home_relative_identity_paths() {
+        let home = std::path::Path::new("/home/tester");
+        assert_eq!(
+            expand_home_path("~/.ssh/id_ed25519", home),
+            home.join(".ssh/id_ed25519")
+        );
+        assert_eq!(
+            expand_home_path("~\\.ssh\\id_ed25519", home),
+            home.join(".ssh\\id_ed25519")
+        );
+        assert_eq!(
+            expand_home_path("/tmp/id_ed25519", home),
+            std::path::PathBuf::from("/tmp/id_ed25519")
+        );
     }
 }

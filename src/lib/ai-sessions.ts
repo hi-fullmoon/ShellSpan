@@ -11,6 +11,7 @@ import {
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { flushAiStreamDelta } from '@/lib/ai-stream-batcher';
+import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
 
 const logger = createLogger('aiSessions');
 const persistenceQueues = new Map<string, Promise<void>>();
@@ -77,8 +78,12 @@ export async function persistAiMessage(message: AiChatMessage): Promise<void> {
     .getState()
     .conversations.find((item) => item.id === message.conversationId);
   if (!conversation) return;
+  const redactedMessage = {
+    ...message,
+    content: redactTerminalSecrets(message.content),
+  };
   await enqueuePersistence(conversation.id, () => (
-    invokeAppendAiSessionMessage(conversation.id, conversation.startedAt, message)
+    invokeAppendAiSessionMessage(conversation.id, conversation.startedAt, redactedMessage)
   ));
   const latestConversation = useAiStore
     .getState()

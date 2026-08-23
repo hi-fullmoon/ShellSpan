@@ -1,0 +1,11 @@
+services:
+  ssh:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:22222:22"
+    healthcheck:
+      test: ["CMD", "ssh-keyscan", "-p", "22", "127.0.0.1"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

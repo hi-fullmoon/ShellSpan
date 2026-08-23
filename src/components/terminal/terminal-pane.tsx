@@ -82,6 +82,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [pendingPaste, setPendingPaste] = useState<{ sessionId: string; text: string } | null>(null);
   const activeSessionId = activeSession?.sessionId ?? null;
+  const currentSessionIdRef = useRef(activeSessionId);
+  currentSessionIdRef.current = activeSessionId;
   const { focus, searchNext, searchPrevious, clearSearch } = useActiveController(
     paneRef,
     activeSessionId,
@@ -267,6 +269,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
       void navigator.clipboard
         .readText()
         .then((text) => {
+          if (currentSessionIdRef.current !== activeSessionId) return;
           if (text) pasteText(text);
         })
         .catch(() => showError(t('terminal.feedback.pasteFailed')));

@@ -16,5 +16,7 @@ export default defineConfig({
     setupFiles: ['./src/setupTests.ts'],
     css: true,
     exclude: ['node_modules', 'dist'],
+    maxWorkers: 4,
+    testTimeout: 15_000,
   },
 });

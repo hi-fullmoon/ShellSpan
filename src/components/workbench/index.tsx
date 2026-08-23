@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useProfileStore } from '@/stores/profileStore';
@@ -16,10 +16,27 @@ import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
+import { ConnectionImportDialog } from './connection-import-dialog';
+import {
+  buildConnectionImportPreview,
+  exportConnections,
+  importConnectionsTransactionally,
+  parseConnectionImport,
+  type ConnectionImportPreview,
+} from '@/lib/connection-import';
+import {
+  invokeExportLogFile,
+  invokePickLocalFiles,
+  invokeReadTextFile,
+} from '@/lib/tauri';
+import { useKeychainStore } from '@/stores/keychainStore';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('connection-import');
 
 const Workbench: React.FC = () => {
   const { t } = useI18n();
-  const { error: showError } = useToast();
+  const { error: showError, success: showSuccess } = useToast();
   const activeTab = useAppStore((state) => state.activeWorkbenchTab);
   const setActiveTab = useAppStore((state) => state.setActiveWorkbenchTab);
   const [formOpen, setFormOpen] = useState(false);
@@ -28,6 +45,9 @@ const Workbench: React.FC = () => {
   const [initialValues, setInitialValues] = useState<
     { host: string; port: string } | undefined
   >();
+  const [importCandidates, setImportCandidates] = useState<ConnectionImportPreview[]>([]);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
   const { connect } = useConnectSession();
   const {
     open: openSftpConnection,
@@ -98,9 +118,91 @@ const Workbench: React.FC = () => {
     await duplicateProfile(profile.id);
   }, [duplicateProfile]);
 
+  const handleToggleFavorite = useCallback(async (profile: ConnectionProfile): Promise<void> => {
+    try {
+      await updateProfile(profile.id, { favorite: !profile.favorite });
+    } catch (error) {
+      logger.error(`failed to update favorite state for profile ${profile.id}`, error);
+      showError(t('workbench.connections.favoriteFailed'));
+    }
+  }, [showError, t, updateProfile]);
+
   const connectSftp = useCallback(async (profile: ConnectionProfile): Promise<void> => {
     await openSftpConnection(profile);
   }, [openSftpConnection]);
+
+  useEffect(() => {
+    const handleConnectProfile = (event: Event): void => {
+      const detail = (event as CustomEvent<{
+        profileId?: string;
+        target?: 'terminal' | 'sftp';
+        initialDirectory?: string;
+      }>).detail;
+      const profile = detail?.profileId
+        ? useProfileStore.getState().getProfile(detail.profileId)
+        : undefined;
+      if (!profile) return;
+      if (detail.target === 'sftp') {
+        void openSftpConnection(profile);
+      } else {
+        void connect(profile, { initialDirectory: detail.initialDirectory });
+      }
+    };
+    document.addEventListener('termbridge:connect-profile', handleConnectProfile);
+    return () => document.removeEventListener('termbridge:connect-profile', handleConnectProfile);
+  }, [connect, openSftpConnection]);
+
+  const handleOpenImport = useCallback(async (): Promise<void> => {
+    try {
+      const [path] = await invokePickLocalFiles();
+      if (!path) return;
+      const candidates = parseConnectionImport(await invokeReadTextFile(path));
+      if (candidates.length === 0) {
+        showError(t('workbench.connections.importEmpty'));
+        return;
+      }
+      setImportCandidates(buildConnectionImportPreview(candidates, useProfileStore.getState().profiles));
+      setImportDialogOpen(true);
+    } catch (error) {
+      logger.error('failed to preview connection import', error);
+      showError(t('workbench.connections.importFailed'));
+    }
+  }, [showError, t]);
+
+  const handleExport = useCallback(async (): Promise<void> => {
+    try {
+      const content = exportConnections(useProfileStore.getState().profiles);
+      const path = await invokeExportLogFile('termbridge-connections.json', content);
+      if (path) showSuccess(t('workbench.connections.exported', { path }));
+    } catch (error) {
+      logger.error('failed to export connections', error);
+      showError(t('workbench.connections.exportFailed'));
+    }
+  }, [showError, showSuccess, t]);
+
+  const handleImportSelected = useCallback(async (ids: string[]): Promise<void> => {
+    const selected = importCandidates.filter((candidate) => ids.includes(candidate.id));
+    setImporting(true);
+    try {
+      const result = await importConnectionsTransactionally(selected, {
+        readTextFile: invokeReadTextFile,
+        addKey: (key) => useKeychainStore.getState().addKey(key),
+        removeKey: (id) => useKeychainStore.getState().removeKey(id),
+        addProfile: (profile) => useProfileStore.getState().addProfile(profile),
+        removeProfile: (id) => useProfileStore.getState().removeProfile(id),
+        onRollbackError: (resource, id, error) => {
+          logger.error(`failed to roll back imported ${resource} ${id}`, error);
+        },
+      });
+      setImportDialogOpen(false);
+      showSuccess(t('workbench.connections.imported', { count: result.profileIds.length }));
+    } catch (error) {
+      logger.error('connection import failed; rolling back batch', error);
+      showError(t('workbench.connections.importRolledBack'));
+    } finally {
+      setImporting(false);
+    }
+  }, [importCandidates, showError, showSuccess, t]);
 
   return (
     <div className="flex h-full w-full">
@@ -118,6 +220,9 @@ const Workbench: React.FC = () => {
               onConnectTerminal={connect}
               onConnectSftp={connectSftp}
               onDuplicate={handleDuplicate}
+              onToggleFavorite={(profile) => void handleToggleFavorite(profile)}
+              onImport={() => void handleOpenImport()}
+              onExport={() => void handleExport()}
             />
           )}
           {activeTab === 'knownHosts' && (
@@ -155,6 +260,14 @@ const Workbench: React.FC = () => {
         fingerprint={sftpHostKeyDialog.fingerprint}
         mismatch={sftpHostKeyDialog.mismatch}
         onTrust={sftpHostKeyDialog.onTrust}
+      />
+
+      <ConnectionImportDialog
+        open={importDialogOpen}
+        candidates={importCandidates}
+        importing={importing}
+        onClose={() => setImportDialogOpen(false)}
+        onImport={handleImportSelected}
       />
     </div>
   );

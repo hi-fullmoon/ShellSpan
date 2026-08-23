@@ -1,10 +1,80 @@
-import { t } from '@/locales';
+import { t, type LocaleKey } from '@/locales';
 
 const KEYCHAIN_KEY_NOT_FOUND_PREFIX = 'keychain key not found:';
 const STORED_PASSWORD_MISSING_MESSAGE = 'stored password is missing';
 
 function containsAny(message: string, fragments: string[]): boolean {
   return fragments.some((fragment) => message.includes(fragment));
+}
+
+export type ErrorCategory =
+  | 'authentication'
+  | 'timeout'
+  | 'network'
+  | 'permission'
+  | 'not-found'
+  | 'conflict'
+  | 'storage'
+  | 'host-key'
+  | 'cancelled'
+  | 'unknown';
+
+export interface ErrorClassification {
+  category: ErrorCategory;
+  retryable: boolean;
+  messageKey: LocaleKey;
+}
+
+/** Maps unstable platform/library messages to a stable UI and audit taxonomy. */
+export function classifyError(error: unknown): ErrorClassification {
+  if (typeof error === 'object' && error !== null) {
+    const type = (error as { type?: unknown }).type;
+    if (type === 'HostKeyUnknown' || type === 'HostKeyMismatch') {
+      return { category: 'host-key', retryable: false, messageKey: 'error.hostKeyCheckFailed' };
+    }
+  }
+
+  const normalized = getErrorMessage(error).toLowerCase();
+  if (containsAny(normalized, ['cancelled', 'canceled', 'operation aborted'])) {
+    return { category: 'cancelled', retryable: true, messageKey: 'error.operationCancelled' };
+  }
+  if (
+    containsAny(normalized, [
+      'authentication failed', 'auth failed', 'invalid credentials',
+      'password auth', 'public key auth', KEYCHAIN_KEY_NOT_FOUND_PREFIX,
+      STORED_PASSWORD_MISSING_MESSAGE,
+    ])
+  ) {
+    return { category: 'authentication', retryable: false, messageKey: 'error.authenticationFailed' };
+  }
+  if (containsAny(normalized, ['timed out', 'timeout'])) {
+    return { category: 'timeout', retryable: true, messageKey: 'error.connectionTimedOut' };
+  }
+  if (
+    containsAny(normalized, [
+      'connection refused', 'connection reset', 'connection closed',
+      'broken pipe', 'no route to host', 'network is unreachable',
+      'ssh handshake failed', 'transport disconnected',
+    ])
+  ) {
+    return { category: 'network', retryable: true, messageKey: 'error.connectionFailed' };
+  }
+  if (containsAny(normalized, ['permission denied', 'operation not permitted', 'access denied'])) {
+    return { category: 'permission', retryable: false, messageKey: 'error.permissionDenied' };
+  }
+  if (containsAny(normalized, ['no such file or directory', 'no such file', 'path does not exist', 'file not found'])) {
+    return { category: 'not-found', retryable: false, messageKey: 'error.pathNotFound' };
+  }
+  if (containsAny(normalized, ['already exists', 'conflict'])) {
+    return { category: 'conflict', retryable: false, messageKey: 'error.pathConflict' };
+  }
+  if (containsAny(normalized, ['no space left', 'disk full'])) {
+    return { category: 'storage', retryable: true, messageKey: 'error.storageFull' };
+  }
+  if (containsAny(normalized, ['failed to check the host key', 'host key check failed', 'failed to verify host key'])) {
+    return { category: 'host-key', retryable: true, messageKey: 'error.hostKeyCheckFailed' };
+  }
+  return { category: 'unknown', retryable: true, messageKey: 'error.operationFailed' };
 }
 
 /**
@@ -88,67 +158,5 @@ export function getToastErrorMessage(error: unknown): string {
     return localized;
   }
 
-  const normalized = raw.toLowerCase();
-  if (
-    containsAny(normalized, [
-      'authentication failed',
-      'auth failed',
-      'invalid credentials',
-      'password auth',
-      'public key auth',
-    ])
-  ) {
-    return t('error.authenticationFailed');
-  }
-  if (containsAny(normalized, ['timed out', 'timeout'])) {
-    return t('error.connectionTimedOut');
-  }
-  if (
-    containsAny(normalized, [
-      'connection refused',
-      'connection reset',
-      'connection closed',
-      'no route to host',
-      'network is unreachable',
-      'ssh handshake failed',
-    ])
-  ) {
-    return t('error.connectionFailed');
-  }
-  if (
-    containsAny(normalized, [
-      'permission denied',
-      'operation not permitted',
-      'access denied',
-    ])
-  ) {
-    return t('error.permissionDenied');
-  }
-  if (
-    containsAny(normalized, [
-      'no such file or directory',
-      'no such file',
-      'path does not exist',
-      'file not found',
-    ])
-  ) {
-    return t('error.pathNotFound');
-  }
-  if (containsAny(normalized, ['already exists', 'conflict'])) {
-    return t('error.pathConflict');
-  }
-  if (containsAny(normalized, ['no space left', 'disk full'])) {
-    return t('error.storageFull');
-  }
-  if (
-    containsAny(normalized, [
-      'failed to check the host key',
-      'host key check failed',
-      'failed to verify host key',
-    ])
-  ) {
-    return t('error.hostKeyCheckFailed');
-  }
-
-  return t('error.operationFailed');
+  return t(classifyError(error).messageKey);
 }

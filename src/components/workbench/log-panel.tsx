@@ -46,6 +46,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn, formatBytes } from '@/lib/utils';
+import { buildDiagnosticBundle } from '@/lib/diagnostic-bundle';
+import { useTerminalStore } from '@/stores/terminalStore';
+import { useSftpStore } from '@/stores/sftpStore';
+import { useTransferStore } from '@/stores/transferStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { isTauriRuntime } from '@/lib/tauri';
 
 interface ParsedLogLine {
   raw: string;
@@ -611,6 +617,52 @@ export const LogPanel: React.FC = () => {
       showError(t('workbench.logs.exportFailed'));
     }
   }, [content, activeFileName, success, showError, t]);
+  const handleDiagnosticBundle = useCallback(async (): Promise<void> => {
+    try {
+      const version = isTauriRuntime()
+        ? await import('@tauri-apps/api/app').then(({ getVersion }) => getVersion())
+        : 'development';
+      const transferOperations = useTransferStore.getState().operations;
+      const providers = useAiSettingsStore.getState().providers;
+      const generatedAt = new Date();
+      const bundle = buildDiagnosticBundle({
+        version,
+        platform: navigator.userAgent,
+        locale: useAppStore.getState().locale,
+        featureState: {
+          terminalSessions: useTerminalStore.getState().sessions.length,
+          sftpTabs: useSftpStore.getState().connections.length,
+          activeTransfers: transferOperations.filter((operation) => (
+            operation.status === 'pending'
+            || operation.status === 'running'
+            || operation.status === 'cancelling'
+          )).length,
+          aiConfigured: providers.some((provider) => (
+            provider.baseUrl.trim().length > 0 && provider.model.trim().length > 0
+          )),
+        },
+        recentFailures: transferOperations
+          .filter((operation) => operation.status === 'failed')
+          .slice(0, 20)
+          .map((operation) => ({
+            operationId: operation.operationId,
+            kind: operation.kind,
+            category: operation.errorCategory ?? 'unknown',
+          })),
+        selectedLog: content
+          ? { name: activeFileName ?? 'termbridge.log', source: activeSource, content }
+          : undefined,
+      }, generatedAt.toISOString());
+      const stamp = generatedAt.toISOString().replace(/[:.]/g, '-');
+      const savedPath = await invokeExportLogFile(
+        `termbridge-diagnostic-${stamp}.json`,
+        bundle,
+      );
+      if (savedPath) success(t('workbench.logs.diagnosticExported', { path: savedPath }));
+    } catch {
+      showError(t('workbench.logs.diagnosticFailed'));
+    }
+  }, [activeFileName, activeSource, content, showError, success, t]);
   const handleSourceChange = (value: LogSource | undefined): void => {
     if (!value) return;
     setSelectedOriginalIndex(undefined);
@@ -671,6 +723,10 @@ export const LogPanel: React.FC = () => {
               <Button variant="outline" size="sm" onClick={handleExport} disabled={!content}>
                 <DownloadIcon data-icon="inline-start" />
                 {t('workbench.logs.export')}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleDiagnosticBundle}>
+                <BugIcon data-icon="inline-start" />
+                {t('workbench.logs.diagnostic')}
               </Button>
             </div>
           </div>

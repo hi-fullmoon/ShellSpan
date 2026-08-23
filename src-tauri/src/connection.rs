@@ -1,6 +1,8 @@
 use crate::known_hosts::check_host_key_against_file;
 use crate::models::{
-    AuthMethod, ConnectedSftp, ConnectionError, HostKeyCheckStatus, JumpHostConfig,
+    AuthMethod, ConnectedSftp, ConnectionError, ConnectionPreflightResult,
+    ConnectionPreflightStatus, ConnectionPreflightStep, ConnectionPreflightStepId,
+    ConnectionPreflightStepStatus, HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig,
     RemoteConnectionRequest, RemoteFsError, SessionCreateRequest,
 };
 use crate::sftp_pool::{connection_key, ConnectClaim, SftpPool};
@@ -8,9 +10,12 @@ use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
 use std::{
-    net::{IpAddr, Ipv6Addr, TcpListener, TcpStream, ToSocketAddrs},
+    net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering as AtomicOrdering},
+        Arc, Mutex,
+    },
     thread,
     time::Duration,
 };
@@ -260,7 +265,7 @@ fn summarize_connection_fields(
 }
 
 pub(crate) fn summarize_session_request(request: &SessionCreateRequest) -> String {
-    summarize_connection_fields(
+    let connection = summarize_connection_fields(
         &request.host,
         request.port,
         &request.username,
@@ -268,7 +273,19 @@ pub(crate) fn summarize_session_request(request: &SessionCreateRequest) -> Strin
         request.password.as_deref(),
         request.private_key_data.as_deref(),
         request.passphrase.as_deref(),
-    )
+    );
+    let operation_id = request
+        .operation_id
+        .as_deref()
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+        })
+        .unwrap_or("untracked");
+    format!("operation_id={operation_id} {connection}")
 }
 
 pub(crate) fn summarize_remote_connection_request(request: &RemoteConnectionRequest) -> String {
@@ -284,24 +301,14 @@ pub(crate) fn summarize_remote_connection_request(request: &RemoteConnectionRequ
 }
 
 pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, String> {
+    let socket_addrs = resolve_socket_addresses(host, port)?;
     let address = format!("{}:{port}", format_host_for_socket_address(host));
     debug!("Opening TCP connection address={address}");
-    let socket_addrs: Vec<_> = address
-        .as_str()
-        .to_socket_addrs()
-        .map_err(|error| format!("failed to resolve {address}: {error}"))?
-        .collect();
-    if socket_addrs.is_empty() {
-        return Err(format!("no socket address found for {address}"));
-    }
 
     // Try every resolved address (e.g. IPv6 then IPv4) instead of giving up
     // on the first one.
     let mut last_error = None;
     for socket_addr in socket_addrs {
-        if is_blocked_ip(normalize_ip(socket_addr.ip())) {
-            return Err(format!("connections to {} are blocked", socket_addr.ip()));
-        }
         match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(12)) {
             Ok(tcp) => {
                 configure_tcp_stream(&tcp).map_err(|error| {
@@ -320,6 +327,26 @@ pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, Str
         "failed to connect to {address}: {}",
         last_error.expect("at least one address was attempted")
     ))
+}
+
+pub(crate) fn resolve_socket_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    validate_host(host)?;
+    let address = format!("{}:{port}", format_host_for_socket_address(host));
+    let socket_addrs: Vec<_> = address
+        .as_str()
+        .to_socket_addrs()
+        .map_err(|error| format!("failed to resolve {address}: {error}"))?
+        .collect();
+    if socket_addrs.is_empty() {
+        return Err(format!("no socket address found for {address}"));
+    }
+
+    for socket_addr in &socket_addrs {
+        if is_blocked_ip(normalize_ip(socket_addr.ip())) {
+            return Err(format!("connections to {} are blocked", socket_addr.ip()));
+        }
+    }
+    Ok(socket_addrs)
 }
 
 fn format_host_for_socket_address(host: &str) -> String {
@@ -357,40 +384,10 @@ pub(crate) fn open_authenticated_session(
         username,
         auth_method.as_str()
     );
-    let mut session = Session::new().map_err(|error| ConnectionError::Other {
-        message: format!("session init failed: {error}"),
-    })?;
-    session.set_tcp_stream(tcp);
-    session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
-    session.handshake().map_err(|error| {
-        error!("SSH handshake failed remote={host}:{port}: {error}");
-        ConnectionError::Other {
-            message: format!("ssh handshake failed: {error}"),
-        }
-    })?;
+    let mut session = open_handshaken_session(tcp, host, port)?;
 
     if let Some(path) = known_hosts_path {
-        match check_host_key_against_file(&session, host, port, path) {
-            Ok(_) => {}
-            Err(result) => {
-                return match result.status {
-                    HostKeyCheckStatus::NotFound => Err(ConnectionError::HostKeyUnknown {
-                        host: host.to_string(),
-                        port,
-                        fingerprint: result.fingerprint,
-                    }),
-                    HostKeyCheckStatus::Mismatch => Err(ConnectionError::HostKeyMismatch {
-                        host: host.to_string(),
-                        port,
-                    }),
-                    _ => Err(ConnectionError::Other {
-                        message: result
-                            .message
-                            .unwrap_or_else(|| "host key check failed".to_string()),
-                    }),
-                };
-            }
-        }
+        verify_session_host_key(&session, host, port, path)?;
     }
 
     authenticate(
@@ -410,6 +407,53 @@ pub(crate) fn open_authenticated_session(
     );
     session.set_keepalive(true, SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
     Ok(session)
+}
+
+fn open_handshaken_session(
+    tcp: TcpStream,
+    host: &str,
+    port: u16,
+) -> Result<Session, ConnectionError> {
+    let mut session = Session::new().map_err(|error| ConnectionError::Other {
+        message: format!("session init failed: {error}"),
+    })?;
+    session.set_tcp_stream(tcp);
+    session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
+    session.handshake().map_err(|error| {
+        error!("SSH handshake failed remote={host}:{port}: {error}");
+        ConnectionError::Other {
+            message: format!("ssh handshake failed: {error}"),
+        }
+    })?;
+
+    Ok(session)
+}
+
+fn verify_session_host_key(
+    session: &Session,
+    host: &str,
+    port: u16,
+    known_hosts_path: &Path,
+) -> Result<HostKeyCheckResult, ConnectionError> {
+    match check_host_key_against_file(session, host, port, known_hosts_path) {
+        Ok(result) => Ok(result),
+        Err(result) => match result.status {
+            HostKeyCheckStatus::NotFound => Err(ConnectionError::HostKeyUnknown {
+                host: host.to_string(),
+                port,
+                fingerprint: result.fingerprint,
+            }),
+            HostKeyCheckStatus::Mismatch => Err(ConnectionError::HostKeyMismatch {
+                host: host.to_string(),
+                port,
+            }),
+            _ => Err(ConnectionError::Other {
+                message: result
+                    .message
+                    .unwrap_or_else(|| "host key check failed".to_string()),
+            }),
+        },
+    }
 }
 
 pub(crate) fn open_session_for_host_key(host: &str, port: u16) -> Result<Session, String> {
@@ -455,7 +499,30 @@ pub(crate) fn connect_through_jump_host(
         known_hosts_path,
     )?;
 
-    // 2. Create a local TCP socket pair for bridging
+    let client_stream = open_jump_bridge(&jump_session, target_host, target_port)?;
+
+    // Open authenticated session on the client side of the bridge.
+    let target_session = open_authenticated_session(
+        client_stream,
+        target_username,
+        target_auth_method,
+        target_password,
+        target_private_key_data,
+        target_passphrase,
+        target_host,
+        target_port,
+        known_hosts_path,
+    )?;
+
+    debug!("Connected to target through jump host successfully");
+    Ok((jump_session, target_session))
+}
+
+fn open_jump_bridge(
+    jump_session: &Session,
+    target_host: &str,
+    target_port: u16,
+) -> Result<TcpStream, ConnectionError> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| ConnectionError::Other {
         message: format!("failed to bind local bridge socket: {e}"),
     })?;
@@ -471,17 +538,15 @@ pub(crate) fn connect_through_jump_host(
             message: format!("failed to set bridge listener nonblocking: {e}"),
         })?;
 
-    // 3. Open direct-tcpip channel through jump host to target
+    // Open direct-tcpip through the jump host. The target hostname is resolved
+    // by that host, which is why preflight reports local target DNS as delegated.
     let channel = jump_session
         .channel_direct_tcpip(target_host, target_port, Some(("127.0.0.1", local_port)))
         .map_err(|e| ConnectionError::Other {
             message: format!("failed to open direct-tcpip through jump host: {e}"),
         })?;
 
-    // 4. Spawn a thread that accepts the bridge connection and bridges data
-    //    between the jump channel and the server side. The accept must run
-    //    concurrently with the client connect below, otherwise neither side
-    //    would ever complete the TCP handshake.
+    // Accept and bridge concurrently with the client connect below.
     let bridge_handle = thread::spawn(move || {
         match accept_bridge_with_timeout(&listener, Duration::from_secs(15)) {
             Ok(server_stream) => {
@@ -495,7 +560,6 @@ pub(crate) fn connect_through_jump_host(
         }
     });
 
-    // 5. Connect client side of the bridge (this will be the target session's TCP stream)
     let client_stream =
         TcpStream::connect(("127.0.0.1", local_port)).map_err(|e| ConnectionError::Other {
             message: format!("failed to connect to bridge socket: {e}"),
@@ -504,26 +568,9 @@ pub(crate) fn connect_through_jump_host(
         message: format!("failed to configure bridge client socket: {e}"),
     })?;
 
-    // 6. Open authenticated session on the client stream
-    let target_session = open_authenticated_session(
-        client_stream,
-        target_username,
-        target_auth_method,
-        target_password,
-        target_private_key_data,
-        target_passphrase,
-        target_host,
-        target_port,
-        known_hosts_path,
-    )?;
-
-    // Dropping the JoinHandle detaches the bridge thread: it keeps copying
-    // data until the jump channel closes (i.e. when the sessions are dropped)
-    // or the bridge copy fails, and then exits on its own.
+    // Detach the bridge; it exits when either SSH session drops.
     drop(bridge_handle);
-
-    debug!("Connected to target through jump host successfully");
-    Ok((jump_session, target_session))
+    Ok(client_stream)
 }
 
 fn accept_bridge_with_timeout(
@@ -663,16 +710,492 @@ fn authenticate(
     }
 }
 
+struct PreflightRecorder {
+    operation_id: String,
+    expected: Vec<ConnectionPreflightStepId>,
+    steps: Vec<ConnectionPreflightStep>,
+}
+
+impl PreflightRecorder {
+    fn new(operation_id: String, uses_jump_host: bool) -> Self {
+        let mut expected = vec![
+            ConnectionPreflightStepId::Dns,
+            ConnectionPreflightStepId::Tcp,
+        ];
+        if uses_jump_host {
+            expected.extend([
+                ConnectionPreflightStepId::JumpHostKey,
+                ConnectionPreflightStepId::JumpAuthentication,
+                ConnectionPreflightStepId::JumpTunnel,
+            ]);
+        }
+        expected.extend([
+            ConnectionPreflightStepId::HostKey,
+            ConnectionPreflightStepId::Authentication,
+        ]);
+        Self {
+            operation_id,
+            expected,
+            steps: Vec::new(),
+        }
+    }
+
+    fn push(
+        &mut self,
+        id: ConnectionPreflightStepId,
+        status: ConnectionPreflightStepStatus,
+        detail: impl Into<String>,
+        endpoint: Option<(&str, u16)>,
+        fingerprint: Option<String>,
+        trustable: bool,
+    ) {
+        self.steps.push(ConnectionPreflightStep {
+            id,
+            status,
+            detail: detail.into(),
+            host: endpoint.map(|(host, _)| host.to_string()),
+            port: endpoint.map(|(_, port)| port),
+            fingerprint,
+            trustable,
+        });
+    }
+
+    fn finish(
+        mut self,
+        status: ConnectionPreflightStatus,
+        blocked_reason: &str,
+    ) -> ConnectionPreflightResult {
+        let completed: Vec<_> = self.steps.iter().map(|step| step.id).collect();
+        for id in self.expected.clone() {
+            if !completed.contains(&id) {
+                self.push(
+                    id,
+                    ConnectionPreflightStepStatus::Blocked,
+                    blocked_reason,
+                    None,
+                    None,
+                    false,
+                );
+            }
+        }
+        ConnectionPreflightResult {
+            operation_id: self.operation_id,
+            status,
+            checked_at: crate::db::current_timestamp_ms(),
+            steps: self.steps,
+        }
+    }
+}
+
+fn cancelled_preflight(recorder: PreflightRecorder) -> ConnectionPreflightResult {
+    recorder.finish(
+        ConnectionPreflightStatus::Cancelled,
+        "Not run because the preflight was cancelled by the user.",
+    )
+}
+
+fn verify_preflight_host_key(
+    recorder: &mut PreflightRecorder,
+    id: ConnectionPreflightStepId,
+    session: &Session,
+    host: &str,
+    port: u16,
+    known_hosts_path: &Path,
+) -> Option<ConnectionPreflightStatus> {
+    let result = match check_host_key_against_file(session, host, port, known_hosts_path) {
+        Ok(result) | Err(result) => result,
+    };
+    match result.status {
+        HostKeyCheckStatus::Match => {
+            recorder.push(
+                id,
+                ConnectionPreflightStepStatus::Passed,
+                "The presented host key matches the trusted key.",
+                Some((host, port)),
+                result.fingerprint,
+                false,
+            );
+            None
+        }
+        HostKeyCheckStatus::NotFound => {
+            recorder.push(
+                id,
+                ConnectionPreflightStepStatus::Warning,
+                result.message.unwrap_or_else(|| {
+                    "The host key is not trusted yet; credentials were not sent.".to_string()
+                }),
+                Some((host, port)),
+                result.fingerprint,
+                true,
+            );
+            Some(ConnectionPreflightStatus::Attention)
+        }
+        HostKeyCheckStatus::Mismatch => {
+            recorder.push(
+                id,
+                ConnectionPreflightStepStatus::Failed,
+                result.message.unwrap_or_else(|| {
+                    "The presented host key does not match the trusted key.".to_string()
+                }),
+                Some((host, port)),
+                result.fingerprint,
+                false,
+            );
+            Some(ConnectionPreflightStatus::Failed)
+        }
+        HostKeyCheckStatus::Failure => {
+            recorder.push(
+                id,
+                ConnectionPreflightStepStatus::Failed,
+                result
+                    .message
+                    .unwrap_or_else(|| "The host key could not be verified.".to_string()),
+                Some((host, port)),
+                result.fingerprint,
+                false,
+            );
+            Some(ConnectionPreflightStatus::Failed)
+        }
+    }
+}
+
+/// Performs an explicit, read-only connection preflight. Credentials are only
+/// sent after the corresponding host key is already trusted.
+pub(crate) fn preflight_connection(
+    request: RemoteConnectionRequest,
+    operation_id: String,
+    known_hosts_path: &Path,
+    cancel_flag: &AtomicBool,
+) -> ConnectionPreflightResult {
+    let uses_jump_host = request.jump_host.is_some();
+    let mut recorder = PreflightRecorder::new(operation_id, uses_jump_host);
+    if let Err(message) = validate_connection_fields(&request.host, &request.username) {
+        recorder.push(
+            ConnectionPreflightStepId::Dns,
+            ConnectionPreflightStepStatus::Failed,
+            message,
+            Some((&request.host, request.port)),
+            None,
+            false,
+        );
+        return recorder.finish(
+            ConnectionPreflightStatus::Failed,
+            "Not run because validation failed.",
+        );
+    }
+    if let Some(jump) = &request.jump_host {
+        if let Err(message) = validate_connection_fields(&jump.host, &jump.username) {
+            recorder.push(
+                ConnectionPreflightStepId::Dns,
+                ConnectionPreflightStepStatus::Failed,
+                message,
+                Some((&jump.host, jump.port)),
+                None,
+                false,
+            );
+            return recorder.finish(
+                ConnectionPreflightStatus::Failed,
+                "Not run because jump-host validation failed.",
+            );
+        }
+    }
+    if cancel_flag.load(AtomicOrdering::SeqCst) {
+        return cancelled_preflight(recorder);
+    }
+
+    let (network_host, network_port) = request
+        .jump_host
+        .as_ref()
+        .map_or((&request.host, request.port), |jump| {
+            (&jump.host, jump.port)
+        });
+    let addresses = match resolve_socket_addresses(network_host, network_port) {
+        Ok(addresses) => addresses,
+        Err(message) => {
+            recorder.push(
+                ConnectionPreflightStepId::Dns,
+                ConnectionPreflightStepStatus::Failed,
+                message,
+                Some((network_host, network_port)),
+                None,
+                false,
+            );
+            return recorder.finish(
+                ConnectionPreflightStatus::Failed,
+                "Not run because name resolution failed.",
+            );
+        }
+    };
+    let address_summary = addresses
+        .iter()
+        .take(4)
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let dns_detail = if uses_jump_host {
+        format!(
+            "Jump host resolved to {address_summary}. Target DNS resolution is delegated through the jump tunnel."
+        )
+    } else {
+        format!("Resolved to {address_summary}.")
+    };
+    recorder.push(
+        ConnectionPreflightStepId::Dns,
+        ConnectionPreflightStepStatus::Passed,
+        dns_detail,
+        Some((network_host, network_port)),
+        None,
+        false,
+    );
+    if cancel_flag.load(AtomicOrdering::SeqCst) {
+        return cancelled_preflight(recorder);
+    }
+
+    let tcp = match connect_tcp_stream(network_host, network_port) {
+        Ok(tcp) => tcp,
+        Err(message) => {
+            recorder.push(
+                ConnectionPreflightStepId::Tcp,
+                ConnectionPreflightStepStatus::Failed,
+                message,
+                Some((network_host, network_port)),
+                None,
+                false,
+            );
+            return recorder.finish(
+                ConnectionPreflightStatus::Failed,
+                "Not run because TCP connectivity failed.",
+            );
+        }
+    };
+    recorder.push(
+        ConnectionPreflightStepId::Tcp,
+        ConnectionPreflightStepStatus::Passed,
+        "The SSH TCP port accepted a connection.",
+        Some((network_host, network_port)),
+        None,
+        false,
+    );
+    if cancel_flag.load(AtomicOrdering::SeqCst) {
+        return cancelled_preflight(recorder);
+    }
+
+    let endpoint_session = match open_handshaken_session(tcp, network_host, network_port) {
+        Ok(session) => session,
+        Err(error) => {
+            let id = if uses_jump_host {
+                ConnectionPreflightStepId::JumpHostKey
+            } else {
+                ConnectionPreflightStepId::HostKey
+            };
+            recorder.push(
+                id,
+                ConnectionPreflightStepStatus::Failed,
+                error.message(),
+                Some((network_host, network_port)),
+                None,
+                false,
+            );
+            return recorder.finish(
+                ConnectionPreflightStatus::Failed,
+                "Not run because the SSH handshake failed.",
+            );
+        }
+    };
+
+    if let Some(jump) = &request.jump_host {
+        if let Some(status) = verify_preflight_host_key(
+            &mut recorder,
+            ConnectionPreflightStepId::JumpHostKey,
+            &endpoint_session,
+            &jump.host,
+            jump.port,
+            known_hosts_path,
+        ) {
+            return recorder.finish(status, "Not run because the jump-host key is not trusted.");
+        }
+        if cancel_flag.load(AtomicOrdering::SeqCst) {
+            return cancelled_preflight(recorder);
+        }
+        let mut jump_session = endpoint_session;
+        if let Err(message) = authenticate(
+            &mut jump_session,
+            &jump.username,
+            jump.auth_method,
+            jump.password.as_deref(),
+            jump.private_key_data.as_deref(),
+            jump.passphrase.as_deref(),
+        ) {
+            recorder.push(
+                ConnectionPreflightStepId::JumpAuthentication,
+                ConnectionPreflightStepStatus::Failed,
+                message,
+                Some((&jump.host, jump.port)),
+                None,
+                false,
+            );
+            return recorder.finish(
+                ConnectionPreflightStatus::Failed,
+                "Not run because jump-host authentication failed.",
+            );
+        }
+        recorder.push(
+            ConnectionPreflightStepId::JumpAuthentication,
+            ConnectionPreflightStepStatus::Passed,
+            "Jump-host authentication succeeded.",
+            Some((&jump.host, jump.port)),
+            None,
+            false,
+        );
+        if cancel_flag.load(AtomicOrdering::SeqCst) {
+            return cancelled_preflight(recorder);
+        }
+        let target_tcp = match open_jump_bridge(&jump_session, &request.host, request.port) {
+            Ok(tcp) => tcp,
+            Err(error) => {
+                recorder.push(
+                    ConnectionPreflightStepId::JumpTunnel,
+                    ConnectionPreflightStepStatus::Failed,
+                    error.message(),
+                    Some((&request.host, request.port)),
+                    None,
+                    false,
+                );
+                return recorder.finish(
+                    ConnectionPreflightStatus::Failed,
+                    "Not run because the jump tunnel failed.",
+                );
+            }
+        };
+        recorder.push(
+            ConnectionPreflightStepId::JumpTunnel,
+            ConnectionPreflightStepStatus::Passed,
+            "The jump host opened a direct TCP tunnel to the target.",
+            Some((&request.host, request.port)),
+            None,
+            false,
+        );
+        if cancel_flag.load(AtomicOrdering::SeqCst) {
+            return cancelled_preflight(recorder);
+        }
+        let mut target_session =
+            match open_handshaken_session(target_tcp, &request.host, request.port) {
+                Ok(session) => session,
+                Err(error) => {
+                    recorder.push(
+                        ConnectionPreflightStepId::HostKey,
+                        ConnectionPreflightStepStatus::Failed,
+                        error.message(),
+                        Some((&request.host, request.port)),
+                        None,
+                        false,
+                    );
+                    return recorder.finish(
+                        ConnectionPreflightStatus::Failed,
+                        "Not run because the target SSH handshake failed.",
+                    );
+                }
+            };
+        if let Some(status) = verify_preflight_host_key(
+            &mut recorder,
+            ConnectionPreflightStepId::HostKey,
+            &target_session,
+            &request.host,
+            request.port,
+            known_hosts_path,
+        ) {
+            return recorder.finish(
+                status,
+                "Authentication was not attempted because the target key is not trusted.",
+            );
+        }
+        if let Err(message) = authenticate(
+            &mut target_session,
+            &request.username,
+            request.auth_method,
+            request.password.as_deref(),
+            request.private_key_data.as_deref(),
+            request.passphrase.as_deref(),
+        ) {
+            recorder.push(
+                ConnectionPreflightStepId::Authentication,
+                ConnectionPreflightStepStatus::Failed,
+                message,
+                Some((&request.host, request.port)),
+                None,
+                false,
+            );
+            return recorder.finish(
+                ConnectionPreflightStatus::Failed,
+                "Connection preflight failed.",
+            );
+        }
+    } else {
+        let mut target_session = endpoint_session;
+        if let Some(status) = verify_preflight_host_key(
+            &mut recorder,
+            ConnectionPreflightStepId::HostKey,
+            &target_session,
+            &request.host,
+            request.port,
+            known_hosts_path,
+        ) {
+            return recorder.finish(
+                status,
+                "Authentication was not attempted because the host key is not trusted.",
+            );
+        }
+        if let Err(message) = authenticate(
+            &mut target_session,
+            &request.username,
+            request.auth_method,
+            request.password.as_deref(),
+            request.private_key_data.as_deref(),
+            request.passphrase.as_deref(),
+        ) {
+            recorder.push(
+                ConnectionPreflightStepId::Authentication,
+                ConnectionPreflightStepStatus::Failed,
+                message,
+                Some((&request.host, request.port)),
+                None,
+                false,
+            );
+            return recorder.finish(
+                ConnectionPreflightStatus::Failed,
+                "Connection preflight failed.",
+            );
+        }
+    }
+
+    recorder.push(
+        ConnectionPreflightStepId::Authentication,
+        ConnectionPreflightStepStatus::Passed,
+        "SSH authentication succeeded. No shell or remote command was started.",
+        Some((&request.host, request.port)),
+        None,
+        false,
+    );
+    recorder.finish(
+        ConnectionPreflightStatus::Passed,
+        "Connection preflight completed.",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::SessionCreateRequest;
+    use ssh2::{KnownHostFileKind, KnownHostKeyFormat};
+    use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::path::Path;
     use std::thread;
 
     #[test]
     fn session_request_summary_redacts_secret_values() {
         let request = SessionCreateRequest {
+            operation_id: Some("ssh-connect-test".to_string()),
             name: "demo".to_string(),
             host: "example.com".to_string(),
             port: 22,
@@ -690,6 +1213,7 @@ mod tests {
         let summary = summarize_session_request(&request);
 
         assert!(summary.contains("host=example.com"));
+        assert!(summary.contains("operation_id=ssh-connect-test"));
         assert!(summary.contains("username=alice"));
         assert!(summary.contains("auth_method=password"));
         assert!(summary.contains("has_password=true"));
@@ -814,5 +1338,199 @@ mod tests {
         accept_thread
             .join()
             .expect("accept thread should finish cleanly");
+    }
+
+    #[test]
+    fn cancelled_preflight_marks_every_unstarted_step_blocked() {
+        let request = RemoteConnectionRequest {
+            host: "127.0.0.1".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("unused".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let cancelled = AtomicBool::new(true);
+        let result = preflight_connection(
+            request,
+            "connection-preflight-cancelled".to_string(),
+            Path::new("unused-known-hosts"),
+            &cancelled,
+        );
+
+        assert_eq!(result.status, ConnectionPreflightStatus::Cancelled);
+        assert_eq!(result.steps.len(), 4);
+        assert!(result
+            .steps
+            .iter()
+            .all(|step| step.status == ConnectionPreflightStepStatus::Blocked));
+    }
+
+    #[test]
+    fn preflight_recorder_never_omits_expected_steps() {
+        let mut recorder = PreflightRecorder::new("connection-preflight-test".to_string(), true);
+        recorder.push(
+            ConnectionPreflightStepId::Dns,
+            ConnectionPreflightStepStatus::Passed,
+            "resolved",
+            Some(("jump.example.com", 22)),
+            None,
+            false,
+        );
+
+        let result = recorder.finish(ConnectionPreflightStatus::Failed, "not reached");
+
+        assert_eq!(result.steps.len(), 7);
+        assert_eq!(
+            result.steps[0].status,
+            ConnectionPreflightStepStatus::Passed
+        );
+        assert!(result.steps[1..]
+            .iter()
+            .all(|step| step.status == ConnectionPreflightStepStatus::Blocked));
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_end_to_end() {
+        let host =
+            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(22222);
+        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
+            .unwrap_or_else(|_| "termbridge".to_string());
+        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
+            .unwrap_or_else(|_| "termbridge-e2e".to_string());
+        let temp = tempfile::tempdir().expect("create isolated known-hosts directory");
+        let known_hosts_path = temp.path().join("known_hosts");
+        let request = || RemoteConnectionRequest {
+            host: host.clone(),
+            port,
+            username: username.clone(),
+            auth_method: AuthMethod::Password,
+            password: Some(password.clone()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        };
+
+        let unknown_preflight = preflight_connection(
+            request(),
+            "connection-preflight-unknown".to_string(),
+            &known_hosts_path,
+            &AtomicBool::new(false),
+        );
+        assert_eq!(
+            unknown_preflight.status,
+            ConnectionPreflightStatus::Attention
+        );
+        assert!(unknown_preflight.steps.iter().any(|step| {
+            step.id == ConnectionPreflightStepId::HostKey
+                && step.status == ConnectionPreflightStepStatus::Warning
+                && step.trustable
+        }));
+        assert!(unknown_preflight.steps.iter().any(|step| {
+            step.id == ConnectionPreflightStepId::Authentication
+                && step.status == ConnectionPreflightStepStatus::Blocked
+        }));
+
+        let unknown = open_authenticated_session(
+            connect_tcp_stream(&host, port).expect("connect to isolated SSH service"),
+            &username,
+            AuthMethod::Password,
+            Some(&password),
+            None,
+            None,
+            &host,
+            port,
+            Some(&known_hosts_path),
+        );
+        match unknown {
+            Err(ConnectionError::HostKeyUnknown { .. }) => {}
+            Err(error) => panic!("expected an unknown host key, got {error:?}"),
+            Ok(_) => panic!("an untrusted host key was accepted"),
+        }
+
+        let handshake = open_session_for_host_key(&host, port).expect("read isolated host key");
+        let (key, key_type) = handshake.host_key().expect("server exposes a host key");
+        let key_format = match key_type {
+            ssh2::HostKeyType::Rsa => KnownHostKeyFormat::SshRsa,
+            ssh2::HostKeyType::Dss => KnownHostKeyFormat::SshDss,
+            ssh2::HostKeyType::Ecdsa256 => KnownHostKeyFormat::Ecdsa256,
+            ssh2::HostKeyType::Ecdsa384 => KnownHostKeyFormat::Ecdsa384,
+            ssh2::HostKeyType::Ecdsa521 => KnownHostKeyFormat::Ecdsa521,
+            ssh2::HostKeyType::Ed25519 => KnownHostKeyFormat::Ed25519,
+            ssh2::HostKeyType::Unknown => KnownHostKeyFormat::Unknown,
+        };
+        let host_with_port = if port == 22 {
+            host.clone()
+        } else {
+            format!("[{host}]:{port}")
+        };
+        let mut known_hosts = handshake.known_hosts().expect("initialize known hosts");
+        known_hosts
+            .add(&host_with_port, key, &host_with_port, key_format)
+            .expect("trust isolated host key");
+        known_hosts
+            .write_file(&known_hosts_path, KnownHostFileKind::OpenSSH)
+            .expect("persist isolated known host");
+
+        let trusted_preflight = preflight_connection(
+            request(),
+            "connection-preflight-trusted".to_string(),
+            &known_hosts_path,
+            &AtomicBool::new(false),
+        );
+        assert_eq!(trusted_preflight.status, ConnectionPreflightStatus::Passed);
+        assert!(trusted_preflight.steps.iter().all(|step| !step.trustable));
+
+        let session = open_authenticated_session(
+            connect_tcp_stream(&host, port).expect("reconnect to isolated SSH service"),
+            &username,
+            AuthMethod::Password,
+            Some(&password),
+            None,
+            None,
+            &host,
+            port,
+            Some(&known_hosts_path),
+        )
+        .expect("authenticate after trusting host key");
+
+        let mut channel = session.channel_session().expect("open terminal channel");
+        channel
+            .request_pty("xterm", None, None)
+            .expect("request terminal PTY");
+        channel.shell().expect("start remote shell");
+        channel
+            .write_all(b"printf 'termbridge-terminal-ok\\n'\nexit\n")
+            .expect("write terminal input");
+        let mut terminal_output = String::new();
+        channel
+            .read_to_string(&mut terminal_output)
+            .expect("read terminal output");
+        channel.wait_close().expect("close terminal channel");
+        assert!(terminal_output.contains("termbridge-terminal-ok"));
+
+        let sftp = session.sftp().expect("open SFTP subsystem");
+        let remote_path = Path::new("/home/termbridge/upload/termbridge-e2e.txt");
+        let mut remote = sftp.create(remote_path).expect("create remote upload");
+        remote
+            .write_all(b"termbridge-sftp-ok")
+            .expect("upload remote content");
+        drop(remote);
+        let mut downloaded = String::new();
+        sftp.open(remote_path)
+            .expect("open uploaded file")
+            .read_to_string(&mut downloaded)
+            .expect("download uploaded file");
+        assert_eq!(downloaded, "termbridge-sftp-ok");
+        sftp.unlink(remote_path).expect("clean up remote fixture");
     }
 }

@@ -7,6 +7,7 @@ import {
   buildSessionCreateRequest,
   invokeCreateLocalSession,
   invokeCreateSession,
+  invokeWriteSession,
 } from '@/lib/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
@@ -19,13 +20,21 @@ import {
 } from '@/lib/keychain-key-prompt';
 import { openHostKeyPrompt } from '@/lib/host-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
+import { buildChangeDirectoryCommand } from '@/lib/host-context';
+
+export interface ConnectSessionOptions {
+  insertAfterId?: string;
+  pinned?: boolean;
+  color?: string;
+  initialDirectory?: string;
+}
 
 const logger = createLogger('connect');
 
 export function useConnectSession(): {
   connect: (
     profile: ConnectionProfile,
-    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+    options?: ConnectSessionOptions,
   ) => Promise<void>;
   openLocal: () => Promise<void>;
 } {
@@ -66,10 +75,10 @@ export function useConnectSession(): {
 
   const connect: (
     profile: ConnectionProfile,
-    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+    options?: ConnectSessionOptions,
   ) => Promise<void> = useCallback(async (
     profile: ConnectionProfile,
-    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+    options?: ConnectSessionOptions,
   ): Promise<void> => {
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
 
@@ -100,6 +109,20 @@ export function useConnectSession(): {
         );
         await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
         addSession(summary, profile.id, options);
+        if (options?.initialDirectory) {
+          const changeDirectoryCommand = buildChangeDirectoryCommand(options.initialDirectory);
+          if (changeDirectoryCommand) {
+            try {
+              await invokeWriteSession(summary.sessionId, changeDirectoryCommand);
+            } catch (error) {
+              logger.error(
+                `failed to set initial directory session_id=${summary.sessionId}`,
+                error,
+              );
+              useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
+            }
+          }
+        }
         logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
         useRecentProfilesStore.getState().touchProfile(profile.id);
         setActiveSection('terminal');

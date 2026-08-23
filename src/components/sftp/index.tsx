@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FolderIcon, ServerIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
+import { useProfileStore } from '@/stores/profileStore';
 import {
   getSftpPaneConnection,
   getSftpPaneConnectionKey,
@@ -38,6 +39,20 @@ import {
   useTransferStore,
 } from '@/stores/transferStore';
 import type { ConnectionProfile, UploadConflictPolicy } from '@/types';
+import { serializeSftpWorkspace } from '@/lib/sftp-workspace';
+import {
+  clearSftpWorkspace,
+  flushSftpWorkspace,
+  stageSftpWorkspace,
+} from '@/lib/sftp-workspace-persistence';
+import { createLogger } from '@/lib/logger';
+import {
+  removeTransferResumeCandidate,
+  upsertTransferResumeCandidate,
+  type TransferResumeCandidate,
+} from '@/lib/transfer-resume';
+
+const logger = createLogger('sftp-workspace');
 
 const Sftp: React.FC = () => {
   const { t } = useI18n();
@@ -45,6 +60,7 @@ const Sftp: React.FC = () => {
   const activeConnectionId = useSftpStore((state) => state.activeConnectionId);
   const connection = connections.find((c) => c.id === activeConnectionId);
   const addLocalConnection = useSftpStore((state) => state.addLocalConnection);
+  const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
   const {
     open: openSftpConnection,
     verifyHostKey,
@@ -64,6 +80,22 @@ const Sftp: React.FC = () => {
     document.addEventListener('termbridge:new-sftp-connection', handleNewConnectionRequest);
     return () => document.removeEventListener('termbridge:new-sftp-connection', handleNewConnectionRequest);
   }, []);
+
+  useEffect(() => {
+    if (!restoreWorkspace) {
+      void clearSftpWorkspace().catch((error) => {
+        logger.error('failed to clear SFTP workspace', error);
+      });
+      return;
+    }
+    stageSftpWorkspace(serializeSftpWorkspace(connections, activeConnectionId));
+    const timer = window.setTimeout(() => {
+      void flushSftpWorkspace().catch((error) => {
+        logger.error('failed to save SFTP workspace', error);
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [activeConnectionId, connections, restoreWorkspace]);
 
   if (!connection) {
     return (
@@ -96,6 +128,7 @@ const Sftp: React.FC = () => {
             onOpenLocal={addLocalConnection}
           />
         </div>
+        <TransferProgress />
         <SftpTabContextMenu
           open={!!tabContextMenu}
           x={tabContextMenu?.x ?? 0}
@@ -211,6 +244,23 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   const markTransferFailed = useTransferStore((state) => state.markOperationFailed);
   const markTransferCancelled = useTransferStore((state) => state.markOperationCancelled);
   const removeTransferOperation = useTransferStore((state) => state.removeOperation);
+
+  const reconnectRestoredPane = useCallback((side: SftpSide): void => {
+    const profileId = side === 'local' ? connection.leftProfileId : connection.profileId;
+    if (!profileId) return;
+    const profile = useProfileStore.getState().getProfile(profileId);
+    if (!profile) return;
+    void openSftpConnection(profile, connection.id, side);
+  }, [connection.id, connection.leftProfileId, connection.profileId, openSftpConnection]);
+
+  const openTerminalForPane = useCallback((side: SftpSide): void => {
+    const profileId = side === 'local' ? connection.leftProfileId : connection.profileId;
+    const path = side === 'local' ? connection.localPath : connection.remotePath;
+    if (!profileId || !path) return;
+    document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {
+      detail: { profileId, target: 'terminal', initialDirectory: path },
+    }));
+  }, [connection.leftProfileId, connection.localPath, connection.profileId, connection.remotePath]);
 
   const selectedRemotePaths = useMemo(
     () => new Set(connection.remotePane.selectedPaths),
@@ -421,6 +471,25 @@ export const SftpContent: React.FC<SftpContentProps> = ({
             conflictPolicies: queue.policies,
             operationId,
           };
+          const sourceProfileId = queue.sourceSide === 'local'
+            ? connection.leftProfileId
+            : connection.profileId;
+          const destinationProfileId = queue.side === 'local'
+            ? connection.leftProfileId
+            : connection.profileId;
+          const resumeCandidate: TransferResumeCandidate | undefined =
+            sourceProfileId && destinationProfileId
+              ? {
+                  schemaVersion: 1,
+                  operationId,
+                  sourceProfileId,
+                  destinationProfileId,
+                  sourcePaths: [...queue.accepted],
+                  destinationDirectory: queue.destination,
+                  conflictPolicies: [...queue.policies],
+                  createdAt: new Date().toISOString(),
+                }
+              : undefined;
           const targetRemote = queue.side === 'local' ? leftRemote : rightRemote;
           const transferScopes = [
             { connectionId: sourceConnectionKey, paths: queue.accepted },
@@ -434,8 +503,14 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           const runRemoteCopy = async (): Promise<void> => {
             markTransferRunning(operationId);
             try {
+              if (resumeCandidate) {
+                await upsertTransferResumeCandidate(resumeCandidate);
+              }
               await invokeCopyRemoteToRemote(request);
               markTransferCompleted(operationId);
+              if (resumeCandidate) {
+                await removeTransferResumeCandidate(operationId);
+              }
               targetRemote.invalidatePaneListingCache();
               void targetRemote.loadRemoteDirectory(queue.destination);
             } catch (copyError) {
@@ -444,6 +519,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
               );
               if (operation?.status === 'cancelling') {
                 markTransferCancelled(operationId);
+                if (resumeCandidate) {
+                  await removeTransferResumeCandidate(operationId);
+                }
                 return;
               }
               markTransferFailed(
@@ -472,6 +550,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                   status: 'running',
                   retry: runRemoteCopy,
                   cancel: () => invokeCancelRemoteCopy(operationId),
+                  onDiscard: resumeCandidate
+                    ? () => removeTransferResumeCandidate(operationId)
+                    : undefined,
                 });
                 await runRemoteCopy();
               },
@@ -737,6 +818,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 systemDropActive={systemDragActive}
                 systemDropHovered={systemHoveredSide === 'local'}
                 localMode={leftIsLocal}
+                onOpenTerminal={!leftIsLocal && connection.leftProfileId
+                  ? () => openTerminalForPane('local')
+                  : undefined}
                 onTitleClick={() => {
                   setSourceTargetSide('local');
                   setNewConnectionMenuOpen(true);
@@ -749,6 +833,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                     () => void leftRemote.loadRemoteDirectory(connection.localPath),
                   );
                 }}
+                onReconnect={() => reconnectRestoredPane('local')}
               />
             }
             right={rightSource === 'empty' ? (
@@ -793,9 +878,13 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                     () => void rightRemote.loadRemoteDirectory(connection.remotePath),
                   );
                 }}
+                onReconnect={() => reconnectRestoredPane('remote')}
                 systemDropActive={systemDragActive}
                 systemDropHovered={systemHoveredSide === 'remote'}
                 localMode={rightIsLocal}
+                onOpenTerminal={!rightIsLocal && connection.profileId
+                  ? () => openTerminalForPane('remote')
+                  : undefined}
                 onTitleClick={() => {
                   setSourceTargetSide('remote');
                   setNewConnectionMenuOpen(true);

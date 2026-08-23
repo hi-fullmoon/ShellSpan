@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { EyeIcon, EyeOffIcon, FolderOpen, KeyRound, Network, Server } from 'lucide-react';
+import { EyeIcon, EyeOffIcon, FolderOpen, KeyRound, Network, Server, ShieldCheckIcon, TagsIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useKeychainStore } from '@/stores/keychainStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,9 +14,23 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FieldGroup } from '@/components/ui/field';
 import { FormRow } from './shared';
-import { invokePickPrivateKeyFile, invokeReadTextFile } from '@/lib/tauri';
+import {
+  invokeCancelConnectionPreflight,
+  invokePickPrivateKeyFile,
+  invokePreflightConnection,
+  invokeReadTextFile,
+  invokeTrustHost,
+} from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
-import type { AuthMethod, ConnectionProfile, JumpHostConfig } from '@/types';
+import { createOperationId } from '@/lib/operation-id';
+import type {
+  AuthMethod,
+  ConnectionPreflightRequest,
+  ConnectionPreflightResult,
+  ConnectionProfile,
+  JumpHostConfig,
+} from '@/types';
+import { ConnectionPreflightDialog } from './connection-preflight-dialog';
 
 const logger = createLogger('connectionForm');
 
@@ -43,6 +58,10 @@ interface FormState {
   keychainKeyId: string;
   privateKeyPath: string;
   passphrase: string;
+  group: string;
+  tags: string;
+  favorite: boolean;
+  notes: string;
   useJumpHost: boolean;
   jumpHost: JumpHostFormState;
 }
@@ -57,6 +76,10 @@ const EMPTY_FORM: FormState = {
   keychainKeyId: '',
   privateKeyPath: '',
   passphrase: '',
+  group: '',
+  tags: '',
+  favorite: false,
+  notes: '',
   useJumpHost: false,
   jumpHost: {
     host: '',
@@ -81,6 +104,10 @@ function profileToForm(profile: ConnectionProfile): FormState {
     keychainKeyId: profile.keychainKeyId ?? '',
     privateKeyPath: '',
     passphrase: profile.passphrase ?? '',
+    group: profile.group ?? '',
+    tags: (profile.tags ?? []).join(', '),
+    favorite: Boolean(profile.favorite),
+    notes: profile.notes ?? '',
     useJumpHost: !!profile.jumpHost,
     jumpHost: profile.jumpHost ? { ...profile.jumpHost, privateKeyPath: '' } : EMPTY_FORM.jumpHost,
   };
@@ -100,7 +127,13 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [preflightOpen, setPreflightOpen] = useState(false);
+  const [preflightChecking, setPreflightChecking] = useState(false);
+  const [preflightResult, setPreflightResult] = useState<ConnectionPreflightResult>();
+  const [preflightError, setPreflightError] = useState<string>();
   const submissionInFlightRef = useRef(false);
+  const preflightOperationIdRef = useRef<string | undefined>(undefined);
+  const preflightRunRef = useRef(0);
 
   useEffect(() => {
     if (open) {
@@ -112,6 +145,12 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
         setForm(EMPTY_FORM);
       }
       setErrors({});
+      setPreflightOpen(false);
+      setPreflightChecking(false);
+      setPreflightResult(undefined);
+      setPreflightError(undefined);
+      preflightOperationIdRef.current = undefined;
+      preflightRunRef.current += 1;
     }
   }, [initial, initialValues, open]);
 
@@ -295,7 +334,104 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
       keychainKeyId,
       passphrase: form.authMethod === 'key' ? form.passphrase.trim() || undefined : undefined,
       jumpHost,
+      group: form.group.trim() || undefined,
+      tags: [...new Set(form.tags.split(',').map((tag) => tag.trim()).filter(Boolean))],
+      favorite: form.favorite,
+      notes: form.notes.trim() || undefined,
     };
+  };
+
+  const buildPreflightRequest = async (operationId: string): Promise<ConnectionPreflightRequest> => {
+    const privateKeyData = form.authMethod === 'key' && form.privateKeyPath.trim()
+      ? await invokeReadTextFile(form.privateKeyPath.trim())
+      : undefined;
+    let jumpHost: JumpHostConfig | undefined;
+    if (form.useJumpHost) {
+      const jumpPrivateKeyData = form.jumpHost.authMethod === 'key' && form.jumpHost.privateKeyPath.trim()
+        ? await invokeReadTextFile(form.jumpHost.privateKeyPath.trim())
+        : undefined;
+      jumpHost = {
+        host: form.jumpHost.host.trim(),
+        port: form.jumpHost.port,
+        username: form.jumpHost.username.trim(),
+        authMethod: form.jumpHost.authMethod,
+        password: form.jumpHost.authMethod === 'password' ? form.jumpHost.password?.trim() || undefined : undefined,
+        keychainKeyId: form.jumpHost.authMethod === 'key' && !jumpPrivateKeyData
+          ? form.jumpHost.keychainKeyId?.trim() || undefined
+          : undefined,
+        privateKeyData: jumpPrivateKeyData,
+        passphrase: form.jumpHost.authMethod === 'key' ? form.jumpHost.passphrase?.trim() || undefined : undefined,
+      };
+    }
+
+    return {
+      operationId,
+      host: form.host.trim(),
+      port: Number(form.port),
+      username: form.username.trim(),
+      authMethod: form.authMethod,
+      password: form.authMethod === 'password' ? form.password.trim() || undefined : undefined,
+      keychainKeyId: form.authMethod === 'key' && !privateKeyData
+        ? form.keychainKeyId.trim() || undefined
+        : undefined,
+      privateKeyData,
+      passphrase: form.authMethod === 'key' ? form.passphrase.trim() || undefined : undefined,
+      jumpHost,
+    };
+  };
+
+  const runPreflight = async (): Promise<void> => {
+    if (preflightChecking || !validate()) return;
+    const run = preflightRunRef.current + 1;
+    preflightRunRef.current = run;
+    const operationId = createOperationId('connection-preflight');
+    preflightOperationIdRef.current = operationId;
+    setPreflightOpen(true);
+    setPreflightChecking(true);
+    setPreflightResult(undefined);
+    setPreflightError(undefined);
+    try {
+      const request = await buildPreflightRequest(operationId);
+      const result = await invokePreflightConnection(request);
+      if (preflightRunRef.current === run) setPreflightResult(result);
+    } catch (error) {
+      logger.error(`connection preflight failed operation_id=${operationId}`, error);
+      if (preflightRunRef.current === run) {
+        setPreflightError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (preflightRunRef.current === run) {
+        setPreflightChecking(false);
+        preflightOperationIdRef.current = undefined;
+      }
+    }
+  };
+
+  const cancelPreflight = (): void => {
+    const operationId = preflightOperationIdRef.current;
+    if (operationId) {
+      void invokeCancelConnectionPreflight(operationId).catch((error) => {
+        logger.error(`failed to cancel connection preflight operation_id=${operationId}`, error);
+      });
+    }
+  };
+
+  const closePreflight = (): void => {
+    cancelPreflight();
+    preflightRunRef.current += 1;
+    preflightOperationIdRef.current = undefined;
+    setPreflightChecking(false);
+    setPreflightOpen(false);
+  };
+
+  const trustPreflightHost = async (host: string, port: number): Promise<void> => {
+    try {
+      await invokeTrustHost(host, port);
+      void runPreflight();
+    } catch (error) {
+      logger.error(`failed to trust preflight host host=${host} port=${port}`, error);
+      setPreflightError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const submit = async (action: ConnectionFormDrawerProps['onSubmit']): Promise<void> => {
@@ -348,6 +484,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
   };
 
   return (
+    <>
     <Drawer
       open={open}
       onOpenChange={(open) => {
@@ -406,6 +543,50 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                   </FormRow>
                 </>
               )}
+            </FormSection>
+
+            <FormSection icon={TagsIcon} title={t('connection.form.section.organization')}>
+              <div className="grid grid-cols-2 gap-2">
+                <FormRow controlId="connection-group" label={t('connection.form.group')}>
+                  <Input
+                    id="connection-group"
+                    value={form.group}
+                    onChange={(event) => updateField('group', event.target.value)}
+                    placeholder={t('connection.form.groupPlaceholder')}
+                    autoComplete="off"
+                  />
+                </FormRow>
+                <FormRow controlId="connection-tags" label={t('connection.form.tags')}>
+                  <Input
+                    id="connection-tags"
+                    value={form.tags}
+                    onChange={(event) => updateField('tags', event.target.value)}
+                    placeholder={t('connection.form.tagsPlaceholder')}
+                    autoComplete="off"
+                  />
+                </FormRow>
+              </div>
+              <FormRow controlId="connection-notes" label={t('connection.form.notes')}>
+                <Textarea
+                  id="connection-notes"
+                  value={form.notes}
+                  onChange={(event) => updateField('notes', event.target.value)}
+                  placeholder={t('connection.form.notesPlaceholder')}
+                  className="min-h-20 resize-y"
+                />
+              </FormRow>
+              <div className="flex items-center justify-between rounded-lg border border-app-border px-3.5 py-3">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-sm font-medium text-app-text">{t('connection.form.favorite')}</span>
+                  <span className="text-xs text-muted-foreground">{t('connection.form.favoriteHint')}</span>
+                </div>
+                <Switch
+                  id="connection-favorite"
+                  checked={form.favorite}
+                  onCheckedChange={(checked) => updateField('favorite', checked)}
+                  aria-label={t('connection.form.favorite')}
+                />
+              </div>
             </FormSection>
 
             <FormSection icon={Network} title={t('connection.form.jumpHost')}>
@@ -468,7 +649,11 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
           </div>
         </ScrollArea>
 
-        <DrawerFooter className="grid grid-cols-2 gap-2 px-5 py-4">
+        <DrawerFooter className="grid grid-cols-3 gap-2 px-5 py-4">
+          <Button variant="outline" onClick={() => void runPreflight()} disabled={isSubmitting || preflightChecking}>
+            <ShieldCheckIcon data-icon="inline-start" />
+            {t('connection.preflight.action')}
+          </Button>
           {initial ? (
             <>
               <Button variant="outline" onClick={handleConnect} disabled={isSubmitting}>
@@ -491,6 +676,17 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
+      <ConnectionPreflightDialog
+        open={preflightOpen}
+        checking={preflightChecking}
+        result={preflightResult}
+        error={preflightError}
+        onClose={closePreflight}
+        onCancel={cancelPreflight}
+        onRetry={() => void runPreflight()}
+        onTrust={(host, port) => void trustPreflightHost(host, port)}
+      />
+    </>
   );
 };
 

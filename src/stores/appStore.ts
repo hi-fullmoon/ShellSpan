@@ -16,6 +16,7 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   openTerminal: 'mod+2',
   openSftp: 'mod+3',
   openSettings: 'mod+,',
+  openCommandPalette: 'mod+shift+p',
   toggleAiPanel: 'mod+shift+a',
   newTerminalTab: 'mod+k',
   closeTerminalTab: 'mod+w',

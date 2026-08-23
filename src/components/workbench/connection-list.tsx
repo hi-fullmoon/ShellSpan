@@ -7,9 +7,12 @@ import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
+import { HostOverviewDialog } from './host-overview-dialog';
 import type { ConnectionProfile } from '@/types';
+import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import {
   CopyIcon,
   FolderIcon,
@@ -20,6 +23,10 @@ import {
   SearchXIcon,
   TerminalIcon,
   Trash2Icon,
+  UploadIcon,
+  DownloadIcon,
+  StarIcon,
+  InfoIcon,
 } from 'lucide-react';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
@@ -37,6 +44,9 @@ export interface ConnectionListProps {
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
+  onToggleFavorite: (profile: ConnectionProfile) => void;
+  onImport: () => void;
+  onExport: () => void;
 }
 
 export const ConnectionList: React.FC<ConnectionListProps> = ({
@@ -48,14 +58,24 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onConnectTerminal,
   onConnectSftp,
   onDuplicate,
+  onToggleFavorite,
+  onImport,
+  onExport,
 }) => {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
+  const [activityFilter, setActivityFilter] = useState<'all' | 'favorites' | 'recent'>('all');
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [overviewProfile, setOverviewProfile] = useState<ConnectionProfile>();
+  const recentIds = useRecentProfilesStore((state) => state.recentIds);
+
+  const groups = useMemo(() => [...new Set(
+    profiles.map((profile) => profile.group?.trim()).filter((group): group is string => Boolean(group)),
+  )].sort((left, right) => left.localeCompare(right)), [profiles]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredProfiles = useMemo(() => {
     return profiles.filter((profile) => {
-      if (!normalizedQuery) return true;
       const haystack = [
         profile.name,
         profile.host,
@@ -63,14 +83,21 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
         String(profile.port),
         profile.jumpHost?.host,
         profile.jumpHost?.username,
+        profile.group,
+        ...(profile.tags ?? []),
+        profile.notes,
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
 
-      return haystack.includes(normalizedQuery);
+      if (normalizedQuery && !haystack.includes(normalizedQuery)) return false;
+      if (activityFilter === 'favorites' && !profile.favorite) return false;
+      if (activityFilter === 'recent' && !recentIds.includes(profile.id)) return false;
+      if (groupFilter !== 'all' && profile.group !== groupFilter) return false;
+      return true;
     });
-  }, [profiles, normalizedQuery]);
+  }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds]);
 
   if (profiles.length === 0) {
     if (!initialized) {
@@ -82,15 +109,16 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
         description={t('workbench.connections.emptyDescription')}
         icon={<MonitorIcon className="size-5" />}
         action={
-          <Button
-            variant="default"
-            size="default"
-            onClick={onAdd}
-            data-icon="inline-start"
-          >
-            <PlusIcon data-icon="inline-start" />
-            {t('workbench.connections.new')}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="default" onClick={onImport}>
+              <UploadIcon data-icon="inline-start" />
+              {t('workbench.connections.import')}
+            </Button>
+            <Button variant="default" size="default" onClick={onAdd}>
+              <PlusIcon data-icon="inline-start" />
+              {t('workbench.connections.new')}
+            </Button>
+          </div>
         }
       />
     );
@@ -122,10 +150,40 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 className="h-8 pl-7"
               />
             </div>
+            <Button variant="outline" size="sm" onClick={onImport} aria-label={t('workbench.connections.import')}>
+              <UploadIcon />
+            </Button>
+            <Button variant="outline" size="sm" onClick={onExport} aria-label={t('workbench.connections.export')}>
+              <DownloadIcon />
+            </Button>
             <Button variant="default" size="sm" onClick={onAdd}>
               {t('workbench.connections.new')}
             </Button>
           </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-app-border/50 px-3 py-1.5">
+          {(['all', 'favorites', 'recent'] as const).map((filter) => (
+            <Button
+              key={filter}
+              variant={activityFilter === filter ? 'secondary' : 'ghost'}
+              size="xs"
+              onClick={() => setActivityFilter(filter)}
+            >
+              {t(`workbench.connections.filter.${filter}`)}
+            </Button>
+          ))}
+          {groups.length > 0 && (
+            <Select value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
+              <SelectTrigger size="sm" className="ml-auto w-40" aria-label={t('workbench.connections.groupFilter')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('workbench.connections.allGroups')}</SelectItem>
+                {groups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -150,12 +208,15 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                   onConnectTerminal={onConnectTerminal}
                   onConnectSftp={onConnectSftp}
                   onDuplicate={onDuplicate}
+                  onToggleFavorite={onToggleFavorite}
+                  onOverview={setOverviewProfile}
                 />
               ))}
             </ResponsiveCardGrid>
           )}
         </div>
       </div>
+      <HostOverviewDialog profile={overviewProfile} onClose={() => setOverviewProfile(undefined)} />
     </TooltipProvider>
   );
 };
@@ -167,6 +228,8 @@ interface ConnectionCardProps {
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
+  onToggleFavorite: (profile: ConnectionProfile) => void;
+  onOverview: (profile: ConnectionProfile) => void;
 }
 
 const ConnectionCard = React.memo<ConnectionCardProps>(({
@@ -176,6 +239,8 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
   onConnectTerminal,
   onConnectSftp,
   onDuplicate,
+  onToggleFavorite,
+  onOverview,
 }) => {
   const { t } = useI18n();
   const handleConnectTerminal = useDebouncedCallback(
@@ -192,6 +257,10 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
     CARD_ACTION_DEBOUNCE_MS,
   );
   const handleDelete = useDebouncedCallback(() => onDelete(profile), CARD_ACTION_DEBOUNCE_MS);
+  const handleToggleFavorite = useDebouncedCallback(
+    () => onToggleFavorite(profile),
+    CARD_ACTION_DEBOUNCE_MS,
+  );
 
   return (
     <ManagementCard>
@@ -220,8 +289,15 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
               {t('connection.form.jumpHost')}
             </Badge>
           )}
+          {profile.group && <Badge variant="secondary">{profile.group}</Badge>}
+          {(profile.tags ?? []).map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
         </div>
       </div>
+      {profile.notes && (
+        <p className="line-clamp-2 text-xs text-muted-foreground" title={profile.notes}>
+          {profile.notes}
+        </p>
+      )}
       {profile.jumpHost && (
         <div className="rounded-lg border border-app-border bg-muted px-2.5 py-2">
           <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
@@ -244,6 +320,24 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
             tooltip={t('workbench.connections.connectSftp')}
           >
             <FolderIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
+            onClick={() => onOverview(profile)}
+            aria-label={t('hostOverview.open')}
+            tooltip={t('hostOverview.open')}
+          >
+            <InfoIcon />
+          </IconActionButton>
+          <IconActionButton
+            onClick={handleToggleFavorite}
+            aria-label={profile.favorite
+              ? t('workbench.connections.unfavorite')
+              : t('workbench.connections.favorite')}
+            tooltip={profile.favorite
+              ? t('workbench.connections.unfavorite')
+              : t('workbench.connections.favorite')}
+          >
+            <StarIcon className={profile.favorite ? 'fill-current text-app-warning' : undefined} />
           </IconActionButton>
           <IconActionButton
             onClick={handleEdit}

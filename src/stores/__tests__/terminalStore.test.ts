@@ -141,6 +141,23 @@ describe('terminalStore', () => {
     expect(useTerminalStore.getState().sessions[0]?.reconnecting).toBe(false);
   });
 
+  it('does not activate a background session when it reconnects', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'A', host: 'h1', port: 22, username: 'u' });
+    store.addSession({ sessionId: 's2', title: 'B', host: 'h2', port: 22, username: 'u' });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+
+    store.reconnectSession('s1', {
+      sessionId: 's1-next',
+      title: 'A',
+      host: 'h1',
+      port: 22,
+      username: 'u',
+    });
+
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
   it('restores saved profile tabs as disconnected sessions preserving ids', () => {
     useTerminalStore.getState().addRestoredSessions([{
       sessionId: 'saved-1',

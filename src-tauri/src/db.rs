@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 2;
+const CURRENT_SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -103,6 +103,24 @@ PRAGMA wal_checkpoint(TRUNCATE);
 VACUUM;
 ";
 
+const SCHEMA_V3: &str = "
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS sftp_workspace (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    workspace_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+INSERT INTO schema_version (version) VALUES (3);
+COMMIT;
+";
+
+const SCHEMA_V4: &str = "
+BEGIN IMMEDIATE;
+ALTER TABLE profiles ADD COLUMN organization_json TEXT;
+INSERT INTO schema_version (version) VALUES (4);
+COMMIT;
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -157,6 +175,16 @@ impl Database {
                 .map_err(|e| format!("migration v2 failed: {e}"))?;
         }
 
+        if current < 3 {
+            conn.execute_batch(SCHEMA_V3)
+                .map_err(|e| format!("migration v3 failed: {e}"))?;
+        }
+
+        if current < 4 {
+            conn.execute_batch(SCHEMA_V4)
+                .map_err(|e| format!("migration v4 failed: {e}"))?;
+        }
+
         Ok(())
     }
 
@@ -170,7 +198,7 @@ impl Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, host, port, username, auth_method, \
-                 keychain_key_id, jump_host_config, created_at, updated_at \
+                 keychain_key_id, jump_host_config, organization_json, created_at, updated_at \
                  FROM profiles ORDER BY name",
             )
             .map_err(|e| format!("failed to prepare list_profiles: {e}"))?;
@@ -201,8 +229,9 @@ impl Database {
                     },
                     keychain_key_id: row.get(6)?,
                     jump_host_config: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    organization_json: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             })
             .map_err(|e| format!("failed to query profiles: {e}"))?;
@@ -221,7 +250,7 @@ impl Database {
         let row = conn
             .query_row(
                 "SELECT id, name, host, port, username, auth_method, \
-                 keychain_key_id, jump_host_config, created_at, updated_at \
+                 keychain_key_id, jump_host_config, organization_json, created_at, updated_at \
                  FROM profiles WHERE id = ?1",
                 params![id],
                 |row| {
@@ -248,8 +277,9 @@ impl Database {
                         },
                         keychain_key_id: row.get(6)?,
                         jump_host_config: row.get(7)?,
-                        created_at: row.get(8)?,
-                        updated_at: row.get(9)?,
+                        organization_json: row.get(8)?,
+                        created_at: row.get(9)?,
+                        updated_at: row.get(10)?,
                     })
                 },
             )
@@ -265,8 +295,8 @@ impl Database {
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         conn.execute(
             "INSERT INTO profiles (id, name, host, port, username, auth_method, \
-             keychain_key_id, jump_host_config, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             keychain_key_id, jump_host_config, organization_json, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 profile.id,
                 profile.name,
@@ -276,6 +306,7 @@ impl Database {
                 profile.auth_method.as_str(),
                 profile.keychain_key_id,
                 profile.jump_host_config,
+                profile.organization_json,
                 profile.created_at,
                 profile.updated_at,
             ],
@@ -297,7 +328,7 @@ impl Database {
             .execute(
                 "UPDATE profiles SET name=?2, host=?3, port=?4, username=?5, auth_method=?6, \
                  keychain_key_id=?7, jump_host_config=?8, \
-                 created_at=?9, updated_at=?10 WHERE id=?1",
+                 organization_json=?9, created_at=?10, updated_at=?11 WHERE id=?1",
                 params![
                     id,
                     profile.name,
@@ -307,6 +338,7 @@ impl Database {
                     profile.auth_method.as_str(),
                     profile.keychain_key_id,
                     profile.jump_host_config,
+                    profile.organization_json,
                     profile.created_at,
                     profile.updated_at,
                 ],
@@ -715,6 +747,48 @@ impl Database {
             .map(|_| ())
             .map_err(|e| format!("failed to clear terminal workspace: {e}"))
     }
+
+    // --- SFTP Workspace ---
+
+    pub(crate) fn load_sftp_workspace(&self) -> Result<Option<String>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.query_row(
+            "SELECT workspace_json FROM sftp_workspace WHERE id=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("failed to load SFTP workspace: {e}"))
+    }
+
+    pub(crate) fn save_sftp_workspace(&self, workspace_json: &str) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.execute(
+            "INSERT INTO sftp_workspace (id, workspace_json, updated_at) \
+             VALUES (1, ?1, ?2) \
+             ON CONFLICT(id) DO UPDATE SET \
+             workspace_json=excluded.workspace_json, updated_at=excluded.updated_at",
+            params![workspace_json, current_timestamp_ms()],
+        )
+        .map(|_| ())
+        .map_err(|e| format!("failed to save SFTP workspace: {e}"))
+    }
+
+    pub(crate) fn clear_sftp_workspace(&self) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        conn.execute("DELETE FROM sftp_workspace WHERE id=1", [])
+            .map(|_| ())
+            .map_err(|e| format!("failed to clear SFTP workspace: {e}"))
+    }
 }
 
 pub(crate) fn current_timestamp_ms() -> i64 {
@@ -749,6 +823,7 @@ mod tests {
             auth_method: ProfileAuthMethod::Password,
             keychain_key_id: None,
             jump_host_config: None,
+            organization_json: None,
             created_at: 1000,
             updated_at: 2000,
         }
@@ -775,6 +850,8 @@ mod tests {
             .unwrap();
         conn.execute("SELECT 1 FROM terminal_workspace LIMIT 0", [])
             .unwrap();
+        conn.execute("SELECT 1 FROM sftp_workspace LIMIT 0", [])
+            .unwrap();
         conn.execute("SELECT 1 FROM key_credentials LIMIT 0", [])
             .unwrap();
         let has_secret_value_column: bool = conn
@@ -784,6 +861,13 @@ mod tests {
             .unwrap()
             .any(|name| name.as_deref() == Ok("value"));
         assert!(!has_secret_value_column);
+        let has_organization_column: bool = conn
+            .prepare("PRAGMA table_info(profiles)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .any(|name| name.as_deref() == Ok("organization_json"));
+        assert!(has_organization_column);
     }
 
     #[test]
@@ -854,6 +938,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(metadata, ("Server key".to_string(), "rsa".to_string(), 42));
+        let organization_json: Option<String> = conn
+            .query_row(
+                "SELECT organization_json FROM profiles WHERE id='profile-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(organization_json, None);
     }
 
     #[test]
@@ -1061,6 +1153,7 @@ mod tests {
             auth_method: ProfileAuthMethod::Key,
             keychain_key_id: Some("key-1".to_string()),
             jump_host_config: None,
+            organization_json: None,
             created_at: 1000,
             updated_at: 2000,
         };
@@ -1086,6 +1179,10 @@ mod tests {
                 r#"{"host":"jump.example.com","port":22,"username":"jumpuser","authMethod":"key"}"#
                     .to_string(),
             ),
+            organization_json: Some(
+                r#"{"group":"Production","tags":["api"],"favorite":true,"notes":"Primary"}"#
+                    .to_string(),
+            ),
             created_at: 1000,
             updated_at: 2000,
         };
@@ -1095,6 +1192,10 @@ mod tests {
         assert!(list[0].jump_host_config.is_some());
         let config = list[0].jump_host_config.as_deref().unwrap();
         assert!(config.contains("jump.example.com"));
+        assert!(list[0]
+            .organization_json
+            .as_deref()
+            .is_some_and(|metadata| metadata.contains("Production")));
     }
 
     #[test]
@@ -1117,6 +1218,22 @@ mod tests {
     }
 
     #[test]
+    fn sftp_workspace_roundtrip_and_clear() {
+        let db = test_db();
+        assert_eq!(db.load_sftp_workspace().unwrap(), None);
+
+        let workspace = r#"{"version":1,"tabs":[]}"#;
+        db.save_sftp_workspace(workspace).unwrap();
+        assert_eq!(
+            db.load_sftp_workspace().unwrap().as_deref(),
+            Some(workspace)
+        );
+
+        db.clear_sftp_workspace().unwrap();
+        assert_eq!(db.load_sftp_workspace().unwrap(), None);
+    }
+
+    #[test]
     fn profile_password_is_listed_with_password_kind_and_profile_key_type() {
         let db = test_db();
         let profile = ProfileRow {
@@ -1128,6 +1245,7 @@ mod tests {
             auth_method: ProfileAuthMethod::Password,
             keychain_key_id: None,
             jump_host_config: None,
+            organization_json: None,
             created_at: 1,
             updated_at: 1,
         };
@@ -1167,6 +1285,7 @@ mod tests {
             auth_method: ProfileAuthMethod::Key,
             keychain_key_id: Some("key-1".to_string()),
             jump_host_config: None,
+            organization_json: None,
             created_at: 1,
             updated_at: 1,
         };
@@ -1204,6 +1323,7 @@ mod tests {
                 r#"{"host":"jump.example.com","port":22,"username":"jump","authMethod":"key","keychainKeyId":"jump-key"}"#
                     .to_string(),
             ),
+            organization_json: None,
             created_at: 1,
             updated_at: 1,
         };

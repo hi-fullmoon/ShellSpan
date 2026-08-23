@@ -4,6 +4,12 @@ import { runPathOperation, useTransferStore } from '../transferStore';
 import { invokeAddSftpBookmark, invokeDisconnectSftp, invokeRemoveSftpBookmark } from '@/lib/tauri';
 
 vi.mock('@/lib/tauri', () => ({
+  buildRemoteConnectionRequest: vi.fn((profile) => ({
+    host: profile.host,
+    port: profile.port,
+    username: profile.username,
+    authMethod: profile.authMethod,
+  })),
   invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
   invokeAddSftpBookmark: vi.fn().mockResolvedValue(undefined),
   invokeRemoveSftpBookmark: vi.fn().mockResolvedValue(undefined),
@@ -139,6 +145,78 @@ describe('sftpStore', () => {
     expect(dualRemote.rightSource).toBe('remote');
     expect(dualRemote.leftTitle).toBe('Staging');
     expect(dualRemote.leftConnection?.host).toBe('staging.example.com');
+  });
+
+  it('restores view state without connecting or restoring transfers', () => {
+    useSftpStore.getState().addRestoredConnections([
+      {
+        id: 'saved-tab',
+        title: 'Production',
+        pinned: true,
+        leftSource: 'local',
+        rightSource: 'remote',
+        rightProfileId: 'profile-1',
+        localPath: 'C:/work',
+        remotePath: '/srv/app',
+        splitRatio: 0.4,
+        remoteBookmarks: { local: [], remote: ['/srv/app'] },
+      },
+    ], 'saved-tab', [{
+      id: 'profile-1',
+      name: 'Production',
+      host: 'prod.example.com',
+      port: 22,
+      username: 'alice',
+      authMethod: 'password',
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
+
+    const restored = useSftpStore.getState().connections[0]!;
+    expect(restored).toMatchObject({
+      id: 'saved-tab',
+      sessionId: undefined,
+      localPath: 'C:/work',
+      remotePath: '/srv/app',
+      splitRatio: 0.4,
+      restorePending: { local: false, remote: true },
+    });
+    expect(useTransferStore.getState().operations).toEqual([]);
+
+    useSftpStore.getState().attachRemoteConnection(
+      restored.id,
+      'remote',
+      { sessionId: 'connected', title: 'Production', host: 'prod.example.com', port: 22, username: 'alice' },
+      baseConnection.connection,
+      'profile-1',
+    );
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      remotePath: '/srv/app',
+      restorePending: { remote: false },
+    });
+  });
+
+  it('degrades a deleted remote profile to an empty pane', () => {
+    useSftpStore.getState().addRestoredConnections([
+      {
+        id: 'stale-tab',
+        title: 'Deleted host',
+        pinned: false,
+        leftSource: 'local',
+        rightSource: 'remote',
+        rightProfileId: 'missing',
+        localPath: '',
+        remotePath: '/srv',
+        splitRatio: 0.5,
+        remoteBookmarks: { local: [], remote: [] },
+      },
+    ], 'stale-tab', []);
+
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      rightSource: 'empty',
+      profileId: undefined,
+      localOnly: true,
+    });
   });
 
   it('inserts a duplicated connection after the source tab', () => {

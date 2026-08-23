@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cancelQueuedPathOperationsForOwner,
+  countActiveTransfersForOwners,
   hasActivePathOperation,
   isTransferComplete,
   runPathOperation,
@@ -32,6 +33,7 @@ describe('transferStore', () => {
     expect(useTransferStore.getState().operations[0]).toMatchObject({
       status: 'failed',
       error: 'offline',
+      errorCategory: 'unknown',
     });
 
     await useTransferStore.getState().retryOperation(operation.operationId);
@@ -40,6 +42,7 @@ describe('transferStore', () => {
     expect(useTransferStore.getState().operations[0]).toMatchObject({
       status: 'running',
       error: undefined,
+      errorCategory: undefined,
     });
   });
 
@@ -161,6 +164,17 @@ describe('transferStore', () => {
     expect(hasActivePathOperation('connection-1', ['/remote/archive/file.zip'])).toBe(true);
     expect(hasActivePathOperation('connection-1', ['/remote/other.txt'])).toBe(false);
     expect(hasActivePathOperation('connection-2', ['/remote/archive'])).toBe(false);
+  });
+
+  it('counts only active transfers owned by tabs being closed', () => {
+    useTransferStore.setState({ operations: [
+      { ...operation, operationId: 'active-a', ownerId: 'tab-a', status: 'running' },
+      { ...operation, operationId: 'done-a', ownerId: 'tab-a', status: 'completed' },
+      { ...operation, operationId: 'active-b', ownerId: 'tab-b', status: 'pending' },
+    ] });
+
+    expect(countActiveTransfersForOwners(['tab-a'])).toBe(1);
+    expect(countActiveTransfersForOwners(['tab-a', 'tab-b'])).toBe(2);
   });
 
   it('keeps a path occupied until backend cancellation finishes', async () => {

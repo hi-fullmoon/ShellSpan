@@ -17,6 +17,7 @@ describe('UpdateRestartDialog', () => {
         open
         version="2.1.0"
         hasActiveSessions={false}
+        activeTransferCount={0}
         downloadProgress={100}
         onInstallNow={vi.fn()}
         onLater={onLater}
@@ -29,5 +30,20 @@ describe('UpdateRestartDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'update.restartDialog.later' }));
     expect(onLater).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the number of transfers that an update restart will interrupt', () => {
+    render(
+      <UpdateRestartDialog
+        open
+        version="2.1.0"
+        hasActiveSessions={false}
+        activeTransferCount={2}
+        onInstallNow={vi.fn()}
+        onLater={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('update.restartDialog.activeTransferWarning')).toBeInTheDocument();
   });
 });

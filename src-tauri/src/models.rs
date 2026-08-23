@@ -78,6 +78,8 @@ fn redact_secret(value: &Option<String>) -> Option<&'static str> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionCreateRequest {
+    #[serde(default)]
+    pub(crate) operation_id: Option<String>,
     pub(crate) name: String,
     pub(crate) host: String,
     pub(crate) port: u16,
@@ -106,6 +108,65 @@ pub(crate) struct RemoteConnectionRequest {
     pub(crate) private_key_data: Option<String>,
     pub(crate) passphrase: Option<String>,
     pub(crate) jump_host: Option<JumpHostConfig>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConnectionPreflightRequest {
+    pub(crate) operation_id: String,
+    #[serde(flatten)]
+    pub(crate) connection: RemoteConnectionRequest,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConnectionPreflightStepId {
+    Dns,
+    Tcp,
+    JumpHostKey,
+    JumpAuthentication,
+    JumpTunnel,
+    HostKey,
+    Authentication,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConnectionPreflightStepStatus {
+    Passed,
+    Warning,
+    Failed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConnectionPreflightStep {
+    pub(crate) id: ConnectionPreflightStepId,
+    pub(crate) status: ConnectionPreflightStepStatus,
+    pub(crate) detail: String,
+    pub(crate) host: Option<String>,
+    pub(crate) port: Option<u16>,
+    pub(crate) fingerprint: Option<String>,
+    pub(crate) trustable: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConnectionPreflightStatus {
+    Passed,
+    Attention,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConnectionPreflightResult {
+    pub(crate) operation_id: String,
+    pub(crate) status: ConnectionPreflightStatus,
+    pub(crate) checked_at: i64,
+    pub(crate) steps: Vec<ConnectionPreflightStep>,
 }
 
 // Hand-written Debug that redacts secrets, mirroring the redaction used by
@@ -843,6 +904,7 @@ macro_rules! cancellation_registry {
 
 cancellation_registry!(UploadCancellationRegistry, "upload");
 cancellation_registry!(DeleteCancellationRegistry, "delete");
+cancellation_registry!(PreflightCancellationRegistry, "connection preflight");
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct DownloadScanStats {
@@ -874,7 +936,7 @@ pub(crate) struct DownloadProgressTracker {
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 
 fn should_emit_progress(last_emitted_at: Option<Instant>) -> bool {
-    last_emitted_at.map_or(true, |instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
+    last_emitted_at.is_none_or(|instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
 }
 
 impl DownloadProgressTracker {
@@ -1455,6 +1517,8 @@ pub(crate) struct ProfileRow {
     pub(crate) auth_method: ProfileAuthMethod,
     pub(crate) keychain_key_id: Option<String>,
     pub(crate) jump_host_config: Option<String>,
+    #[serde(default)]
+    pub(crate) organization_json: Option<String>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }

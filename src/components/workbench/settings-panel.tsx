@@ -32,6 +32,8 @@ import type {
 import { invokePickLocalFolder } from '@/lib/tauri';
 import type { LocaleKey } from '@/locales';
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
+import { clearTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
+import { clearSftpWorkspace } from '@/lib/sftp-workspace-persistence';
 
 interface ShortcutGroup {
   id: 'app' | 'terminal' | 'sftp';
@@ -41,7 +43,7 @@ interface ShortcutGroup {
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     id: 'app',
-    actions: ['openWorkbench', 'openTerminal', 'openSftp', 'openSettings', 'toggleAiPanel'],
+    actions: ['openWorkbench', 'openTerminal', 'openSftp', 'openSettings', 'openCommandPalette', 'toggleAiPanel'],
   },
   {
     id: 'terminal',
@@ -187,12 +189,18 @@ export const SettingsPanel: React.FC = () => {
     setActiveSection(value as SettingsSection);
   };
 
+  const handleClearWorkspace = (): void => {
+    setRestoreWorkspace(false);
+    void Promise.all([clearTerminalWorkspace(), clearSftpWorkspace()]);
+  };
+
   const shortcutLabels = useMemo<Record<ShortcutAction, string>>(
     () => ({
       openWorkbench: t('settings.shortcuts.openWorkbench'),
       openTerminal: t('settings.shortcuts.openTerminal'),
       openSftp: t('settings.shortcuts.openSftp'),
       openSettings: t('settings.shortcuts.openSettings'),
+      openCommandPalette: t('settings.shortcuts.openCommandPalette'),
       toggleAiPanel: t('settings.shortcuts.toggleAiPanel'),
       newTerminalTab: t('settings.shortcuts.newTerminalTab'),
       closeTerminalTab: t('settings.shortcuts.closeTerminalTab'),
@@ -354,7 +362,10 @@ export const SettingsPanel: React.FC = () => {
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={handleClearWorkspace}>
+                      {t('settings.general.clearWorkspace')}
+                    </Button>
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
                   </div>
                 </SettingRow>

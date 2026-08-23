@@ -98,6 +98,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const { connect } = useConnectSession();
   const [renameTarget, setRenameTarget] = useState<TerminalSession | null>(null);
   const [confirmationTarget, setConfirmationTarget] = useState<TerminalSession | null>(null);
+  const [confirmationOrder, setConfirmationOrder] = useState<string[] | null>(null);
   const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
   const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -141,7 +142,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
   const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
 
-  const orderedIds = orderedSessionIds ?? sessions.map((s) => s.sessionId);
+  const orderedIds = confirmationOrder ?? orderedSessionIds ?? sessions.map((s) => s.sessionId);
   const isUnpinned = (sessionId: string): boolean =>
     !sessions.find((s) => s.sessionId === sessionId)?.pinned;
 
@@ -182,6 +183,15 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     onClose();
   };
 
+  const handleOpenSftp = (): void => {
+    if (target.profileId) {
+      document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {
+        detail: { profileId: target.profileId, target: 'sftp' },
+      }));
+    }
+    onClose();
+  };
+
   const handleClose = (): void => {
     document.dispatchEvent(
       new CustomEvent('termbridge:close-terminal-tab', { detail: { sessionId: target.sessionId } }),
@@ -191,12 +201,14 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   const handleCloseOthers = (): void => {
     setConfirmationTarget(target);
+    setConfirmationOrder([...orderedIds]);
     onClose();
     setCloseOthersConfirm(true);
   };
 
   const handleCloseToRight = (): void => {
     setConfirmationTarget(target);
+    setConfirmationOrder([...orderedIds]);
     onClose();
     setCloseToRightConfirm(true);
   };
@@ -204,11 +216,13 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const dismissCloseOthersConfirm = (): void => {
     setCloseOthersConfirm(false);
     setConfirmationTarget(null);
+    setConfirmationOrder(null);
   };
 
   const dismissCloseToRightConfirm = (): void => {
     setCloseToRightConfirm(false);
     setConfirmationTarget(null);
+    setConfirmationOrder(null);
   };
 
   const confirmCloseOthers = (): void => {
@@ -315,6 +329,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         </MenuItem>
         <MenuItem onClick={handleCopyInfo}>
           {t('terminal.tab.copyInfo')}
+        </MenuItem>
+        <MenuItem onClick={handleOpenSftp} disabled={!target.profileId}>
+          {t('terminal.tab.openSftp')}
         </MenuItem>
         <Separator className="my-0.5" />
         <MenuItem onClick={() => handleSplit('right')} disabled={!canSplit}>

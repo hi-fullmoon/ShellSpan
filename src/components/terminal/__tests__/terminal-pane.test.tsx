@@ -222,6 +222,33 @@ describe('TerminalPane', () => {
     });
   });
 
+  it('drops an asynchronous clipboard result after the pane switches sessions', async () => {
+    let resolveRead!: (text: string) => void;
+    const readPromise = new Promise<string>((resolve) => {
+      resolveRead = resolve;
+    });
+    vi.mocked(navigator.clipboard.readText).mockReturnValue(readPromise);
+    const firstTerminal = makeMockTerminal();
+    const { rerender } = render(
+      <TerminalPane activeSession={makeSession({ sessionId: 's1' })} />,
+    );
+
+    firstTerminal.element?.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
+    );
+    const secondTerminal = makeMockTerminal();
+    rerender(<TerminalPane activeSession={makeSession({ sessionId: 's2' })} />);
+
+    resolveRead('stale paste');
+    await act(async () => {
+      await readPromise;
+      await Promise.resolve();
+    });
+
+    expect(firstTerminal.paste).not.toHaveBeenCalled();
+    expect(secondTerminal.paste).not.toHaveBeenCalled();
+  });
+
   it('confirms before pasting multiple lines', async () => {
     vi.mocked(navigator.clipboard.readText).mockResolvedValue('echo one\necho two');
     const terminal = makeMockTerminal();

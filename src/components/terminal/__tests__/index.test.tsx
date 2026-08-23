@@ -6,6 +6,12 @@ import { terminalRegistry } from '../registry/terminal-registry';
 
 const mockConnect = vi.fn();
 
+vi.mock('@/lib/terminal-workspace-persistence', () => ({
+  clearTerminalWorkspace: vi.fn().mockResolvedValue(undefined),
+  flushTerminalWorkspace: vi.fn().mockResolvedValue(undefined),
+  stageTerminalWorkspace: vi.fn(),
+}));
+
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,

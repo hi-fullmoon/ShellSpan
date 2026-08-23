@@ -21,6 +21,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
+import { countActiveTransfersForOwners, useTransferStore } from '@/stores/transferStore';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -227,6 +228,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const removeConnection = useSftpStore((state) => state.removeConnection);
   const reorderConnections = useSftpStore((state) => state.reorderConnections);
   const togglePin = useSftpStore((state) => state.togglePin);
+  const transferOperations = useTransferStore((state) => state.operations);
 
   // macOS tap-to-click in WKWebView can drop the pointerdown of a tap that
   // immediately follows another one (the single-tap gesture recognizer stays
@@ -463,6 +465,9 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const draggingConnection = draggingConnectionId ? (connections.find((c) => c.id === draggingConnectionId) ?? null) : null;
 
   const closingConnection = closingConnectionId ? (connections.find((c) => c.id === closingConnectionId) ?? null) : null;
+  const closingTransferCount = closingConnection
+    ? countActiveTransfersForOwners([closingConnection.id], transferOperations)
+    : 0;
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
   const visibleConnections = draggingConnectionId ? connections.filter((connection) => connection.id !== draggingConnectionId) : connections;
@@ -571,7 +576,14 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closingConnection ? t('sftp.tab.closeConfirmMessage', { title: closingConnection.title }) : ''}
+              {closingConnection
+                ? closingTransferCount > 0
+                  ? t('sftp.tab.closeTransferWarning', {
+                      title: closingConnection.title,
+                      count: closingTransferCount,
+                    })
+                  : t('sftp.tab.closeConfirmMessage', { title: closingConnection.title })
+                : ''}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">

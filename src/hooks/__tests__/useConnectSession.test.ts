@@ -65,6 +65,7 @@ import {
   invokeRetrieveProfileSecret,
   invokeTrustHost,
   invokeStoreProfilePassword,
+  invokeWriteSession,
 } from '@/lib/tauri';
 import { promptForMissingPassword } from '@/lib/password-prompt';
 import {
@@ -116,6 +117,8 @@ describe('useConnectSession', () => {
     vi.mocked(invokeRetrieveProfilePassword).mockResolvedValue(undefined);
     vi.mocked(invokeRetrieveProfileSecret).mockReset();
     vi.mocked(invokeRetrieveProfileSecret).mockResolvedValue(undefined);
+    vi.mocked(invokeWriteSession).mockReset();
+    vi.mocked(invokeWriteSession).mockResolvedValue(undefined);
     vi.mocked(promptForMissingPassword).mockReset();
     vi.mocked(promptForMissingPassword).mockImplementation((p) => Promise.resolve(p));
     vi.mocked(promptForMissingKeychainKey).mockReset();
@@ -146,6 +149,23 @@ describe('useConnectSession', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
     expect(useRecentProfilesStore.getState().recentIds).toEqual(['p1']);
     expect(hostKeyDialog().open).toBe(false);
+  });
+
+  it('opens a terminal in the requested remote directory with a safely quoted command', async () => {
+    vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
+    const { result } = renderHook(() => useConnectSession());
+
+    await act(async () => {
+      await result.current.connect(profile, {
+        initialDirectory: "/srv/Release Candidate/O'Brien",
+      });
+    });
+
+    expect(invokeWriteSession).toHaveBeenCalledWith(
+      's1',
+      "cd -- '/srv/Release Candidate/O'\\''Brien'\r",
+    );
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
   });
 
   it('opens dialog on HostKeyUnknown and trusts then retries', async () => {
