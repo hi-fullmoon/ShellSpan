@@ -73,6 +73,7 @@ describe('runbook text contract', () => {
   it('parses the versioned document and shell-quotes resolved variables in the review', () => {
     const value = prepared();
     expect(value.document.schemaVersion).toBe(1);
+    expect(value.document.steps[0].rollback).toContain('previous validated configuration');
     expect(value.items.map((item) => item.risk)).toEqual(['readOnly', 'stateChange']);
     expect(value.items[0].commandPreview).toBe("systemctl status 'nginx'\"'\"'; reboot'");
     expect(value.resolvedVariables).toEqual({ SERVICE: "nginx'; reboot" });
@@ -95,6 +96,10 @@ describe('runbook text contract', () => {
     expect(() => parseRunbookText(RUNBOOK_EXAMPLE
       .replace('sudo systemctl reload {{SERVICE}}', 'rm -rf /srv/cache')
       .replace('"stateChange"', '"readOnly"'))).toThrow('understates detected destructive');
+    expect(() => parseRunbookText(RUNBOOK_EXAMPLE.replace(
+      '      "rollback": "If the reload fails, keep the current process running and restore the previous validated configuration before retrying.",\n',
+      '',
+    ))).toThrow('rollback is required');
     for (const unsafePrecheck of [
       'date -s tomorrow',
       'hostname replacement',
@@ -108,6 +113,17 @@ describe('runbook text contract', () => {
         unsafePrecheck,
       ))).toThrow();
     }
+  });
+
+  it('supports an evidence-only diagnostic Runbook', () => {
+    const document = JSON.parse(RUNBOOK_EXAMPLE) as Record<string, unknown>;
+    document.steps = [];
+    const text = JSON.stringify(document);
+    expect(parseRunbookText(text).steps).toEqual([]);
+    let run = startRunbookRun(prepareRunbook(text, { SERVICE: 'nginx' }, target), 'evidence-only', 1_000);
+    const precheck = running(run);
+    run = applyRunbookStepResult(precheck.run, result(precheck.run, precheck.item), 1_100);
+    expect(run.phase).toBe('completed');
   });
 
   it('permits secrets only as supported keychain references and never resolves them in the preview', () => {

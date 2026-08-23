@@ -49,6 +49,7 @@ const TEXT = JSON.stringify({
     command: 'sudo systemctl reload nginx',
     risk: 'stateChange',
     impact: 'One host',
+    rollback: 'Restore the previous state on that host.',
     expected: { exitCode: 0 },
     timeoutSeconds: 10,
     safeToRetry: true,

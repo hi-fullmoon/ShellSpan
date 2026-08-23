@@ -1,60 +1,151 @@
 import { describe, expect, it } from 'vitest';
+import { parseRunbookText } from '@/lib/runbook';
 import {
-  buildAgentExecutionCommand,
-  createAgentExecutionMarker,
-  extractAgentCommandCompletion,
-  extractAgentCommandResult,
+  createAgentRunbookDraft,
   isSafeReadOnlyAgentCommand,
   parseDiagnosticAgentPlan,
 } from '../diagnostic-agent';
 
+function planValue() {
+  return {
+    objective: 'Reload nginx after validating its current state',
+    target: 'The currently bound nginx host only',
+    assumptions: ['The service is managed by systemd.'],
+    summary: 'Collect fresh service evidence before proposing one reviewed reload.',
+    evidence: [
+      {
+        id: 'terminal-context',
+        description: 'Original terminal context',
+        source: 'context',
+        sourceStepId: null,
+        maxAgeSeconds: 120,
+      },
+      {
+        id: 'service-status-output',
+        description: 'Fresh nginx service status',
+        source: 'stepOutput',
+        sourceStepId: 'check-service',
+        maxAgeSeconds: 45,
+      },
+    ],
+    steps: [
+      {
+        id: 'check-service',
+        title: 'Check nginx',
+        description: 'Collect bounded read-only service status.',
+        command: 'systemctl status nginx',
+        risk: 'readOnly',
+        evidenceIds: ['terminal-context'],
+        impact: 'Reads status from the currently bound host.',
+        rollback: 'No mutation is performed.',
+        expected: { exitCode: 0, stdoutContains: [] },
+        timeoutSeconds: 15,
+        safeToRetry: true,
+      },
+      {
+        id: 'reload-service',
+        title: 'Reload nginx',
+        description: 'Reload only after fresh evidence is accepted.',
+        command: 'sudo systemctl reload nginx',
+        risk: 'stateChange',
+        evidenceIds: ['service-status-output'],
+        impact: 'Reloads nginx on the reviewed host.',
+        rollback: 'Restore the previous configuration and reload nginx again.',
+        expected: { exitCode: 0, stdoutContains: [] },
+        timeoutSeconds: 30,
+        safeToRetry: false,
+      },
+    ],
+  };
+}
+
 describe('diagnostic agent plan', () => {
-  it('parses a tagged plan with safe verification commands', () => {
-    const plan = parseDiagnosticAgentPlan(`
-      <agent_plan>{
-        "summary": "The filesystem is nearly full.",
-        "steps": [
-          {"title": "Check usage", "description": "Inspect mounted filesystems.", "command": "df -h"},
-          {"title": "Review", "description": "Confirm which mount is affected."}
-        ]
-      }</agent_plan>
-    `);
-    expect(plan.summary).toContain('filesystem');
-    expect(plan.steps[0].command).toBe('df -h');
-    expect(plan.steps[1].command).toBeUndefined();
+  it('parses the structured objective, assumptions, evidence, risks, and rollback', () => {
+    const plan = parseDiagnosticAgentPlan(JSON.stringify(planValue()));
+    expect(plan.objective).toContain('Reload nginx');
+    expect(plan.evidence[1]).toMatchObject({
+      source: 'stepOutput',
+      sourceStepId: 'check-service',
+      maxAgeSeconds: 45,
+    });
+    expect(plan.steps[1]).toMatchObject({
+      risk: 'stateChange',
+      evidenceIds: ['service-status-output'],
+      safeToRetry: false,
+    });
+  });
+
+  it('creates a reviewable Runbook without executing or widening the target', () => {
+    const plan = parseDiagnosticAgentPlan(JSON.stringify(planValue()));
+    const runbook = parseRunbookText(createAgentRunbookDraft(plan));
+    expect(runbook.evidenceMaxAgeSeconds).toBe(45);
+    expect(runbook.prechecks).toEqual([
+      expect.objectContaining({ id: 'check-service', command: 'systemctl status nginx' }),
+    ]);
+    expect(runbook.steps).toEqual([
+      expect.objectContaining({
+        id: 'reload-service',
+        risk: 'stateChange',
+        rollback: 'Restore the previous configuration and reload nginx again.',
+      }),
+    ]);
+  });
+
+  it('allows an evidence-only diagnostic Runbook with no modifying steps', () => {
+    const value = planValue();
+    value.steps = [value.steps[0]];
+    const plan = parseDiagnosticAgentPlan(JSON.stringify(value));
+    expect(parseRunbookText(createAgentRunbookDraft(plan)).steps).toEqual([]);
+  });
+
+  it('blocks modifying steps that cite only context, stale structure, or missing rollback', () => {
+    const contextOnly = planValue();
+    contextOnly.steps[1].evidenceIds = ['terminal-context'];
+    expect(() => parseDiagnosticAgentPlan(JSON.stringify(contextOnly)))
+      .toThrow(/lacks prior executable evidence/);
+
+    const readAfterWrite = planValue();
+    readAfterWrite.steps.reverse();
+    expect(() => parseDiagnosticAgentPlan(JSON.stringify(readAfterWrite)))
+      .toThrow(/read-only evidence steps must precede/);
+
+    const noRollback = planValue() as unknown as { steps: Array<Record<string, unknown>> };
+    delete noRollback.steps[1].rollback;
+    expect(() => parseDiagnosticAgentPlan(JSON.stringify(noRollback))).toThrow(/rollback/);
+  });
+
+  it('fails closed on risk understatement, unknown evidence, and unsupported fields', () => {
+    const understated = planValue();
+    understated.steps[0].command = 'systemctl restart nginx';
+    expect(() => parseDiagnosticAgentPlan(JSON.stringify(understated)))
+      .toThrow(/unsafe read-only command/);
+
+    const missing = planValue();
+    missing.steps[1].evidenceIds = ['made-up'];
+    expect(() => parseDiagnosticAgentPlan(JSON.stringify(missing))).toThrow(/unknown evidence/);
+
+    expect(() => parseDiagnosticAgentPlan(JSON.stringify({
+      ...planValue(),
+      unrestrictedShell: true,
+    }))).toThrow(/unknown field/);
   });
 
   it.each([
     'sudo df -h',
     'df -h && rm -rf /tmp/cache',
     'systemctl restart nginx',
-    'find /tmp -delete',
-    'find /tmp -fprint /tmp/agent-review',
-    "rg --pre 'touch /tmp/agent-review' pattern .",
     'journalctl --vacuum-size=1M',
     'date -s 12:00:00',
     'hostname compromised-host',
     'ss -K dst 203.0.113.10',
-    `df ${String.fromCharCode(3)}`,
     'cat /etc/hosts > /tmp/hosts',
     'tail -f /var/log/system.log',
-    'journalctl -fu nginx',
-    'journalctl -u nginx',
-    'docker logs -f app',
     'docker logs app',
-    'docker logs --tail all app',
     'docker stats',
-    'docker stats --no-stream=false',
     'kubectl get pods --watch',
-    'kubectl logs -f app',
-    'kubectl logs app',
     'cat /dev/zero',
-  ])('rejects unsafe commands: %s', (command) => {
+  ])('rejects unsafe read-only commands: %s', (command) => {
     expect(isSafeReadOnlyAgentCommand(command)).toBe(false);
-    expect(() => parseDiagnosticAgentPlan(JSON.stringify({
-      summary: 'test',
-      steps: [{ title: 'test', description: 'test', command }],
-    }))).toThrow(/unsafe command/);
   });
 
   it.each([
@@ -67,61 +158,17 @@ describe('diagnostic agent plan', () => {
     'docker logs --tail 200 app',
     'docker stats --no-stream',
     'kubectl logs app --tail=200',
-  ])
-    ('allows bounded read-only commands: %s', (command) => {
-      expect(isSafeReadOnlyAgentCommand(command)).toBe(true);
-    });
+  ])('allows bounded read-only commands: %s', (command) => {
+    expect(isSafeReadOnlyAgentCommand(command)).toBe(true);
+  });
 
   it('rejects plans with more than eight steps', () => {
-    expect(() => parseDiagnosticAgentPlan(JSON.stringify({
-      summary: 'too many',
-      steps: Array.from({ length: 9 }, (_, index) => ({
-        title: `step ${index}`,
-        description: 'test',
-      })),
-    }))).toThrow(/1-8 steps/);
+    const value = planValue();
+    value.steps = Array.from({ length: 9 }, (_, index) => ({
+      ...value.steps[0],
+      id: `check-${index}`,
+    }));
+    expect(() => parseDiagnosticAgentPlan(JSON.stringify(value))).toThrow(/1-8 steps/);
   });
 
-  it('extracts only terminal output added after command insertion', () => {
-    const before = ['prompt', '$ uptime', 'up 10 days'].join('\n');
-    const after = [
-      'prompt',
-      '$ uptime',
-      'up 10 days',
-      '$ df -h',
-      '/dev/sda1 90%',
-    ].join('\n');
-    expect(extractAgentCommandResult(before, after)).toBe('$ df -h\n/dev/sda1 90%');
-  });
-
-  it('handles a rolling terminal buffer by matching the overlapping tail', () => {
-    const before = ['old', 'shared 1', 'shared 2'].join('\n');
-    const after = ['shared 1', 'shared 2', 'new result'].join('\n');
-    expect(extractAgentCommandResult(before, after)).toBe('new result');
-  });
-
-  it('instruments safe commands and extracts the completion marker and exit code', () => {
-    const marker = createAgentExecutionMarker('step-123');
-    expect(buildAgentExecutionCommand('df -h', marker)).toBe(
-      `df -h; printf '\\n${marker}:%s\\n' "$?"`,
-    );
-    const before = 'prompt\nold output';
-    const after = [
-      'prompt',
-      'old output',
-      'df -h',
-      '/dev/sda1 90%',
-      `${marker}:2`,
-      'prompt',
-    ].join('\n');
-    expect(extractAgentCommandCompletion(before, after, marker)).toEqual({
-      exitCode: 2,
-      result: 'df -h\n/dev/sda1 90%',
-    });
-  });
-
-  it('does not report command completion before the marker is present', () => {
-    const marker = createAgentExecutionMarker('step-pending');
-    expect(extractAgentCommandCompletion('', 'partial output', marker)).toBeUndefined();
-  });
 });

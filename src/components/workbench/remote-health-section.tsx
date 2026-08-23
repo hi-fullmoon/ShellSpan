@@ -188,12 +188,7 @@ export function RemoteHealthSection(): React.JSX.Element {
   const diagnose = async (profile: ConnectionProfile): Promise<void> => {
     if (!capturedResult) return;
     const activeRun = useAgentStore.getState().run;
-    if (activeRun && [
-      'planning',
-      'awaitingApproval',
-      'awaitingExecution',
-      'evaluating',
-    ].includes(activeRun.phase)) {
+    if (activeRun?.phase === 'planning') {
       useToastStore.getState().addToast(t('remoteHealth.diagnosisBusy'), 'info');
       return;
     }

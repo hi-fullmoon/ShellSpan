@@ -173,13 +173,15 @@
       "id": "later-ai-execution",
       "phase": "LATER",
       "title": "AI 辅助执行",
-      "status": "in-progress",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
       "owner": "maintainers",
-      "risk": "模型绕过审批、风险等级或命令限制",
-      "failurePath": "所有工具调用通过本地约束接口，拒绝不在白名单的计划",
-      "recovery": "逐步取消并保留已完成证据，不静默继续",
-      "testStrategy": "结构化计划、证据新鲜度、逐步审批和绕过攻击测试",
-      "evidence": ["src/stores/agentStore.ts", "src/components/ai/agent-run-view.tsx", "src/lib/diagnostic-agent.ts"]
+      "risk": "模型低报风险、引用陈旧或不足证据、绕过主机身份与逐步审批，或把诊断目标静默扩大到其他主机",
+      "failurePath": "严格结构化计划先经前端关系校验，再转为 Runbook 并复用同一风险/秘密/命令解析器；AI 无终端插入和执行通道，修改只能引用先前只读步骤证据并由 Runbook 重新采集，缺失、陈旧、身份错配、摘要错配或未批准均停止",
+      "recovery": "失败、取消、证据不足与身份错配保留为显式终态；仅允许从 safeToRetry 步骤或只读预检人工恢复，修改重试必须重跑全部预检；多主机部分成功只重试用户明确选择且身份仍匹配的失败主机",
+      "testStrategy": "结构化目标/假设/证据/风险/回滚、未知字段与风险低报、上下文证据绕过、只读顺序、证据新鲜度、草案显式交接、逐步审批、高风险确认、取消/恢复、身份错配、熔断和部分成功测试，并运行隔离 SSH E2E",
+      "evidence": ["docs/ai-assisted-execution.md", "docs/runbook-format.md", "src/stores/agentStore.ts", "src/components/ai/agent-run-view.tsx", "src/components/ai/ai-panel.tsx", "src/lib/diagnostic-agent.ts", "src/lib/runbook.ts", "src/lib/multi-host-runbook.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx", "src-tauri/src/ai.rs", "src-tauri/src/runbook.rs"],
+      "tests": ["src/lib/__tests__/diagnostic-agent.test.ts", "src/stores/__tests__/agentStore.test.ts", "src/components/ai/__tests__/agent-run-view.test.tsx", "src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "src-tauri/src/ai.rs", "src-tauri/src/runbook.rs", "scripts/run-ssh-e2e.ps1"]
     },
     {
       "id": "later-operation-history",

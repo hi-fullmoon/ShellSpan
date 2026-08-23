@@ -433,6 +433,9 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                   <AlertDescription>
                     <div className="flex flex-col gap-2">
                       <span>{t('runbook.impact')}: {activeItem.impact}</span>
+                      {activeItem.rollback && (
+                        <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
+                      )}
                       <code className="break-all rounded-md bg-muted p-2 text-foreground">{activeItem.commandPreview}</code>
                     </div>
                   </AlertDescription>
@@ -452,6 +455,17 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                     </CardHeader>
                     {(item.evidence || item.error) && (
                       <CardContent className="flex flex-col gap-1 text-xs">
+                        {item.evidence && (
+                          <>
+                            <span>{t('runbook.evidenceOperation')}: {item.evidence.operationId}</span>
+                            <span>
+                              {t('runbook.evidenceTarget')}: {item.evidence.username}@{item.evidence.host}:{item.evidence.port}
+                            </span>
+                            <span>
+                              {t('runbook.evidenceCompletedAt')}: {new Date(item.evidence.completedAt).toLocaleString()}
+                            </span>
+                          </>
+                        )}
                         {item.evidence?.exitCode !== undefined && <span>exit {item.evidence.exitCode}</span>}
                         {item.evidence?.stdout && (
                           <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stdout}</code>
@@ -521,7 +535,14 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
             <Alert variant="destructive">
               <AlertTriangleIcon />
               <AlertTitle>{confirmingItem.impact}</AlertTitle>
-              <AlertDescription><code className="break-all">{confirmingItem.commandPreview}</code></AlertDescription>
+              <AlertDescription>
+                <div className="flex flex-col gap-2">
+                  {confirmingItem.rollback && (
+                    <span>{t('runbook.rollback')}: {confirmingItem.rollback}</span>
+                  )}
+                  <code className="break-all">{confirmingItem.commandPreview}</code>
+                </div>
+              </AlertDescription>
             </Alert>
           )}
           <AlertDialogFooter>

@@ -76,6 +76,8 @@ struct RunbookStep {
     timeout_seconds: u64,
     risk: RunbookRisk,
     impact: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rollback: Option<String>,
     safe_to_retry: bool,
 }
 
@@ -613,7 +615,6 @@ fn validate_document(document: &RunbookDocument) -> Result<(), String> {
     if document.variables.len() > 32
         || document.prechecks.is_empty()
         || document.prechecks.len() > 16
-        || document.steps.is_empty()
         || document.steps.len() > 64
     {
         return Err("runbook action or variable count is invalid".to_string());
@@ -686,6 +687,15 @@ fn validate_document(document: &RunbookDocument) -> Result<(), String> {
             || !non_empty_bounded(&step.description, 4_000)
             || !non_empty_bounded(&step.command, MAX_COMMAND_BYTES)
             || !non_empty_bounded(&step.impact, 4_000)
+            || (step.risk != RunbookRisk::ReadOnly
+                && !step
+                    .rollback
+                    .as_deref()
+                    .is_some_and(|value| non_empty_bounded(value, 4_000)))
+            || step
+                .rollback
+                .as_deref()
+                .is_some_and(|value| !non_empty_bounded(value, 4_000))
             || contains_secret_literal(&step.command)
             || !(1..=300).contains(&step.timeout_seconds)
         {
@@ -1328,7 +1338,7 @@ mod tests {
               "evidenceMaxAgeSeconds":300,
               "variables":{variables},
               "prechecks":[{{"id":"check","description":"check","command":"uname -s","expected":{{"exitCode":0}},"timeoutSeconds":10}}],
-              "steps":[{{"id":"action","description":"action","command":{command:?},"risk":"{risk}","impact":"reviewed impact","expected":{{"exitCode":0}},"timeoutSeconds":10,"safeToRetry":true}}]
+              "steps":[{{"id":"action","description":"action","command":{command:?},"risk":"{risk}","impact":"reviewed impact","rollback":"restore the reviewed previous state","expected":{{"exitCode":0}},"timeoutSeconds":10,"safeToRetry":true}}]
             }}"#
         )
     }
@@ -1371,6 +1381,10 @@ mod tests {
         assert_eq!(document.id, "test-runbook");
         assert_eq!(document.prechecks.len(), 1);
         assert_eq!(document.steps[0].risk, RunbookRisk::StateChange);
+        assert_eq!(
+            document.steps[0].rollback.as_deref(),
+            Some("restore the reviewed previous state")
+        );
     }
 
     #[test]
@@ -1391,6 +1405,14 @@ mod tests {
             false,
         ))
         .is_err());
+        let missing_rollback = valid_text("systemctl restart nginx", "stateChange", false)
+            .replace(",\"rollback\":\"restore the reviewed previous state\"", "");
+        assert!(parse_document(&missing_rollback).is_err());
+        let evidence_only = valid_text("uname -s", "readOnly", false).replace(
+            r#""steps":[{"id":"action","description":"action","command":"uname -s","risk":"readOnly","impact":"reviewed impact","rollback":"restore the reviewed previous state","expected":{"exitCode":0},"timeoutSeconds":10,"safeToRetry":true}]"#,
+            r#""steps":[]"#,
+        );
+        assert!(parse_document(&evidence_only).is_ok());
     }
 
     #[test]

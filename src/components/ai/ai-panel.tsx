@@ -76,9 +76,8 @@ import {
 import { cn, generateId } from '@/lib/utils';
 import { parseAssistantContent } from '@/lib/ai-content';
 import {
-  buildAgentExecutionCommand,
-  createAgentExecutionMarker,
-  extractAgentCommandCompletion,
+  createAgentRunbookDraft,
+  dispatchAgentRunbookDraft,
   isSafeReadOnlyAgentCommand,
 } from '@/lib/diagnostic-agent';
 import {
@@ -101,7 +100,6 @@ import {
   persistAiMessage,
 } from '@/lib/ai-sessions';
 import type {
-  AgentRunStep,
   AiChatMessage,
   AiContext,
   AiMessageInput,
@@ -297,7 +295,7 @@ export function cancelActiveAiRequests(
     requestIds.add(ai.activeRequestId);
     ai.cancelRequest(ai.activeRequestId);
   }
-  if (agent.run && ['planning', 'evaluating'].includes(agent.run.phase)) {
+  if (agent.run?.phase === 'planning') {
     requestIds.add(agent.run.requestId);
     agent.cancelRun(agent.run.requestId);
   }
@@ -316,7 +314,7 @@ export function stopActiveAgentRun(
   const agent = useAgentStore.getState();
   const run = agent.run;
   if (!run) return undefined;
-  const requestId = ['planning', 'evaluating'].includes(run.phase)
+  const requestId = run.phase === 'planning'
     ? run.requestId
     : undefined;
   agent.stopRun();
@@ -634,7 +632,7 @@ export const AiPanel: React.FC = () => {
       const payload = event.payload;
       const agent = useAgentStore.getState();
       if (agent.run?.requestId === payload.requestId) {
-        if (!['planning', 'evaluating'].includes(agent.run.phase)) return;
+        if (agent.run.phase !== 'planning') return;
         if (payload.type === 'textDelta') {
           batcher.push(payload.requestId, payload.text);
           return;
@@ -756,6 +754,7 @@ export const AiPanel: React.FC = () => {
     const snapshot = external ?? currentDiagnosticAgentContext();
     if (!snapshot.context || !snapshot.sessionId) return;
     const requestId = generateId();
+    const contextObservedAt = Date.now();
     const provider = useAiSettingsStore.getState().getProviderConfig();
     if (!provider.model) {
       navigateToAiSettings();
@@ -768,6 +767,7 @@ export const AiPanel: React.FC = () => {
       snapshot.context.label,
       snapshot.profileId,
       external ? 'remoteHealth' : 'terminal',
+      contextObservedAt,
     );
     if (!started) return;
     setDraft('');
@@ -777,7 +777,10 @@ export const AiPanel: React.FC = () => {
         provider,
         task: 'diagnosticAgent',
         messages: [{ role: 'user', content: goal }],
-        context: snapshot.context,
+        context: {
+          ...snapshot.context,
+          content: `${snapshot.context.content}\n\nContext observed at: ${new Date(contextObservedAt).toISOString()}`,
+        },
       });
     } catch (reason) {
       useAgentStore.getState().failRun(
@@ -812,70 +815,6 @@ export const AiPanel: React.FC = () => {
     );
   }, [runDiagnosticAgent, setOpen]);
 
-  const evaluateAgentStep = useCallback(async (
-    stepId: string,
-    result: string | undefined,
-    exitCode: number,
-  ): Promise<void> => {
-    if (!contextEnabled) return;
-    const run = useAgentStore.getState().run;
-    const step = run?.steps.find((item) => item.id === stepId);
-    if (!run || step?.status !== 'inserted' || !step.command) return;
-    const completedCommandCount = run.steps.filter((item) => (
-      item.kind === 'command' && item.status === 'completed'
-    )).length;
-    const observationHistory = [
-      ...run.steps
-        .filter((item) => item.kind === 'command' && item.status === 'completed' && item.command)
-        .map((item, index) => [
-          `Observation ${index + 1}`,
-          `Command: ${item.command}`,
-          `Exit code: ${item.exitCode ?? 'unknown'}`,
-          `Output:\n${item.result || '(no output)'}`,
-        ].join('\n')),
-      [
-        `Observation ${completedCommandCount + 1}`,
-        `Command: ${step.command}`,
-        `Exit code: ${exitCode}`,
-        `Output:\n${result || '(no output)'}`,
-      ].join('\n'),
-    ];
-    const requestId = generateId();
-    const started = useAgentStore.getState().beginEvaluation(
-      stepId,
-      requestId,
-      result,
-      exitCode,
-    );
-    if (!started) return;
-    try {
-      await invokeStartAiRequest({
-        requestId,
-        provider: useAiSettingsStore.getState().getProviderConfig(),
-        task: 'diagnosticAgent',
-        messages: [{
-          role: 'user',
-          content: [
-            `Original diagnostic goal: ${run.goal}`,
-            `Previous assessment: ${run.summary || '(none)'}`,
-            'Evaluate the latest command observation and return an updated remaining plan.',
-            'Do not repeat completed checks unless the observation makes repetition necessary.',
-            `The run may execute at most ${Math.max(0, 7 - completedCommandCount)} more commands.`,
-          ].join('\n'),
-        }],
-        context: {
-          label: run.contextLabel,
-          content: observationHistory.join('\n\n'),
-        },
-      });
-    } catch (reason) {
-      useAgentStore.getState().failRun(
-        requestId,
-        reason instanceof Error ? reason.message : String(reason),
-      );
-    }
-  }, [contextEnabled]);
-
   const handleContextEnabledChange = useCallback((enabled: boolean): void => {
     if (!enabled && agentRun) {
       streamDeltaBatcherRef.current?.flush(agentRun.requestId);
@@ -883,28 +822,6 @@ export const AiPanel: React.FC = () => {
     }
     setContextEnabled(enabled);
   }, [agentRun]);
-
-  const insertedAgentStep = agentRun?.steps.find((step) => step.status === 'inserted');
-  useEffect(() => {
-    if (!agentRun || !insertedAgentStep?.executionMarker) return;
-    const checkCompletion = (): void => {
-      const currentRun = useAgentStore.getState().run;
-      const currentStep = currentRun?.steps.find((step) => step.id === insertedAgentStep.id);
-      if (!currentRun || currentStep?.status !== 'inserted' || !currentStep.executionMarker) return;
-      const output = getRecentTerminalOutput(currentRun.sessionId, 240);
-      const completion = extractAgentCommandCompletion(
-        currentStep.outputBaseline ?? '',
-        output,
-        currentStep.executionMarker,
-      );
-      if (completion) {
-        void evaluateAgentStep(currentStep.id, completion.result, completion.exitCode);
-      }
-    };
-    checkCompletion();
-    const interval = window.setInterval(checkCompletion, 400);
-    return () => window.clearInterval(interval);
-  }, [agentRun?.sessionId, evaluateAgentStep, insertedAgentStep?.executionMarker, insertedAgentStep?.id]);
 
   const handleExplain = (): void => {
     const snapshot = currentTerminalContext();
@@ -938,40 +855,29 @@ export const AiPanel: React.FC = () => {
     stopActiveAgentRun();
   };
 
-  const handleApproveAgentStep = (step: AgentRunStep): void => {
+  const handleReviewAgentRunbook = (): void => {
     const run = useAgentStore.getState().run;
-    const currentStep = run?.steps.find((item) => item.id === step.id);
-    if (
-      !run
-      || currentStep?.status !== 'awaitingApproval'
-      || !currentStep.command
-      || currentStep.command !== step.command
-      || !isSafeReadOnlyAgentCommand(currentStep.command)
-    ) return;
-    const terminalState = useTerminalStore.getState();
-    const session = terminalState.sessions.find((item) => item.sessionId === run.sessionId);
-    if (terminalState.activeSessionId !== run.sessionId || session?.status !== 'connected') return;
-    const registeredTerminal = terminalRegistry.get(run.sessionId)?.terminal;
-    if (!registeredTerminal) return;
-    const outputBaseline = getRecentTerminalOutput(run.sessionId, 240);
-    const executionMarker = createAgentExecutionMarker(step.id);
-    const executionCommand = buildAgentExecutionCommand(currentStep.command, executionMarker);
-    const approved = useAgentStore.getState().approveStep(
-      step.id,
-      outputBaseline,
-      executionMarker,
-    );
-    if (approved) registeredTerminal.paste(executionCommand);
-  };
-
-  const handleActivateAgentSession = (): void => {
-    const run = useAgentStore.getState().run;
-    if (!run) return;
-    const terminalState = useTerminalStore.getState();
-    const session = terminalState.sessions.find((item) => item.sessionId === run.sessionId);
-    if (session?.status !== 'connected') return;
-    useAppStore.getState().setActiveSection('terminal');
-    terminalState.setActiveSession(run.sessionId);
+    if (!run?.plan || !['awaitingReview', 'handedOff'].includes(run.phase)) return;
+    try {
+      dispatchAgentRunbookDraft({
+        sourceText: createAgentRunbookDraft(run.plan),
+        profileId: run.profileId,
+        contextLabel: run.contextLabel,
+        contextObservedAt: run.contextObservedAt,
+        objective: run.plan.objective,
+        target: run.plan.target,
+      });
+      useAgentStore.getState().markHandedOff();
+      const app = useAppStore.getState();
+      app.setActiveSection('workbench');
+      app.setActiveWorkbenchTab('runbooks');
+      setOpen(false);
+    } catch (reason) {
+      useAgentStore.getState().failRun(
+        run.requestId,
+        reason instanceof Error ? reason.message : String(reason),
+      );
+    }
   };
 
   const handleInsertCommand = (
@@ -1091,36 +997,14 @@ export const AiPanel: React.FC = () => {
     && activeSection === 'terminal'
     && Boolean(contextSnapshot.context);
   const agentContext = contextEnabled ? currentDiagnosticAgentContext() : {};
-  const agentPlanning = agentRun?.phase === 'planning' || agentRun?.phase === 'evaluating';
-  const agentNeedsResolution = task === 'diagnosticAgent'
-    && (agentRun?.phase === 'awaitingApproval' || agentRun?.phase === 'awaitingExecution');
+  const agentPlanning = agentRun?.phase === 'planning';
   const busy = phase === 'streaming' || agentPlanning;
   const composerSubmitDisabled = busy
     || viewingHistory
     || loadingConversationId === visibleConversationId
     || !draft.trim()
     || !model.trim()
-    || agentNeedsResolution
     || (task === 'diagnosticAgent' && (!contextEnabled || !agentContext.context));
-  const agentSession = agentRun
-    ? sessions.find((session) => session.sessionId === agentRun.sessionId)
-    : undefined;
-  const agentTerminalReady = Boolean(
-    agentSession?.status === 'connected'
-    && agentRun
-    && terminalRegistry.get(agentRun.sessionId),
-  );
-  const agentSessionState = !agentRun || !agentTerminalReady
-    ? 'unavailable' as const
-    : activeSessionId === agentRun.sessionId
-      ? 'ready' as const
-      : 'inactive' as const;
-  const canInsertAgentCommand = Boolean(
-    agentRun
-    && activeSessionId === agentRun.sessionId
-    && activeSession?.status === 'connected'
-    && terminalRegistry.get(agentRun.sessionId),
-  );
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
   const compactModeControls = panelWidth < AI_PANEL_COMPACT_CONTROLS_WIDTH;
   const currentLane = conversationLane(task === 'generateCommand' ? 'generateCommand' : 'chat');
@@ -1355,7 +1239,7 @@ export const AiPanel: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="icon"
-                          disabled={busy || viewingHistory || agentNeedsResolution || !hasCurrentConversation}
+                          disabled={busy || viewingHistory || !hasCurrentConversation}
                           aria-label={t('ai.clear')}
                         />
                       )}
@@ -1442,7 +1326,7 @@ export const AiPanel: React.FC = () => {
               variant="ghost"
               size="xs"
               onClick={handleExplain}
-              disabled={!canExplain || busy || agentNeedsResolution}
+              disabled={!canExplain || busy}
               title={!canExplain ? t('ai.context.noOutput') : undefined}
             >
               <SquareTerminalIcon data-icon="inline-start" />
@@ -1537,16 +1421,12 @@ export const AiPanel: React.FC = () => {
         {task === 'diagnosticAgent' ? (
           <AgentRunView
             run={agentRun}
-            onApprove={handleApproveAgentStep}
-            onReject={(stepId) => useAgentStore.getState().rejectStep(stepId)}
             onCancel={handleStopAgentRun}
             onRetry={() => {
               const goal = useAgentStore.getState().run?.goal;
               if (goal) void runDiagnosticAgent(goal);
             }}
-            onActivateSession={handleActivateAgentSession}
-            canInsert={canInsertAgentCommand}
-            sessionState={agentSessionState}
+            onReviewRunbook={handleReviewAgentRunbook}
           />
         ) : loadingConversationId === visibleConversationId && visibleMessages.length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -1739,18 +1619,16 @@ export const AiPanel: React.FC = () => {
               className="min-h-14 max-h-48 px-3.5 pt-3 pb-1 leading-5"
             />
             <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
-              {(agentNeedsResolution || (task === 'diagnosticAgent' && (!contextEnabled || !agentContext.context))) && (
+              {task === 'diagnosticAgent' && (!contextEnabled || !agentContext.context) && (
                 <InputGroupText
                   className="min-w-0 px-1 text-xs leading-4 text-muted-foreground/80"
                   aria-live="polite"
                 >
                   <SquareTerminalIcon />
                   <span>
-                    {agentNeedsResolution
-                      ? t('ai.agent.resolvePending')
-                      : !contextEnabled
-                        ? t('ai.agent.requiresContext')
-                        : t('ai.agent.requiresTerminal')}
+                    {!contextEnabled
+                      ? t('ai.agent.requiresContext')
+                      : t('ai.agent.requiresTerminal')}
                   </span>
                 </InputGroupText>
               )}
@@ -1766,7 +1644,7 @@ export const AiPanel: React.FC = () => {
                   spacing={1}
                   className="min-w-0"
                   aria-label={t('ai.mode')}
-                  disabled={busy || agentNeedsResolution || viewingHistory}
+                  disabled={busy || viewingHistory}
                 >
                   <Tooltip>
                     <TooltipTrigger

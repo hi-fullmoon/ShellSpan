@@ -6,7 +6,7 @@ TermBridge Runbooks are UTF-8 JSON files ending in `.runbook.json`. JSON is inte
 
 - A Runbook binds to one connection profile when a run starts. The review freezes the profile ID, host, port, username, source digest, resolved non-secret variables, and keychain references.
 - Every precheck is read-only. Steps declare exactly one risk: `readOnly`, `stateChange`, or `destructive`. Static checks reject known mutating or destructive commands whose declared risk is lower than detected behavior. Read-only actions also use a local command allowlist and reject shell control operators.
-- Approval is per step and per exact risk. The backend validates the source text, selected action, variable set, risk, target identity, timeout, and approval again. Destructive steps receive a second confirmation showing the complete reviewed command and impact.
+- Approval is per step and per exact risk. The backend validates the source text, selected action, variable set, risk, target identity, timeout, and approval again. Every modifying step must describe a rollback. Destructive steps receive a second confirmation showing the complete reviewed command, impact, and rollback.
 - Variable placeholders use `{{UPPERCASE_NAME}}`. Values are POSIX-shell quoted as one argument, preventing a variable from adding shell syntax. The review shows the resulting full command.
 - Secret variables have no `default` or runtime text value. They use one of the supported references: `keychain://profile/password`, `keychain://profile/passphrase`, `keychain://profile/jump-password`, or `keychain://profile/jump-passphrase`. Only the Rust execution boundary resolves them. Reviews retain the reference, and returned stdout, stderr, and errors are scrubbed using every resolved Runbook and connection secret.
 - Files containing unknown fields, common literal-secret assignments, private-key blocks, unsupported references, invalid placeholders, duplicate IDs, or understated risk are rejected before save or execution.
@@ -44,6 +44,7 @@ TermBridge Runbooks are UTF-8 JSON files ending in `.runbook.json`. JSON is inte
       "command": "sudo systemctl reload {{SERVICE}}",
       "risk": "stateChange",
       "impact": "Reloads the selected unit without stopping it.",
+      "rollback": "Restore the previous validated configuration and reload the same unit.",
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 30,
       "safeToRetry": true
@@ -52,7 +53,7 @@ TermBridge Runbooks are UTF-8 JSON files ending in `.runbook.json`. JSON is inte
 }
 ```
 
-`expected.exitCode` is required. `expected.stdoutContains` may contain up to 20 literal evidence fragments; all must match. A precheck failure, expected-result mismatch, cancellation, timeout, approval refusal, connection error, or step failure stops the run without advancing.
+`expected.exitCode` is required. `expected.stdoutContains` may contain up to 20 literal evidence fragments; all must match. `rollback` is required for `stateChange` and `destructive` steps. A diagnostic evidence-only Runbook may use an empty `steps` array, but still requires at least one bounded precheck. A precheck failure, expected-result mismatch, cancellation, timeout, approval refusal, connection error, or step failure stops the run without advancing.
 
 ## Pause, skip, retry, and evidence
 
@@ -64,4 +65,4 @@ TermBridge Runbooks are UTF-8 JSON files ending in `.runbook.json`. JSON is inte
 
 ## Implementation audit
 
-The pre-existing diagnostic Agent inserts approved read-only commands into the visible PTY. That is appropriate for interactive diagnostics but not for Runbook secret variables because terminal echo and AI context capture could retain a resolved value. Local Runbooks therefore use a separate one-step SSH channel with bounded output, timeout, cancellation, expected-result verification, and backend redaction. Connection authentication still reuses the existing profile, host-key, password prompt, private-key, jump-host, and OS-keychain implementations; no new credential store or unrestricted Agent shell was introduced.
+The diagnostic Agent produces a structured draft only. It cannot insert or execute its commands in the visible PTY. Users explicitly hand the draft to this editor, where they can review, edit, save, bind a single profile or deliberately select a tag, and then approve each action. Runbooks use a separate one-step SSH channel with bounded output, timeout, cancellation, expected-result verification, and backend redaction. Connection authentication still reuses the existing profile, host-key, password prompt, private-key, jump-host, and OS-keychain implementations; no new credential store or unrestricted Agent shell was introduced.

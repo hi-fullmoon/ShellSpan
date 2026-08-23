@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
@@ -54,6 +54,11 @@ import { useToast } from '@/hooks/useToast';
 import type { LocaleKey } from '@/locales';
 import { ensureKeychainKeyForProfile } from '@/lib/keychain-key-prompt';
 import { createOperationId } from '@/lib/operation-id';
+import {
+  AI_RUNBOOK_DRAFT_EVENT,
+  consumePendingAgentRunbookDraft,
+  type AiRunbookDraftDetail,
+} from '@/lib/diagnostic-agent';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
 import {
   createMultiHostRunbookTask,
@@ -165,6 +170,7 @@ export const RunbookPanel: React.FC = () => {
   const [preparing, setPreparing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [validationError, setValidationError] = useState<string>();
+  const [aiDraft, setAiDraft] = useState<AiRunbookDraftDetail>();
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === targetProfileId),
@@ -179,7 +185,7 @@ export const RunbookPanel: React.FC = () => {
   const executionLocked = run?.phase === 'running'
     || Boolean(multiHostTask && !isMultiHostRunbookTaskTerminal(multiHostTask));
 
-  const applyValidatedText = (text: string, path?: string): void => {
+  const applyValidatedText = useCallback((text: string, path?: string): void => {
     const parsed = parseRunbookText(text);
     const normalized = serializeRunbook(parsed);
     setSourceText(normalized);
@@ -190,7 +196,25 @@ export const RunbookPanel: React.FC = () => {
     setRun(undefined);
     setMultiHostTask(undefined);
     setValidationError(undefined);
-  };
+  }, []);
+
+  useEffect(() => {
+    const applyDraft = (detail: AiRunbookDraftDetail): void => {
+      applyValidatedText(detail.sourceText);
+      setTargetMode('single');
+      setTargetProfileId(detail.profileId);
+      setAiDraft(detail);
+    };
+    const pending = consumePendingAgentRunbookDraft();
+    if (pending) applyDraft(pending);
+    const handleDraft = (event: Event): void => {
+      const detail = consumePendingAgentRunbookDraft()
+        ?? (event as CustomEvent<AiRunbookDraftDetail>).detail;
+      if (detail?.sourceText) applyDraft(detail);
+    };
+    window.addEventListener(AI_RUNBOOK_DRAFT_EVENT, handleDraft);
+    return () => window.removeEventListener(AI_RUNBOOK_DRAFT_EVENT, handleDraft);
+  }, [applyValidatedText]);
 
   const handleValidate = (): void => {
     try {
@@ -206,7 +230,10 @@ export const RunbookPanel: React.FC = () => {
   const handleOpen = async (): Promise<void> => {
     try {
       const file = await invokeOpenRunbookFile();
-      if (file) applyValidatedText(file.text, file.path);
+      if (file) {
+        applyValidatedText(file.text, file.path);
+        setAiDraft(undefined);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setValidationError(message);
@@ -419,6 +446,24 @@ export const RunbookPanel: React.FC = () => {
           <XCircleIcon />
           <AlertTitle>{t('runbook.validationFailed')}</AlertTitle>
           <AlertDescription>{validationError}</AlertDescription>
+        </Alert>
+      )}
+
+      {aiDraft && (
+        <Alert>
+          <ShieldAlertIcon />
+          <AlertTitle>{t('runbook.aiDraftTitle')}</AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-col gap-1">
+              <span>{t('runbook.aiDraftDescription')}</span>
+              <span>{t('ai.agent.objective')}: {aiDraft.objective}</span>
+              <span>{t('ai.agent.target')}: {aiDraft.target}</span>
+              <span>{t('ai.agent.boundTarget')}: {aiDraft.contextLabel}</span>
+              <span>
+                {t('runbook.aiDraftObservedAt')}: {new Date(aiDraft.contextObservedAt).toLocaleString()}
+              </span>
+            </div>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -640,6 +685,9 @@ export const RunbookPanel: React.FC = () => {
                       <AlertDescription>
                         <div className="flex flex-col gap-2">
                           <span>{t('runbook.impact')}: {activeItem.impact}</span>
+                          {activeItem.rollback && (
+                            <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
+                          )}
                           <code className="break-all rounded-md bg-muted p-2 text-foreground">{activeItem.commandPreview}</code>
                           <span>{t('runbook.timeout')}: {activeItem.timeoutSeconds}s</span>
                         </div>
@@ -668,6 +716,17 @@ export const RunbookPanel: React.FC = () => {
                           </CardHeader>
                           {(item.evidence || item.error) && (
                             <CardContent className="flex flex-col gap-1 text-xs">
+                              {item.evidence && (
+                                <>
+                                  <span>{t('runbook.evidenceOperation')}: {item.evidence.operationId}</span>
+                                  <span>
+                                    {t('runbook.evidenceTarget')}: {item.evidence.username}@{item.evidence.host}:{item.evidence.port}
+                                  </span>
+                                  <span>
+                                    {t('runbook.evidenceCompletedAt')}: {new Date(item.evidence.completedAt).toLocaleString()}
+                                  </span>
+                                </>
+                              )}
                               {item.evidence?.exitCode !== undefined && <span>exit {item.evidence.exitCode}</span>}
                               {item.evidence?.stdout && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stdout}</code>}
                               {item.evidence?.stderr && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stderr}</code>}
@@ -758,7 +817,12 @@ export const RunbookPanel: React.FC = () => {
               <AlertTriangleIcon />
               <AlertTitle>{activeItem.impact}</AlertTitle>
               <AlertDescription>
-                <code className="break-all">{activeItem.commandPreview}</code>
+                <div className="flex flex-col gap-2">
+                  {activeItem.rollback && (
+                    <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
+                  )}
+                  <code className="break-all">{activeItem.commandPreview}</code>
+                </div>
               </AlertDescription>
             </Alert>
           )}
