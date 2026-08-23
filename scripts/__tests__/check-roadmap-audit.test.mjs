@@ -67,4 +67,40 @@ describe('roadmap audit', () => {
       },
     );
   });
+
+  it('requires user value evidence independently from the user group', () => {
+    withChangedAudit(
+      (audit) => { delete audit.items.find((item) => item.phase === 'EXPLORE').criteria.userValue; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('is missing EXPLORE criterion userValue');
+      },
+    );
+  });
+
+  it('does not allow a stable extension contract before admission evidence is complete', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('插件 API'));
+        item.extensionGates.dataContract = 'stable';
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('cannot record a stable data contract');
+      },
+    );
+  });
+
+  it('keeps plugin API evaluation blocked until the data contract is stable', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('插件 API'));
+        item.extensionGates.pluginApi = 'candidate';
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('plugin API evaluation requires a stable data contract');
+      },
+    );
+  });
 });

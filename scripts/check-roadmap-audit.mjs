@@ -9,6 +9,7 @@ const allowedStatuses = new Set(['planned', 'in-progress', 'verified', 'blocked'
 const requiredPhases = ['NOW', 'NEXT', 'LATER', 'EXPLORE'];
 const exploreCriteria = [
   'userGroup',
+  'userValue',
   'maintenanceCost',
   'crossPlatformImplementation',
   'securityModel',
@@ -138,6 +139,30 @@ for (const item of audit.items) {
     }
     if (item.decision === 'defer' && item.status !== 'deferred') {
       fail(`${item.id} defer decision must use deferred status`);
+    }
+    if (item.roadmapItem.includes('插件 API')) {
+      const gates = item.extensionGates;
+      if (!gates || typeof gates !== 'object' || Array.isArray(gates)) {
+        fail(`${item.id} is missing extensionGates`);
+      }
+      if (!['not-established', 'stable'].includes(gates.dataContract)) {
+        fail(`${item.id} has invalid data-contract gate ${gates.dataContract}`);
+      }
+      if (!['blocked', 'candidate'].includes(gates.pluginApi)) {
+        fail(`${item.id} has invalid plugin API gate ${gates.pluginApi}`);
+      }
+      if (typeof gates.finding !== 'string' || gates.finding.trim() === '') {
+        fail(`${item.id} extensionGates is missing finding`);
+      }
+      if (gates.dataContract === 'stable'
+        && (!item.necessary
+          || item.status !== 'verified'
+          || exploreCriteria.some((criterionName) => item.criteria[criterionName].status !== 'met'))) {
+        fail(`${item.id} cannot record a stable data contract before EXPLORE admission evidence is complete`);
+      }
+      if (gates.pluginApi !== 'blocked' && gates.dataContract !== 'stable') {
+        fail(`${item.id} plugin API evaluation requires a stable data contract`);
+      }
     }
   }
 }
