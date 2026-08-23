@@ -377,7 +377,7 @@ export function isRunbookEvidenceStale(
   return !evidence?.expectedMatched || now - evidence.completedAt >= maxAgeSeconds * 1000;
 }
 
-function prechecksFresh(run: RunbookRun, now: number): boolean {
+export function areRunbookPrechecksFresh(run: RunbookRun, now = Date.now()): boolean {
   return run.items
     .filter((item) => item.kind === 'precheck')
     .every((item) => item.status === 'completed'
@@ -387,7 +387,7 @@ function prechecksFresh(run: RunbookRun, now: number): boolean {
 function advance(run: RunbookRun, now: number): RunbookRun {
   const next = run.items.find((item) => item.status === 'queued');
   if (!next) return { ...run, phase: 'completed', activeItemId: undefined, error: undefined };
-  if (next.kind === 'step' && !prechecksFresh(run, now)) {
+  if (next.kind === 'step' && !areRunbookPrechecksFresh(run, now)) {
     return {
       ...run,
       phase: 'staleEvidence',
@@ -423,7 +423,7 @@ export function startRunbookRun(prepared: PreparedRunbook, runId: string, now = 
 export function markRunbookItemRunning(run: RunbookRun, now = Date.now()): RunbookRun {
   if (run.phase !== 'awaitingApproval' || activeIndex(run) < 0) return run;
   const active = run.items[activeIndex(run)];
-  if (active.kind === 'step' && !prechecksFresh(run, now)) {
+  if (active.kind === 'step' && !areRunbookPrechecksFresh(run, now)) {
     return {
       ...run,
       phase: 'staleEvidence',
@@ -513,7 +513,7 @@ export function pauseRunbook(run: RunbookRun): RunbookRun {
 export function resumeRunbook(run: RunbookRun, now = Date.now()): RunbookRun {
   if (run.phase !== 'paused' || !run.activeItemId) return run;
   const active = run.items.find((item) => item.id === run.activeItemId);
-  if (active?.kind === 'step' && !prechecksFresh(run, now)) {
+  if (active?.kind === 'step' && !areRunbookPrechecksFresh(run, now)) {
     return { ...run, phase: 'staleEvidence', activeItemId: undefined, error: 'Runbook prerequisite evidence is stale; retry from a safe precheck.' };
   }
   return { ...run, phase: 'awaitingApproval', error: undefined };
@@ -542,6 +542,28 @@ export function retryRunbookFrom(run: RunbookRun, itemId: string, now = Date.now
     items: run.items.map((item, itemIndex) => itemIndex >= index
       ? { ...item, status: 'queued', evidence: undefined, error: undefined }
       : item),
+  };
+  return advance(reset, now);
+}
+
+export function retryRunbookWithFreshPrechecks(
+  run: RunbookRun,
+  itemId: string,
+  now = Date.now(),
+): RunbookRun {
+  if (!['stopped', 'cancelled', 'staleEvidence'].includes(run.phase)) return run;
+  const retryIndex = run.items.findIndex((item) => item.id === itemId);
+  if (retryIndex < 0 || !run.items[retryIndex].safeToRetry) return run;
+  const reset: RunbookRun = {
+    ...run,
+    phase: 'awaitingApproval',
+    activeItemId: undefined,
+    error: undefined,
+    items: run.items.map((item, index) => (
+      item.kind === 'precheck' || index >= retryIndex
+        ? { ...item, status: 'queued', evidence: undefined, error: undefined }
+        : item
+    )),
   };
   return advance(reset, now);
 }

@@ -1537,4 +1537,76 @@ mod tests {
             }
         ));
     }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_end_to_end_multi_host_runbook_output_isolation() {
+        let connection = RemoteConnectionRequest {
+            host: std::env::var("TERMBRIDGE_E2E_SSH_HOST")
+                .unwrap_or_else(|_| "127.0.0.1".to_string()),
+            port: std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+                .unwrap_or(22222),
+            username: std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
+                .unwrap_or_else(|_| "termbridge".to_string()),
+            auth_method: AuthMethod::Password,
+            password: Some(
+                std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
+                    .unwrap_or_else(|_| "termbridge-e2e".to_string()),
+            ),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let handles = ["TERMBRIDGE_HOST_ALPHA", "TERMBRIDGE_HOST_BRAVO"].map(|marker| {
+            let worker_connection = connection.clone();
+            std::thread::spawn(move || {
+                let tcp = connect_tcp_stream(&worker_connection.host, worker_connection.port)
+                    .expect("connect isolated multi-host tcp");
+                let session = open_authenticated_session(
+                    tcp,
+                    &worker_connection.username,
+                    worker_connection.auth_method,
+                    worker_connection.password.as_deref(),
+                    None,
+                    None,
+                    &worker_connection.host,
+                    worker_connection.port,
+                    None,
+                )
+                .expect("authenticate isolated multi-host SSH");
+                let expected = RunbookExpectedResult {
+                    exit_code: 0,
+                    stdout_contains: vec![marker.to_string()],
+                };
+                match execute_channel(
+                    &session,
+                    &format!("printf {marker}"),
+                    &expected,
+                    &AtomicBool::new(false),
+                    Instant::now() + Duration::from_secs(10),
+                ) {
+                    ExecutionOutcome::Finished {
+                        exit_code,
+                        expected_matched,
+                        stdout,
+                        stderr,
+                    } => (marker, exit_code, expected_matched, stdout, stderr),
+                    _ => panic!("isolated multi-host command did not finish"),
+                }
+            })
+        });
+        let [alpha, bravo] = handles.map(|handle| handle.join().expect("join multi-host worker"));
+
+        assert_eq!(alpha.1, 0);
+        assert_eq!(bravo.1, 0);
+        assert!(alpha.2 && bravo.2);
+        assert_eq!(alpha.3, alpha.0);
+        assert_eq!(bravo.3, bravo.0);
+        assert!(!alpha.3.contains(bravo.0));
+        assert!(!bravo.3.contains(alpha.0));
+        assert!(alpha.4.is_empty() && bravo.4.is_empty());
+    }
 }
