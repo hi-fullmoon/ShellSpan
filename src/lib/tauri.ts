@@ -45,6 +45,8 @@ import type {
   SessionSummary,
   StatusEvent,
   SystemHealth,
+  RemoteHealthSnapshotRequest,
+  RemoteHealthSnapshotResult,
   TransferBatchResult,
   UploadProgressEvent,
 } from '@/types';
@@ -732,4 +734,14 @@ export async function invokeLoadAiSession(
 
 export async function invokeGetSystemHealth(): Promise<SystemHealth> {
   return invokeLogged<SystemHealth>('get_system_health');
+}
+
+export async function invokeCollectRemoteHealthSnapshot(
+  request: RemoteHealthSnapshotRequest,
+): Promise<RemoteHealthSnapshotResult> {
+  return invokeLogged<RemoteHealthSnapshotResult>('collect_remote_health_snapshot', { request });
+}
+
+export async function invokeCancelRemoteHealthSnapshot(operationId: string): Promise<void> {
+  return invokeLogged('cancel_remote_health_snapshot', { operationId });
 }

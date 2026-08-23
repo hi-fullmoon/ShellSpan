@@ -75,7 +75,10 @@ export function buildHostOverview(
       ACTIVE_TRANSFER_STATUSES.has(transfer.status ?? 'running')
     )).length,
     failedTransfers: hostTransfers.filter((transfer) => transfer.status === 'failed').length,
-    diagnosticPhase: agentRun && diagnosticSessionIds.has(agentRun.sessionId)
+    diagnosticPhase: agentRun && (
+      agentRun.profileId === profile.id
+      || (!agentRun.profileId && diagnosticSessionIds.has(agentRun.sessionId))
+    )
       ? agentRun.phase
       : undefined,
     latestDisconnect,

@@ -627,3 +627,75 @@ export interface SystemHealth {
   disk: DiskInfo;
   appInfo: AppInfo;
 }
+
+// --- Explicitly authorized, one-shot remote host health snapshots ---
+
+export type RemoteHealthResultStatus =
+  | 'success'
+  | 'unauthorized'
+  | 'cancelled'
+  | 'timedOut'
+  | 'unsupported'
+  | 'failed';
+
+export interface RemoteHealthSource {
+  kind: 'sshReadOnly';
+  commandSetVersion: string;
+  profileId: string;
+  host: string;
+  port: number;
+  username: string;
+}
+
+export interface RemoteSystemInfo {
+  osFamily: 'linux' | 'macos';
+  osVersion?: string;
+  hostname: string;
+  kernelVersion: string;
+  architecture: string;
+  cpuCount: number;
+  uptimeSecs: number;
+}
+
+export interface RemoteHealthSnapshot {
+  system: RemoteSystemInfo;
+  cpu: {
+    usagePercent: number;
+  };
+  memory: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usagePercent: number;
+  };
+  disk: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usagePercent: number;
+    mountPoint: string;
+  };
+  load: {
+    oneMinute: number;
+    fiveMinutes: number;
+    fifteenMinutes: number;
+  };
+}
+
+export interface RemoteHealthSnapshotRequest {
+  operationId: string;
+  profileId: string;
+  authorized: boolean;
+  timeoutMs: number;
+  connection: RemoteConnectionRequest;
+}
+
+export interface RemoteHealthSnapshotResult {
+  operationId: string;
+  profileId: string;
+  status: RemoteHealthResultStatus;
+  checkedAt: number;
+  source: RemoteHealthSource;
+  snapshot?: RemoteHealthSnapshot;
+  error?: string;
+}

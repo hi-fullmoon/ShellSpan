@@ -5,7 +5,14 @@ import type { AgentRun } from '@/types/ai';
 
 interface AgentState {
   run?: AgentRun;
-  beginRun: (requestId: string, goal: string, sessionId: string, contextLabel: string) => boolean;
+  beginRun: (
+    requestId: string,
+    goal: string,
+    sessionId: string,
+    contextLabel: string,
+    profileId?: string,
+    contextSource?: 'terminal' | 'remoteHealth',
+  ) => boolean;
   appendDelta: (requestId: string, text: string) => void;
   completePlanning: (requestId: string) => void;
   cancelRun: (requestId: string) => void;
@@ -57,7 +64,14 @@ function advanceRun(run: AgentRun): AgentRun {
 }
 
 export const useAgentStore = create<AgentState>()((set) => ({
-  beginRun: (requestId, goal, sessionId, contextLabel) => {
+  beginRun: (
+    requestId,
+    goal,
+    sessionId,
+    contextLabel,
+    profileId,
+    contextSource = 'terminal',
+  ) => {
     let started = false;
     set((state) => {
       if (state.run && ACTIVE_PHASES.includes(state.run.phase)) return state;
@@ -68,14 +82,18 @@ export const useAgentStore = create<AgentState>()((set) => ({
           requestId,
           goal,
           sessionId,
+          profileId,
           contextLabel,
+          contextSource,
           phase: 'planning',
           responseText: '',
           steps: [
             {
               id: generateId(),
               kind: 'tool',
-              title: 'terminal.getContext',
+              title: contextSource === 'remoteHealth'
+                ? 'remoteHealth.getSnapshotContext'
+                : 'terminal.getContext',
               description: contextLabel,
               status: 'completed',
             },
