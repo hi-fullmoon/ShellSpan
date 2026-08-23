@@ -4,9 +4,19 @@ import { resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const auditPath = resolve(root, 'docs/roadmap-audit.json');
 const roadmapPath = resolve(root, 'ROADMAP.md');
-const allowedPhases = new Set(['NOW', 'NEXT', 'LATER']);
-const allowedStatuses = new Set(['planned', 'in-progress', 'verified', 'blocked', 'deferred']);
-const requiredPhases = ['NOW', 'NEXT', 'LATER'];
+const allowedPhases = new Set(['NOW', 'NEXT', 'LATER', 'EXPLORE']);
+const allowedStatuses = new Set(['planned', 'in-progress', 'verified', 'blocked', 'deferred', 'researching']);
+const requiredPhases = ['NOW', 'NEXT', 'LATER', 'EXPLORE'];
+const exploreCriteria = [
+  'userGroup',
+  'maintenanceCost',
+  'crossPlatformImplementation',
+  'securityModel',
+  'upgradeStrategy',
+  'automatedTesting',
+];
+const allowedExploreCriterionStatuses = new Set(['met', 'not-met', 'unknown']);
+const allowedExploreDecisions = new Set(['candidate', 'admit', 'defer']);
 const maximumReviewAgeDays = 35;
 
 function fail(message) {
@@ -57,6 +67,57 @@ for (const item of audit.items) {
       fail(`${item.id} is verified without verifiedAt and test evidence`);
     }
     await Promise.all(item.tests.map((path) => assertEvidenceExists(item, path)));
+  }
+  if (item.status === 'researching' && item.phase !== 'EXPLORE') {
+    fail(`${item.id} uses researching outside EXPLORE`);
+  }
+  if (item.phase === 'EXPLORE') {
+    if (!allowedExploreDecisions.has(item.decision)) {
+      fail(`${item.id} has invalid EXPLORE decision ${item.decision}`);
+    }
+    if (typeof item.decisionRationale !== 'string' || item.decisionRationale.trim() === '') {
+      fail(`${item.id} is missing decisionRationale`);
+    }
+    if (typeof item.necessary !== 'boolean') {
+      fail(`${item.id} is missing the EXPLORE necessity decision`);
+    }
+    if (typeof item.necessityFinding !== 'string' || item.necessityFinding.trim() === '') {
+      fail(`${item.id} is missing necessityFinding`);
+    }
+    if (!item.criteria || typeof item.criteria !== 'object' || Array.isArray(item.criteria)) {
+      fail(`${item.id} is missing EXPLORE criteria`);
+    }
+    for (const criterionName of exploreCriteria) {
+      const criterion = item.criteria[criterionName];
+      if (!criterion || typeof criterion !== 'object' || Array.isArray(criterion)) {
+        fail(`${item.id} is missing EXPLORE criterion ${criterionName}`);
+      }
+      if (!allowedExploreCriterionStatuses.has(criterion.status)) {
+        fail(`${item.id} ${criterionName} has invalid status ${criterion.status}`);
+      }
+      if (typeof criterion.finding !== 'string' || criterion.finding.trim() === '') {
+        fail(`${item.id} ${criterionName} is missing finding`);
+      }
+    }
+    const unexpectedCriteria = Object.keys(item.criteria).filter(
+      (criterionName) => !exploreCriteria.includes(criterionName),
+    );
+    if (unexpectedCriteria.length > 0) {
+      fail(`${item.id} has unknown EXPLORE criteria: ${unexpectedCriteria.join(', ')}`);
+    }
+    if (item.decision === 'admit'
+      && exploreCriteria.some((criterionName) => item.criteria[criterionName].status !== 'met')) {
+      fail(`${item.id} cannot be admitted before every EXPLORE criterion is met`);
+    }
+    if (item.decision === 'admit' && (!item.necessary || item.status !== 'verified')) {
+      fail(`${item.id} admission requires explicit necessity and verified test evidence`);
+    }
+    if (item.decision === 'candidate' && item.status !== 'researching') {
+      fail(`${item.id} candidate decision must use researching status`);
+    }
+    if (item.decision === 'defer' && item.status !== 'deferred') {
+      fail(`${item.id} defer decision must use deferred status`);
+    }
   }
 }
 
