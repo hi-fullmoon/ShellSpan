@@ -207,10 +207,11 @@ jobs:
           node-version: 24
 
       - name: Setup Rust toolchain
-        # 版本由仓库根目录 rust-toolchain.toml 固定，与 cache-warm.yml 保持一致，
-        # 否则 rustc 版本变化会使 rust-cache 的 key 失配、缓存失效
+        # 使用完整 action SHA 时必须显式传入工具链，并与 rust-toolchain.toml 保持一致；
+        # 否则 rustc 版本变化会使 rust-cache 的 key 失配、缓存失效。
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
+          toolchain: 1.95.0
           targets: ${{ matrix.rust_target }}
 
       # Tag-triggered runs can only restore caches from the default branch,

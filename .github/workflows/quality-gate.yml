@@ -52,6 +52,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
+          toolchain: 1.95.0
           components: rustfmt, clippy
       - name: Cache Rust
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -72,6 +73,8 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.95.0
       - name: Install Tauri build dependencies
         run: >-
           sudo apt-get update && sudo apt-get install -y

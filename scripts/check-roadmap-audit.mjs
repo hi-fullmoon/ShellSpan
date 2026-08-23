@@ -41,6 +41,11 @@ const requiredSecurityClosures = [
   'aiApiKeyKeychainOnly',
   'terminalWorkspaceContract',
 ];
+const rustWorkflowPaths = [
+  '.github/workflows/quality-gate.yml',
+  '.github/workflows/cache-warm.yml',
+  '.github/workflows/release.yml',
+];
 
 function fail(message) {
   throw new Error(`roadmap audit: ${message}`);
@@ -474,6 +479,21 @@ if (!databaseSource.includes('AI provider preferences may only contain non-sensi
 if (!terminalWorkspaceSource.includes('TERMINAL_WORKSPACE_VERSION = 1')
   || !databaseSource.includes('validate_terminal_workspace')) {
   fail('terminal workspace must have a versioned, bounded frontend and database contract');
+}
+
+const toolchainToml = await readFile(resolve(root, 'rust-toolchain.toml'), 'utf8');
+const toolchainMatch = toolchainToml.match(/^channel\s*=\s*"([^"]+)"/m);
+if (!toolchainMatch) fail('rust-toolchain.toml is missing a channel');
+const pinnedToolchain = toolchainMatch[1];
+for (const workflowPath of rustWorkflowPaths) {
+  const workflowLines = (await readFile(resolve(root, workflowPath), 'utf8')).split(/\r?\n/);
+  workflowLines.forEach((line, index) => {
+    if (!line.includes('uses: dtolnay/rust-toolchain@')) return;
+    const actionBlock = workflowLines.slice(index, index + 8).join('\n');
+    if (!actionBlock.includes(`toolchain: ${pinnedToolchain}`)) {
+      fail(`${workflowPath} must install the pinned Rust ${pinnedToolchain} toolchain explicitly`);
+    }
+  });
 }
 
 for (const phase of requiredPhases) {
