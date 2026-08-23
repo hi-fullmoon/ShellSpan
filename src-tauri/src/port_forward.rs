@@ -259,7 +259,7 @@ pub(crate) fn start_port_forward(
     request: PortForwardStartRequest,
     cancel_flag: Arc<AtomicBool>,
     local_listener: Option<TcpListener>,
-    known_hosts_path: Option<String>,
+    known_hosts_path: String,
 ) {
     let operation_id = request.operation_id.clone();
     let profile_id = request.profile_id.clone();
@@ -267,7 +267,7 @@ pub(crate) fn start_port_forward(
     let config = request.forward;
     let sent = Arc::new(AtomicU64::new(0));
     let received = Arc::new(AtomicU64::new(0));
-    let known_hosts = known_hosts_path.as_deref().map(Path::new);
+    let known_hosts = Path::new(&known_hosts_path);
 
     info!(
         "Starting port forward operation_id={} profile_id={} config_id={} kind={:?}",
@@ -449,7 +449,7 @@ fn open_forward_session(
     private_key_data: Option<&str>,
     passphrase: Option<&str>,
     jump_host: Option<&JumpHostConfig>,
-    known_hosts_path: Option<&Path>,
+    known_hosts_path: &Path,
 ) -> Result<ForwardSession, String> {
     if let Some(jump) = jump_host {
         let (jump_session, target) = connect_through_jump_host(
@@ -461,7 +461,7 @@ fn open_forward_session(
             password,
             private_key_data,
             passphrase,
-            known_hosts_path,
+            Some(known_hosts_path),
         )
         .map_err(|error| error.message())?;
         Ok(ForwardSession {
@@ -479,7 +479,7 @@ fn open_forward_session(
             passphrase,
             host,
             port,
-            known_hosts_path,
+            Some(known_hosts_path),
         )
         .map_err(|error| error.message())?;
         session.set_keepalive(true, 30);
@@ -500,7 +500,7 @@ fn local_forward_loop(
     cancel_flag: Arc<AtomicBool>,
     bytes_sent: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
-    known_hosts_path: Option<&Path>,
+    known_hosts_path: &Path,
     on_ready: impl FnOnce(),
     on_tick: impl Fn(),
     on_error: impl Fn(String),
@@ -583,7 +583,7 @@ fn remote_forward_loop(
     cancel_flag: Arc<AtomicBool>,
     bytes_sent: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
-    known_hosts_path: Option<&Path>,
+    known_hosts_path: &Path,
     on_ready: impl FnOnce(),
     on_tick: impl Fn(),
     on_error: impl Fn(String),
@@ -820,6 +820,8 @@ mod tests {
             passphrase: None,
             jump_host: None,
         };
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind forward listener");
         listener
             .set_nonblocking(true)
@@ -832,6 +834,7 @@ mod tests {
         let worker_cancel = cancel.clone();
         let worker_sent = sent.clone();
         let worker_received = received.clone();
+        let worker_known_hosts_path = known_hosts_path.clone();
         let worker = thread::spawn(move || {
             local_forward_loop(
                 &connection,
@@ -841,7 +844,7 @@ mod tests {
                 worker_cancel,
                 worker_sent,
                 worker_received,
-                None,
+                &worker_known_hosts_path,
                 || ready_tx.send(()).expect("report ready"),
                 || {},
                 |_| {},
@@ -913,6 +916,8 @@ mod tests {
             passphrase: None,
             jump_host: None,
         };
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
 
         let local_service = TcpListener::bind("127.0.0.1:0").expect("bind local target service");
         let local_port = local_service
@@ -940,6 +945,7 @@ mod tests {
         let worker_cancel = cancel.clone();
         let worker_sent = sent.clone();
         let worker_received = received.clone();
+        let worker_known_hosts_path = known_hosts_path.clone();
         let worker = thread::spawn(move || {
             remote_forward_loop(
                 &connection,
@@ -949,7 +955,7 @@ mod tests {
                 worker_cancel,
                 worker_sent,
                 worker_received,
-                None,
+                &worker_known_hosts_path,
                 || ready_tx.send(()).expect("report remote forward ready"),
                 || {},
                 |_| {},
@@ -969,7 +975,7 @@ mod tests {
             None,
             None,
             None,
-            None,
+            &known_hosts_path,
         )
         .expect("connect test client to isolated SSH service");
         let mut command = session
@@ -1013,7 +1019,7 @@ mod tests {
             None,
             None,
             None,
-            None,
+            &known_hosts_path,
         )
         .expect("open remote listener verification session");
         let listener = verification

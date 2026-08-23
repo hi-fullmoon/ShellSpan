@@ -468,6 +468,41 @@ pub(crate) fn open_session_for_host_key(host: &str, port: u16) -> Result<Session
     Ok(session)
 }
 
+#[cfg(test)]
+pub(crate) fn trusted_known_hosts_fixture(
+    host: &str,
+    port: u16,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    use ssh2::{KnownHostFileKind, KnownHostKeyFormat};
+
+    let temp = tempfile::tempdir().expect("create isolated known-hosts directory");
+    let path = temp.path().join("known_hosts");
+    let handshake = open_session_for_host_key(host, port).expect("read isolated host key");
+    let (key, key_type) = handshake.host_key().expect("server exposes a host key");
+    let key_format = match key_type {
+        ssh2::HostKeyType::Rsa => KnownHostKeyFormat::SshRsa,
+        ssh2::HostKeyType::Dss => KnownHostKeyFormat::SshDss,
+        ssh2::HostKeyType::Ecdsa256 => KnownHostKeyFormat::Ecdsa256,
+        ssh2::HostKeyType::Ecdsa384 => KnownHostKeyFormat::Ecdsa384,
+        ssh2::HostKeyType::Ecdsa521 => KnownHostKeyFormat::Ecdsa521,
+        ssh2::HostKeyType::Ed25519 => KnownHostKeyFormat::Ed25519,
+        ssh2::HostKeyType::Unknown => KnownHostKeyFormat::Unknown,
+    };
+    let host_with_port = if port == 22 {
+        host.to_string()
+    } else {
+        format!("[{host}]:{port}")
+    };
+    let mut known_hosts = handshake.known_hosts().expect("initialize known hosts");
+    known_hosts
+        .add(&host_with_port, key, &host_with_port, key_format)
+        .expect("trust isolated host key");
+    known_hosts
+        .write_file(&path, KnownHostFileKind::OpenSSH)
+        .expect("persist isolated host key");
+    (temp, path)
+}
+
 pub(crate) fn connect_through_jump_host(
     jump: &JumpHostConfig,
     target_host: &str,
@@ -1502,6 +1537,43 @@ mod tests {
             Some(&known_hosts_path),
         )
         .expect("authenticate after trusting host key");
+
+        let mismatch_path = temp.path().join("mismatched-known-hosts");
+        let mut mismatched_key = key.to_vec();
+        let last = mismatched_key
+            .last_mut()
+            .expect("isolated SSH host key is not empty");
+        *last ^= 0x01;
+        let mut mismatched_hosts = handshake
+            .known_hosts()
+            .expect("initialize mismatched known hosts");
+        mismatched_hosts
+            .add(
+                &host_with_port,
+                &mismatched_key,
+                &host_with_port,
+                key_format,
+            )
+            .expect("record a changed host key fixture");
+        mismatched_hosts
+            .write_file(&mismatch_path, KnownHostFileKind::OpenSSH)
+            .expect("persist changed host key fixture");
+        let mismatch = open_authenticated_session(
+            connect_tcp_stream(&host, port).expect("reconnect for changed host-key check"),
+            &username,
+            AuthMethod::Password,
+            Some(&password),
+            None,
+            None,
+            &host,
+            port,
+            Some(&mismatch_path),
+        );
+        match mismatch {
+            Err(ConnectionError::HostKeyMismatch { .. }) => {}
+            Err(error) => panic!("expected a changed host key, got {error:?}"),
+            Ok(_) => panic!("a changed host key was accepted"),
+        }
 
         let mut channel = session.channel_session().expect("open terminal channel");
         channel

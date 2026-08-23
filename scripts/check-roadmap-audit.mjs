@@ -35,6 +35,12 @@ const teamWorkspacePrerequisites = [
 ];
 const teamDiscoveryObjects = ['team-sharing', 'central-policy', 'central-audit'];
 const maximumReviewAgeDays = 35;
+const committedPhases = ['NOW', 'NEXT', 'LATER'];
+const requiredSecurityClosures = [
+  'knownHostsFailClosed',
+  'aiApiKeyKeychainOnly',
+  'terminalWorkspaceContract',
+];
 
 function fail(message) {
   throw new Error(`roadmap audit: ${message}`);
@@ -48,11 +54,64 @@ async function assertEvidenceExists(item, path) {
   await access(absolute).catch(() => fail(`${item.id} evidence does not exist: ${path}`));
 }
 
+function parseRoadmap(markdown) {
+  const phases = Object.fromEntries(requiredPhases.map((phase) => [phase, {
+    sections: new Map(),
+    exitCriteria: [],
+    candidates: [],
+  }]));
+  let phase = null;
+  let section = null;
+  let inExitCriteria = false;
+  for (const line of markdown.split(/\r?\n/)) {
+    const phaseMatch = line.match(/^## (NOW|NEXT|LATER|EXPLORE)\b/);
+    if (phaseMatch) {
+      phase = phaseMatch[1];
+      section = null;
+      inExitCriteria = false;
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      phase = null;
+      section = null;
+      inExitCriteria = false;
+      continue;
+    }
+    if (!phase) continue;
+    if (line === '### 退出条件') {
+      section = null;
+      inExitCriteria = true;
+      continue;
+    }
+    const sectionMatch = line.match(/^### (\d+\. .+)$/);
+    if (sectionMatch && phase !== 'EXPLORE') {
+      section = sectionMatch[1];
+      inExitCriteria = false;
+      if (phases[phase].sections.has(section)) fail(`ROADMAP.md has duplicate section ${phase}/${section}`);
+      phases[phase].sections.set(section, []);
+      continue;
+    }
+    if (!line.startsWith('- ')) continue;
+    const item = line.slice(2);
+    if (phase === 'EXPLORE') phases.EXPLORE.candidates.push(item);
+    else if (inExitCriteria) phases[phase].exitCriteria.push(item);
+    else if (section) phases[phase].sections.get(section).push(item);
+  }
+  return phases;
+}
+
+function sameStrings(actual, expected) {
+  return Array.isArray(actual)
+    && actual.length === expected.length
+    && actual.every((value, index) => value === expected[index]);
+}
+
 const [rawAudit, roadmap] = await Promise.all([
   readFile(auditPath, 'utf8'),
   readFile(roadmapPath, 'utf8'),
 ]);
 const audit = JSON.parse(rawAudit);
+const parsedRoadmap = parseRoadmap(roadmap);
 const roadmapItems = new Set(
   roadmap
     .split(/\r?\n/)
@@ -62,6 +121,12 @@ const roadmapItems = new Set(
 
 if (audit.schemaVersion !== 1) fail('schemaVersion must be 1');
 if (!Array.isArray(audit.items) || audit.items.length === 0) fail('items must not be empty');
+if (!audit.roadmapMapping || typeof audit.roadmapMapping !== 'object' || Array.isArray(audit.roadmapMapping)) {
+  fail('roadmapMapping must map every committed ROADMAP section');
+}
+if (!audit.phaseExitCriteria || typeof audit.phaseExitCriteria !== 'object' || Array.isArray(audit.phaseExitCriteria)) {
+  fail('phaseExitCriteria must map every phase exit condition');
+}
 
 const reviewedAt = new Date(`${audit.reviewedAt}T00:00:00Z`);
 if (Number.isNaN(reviewedAt.getTime())) fail('reviewedAt must use YYYY-MM-DD');
@@ -82,6 +147,9 @@ for (const item of audit.items) {
   ids.add(item.id);
   if (!allowedPhases.has(item.phase)) fail(`${item.id} has invalid phase ${item.phase}`);
   if (!allowedStatuses.has(item.status)) fail(`${item.id} has invalid status ${item.status}`);
+  if (item.phase !== 'EXPLORE' && item.status !== 'verified') {
+    fail(`${item.id} is a committed workstream and must be verified, not ${item.status}`);
+  }
   if (!Array.isArray(item.evidence) || item.evidence.length === 0) {
     fail(`${item.id} needs at least one evidence path`);
   }
@@ -273,6 +341,139 @@ for (const item of audit.items) {
       }
     }
   }
+}
+
+for (const phase of committedPhases) {
+  const mappings = audit.roadmapMapping[phase];
+  if (!Array.isArray(mappings)) fail(`roadmapMapping is missing phase ${phase}`);
+  const expectedSections = parsedRoadmap[phase].sections;
+  if (mappings.length !== expectedSections.size) {
+    fail(`${phase} roadmapMapping has ${mappings.length} sections; ROADMAP.md has ${expectedSections.size}`);
+  }
+  const mappedSections = new Set();
+  const mappedAuditIds = new Set();
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) {
+      fail(`${phase} roadmapMapping contains an invalid mapping`);
+    }
+    if (mappedSections.has(mapping.section)) fail(`${phase} has duplicate mapped section ${mapping.section}`);
+    if (mappedAuditIds.has(mapping.auditId)) fail(`${phase} has duplicate mapped auditId ${mapping.auditId}`);
+    mappedSections.add(mapping.section);
+    mappedAuditIds.add(mapping.auditId);
+    const expectedItems = expectedSections.get(mapping.section);
+    if (!expectedItems) fail(`${phase} mapping section is not exact: ${mapping.section}`);
+    if (!sameStrings(mapping.items, expectedItems)) {
+      fail(`${phase}/${mapping.section} items are not an exact ordered ROADMAP mapping`);
+    }
+    const auditItem = audit.items.find((item) => item.id === mapping.auditId);
+    if (!auditItem) fail(`${phase}/${mapping.section} maps unknown auditId ${mapping.auditId}`);
+    if (auditItem.phase !== phase) fail(`${mapping.auditId} is mapped to ${phase} but belongs to ${auditItem.phase}`);
+    if (auditItem.status !== 'verified') fail(`${mapping.auditId} mapping is not verified`);
+  }
+}
+
+const unexpectedMappedPhases = Object.keys(audit.roadmapMapping)
+  .filter((phase) => !committedPhases.includes(phase));
+if (unexpectedMappedPhases.length > 0) {
+  fail(`roadmapMapping has unknown phases: ${unexpectedMappedPhases.join(', ')}`);
+}
+
+for (const phase of committedPhases) {
+  const criteria = audit.phaseExitCriteria[phase];
+  const expectedCriteria = parsedRoadmap[phase].exitCriteria;
+  if (!Array.isArray(criteria) || criteria.length !== expectedCriteria.length) {
+    fail(`${phase} phaseExitCriteria must map all ${expectedCriteria.length} ROADMAP exit conditions`);
+  }
+  const actualCriteria = criteria.map((criterion) => criterion?.roadmapItem);
+  if (!sameStrings(actualCriteria, expectedCriteria)) {
+    fail(`${phase} phaseExitCriteria is not an exact ordered ROADMAP mapping`);
+  }
+  for (const [index, criterion] of criteria.entries()) {
+    const label = { id: `${phase} exit criterion ${index + 1}` };
+    if (!['verified', 'pending-external'].includes(criterion.status)) {
+      fail(`${label.id} has invalid status ${criterion.status}`);
+    }
+    if (typeof criterion.finding !== 'string' || criterion.finding.trim() === '') {
+      fail(`${label.id} is missing finding`);
+    }
+    if (!Array.isArray(criterion.evidence) || criterion.evidence.length === 0
+      || !Array.isArray(criterion.tests) || criterion.tests.length === 0) {
+      fail(`${label.id} needs evidence and test paths`);
+    }
+    await Promise.all([...criterion.evidence, ...criterion.tests]
+      .map((path) => assertEvidenceExists(label, path)));
+  }
+}
+
+const unexpectedExitPhases = Object.keys(audit.phaseExitCriteria)
+  .filter((phase) => !committedPhases.includes(phase));
+if (unexpectedExitPhases.length > 0) {
+  fail(`phaseExitCriteria has unknown phases: ${unexpectedExitPhases.join(', ')}`);
+}
+
+if (!sameStrings([...exploreRoadmapItems], parsedRoadmap.EXPLORE.candidates)) {
+  fail('EXPLORE audits must map every candidate ROADMAP item exactly once and no non-candidate bullet');
+}
+
+if (!audit.securityClosure || typeof audit.securityClosure !== 'object' || Array.isArray(audit.securityClosure)) {
+  fail('securityClosure is missing');
+}
+for (const closureName of requiredSecurityClosures) {
+  const closure = audit.securityClosure[closureName];
+  const label = { id: `securityClosure.${closureName}` };
+  if (!closure || closure.status !== 'verified') fail(`${label.id} must be verified`);
+  if (typeof closure.finding !== 'string' || closure.finding.trim() === '') {
+    fail(`${label.id} is missing finding`);
+  }
+  if (!Array.isArray(closure.evidence) || closure.evidence.length === 0
+    || !Array.isArray(closure.tests) || closure.tests.length === 0) {
+    fail(`${label.id} needs evidence and test paths`);
+  }
+  await Promise.all([...closure.evidence, ...closure.tests]
+    .map((path) => assertEvidenceExists(label, path)));
+}
+const unexpectedClosures = Object.keys(audit.securityClosure)
+  .filter((closureName) => !requiredSecurityClosures.includes(closureName));
+if (unexpectedClosures.length > 0) fail(`securityClosure has unknown entries: ${unexpectedClosures.join(', ')}`);
+
+const knownHostsSources = await Promise.all([
+  'src-tauri/src/commands.rs',
+  'src-tauri/src/remote_fs.rs',
+  'src-tauri/src/session.rs',
+  'src-tauri/src/port_forward.rs',
+].map((path) => readFile(resolve(root, path), 'utf8')));
+if (knownHostsSources.some((source) => /known_hosts_path\([^)]*\)\s*\.ok\(\)/.test(source))) {
+  fail('Known Hosts path resolution must never be downgraded with .ok()');
+}
+if (!knownHostsSources[3].includes('known_hosts_path: String')) {
+  fail('port forwarding must require a resolved Known Hosts path');
+}
+
+const [aiSource, aiTypes, aiSettingsStore, databaseSource, terminalWorkspaceSource] = await Promise.all([
+  readFile(resolve(root, 'src-tauri/src/ai.rs'), 'utf8'),
+  readFile(resolve(root, 'src/types/ai.ts'), 'utf8'),
+  readFile(resolve(root, 'src/stores/aiSettingsStore.ts'), 'utf8'),
+  readFile(resolve(root, 'src-tauri/src/db.rs'), 'utf8'),
+  readFile(resolve(root, 'src/lib/terminal-workspace.ts'), 'utf8'),
+]);
+if (/\bapiKey\b/.test(aiTypes) || /\bapiKey\b/.test(aiSettingsStore)) {
+  fail('AI provider metadata must not contain apiKey');
+}
+const migrationStart = aiSource.indexOf('fn migrate_legacy_api_keys_with');
+const migrationEnd = aiSource.indexOf('#[tauri::command]', migrationStart);
+const migrationSource = aiSource.slice(migrationStart, migrationEnd);
+if (migrationStart < 0 || migrationEnd < 0
+  || !migrationSource.includes('provider.remove("apiKey")')
+  || !migrationSource.includes('credentials.set_api_key')
+  || migrationSource.includes('delete_api_key')) {
+  fail('AI legacy migration must move SQLite secrets to keychain without deleting the secure copy');
+}
+if (!databaseSource.includes('AI provider preferences may only contain non-sensitive metadata')) {
+  fail('database must reject sensitive AI provider metadata');
+}
+if (!terminalWorkspaceSource.includes('TERMINAL_WORKSPACE_VERSION = 1')
+  || !databaseSource.includes('validate_terminal_workspace')) {
+  fail('terminal workspace must have a versioned, bounded frontend and database contract');
 }
 
 for (const phase of requiredPhases) {

@@ -119,8 +119,9 @@ pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
     .map_err(|message| ConnectionError::Other { message })?;
 
     let mut _jump_session_holder: Option<Box<ssh2::Session>> = None;
-    let known_hosts = known_hosts_path(app).ok();
-    let known_hosts_ref = known_hosts.as_deref();
+    let known_hosts =
+        known_hosts_path(app).map_err(|message| ConnectionError::Other { message })?;
+    let known_hosts_ref = Some(known_hosts.as_path());
     let session_result = if let Some(ref jump) = request.jump_host {
         connect_through_jump_host(
             jump,

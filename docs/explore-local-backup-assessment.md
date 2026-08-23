@@ -1,7 +1,7 @@
 # EXPLORE 本地加密备份与设备迁移准入评估
 
 > 基线：`6355d69`
-> 审核日期：2026-08-23
+> 审核日期：2026-08-24
 > 范围：安全的加密备份与设备迁移；优先本地文件，不默认引入账户体系
 
 ## 结论
@@ -13,7 +13,7 @@
 - 没有可复核的 TermBridge 用户请求、设备更换阻断或候选试用队列，不能证明完整备份相对继续完善现有无秘密连接导出确有必要。
 - 现有连接导出只覆盖连接元数据，导入时生成新 profile ID；工作区、最近连接和传输恢复记录仍引用旧 ID，不能直接拼成一致迁移。
 - 仓库没有备份容器、口令 KDF、认证加密、秘密清零或篡改/错密码测试。`Cargo.toml` 也没有直接声明相应密码学依赖，不能把传递依赖当作可审核实现。
-- `preferences` 不是可整体复制的“设置”集合：它混有设备路径、传输恢复、操作记录策略，并且 `ai.providers` 当前会把 API Key 写入 SQLite。完整数据库复制会违反默认不含秘密与不落盘新明文凭据的边界。
+- `preferences` 不是可整体复制的“设置”集合：它混有设备路径、传输恢复和操作记录策略。`ai.providers` 已只保留非敏感元数据并由数据库拒绝敏感字段，但完整数据库复制仍会固化设备绑定数据，且不是经过认证加密、可回滚的备份契约。
 - 元数据在 SQLite、SSH 秘密在原生钥匙串，二者没有跨存储事务；现有测试尚不能证明导入中断、钥匙串锁定或回滚失败后不会留下半导入 profile、孤儿凭据或被覆盖的本机配置。
 
 因此本次只记录候选边界和准入门槛。探索证据齐全后仍需独立评审；不得由本评估、候选文件格式或测试通过自动转为路线图承诺。
@@ -52,10 +52,10 @@
 | SSH key 元数据 | SQLite `key_credentials` 保存 label、kind、service、公钥等；profile 保存 key ID 引用 | v2 迁移删除旧明文 value 列；测试证明数据库不再保存 SSH 私钥值 | 元数据本身不能恢复凭据；不得把引用存在误报为秘密已迁移 |
 | SSH 密码、私钥与 passphrase | macOS Keychain、Windows Credential Manager 或 Secret Service；三个固定 service 与 profile/key ID | 原生存储不可用时失败关闭；store/delete 与数据库元数据有部分补偿测试 | 默认排除；若未来支持，必须使用独立授权、认证加密和跨钥匙串补偿事务 |
 | 通用设置与主题 | SQLite `preferences`；主题另有 `localStorage` 首屏缓存 | App 设置有默认值与兼容合并；主题 cache 只是优化 | 只能按白名单导出，不能复制整个表；主题 cache 无需迁移 |
-| AI provider 设置 | `preferences.ai.providers` | provider 校验与旧格式迁移有测试；API Key 当前随 provider JSON 写入 SQLite | 配置可在去除 `apiKey` 后候选迁移；秘密迁移在当前存储模型下不准入 |
+| AI provider 设置 | `preferences.ai.providers` + 系统钥匙串 | provider 元数据不含 API Key；旧 SQLite 明文只迁入钥匙串，写入/清理失败保留可恢复状态 | 非敏感 provider 元数据可候选迁移；钥匙串秘密必须另行授权和设计，不能随普通备份进入容器 |
 | 设备/运行期偏好 | 下载目录、最近连接、`transferResumeCandidates`、操作记录保留策略、启动更新检查时间、AI 面板宽度 | 部分数据有版本与边界校验 | 下载目录只能预览后验证；最近连接、传输恢复、更新时间与面板宽度默认排除 |
 | Runbook | 用户选择的独立 `.runbook.json`，`schemaVersion: 1` | 前后端拒绝未知字段、明文秘密、未知 keychainRef、风险低报；保存前规范化 | 不在应用数据库中；默认不扫描磁盘。仅允许用户明确选择文件，保留 keychain 引用而不解析秘密 |
-| 终端工作区 | SQLite `terminal_workspace.sessions_json` | 只保存 profile ID、身份、固定/颜色、会话对话 ID 与分屏；不保存终端输入/输出；恢复为断开态 | 当前没有工作区 schema version，且引用旧 profile ID；默认排除，版本化和 ID 重映射完成后再评审 |
+| 终端工作区 | SQLite `terminal_workspace.sessions_json` | v1 限制 1 MiB、100 会话、字段长度和布局深度，兼容旧无版本形状、拒绝未来版本；不保存终端输入/输出且恢复为断开态 | 仍引用设备本地 profile ID；默认排除，完成可移植 ID 重映射和备份容器 N-1 迁移后再评审 |
 | SFTP 工作区 | SQLite `sftp_workspace.workspace_json`，版本 1 | 保存 profile ID、本地/远端路径、书签与比例；不恢复传输 | 路径和书签会暴露敏感结构且可能在新设备无效；默认排除或单独明确选择，并需路径预检 |
 | SFTP 书签 | SQLite `sftp_bookmarks` | CRUD 与 host/port/username 过滤有测试 | 可作为独立敏感元数据类别，不能被“设置”笼统包含 |
 | 主机信任 | `~/.termbridge/known_hosts` | 连接时强制校验；写入有进程内锁，但新增/删除不是临时文件替换 | 属于安全决策而非普通设置。默认排除；若迁移，冲突或指纹不匹配必须逐项人工处理，绝不静默覆盖 |
@@ -64,7 +64,7 @@
 | AI 会话 | `~/.termbridge/sessions/**/*.jsonl` | append-only、Unix 权限 0700/0600、损坏行容错 | 可能包含终端上下文、命令、主机身份与对话，默认排除且不进入首个候选 |
 | 临时缓存 | `open-cache`、运行中会话、传输队列 | 可重建或明确不恢复 | 永不备份 |
 
-数据库当前为 schema v5，并会拒绝高于当前版本的数据库而不继续迁移。这能保护应用启动，但不能替代备份格式：原始复制 `termbridge.db` 还会遗漏 WAL 一致性、钥匙串、独立文件，并把内部表和明文 API Key 一并固化为外部契约。
+数据库当前为 schema v5，并会拒绝高于当前版本的数据库而不继续迁移。这能保护应用启动，但不能替代备份格式：原始复制 `termbridge.db` 还会遗漏 WAL 一致性、钥匙串和独立文件，并把内部表、设备路径与本地引用固化为外部契约；AI 明文已被拒绝，但这不提供容器级认证加密或完整性。
 
 ## 若重新准入，首个安全本地文件的最小范围
 
@@ -137,9 +137,9 @@
 - `src/lib/__tests__/connection-import.test.ts`：版本化连接文件、无秘密导出、冲突预览、共享私钥导入与失败补偿回滚。
 - `src/stores/__tests__/profileStore.test.ts` 与 `src-tauri/src/db.rs`：SSH 秘密不进入 profile 行、钥匙串写失败补偿、数据库迁移、工作区/设置 CRUD 和较新 schema 拒绝。
 - `src/lib/__tests__/runbook.test.ts` 与 `src-tauri/src/runbook.rs`：版本、未知字段、秘密 literal/keychainRef、规范化和执行边界。
-- `src/lib/__tests__/terminal-workspace*.test.ts` 与 `src/lib/__tests__/sftp-workspace*.test.ts`：工作区序列化、解析、排队保存和清除；这些测试也暴露终端 workspace 无版本与路径/ID 可移植性缺口。
+- `src/lib/__tests__/terminal-workspace*.test.ts` 与 `src/lib/__tests__/sftp-workspace*.test.ts`：工作区版本、上限、损坏解析、排队保存和清除；仍暴露 profile/path ID 的设备可移植性缺口。
 - `src/lib/__tests__/diagnostic-bundle.test.ts` 与 `src-tauri/src/operation_history.rs`：诊断脱敏、结构化历史导出和原子写入模式。
-- `src/stores/__tests__/aiSettingsStore.test.ts` 与 `src-tauri/src/ai.rs`：provider/API Key 当前存储与旧钥匙串迁移的事实证据，证明 preferences 不能整体进入默认备份。
+- `src/stores/__tests__/aiSettingsStore.test.ts`、`src-tauri/src/ai.rs` 与 `src-tauri/src/db.rs`：provider 元数据与钥匙串秘密分离、旧 SQLite 明文迁移及敏感字段拒绝证据；证明普通备份只能白名单选择非敏感元数据。
 
 这些测试只证明可复用基础和当前边界，不是备份功能已经通过的证据。
 

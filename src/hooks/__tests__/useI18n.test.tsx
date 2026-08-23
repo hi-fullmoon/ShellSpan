@@ -45,10 +45,12 @@ describe('useI18n', () => {
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
     });
 
-    // react-intl-universal 的 init() 是同步应用语言包的（仅返回已 resolve 的
-    // Promise），await act 排空微任务后英文文案必然已渲染；用同步 getBy 断言，
-    // 避免高负载下 waitFor 默认 1s 超时造成的偶发失败
-    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    // Locale initialization is promise-based and can finish after React's event
+    // act boundary under a saturated full-suite worker. Wait for the observable
+    // language change with an explicit gate-sized timeout instead of assuming a
+    // particular microtask schedule.
+    expect(await screen.findByRole('button', { name: 'Save' }, { timeout: 5_000 }))
+      .toBeInTheDocument();
     expect(screen.getByText('Cancel')).toBeInTheDocument();
     expect(screen.getByText('Open Workbench')).toBeInTheDocument();
   });

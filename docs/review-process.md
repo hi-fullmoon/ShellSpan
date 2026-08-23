@@ -1,6 +1,6 @@
 # TermBridge 审核机制
 
-本机制把 `ROADMAP.md` 的承诺转换为合并前可执行的证据。路线图是产品方向，`docs/roadmap-audit.json` 是唯一状态台账；没有测试证据的条目不得标记为 `verified`。
+本机制把 `ROADMAP.md` 的承诺转换为合并前可执行的证据。路线图是产品方向，`docs/roadmap-audit.json` 是唯一状态台账；没有测试证据的条目不得标记为 `verified`。`roadmapMapping` 必须按原顺序逐字覆盖 NOW、NEXT、LATER 的每个工作项，`phaseExitCriteria` 必须逐字覆盖每个阶段退出条件；增删或近似改写任一侧都会让门禁失败。
 
 ## 每次变更
 
@@ -26,7 +26,11 @@
 - `deferred`：复盘后有意移出当前阶段，不得伪装成完成。
 - `researching`：仅用于 EXPLORE；已有候选边界和发现证据，但正式准入条件尚未全部满足，不构成产品承诺。
 
-EXPLORE 条目还必须用 `roadmapItem` 精确映射一个现有 ROADMAP 项，记录 `candidate`、`admit` 或 `defer` 决策、明确的必要性判断，并逐项复核用户群、用户价值、维护成本、跨平台实现、安全模型、升级策略和自动化测试方案。全局 `failurePath` 和 `recovery` 字段必须说明失败关闭与恢复边界。即使处于 `researching`，也必须列出支撑当前判断的既有测试路径，并在评估中明确它们是可复用基础还是正式准入缺口。只有七项均为 `met`、必要性为真且条目具有 `verified` 测试证据时，审计才允许记录 `admit`；这只允许进入独立的路线图评审，不会自动建立正式阶段或发行承诺。
+NOW、NEXT、LATER 是已经承诺的范围，审计不接受 `planned`、`in-progress`、`blocked`、`deferred` 或 `researching`；若实现或证据尚未完成，必须先完成最小安全实现与测试，不能只修改状态。阶段退出条件可使用 `pending-external` 表示必须等待当前提交进入托管平台检查的事实，例如尚未运行的 macOS/Windows CI；这种状态明确表示阶段尚未通过，不能被工作流定义或历史运行替代。LATER 的“已通过”声明要求其全部退出条件保持 `verified`。
+
+`securityClosure` 固定检查 Known Hosts 失败关闭、AI API Key 仅存钥匙串和终端恢复契约三个边界。除证据路径必须存在外，脚本还扫描生产代码：禁止把 Known Hosts 路径解析错误用 `.ok()` 降级；禁止 AI provider 元数据重新出现 `apiKey`；要求迁移方向为 SQLite → 钥匙串且不删除安全副本；要求数据库拒绝 AI 敏感字段，并要求终端恢复前后端都执行版本与上限校验。
+
+EXPLORE 条目还必须用 `roadmapItem` 精确且不重复地覆盖 EXPLORE 区域的全部五个候选项；“暂不进入范围”等其他项目不能冒充候选。每项记录 `candidate`、`admit` 或 `defer` 决策、明确的必要性判断，并逐项复核用户群、用户价值、维护成本、跨平台实现、安全模型、升级策略和自动化测试方案。全局 `failurePath` 和 `recovery` 字段必须说明失败关闭与恢复边界。即使处于 `researching`，也必须列出支撑当前判断的既有测试路径，并在评估中明确它们是可复用基础还是正式准入缺口。只有七项均为 `met`、必要性为真且条目具有 `verified` 测试证据时，审计才允许记录 `admit`；这只允许进入独立的路线图评审，不会自动建立正式阶段或发行承诺。
 
 含“插件 API”的 EXPLORE 条目还必须记录 `extensionGates`。`dataContract` 只能在七项准入证据全部满足、必要性为真且自动化测试已验证后标记为 `stable`；在此之前 `pluginApi` 必须保持 `blocked`。稳定数据契约只是评估插件 API 的前置条件，不授权插件运行时、第三方代码执行、市场或新的网络/账户能力。
 
