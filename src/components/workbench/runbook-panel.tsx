@@ -48,12 +48,21 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Spinner } from '@/components/ui/empty-state';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import type { LocaleKey } from '@/locales';
 import { ensureKeychainKeyForProfile } from '@/lib/keychain-key-prompt';
 import { createOperationId } from '@/lib/operation-id';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
+import {
+  createMultiHostRunbookTask,
+  isMultiHostRunbookTaskTerminal,
+  listMultiHostRunbookTags,
+  MULTI_HOST_MAX_BATCH_SIZE,
+  MULTI_HOST_MAX_CONCURRENCY,
+  selectMultiHostProfilesByTag,
+} from '@/lib/multi-host-runbook';
 import {
   applyRunbookStepResult,
   isRunbookEvidenceStale,
@@ -78,6 +87,7 @@ import {
 } from '@/lib/tauri';
 import { useProfileStore } from '@/stores/profileStore';
 import type { ConnectionProfile } from '@/types';
+import type { MultiHostRunbookTask } from '@/types/multi-host-runbook';
 import type {
   RunbookDocument,
   RunbookRisk,
@@ -85,6 +95,9 @@ import type {
   RunbookRunItem,
   RunbookStepExecutionResult,
 } from '@/types/runbook';
+import { MultiHostRunbookExecution } from './multi-host-runbook-execution';
+
+type RunbookTargetMode = 'single' | 'tag';
 
 function riskVariant(risk: RunbookRisk): 'outline' | 'secondary' | 'destructive' {
   if (risk === 'destructive') return 'destructive';
@@ -141,8 +154,13 @@ export const RunbookPanel: React.FC = () => {
   const [document, setDocument] = useState<RunbookDocument>(() => parseRunbookText(RUNBOOK_EXAMPLE));
   const [validatedText, setValidatedText] = useState(() => serializeRunbook(parseRunbookText(RUNBOOK_EXAMPLE)));
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
+  const [targetMode, setTargetMode] = useState<RunbookTargetMode>('single');
   const [targetProfileId, setTargetProfileId] = useState<string>();
+  const [selectedTag, setSelectedTag] = useState<string>();
+  const [concurrencyLimit, setConcurrencyLimit] = useState(2);
+  const [batchSize, setBatchSize] = useState(5);
   const [run, setRun] = useState<RunbookRun>();
+  const [multiHostTask, setMultiHostTask] = useState<MultiHostRunbookTask>();
   const [operationId, setOperationId] = useState<string>();
   const [preparing, setPreparing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -152,7 +170,14 @@ export const RunbookPanel: React.FC = () => {
     () => profiles.find((profile) => profile.id === targetProfileId),
     [profiles, targetProfileId],
   );
+  const availableTags = useMemo(() => listMultiHostRunbookTags(profiles), [profiles]);
+  const multiHostTargets = useMemo(
+    () => selectedTag ? selectMultiHostProfilesByTag(profiles, selectedTag) : [],
+    [profiles, selectedTag],
+  );
   const activeItem = run?.items.find((item) => item.id === run.activeItemId);
+  const executionLocked = run?.phase === 'running'
+    || Boolean(multiHostTask && !isMultiHostRunbookTaskTerminal(multiHostTask));
 
   const applyValidatedText = (text: string, path?: string): void => {
     const parsed = parseRunbookText(text);
@@ -163,6 +188,7 @@ export const RunbookPanel: React.FC = () => {
     setSourcePath(path);
     setVariableValues({});
     setRun(undefined);
+    setMultiHostTask(undefined);
     setValidationError(undefined);
   };
 
@@ -204,6 +230,34 @@ export const RunbookPanel: React.FC = () => {
   };
 
   const handleStart = (): void => {
+    if (targetMode === 'tag') {
+      if (!selectedTag) {
+        setValidationError(t('runbook.multi.tagRequired'));
+        return;
+      }
+      try {
+        const task = createMultiHostRunbookTask({
+          id: createOperationId('multi-host-task'),
+          sourceText,
+          variableValues,
+          profiles,
+          selectedTag,
+          concurrencyLimit,
+          batchSize,
+          createRunId: () => createOperationId('multi-host-run'),
+        });
+        const parsed = parseRunbookText(task.sourceText);
+        setSourceText(task.sourceText);
+        setValidatedText(task.sourceText);
+        setDocument(parsed);
+        setRun(undefined);
+        setMultiHostTask(task);
+        setValidationError(undefined);
+      } catch (error) {
+        setValidationError(error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
     if (!selectedProfile) {
       setValidationError(t('runbook.targetRequired'));
       return;
@@ -219,6 +273,7 @@ export const RunbookPanel: React.FC = () => {
       setSourceText(prepared.sourceText);
       setValidatedText(prepared.sourceText);
       setDocument(prepared.document);
+      setMultiHostTask(undefined);
       setRun(startRunbookRun(prepared, createOperationId('runbook-run')));
       setValidationError(undefined);
     } catch (error) {
@@ -344,15 +399,15 @@ export const RunbookPanel: React.FC = () => {
           {sourcePath && <p className="text-xs text-muted-foreground">{sourcePath}</p>}
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => void handleOpen()} disabled={run?.phase === 'running'}>
+          <Button variant="outline" size="sm" onClick={() => void handleOpen()} disabled={executionLocked}>
             <FileInputIcon data-icon="inline-start" />
             {t('runbook.open')}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void handleSave()} disabled={run?.phase === 'running'}>
+          <Button variant="outline" size="sm" onClick={() => void handleSave()} disabled={executionLocked}>
             <FileOutputIcon data-icon="inline-start" />
             {t('runbook.save')}
           </Button>
-          <Button size="sm" onClick={handleValidate} disabled={run?.phase === 'running'}>
+          <Button size="sm" onClick={handleValidate} disabled={executionLocked}>
             <CheckCircle2Icon data-icon="inline-start" />
             {t('runbook.validate')}
           </Button>
@@ -378,10 +433,12 @@ export const RunbookPanel: React.FC = () => {
               aria-label={t('runbook.textTitle')}
               className="h-full min-h-80 resize-none"
               value={sourceText}
+              disabled={executionLocked}
               onChange={(event) => {
                 setSourceText(event.target.value);
                 setValidationError(undefined);
                 setRun(undefined);
+                setMultiHostTask(undefined);
               }}
               spellCheck={false}
             />
@@ -405,8 +462,40 @@ export const RunbookPanel: React.FC = () => {
               <CardContent>
                 <FieldGroup>
                   <Field>
+                    <FieldLabel>{t('runbook.targetMode')}</FieldLabel>
+                    <ToggleGroup
+                      value={[targetMode]}
+                      onValueChange={(next) => {
+                        const selected = next[0] as RunbookTargetMode | undefined;
+                        if (selected) {
+                          setTargetMode(selected);
+                          setRun(undefined);
+                          setMultiHostTask(undefined);
+                          setValidationError(undefined);
+                        }
+                      }}
+                      className="w-full"
+                      aria-label={t('runbook.targetMode')}
+                      disabled={executionLocked}
+                    >
+                      <ToggleGroupItem value="single" className="flex-1">
+                        {t('runbook.targetMode.single')}
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="tag" className="flex-1">
+                        {t('runbook.targetMode.tag')}
+                      </ToggleGroupItem>
+                    </ToggleGroup>
+                    <FieldDescription>{t('runbook.targetModeDescription')}</FieldDescription>
+                  </Field>
+
+                  {targetMode === 'single' ? (
+                  <Field>
                     <FieldLabel>{t('runbook.target')}</FieldLabel>
-                    <Select value={targetProfileId ?? null} onValueChange={(value) => setTargetProfileId(value ?? undefined)}>
+                    <Select
+                      value={targetProfileId ?? null}
+                      onValueChange={(value) => setTargetProfileId(value ?? undefined)}
+                      disabled={executionLocked}
+                    >
                       <SelectTrigger aria-label={t('runbook.target')}>
                         <SelectValue placeholder={t('runbook.chooseTarget')} />
                       </SelectTrigger>
@@ -423,6 +512,66 @@ export const RunbookPanel: React.FC = () => {
                     </Select>
                     <FieldDescription>{t('runbook.targetDescription')}</FieldDescription>
                   </Field>
+                  ) : (
+                    <>
+                      <Field data-invalid={Boolean(selectedTag && multiHostTargets.length === 0)}>
+                        <FieldLabel>{t('runbook.multi.tag')}</FieldLabel>
+                        <Select
+                          value={selectedTag ?? null}
+                          onValueChange={(value) => setSelectedTag(value ?? undefined)}
+                          disabled={executionLocked}
+                        >
+                          <SelectTrigger
+                            aria-label={t('runbook.multi.tag')}
+                            aria-invalid={Boolean(selectedTag && multiHostTargets.length === 0)}
+                          >
+                            <SelectValue placeholder={t('runbook.multi.chooseTag')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectLabel>{t('runbook.multi.availableTags')}</SelectLabel>
+                              {availableTags.map((tag) => (
+                                <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <FieldDescription>
+                          {t('runbook.multi.targetCount', { count: multiHostTargets.length })}
+                        </FieldDescription>
+                      </Field>
+                      <FieldGroup className="grid grid-cols-2 gap-3">
+                        <Field data-invalid={concurrencyLimit < 1 || concurrencyLimit > MULTI_HOST_MAX_CONCURRENCY}>
+                          <FieldLabel htmlFor="runbook-multi-concurrency">{t('runbook.multi.concurrency')}</FieldLabel>
+                          <Input
+                            id="runbook-multi-concurrency"
+                            type="number"
+                            min={1}
+                            max={MULTI_HOST_MAX_CONCURRENCY}
+                            value={concurrencyLimit}
+                            disabled={executionLocked}
+                            aria-invalid={concurrencyLimit < 1 || concurrencyLimit > MULTI_HOST_MAX_CONCURRENCY}
+                            onChange={(event) => setConcurrencyLimit(Number(event.target.value))}
+                          />
+                          <FieldDescription>{t('runbook.multi.concurrencyDescription')}</FieldDescription>
+                        </Field>
+                        <Field data-invalid={batchSize < 1 || batchSize > MULTI_HOST_MAX_BATCH_SIZE || concurrencyLimit > batchSize}>
+                          <FieldLabel htmlFor="runbook-multi-batch">{t('runbook.multi.batchSize')}</FieldLabel>
+                          <Input
+                            id="runbook-multi-batch"
+                            type="number"
+                            min={1}
+                            max={MULTI_HOST_MAX_BATCH_SIZE}
+                            value={batchSize}
+                            disabled={executionLocked}
+                            aria-invalid={batchSize < 1 || batchSize > MULTI_HOST_MAX_BATCH_SIZE || concurrencyLimit > batchSize}
+                            onChange={(event) => setBatchSize(Number(event.target.value))}
+                          />
+                          <FieldDescription>{t('runbook.multi.batchDescription')}</FieldDescription>
+                        </Field>
+                      </FieldGroup>
+                    </>
+                  )}
 
                   {document.variables.map((variable) => (
                     <Field key={variable.name}>
@@ -434,6 +583,7 @@ export const RunbookPanel: React.FC = () => {
                           id={`runbook-${variable.name}`}
                           value={variableValues[variable.name] ?? ''}
                           placeholder={variable.default}
+                          disabled={executionLocked}
                           onChange={(event) => setVariableValues((current) => ({
                             ...current,
                             [variable.name]: event.target.value,
@@ -446,9 +596,12 @@ export const RunbookPanel: React.FC = () => {
                 </FieldGroup>
               </CardContent>
               <CardFooter className="justify-end">
-                <Button onClick={handleStart} disabled={!selectedProfile || run?.phase === 'running'}>
+                <Button
+                  onClick={handleStart}
+                  disabled={executionLocked || (targetMode === 'single' ? !selectedProfile : !selectedTag || multiHostTargets.length === 0)}
+                >
                   <PlayIcon data-icon="inline-start" />
-                  {t('runbook.reviewRun')}
+                  {t(targetMode === 'single' ? 'runbook.reviewRun' : 'runbook.multi.startPreflight')}
                 </Button>
               </CardFooter>
             </Card>
@@ -580,6 +733,15 @@ export const RunbookPanel: React.FC = () => {
                   )}
                 </CardFooter>
               </Card>
+            )}
+
+            {multiHostTask && (
+              <MultiHostRunbookExecution
+                key={multiHostTask.id}
+                initialTask={multiHostTask}
+                profiles={profiles}
+                onTaskChange={setMultiHostTask}
+              />
             )}
           </div>
         </ScrollArea>

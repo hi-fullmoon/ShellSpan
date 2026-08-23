@@ -159,13 +159,15 @@
       "id": "later-multi-host",
       "phase": "LATER",
       "title": "多主机任务",
-      "status": "planned",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
       "owner": "maintainers",
       "risk": "主机上下文串扰或部分失败被误报成功",
-      "failurePath": "按主机熔断并保留部分成功状态",
-      "recovery": "仅重试失败主机并维持并发上限",
-      "testStrategy": "批次、并发、熔断、输出隔离和部分成功测试",
-      "evidence": ["src/stores/profileStore.ts"]
+      "failurePath": "标签目标在预检前冻结；失败、取消、超时、陈旧证据、目标变化或结果身份错配只打开对应主机熔断器，错配输出直接丢弃，部分成功保持独立终态",
+      "recovery": "仅允许用户明确选择已失败、步骤声明可安全重试、仍匹配冻结身份与标签的主机；保留已完成修改，重新运行全部只读预检，并持续遵守原批次、并发和逐主机审批边界",
+      "testStrategy": "标签与空目标、并发/批次边界、单主机熔断、取消/超时、部分成功、安全失败主机重试、陈旧预检、结果身份错配、变量/命令/证据/退出码/输出隔离，以及隔离 SSH 并行通道 E2E",
+      "evidence": ["docs/multi-host-runbook.md", "src/stores/profileStore.ts", "src/lib/multi-host-runbook.ts", "src/types/multi-host-runbook.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx", "src-tauri/src/runbook.rs"],
+      "tests": ["src/lib/__tests__/multi-host-runbook.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "src-tauri/src/runbook.rs", "scripts/run-ssh-e2e.ps1"]
     },
     {
       "id": "later-ai-execution",
