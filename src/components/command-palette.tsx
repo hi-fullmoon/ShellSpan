@@ -7,6 +7,7 @@ import {
   FolderSyncIcon,
   InfoIcon,
   KeyboardIcon,
+  ListChecksIcon,
   LogsIcon,
   MonitorIcon,
   PaletteIcon,
@@ -164,6 +165,7 @@ export function buildCommandPaletteItems({
     ['settings', 'workbench', 'settings', SettingsIcon],
     ['logs', 'workbench', 'logs', LogsIcon],
     ['monitor', 'workbench', 'monitor', MonitorIcon],
+    ['runbooks', 'workbench', 'runbooks', ListChecksIcon],
   ].map(([id, section, tab, icon]) => ({
     id: `navigation-${String(id)}`,
     group: 'navigation' as const,
