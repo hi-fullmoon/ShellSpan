@@ -132,11 +132,26 @@ describe('TermBridge connection export', () => {
         remotePort: 5432,
         autoStart: true,
       }],
+      quickActions: [
+        {
+          id: 'command-status',
+          kind: 'command',
+          label: 'Status',
+          command: 'systemctl status api',
+        },
+        {
+          id: 'command-secret',
+          kind: 'command',
+          label: 'Unsafe',
+          command: 'password=must-not-export',
+        },
+      ],
     }], '2026-08-23T00:00:00.000Z');
     expect(exported).not.toContain('must-not-export');
     expect(exported).not.toContain('device-only-key-id');
     expect(exported).not.toContain('profile-1');
     expect(exported).not.toContain('must-redact');
+    expect(exported).not.toContain('must-not-export');
     expect(parseConnectionExport(exported)[0]).toMatchObject({
       group: 'Production',
       tags: ['api'],
@@ -145,6 +160,10 @@ describe('TermBridge connection export', () => {
       portForwards: [expect.objectContaining({
         id: 'forward-database',
         autoStart: true,
+      })],
+      quickActions: [expect.objectContaining({
+        id: 'command-status',
+        command: 'systemctl status api',
       })],
     });
   });
@@ -191,5 +210,27 @@ describe('TermBridge connection export', () => {
     }));
 
     expect(imported[0]?.portForwards).toEqual([]);
+  });
+
+  it('drops a quick action if it contains an unexpected secret-bearing field', () => {
+    const imported = parseConnectionExport(JSON.stringify({
+      schemaVersion: 3,
+      profiles: [{
+        name: 'API',
+        host: 'api.test',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+        quickActions: [{
+          id: 'command-1',
+          kind: 'command',
+          label: 'Status',
+          command: 'systemctl status api',
+          password: 'unexpected-secret',
+        }],
+      }],
+    }));
+
+    expect(imported[0]?.quickActions).toEqual([]);
   });
 });

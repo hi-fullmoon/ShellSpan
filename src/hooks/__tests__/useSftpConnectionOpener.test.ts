@@ -104,6 +104,19 @@ describe('useSftpConnectionOpener', () => {
     );
   });
 
+  it('binds an initial directory to the newly opened host pane', async () => {
+    vi.mocked(invokeCheckHostKey).mockResolvedValue({ status: 'match' });
+    const { result } = renderHook(() => useSftpConnectionOpener());
+
+    await act(async () => {
+      await result.current.open(profile, undefined, 'remote', '/srv/releases');
+    });
+
+    const connection = useSftpStore.getState().connections[0];
+    expect(connection?.profileId).toBe(profile.id);
+    expect(connection?.remotePath).toBe('/srv/releases');
+  });
+
   it('asks for confirmation before trusting an unknown host and opening SFTP', async () => {
     vi.mocked(invokeCheckHostKey).mockResolvedValue({
       status: 'notFound',

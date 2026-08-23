@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
@@ -71,9 +71,11 @@ interface AppState extends AppPreferences {
   initialized: boolean;
   activeSection: AppSection;
   activeWorkbenchTab: WorkbenchTab;
+  activeSettingsSection: SettingsSection;
   hydrateFromDb: () => Promise<void>;
   setActiveSection: (section: AppSection) => void;
   setActiveWorkbenchTab: (tab: WorkbenchTab) => void;
+  setActiveSettingsSection: (section: SettingsSection) => void;
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
@@ -243,6 +245,7 @@ export const useAppStore = create<AppState>()(
     initialized: false,
     activeSection: defaults.startupSection,
     activeWorkbenchTab: 'connections' as WorkbenchTab,
+    activeSettingsSection: 'general' as SettingsSection,
 
     hydrateFromDb: async () => {
       try {
@@ -265,6 +268,7 @@ export const useAppStore = create<AppState>()(
 
     setActiveSection: (activeSection) => set({ activeSection }),
     setActiveWorkbenchTab: (activeWorkbenchTab) => set({ activeWorkbenchTab }),
+    setActiveSettingsSection: (activeSettingsSection) => set({ activeSettingsSection }),
     setTheme: (theme) => set({ theme }),
     setLocale: (locale) => {
       void changeLocale(locale);

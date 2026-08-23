@@ -137,13 +137,19 @@ const Workbench: React.FC = () => {
         profileId?: string;
         target?: 'terminal' | 'sftp';
         initialDirectory?: string;
+        sftpSide?: 'local' | 'remote';
       }>).detail;
       const profile = detail?.profileId
         ? useProfileStore.getState().getProfile(detail.profileId)
         : undefined;
       if (!profile) return;
       if (detail.target === 'sftp') {
-        void openSftpConnection(profile);
+        void openSftpConnection(
+          profile,
+          undefined,
+          detail.sftpSide ?? 'remote',
+          detail.initialDirectory,
+        );
       } else {
         void connect(profile, { initialDirectory: detail.initialDirectory });
       }

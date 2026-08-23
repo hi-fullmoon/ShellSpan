@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { HostOverviewDialog } from './host-overview-dialog';
 import { PortForwardDialog } from './port-forward-dialog';
+import { HostQuickActionsDialog } from './host-quick-actions-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import {
@@ -29,6 +30,7 @@ import {
   StarIcon,
   InfoIcon,
   CableIcon,
+  ZapIcon,
 } from 'lucide-react';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
@@ -70,6 +72,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [groupFilter, setGroupFilter] = useState('all');
   const [overviewProfile, setOverviewProfile] = useState<ConnectionProfile>();
   const [forwardProfile, setForwardProfile] = useState<ConnectionProfile>();
+  const [quickActionProfile, setQuickActionProfile] = useState<ConnectionProfile>();
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
 
   const groups = useMemo(() => [...new Set(
@@ -101,6 +104,22 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       return true;
     });
   }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds]);
+
+  useEffect(() => {
+    const handleOpenHostTool = (event: Event): void => {
+      const detail = (event as CustomEvent<{
+        profileId?: string;
+        tool?: 'portForward' | 'overview' | 'quickActions';
+      }>).detail;
+      const target = profiles.find((profile) => profile.id === detail?.profileId);
+      if (!target) return;
+      if (detail.tool === 'portForward') setForwardProfile(target);
+      else if (detail.tool === 'overview') setOverviewProfile(target);
+      else if (detail.tool === 'quickActions') setQuickActionProfile(target);
+    };
+    document.addEventListener('termbridge:open-host-tool', handleOpenHostTool);
+    return () => document.removeEventListener('termbridge:open-host-tool', handleOpenHostTool);
+  }, [profiles]);
 
   if (profiles.length === 0) {
     if (!initialized) {
@@ -214,6 +233,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                   onToggleFavorite={onToggleFavorite}
                   onOverview={setOverviewProfile}
                   onPortForward={setForwardProfile}
+                  onQuickActions={setQuickActionProfile}
                 />
               ))}
             </ResponsiveCardGrid>
@@ -222,6 +242,10 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       </div>
       <HostOverviewDialog profile={overviewProfile} onClose={() => setOverviewProfile(undefined)} />
       <PortForwardDialog profile={forwardProfile} onClose={() => setForwardProfile(undefined)} />
+      <HostQuickActionsDialog
+        profile={quickActionProfile}
+        onClose={() => setQuickActionProfile(undefined)}
+      />
     </TooltipProvider>
   );
 };
@@ -236,6 +260,7 @@ interface ConnectionCardProps {
   onToggleFavorite: (profile: ConnectionProfile) => void;
   onOverview: (profile: ConnectionProfile) => void;
   onPortForward: (profile: ConnectionProfile) => void;
+  onQuickActions: (profile: ConnectionProfile) => void;
 }
 
 const ConnectionCard = React.memo<ConnectionCardProps>(({
@@ -248,6 +273,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
   onToggleFavorite,
   onOverview,
   onPortForward,
+  onQuickActions,
 }) => {
   const { t } = useI18n();
   const handleConnectTerminal = useDebouncedCallback(
@@ -334,6 +360,13 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
             tooltip={t('portForward.open')}
           >
             <CableIcon />
+          </IconActionButton>
+          <IconActionButton
+            onClick={() => onQuickActions(profile)}
+            aria-label={t('hostQuickActions.open')}
+            tooltip={t('hostQuickActions.open')}
+          >
+            <ZapIcon data-icon="inline-start" />
           </IconActionButton>
           <IconActionButton
             onClick={() => onOverview(profile)}

@@ -20,6 +20,7 @@ import { TERMINAL_COLOR_SCHEME_IDS } from '@/types';
 import type {
   AppSection,
   Locale,
+  SettingsSection,
   SftpConflictPolicy,
   ShortcutAction,
   TerminalBellStyle,
@@ -74,8 +75,6 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
   terminal: 'settings.shortcuts.groupTerminal',
   sftp: 'settings.shortcuts.groupSftp',
 };
-
-type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts';
 
 const SETTINGS_SECTIONS: { id: SettingsSection; icon: React.ElementType; titleKey: LocaleKey }[] = [
   { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title' },
@@ -180,7 +179,8 @@ export const SettingsPanel: React.FC = () => {
   const resetShortcuts = useAppStore((state) => state.resetShortcuts);
   const [editingAction, setEditingAction] = useState<ShortcutAction | null>(null);
   const [conflictAction, setConflictAction] = useState<ShortcutAction | null>(null);
-  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const activeSection = useAppStore((state) => state.activeSettingsSection);
+  const setActiveSection = useAppStore((state) => state.setActiveSettingsSection);
   const settingsViewportRef = useRef<HTMLDivElement>(null);
 
   const handleSectionChange = (value: string): void => {

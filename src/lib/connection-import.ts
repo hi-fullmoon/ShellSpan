@@ -1,5 +1,12 @@
-import type { AuthMethod, ConnectionProfile, JumpHostConfig, PortForwardRule } from '@/types';
+import type {
+  AuthMethod,
+  ConnectionProfile,
+  HostQuickAction,
+  JumpHostConfig,
+  PortForwardRule,
+} from '@/types';
 import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
+import { sanitizeHostQuickActions } from '@/lib/host-quick-action-model';
 
 export interface ConnectionImportCandidate {
   id: string;
@@ -16,6 +23,7 @@ export interface ConnectionImportCandidate {
   favorite?: boolean;
   notes?: string;
   portForwards?: PortForwardRule[];
+  quickActions?: HostQuickAction[];
   warnings: string[];
 }
 
@@ -168,6 +176,7 @@ interface ExportedProfile {
   favorite?: boolean;
   notes?: string;
   portForwards?: PortForwardRule[];
+  quickActions?: HostQuickAction[];
 }
 
 function cleanOptionalText(value: unknown): string | undefined {
@@ -253,7 +262,7 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
 }
 
 export interface ConnectionExportFile {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   exportedAt: string;
   profiles: ExportedProfile[];
 }
@@ -263,7 +272,7 @@ export function exportConnections(
   exportedAt = new Date().toISOString(),
 ): string {
   const payload: ConnectionExportFile = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     exportedAt,
     profiles: profiles.map((profile) => ({
       name: profile.name,
@@ -284,6 +293,7 @@ export function exportConnections(
       favorite: Boolean(profile.favorite),
       notes: profile.notes ? redactTerminalSecrets(profile.notes) : undefined,
       portForwards: sanitizePortForwardRules(profile.portForwards),
+      quickActions: sanitizeHostQuickActions(profile.quickActions),
     })),
   };
   return JSON.stringify(payload, null, 2);
@@ -293,7 +303,7 @@ export function parseConnectionExport(content: string): ConnectionImportCandidat
   try {
     const parsed = JSON.parse(content) as Partial<ConnectionExportFile>;
     if (
-      (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2)
+      (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3)
       || !Array.isArray(parsed.profiles)
     ) return [];
     return parsed.profiles.flatMap((profile, index) => {
@@ -324,6 +334,7 @@ export function parseConnectionExport(content: string): ConnectionImportCandidat
         favorite: candidate.favorite === true,
         notes: cleanOptionalText(candidate.notes),
         portForwards: sanitizePortForwardRules(candidate.portForwards),
+        quickActions: sanitizeHostQuickActions(candidate.quickActions),
         warnings: candidate.authMethod === 'key' ? ['key-rebind-required'] : [],
       }];
     });
@@ -398,6 +409,7 @@ export async function importConnectionsTransactionally(
         favorite: candidate.favorite,
         notes: candidate.notes,
         portForwards: candidate.portForwards,
+        quickActions: candidate.quickActions,
       });
       profileIds.push(profile.id);
     }
