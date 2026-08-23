@@ -20,6 +20,20 @@ const allowedExploreCriterionStatuses = new Set(['met', 'not-met', 'unknown']);
 const allowedExploreDecisions = new Set(['candidate', 'admit', 'defer']);
 const singleProtocolRoadmapItem = '基于真实使用场景评估动态 SOCKS 转发、串口、Mosh 或其他协议，一次只验证一个方向。';
 const allowedProtocolDirections = new Set(['dynamic-socks', 'serial', 'mosh']);
+const teamDiscoveryRoadmapItem = '团队共享、集中策略与审计服务仅在个人工作区模型稳定后进入产品发现。';
+const teamWorkspacePrerequisites = [
+  'connectionCredentials',
+  'knownHosts',
+  'sessionWorkspaceRecovery',
+  'runbookMultiHost',
+  'operationHistory',
+  'redactedExport',
+  'localDatabase',
+  'authorizationApproval',
+  'crossPlatform',
+  'automatedTesting',
+];
+const teamDiscoveryObjects = ['team-sharing', 'central-policy', 'central-audit'];
 const maximumReviewAgeDays = 35;
 
 function fail(message) {
@@ -191,6 +205,71 @@ for (const item of audit.items) {
           || item.status !== 'verified'
           || exploreCriteria.some((criterionName) => item.criteria[criterionName].status !== 'met'))) {
         fail(`${item.id} cannot enable a protocol candidate foundation before EXPLORE admission evidence is complete`);
+      }
+    }
+    if (item.roadmapItem === teamDiscoveryRoadmapItem) {
+      const gates = item.teamDiscoveryGates;
+      if (!gates || typeof gates !== 'object' || Array.isArray(gates)) {
+        fail(`${item.id} is missing teamDiscoveryGates`);
+      }
+      if (!['not-stable', 'stable'].includes(gates.personalWorkspaceModel)) {
+        fail(`${item.id} has invalid personal workspace model ${gates.personalWorkspaceModel}`);
+      }
+      if (!['blocked', 'eligible'].includes(gates.productDiscoveryGate)) {
+        fail(`${item.id} has invalid product discovery gate ${gates.productDiscoveryGate}`);
+      }
+      if (!['blocked', 'eligible'].includes(gates.independentReviewGate)) {
+        fail(`${item.id} has invalid independent review gate ${gates.independentReviewGate}`);
+      }
+      if (gates.firstDiscoveryObject !== 'secret-free-team-artifact-sharing') {
+        fail(`${item.id} has invalid first team discovery object ${gates.firstDiscoveryObject}`);
+      }
+      if (!Array.isArray(gates.comparedObjects)
+        || gates.comparedObjects.length !== teamDiscoveryObjects.length
+        || new Set(gates.comparedObjects).size !== teamDiscoveryObjects.length
+        || teamDiscoveryObjects.some((object) => !gates.comparedObjects.includes(object))) {
+        fail(`${item.id} must compare team sharing, central policy, and central audit independently`);
+      }
+      if (typeof gates.finding !== 'string' || gates.finding.trim() === '') {
+        fail(`${item.id} teamDiscoveryGates is missing finding`);
+      }
+      if (!gates.prerequisites || typeof gates.prerequisites !== 'object' || Array.isArray(gates.prerequisites)) {
+        fail(`${item.id} is missing personal workspace prerequisites`);
+      }
+      for (const prerequisiteName of teamWorkspacePrerequisites) {
+        const prerequisite = gates.prerequisites[prerequisiteName];
+        if (!prerequisite || typeof prerequisite !== 'object' || Array.isArray(prerequisite)) {
+          fail(`${item.id} is missing personal workspace prerequisite ${prerequisiteName}`);
+        }
+        if (!allowedExploreCriterionStatuses.has(prerequisite.status)) {
+          fail(`${item.id} ${prerequisiteName} has invalid status ${prerequisite.status}`);
+        }
+        if (typeof prerequisite.finding !== 'string' || prerequisite.finding.trim() === '') {
+          fail(`${item.id} ${prerequisiteName} is missing finding`);
+        }
+      }
+      const unexpectedPrerequisites = Object.keys(gates.prerequisites).filter(
+        (prerequisiteName) => !teamWorkspacePrerequisites.includes(prerequisiteName),
+      );
+      if (unexpectedPrerequisites.length > 0) {
+        fail(`${item.id} has unknown personal workspace prerequisites: ${unexpectedPrerequisites.join(', ')}`);
+      }
+      if (gates.personalWorkspaceModel === 'stable'
+        && teamWorkspacePrerequisites.some(
+          (prerequisiteName) => gates.prerequisites[prerequisiteName].status !== 'met',
+        )) {
+        fail(`${item.id} cannot mark the personal workspace stable before every prerequisite is met`);
+      }
+      if (gates.productDiscoveryGate === 'eligible' && gates.personalWorkspaceModel !== 'stable') {
+        fail(`${item.id} cannot enter team product discovery before the personal workspace is stable`);
+      }
+      if (gates.independentReviewGate === 'eligible'
+        && (gates.productDiscoveryGate !== 'eligible'
+          || item.decision !== 'admit'
+          || !item.necessary
+          || item.status !== 'verified'
+          || exploreCriteria.some((criterionName) => item.criteria[criterionName].status !== 'met'))) {
+        fail(`${item.id} cannot enter independent team review before discovery and EXPLORE admission are complete`);
       }
     }
   }

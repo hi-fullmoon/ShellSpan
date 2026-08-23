@@ -156,4 +156,87 @@ describe('roadmap audit', () => {
       },
     );
   });
+
+  it('requires the team EXPLORE item to record its workspace and discovery gates', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('团队共享'));
+        delete item.teamDiscoveryGates;
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('is missing teamDiscoveryGates');
+      },
+    );
+  });
+
+  it('requires all three team service problems to be compared independently', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('团队共享'));
+        item.teamDiscoveryGates.comparedObjects = ['team-sharing', 'central-audit'];
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('must compare team sharing, central policy, and central audit independently');
+      },
+    );
+  });
+
+  it('does not mark the personal workspace stable while a prerequisite is unmet', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('团队共享'));
+        item.teamDiscoveryGates.personalWorkspaceModel = 'stable';
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('cannot mark the personal workspace stable');
+      },
+    );
+  });
+
+  it('requires every named personal workspace prerequisite', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('团队共享'));
+        delete item.teamDiscoveryGates.prerequisites.knownHosts;
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('is missing personal workspace prerequisite knownHosts');
+      },
+    );
+  });
+
+  it('blocks team product discovery until the personal workspace is stable', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('团队共享'));
+        item.teamDiscoveryGates.productDiscoveryGate = 'eligible';
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('cannot enter team product discovery');
+      },
+    );
+  });
+
+  it('blocks independent team review until discovery and admission are complete', () => {
+    withChangedAudit(
+      (audit) => {
+        const item = audit.items.find((candidate) => candidate.roadmapItem?.includes('团队共享'));
+        for (const prerequisite of Object.values(item.teamDiscoveryGates.prerequisites)) {
+          prerequisite.status = 'met';
+        }
+        item.teamDiscoveryGates.personalWorkspaceModel = 'stable';
+        item.teamDiscoveryGates.productDiscoveryGate = 'eligible';
+        item.teamDiscoveryGates.independentReviewGate = 'eligible';
+      },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('cannot enter independent team review');
+      },
+    );
+  });
 });
