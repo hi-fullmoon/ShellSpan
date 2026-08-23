@@ -34,10 +34,29 @@ pub(crate) enum PortForwardKind {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PortForwardConfig {
+    pub(crate) id: String,
+    pub(crate) name: String,
     pub(crate) kind: PortForwardKind,
     pub(crate) local_port: u16,
     pub(crate) remote_host: String,
     pub(crate) remote_port: u16,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PortForwardStartMode {
+    Manual,
+    Auto,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PortForwardStartRequest {
+    pub(crate) operation_id: String,
+    pub(crate) profile_id: String,
+    pub(crate) mode: PortForwardStartMode,
+    pub(crate) connection: RemoteConnectionRequest,
+    pub(crate) forward: PortForwardConfig,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

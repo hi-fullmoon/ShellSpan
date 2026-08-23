@@ -77,6 +77,43 @@ export interface JumpHostConfig {
   passphrase?: string;
 }
 
+export type PortForwardKind = 'local' | 'remote';
+export type PortForwardStartMode = 'manual' | 'auto';
+export type PortForwardStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
+export type PortForwardErrorCategory =
+  | 'portInUse'
+  | 'hostKey'
+  | 'authentication'
+  | 'connection'
+  | 'invalidConfiguration'
+  | 'other';
+
+export interface PortForwardRule {
+  id: string;
+  name: string;
+  kind: PortForwardKind;
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
+  autoStart: boolean;
+}
+
+export interface PortForwardRuntime {
+  operationId: string;
+  profileId: string;
+  configId: string;
+  name: string;
+  kind: PortForwardKind;
+  mode: PortForwardStartMode;
+  status: PortForwardStatus;
+  startedAt?: number;
+  stoppedAt?: number;
+  bytesSent: number;
+  bytesReceived: number;
+  lastError?: string;
+  errorCategory?: PortForwardErrorCategory;
+}
+
 export interface ConnectionProfile {
   id: string;
   name: string;
@@ -93,6 +130,7 @@ export interface ConnectionProfile {
   tags?: string[];
   favorite?: boolean;
   notes?: string;
+  portForwards?: PortForwardRule[];
   createdAt: number;
   updatedAt: number;
 }
@@ -131,6 +169,14 @@ export interface RemoteConnectionRequest {
   privateKeyData?: string;
   passphrase?: string;
   jumpHost?: JumpHostConfig;
+}
+
+export interface PortForwardStartRequest {
+  operationId: string;
+  profileId: string;
+  mode: PortForwardStartMode;
+  connection: RemoteConnectionRequest;
+  forward: Omit<PortForwardRule, 'autoStart'>;
 }
 
 export type ConnectionPreflightStepId =

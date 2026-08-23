@@ -2,7 +2,12 @@ import type { SftpConnection } from '@/stores/sftpStore';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { TransferOperation } from '@/stores/transferStore';
 import type { AgentRun } from '@/types/ai';
-import type { ConnectionProfile, DisconnectEvent, SessionStatus } from '@/types';
+import type {
+  ConnectionProfile,
+  DisconnectEvent,
+  PortForwardRuntime,
+  SessionStatus,
+} from '@/types';
 
 export interface HostOverviewSnapshot {
   terminals: Record<SessionStatus, number>;
@@ -14,11 +19,12 @@ export interface HostOverviewSnapshot {
   diagnosticPhase?: AgentRun['phase'];
   latestDisconnect?: DisconnectEvent;
   latestError?: string;
-  activePortForwards: 0;
-  portForwardTrackingAvailable: false;
+  activePortForwards: number;
+  failedPortForwards: number;
 }
 
 const ACTIVE_TRANSFER_STATUSES = new Set(['pending', 'running', 'cancelling']);
+const ACTIVE_PORT_FORWARD_STATUSES = new Set(['starting', 'running', 'stopping']);
 
 export function buildHostOverview(
   profile: ConnectionProfile,
@@ -26,6 +32,7 @@ export function buildHostOverview(
   sftpConnections: SftpConnection[],
   transfers: TransferOperation[],
   disconnectEvents: DisconnectEvent[],
+  portForwards: PortForwardRuntime[],
   agentRun?: AgentRun,
 ): HostOverviewSnapshot {
   const hostSessions = sessions.filter((session) => session.profileId === profile.id);
@@ -51,6 +58,8 @@ export function buildHostOverview(
     && event.username === profile.username
   ));
   const failedTransfer = hostTransfers.find((transfer) => transfer.status === 'failed');
+  const hostForwards = portForwards.filter((runtime) => runtime.profileId === profile.id);
+  const failedForward = hostForwards.find((runtime) => runtime.status === 'failed');
   const diagnosticSessionIds = new Set(hostSessions.map((session) => session.sessionId));
 
   return {
@@ -70,8 +79,10 @@ export function buildHostOverview(
       ? agentRun.phase
       : undefined,
     latestDisconnect,
-    latestError: failedTransfer?.error ?? latestDisconnect?.reason,
-    activePortForwards: 0,
-    portForwardTrackingAvailable: false,
+    latestError: failedForward?.lastError ?? failedTransfer?.error ?? latestDisconnect?.reason,
+    activePortForwards: hostForwards.filter((runtime) => (
+      ACTIVE_PORT_FORWARD_STATUSES.has(runtime.status)
+    )).length,
+    failedPortForwards: hostForwards.filter((runtime) => runtime.status === 'failed').length,
   };
 }

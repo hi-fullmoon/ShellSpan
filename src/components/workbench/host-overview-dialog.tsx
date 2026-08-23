@@ -25,6 +25,7 @@ import { useSftpStore } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useTransferStore } from '@/stores/transferStore';
 import type { ConnectionProfile } from '@/types';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 
 interface HostOverviewDialogProps {
   profile?: ConnectionProfile;
@@ -61,9 +62,18 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
   const transfers = useTransferStore((state) => state.operations);
   const disconnectEvents = useMonitorStore((state) => state.disconnectEvents);
   const agentRun = useAgentStore((state) => state.run);
+  const portForwards = usePortForwardStore((state) => state.runtimes);
   const snapshot = useMemo(() => profile
-    ? buildHostOverview(profile, sessions, sftpConnections, transfers, disconnectEvents, agentRun)
-    : undefined, [agentRun, disconnectEvents, profile, sessions, sftpConnections, transfers]);
+    ? buildHostOverview(
+        profile,
+        sessions,
+        sftpConnections,
+        transfers,
+        disconnectEvents,
+        portForwards,
+        agentRun,
+      )
+    : undefined, [agentRun, disconnectEvents, portForwards, profile, sessions, sftpConnections, transfers]);
 
   return (
     <Dialog open={Boolean(profile)} onOpenChange={(open) => !open && onClose()}>
@@ -103,7 +113,7 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
                 icon={CableIcon}
                 label={t('hostOverview.forwards')}
                 value={snapshot.activePortForwards}
-                detail={t('hostOverview.forwardsUntracked')}
+                detail={t('hostOverview.forwardsDetail', { failed: snapshot.failedPortForwards })}
               />
             </div>
 

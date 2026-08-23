@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { HostOverviewDialog } from './host-overview-dialog';
+import { PortForwardDialog } from './port-forward-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import {
@@ -27,6 +28,7 @@ import {
   DownloadIcon,
   StarIcon,
   InfoIcon,
+  CableIcon,
 } from 'lucide-react';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
@@ -67,6 +69,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [activityFilter, setActivityFilter] = useState<'all' | 'favorites' | 'recent'>('all');
   const [groupFilter, setGroupFilter] = useState('all');
   const [overviewProfile, setOverviewProfile] = useState<ConnectionProfile>();
+  const [forwardProfile, setForwardProfile] = useState<ConnectionProfile>();
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
 
   const groups = useMemo(() => [...new Set(
@@ -210,6 +213,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                   onDuplicate={onDuplicate}
                   onToggleFavorite={onToggleFavorite}
                   onOverview={setOverviewProfile}
+                  onPortForward={setForwardProfile}
                 />
               ))}
             </ResponsiveCardGrid>
@@ -217,6 +221,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
         </div>
       </div>
       <HostOverviewDialog profile={overviewProfile} onClose={() => setOverviewProfile(undefined)} />
+      <PortForwardDialog profile={forwardProfile} onClose={() => setForwardProfile(undefined)} />
     </TooltipProvider>
   );
 };
@@ -230,6 +235,7 @@ interface ConnectionCardProps {
   onDuplicate: (profile: ConnectionProfile) => void;
   onToggleFavorite: (profile: ConnectionProfile) => void;
   onOverview: (profile: ConnectionProfile) => void;
+  onPortForward: (profile: ConnectionProfile) => void;
 }
 
 const ConnectionCard = React.memo<ConnectionCardProps>(({
@@ -241,6 +247,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
   onDuplicate,
   onToggleFavorite,
   onOverview,
+  onPortForward,
 }) => {
   const { t } = useI18n();
   const handleConnectTerminal = useDebouncedCallback(
@@ -320,6 +327,13 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
             tooltip={t('workbench.connections.connectSftp')}
           >
             <FolderIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
+            onClick={() => onPortForward(profile)}
+            aria-label={t('portForward.open')}
+            tooltip={t('portForward.open')}
+          >
+            <CableIcon />
           </IconActionButton>
           <IconActionButton
             onClick={() => onOverview(profile)}

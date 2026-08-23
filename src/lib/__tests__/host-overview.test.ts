@@ -40,6 +40,18 @@ describe('buildHostOverview', () => {
         { operationId: 'transfer-other', kind: 'upload', ownerId: 'other', totalBytes: 10, processedBytes: 2, totalSteps: 1, completedSteps: 0, status: 'running' },
       ],
       [{ sessionId: 's2', host: profile.host, port: 22, username: 'root', reasonKind: 'error', reason: 'transport reset', retryable: true, at: 2 }],
+      [{
+        operationId: 'forward-1',
+        profileId: profile.id,
+        configId: 'rule-1',
+        name: 'Database',
+        kind: 'local',
+        mode: 'manual',
+        status: 'running',
+        startedAt: 1,
+        bytesSent: 10,
+        bytesReceived: 20,
+      }],
       { id: 'agent-1', requestId: 'request-1', goal: 'diagnose', sessionId: 's1', contextLabel: 'root@prod', phase: 'awaitingApproval', responseText: '', steps: [] },
     );
 
@@ -52,8 +64,8 @@ describe('buildHostOverview', () => {
       failedTransfers: 0,
       diagnosticPhase: 'awaitingApproval',
       latestError: 'transport reset',
-      activePortForwards: 0,
-      portForwardTrackingAvailable: false,
+      activePortForwards: 1,
+      failedPortForwards: 0,
     });
   });
 });

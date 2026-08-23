@@ -10,4 +10,4 @@ COPY sshd_config /etc/ssh/sshd_config
 
 EXPOSE 22
 
-CMD ["sh", "-c", "ssh-keygen -A && exec /usr/sbin/sshd -D -e"]
+CMD ["sh", "-c", "ssh-keygen -A || exit $?; (while true; do printf 'termbridge-forward-ok\\n' | nc -l -p 18080; done) & exec /usr/sbin/sshd -D -e"]

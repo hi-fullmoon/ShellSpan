@@ -1,12 +1,11 @@
 use super::*;
 use crate::db::Database;
 use crate::models::{
-    AuthMethod, ClosedReasonKind, ConnectionPreflightRequest, ConnectionPreflightResult,
-    CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest,
-    CreateRemoteEntryRequest, CreateSessionError, DeleteRemotePathRequest,
-    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, JumpHostConfig,
+    ClosedReasonKind, ConnectionPreflightRequest, ConnectionPreflightResult, CopyLocalPathsRequest,
+    CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
+    DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
     KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LogFileInfo,
-    ManagedSession, OpenRemoteFileRequest, PortForwardConfig, PreflightCancellationRegistry,
+    ManagedSession, OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
     RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
     RemoteFileKind, RemoteFsError, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
@@ -25,7 +24,7 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -516,14 +515,26 @@ pub(crate) fn close_session(
 }
 
 #[tauri::command]
-pub(crate) fn request_app_restart(app: AppHandle) {
+pub(crate) fn request_app_restart(
+    app: AppHandle,
+    forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+) {
     info!("Requesting application restart");
+    if let Err(error) = forwards_state.cancel_all() {
+        warn!("Failed to cancel port forwards before restart: {error}");
+    }
     app.request_restart();
 }
 
 #[tauri::command]
-pub(crate) fn request_app_exit(app: AppHandle) {
+pub(crate) fn request_app_exit(
+    app: AppHandle,
+    forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+) {
     info!("Requesting application exit");
+    if let Err(error) = forwards_state.cancel_all() {
+        warn!("Failed to cancel port forwards before exit: {error}");
+    }
     app.exit(0);
 }
 
@@ -1585,73 +1596,87 @@ fn resolve_keychain_key_for_session(
 }
 
 #[tauri::command]
-pub(crate) fn start_port_forwards(
+pub(crate) fn start_port_forward(
     app: AppHandle,
     credentials: State<'_, crate::keychain::CredentialManager>,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
-    operation_id: String,
-    host: String,
-    port: u16,
-    username: String,
-    auth_method: AuthMethod,
-    password: Option<String>,
-    keychain_key_id: Option<String>,
-    passphrase: Option<String>,
-    jump_host: Option<JumpHostConfig>,
-    forwards: Vec<PortForwardConfig>,
-) -> Result<(), String> {
+    mut request: PortForwardStartRequest,
+) -> Result<crate::port_forward::PortForwardRuntime, String> {
     info!(
-        "Starting port forwards operation_id={operation_id} count={}",
-        forwards.len()
+        "Starting port forward operation_id={} profile_id={} config_id={}",
+        request.operation_id, request.profile_id, request.forward.id
     );
-    validate_connection_fields(&host, &username)?;
+    validate_connection_fields(&request.connection.host, &request.connection.username)?;
+    crate::port_forward::validate_start_request(&request)?;
+    resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
 
-    let mut private_key_data: Option<String> = None;
-    if let Some(key_id) = keychain_key_id.as_deref() {
-        private_key_data = Some(load_keychain_private_key(&credentials, key_id)?);
+    let local_listener = if request.forward.kind == crate::models::PortForwardKind::Local {
+        Some(crate::port_forward::bind_local_listener(&request.forward)?)
+    } else {
+        None
+    };
+    let cancel_flag = forwards_state.register(&request)?;
+    let runtime = forwards_state
+        .list()?
+        .into_iter()
+        .find(|runtime| runtime.operation_id == request.operation_id)
+        .ok_or_else(|| "registered port forward disappeared".to_string())?;
+    if let Err(error) = app.emit(crate::port_forward::PORT_FORWARD_EVENT, &runtime) {
+        warn!("Failed to emit initial port forward state: {error}");
     }
-    let mut jump_host = jump_host;
-    if let Some(ref mut jump) = jump_host {
-        if let Some(key_id) = jump.keychain_key_id.as_deref() {
-            jump.private_key_data = Some(load_keychain_private_key(&credentials, key_id)?);
-        }
-    }
-
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-    forwards_state.register(operation_id.clone(), cancel_flag.clone())?;
 
     let manager = (*forwards_state).clone();
+    let worker_app = app.clone();
     let known_hosts = crate::known_hosts::known_hosts_path(&app)
         .ok()
         .map(|p| p.to_string_lossy().to_string());
     thread::spawn(move || {
-        crate::port_forward::start_port_forwards(
+        crate::port_forward::start_port_forward(
+            worker_app,
             manager,
-            operation_id,
-            host,
-            port,
-            username,
-            auth_method,
-            password,
-            private_key_data,
-            passphrase,
-            jump_host,
-            forwards,
+            request,
             cancel_flag,
+            local_listener,
             known_hosts,
         );
     });
 
-    Ok(())
+    Ok(runtime)
 }
 
 #[tauri::command]
-pub(crate) fn stop_port_forwards(
+pub(crate) fn stop_port_forward(
+    app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     operation_id: String,
-) -> Result<(), String> {
-    info!("Stopping port forwards operation_id={operation_id}");
-    forwards_state.cancel(&operation_id)
+) -> Result<crate::port_forward::PortForwardRuntime, String> {
+    info!("Stopping port forward operation_id={operation_id}");
+    let runtime = forwards_state.cancel(&operation_id)?;
+    if let Err(error) = app.emit(crate::port_forward::PORT_FORWARD_EVENT, &runtime) {
+        warn!("Failed to emit stopping port forward state: {error}");
+    }
+    Ok(runtime)
+}
+
+#[tauri::command]
+pub(crate) fn stop_all_port_forwards(
+    app: AppHandle,
+    forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+) -> Result<Vec<crate::port_forward::PortForwardRuntime>, String> {
+    let runtimes = forwards_state.cancel_all()?;
+    for runtime in &runtimes {
+        if let Err(error) = app.emit(crate::port_forward::PORT_FORWARD_EVENT, runtime) {
+            warn!("Failed to emit stopping port forward state: {error}");
+        }
+    }
+    Ok(runtimes)
+}
+
+#[tauri::command]
+pub(crate) fn list_port_forwards(
+    forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+) -> Result<Vec<crate::port_forward::PortForwardRuntime>, String> {
+    forwards_state.list()
 }
 
 #[tauri::command]

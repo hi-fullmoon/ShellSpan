@@ -6,6 +6,7 @@ PermitEmptyPasswords no
 PermitRootLogin no
 UsePAM no
 AllowUsers termbridge
+AllowTcpForwarding yes
 KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha256
 Ciphers aes128-ctr,aes192-ctr,aes256-ctr
 MACs hmac-sha2-256,hmac-sha2-512

@@ -25,6 +25,7 @@ import {
   useTransferStore,
 } from './transferStore';
 import type { FileEntry } from '@/components/sftp/utils';
+import { usePortForwardStore } from './portForwardStore';
 
 const logger = createLogger('sftpStore');
 
@@ -404,7 +405,8 @@ export const useSftpStore = create<SftpState>()((set) => ({
       return { connections: restored, activeConnectionId };
     }),
 
-  setPaneLocal: (id, side) =>
+  setPaneLocal: (id, side) => {
+    void usePortForwardStore.getState().stopOwnersByPrefix(`sftp:${id}:${side}:`);
     set((state) => ({
       connections: updateConnection(state, id, (current) => ({
         ...current,
@@ -444,7 +446,8 @@ export const useSftpStore = create<SftpState>()((set) => ({
             : current.remoteClipboard,
       })),
       activeConnectionId: id,
-    })),
+    }));
+  },
 
   attachRemoteConnection: (id, side, summary, connection, profileId) =>
     set((state) => ({
@@ -485,7 +488,8 @@ export const useSftpStore = create<SftpState>()((set) => ({
       activeConnectionId: id,
     })),
 
-  removeConnection: (id) =>
+  removeConnection: (id) => {
+    void usePortForwardStore.getState().stopOwnersByPrefix(`sftp:${id}:`);
     set((state) => {
       const closing = state.connections.find((conn) => conn.id === id);
       const connections = state.connections.filter((conn) => conn.id !== id);
@@ -498,7 +502,8 @@ export const useSftpStore = create<SftpState>()((set) => ({
         disconnectRemotePanes(closing);
       }
       return { connections, activeConnectionId };
-    }),
+    });
+  },
 
   setActiveConnection: (id) => set({ activeConnectionId: id }),
 

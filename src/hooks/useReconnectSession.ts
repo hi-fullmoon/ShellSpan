@@ -16,6 +16,7 @@ import {
   getMissingKeychainKeyTarget,
   promptForMissingKeychainKey,
 } from '@/lib/keychain-key-prompt';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 
 const logger = createLogger('reconnect');
 
@@ -114,6 +115,9 @@ export function useReconnectSession(): (sessionId: string) => Promise<void> {
         }
         terminalRegistry.rebindSession(sessionId, summary.sessionId);
         reconnectSession(sessionId, summary, profile.id);
+        void usePortForwardStore
+          .getState()
+          .startAutoForOwner(preparedProfile, `terminal:${summary.sessionId}`);
         logger.info(`Reconnected session ${sessionId} as session ${summary.sessionId}`);
         invokeCloseSession(sessionId).catch((error) => {
           logger.warn(`Failed to close replaced session ${sessionId}`, error);

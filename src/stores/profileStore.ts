@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import type { AuthMethod, ConnectionProfile, JumpHostConfig, ProfileRow, ProfileSecretKind } from '@/types';
+import type {
+  AuthMethod,
+  ConnectionProfile,
+  JumpHostConfig,
+  PortForwardKind,
+  PortForwardRule,
+  ProfileRow,
+  ProfileSecretKind,
+} from '@/types';
 import {
   invokeListProfiles,
   invokeAddProfile,
@@ -272,6 +280,7 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
       tags: [...new Set((profile.tags ?? []).map((tag) => tag.trim()).filter(Boolean))],
       favorite: Boolean(profile.favorite),
       notes: profile.notes?.trim() || undefined,
+      portForwards: sanitizePortForwardRules(profile.portForwards),
     }),
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
@@ -280,9 +289,9 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
 
 function parseOrganizationMetadata(value: string | undefined): Pick<
   ConnectionProfile,
-  'group' | 'tags' | 'favorite' | 'notes'
+  'group' | 'tags' | 'favorite' | 'notes' | 'portForwards'
 > {
-  if (!value) return { tags: [], favorite: false };
+  if (!value) return { tags: [], favorite: false, portForwards: [] };
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
     return {
@@ -297,11 +306,59 @@ function parseOrganizationMetadata(value: string | undefined): Pick<
       notes: typeof parsed.notes === 'string' && parsed.notes.trim()
         ? parsed.notes.trim()
         : undefined,
+      portForwards: sanitizePortForwardRules(parsed.portForwards),
     };
   } catch (error) {
     logger.error('ignored invalid profile organization metadata', error);
-    return { tags: [], favorite: false };
+    return { tags: [], favorite: false, portForwards: [] };
   }
+}
+
+function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const rules: PortForwardRule[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const candidate = item as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const kind: PortForwardKind | undefined = candidate.kind === 'local' || candidate.kind === 'remote'
+      ? candidate.kind
+      : undefined;
+    const localPort = Number(candidate.localPort);
+    const remotePort = Number(candidate.remotePort);
+    const remoteHost = typeof candidate.remoteHost === 'string'
+      ? candidate.remoteHost.trim()
+      : '';
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)
+      || seen.has(id)
+      || !name
+      || name.length > 100
+      || /[\u0000-\u001f\u007f]/.test(name)
+      || !kind
+      || !remoteHost
+      || !Number.isInteger(localPort)
+      || localPort < 1
+      || localPort > 65_535
+      || !Number.isInteger(remotePort)
+      || remotePort < 1
+      || remotePort > 65_535
+      || (kind === 'remote' && !['127.0.0.1', 'localhost', '::1'].includes(remoteHost))
+    ) continue;
+    seen.add(id);
+    rules.push({
+      id,
+      name,
+      kind,
+      localPort,
+      remoteHost,
+      remotePort,
+      autoStart: candidate.autoStart === true,
+    });
+  }
+  return rules;
 }
 
 async function retrieveProfilePassword(profile: ConnectionProfile): Promise<ConnectionProfile> {

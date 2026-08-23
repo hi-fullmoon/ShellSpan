@@ -4,6 +4,7 @@ import { useMonitorStore } from '@/stores/monitorStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ClosedEvent, DisconnectEvent } from '@/types';
 import { createLogger } from '@/lib/logger';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 
 const logger = createLogger('monitor');
 
@@ -26,6 +27,7 @@ export function useMonitorEvents(): void {
 
     const handleClosed = (event: Event<ClosedEvent>): void => {
       const payload = event.payload;
+      void usePortForwardStore.getState().stopOwner(`terminal:${payload.sessionId}`);
       // A user-initiated close is not a monitored disconnect.
       if (payload.reasonKind === 'local_close') {
         return;

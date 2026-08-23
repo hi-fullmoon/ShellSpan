@@ -1,4 +1,4 @@
-import type { AuthMethod, ConnectionProfile, JumpHostConfig } from '@/types';
+import type { AuthMethod, ConnectionProfile, JumpHostConfig, PortForwardRule } from '@/types';
 import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
 
 export interface ConnectionImportCandidate {
@@ -15,6 +15,7 @@ export interface ConnectionImportCandidate {
   tags?: string[];
   favorite?: boolean;
   notes?: string;
+  portForwards?: PortForwardRule[];
   warnings: string[];
 }
 
@@ -166,6 +167,7 @@ interface ExportedProfile {
   tags?: string[];
   favorite?: boolean;
   notes?: string;
+  portForwards?: PortForwardRule[];
 }
 
 function cleanOptionalText(value: unknown): string | undefined {
@@ -199,8 +201,59 @@ function sanitizeExportedJumpHost(value: unknown): ConnectionImportCandidate['ju
   };
 }
 
+function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
+  if (!Array.isArray(value)) return [];
+  const allowed = new Set([
+    'id',
+    'name',
+    'kind',
+    'localPort',
+    'remoteHost',
+    'remotePort',
+    'autoStart',
+  ]);
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const rule = item as Record<string, unknown>;
+    if (!Object.keys(rule).every((key) => allowed.has(key))) return [];
+    const id = cleanOptionalText(rule.id);
+    const name = cleanOptionalText(rule.name);
+    const remoteHost = cleanOptionalText(rule.remoteHost);
+    const localPort = Number(rule.localPort);
+    const remotePort = Number(rule.remotePort);
+    if (
+      !id
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)
+      || seen.has(id)
+      || !name
+      || name.length > 100
+      || /[\u0000-\u001f\u007f]/.test(name)
+      || !remoteHost
+      || (rule.kind !== 'local' && rule.kind !== 'remote')
+      || !Number.isInteger(localPort)
+      || localPort < 1
+      || localPort > 65_535
+      || !Number.isInteger(remotePort)
+      || remotePort < 1
+      || remotePort > 65_535
+      || (rule.kind === 'remote' && !['127.0.0.1', 'localhost', '::1'].includes(remoteHost))
+    ) return [];
+    seen.add(id);
+    return [{
+      id,
+      name,
+      kind: rule.kind,
+      localPort,
+      remoteHost,
+      remotePort,
+      autoStart: rule.autoStart === true,
+    }];
+  });
+}
+
 export interface ConnectionExportFile {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   exportedAt: string;
   profiles: ExportedProfile[];
 }
@@ -210,7 +263,7 @@ export function exportConnections(
   exportedAt = new Date().toISOString(),
 ): string {
   const payload: ConnectionExportFile = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt,
     profiles: profiles.map((profile) => ({
       name: profile.name,
@@ -230,6 +283,7 @@ export function exportConnections(
       tags: (profile.tags ?? []).map((tag) => redactTerminalSecrets(tag)),
       favorite: Boolean(profile.favorite),
       notes: profile.notes ? redactTerminalSecrets(profile.notes) : undefined,
+      portForwards: sanitizePortForwardRules(profile.portForwards),
     })),
   };
   return JSON.stringify(payload, null, 2);
@@ -238,7 +292,10 @@ export function exportConnections(
 export function parseConnectionExport(content: string): ConnectionImportCandidate[] {
   try {
     const parsed = JSON.parse(content) as Partial<ConnectionExportFile>;
-    if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.profiles)) return [];
+    if (
+      (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2)
+      || !Array.isArray(parsed.profiles)
+    ) return [];
     return parsed.profiles.flatMap((profile, index) => {
       if (!profile || typeof profile !== 'object') return [];
       const candidate = profile as Partial<ExportedProfile>;
@@ -266,6 +323,7 @@ export function parseConnectionExport(content: string): ConnectionImportCandidat
         tags: cleanTags(candidate.tags),
         favorite: candidate.favorite === true,
         notes: cleanOptionalText(candidate.notes),
+        portForwards: sanitizePortForwardRules(candidate.portForwards),
         warnings: candidate.authMethod === 'key' ? ['key-rebind-required'] : [],
       }];
     });
@@ -339,6 +397,7 @@ export async function importConnectionsTransactionally(
         tags: candidate.tags,
         favorite: candidate.favorite,
         notes: candidate.notes,
+        portForwards: candidate.portForwards,
       });
       profileIds.push(profile.id);
     }
