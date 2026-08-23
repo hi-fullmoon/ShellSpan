@@ -267,9 +267,41 @@ function profileToRow(profile: ConnectionProfile): ProfileRow {
     authMethod: profile.authMethod,
     keychainKeyId: profile.keychainKeyId,
     jumpHostConfig: scrubbedJumpHost ? JSON.stringify(scrubbedJumpHost) : undefined,
+    organizationJson: JSON.stringify({
+      group: profile.group?.trim() || undefined,
+      tags: [...new Set((profile.tags ?? []).map((tag) => tag.trim()).filter(Boolean))],
+      favorite: Boolean(profile.favorite),
+      notes: profile.notes?.trim() || undefined,
+    }),
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
   };
+}
+
+function parseOrganizationMetadata(value: string | undefined): Pick<
+  ConnectionProfile,
+  'group' | 'tags' | 'favorite' | 'notes'
+> {
+  if (!value) return { tags: [], favorite: false };
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return {
+      group: typeof parsed.group === 'string' && parsed.group.trim()
+        ? parsed.group.trim()
+        : undefined,
+      tags: Array.isArray(parsed.tags)
+        ? [...new Set(parsed.tags.filter((tag): tag is string => typeof tag === 'string')
+          .map((tag) => tag.trim()).filter(Boolean))]
+        : [],
+      favorite: parsed.favorite === true,
+      notes: typeof parsed.notes === 'string' && parsed.notes.trim()
+        ? parsed.notes.trim()
+        : undefined,
+    };
+  } catch (error) {
+    logger.error('ignored invalid profile organization metadata', error);
+    return { tags: [], favorite: false };
+  }
 }
 
 async function retrieveProfilePassword(profile: ConnectionProfile): Promise<ConnectionProfile> {
@@ -316,6 +348,7 @@ function rowToProfile(row: ProfileRow): ConnectionProfile {
     keychainKeyId: row.keychainKeyId,
     jumpHost,
     password: undefined,
+    ...parseOrganizationMetadata(row.organizationJson),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

@@ -5,6 +5,7 @@ import {
   getRecentTerminalOutput,
   rebindTerminalOutput,
   renderTerminalText,
+  redactTerminalSecrets,
   stripAnsi,
   subscribeTerminalOutput,
 } from '../terminal-output-buffer';
@@ -23,6 +24,39 @@ describe('terminal output buffer', () => {
   it('returns only recent lines and redacts common secrets', () => {
     appendTerminalOutput('session-1', 'first\npassword=hunter2\nthird\n');
     expect(getRecentTerminalOutput('session-1', 2)).toBe('password=[REDACTED]\nthird');
+  });
+
+  it('redacts credential formats before AI context or archives are written', () => {
+    const privateKey = [
+      '-----BEGIN OPENSSH PRIVATE KEY-----',
+      'sensitive-key-material',
+      '-----END OPENSSH PRIVATE KEY-----',
+    ].join('\n');
+    const input = [
+      privateKey,
+      'Authorization: Bearer bearer-secret',
+      'export CLIENT_SECRET="client-secret"',
+      'curl --api-key command-secret https://alice:url-secret@example.com',
+      'AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF',
+      'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz1234',
+      'SESSION=eyJabcdefghijk.abcdefghijkl.abcdefghijkl',
+    ].join('\n');
+
+    const redacted = redactTerminalSecrets(input);
+
+    for (const secret of [
+      'sensitive-key-material',
+      'bearer-secret',
+      'client-secret',
+      'command-secret',
+      'url-secret',
+      'AKIA1234567890ABCDEF',
+      'ghp_abcdefghijklmnopqrstuvwxyz1234',
+      'eyJabcdefghijk.abcdefghijkl.abcdefghijkl',
+    ]) {
+      expect(redacted).not.toContain(secret);
+    }
+    expect(redacted).toContain('[REDACTED PRIVATE KEY]');
   });
 
   it('moves buffered output when a session reconnects', () => {

@@ -181,7 +181,9 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       sessions.splice(oldIndex, 0, newSession);
       return {
         sessions: sortSessions(sessions),
-        activeSessionId: summary.sessionId,
+        activeSessionId: state.activeSessionId === oldSessionId
+          ? summary.sessionId
+          : state.activeSessionId,
       };
     }),
   setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),

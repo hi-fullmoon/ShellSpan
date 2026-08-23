@@ -16,6 +16,7 @@ import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { PromptDialog } from './sftp-dialogs';
 import type { ConnectionProfile } from '@/types';
 import { useProfileStore } from '@/stores/profileStore';
+import { countActiveTransfersForOwners, useTransferStore } from '@/stores/transferStore';
 
 const MENU_WIDTH = 256;
 const MENU_HEIGHT = 320;
@@ -59,6 +60,7 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const togglePin = useSftpStore((state) => state.togglePin);
   const addConnection = useSftpStore((state) => state.addConnection);
   const getProfile = useProfileStore((state) => state.getProfile);
+  const transferOperations = useTransferStore((state) => state.operations);
   const [renameTarget, setRenameTarget] = useState<SftpConnection | null>(null);
   const [confirmationTarget, setConfirmationTarget] = useState<SftpConnection | null>(null);
   const [closeConfirm, setCloseConfirm] = useState(false);
@@ -92,6 +94,20 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
     const idx = connections.findIndex((c) => c.id === target.id);
     if (idx === -1) return 0;
     return connections.slice(idx + 1).filter((c) => !c.pinned).length;
+  })();
+  const closeTransferCount = countActiveTransfersForOwners([target.id], transferOperations);
+  const closeOthersTransferCount = countActiveTransfersForOwners(
+    connections.filter((item) => item.id !== target.id && !item.pinned).map((item) => item.id),
+    transferOperations,
+  );
+  const closeToRightTransferCount = (() => {
+    const index = connections.findIndex((item) => item.id === target.id);
+    return countActiveTransfersForOwners(
+      index < 0
+        ? []
+        : connections.slice(index + 1).filter((item) => !item.pinned).map((item) => item.id),
+      transferOperations,
+    );
   })();
 
   const handleClose = (): void => {
@@ -251,7 +267,9 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {t('sftp.tab.closeConfirmMessage', { title: target.title })}
+              {closeTransferCount > 0
+                ? t('sftp.tab.closeTransferWarning', { title: target.title, count: closeTransferCount })
+                : t('sftp.tab.closeConfirmMessage', { title: target.title })}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
@@ -271,7 +289,12 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {t('sftp.tab.closeOthersConfirmMessage', { count: closeOthersCount })}
+              {closeOthersTransferCount > 0
+                ? t('sftp.tab.closeManyTransferWarning', {
+                    tabs: closeOthersCount,
+                    count: closeOthersTransferCount,
+                  })
+                : t('sftp.tab.closeOthersConfirmMessage', { count: closeOthersCount })}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
@@ -291,7 +314,12 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
             <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {t('sftp.tab.closeToRightConfirmMessage', { count: closeToRightCount })}
+              {closeToRightTransferCount > 0
+                ? t('sftp.tab.closeManyTransferWarning', {
+                    tabs: closeToRightCount,
+                    count: closeToRightTransferCount,
+                  })
+                : t('sftp.tab.closeToRightConfirmMessage', { count: closeToRightCount })}
             </AlertDialogDescription>
           </div>
           <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">

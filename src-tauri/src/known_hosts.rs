@@ -110,7 +110,7 @@ fn ensure_known_hosts_dir(path: &Path) -> Result<(), String> {
 
 fn base64url_encode(input: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut result = String::with_capacity((input.len() * 4 + 2) / 3);
+    let mut result = String::with_capacity((input.len() * 4).div_ceil(3));
     for chunk in input.chunks(3) {
         let b = match chunk.len() {
             1 => [chunk[0], 0, 0],

@@ -8,6 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
+    debug: vi.fn(),
     info: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
@@ -19,6 +20,7 @@ import {
   buildSessionCreateRequest,
   invokeStoreKeyCredential,
   invokeListKeyCredentials,
+  invokePreflightConnection,
 } from '@/lib/tauri';
 import type { ConnectionProfile } from '@/types';
 
@@ -110,5 +112,34 @@ describe('connection request serialization', () => {
 
     expect(request.keychainKeyId).toBe('key-1');
     expect(request.jumpHost?.keychainKeyId).toBe('jump-key-1');
+  });
+
+  it('wraps connection preflight fields for the native command', async () => {
+    invokeMock.mockResolvedValue({
+      operationId: 'connection-preflight-test',
+      status: 'passed',
+      checkedAt: 1,
+      steps: [],
+    });
+
+    await invokePreflightConnection({
+      operationId: 'connection-preflight-test',
+      host: 'server.example.com',
+      port: 22,
+      username: 'root',
+      authMethod: 'password',
+      password: 'secret',
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('preflight_connection', {
+      request: {
+        operationId: 'connection-preflight-test',
+        host: 'server.example.com',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        password: 'secret',
+      },
+    });
   });
 });

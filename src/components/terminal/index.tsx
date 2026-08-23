@@ -7,8 +7,12 @@ import { Button } from '@/components/ui/button';
 import { SquareTerminalIcon } from 'lucide-react';
 import { SplitPane } from '@/components/ui/split-pane';
 import { useConnectSession } from '@/hooks/useConnectSession';
-import { invokeClearTerminalWorkspace, invokeSaveTerminalWorkspace } from '@/lib/tauri';
 import { serializeTerminalWorkspace } from '@/lib/terminal-workspace';
+import {
+  clearTerminalWorkspace,
+  flushTerminalWorkspace,
+  stageTerminalWorkspace,
+} from '@/lib/terminal-workspace-persistence';
 import { createLogger } from '@/lib/logger';
 import { cn } from '@/lib/utils';
 import { terminalRegistry } from './registry/terminal-registry';
@@ -136,7 +140,7 @@ const Terminal: React.FC = () => {
 
   useEffect(() => {
     if (!restoreWorkspace) {
-      void invokeClearTerminalWorkspace().catch((error) => {
+      void clearTerminalWorkspace().catch((error) => {
         logger.error('failed to clear terminal workspace', error);
       });
     }
@@ -144,8 +148,9 @@ const Terminal: React.FC = () => {
 
   useEffect(() => {
     if (!restoreWorkspace) return;
+    stageTerminalWorkspace(serializeTerminalWorkspace(sessions, split));
     const timer = window.setTimeout(() => {
-      void invokeSaveTerminalWorkspace(serializeTerminalWorkspace(sessions, split)).catch((error) => {
+      void flushTerminalWorkspace().catch((error) => {
         logger.error('failed to save terminal workspace', error);
       });
     }, 500);

@@ -70,6 +70,7 @@ fn disconnect_entries(entries: Vec<PooledEntry>) {
 /// Outcome of claiming the right to establish a pooled connection: exactly one
 /// caller becomes the leader and handshakes; concurrent callers become
 /// followers waiting on the shared slot instead of handshaking themselves.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ConnectClaim {
     Leader(ConnectLeaderGuard),
     Follower(Arc<ConnectSlot>),

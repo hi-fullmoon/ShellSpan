@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDndContext, useDroppable } from '@dnd-kit/core';
-import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon, SearchIcon, XIcon } from 'lucide-react';
+import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon, SearchIcon, SquareTerminalIcon, XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -27,10 +27,12 @@ export interface SftpPaneProps {
   selectedPaths: Set<string>;
   onSelectedPathsChange: (paths: Set<string>) => void;
   onVerifyHostKey?: () => void;
+  onReconnect?: () => void;
   systemDropActive?: boolean;
   systemDropHovered?: boolean;
   localMode?: boolean;
   onTitleClick?: () => void;
+  onOpenTerminal?: () => void;
 }
 
 interface HistoryState {
@@ -47,10 +49,12 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       selectedPaths,
       onSelectedPathsChange,
       onVerifyHostKey,
+      onReconnect,
       systemDropActive,
       systemDropHovered,
       localMode,
       onTitleClick,
+      onOpenTerminal,
     },
     ref,
   ) => {
@@ -84,7 +88,10 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       [entries, showHiddenFiles],
     );
     const loading = side === 'local' ? connection.localLoading : connection.remoteLoading;
-    const error = side === 'local' ? connection.localError : connection.remoteError;
+    const restorePending = !isLocal && connection.restorePending?.[side] === true;
+    const error = restorePending
+      ? t('sftp.restore.disconnected')
+      : side === 'local' ? connection.localError : connection.remoteError;
     const isHostKeyError = !isLocal && !!error && (error.toLowerCase().includes('host key') || error.toLowerCase().includes('trust this host'));
     const pane = side === 'local' ? connection.localPane : connection.remotePane;
     const remoteBookmarks = connection.remoteBookmarks[side];
@@ -174,12 +181,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, []);
 
     useEffect(() => {
+      if (restorePending) return;
       if (isLocal) {
-        loadLocalDirectory('');
+        loadLocalDirectory(path);
       } else {
-        loadRemoteDirectory('');
+        loadRemoteDirectory(path);
       }
-    }, [isLocal, loadLocalDirectory, loadRemoteDirectory]);
+    }, [isLocal, loadLocalDirectory, loadRemoteDirectory, restorePending]);
 
     const navigateTo = useCallback(
       (target: string, pushHistory = true): void => {
@@ -442,6 +450,17 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </div>
           )}
           <div className="flex items-center gap-1.5">
+            {!isLocal && onOpenTerminal && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onOpenTerminal}
+                className="h-[30px] w-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
+                aria-label={t('sftp.openTerminalHere')}
+              >
+                <SquareTerminalIcon />
+              </Button>
+            )}
             {/* Search — animated expand from icon. The inner row keeps a fixed
                 width so the container clip-reveals it instead of squishing the
                 input and buttons during the width transition. */}
@@ -559,8 +578,20 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
           {error && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface p-4 text-center text-xs text-app-error">
               <span>{error}</span>
-              <Button variant="secondary" size="sm" onClick={isHostKeyError && onVerifyHostKey ? onVerifyHostKey : () => navigateTo(path)}>
-                {isHostKeyError ? t('sftp.hostKey.verify') : t('common.retry')}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={
+                  restorePending && onReconnect
+                    ? onReconnect
+                    : isHostKeyError && onVerifyHostKey
+                      ? onVerifyHostKey
+                      : () => navigateTo(path)
+                }
+              >
+                {restorePending
+                  ? t('sftp.restore.reconnect')
+                  : isHostKeyError ? t('sftp.hostKey.verify') : t('common.retry')}
               </Button>
             </div>
           )}

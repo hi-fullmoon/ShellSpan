@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { SftpTabContextMenu } from '../sftp-tab-context-menu';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useProfileStore } from '@/stores/profileStore';
+import { useTransferStore } from '@/stores/transferStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -27,6 +28,7 @@ const connection = {
 describe('SftpTabContextMenu', () => {
   beforeEach(() => {
     useSftpStore.setState(initialSftp, true);
+    useTransferStore.setState({ operations: [] });
     useProfileStore.setState(initialProfile, true);
     useProfileStore.setState({
       profiles: [

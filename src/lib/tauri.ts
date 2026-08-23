@@ -1,9 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/lib/logger';
+import { createOperationId, findOperationId } from '@/lib/operation-id';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   AuthMethod,
   ClosedEvent,
+  ConnectionPreflightRequest,
+  ConnectionPreflightResult,
   ConnectionProfile,
   CopyRemotePathRequest,
   KeychainKey,
@@ -55,10 +58,14 @@ import type {
 const logger = createLogger('ipc');
 
 async function invokeLogged<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const operationId = findOperationId(args) ?? createOperationId(cmd);
+  logger.debug(`invoke ${cmd} started operation_id=${operationId}`);
   try {
-    return await invoke<T>(cmd, args);
+    const result = await invoke<T>(cmd, args);
+    logger.debug(`invoke ${cmd} completed operation_id=${operationId}`);
+    return result;
   } catch (error) {
-    logger.error(`invoke ${cmd} failed`, error);
+    logger.error(`invoke ${cmd} failed operation_id=${operationId}`, error);
     throw error;
   }
 }
@@ -299,6 +306,16 @@ export async function invokeCheckHostKey(
   return result;
 }
 
+export async function invokePreflightConnection(
+  request: ConnectionPreflightRequest,
+): Promise<ConnectionPreflightResult> {
+  return invokeLogged('preflight_connection', { request });
+}
+
+export async function invokeCancelConnectionPreflight(operationId: string): Promise<void> {
+  return invokeLogged('cancel_connection_preflight', { operationId });
+}
+
 export async function invokeTrustHost(host: string, port: number): Promise<void> {
   return invokeLogged('trust_host', { request: { host, port } });
 }
@@ -457,6 +474,7 @@ export function buildSessionCreateRequest(
   rows: number,
 ): SessionCreateRequest {
   return {
+    operationId: createOperationId('ssh-connect'),
     name: profile.name,
     host: profile.host,
     port: profile.port,
@@ -623,6 +641,18 @@ export async function invokeSaveTerminalWorkspace(sessionsJson: string): Promise
 
 export async function invokeClearTerminalWorkspace(): Promise<void> {
   return invokeLogged('clear_terminal_workspace');
+}
+
+export async function invokeLoadSftpWorkspace(): Promise<string | null> {
+  return invokeLogged<string | null>('load_sftp_workspace');
+}
+
+export async function invokeSaveSftpWorkspace(workspaceJson: string): Promise<void> {
+  return invokeLogged('save_sftp_workspace', { workspaceJson });
+}
+
+export async function invokeClearSftpWorkspace(): Promise<void> {
+  return invokeLogged('clear_sftp_workspace');
 }
 
 export async function invokeCreateAiSession(meta: AiSessionMeta): Promise<void> {

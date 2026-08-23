@@ -84,9 +84,23 @@ export function renderTerminalText(value: string): string {
 
 export function redactTerminalSecrets(value: string): string {
   return value
-    .replace(/-----BEGIN[\s\S]*?PRIVATE KEY-----[\s\S]*?-----END[\s\S]*?PRIVATE KEY-----/gi, '[REDACTED PRIVATE KEY]')
+    .replace(
+      /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----/gi,
+      '[REDACTED PRIVATE KEY]',
+    )
     .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
-    .replace(/\b(api[_-]?key|access[_-]?token|secret|password|passwd)\s*[:=]\s*([^\s]+)/gi, '$1=[REDACTED]');
+    .replace(
+      /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|password|passwd|pwd)\s*[:=]\s*)(["']?)[^\s"']+\2/gi,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /(--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|secret|password|passwd))(?:=|\s+)\S+/gi,
+      '$1=[REDACTED]',
+    )
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1[REDACTED]@')
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED AWS ACCESS KEY]')
+    .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, '[REDACTED GITHUB TOKEN]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED JWT]');
 }
 
 function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): void {

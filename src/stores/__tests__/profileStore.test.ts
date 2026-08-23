@@ -89,6 +89,25 @@ describe('profileStore', () => {
     expect(useProfileStore.getState().profiles[0].password).toBeUndefined();
   });
 
+  it('persists normalized non-secret connection organization metadata', async () => {
+    await useProfileStore.getState().addProfile({
+      ...profileValues,
+      group: ' Production ',
+      tags: [' api ', 'api', 'critical'],
+      favorite: true,
+      notes: ' Primary service ',
+    });
+
+    const row = invokeAddProfile.mock.calls[0][0];
+    expect(JSON.parse(row.organizationJson)).toEqual({
+      group: 'Production',
+      tags: ['api', 'critical'],
+      favorite: true,
+      notes: 'Primary service',
+    });
+    expect(row).not.toHaveProperty('password');
+  });
+
   it('does not persist a profile when the database insert fails', async () => {
     invokeAddProfile.mockRejectedValue(new Error('database unavailable'));
 
@@ -380,6 +399,12 @@ describe('profileStore', () => {
         username: 'ju',
         authMethod: 'password',
       }),
+      organizationJson: JSON.stringify({
+        group: 'Production',
+        tags: ['api', 'critical'],
+        favorite: true,
+        notes: 'Primary service',
+      }),
       createdAt: 1,
       updatedAt: 1,
     }]);
@@ -389,6 +414,12 @@ describe('profileStore', () => {
     const profile = useProfileStore.getState().profiles[0];
     expect(profile.passphrase).toBeUndefined();
     expect(profile.jumpHost?.password).toBeUndefined();
+    expect(profile).toMatchObject({
+      group: 'Production',
+      tags: ['api', 'critical'],
+      favorite: true,
+      notes: 'Primary service',
+    });
     expect(invokeRetrieveProfilePassword).not.toHaveBeenCalled();
     expect(invokeRetrieveProfileSecret).not.toHaveBeenCalled();
   });

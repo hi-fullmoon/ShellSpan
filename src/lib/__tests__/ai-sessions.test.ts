@@ -86,6 +86,24 @@ describe('AI session persistence queue', () => {
     expect(tauriMocks.clear).toHaveBeenCalledTimes(1);
   });
 
+  it('redacts secrets in the persisted copy without mutating the visible message', async () => {
+    const sensitive = {
+      ...assistant,
+      content: 'PASSWORD=hunter2\nAuthorization: Bearer token-value',
+    };
+
+    await persistAiMessage(sensitive);
+
+    expect(tauriMocks.append).toHaveBeenCalledWith(
+      conversation.id,
+      conversation.startedAt,
+      expect.objectContaining({
+        content: 'PASSWORD=[REDACTED]\nAuthorization: Bearer [REDACTED]',
+      }),
+    );
+    expect(sensitive.content).toContain('hunter2');
+  });
+
   it('flushes buffered stream text before persisting on exit', async () => {
     useAiStore.getState().beginRequest({
       requestId: 'request-exit',

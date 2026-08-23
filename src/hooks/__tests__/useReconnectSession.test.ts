@@ -64,6 +64,7 @@ const initialProfile = useProfileStore.getState();
 
 describe('useReconnectSession', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
     terminalRegistry.disposeAll();
@@ -176,6 +177,47 @@ describe('useReconnectSession', () => {
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
     expect(terminalRegistry.get('s2')?.terminal).toBe(terminal);
+  });
+
+  it('closes a replacement created after the source session was removed', async () => {
+    const profile = {
+      id: 'p1',
+      name: 'Alpha',
+      host: 'h',
+      port: 22,
+      username: 'u',
+      authMethod: 'password' as const,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    useProfileStore.setState({ profiles: [profile] });
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' },
+      'p1',
+    );
+
+    const { invokeCreateSession, invokeCloseSession } = await import('@/lib/tauri');
+    let resolveCreate!: (summary: {
+      sessionId: string;
+      title: string;
+      host: string;
+      port: number;
+      username: string;
+    }) => void;
+    vi.mocked(invokeCreateSession).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveCreate = resolve;
+    }));
+
+    const { result } = renderHook(() => useReconnectSession());
+    const reconnectPromise = result.current('s1');
+    await vi.waitFor(() => expect(invokeCreateSession).toHaveBeenCalledTimes(1));
+    useTerminalStore.getState().removeSession('s1');
+    resolveCreate({ sessionId: 's2', title: 'New', host: 'h', port: 22, username: 'u' });
+    await reconnectPromise;
+
+    expect(invokeCloseSession).toHaveBeenCalledWith('s2');
+    expect(useTerminalStore.getState().sessions).toHaveLength(0);
+    expect(terminalRegistry.get('s2')).toBeUndefined();
   });
 
   it('sets status to error when create session fails', async () => {

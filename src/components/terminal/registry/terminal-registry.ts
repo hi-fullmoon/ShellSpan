@@ -80,6 +80,8 @@ const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 const RESIZE_DEBOUNCE_MS = 100;
 const OUTPUT_PAUSE_HIGH_WATERMARK = 512 * 1024;
 const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
+const OUTPUT_RESUME_RETRY_BASE_MS = 250;
+const OUTPUT_RESUME_RETRY_MAX_MS = 2000;
 
 // After a reconnect the channel reports connected while the remote shell is
 // still starting up (sourcing rc files, printing its first prompt). Input
@@ -363,6 +365,8 @@ class TerminalControllerImpl implements TerminalController {
   private outputPaused = false;
   private outputGeneration = 0;
   private outputPauseCommand: Promise<void> = Promise.resolve();
+  private outputResumeRetryTimer: number | null = null;
+  private outputResumeRetryAttempts = 0;
 
   constructor(
     sessionId: string,
@@ -642,22 +646,66 @@ class TerminalControllerImpl implements TerminalController {
     });
   }
 
-  private setOutputPaused(paused: boolean): void {
-    if (this.outputPaused === paused) return;
+  private setOutputPaused(paused: boolean, force = false): void {
+    if (this.outputPaused === paused && !force) return;
     this.outputPaused = paused;
+    if (paused) {
+      this.cancelOutputResumeRetry();
+    }
     const sessionId = this.sessionId;
     const command = this.outputPauseCommand.then(() =>
       invokeSetSessionOutputPaused(sessionId, paused),
     );
-    this.outputPauseCommand = command.catch((error) => {
-      if (!this.disposed && this.sessionId === sessionId && this.outputPaused === paused) {
+    this.outputPauseCommand = command.then(() => {
+      if (!paused && !this.disposed && this.sessionId === sessionId && !this.outputPaused) {
+        this.outputResumeRetryAttempts = 0;
+        this.cancelOutputResumeRetry();
+      }
+    }, (error) => {
+      const isCurrentSession = !this.disposed && this.sessionId === sessionId;
+      if (paused && isCurrentSession && this.outputPaused) {
         this.outputPaused = false;
+      } else if (
+        !paused
+        && isCurrentSession
+        && !this.outputPaused
+        && this.getStatus(sessionId) === 'connected'
+      ) {
+        this.scheduleOutputResumeRetry(sessionId);
       }
       logger.warn(
         `Failed to ${paused ? 'pause' : 'resume'} session output ${sessionId}`,
         error,
       );
     });
+  }
+
+  private scheduleOutputResumeRetry(sessionId: string): void {
+    if (this.outputResumeRetryTimer !== null) return;
+    const delay = Math.min(
+      OUTPUT_RESUME_RETRY_BASE_MS * 2 ** this.outputResumeRetryAttempts,
+      OUTPUT_RESUME_RETRY_MAX_MS,
+    );
+    this.outputResumeRetryAttempts += 1;
+    this.outputResumeRetryTimer = window.setTimeout(() => {
+      this.outputResumeRetryTimer = null;
+      if (
+        this.disposed
+        || this.sessionId !== sessionId
+        || this.outputPaused
+        || this.getStatus(sessionId) !== 'connected'
+      ) {
+        return;
+      }
+      this.setOutputPaused(false, true);
+    }, delay);
+  }
+
+  private cancelOutputResumeRetry(): void {
+    if (this.outputResumeRetryTimer !== null) {
+      window.clearTimeout(this.outputResumeRetryTimer);
+      this.outputResumeRetryTimer = null;
+    }
   }
 
   attach(host: HTMLElement): void {
@@ -789,6 +837,8 @@ class TerminalControllerImpl implements TerminalController {
     const previousSessionId = this.sessionId;
     this.clearListeners();
     this.cancelPendingResize();
+    this.cancelOutputResumeRetry();
+    this.outputResumeRetryAttempts = 0;
     if (this.outputPaused) {
       this.setOutputPaused(false);
     }
@@ -860,6 +910,7 @@ class TerminalControllerImpl implements TerminalController {
     if (this.disposed) return;
     this.disposed = true;
     logger.debug(`Terminal disposed for session ${this.sessionId}`);
+    this.cancelOutputResumeRetry();
     if (this.outputPaused) {
       this.setOutputPaused(false);
     }

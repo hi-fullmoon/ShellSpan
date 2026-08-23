@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  classifyError,
   getErrorMessage,
   getLocalizedErrorMessage,
   getToastErrorMessage,
@@ -88,5 +89,28 @@ describe('getToastErrorMessage', () => {
     expect(getToastErrorMessage(new Error(message))).toBe(
       t(key as Parameters<typeof t>[0]),
     );
+  });
+});
+
+describe('classifyError', () => {
+  it.each([
+    ['password auth failed', 'authentication', false],
+    ['tcp timeout', 'timeout', true],
+    ['connection reset by peer', 'network', true],
+    ['permission denied', 'permission', false],
+    ['file not found', 'not-found', false],
+    ['already exists', 'conflict', false],
+    ['disk full', 'storage', true],
+    ['operation cancelled', 'cancelled', true],
+    ['unclassified failure', 'unknown', true],
+  ])('classifies %s as %s', (message, category, retryable) => {
+    expect(classifyError(new Error(message))).toMatchObject({ category, retryable });
+  });
+
+  it('classifies structured host-key failures without inspecting their message', () => {
+    expect(classifyError({
+      type: 'HostKeyMismatch',
+      payload: { host: 'example.test', port: 22 },
+    })).toMatchObject({ category: 'host-key', retryable: false });
   });
 });

@@ -15,8 +15,8 @@ import {
   PaperclipIcon,
   PanelRightCloseIcon,
   RotateCcwIcon,
+  ServerIcon,
   SettingsIcon,
-  SparklesIcon,
   SquareIcon,
   SquareTerminalIcon,
 } from 'lucide-react';
@@ -94,6 +94,7 @@ import { useAiStore } from '@/stores/aiStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useProfileStore } from '@/stores/profileStore';
 import {
   clearPersistedAiConversation,
   ensureAiSessionFile,
@@ -469,12 +470,15 @@ export const AiPanel: React.FC = () => {
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
   const defaultProvider = providers.find((provider) => provider.id === defaultProviderId) ?? providers[0];
-  const providerKind = defaultProvider?.kind;
   const model = defaultProvider?.model ?? '';
   const activeSection = useAppStore((state) => state.activeSection);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId);
+  const profiles = useProfileStore((state) => state.profiles);
+  const activeProfile = activeSession?.profileId
+    ? profiles.find((profile) => profile.id === activeSession.profileId)
+    : undefined;
   const [draft, setDraft] = useState('');
   const [task, setTask] = useState<AiTaskKind>('chat');
   const [contextEnabled, setContextEnabled] = useState(true);
@@ -1106,6 +1110,13 @@ export const AiPanel: React.FC = () => {
       ? t('ai.context.selectionShort')
       : t('ai.context.lineCount', { count: contextSnapshot.lineCount })}`
     : undefined;
+  const boundContextSource = !contextEnabled
+    ? t('ai.context.sourceDisabled')
+    : contextSnapshot.selection
+      ? t('ai.context.sourceSelection')
+      : contextSnapshot.context
+        ? t('ai.context.sourceRecentOutput')
+        : t('ai.context.sourceNoOutput');
 
   const panelContent = (
       <aside
@@ -1184,7 +1195,6 @@ export const AiPanel: React.FC = () => {
         </div>}
         <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
           <div className="flex min-w-0 items-center gap-2">
-            <SparklesIcon className="size-4 shrink-0 text-primary" />
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={(
@@ -1235,9 +1245,6 @@ export const AiPanel: React.FC = () => {
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Badge variant={providerKind === 'ollama' ? 'secondary' : 'outline'}>
-              {providerKind === 'ollama' ? t('ai.local') : t('ai.cloud')}
-            </Badge>
           </div>
           <div className="flex items-center gap-1">
             <DropdownMenu>
@@ -1372,6 +1379,20 @@ export const AiPanel: React.FC = () => {
 
         {activeSection === 'terminal' && !viewingHistory && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+            {activeSession && (
+              <div
+                data-testid="ai-host-binding"
+                className="flex min-w-full items-center gap-2 text-xs text-muted-foreground"
+              >
+                <ServerIcon className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  {t('ai.context.boundHost')}: {activeProfile?.name ?? activeSession.title}
+                  {' · '}
+                  {activeSession.username}@{activeSession.host}:{activeSession.port}
+                </span>
+                <Badge variant="outline">{boundContextSource}</Badge>
+              </div>
+            )}
             <Button
               variant="ghost"
               size="xs"
@@ -1493,23 +1514,23 @@ export const AiPanel: React.FC = () => {
               title={t('ai.emptyTitle')}
               description={t('ai.empty')}
               action={!viewingHistory ? (
-                <div className="flex max-w-xs flex-wrap justify-center gap-1.5">
+                <div className="flex max-w-xs flex-wrap justify-center gap-2">
                   {canExplain && (
-                    <Button variant="ghost" size="xs" onClick={handleExplain}>
+                    <Button variant="secondary" size="sm" onClick={handleExplain}>
                       <SquareTerminalIcon data-icon="inline-start" />
                       {t('ai.suggestion.analyzeOutput')}
                     </Button>
                   )}
                   <Button
-                    variant="ghost"
-                    size="xs"
+                    variant={canExplain ? 'outline' : 'secondary'}
+                    size="sm"
                     onClick={() => applySuggestedPrompt(t('ai.suggestion.troubleshoot'))}
                   >
                     {t('ai.suggestion.troubleshoot')}
                   </Button>
                   <Button
-                    variant="ghost"
-                    size="xs"
+                    variant="outline"
+                    size="sm"
                     onClick={() => applySuggestedPrompt(
                       t('ai.suggestion.healthCheck'),
                       'generateCommand',
@@ -1565,7 +1586,6 @@ export const AiPanel: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="xs"
-                          className="h-5 gap-1 px-1.5 text-[10px] [&_svg]:size-2.5"
                           onClick={() => void handleCopyCommand(message.id, command)}
                         >
                           {copiedCommandId === message.id
@@ -1647,7 +1667,7 @@ export const AiPanel: React.FC = () => {
         </span>
 
         <div className="shrink-0 p-3 pt-2">
-          <InputGroup className="min-h-28 rounded-2xl bg-card shadow-xs has-[[data-slot=input-group-control]:focus-visible]:ring-1">
+          <InputGroup className="min-h-24 rounded-2xl bg-card shadow-xs has-[[data-slot=input-group-control]:focus-visible]:ring-1">
             <InputGroupTextarea
               ref={composerRef}
               value={draft}
@@ -1671,7 +1691,7 @@ export const AiPanel: React.FC = () => {
                 : task === 'generateCommand'
                   ? t('ai.commandPlaceholder')
                   : t('ai.placeholder')}
-              className="min-h-18 max-h-48 px-3.5 pt-3 pb-1 leading-5"
+              className="min-h-14 max-h-48 px-3.5 pt-3 pb-1 leading-5"
             />
             <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
               {(agentNeedsResolution || (task === 'diagnosticAgent' && (!contextEnabled || !agentContext.context))) && (

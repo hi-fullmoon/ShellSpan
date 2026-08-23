@@ -61,6 +61,9 @@ export function useAppShortcuts(): void {
           setActiveSection('workbench');
           setActiveWorkbenchTab('settings');
           break;
+        case 'openCommandPalette':
+          document.dispatchEvent(new Event('termbridge:open-command-palette'));
+          break;
         case 'toggleAiPanel':
           useAiStore.getState().toggleOpen();
           break;

@@ -88,6 +88,14 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   value: ResizeObserverMock,
 });
 
+// jsdom deliberately leaves canvas rendering unimplemented and prints an
+// error whenever getContext() is called. Return null silently so components
+// exercise their intended no-canvas/CSS fallback without changing layout.
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+  configurable: true,
+  value: vi.fn(() => null),
+});
+
 // jsdom does not yet expose the ARIA reflection properties used by
 // react-resizable-panels to distinguish enabled separators.
 if (!('ariaDisabled' in Element.prototype)) {

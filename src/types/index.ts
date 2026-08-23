@@ -25,6 +25,7 @@ export type ShortcutAction =
   | 'openTerminal'
   | 'openSftp'
   | 'openSettings'
+  | 'openCommandPalette'
   | 'toggleAiPanel'
   | 'newTerminalTab'
   | 'closeTerminalTab'
@@ -88,6 +89,10 @@ export interface ConnectionProfile {
   privateKeyData?: string;
   passphrase?: string;
   jumpHost?: JumpHostConfig;
+  group?: string;
+  tags?: string[];
+  favorite?: boolean;
+  notes?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -101,6 +106,7 @@ export interface SessionSummary {
 }
 
 export interface SessionCreateRequest {
+  operationId?: string;
   name: string;
   host: string;
   port: number;
@@ -125,6 +131,38 @@ export interface RemoteConnectionRequest {
   privateKeyData?: string;
   passphrase?: string;
   jumpHost?: JumpHostConfig;
+}
+
+export type ConnectionPreflightStepId =
+  | 'dns'
+  | 'tcp'
+  | 'jumpHostKey'
+  | 'jumpAuthentication'
+  | 'jumpTunnel'
+  | 'hostKey'
+  | 'authentication';
+
+export type ConnectionPreflightStepStatus = 'passed' | 'warning' | 'failed' | 'blocked';
+
+export interface ConnectionPreflightStep {
+  id: ConnectionPreflightStepId;
+  status: ConnectionPreflightStepStatus;
+  detail: string;
+  host?: string;
+  port?: number;
+  fingerprint?: string;
+  trustable: boolean;
+}
+
+export interface ConnectionPreflightResult {
+  operationId: string;
+  status: 'passed' | 'attention' | 'failed' | 'cancelled';
+  checkedAt: number;
+  steps: ConnectionPreflightStep[];
+}
+
+export interface ConnectionPreflightRequest extends RemoteConnectionRequest {
+  operationId: string;
 }
 
 export interface RemoteFileEntry {
@@ -457,6 +495,7 @@ export interface ProfileRow {
   authMethod: AuthMethod;
   keychainKeyId?: string;
   jumpHostConfig?: string; // JSON serialized JumpHostConfig
+  organizationJson?: string; // JSON serialized non-secret organization metadata
   createdAt: number;
   updatedAt: number;
 }

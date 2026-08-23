@@ -94,14 +94,11 @@ const MarkdownContent = React.memo(function MarkdownContent({
           const code = textFromNode(codeChildren).replace(/\n$/, '');
           const copied = copiedCode === code;
           return (
-            <div className="group relative">
+            <div className="relative">
               <Button
                 variant="outline"
-                size="xs"
-                className={cn(
-                  'absolute right-1.5 top-1.5 h-5 gap-1 px-1.5 text-[10px] transition-opacity [&_svg]:size-2.5',
-                  !copied && 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
-                )}
+                size="sm"
+                className="absolute right-2 top-2"
                 onClick={() => copyCode(code)}
               >
                 {copied
@@ -109,7 +106,7 @@ const MarkdownContent = React.memo(function MarkdownContent({
                   : <ClipboardIcon data-icon="inline-start" />}
                 <span aria-live="polite">{copied ? copiedLabel : copyLabel}</span>
               </Button>
-              <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 pt-8 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
+              <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 pt-12 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
                 {codeChildren}
               </pre>
             </div>

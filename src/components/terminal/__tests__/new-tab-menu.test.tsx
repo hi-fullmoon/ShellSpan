@@ -197,6 +197,24 @@ describe('NewTabMenu', () => {
     expect(mockConnect).toHaveBeenCalledWith(p2);
   });
 
+  it('does not connect the selected profile when Enter is pressed on the workbench button', () => {
+    const profile = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
+    useProfileStore.setState({ profiles: [profile] });
+    const onClose = vi.fn();
+    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    const workbenchButton = screen.getByRole('button', {
+      name: 'terminal.newTabMenu.openWorkbench',
+    });
+    workbenchButton.focus();
+
+    fireEvent.keyDown(workbenchButton, { key: 'Enter' });
+    fireEvent.click(workbenchButton);
+
+    expect(mockConnect).not.toHaveBeenCalled();
+    expect(useAppStore.getState().activeSection).toBe('workbench');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the empty hint and opens workbench from footer when no profiles', () => {
     useProfileStore.setState({ profiles: [] });
 

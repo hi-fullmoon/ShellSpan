@@ -102,6 +102,7 @@ describe('TerminalContextMenu', () => {
     expect(screen.getByText('common.rename')).toBeInTheDocument();
     expect(screen.getByText('common.duplicate')).toBeInTheDocument();
     expect(screen.getByText('terminal.tab.copyInfo')).toBeInTheDocument();
+    expect(screen.getByText('terminal.tab.openSftp')).toBeInTheDocument();
     expect(screen.getByText('common.close')).toBeInTheDocument();
     expect(
       screen.getByText('terminal.tab.closeOthers'),
@@ -267,6 +268,65 @@ describe('TerminalContextMenu', () => {
       screen.getByText('terminal.tab.closeOthersConfirmTitle'),
     ).toBeInTheDocument();
     expect(useTerminalStore.getState().sessions).toHaveLength(2);
+  });
+
+  it('opens the profiled host in SFTP through the shared host-context event', () => {
+    const listener = vi.fn();
+    document.addEventListener('termbridge:connect-profile', listener);
+    const onClose = vi.fn();
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={makeSession('s1', 'A', 'p1')}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.openSftp'));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      profileId: 'p1',
+      target: 'sftp',
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    document.removeEventListener('termbridge:connect-profile', listener);
+  });
+
+  it('keeps the source split scope after the parent closes the context menu', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    addSession('s3', 'C');
+    addSession('s4', 'D');
+    const session = makeSession('s1', 'A');
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        orderedSessionIds={['s1', 's3']}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('terminal.tab.closeOthers'));
+    rerender(
+      <TerminalContextMenu
+        open={false}
+        x={0}
+        y={0}
+        session={null}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('common.close'));
+
+    expect(useTerminalStore.getState().sessions.map((item) => item.sessionId))
+      .toEqual(['s1', 's2', 's4']);
   });
 
   it('close others skips pinned sessions', () => {

@@ -40,6 +40,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const activatingRef = useRef(false);
 
   const activateOnce = useCallback((action: () => void): void => {
@@ -118,6 +119,7 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (document.activeElement !== searchInputRef.current) return;
       if (!hasResults) return;
 
       const isNext =
@@ -191,11 +193,12 @@ export const NewTabMenu: React.FC<NewTabMenuProps> = ({
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-app-text-soft" />
             <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('terminal.newTabMenu.searchPlaceholder')}
-            className="h-11 rounded-xl pl-10 pr-24 text-sm"
-            autoFocus
+              ref={searchInputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('terminal.newTabMenu.searchPlaceholder')}
+              className="h-11 rounded-xl pl-10 pr-24 text-sm"
+              autoFocus
             />
             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-app-border bg-app-surface-muted px-2 py-0.5 font-mono text-xs text-app-text-soft">
               {platform === 'macos' ? '⌘ K' : 'Ctrl K'}

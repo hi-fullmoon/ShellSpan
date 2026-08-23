@@ -30,6 +30,10 @@ import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { AiPanel } from '@/components/ai/ai-panel';
 import { finalizeAiSessionsBeforeExit } from '@/lib/ai-sessions';
+import { flushTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
+import { flushSftpWorkspace } from '@/lib/sftp-workspace-persistence';
+import { CommandPalette } from '@/components/command-palette';
+import { isTransferActive, useTransferStore } from '@/stores/transferStore';
 const logger = createLogger('app');
 
 const AppSections: React.FC = () => {
@@ -85,10 +89,17 @@ export const App: React.FC = () => {
   const requestAppExit = React.useCallback((): void => {
     if (exitInFlightRef.current) return;
     exitInFlightRef.current = true;
-    void finalizeAiSessionsBeforeExit()
-      .catch((error) => {
+    void Promise.all([
+      finalizeAiSessionsBeforeExit().catch((error) => {
         logger.warn('Failed to flush AI session history before exit', error);
-      })
+      }),
+      flushTerminalWorkspace().catch((error) => {
+        logger.warn('Failed to flush terminal workspace before exit', error);
+      }),
+      flushSftpWorkspace().catch((error) => {
+        logger.warn('Failed to flush SFTP workspace before exit', error);
+      }),
+    ])
       .then(() => invoke('request_app_exit'))
       .catch((error) => {
         exitInFlightRef.current = false;
@@ -142,6 +153,9 @@ export const App: React.FC = () => {
   const connectedSessions = useTerminalStore(
     (state) => state.sessions.filter((session) => session.status === 'connected').length,
   );
+  const activeTransfers = useTransferStore(
+    (state) => state.operations.filter(isTransferActive).length,
+  );
 
   const updatePhase = useUpdateStore((state) => state.phase);
   const updateVersion = useUpdateStore((state) => state.version);
@@ -193,7 +207,9 @@ export const App: React.FC = () => {
         open={exitDialogOpen}
         onOpenChange={setExitDialogOpen}
         title={t('app.exitConfirm.title')}
-        description={t('app.exitConfirm.description')}
+        description={activeTransfers > 0
+          ? t('app.exitConfirm.activeTransfers', { count: activeTransfers })
+          : t('app.exitConfirm.description')}
         confirmLabel={t('app.exitConfirm.confirm')}
         onConfirm={() => {
           setExitDialogOpen(false);
@@ -204,6 +220,7 @@ export const App: React.FC = () => {
       <UpdateRestartDialog
         downloadProgress={updateDownloadProgress}
         hasActiveSessions={connectedSessions > 0}
+        activeTransferCount={activeTransfers}
         onInstallNow={installUpdateNow}
         onLater={installUpdateLater}
         open={restartDialogOpen}
@@ -217,6 +234,7 @@ export const App: React.FC = () => {
       <CredentialPromptDialog />
       <KeychainKeyPromptDialog />
       <HostKeyDialogHost />
+      <CommandPalette />
 
       <Toaster />
     </AppShell>

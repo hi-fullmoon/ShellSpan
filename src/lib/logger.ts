@@ -1,3 +1,5 @@
+import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface Logger {
@@ -16,15 +18,15 @@ function isTauriRuntime(): boolean {
 
 function serializeDetail(detail: unknown): string {
   if (detail instanceof Error) {
-    return detail.stack ?? detail.message;
+    return redactTerminalSecrets(detail.stack ?? detail.message);
   }
   if (typeof detail === 'string') {
-    return detail;
+    return redactTerminalSecrets(detail);
   }
   try {
-    return JSON.stringify(detail) ?? String(detail);
+    return redactTerminalSecrets(JSON.stringify(detail) ?? String(detail));
   } catch {
-    return String(detail);
+    return redactTerminalSecrets(String(detail));
   }
 }
 

@@ -2093,7 +2093,7 @@ fn read_remote_file_inner(
 
 pub(crate) fn decode_preview_text(buffer: &[u8], allow_incomplete_tail: bool) -> Option<String> {
     if buffer.starts_with(&[0xff, 0xfe]) || buffer.starts_with(&[0xfe, 0xff]) {
-        if !allow_incomplete_tail && (buffer.len() - 2) % 2 != 0 {
+        if !allow_incomplete_tail && !(buffer.len() - 2).is_multiple_of(2) {
             return None;
         }
         let little_endian = buffer.starts_with(&[0xff, 0xfe]);

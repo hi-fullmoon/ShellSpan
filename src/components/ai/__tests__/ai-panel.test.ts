@@ -6,6 +6,7 @@ import { useAgentStore } from '@/stores/agentStore';
 import { useAiStore } from '@/stores/aiStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useProfileStore } from '@/stores/profileStore';
 import type { AiChatMessage } from '@/types/ai';
 import {
   AiPanel,
@@ -62,6 +63,80 @@ describe('terminal selection context', () => {
 });
 
 describe('terminal conversation binding', () => {
+  it('updates the explicit asset and host binding when the active terminal changes', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    const previousProfiles = useProfileStore.getState();
+    await initI18n('en-US');
+    useAiStore.getState().setOpen(true);
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useProfileStore.setState({
+      profiles: [
+        {
+          id: 'profile-a',
+          name: 'Production A',
+          host: 'a.example.com',
+          port: 22,
+          username: 'root',
+          authMethod: 'password',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        {
+          id: 'profile-b',
+          name: 'Staging B',
+          host: 'b.example.com',
+          port: 2222,
+          username: 'deploy',
+          authMethod: 'password',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    });
+    useTerminalStore.setState({
+      sessions: [
+        {
+          sessionId: 'session-a',
+          title: 'A',
+          host: 'a.example.com',
+          port: 22,
+          username: 'root',
+          status: 'connected',
+          profileId: 'profile-a',
+        },
+        {
+          sessionId: 'session-b',
+          title: 'B',
+          host: 'b.example.com',
+          port: 2222,
+          username: 'deploy',
+          status: 'connected',
+          profileId: 'profile-b',
+        },
+      ],
+      activeSessionId: 'session-a',
+    });
+
+    const { unmount } = render(createElement(AiPanel));
+    expect(screen.getByTestId('ai-host-binding')).toHaveTextContent(
+      'Bound host: Production A · root@a.example.com:22',
+    );
+    expect(screen.getByTestId('ai-host-binding')).toHaveTextContent('Source: no output');
+
+    act(() => useTerminalStore.getState().setActiveSession('session-b'));
+    expect(screen.getByTestId('ai-host-binding')).toHaveTextContent(
+      'Bound host: Staging B · deploy@b.example.com:2222',
+    );
+
+    unmount();
+    useAiStore.getState().setOpen(false);
+    useAppStore.setState(previousApp, true);
+    useTerminalStore.setState(previousTerminal, true);
+    useProfileStore.setState(previousProfiles, true);
+    await initI18n(previousApp.locale);
+  });
+
   it('keeps commands bound after a terminal reconnect changes sessionId', () => {
     expect(isMessageBoundToTerminal(
       { conversationId: 'conversation-1', sessionId: 'old-session' },

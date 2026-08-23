@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { generateId } from '@/lib/utils';
 import type {
+  ConnectionProfile,
   LocalFileEntry,
   RemoteConnectionRequest,
   RemoteFileEntry,
@@ -8,11 +9,13 @@ import type {
   SessionSummary,
 } from '@/types';
 import {
+  buildRemoteConnectionRequest,
   invokeListSftpBookmarks,
   invokeAddSftpBookmark,
   invokeRemoveSftpBookmark,
   invokeDisconnectSftp,
 } from '@/lib/tauri';
+import type { SavedSftpTab } from '@/lib/sftp-workspace';
 import { safeInvoke } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 import {
@@ -71,6 +74,7 @@ export interface SftpConnection {
   localOnly?: boolean;
   rightLocal?: boolean;
   splitRatio: number;
+  restorePending?: Partial<Record<SftpSide, boolean>>;
 }
 
 export interface SftpDirectoryListing {
@@ -130,6 +134,11 @@ interface SftpState {
     options?: { insertAfterId?: string; pinned?: boolean },
   ) => void;
   addLocalConnection: () => void;
+  addRestoredConnections: (
+    tabs: SavedSftpTab[],
+    activeConnectionId: string | null,
+    profiles: ConnectionProfile[],
+  ) => void;
   setPaneLocal: (id: string, side: SftpSide) => void;
   attachRemoteConnection: (
     id: string,
@@ -322,6 +331,79 @@ export const useSftpStore = create<SftpState>()((set) => ({
       return { connections: [...state.connections, conn], activeConnectionId: id };
     }),
 
+  addRestoredConnections: (tabs, savedActiveConnectionId, profiles) =>
+    set((state) => {
+      const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+      const restored = tabs.map((tab) => {
+        const leftProfile = tab.leftProfileId
+          ? profileById.get(tab.leftProfileId)
+          : undefined;
+        const rightProfile = tab.rightProfileId
+          ? profileById.get(tab.rightProfileId)
+          : undefined;
+        const leftSource = tab.leftSource === 'remote' && !leftProfile
+          ? 'local'
+          : tab.leftSource;
+        const rightSource = tab.rightSource === 'remote' && !rightProfile
+          ? 'empty'
+          : tab.rightSource;
+        const primaryProfile = rightProfile ?? leftProfile;
+        const request = primaryProfile
+          ? buildRemoteConnectionRequest(primaryProfile)
+          : { host: '', port: 22, username: '', authMethod: 'password' as const };
+        const connection = createDefaultConnection(
+          tab.id,
+          {
+            sessionId: tab.id,
+            title: tab.title,
+            host: primaryProfile?.host ?? '',
+            port: primaryProfile?.port ?? 22,
+            username: primaryProfile?.username ?? '',
+          },
+          request,
+          rightProfile?.id,
+        );
+        connection.sessionId = undefined;
+        connection.title = tab.title;
+        connection.pinned = tab.pinned;
+        connection.leftSource = leftSource;
+        connection.rightSource = rightSource;
+        connection.leftProfileId = leftProfile?.id;
+        connection.leftConnection = leftProfile
+          ? buildRemoteConnectionRequest(leftProfile)
+          : undefined;
+        connection.leftTitle = leftProfile?.name;
+        connection.profileId = rightProfile?.id;
+        connection.connection = rightProfile
+          ? buildRemoteConnectionRequest(rightProfile)
+          : request;
+        connection.localPath = leftSource === 'local' && tab.leftSource === 'remote'
+          ? ''
+          : tab.localPath;
+        connection.remotePath = tab.remotePath;
+        connection.remoteBookmarks = {
+          local: [...tab.remoteBookmarks.local],
+          remote: [...tab.remoteBookmarks.remote],
+        };
+        connection.splitRatio = tab.splitRatio;
+        connection.localOnly = leftSource !== 'remote' && rightSource !== 'remote';
+        connection.rightLocal = rightSource === 'local';
+        connection.restorePending = {
+          local: leftSource === 'remote',
+          remote: rightSource === 'remote',
+        };
+        activatePathOperationOwner(connection.id);
+        return connection;
+      });
+      if (restored.length === 0) return state;
+      const activeConnectionId = restored.some(
+        (connection) => connection.id === savedActiveConnectionId,
+      )
+        ? savedActiveConnectionId
+        : restored[0]?.id ?? null;
+      return { connections: restored, activeConnectionId };
+    }),
+
   setPaneLocal: (id, side) =>
     set((state) => ({
       connections: updateConnection(state, id, (current) => ({
@@ -332,6 +414,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
               leftConnection: undefined,
               leftTitle: undefined,
               leftProfileId: undefined,
+              restorePending: { ...current.restorePending, local: false },
               // The tab title follows the remaining remote pane; without one
               // the tab is local-only and must not keep a stale host name.
               ...(getSftpPaneSource(current, 'remote') === 'remote'
@@ -343,6 +426,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
               // Keep the left pane's remote title when it is the only remote
               // pane left, so the tab does not lose the host name.
               title: current.leftTitle ?? 'Local',
+              restorePending: { ...current.restorePending, remote: false },
             }),
         localOnly:
           side === 'local'
@@ -364,34 +448,40 @@ export const useSftpStore = create<SftpState>()((set) => ({
 
   attachRemoteConnection: (id, side, summary, connection, profileId) =>
     set((state) => ({
-      connections: updateConnection(state, id, (current) => ({
-        ...current,
-        ...(side === 'local'
-          ? {
-              leftSource: 'remote' as const,
-              leftConnection: connection,
-              leftTitle: summary.title,
-              leftProfileId: profileId,
-            }
-          : {
-              rightSource: 'remote' as const,
-              sessionId: summary.sessionId,
-              profileId,
-              title: summary.title,
-              connection,
-            }),
-        localOnly: false,
-        rightLocal: side === 'remote' ? false : current.rightLocal,
-        [getPathKey(side)]: '',
-        [getEntriesKey(side)]: [],
-        [getErrorKey(side)]: undefined,
-        [getPaneKey(side)]: createDefaultPaneState(),
-        remoteBookmarks: { ...current.remoteBookmarks, [side]: [] },
-        remoteClipboard:
-          current.remoteClipboard?.sourceSide === side
-            ? undefined
-            : current.remoteClipboard,
-      })),
+      connections: updateConnection(state, id, (current) => {
+        const wasRestored = current.restorePending?.[side] === true;
+        return {
+          ...current,
+          ...(side === 'local'
+            ? {
+                leftSource: 'remote' as const,
+                leftConnection: connection,
+                leftTitle: summary.title,
+                leftProfileId: profileId,
+              }
+            : {
+                rightSource: 'remote' as const,
+                sessionId: summary.sessionId,
+                profileId,
+                title: summary.title,
+                connection,
+              }),
+          localOnly: false,
+          rightLocal: side === 'remote' ? false : current.rightLocal,
+          [getPathKey(side)]: wasRestored ? current[getPathKey(side)] : '',
+          [getEntriesKey(side)]: [],
+          [getErrorKey(side)]: undefined,
+          [getPaneKey(side)]: createDefaultPaneState(),
+          restorePending: { ...current.restorePending, [side]: false },
+          remoteBookmarks: wasRestored
+            ? current.remoteBookmarks
+            : { ...current.remoteBookmarks, [side]: [] },
+          remoteClipboard:
+            current.remoteClipboard?.sourceSide === side
+              ? undefined
+              : current.remoteClipboard,
+        };
+      }),
       activeConnectionId: id,
     })),
 

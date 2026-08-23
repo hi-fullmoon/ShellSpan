@@ -209,7 +209,9 @@ describe('SftpContent upload queue', () => {
 
     renderContent(createConnection(['a.txt', 'b.txt']));
 
-    await capturedOnDrop!(['/local/a.txt', '/local/b.txt'], 'remote');
+    await React.act(async () => {
+      await capturedOnDrop!(['/local/a.txt', '/local/b.txt'], 'remote');
+    });
 
     // First conflict is presented.
     expect(await findConflictFileName('a.txt')).toBeInTheDocument();

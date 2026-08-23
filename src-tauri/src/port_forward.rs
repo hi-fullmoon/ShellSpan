@@ -80,9 +80,8 @@ pub(crate) fn start_port_forwards(
         let phrase = passphrase.clone();
         let jh = jump_host.clone();
         let cancel = cancel_flag.clone();
-        let kh: Option<std::path::PathBuf> = known_hosts_path
-            .as_deref()
-            .map(|s| std::path::PathBuf::from(s));
+        let kh: Option<std::path::PathBuf> =
+            known_hosts_path.as_deref().map(std::path::PathBuf::from);
 
         match config.kind {
             PortForwardKind::Local => {

@@ -152,6 +152,7 @@ export const TransferProgress: React.FC = () => {
         return (
           <div
             key={op.operationId}
+            data-error-category={op.errorCategory}
             className="relative flex h-8 items-center gap-2 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
           >
             {op.kind === 'delete' ? (

@@ -9,24 +9,47 @@ const locales: Record<Locale, Record<string, string>> = {
 };
 
 let initializedLocale: Locale | undefined;
+let initializingLocale: Locale | undefined;
+let initializationPromise: Promise<void> | undefined;
 
 export type LocaleKey = keyof typeof zhCN;
 
-export function initI18n(locale: Locale): Promise<void> {
-  initializedLocale = locale;
-  return intl.init({
+function initializeLocale(locale: Locale): Promise<void> {
+  if (initializingLocale === locale && initializationPromise) {
+    return initializationPromise;
+  }
+
+  initializingLocale = locale;
+  const pending = intl.init({
     currentLocale: locale,
     locales,
   });
+  const tracked = pending.then(() => {
+    if (initializationPromise === tracked) {
+      initializedLocale = locale;
+      initializingLocale = undefined;
+      initializationPromise = undefined;
+    }
+  }, (error: unknown) => {
+    if (initializationPromise === tracked) {
+      initializingLocale = undefined;
+      initializationPromise = undefined;
+    }
+    throw error;
+  });
+  initializationPromise = tracked;
+  return initializationPromise;
+}
+
+export function initI18n(locale: Locale): Promise<void> {
+  return initializeLocale(locale);
 }
 
 export function changeLocale(locale: Locale): Promise<void> {
-  if (initializedLocale === locale) return Promise.resolve();
-  initializedLocale = locale;
-  return intl.init({
-    currentLocale: locale,
-    locales,
-  });
+  if (initializedLocale === locale && initializingLocale === undefined) {
+    return Promise.resolve();
+  }
+  return initializeLocale(locale);
 }
 
 export function t(key: LocaleKey, variables?: Record<string, string | number>): string {
