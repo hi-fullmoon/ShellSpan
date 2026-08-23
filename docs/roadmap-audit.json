@@ -233,6 +233,10 @@
           "status": "not-met",
           "finding": "三个目标均无可复核的直接需求或真实设备试用队列；公开 issue 入口受限，零结果不能证明没有需求。"
         },
+        "userValue": {
+          "status": "not-met",
+          "finding": "没有现有用户因不支持候选平台而阻断核心任务的证据，也没有候选包对照试用能证明原生发行相对维持现有矩阵的可测量价值。"
+        },
         "maintenanceCost": {
           "status": "unknown",
           "finding": "尚未取得候选构建时长、缓存、平台缺陷与 runner 生命周期成本；Linux 发行版差异、Intel runner 镜像迁移/最终退出和 Windows ARM preview runner 均未形成维护方案。"
@@ -277,6 +281,10 @@
           "status": "not-met",
           "finding": "公开 backup、备份与 migration issue 查询均为 0 且 issue 创建受限；只有个人运维用户换机/重装的假设，没有直接需求、数据范围偏好或真实设备试用队列。"
         },
+        "userValue": {
+          "status": "not-met",
+          "finding": "没有换机/重装的人工耗时、失败率或恢复目标证据，也未区分现有无秘密连接导出已解决的价值与完整备份才能提供的增量价值。"
+        },
         "maintenanceCost": {
           "status": "unknown",
           "finding": "可复用 JSON 校验、SQLite、钥匙串和原子导出基础，但密码学 suite/参数升级、旧格式、跨存储补偿、两平台真实迁移和安全公告响应成本尚无候选实现数据。"
@@ -296,6 +304,59 @@
         "automatedTesting": {
           "status": "not-met",
           "finding": "现有测试只覆盖连接无秘密导出/补偿、数据库与工作区 CRUD、Runbook 校验、诊断脱敏和操作记录原子导出；没有密码学、原子备份、全范围预检、钥匙串补偿或真实两设备迁移测试。"
+        }
+      }
+    },
+    {
+      "id": "explore-extension-data-contracts",
+      "phase": "EXPLORE",
+      "title": "连接、Runbook 和主题的扩展格式与插件 API 前置契约",
+      "roadmapItem": "连接、Runbook 和主题的扩展格式；先定义稳定数据契约，再评估插件 API。",
+      "status": "researching",
+      "decision": "candidate",
+      "decisionRationale": "稳定纯数据契约是任何外部生产者或插件 API 的架构前置，但直接用户需求与增量价值未证明；连接、Runbook 和主题/设置也未同时满足严格未知字段、大小/数量、双端复验、N-1 迁移、回滚与跨平台门禁。保持候选，不实现扩展格式或插件能力。",
+      "necessary": false,
+      "necessityFinding": "对外生产者准入时必须先有稳定契约，但仓库尚无可复核的扩展任务失败、用户请求或真实文件试用队列，不能证明现在建立三个新的对外兼容面确有必要。",
+      "owner": "maintainers",
+      "risk": "将宽松前端类型、内部 SQLite/CSS 结构或只有 v1 的 Runbook 直接暴露会静默丢字段、接受超大文件、泄露设备秘密引用、绕过后端风险重验证，并把内部实现锁死为无法持续维护的公共 API；插件运行时还会引入任意代码、凭据、文件和网络权限。",
+      "failurePath": "任一准入证据缺失即保持 candidate/researching；扩展文件候选必须在任何写入/执行前拒绝过大、过多、无效版本、未知必需字段、重复/悬空引用和秘密边界违反；在稳定契约验收前插件 API 必须保持 blocked。",
+      "recovery": "本次不产生新外部格式或运行时；未来候选使用无写入预检、冲突默认跳过、SQLite 事务/外部资源逆序补偿、主题原子切回和临时文件 sync 后原子替换；较新/无效文件保持只读，现有数据与当前主题不变。",
+      "testStrategy": "三种格式分别建立当前/N-1/较新必需金色夹具；共享 TS/Rust Unicode/边界 corpus；覆盖读取前字节上限、嵌套严格字段、数量/长度、秘密引用、无写入预检、冲突、原子导出、SQLite/外部资源补偿、主题可读性与失败恢复；在 Windows x86_64/macOS ARM 执行文件和干净环境 E2E。",
+      "extensionGates": {
+        "dataContract": "not-established",
+        "pluginApi": "blocked",
+        "finding": "三种格式中只有 Runbook v1 接近可审阅契约；用户价值、完整版本/故障门禁和稳定性验收均未完成，故不建立新契约且不开始插件 API 评估。"
+      },
+      "evidence": ["docs/explore-extension-contracts-assessment.md", "docs/runbook-format.md", "docs/review-process.md", "src/lib/connection-import.ts", "src/lib/runbook.ts", "src-tauri/src/runbook.rs", "src/stores/appStore.ts", "src-tauri/src/db.rs", "src/lib/theme.ts", "src/types/index.ts", "src/styles/base.css", "src/components/terminal/registry/terminal-registry.ts", "scripts/check-roadmap-audit.mjs"],
+      "tests": ["src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src/lib/__tests__/runbook.test.ts", "src-tauri/src/runbook.rs", "src/lib/__tests__/theme.test.ts", "src/stores/__tests__/appStore.test.ts", "src/components/terminal/__tests__/terminal-registry.test.ts", "src/components/terminal/__tests__/terminal-controller-layer.test.tsx", "src-tauri/src/db.rs", "scripts/__tests__/check-roadmap-audit.test.mjs"],
+      "criteria": {
+        "userGroup": {
+          "status": "not-met",
+          "finding": "只有需要用版本控制分享连接模板/Runbook 或自定义配色的个人运维用户假设；公开 plugin、extension、theme 和 runbook issue 查询为 0 且创建受限，无直接需求或真实文件试用队列。"
+        },
+        "userValue": {
+          "status": "not-met",
+          "finding": "降低重复配置、人工转换和审阅成本只是价值假设；没有任务频率、耗时、失败成本或与内置预设/现有导出的对照证据。"
+        },
+        "maintenanceCost": {
+          "status": "unknown",
+          "finding": "需长期维护三个版本窗口、双端验证器、迁移器、金色夹具、故障注入、两平台文件语义和主题可读性；没有候选实现的 CI 时长、夹具体积、缺陷率或月度成本。"
+        },
+        "crossPlatformImplementation": {
+          "status": "unknown",
+          "finding": "纯 UTF-8 JSON 可在正式 Windows x86_64/macOS ARM 共用，但连接文件尚无双端重验证，Runbook 的 TS/Rust 长度边界不同，主题也无文件实现；两平台原子覆盖、权限/链接和导入 E2E 未验证。"
+        },
+        "securityModel": {
+          "status": "not-met",
+          "finding": "Runbook v1 已有严格未知字段、上限、有限 keychainRef 与后端重验证；但连接文件可无界读取且根/profile 忽略未知字段，主题/设置无外部白名单。这些差异不能作为不受信任扩展边界。"
+        },
+        "upgradeStrategy": {
+          "status": "not-met",
+          "finding": "连接 v1–v3 以可选字段兼容而无显式迁移器/夹具，Runbook 只有 v1，主题/preferences 没有对外版本；无共享的 N-1、较新必需格式失败关闭、支持窗口或原子导出/回滚证据。"
+        },
+        "automatedTesting": {
+          "status": "not-met",
+          "finding": "既有连接、Runbook、主题与设置测试是可复用基础；缺少三格式金色夹具、TS/Rust 共享 corpus、大小/数量与较新格式系统回归、故障注入、主题恢复和 Windows/macOS 文件 E2E。"
         }
       }
     }
