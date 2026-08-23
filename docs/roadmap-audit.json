@@ -210,6 +210,48 @@
       "testStrategy": "复核 Runbook、多主机、AI 和操作记录的既有状态机与安全测试；新增批准事件精确命令绑定、多主机父任务关联、命令/风险结果错配和多主机命令二次脱敏回归，并运行全套阶段门禁",
       "evidence": ["docs/later-exit-criteria.md", "docs/operation-history.md", "src/lib/operation-history.ts", "src/lib/tauri.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx", "src-tauri/src/operation_history.rs"],
       "tests": ["src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/lib/__tests__/diagnostic-agent.test.ts", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "src-tauri/src/runbook.rs", "src-tauri/src/ai.rs", "src-tauri/src/operation_history.rs", "scripts/run-ssh-e2e.ps1"]
+    },
+    {
+      "id": "explore-portability-targets",
+      "phase": "EXPLORE",
+      "title": "Linux x86_64 正式发行与 macOS Intel / Windows ARM 需求评估",
+      "status": "researching",
+      "decision": "candidate",
+      "decisionRationale": "公开需求与真实设备试用证据不足，三个目标的安全、升级和自动化发行门禁也未闭合；保持候选，不修改正式发行矩阵。",
+      "necessary": false,
+      "necessityFinding": "尚无直接需求、目标平台阻断或候选试用证据，不能证明新增正式发行相对维持现有矩阵确有必要。",
+      "owner": "maintainers",
+      "risk": "把可编译意图误当正式支持会让未验证的原生凭证存储、安装签名、架构产物或更新路径直接面向用户，并形成无法持续维护的平台承诺",
+      "failurePath": "任一准入项缺少证据即保持 candidate/researching；实验失败不得写入稳定 latest.json，不得增加明文秘密回退，也不得影响现有 macOS ARM 与 Windows x86_64 发行",
+      "recovery": "撤回未发布的候选构建并保留现有正式矩阵；收集显式用户需求、锁定支持基线，在隔离候选渠道补齐目标平台安全、安装和 N-1 升级证据后重新评审",
+      "testStrategy": "Linux 原生全量 Rust 与真实 Secret Service/PTY/GUI/SSH/SFTP/AppImage/更新测试；macOS Intel 和 Windows ARM 原生 runner 上的凭证、PTY、架构、安装签名与 N-1 更新测试；发布清单精确平台集合与失败关闭回归",
+      "evidence": ["docs/explore-portability-assessment.md", ".github/workflows/quality-gate.yml", ".github/workflows/cache-warm.yml", ".github/workflows/release.yml", "scripts/build-updater-json.mjs", "scripts/__tests__/build-updater-json.test.mjs", "src-tauri/Cargo.toml", "src-tauri/src/keychain.rs", "src/lib/platform.ts"],
+      "criteria": {
+        "userGroup": {
+          "status": "not-met",
+          "finding": "三个目标均无可复核的直接需求或真实设备试用队列；公开 issue 入口受限，零结果不能证明没有需求。"
+        },
+        "maintenanceCost": {
+          "status": "unknown",
+          "finding": "尚未取得候选构建时长、缓存、平台缺陷与 runner 生命周期成本；Linux 发行版差异、Intel runner 镜像迁移/最终退出和 Windows ARM preview runner 均未形成维护方案。"
+        },
+        "crossPlatformImplementation": {
+          "status": "unknown",
+          "finding": "Linux 条件编译与 updater 生成器已有部分基础，但三个目标都没有完整的目标机器构建、桌面集成、核心链路和发行证据。"
+        },
+        "securityModel": {
+          "status": "unknown",
+          "finding": "秘密存储设计保持原生存储不可用时失败关闭，但 Linux Secret Service 与目标架构 Keychain/Credential Manager 未做真实集成，首次安装签名边界也未闭合。"
+        },
+        "upgradeStrategy": {
+          "status": "unknown",
+          "finding": "尚未为 Linux 选择单一主要载体，也没有三个目标的独立 manifest、错误架构拒绝、N-1 更新与失败恢复证据。"
+        },
+        "automatedTesting": {
+          "status": "not-met",
+          "finding": "现有 CI 不含 Linux 全量 Rust、macOS Intel 或 Windows ARM 门禁，release/cache matrix 与发布后校验也只覆盖 macOS ARM 和 Windows x86_64。"
+        }
+      }
     }
   ]
 }
