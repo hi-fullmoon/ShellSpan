@@ -215,6 +215,7 @@
       "id": "explore-portability-targets",
       "phase": "EXPLORE",
       "title": "Linux x86_64 正式发行与 macOS Intel / Windows ARM 需求评估",
+      "roadmapItem": "Linux x86_64 正式发行，以及 macOS Intel / Windows ARM 的需求评估。",
       "status": "researching",
       "decision": "candidate",
       "decisionRationale": "公开需求与真实设备试用证据不足，三个目标的安全、升级和自动化发行门禁也未闭合；保持候选，不修改正式发行矩阵。",
@@ -226,6 +227,7 @@
       "recovery": "撤回未发布的候选构建并保留现有正式矩阵；收集显式用户需求、锁定支持基线，在隔离候选渠道补齐目标平台安全、安装和 N-1 升级证据后重新评审",
       "testStrategy": "Linux 原生全量 Rust 与真实 Secret Service/PTY/GUI/SSH/SFTP/AppImage/更新测试；macOS Intel 和 Windows ARM 原生 runner 上的凭证、PTY、架构、安装签名与 N-1 更新测试；发布清单精确平台集合与失败关闭回归",
       "evidence": ["docs/explore-portability-assessment.md", ".github/workflows/quality-gate.yml", ".github/workflows/cache-warm.yml", ".github/workflows/release.yml", "scripts/build-updater-json.mjs", "scripts/__tests__/build-updater-json.test.mjs", "src-tauri/Cargo.toml", "src-tauri/src/keychain.rs", "src/lib/platform.ts"],
+      "tests": ["scripts/__tests__/build-updater-json.test.mjs", "src-tauri/src/keychain.rs", "scripts/run-ssh-e2e.ps1"],
       "criteria": {
         "userGroup": {
           "status": "not-met",
@@ -250,6 +252,50 @@
         "automatedTesting": {
           "status": "not-met",
           "finding": "现有 CI 不含 Linux 全量 Rust、macOS Intel 或 Windows ARM 门禁，release/cache matrix 与发布后校验也只覆盖 macOS ARM 和 Windows x86_64。"
+        }
+      }
+    },
+    {
+      "id": "explore-local-backup-migration",
+      "phase": "EXPLORE",
+      "title": "安全的加密备份与设备迁移",
+      "roadmapItem": "安全的加密备份与设备迁移；优先本地文件，不默认引入账户体系。",
+      "status": "researching",
+      "decision": "candidate",
+      "decisionRationale": "没有可复核的直接用户需求或真实设备试用队列；现有连接导出、数据库、Runbook、工作区、钥匙串与诊断链路也缺少统一版本化清单、认证加密、跨存储事务和迁移门禁。保持本地文件候选，不实现账户、同步或秘密迁移。",
+      "necessary": false,
+      "necessityFinding": "连接无秘密导出已经覆盖部分便携需求，但尚无证据证明用户需要完整设备迁移、工作区迁移或秘密迁移，也无法证明新增密码学与跨平台恢复维护面确有必要。",
+      "owner": "maintainers",
+      "risk": "把原始数据库或分散文件直接封装会泄露 API Key、主机/路径/命令等敏感元数据，产生陈旧 profile/keychain 引用；错误口令、篡改、写入中断或钥匙串部分失败还可能覆盖本机配置并留下孤儿凭据",
+      "failurePath": "任一准入项缺证据即保持 candidate/researching；未来候选必须在任何写入前完成大小/KDF/版本/完整性/范围预检，冲突默认跳过，秘密默认排除，未知必需格式、错口令、篡改、无效路径或钥匙串不可用均失败关闭",
+      "recovery": "本次不产生备份实现；未来导出只允许临时密文、sync 与原子替换，导入保持源文件只读并以 SQLite 事务和钥匙串逆序补偿恢复导入前状态，补偿失败必须列出可定位的待清理项后允许重新预检",
+      "testStrategy": "版本化 envelope/manifest/section 金色夹具与 N-1 兼容；错口令、篡改、截断、恶意 KDF 参数、默认无秘密和敏感范围预览；原子写入故障注入；profile ID 重映射、冲突默认跳过、SQLite/钥匙串部分失败与补偿；Windows/macOS 原生凭据和真实两设备迁移 E2E",
+      "evidence": ["docs/explore-local-backup-assessment.md", "src/lib/connection-import.ts", "src/stores/profileStore.ts", "src-tauri/src/db.rs", "src-tauri/src/keychain.rs", "src/lib/runbook.ts", "src-tauri/src/runbook.rs", "src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/stores/appStore.ts", "src/stores/aiSettingsStore.ts", "src-tauri/src/ai.rs", "src/lib/diagnostic-bundle.ts", "src-tauri/src/operation_history.rs", "src-tauri/src/ai_sessions.rs", "src-tauri/src/known_hosts.rs"],
+      "tests": ["src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src-tauri/src/db.rs", "src-tauri/src/keychain.rs", "src/lib/__tests__/runbook.test.ts", "src-tauri/src/runbook.rs", "src/lib/__tests__/terminal-workspace.test.ts", "src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/lib/__tests__/diagnostic-bundle.test.ts", "src-tauri/src/operation_history.rs", "src/stores/__tests__/aiSettingsStore.test.ts", "src-tauri/src/ai.rs"],
+      "criteria": {
+        "userGroup": {
+          "status": "not-met",
+          "finding": "公开 backup、备份与 migration issue 查询均为 0 且 issue 创建受限；只有个人运维用户换机/重装的假设，没有直接需求、数据范围偏好或真实设备试用队列。"
+        },
+        "maintenanceCost": {
+          "status": "unknown",
+          "finding": "可复用 JSON 校验、SQLite、钥匙串和原子导出基础，但密码学 suite/参数升级、旧格式、跨存储补偿、两平台真实迁移和安全公告响应成本尚无候选实现数据。"
+        },
+        "crossPlatformImplementation": {
+          "status": "unknown",
+          "finding": "本地文件与语义清单可跨平台，Windows/macOS 也已有原生钥匙串入口；但没有备份模块、稳定 ID 重映射、文件权限/原子替换和两种原生凭据的迁移实现或集成证据。"
+        },
+        "securityModel": {
+          "status": "not-met",
+          "finding": "没有直接 KDF/AEAD 依赖、备份容器、完整性验证或秘密生命周期测试；preferences 还包含写入 SQLite 的 AI API Key，故原始数据库和整表设置复制都不满足默认无秘密与不落盘新明文凭据。"
+        },
+        "upgradeStrategy": {
+          "status": "unknown",
+          "finding": "连接、Runbook 和 SFTP 工作区各自版本化，但终端工作区无版本，内部数据库 schema 不能作为外部备份契约，也没有 envelope/section 迁移器、N-1 夹具或较新格式失败关闭证据。"
+        },
+        "automatedTesting": {
+          "status": "not-met",
+          "finding": "现有测试只覆盖连接无秘密导出/补偿、数据库与工作区 CRUD、Runbook 校验、诊断脱敏和操作记录原子导出；没有密码学、原子备份、全范围预检、钥匙串补偿或真实两设备迁移测试。"
         }
       }
     }

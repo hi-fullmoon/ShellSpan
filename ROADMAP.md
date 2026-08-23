@@ -193,6 +193,8 @@ TermBridge 当前已经具备四条清晰的产品主链路：
 
 首项审核状态（2026-08-23）：调研中，保持候选。Linux x86_64、macOS Intel 与 Windows ARM 均未满足全部准入条件；没有改动正式发行矩阵。用户群、维护成本、跨平台实现、安全模型、升级策略和自动化测试方案的逐项证据见 `docs/explore-portability-assessment.md` 与 `docs/roadmap-audit.json`。探索证据齐全后仍需独立评审，不自动转为承诺。
 
+第二项审核状态（2026-08-23）：调研中，保持候选。现有连接导出、SQLite、Runbook、工作区、原生钥匙串、诊断与操作记录链路尚未形成一致的加密备份契约；直接用户需求、认证加密、跨存储回滚、升级夹具和跨平台迁移门禁也未满足。本次没有新增备份实现、账户或同步能力。范围清单、安全模型、失败/恢复语义和测试门槛见 `docs/explore-local-backup-assessment.md` 与 `docs/roadmap-audit.json`。
+
 ---
 
 ## 暂不进入范围

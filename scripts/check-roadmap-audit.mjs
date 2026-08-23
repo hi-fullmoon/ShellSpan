@@ -2,7 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
-const auditPath = resolve(root, 'docs/roadmap-audit.json');
+const auditPath = resolve(root, process.env.TERMBRIDGE_ROADMAP_AUDIT_PATH ?? 'docs/roadmap-audit.json');
 const roadmapPath = resolve(root, 'ROADMAP.md');
 const allowedPhases = new Set(['NOW', 'NEXT', 'LATER', 'EXPLORE']);
 const allowedStatuses = new Set(['planned', 'in-progress', 'verified', 'blocked', 'deferred', 'researching']);
@@ -36,6 +36,12 @@ const [rawAudit, roadmap] = await Promise.all([
   readFile(roadmapPath, 'utf8'),
 ]);
 const audit = JSON.parse(rawAudit);
+const roadmapItems = new Set(
+  roadmap
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.slice(2)),
+);
 
 if (audit.schemaVersion !== 1) fail('schemaVersion must be 1');
 if (!Array.isArray(audit.items) || audit.items.length === 0) fail('items must not be empty');
@@ -48,6 +54,7 @@ if (reviewAgeDays > maximumReviewAgeDays) {
 }
 
 const ids = new Set();
+const exploreRoadmapItems = new Set();
 for (const item of audit.items) {
   for (const field of ['id', 'phase', 'title', 'status', 'owner', 'risk', 'failurePath', 'recovery', 'testStrategy']) {
     if (typeof item[field] !== 'string' || item[field].trim() === '') {
@@ -72,6 +79,20 @@ for (const item of audit.items) {
     fail(`${item.id} uses researching outside EXPLORE`);
   }
   if (item.phase === 'EXPLORE') {
+    if (typeof item.roadmapItem !== 'string' || item.roadmapItem.trim() === '') {
+      fail(`${item.id} is missing roadmapItem`);
+    }
+    if (!roadmapItems.has(item.roadmapItem)) {
+      fail(`${item.id} roadmapItem is not an exact ROADMAP item: ${item.roadmapItem}`);
+    }
+    if (exploreRoadmapItems.has(item.roadmapItem)) {
+      fail(`duplicate EXPLORE roadmapItem: ${item.roadmapItem}`);
+    }
+    exploreRoadmapItems.add(item.roadmapItem);
+    if (!Array.isArray(item.tests) || item.tests.length === 0) {
+      fail(`${item.id} needs existing test evidence while researching EXPLORE`);
+    }
+    await Promise.all(item.tests.map((path) => assertEvidenceExists(item, path)));
     if (!allowedExploreDecisions.has(item.decision)) {
       fail(`${item.id} has invalid EXPLORE decision ${item.decision}`);
     }
