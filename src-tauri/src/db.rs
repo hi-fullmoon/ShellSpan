@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 4;
+const CURRENT_SCHEMA_VERSION: i32 = 5;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -121,6 +121,46 @@ INSERT INTO schema_version (version) VALUES (4);
 COMMIT;
 ";
 
+const SCHEMA_V5: &str = "
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS operation_history_events (
+    event_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    parent_operation_id TEXT,
+    occurred_at INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    action TEXT NOT NULL,
+    event_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    risk TEXT,
+    subject_id TEXT,
+    primary_profile_id TEXT,
+    targets_json TEXT NOT NULL,
+    command_preview TEXT,
+    evidence_json TEXT NOT NULL,
+    error_category TEXT,
+    retry_of_operation_id TEXT,
+    item_count INTEGER,
+    byte_count INTEGER,
+    exit_code INTEGER,
+    batch_index INTEGER,
+    batch_total INTEGER,
+    concurrency_limit INTEGER,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_operation_history_task_time
+    ON operation_history_events(task_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_operation_history_time
+    ON operation_history_events(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_operation_history_category_status
+    ON operation_history_events(category, status, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_operation_history_profile_time
+    ON operation_history_events(primary_profile_id, occurred_at DESC);
+INSERT INTO schema_version (version) VALUES (5);
+COMMIT;
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -185,7 +225,23 @@ impl Database {
                 .map_err(|e| format!("migration v4 failed: {e}"))?;
         }
 
+        if current < 5 {
+            conn.execute_batch(SCHEMA_V5)
+                .map_err(|e| format!("migration v5 failed: {e}"))?;
+        }
+
         Ok(())
+    }
+
+    pub(crate) fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        operation(&conn)
     }
 
     // --- Profiles ---
@@ -853,6 +909,8 @@ mod tests {
         conn.execute("SELECT 1 FROM sftp_workspace LIMIT 0", [])
             .unwrap();
         conn.execute("SELECT 1 FROM key_credentials LIMIT 0", [])
+            .unwrap();
+        conn.execute("SELECT 1 FROM operation_history_events LIMIT 0", [])
             .unwrap();
         let has_secret_value_column: bool = conn
             .prepare("PRAGMA table_info(key_credentials)")

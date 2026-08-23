@@ -55,6 +55,7 @@ import {
   summarizeMultiHostRunbookTask,
 } from '@/lib/multi-host-runbook';
 import { createOperationId } from '@/lib/operation-id';
+import { recordOperationHistoryTransition } from '@/lib/operation-history';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
 import {
   buildRemoteConnectionRequest,
@@ -71,6 +72,11 @@ import type {
   MultiHostRunbookTask,
 } from '@/types/multi-host-runbook';
 import type { RunbookRisk, RunbookRunItem } from '@/types/runbook';
+import type {
+  OperationHistoryErrorCategory,
+  OperationHistoryEventKind,
+  OperationHistoryStatus,
+} from '@/types/operation-history';
 
 interface MultiHostRunbookExecutionProps {
   initialTask: MultiHostRunbookTask;
@@ -109,6 +115,36 @@ function itemStatusVariant(status: RunbookRunItem['status']): 'default' | 'outli
   return 'outline';
 }
 
+function historyStatus(status: MultiHostRunbookHostStatus): OperationHistoryStatus {
+  if (status === 'succeeded') return 'succeeded';
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'timedOut') return 'timedOut';
+  if (status === 'identityMismatch') return 'identityMismatch';
+  if (status === 'failed' || status === 'staleEvidence') return 'failed';
+  if (status === 'cancelling') return 'cancelling';
+  if (status === 'awaitingApproval' || status === 'queuedPreflight' || status === 'queuedStep') return 'pending';
+  return 'running';
+}
+
+function historyError(host: MultiHostRunbookHost): OperationHistoryErrorCategory | undefined {
+  const kind = host.failure?.kind;
+  if (!kind) return undefined;
+  if (kind === 'timedOut') return 'timeout';
+  if (kind === 'identityMismatch') return 'identityMismatch';
+  if (kind === 'staleEvidence') return 'staleEvidence';
+  if (kind === 'targetChanged') return 'targetChanged';
+  if (kind === 'credentialUnavailable') return 'credentialUnavailable';
+  if (kind === 'cancelled') return 'cancelled';
+  return 'unknown';
+}
+
+function historyEventKind(status: MultiHostRunbookHostStatus): OperationHistoryEventKind {
+  if (status === 'succeeded' || status === 'cancelled') return 'completed';
+  if (['failed', 'timedOut', 'staleEvidence', 'identityMismatch'].includes(status)) return 'failed';
+  if (status === 'preflighting' || status === 'runningStep') return 'started';
+  return 'statusChanged';
+}
+
 export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps> = ({
   initialTask,
   profiles,
@@ -124,7 +160,101 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
   const lifecycleGenerationRef = useRef(0);
   const preparedProfilesRef = useRef(new Map<string, CachedPreparedProfile>());
 
+  const recordHostTransition = (
+    currentTask: MultiHostRunbookTask,
+    host: MultiHostRunbookHost,
+    eventKind = historyEventKind(host.status),
+    status = historyStatus(host.status),
+  ): void => {
+    const item = host.run.items.find((entry) => entry.id === host.run.activeItemId)
+      ?? host.run.items.find((entry) => entry.id === host.failure?.itemId);
+    void recordOperationHistoryTransition({
+      taskId: currentTask.id,
+      operationId: host.activeOperationId ?? host.failure?.operationId ?? host.run.id,
+      category: 'multiHost',
+      action: 'executeMultiHostRunbook',
+      eventKind,
+      status,
+      risk: item?.risk ?? 'readOnly',
+      subjectId: item?.id,
+      targets: [{
+        kind: 'remote',
+        profileId: host.target.profileId,
+        host: host.target.host,
+        port: host.target.port,
+        username: host.target.username,
+      }],
+      evidence: host.run.items.flatMap((entry) => entry.evidence ? [{
+        operationId: entry.evidence.operationId,
+        kind: 'runbookStep' as const,
+        observedAt: entry.evidence.completedAt,
+        digest: currentTask.sourceDigest,
+      }] : []),
+      errorCategory: historyError(host),
+      retryOfOperationId: eventKind === 'retryRequested'
+        ? host.failure?.operationId
+        : undefined,
+      batchIndex: host.batchIndex + 1,
+      batchTotal: multiHostRunbookBatchCount(currentTask),
+      concurrencyLimit: currentTask.config.concurrencyLimit,
+    });
+  };
+
+  const recordTaskSummary = (
+    currentTask: MultiHostRunbookTask,
+    eventKind: OperationHistoryEventKind,
+  ): void => {
+    const summary = summarizeMultiHostRunbookTask(currentTask);
+    const status: OperationHistoryStatus = summary.outcome === 'succeeded'
+      ? 'succeeded'
+      : summary.outcome === 'partialSuccess'
+        ? 'partialSuccess'
+        : summary.outcome === 'failed'
+          ? 'failed'
+          : summary.outcome === 'cancelled'
+            ? 'cancelled'
+            : summary.outcome === 'awaitingApproval'
+              ? 'pending'
+              : 'running';
+    const first = currentTask.hosts[0];
+    if (!first) return;
+    void recordOperationHistoryTransition({
+      taskId: currentTask.id,
+      operationId: currentTask.id,
+      category: 'multiHost',
+      action: 'executeMultiHostRunbook',
+      eventKind,
+      status,
+      risk: 'readOnly',
+      targets: [{
+        kind: 'remote',
+        profileId: first.target.profileId,
+        host: first.target.host,
+        port: first.target.port,
+        username: first.target.username,
+      }],
+      itemCount: currentTask.hosts.length,
+      batchTotal: multiHostRunbookBatchCount(currentTask),
+      concurrencyLimit: currentTask.config.concurrencyLimit,
+    });
+  };
+
   const publish = (next: MultiHostRunbookTask): void => {
+    const previous = taskRef.current;
+    for (const host of next.hosts) {
+      const before = previous.hosts.find((entry) => entry.target.profileId === host.target.profileId);
+      if (before?.status !== host.status || before?.attempt !== host.attempt) {
+        recordHostTransition(next, host);
+      }
+    }
+    const previousOutcome = summarizeMultiHostRunbookTask(previous).outcome;
+    const nextOutcome = summarizeMultiHostRunbookTask(next).outcome;
+    if (previousOutcome !== nextOutcome) {
+      recordTaskSummary(
+        next,
+        isMultiHostRunbookTaskTerminal(next) ? 'completed' : 'statusChanged',
+      );
+    }
     taskRef.current = next;
     setTask(next);
     onTaskChange(next);
@@ -217,6 +347,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
 
         const settled = await Promise.all(preparedDispatches.map(async ({ dispatch, prepared }) => {
           try {
+            const currentHost = taskRef.current.hosts.find((host) => host.target.profileId === dispatch.profileId);
             const value = await invokeExecuteRunbookStep({
               operationId: dispatch.operationId,
               runId: dispatch.runId,
@@ -228,6 +359,12 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
               authorized: true,
               approvedRisk: dispatch.risk,
               variableValues: { ...dispatch.variableValues },
+              evidenceReferences: currentHost?.run.items.flatMap((item) => item.evidence ? [{
+                operationId: item.evidence.operationId,
+                kind: 'runbookStep' as const,
+                observedAt: item.evidence.completedAt,
+                digest: dispatch.sourceDigest,
+              }] : []),
               timeoutMs: dispatch.timeoutMs,
               connection: buildRemoteConnectionRequest(prepared.preparedProfile),
             });
@@ -274,6 +411,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
     const generation = lifecycleGenerationRef.current + 1;
     lifecycleGenerationRef.current = generation;
     disposedRef.current = false;
+    recordTaskSummary(initialTask, 'started');
     void pump();
     return () => {
       setTimeout(() => {
@@ -294,6 +432,8 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
 
   const approveHost = (profileId: string): void => {
     setConfirmingProfileId(undefined);
+    const currentHost = taskRef.current.hosts.find((host) => host.target.profileId === profileId);
+    if (currentHost) recordHostTransition(taskRef.current, currentHost, 'approved', 'pending');
     const next = approveMultiHostRunbookHost(taskRef.current, profileId);
     publish(next);
     void pump();
@@ -308,6 +448,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
   const cancelHost = async (profileId: string): Promise<void> => {
     const host = taskRef.current.hosts.find((entry) => entry.target.profileId === profileId);
     const operationId = host?.activeOperationId;
+    if (host) recordHostTransition(taskRef.current, host, 'cancelRequested', 'cancelling');
     publish(requestCancelMultiHostRunbookHost(taskRef.current, profileId));
     if (!operationId) return;
     try {
@@ -319,18 +460,23 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
 
   const cancelTask = async (): Promise<void> => {
     const operationIds = activeMultiHostRunbookOperationIds(taskRef.current);
+    for (const host of taskRef.current.hosts.filter((entry) => !isMultiHostRunbookHostTerminal(entry))) {
+      recordHostTransition(taskRef.current, host, 'cancelRequested', 'cancelling');
+    }
     publish(requestCancelMultiHostRunbookTask(taskRef.current));
     const results = await Promise.allSettled(operationIds.map(invokeCancelRunbookStep));
     if (results.some((entry) => entry.status === 'rejected')) showError(t('runbook.cancelFailed'));
   };
 
   const retryHost = (profileId: string): void => {
+    const previous = taskRef.current.hosts.find((host) => host.target.profileId === profileId);
     const next = retryMultiHostRunbookHosts(
       taskRef.current,
       [profileId],
       useProfileStore.getState().profiles,
     );
     if (next === taskRef.current) return;
+    if (previous) recordHostTransition(taskRef.current, previous, 'retryRequested', 'pending');
     preparedProfilesRef.current.delete(profileId);
     publish(next);
     void pump();

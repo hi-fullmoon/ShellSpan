@@ -21,6 +21,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
 import { t } from '@/locales';
+import { recordOperationHistoryTransition } from '@/lib/operation-history';
 
 const logger = createLogger('port-forward');
 
@@ -306,6 +307,24 @@ export const usePortForwardStore = create<PortForwardState>()((set, get) => ({
     const profile = useProfileStore.getState().getProfile(runtime.profileId);
     const rule = profile?.portForwards?.find((item) => item.id === runtime.configId);
     if (!profile || !rule) return;
+    void recordOperationHistoryTransition({
+      taskId: operationId,
+      operationId,
+      category: 'portForward',
+      action: 'startPortForward',
+      eventKind: 'retryRequested',
+      status: 'pending',
+      risk: 'stateChange',
+      subjectId: rule.id,
+      retryOfOperationId: operationId,
+      targets: [{
+        kind: 'remote',
+        profileId: profile.id,
+        host: profile.host,
+        port: profile.port,
+        username: profile.username,
+      }],
+    });
     await get().startRule(profile, rule, 'manual');
   },
 

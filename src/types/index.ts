@@ -18,7 +18,7 @@ export type TerminalColorScheme = (typeof TERMINAL_COLOR_SCHEME_IDS)[number];
 export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'runbooks' | 'monitor' | 'logs' | 'settings';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'runbooks' | 'history' | 'monitor' | 'logs' | 'settings';
 export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts';
 export type LogSource = 'frontend' | 'backend';
 export type ShortcutAction =
@@ -170,6 +170,8 @@ export interface SessionSummary {
 
 export interface SessionCreateRequest {
   operationId?: string;
+  /** Frontend-only audit identity; older backends safely ignore this field. */
+  profileId?: string;
   name: string;
   host: string;
   port: number;
@@ -185,6 +187,8 @@ export interface SessionCreateRequest {
 }
 
 export interface RemoteConnectionRequest {
+  /** Frontend-only audit identity; the backend authenticates from the explicit host fields. */
+  profileId?: string;
   host: string;
   port: number;
   username: string;

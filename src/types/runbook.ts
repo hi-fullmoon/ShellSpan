@@ -1,4 +1,5 @@
 import type { RemoteConnectionRequest } from '@/types';
+import type { OperationEvidenceReference } from '@/types/operation-history';
 
 export type RunbookRisk = 'readOnly' | 'stateChange' | 'destructive';
 
@@ -131,6 +132,8 @@ export interface RunbookStepExecutionRequest {
   authorized: boolean;
   approvedRisk: RunbookRisk;
   variableValues: Record<string, string>;
+  /** Prior, already-redacted evidence references for the local audit timeline. */
+  evidenceReferences?: OperationEvidenceReference[];
   timeoutMs: number;
   connection: RemoteConnectionRequest;
 }
