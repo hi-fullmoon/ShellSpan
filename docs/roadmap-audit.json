@@ -413,6 +413,104 @@
           "finding": "现有测试覆盖静态本地/远程转发、host-key/PTY、生命周期、配置清洗和操作记录，但没有 SOCKS 解析/模糊测试、策略绕过、资源上限、活动子连接取消、v4 迁移或 Windows/macOS 真实代理 E2E。"
         }
       }
+    },
+    {
+      "id": "explore-team-services-discovery",
+      "phase": "EXPLORE",
+      "title": "团队共享、集中策略与集中审计产品发现",
+      "roadmapItem": "团队共享、集中策略与审计服务仅在个人工作区模型稳定后进入产品发现。",
+      "status": "researching",
+      "decision": "candidate",
+      "decisionRationale": "TermBridge 自身没有可复核的团队需求；个人工作区还存在 Known Hosts 路径失败降级、AI API Key 写回 SQLite、无版本终端恢复契约和正式平台 E2E 等阻断。保持候选，稳定后也先只发现无秘密团队资料共享问题，不实现账户、同步、策略或审计服务。",
+      "necessary": false,
+      "necessityFinding": "外部用户讨论和同类产品证明共享、策略、审计问题类别存在，但没有 TermBridge 团队规模、任务频率、失败成本、合规期限、部署偏好或试用队列，不能证明三者中任何一个现在对本产品必要。",
+      "owner": "maintainers",
+      "risk": "在个人 host-key、秘密、恢复、数据库和跨平台边界稳定前引入团队控制面，会把本地缺口放大为跨成员凭据泄露、越权、跨租户数据混淆、策略旁路和不完整审计；把三个不同问题捆绑还会形成账户、服务可用性、隐私和长期兼容承诺。",
+      "failurePath": "任一个人工作区前置缺证据即保持 personalWorkspaceModel=not-stable 且产品发现门禁 blocked；未来候选遇到身份/租户/工作区/主机/凭据错配、越权、未知/过期版本、超限、host-key 失败、秘密或策略验证失败时必须在写入、认证或执行前失败关闭，服务中断和审计缓冲溢出不得静默放行或丢弃。",
+      "recovery": "本次不产生团队数据或服务；未来候选必须可取消并清理临时产物，保留 last-known-good 和本地未发布草稿，以版本化 checkpoint/tombstone 恢复，撤权立即阻止新操作；失败重试有界且幂等，升级失败原子回滚，保留/删除和脱敏语义不得因离线或服务恢复而反转。",
+      "testStrategy": "个人模型先补所有 SSH/SFTP/转发/Runbook 入口 host-key 失败关闭、钥匙串秘密迁移、版本化工作区/数据库故障和 Windows/macOS E2E；团队候选再覆盖身份/租户/工作区隔离、最小权限、撤权竞态、大小/数量/并发/重试上限、冲突/重放/断网/磁盘满/取消/恢复、策略过期/旁路、审计幂等/缓冲/保留/删除/脱敏及 N-1/较新版本。",
+      "teamDiscoveryGates": {
+        "personalWorkspaceModel": "not-stable",
+        "productDiscoveryGate": "blocked",
+        "independentReviewGate": "blocked",
+        "firstDiscoveryObject": "secret-free-team-artifact-sharing",
+        "comparedObjects": ["team-sharing", "central-policy", "central-audit"],
+        "finding": "十个个人工作区前置中只有 Runbook/多主机、个人本地操作记录、个人脱敏导出和个人显式审批语义满足；直接团队需求也不足，因此只能记录稳定后的首个发现问题，不能开始正式产品发现或独立评审。",
+        "prerequisites": {
+          "connectionCredentials": {
+            "status": "not-met",
+            "finding": "连接 profile 秘密有 OS 钥匙串基础，但 AI legacy key 迁移会把 API Key 写入 SQLite ai.providers 后删除钥匙串副本，通用 preferences 也没有秘密拒绝边界。"
+          },
+          "knownHosts": {
+            "status": "not-met",
+            "finding": "预检和 Runbook 可失败关闭，但多条远程文件/传输和转发命令把 known_hosts_path 错误降级为 None，随后认证路径会跳过 host-key 检查。"
+          },
+          "sessionWorkspaceRecovery": {
+            "status": "not-met",
+            "finding": "SFTP workspace v1 有字段上限且恢复为断开状态；终端快照无版本、总大小、会话数和字符串上限，Rust 保存边界接受任意 JSON，且没有正式平台崩溃/N-1 E2E。"
+          },
+          "runbookMultiHost": {
+            "status": "met",
+            "finding": "Runbook v1、双端复验、逐步批准、取消/超时、安全重试、1–8 并发、1–50 批次、按主机熔断、身份隔离和部分成功均有自动化证据。"
+          },
+          "operationHistory": {
+            "status": "met",
+            "finding": "个人本地 SQLite v5 时间线结构化关联 task/operation/profile/批准/结果并有 20,000 事件读取上限；写入 best-effort 的局限已明确，不视为集中合规证据。"
+          },
+          "redactedExport": {
+            "status": "met",
+            "finding": "个人导出不读取终端输入、原始输出或文件内容，可疑命令整体遮蔽，最多 5,000 个任务并用临时文件 sync 后替换；中央驻留与删除语义不在此结论内。"
+          },
+          "localDatabase": {
+            "status": "not-met",
+            "finding": "SQLite v1–v5 迁移、WAL 和较新版本拒绝有测试，但 preferences/workspace 缺后端大小/形状边界，API Key 可落库，也缺全迁移链路断电/磁盘满/损坏恢复证据。"
+          },
+          "authorizationApproval": {
+            "status": "met",
+            "finding": "Runbook exact risk/command/target/evidence 和多主机逐主机批准在前后端复验；该结论仅覆盖个人显式操作，交互 shell 与直接 SFTP 不是组织策略执行点。"
+          },
+          "crossPlatform": {
+            "status": "not-met",
+            "finding": "Windows x86_64/macOS ARM 有 Rust 单元门禁和发行构建，但隔离 SSH E2E 只在 Ubuntu Docker，没有正式平台原生钥匙串、host-key 失败、恢复、休眠/网络切换和更新恢复证据。"
+          },
+          "automatedTesting": {
+            "status": "not-met",
+            "finding": "常规前端、两平台 Rust 与隔离 SSH job 已定义，但 now-quality-gates 仍为 in-progress，五条桌面关键 E2E、数据库/旧配置故障注入和正式平台端到端门禁未全部闭合。"
+          }
+        }
+      },
+      "evidence": ["docs/explore-team-services-assessment.md", "docs/review-process.md", "ROADMAP.md", "docs/later-exit-criteria.md", "docs/runbook-format.md", "docs/multi-host-runbook.md", "docs/operation-history.md", "src-tauri/src/commands.rs", "src-tauri/src/connection.rs", "src-tauri/src/known_hosts.rs", "src-tauri/src/keychain.rs", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/lib/runbook.ts", "src/lib/multi-host-runbook.ts", "src/lib/operation-history.ts", "src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", ".github/workflows/quality-gate.yml", "scripts/check-roadmap-audit.mjs"],
+      "tests": ["src-tauri/src/connection.rs", "src-tauri/src/known_hosts.rs", "src-tauri/src/keychain.rs", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/lib/__tests__/terminal-workspace.test.ts", "src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/lib/__tests__/operation-history.test.ts", "src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", "scripts/__tests__/check-roadmap-audit.test.mjs", "scripts/run-ssh-e2e.ps1"],
+      "criteria": {
+        "userGroup": {
+          "status": "not-met",
+          "finding": "TermBridge 的 team/share/policy/audit/团队/审计公开 issue 查询均为 0 且创建受限；只有外部小团队运维、安全管理员和审计角色场景，没有本产品直接团队样本或试用队列。"
+        },
+        "userValue": {
+          "status": "not-met",
+          "finding": "减少资料漂移、统一授权和跨成员复盘只是三个独立价值假设；没有交接耗时、误连/越权、审计缺口或与 Git/配置管理/PAM 的对照基线。"
+        },
+        "maintenanceCost": {
+          "status": "unknown",
+          "finding": "团队共享需身份/版本/冲突/撤权；集中策略需语言、发布、不可绕过执行和高可用；集中审计需摄取、存储、索引、密钥、保留/删除。没有候选 CI、容量、运维、安全响应或月度成本。"
+        },
+        "crossPlatformImplementation": {
+          "status": "not-met",
+          "finding": "纯数据验证理论上可复用 TS/Rust，但个人模型在正式 Windows/macOS 尚未通过完整 E2E；多设备离线冲突、原生凭据、文件权限、休眠/网络切换和 N-1 客户端也无实现或证据。"
+        },
+        "securityModel": {
+          "status": "not-met",
+          "finding": "尚无稳定 tenant/workspace/member/artifact 身份、角色与撤权模型；现有 host-key 路径和 API Key 落库缺口未闭合，交互 shell/SFTP 也不是集中策略执行点，本地 best-effort 记录不能证明中央审计完整。"
+        },
+        "upgradeStrategy": {
+          "status": "not-met",
+          "finding": "没有 membership、共享 envelope/artifact、policy/decision 或 audit event 的外部版本、支持窗口、N-1 迁移、较新版本失败关闭、删除 tombstone 和原子服务/客户端回滚契约。"
+        },
+        "automatedTesting": {
+          "status": "not-met",
+          "finding": "现有测试只证明部分个人本地基础；没有租户隔离、最小权限、撤权竞态、大小/数量/并发/重试、同步冲突/故障、策略过期/旁路、审计缓冲/保留/删除或两平台多设备故障 E2E。"
+        }
+      }
     }
   ]
 }

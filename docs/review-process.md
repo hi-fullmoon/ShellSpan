@@ -32,6 +32,8 @@ EXPLORE 条目还必须用 `roadmapItem` 精确映射一个现有 ROADMAP 项，
 
 含“一次只验证一个方向”的协议 EXPLORE 条目还必须记录 `protocolGates`：`selectedDirection` 与 `directionsUnderValidation` 必须精确表示同一个具体方向，比较中的其他协议不得同时进入验证；`implementationGate` 只有在七项准入均为 `met`、`necessary: true`、`status: verified` 且决定为 `admit` 后才能标记为 `eligible`。`eligible` 也只允许独立评审安全、最小的候选基础，不自动授权实现或发布。
 
+团队共享、集中策略与审计服务的 EXPLORE 条目还必须记录 `teamDiscoveryGates`，逐项复核连接/凭据、Known Hosts、会话与工作区恢复、Runbook/多主机、操作记录、脱敏导出、本地数据库、权限/审批、跨平台和自动化测试十个个人工作区前置。只有十项均为 `met`，`personalWorkspaceModel` 才能标记为 `stable`，随后才允许把 `productDiscoveryGate` 标记为 `eligible`。`independentReviewGate` 还必须等待七项 EXPLORE 准入均为 `met`、`necessary: true`、`status: verified` 且决定为 `admit`；它不授权账户、组织/成员、同步后端、集中策略执行、远程审计收集、插件、第三方代码、市场或托管服务。
+
 ## 四周复盘
 
 审计台账的 `reviewedAt` 最多允许落后 35 天，超期会让 CI 失败。复盘必须逐条检查状态、证据路径、风险和测试策略，并按退出条件决定是否推进阶段。
