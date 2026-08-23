@@ -7,6 +7,7 @@ import type {
   RemoteCopyProgressEvent,
   UploadProgressEvent,
 } from '@/types';
+import { recordOperationHistoryTransition } from '@/lib/operation-history';
 
 const logger = createLogger('transfer');
 const retryingOperationIds = new Set<string>();
@@ -193,6 +194,24 @@ export const useTransferStore = create<TransferState>()((set) => ({
     if (!operation?.retry) return;
     if (operation.ownerId && closedPathOwners.has(operation.ownerId)) return;
     retryingOperationIds.add(operationId);
+    const action = operation.kind === 'upload'
+      ? 'uploadFiles'
+      : operation.kind === 'download'
+        ? 'downloadFiles'
+        : operation.kind === 'delete'
+          ? 'deleteRemotePath'
+          : 'copyRemoteToRemote';
+    void recordOperationHistoryTransition({
+      taskId: operationId,
+      operationId,
+      category: 'sftp',
+      action,
+      eventKind: 'retryRequested',
+      status: 'pending',
+      risk: operation.kind === 'delete' ? 'destructive' : 'stateChange',
+      retryOfOperationId: operationId,
+      itemCount: operation.totalSteps || operation.paths?.length,
+    });
 
     const scopes = operation.pathScopes ??
       (operation.connectionId && operation.paths

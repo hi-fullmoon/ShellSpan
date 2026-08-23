@@ -257,7 +257,7 @@ fn supported_keychain_ref(value: &str) -> bool {
     )
 }
 
-fn contains_secret_literal(value: &str) -> bool {
+pub(crate) fn contains_secret_literal(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     let compact = lower
         .chars()

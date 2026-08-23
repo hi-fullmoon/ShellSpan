@@ -187,13 +187,15 @@
       "id": "later-operation-history",
       "phase": "LATER",
       "title": "操作记录",
-      "status": "planned",
+      "status": "verified",
+      "verifiedAt": "2026-08-23",
       "owner": "maintainers",
-      "risk": "审计记录包含秘密或无法关联批准与结果",
-      "failurePath": "导出前统一脱敏，写入失败不阻塞受控操作但明确告警",
-      "recovery": "允许重新导出、按保留周期清理或一键清除",
-      "testStrategy": "时间线关联、Markdown/JSON 脱敏导出与保留策略测试",
-      "evidence": ["src/lib/logger.ts", "src-tauri/src/ai_sessions.rs"]
+      "risk": "审计记录包含秘密、原始高敏输出或错误主机上下文，或无法关联批准、证据、重试与结果",
+      "failurePath": "统一 IPC 与 Runbook/多主机状态机只写白名单结构字段；交互式终端输入和原始输出不进入记录；写入失败不阻塞受控操作但记录日志并显示告警，导出失败不保留半成品",
+      "recovery": "失败、取消、超时、身份错配、部分成功和重试保留独立终态；允许按类型/状态/时间检索并重新导出、缩短或无限期配置保留周期，以及确认后一键清除本地记录",
+      "testStrategy": "数据库 v5 迁移、任务时间线关联、目标/批准/命令/证据/退出码、交互式输入与原始输出排除、失败/取消/超时/身份错配/部分成功/重试、写入失败告警、Markdown/JSON 二次脱敏、保留策略与确认清除测试，并复跑隔离 SSH/SFTP E2E",
+      "evidence": ["docs/operation-history.md", "src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/operation-history.ts", "src/types/operation-history.ts", "src/components/workbench/operation-history-panel.tsx", "src/lib/tauri.ts", "src/stores/transferStore.ts", "src/stores/portForwardStore.ts", "src/stores/remoteHealthStore.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx"],
+      "tests": ["src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/operation-history-panel.test.tsx", "src/stores/__tests__/transferStore.test.ts", "src/stores/__tests__/portForwardStore.test.ts", "src/stores/__tests__/remoteHealthStore.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "scripts/run-ssh-e2e.ps1"]
     }
   ]
 }

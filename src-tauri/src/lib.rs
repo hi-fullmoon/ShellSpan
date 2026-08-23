@@ -12,6 +12,7 @@ mod known_hosts;
 mod local_fs;
 mod menu;
 mod models;
+mod operation_history;
 mod path_utils;
 mod port_forward;
 mod remote_fs;
@@ -326,6 +327,12 @@ pub fn run() {
             commands::load_sftp_workspace,
             commands::save_sftp_workspace,
             commands::clear_sftp_workspace,
+            operation_history::record_operation_event,
+            operation_history::list_operation_history,
+            operation_history::get_operation_history_settings,
+            operation_history::set_operation_history_retention,
+            operation_history::clear_operation_history,
+            operation_history::export_operation_history,
             health::get_system_health,
             remote_health::collect_remote_health_snapshot,
             remote_health::cancel_remote_health_snapshot,

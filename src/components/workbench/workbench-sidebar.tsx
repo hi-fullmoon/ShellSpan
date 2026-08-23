@@ -9,6 +9,7 @@ import {
   FileTextIcon,
   KeyRoundIcon,
   ListChecksIcon,
+  HistoryIcon,
   ServerIcon,
   Settings2Icon,
   ShieldCheckIcon,
@@ -82,6 +83,11 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       key: 'runbooks',
       label: t('runbook.title'),
       icon: ListChecksIcon,
+    },
+    {
+      key: 'history',
+      label: t('operationHistory.title'),
+      icon: HistoryIcon,
     },
     {
       key: 'monitor',

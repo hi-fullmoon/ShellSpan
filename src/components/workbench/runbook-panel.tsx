@@ -54,6 +54,7 @@ import { useToast } from '@/hooks/useToast';
 import type { LocaleKey } from '@/locales';
 import { ensureKeychainKeyForProfile } from '@/lib/keychain-key-prompt';
 import { createOperationId } from '@/lib/operation-id';
+import { recordOperationHistoryTransition } from '@/lib/operation-history';
 import {
   AI_RUNBOOK_DRAFT_EVENT,
   consumePendingAgentRunbookDraft,
@@ -185,6 +186,39 @@ export const RunbookPanel: React.FC = () => {
   const executionLocked = run?.phase === 'running'
     || Boolean(multiHostTask && !isMultiHostRunbookTaskTerminal(multiHostTask));
 
+  const recordRunbookTransition = (
+    current: RunbookRun,
+    item: RunbookRunItem | undefined,
+    eventKind: 'started' | 'rejected' | 'paused' | 'resumed' | 'skipped' | 'retryRequested' | 'failed' | 'completed',
+    status: 'pending' | 'running' | 'rejected' | 'paused' | 'skipped' | 'failed' | 'cancelled',
+    eventOperationId = item?.evidence?.operationId ?? current.id,
+  ): void => {
+    void recordOperationHistoryTransition({
+      taskId: current.id,
+      operationId: eventOperationId,
+      category: 'runbook',
+      action: 'executeRunbookStep',
+      eventKind,
+      status,
+      risk: item?.risk ?? 'readOnly',
+      subjectId: item?.id,
+      targets: [{
+        kind: 'remote',
+        profileId: current.target.profileId,
+        host: current.target.host,
+        port: current.target.port,
+        username: current.target.username,
+      }],
+      evidence: current.items.flatMap((entry) => entry.evidence ? [{
+        operationId: entry.evidence.operationId,
+        kind: 'runbookStep' as const,
+        observedAt: entry.evidence.completedAt,
+        digest: current.sourceDigest,
+      }] : []),
+      retryOfOperationId: eventKind === 'retryRequested' ? item?.evidence?.operationId : undefined,
+    });
+  };
+
   const applyValidatedText = useCallback((text: string, path?: string): void => {
     const parsed = parseRunbookText(text);
     const normalized = serializeRunbook(parsed);
@@ -301,7 +335,14 @@ export const RunbookPanel: React.FC = () => {
       setValidatedText(prepared.sourceText);
       setDocument(prepared.document);
       setMultiHostTask(undefined);
-      setRun(startRunbookRun(prepared, createOperationId('runbook-run')));
+      const nextRun = startRunbookRun(prepared, createOperationId('runbook-run'));
+      setRun(nextRun);
+      recordRunbookTransition(
+        nextRun,
+        nextRun.items.find((item) => item.id === nextRun.activeItemId),
+        'started',
+        'pending',
+      );
       setValidationError(undefined);
     } catch (error) {
       setValidationError(error instanceof Error ? error.message : String(error));
@@ -313,10 +354,12 @@ export const RunbookPanel: React.FC = () => {
     if (!run || !activeItem || run.phase !== 'awaitingApproval') return;
     const profile = useProfileStore.getState().getProfile(run.target.profileId);
     if (!profile) {
+      const failedOperationId = createOperationId('runbook');
       setRun(applyRunbookStepResult(
         markRunbookItemRunning(run),
-        syntheticResult(run, activeItem, createOperationId('runbook'), 'failed', t('runbook.targetMissing')),
+        syntheticResult(run, activeItem, failedOperationId, 'failed', t('runbook.targetMissing')),
       ));
+      recordRunbookTransition(run, activeItem, 'failed', 'failed', failedOperationId);
       return;
     }
     setPreparing(true);
@@ -325,30 +368,34 @@ export const RunbookPanel: React.FC = () => {
       profileWithSavedSecrets = await useProfileStore.getState().ensurePassword(profile);
       const withPassword = await promptForMissingPassword(profileWithSavedSecrets);
       if (!withPassword) {
+        const cancelledOperationId = createOperationId('runbook');
         const cancelled = syntheticResult(
           run,
           activeItem,
-          createOperationId('runbook'),
+          cancelledOperationId,
           'cancelled',
           t('runbook.credentialCancelled'),
         );
         setRun((current) => current
           ? applyRunbookStepResult(markRunbookItemRunning(current), cancelled)
           : current);
+        recordRunbookTransition(run, activeItem, 'completed', 'cancelled', cancelledOperationId);
         return;
       }
       const preparedProfile = await ensureKeychainKeyForProfile(withPassword);
       if (!preparedProfile) {
+        const cancelledOperationId = createOperationId('runbook');
         const cancelled = syntheticResult(
           run,
           activeItem,
-          createOperationId('runbook'),
+          cancelledOperationId,
           'cancelled',
           t('runbook.credentialCancelled'),
         );
         setRun((current) => current
           ? applyRunbookStepResult(markRunbookItemRunning(current), cancelled)
           : current);
+        recordRunbookTransition(run, activeItem, 'completed', 'cancelled', cancelledOperationId);
         return;
       }
       const nextOperationId = createOperationId('runbook');
@@ -373,6 +420,12 @@ export const RunbookPanel: React.FC = () => {
         authorized: true,
         approvedRisk: activeItem.risk,
         variableValues: plainValues,
+        evidenceReferences: run.items.flatMap((item) => item.evidence ? [{
+          operationId: item.evidence.operationId,
+          kind: 'runbookStep' as const,
+          observedAt: item.evidence.completedAt,
+          digest: run.sourceDigest,
+        }] : []),
         timeoutMs: activeItem.timeoutSeconds * 1000,
         connection: buildRemoteConnectionRequest(preparedProfile),
       });
@@ -415,6 +468,36 @@ export const RunbookPanel: React.FC = () => {
     } catch {
       showError(t('runbook.cancelFailed'));
     }
+  };
+
+  const handlePause = (): void => {
+    if (!run) return;
+    recordRunbookTransition(run, activeItem, 'paused', 'paused');
+    setRun(pauseRunbook(run));
+  };
+
+  const handleReject = (): void => {
+    if (!run) return;
+    recordRunbookTransition(run, activeItem, 'rejected', 'rejected');
+    setRun(rejectRunbookItem(run));
+  };
+
+  const handleSkip = (): void => {
+    if (!run) return;
+    recordRunbookTransition(run, activeItem, 'skipped', 'skipped');
+    setRun(skipRunbookItem(run));
+  };
+
+  const handleResume = (): void => {
+    if (!run) return;
+    recordRunbookTransition(run, activeItem, 'resumed', 'pending');
+    setRun(resumeRunbook(run));
+  };
+
+  const handleRetry = (item: RunbookRunItem): void => {
+    if (!run) return;
+    recordRunbookTransition(run, item, 'retryRequested', 'pending');
+    setRun(retryRunbookFrom(run, item.id));
   };
 
   return (
@@ -735,7 +818,7 @@ export const RunbookPanel: React.FC = () => {
                           )}
                           {item.safeToRetry && ['stopped', 'cancelled', 'staleEvidence'].includes(run.phase) && (
                             <CardFooter className="justify-end">
-                              <Button size="xs" variant="outline" onClick={() => setRun(retryRunbookFrom(run, item.id))}>
+                              <Button size="xs" variant="outline" onClick={() => handleRetry(item)}>
                                 <RotateCcwIcon data-icon="inline-start" />
                                 {t('runbook.retryFrom')}
                               </Button>
@@ -750,16 +833,16 @@ export const RunbookPanel: React.FC = () => {
                   <div className="flex gap-2">
                     {run.phase === 'awaitingApproval' && (
                       <>
-                        <Button size="sm" variant="outline" onClick={() => setRun(pauseRunbook(run))}>
+                        <Button size="sm" variant="outline" onClick={handlePause}>
                           <PauseIcon data-icon="inline-start" />
                           {t('runbook.pause')}
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => setRun(rejectRunbookItem(run))}>
+                        <Button size="sm" variant="outline" onClick={handleReject}>
                           <CircleStopIcon data-icon="inline-start" />
                           {t('runbook.reject')}
                         </Button>
                         {activeItem?.kind === 'step' && (
-                          <Button size="sm" variant="outline" onClick={() => setRun(skipRunbookItem(run))}>
+                          <Button size="sm" variant="outline" onClick={handleSkip}>
                             <SkipForwardIcon data-icon="inline-start" />
                             {t('runbook.skip')}
                           </Button>
@@ -767,7 +850,7 @@ export const RunbookPanel: React.FC = () => {
                       </>
                     )}
                     {run.phase === 'paused' && (
-                      <Button size="sm" variant="outline" onClick={() => setRun(resumeRunbook(run))}>
+                      <Button size="sm" variant="outline" onClick={handleResume}>
                         <PlayIcon data-icon="inline-start" />
                         {t('runbook.resume')}
                       </Button>

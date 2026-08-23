@@ -1,6 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/lib/logger';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
+import {
+  recordInvocationFailed,
+  recordInvocationFinished,
+  recordInvocationStarted,
+} from '@/lib/operation-history';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   AuthMethod,
@@ -69,12 +74,15 @@ const logger = createLogger('ipc');
 async function invokeLogged<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const operationId = findOperationId(args) ?? createOperationId(cmd);
   logger.debug(`invoke ${cmd} started operation_id=${operationId}`);
+  const history = await recordInvocationStarted(cmd, args, operationId);
   try {
     const result = await invoke<T>(cmd, args);
     logger.debug(`invoke ${cmd} completed operation_id=${operationId}`);
+    await recordInvocationFinished(history, result);
     return result;
   } catch (error) {
     logger.error(`invoke ${cmd} failed operation_id=${operationId}`, error);
+    await recordInvocationFailed(history, error);
     throw error;
   }
 }
@@ -465,6 +473,7 @@ export function buildRemoteConnectionRequest(
   profile: ConnectionProfile,
 ): RemoteConnectionRequest {
   return {
+    profileId: profile.id,
     host: profile.host,
     port: profile.port,
     username: profile.username,
@@ -484,6 +493,7 @@ export function buildSessionCreateRequest(
 ): SessionCreateRequest {
   return {
     operationId: createOperationId('ssh-connect'),
+    profileId: profile.id,
     name: profile.name,
     host: profile.host,
     port: profile.port,
