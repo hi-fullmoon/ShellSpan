@@ -867,20 +867,12 @@ TB_DISK=1000000 250000 750000 25% /\n";
             passphrase: None,
             jump_host: None,
         };
-        let tcp = connect_tcp_stream(&connection.host, connection.port).expect("connect tcp");
-        let session = open_authenticated_session(
-            tcp,
-            &connection.username,
-            connection.auth_method,
-            connection.password.as_deref(),
-            None,
-            None,
-            &connection.host,
-            connection.port,
-            None,
-        )
-        .expect("authenticate");
-        let output = exec_read_only(&session, LINUX_SNAPSHOT_COMMAND).expect("collect snapshot");
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let session = open_health_session(&connection, &known_hosts_path)
+            .expect("authenticate with the trusted host key");
+        let output =
+            exec_read_only(&session.target, LINUX_SNAPSHOT_COMMAND).expect("collect snapshot");
         let snapshot = parse_linux_snapshot(&output).expect("parse snapshot");
         assert_eq!(snapshot.system.os_family, "linux");
         assert!(snapshot.system.cpu_count >= 1);

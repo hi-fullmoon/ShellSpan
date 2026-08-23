@@ -96,7 +96,7 @@ describe('aiSettingsStore', () => {
     }));
   });
 
-  it('loads an API key from provider preferences and includes it in request config', () => {
+  it('drops legacy inline API keys from provider preferences and request config', () => {
     const provider = {
       id: 'minimax',
       name: 'MiniMax',
@@ -114,6 +114,7 @@ describe('aiSettingsStore', () => {
     ]);
     useAiSettingsStore.setState({ ...preferences, initialized: true });
 
+    expect(preferences.providers[0]).not.toHaveProperty('apiKey');
     expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
       id: 'minimax',
       kind: 'openAiCompatible',
@@ -121,7 +122,6 @@ describe('aiSettingsStore', () => {
       model: 'MiniMax-M3',
       requiresApiKey: true,
       structuredOutput: 'prompt',
-      apiKey: 'database-key',
     });
   });
 

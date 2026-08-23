@@ -15,12 +15,16 @@ const KNOWN_HOSTS_FILENAME: &str = "known_hosts";
 /// operations trust or remove hosts concurrently.
 pub(crate) static KNOWN_HOSTS_WRITE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+fn known_hosts_path_from_home(home: Result<PathBuf, String>) -> Result<PathBuf, String> {
+    home.map(|path| path.join(".termbridge").join(KNOWN_HOSTS_FILENAME))
+}
+
 pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
     let home = app
         .path()
         .home_dir()
-        .map_err(|error| format!("failed to resolve home dir: {error}"))?;
-    Ok(home.join(".termbridge").join(KNOWN_HOSTS_FILENAME))
+        .map_err(|error| format!("failed to resolve home dir: {error}"));
+    known_hosts_path_from_home(home)
 }
 
 fn get_known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -294,5 +298,23 @@ mod tests {
         assert_eq!(base64url_encode(b"fooba"), "Zm9vYmE");
         assert_eq!(base64url_encode(b"foobar"), "Zm9vYmFy");
         assert_eq!(base64url_encode(b"\xff\xfe\xfd"), "__79");
+    }
+
+    #[test]
+    fn known_hosts_path_resolution_fails_closed() {
+        let error = known_hosts_path_from_home(Err("home directory unavailable".to_string()))
+            .expect_err("a missing home directory must not become an absent host-key policy");
+
+        assert_eq!(error, "home directory unavailable");
+    }
+
+    #[test]
+    fn known_hosts_path_uses_the_existing_termbridge_location() {
+        let home = PathBuf::from("test-home");
+
+        assert_eq!(
+            known_hosts_path_from_home(Ok(home.clone())).unwrap(),
+            home.join(".termbridge").join("known_hosts")
+        );
     }
 }

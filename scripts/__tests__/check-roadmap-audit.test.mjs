@@ -38,6 +38,46 @@ describe('roadmap audit', () => {
     expect(result.stdout).toMatch(/Roadmap audit valid/);
   });
 
+  it('requires every committed ROADMAP bullet to map exactly and in order', () => {
+    withChangedAudit(
+      (audit) => { audit.roadmapMapping.NOW[0].items.pop(); },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('items are not an exact ordered ROADMAP mapping');
+      },
+    );
+  });
+
+  it('rejects a committed workstream that is merely in progress', () => {
+    withChangedAudit(
+      (audit) => { audit.items.find((item) => item.id === 'now-quality-gates').status = 'in-progress'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('is a committed workstream and must be verified');
+      },
+    );
+  });
+
+  it('requires an exact mapping for every phase exit condition', () => {
+    withChangedAudit(
+      (audit) => { audit.phaseExitCriteria.NEXT[0].roadmapItem += '（近似文本）'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('phaseExitCriteria is not an exact ordered ROADMAP mapping');
+      },
+    );
+  });
+
+  it('does not allow critical security closure to disappear or become unverified', () => {
+    withChangedAudit(
+      (audit) => { audit.securityClosure.knownHostsFailClosed.status = 'in-progress'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('securityClosure.knownHostsFailClosed must be verified');
+      },
+    );
+  });
+
   it('requires every EXPLORE audit to map one exact ROADMAP item', () => {
     withChangedAudit(
       (audit) => { delete audit.items.find((item) => item.phase === 'EXPLORE').roadmapItem; },

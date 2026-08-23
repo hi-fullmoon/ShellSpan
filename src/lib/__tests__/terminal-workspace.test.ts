@@ -46,6 +46,7 @@ describe('terminal workspace serialization', () => {
     };
 
     expect(JSON.parse(serializeTerminalWorkspace(sessions, layout))).toEqual({
+      version: 1,
       sessions: [{
         sessionId: 'session-1',
         title: 'Production',
@@ -166,5 +167,39 @@ describe('terminal workspace serialization', () => {
     }));
 
     expect(parsed.layout).toBeNull();
+  });
+
+  it('loads the legacy unversioned shape but rejects unknown versions', () => {
+    const legacy = JSON.stringify({
+      sessions: [{
+        sessionId: 's1', title: 'Legacy', host: 'example.com', port: 22,
+        username: 'alice', profileId: 'profile-1',
+      }],
+      layout: null,
+    });
+
+    expect(parseTerminalWorkspace(legacy).sessions).toHaveLength(1);
+    expect(parseTerminalWorkspace(JSON.stringify({ version: 2, sessions: [], layout: null })))
+      .toEqual({ sessions: [], layout: null });
+  });
+
+  it('fails closed for oversized snapshots and excessively deep layouts', () => {
+    expect(parseTerminalWorkspace(JSON.stringify({
+      version: 1,
+      sessions: [],
+      layout: null,
+      padding: 'x'.repeat(1024 * 1024),
+    }))).toEqual({ sessions: [], layout: null });
+
+    let layout: unknown = { kind: 'group', id: 'leaf', sessionIds: [], activeSessionId: '' };
+    for (let index = 0; index < 18; index += 1) {
+      layout = {
+        kind: 'split',
+        orientation: 'horizontal',
+        first: layout,
+        second: { kind: 'group', id: `leaf-${index}`, sessionIds: [], activeSessionId: '' },
+      };
+    }
+    expect(parseTerminalWorkspace(JSON.stringify({ version: 1, sessions: [], layout })).layout).toBeNull();
   });
 });

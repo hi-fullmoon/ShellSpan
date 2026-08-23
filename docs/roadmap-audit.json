@@ -1,19 +1,276 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-08-23",
+  "reviewedAt": "2026-08-24",
   "reviewIntervalDays": 28,
+  "roadmapMapping": {
+    "NOW": [
+      {
+        "auditId": "now-quality-gates",
+        "section": "1. 质量门禁",
+        "items": [
+          "为 pull request 与主干提交增加常规 CI：TypeScript 构建、前端测试、Rust 格式检查、Clippy 和 Rust 测试。",
+          "在 Windows 与 macOS 上运行关键平台测试；修复路径格式、钥匙串和本地文件行为的跨平台差异。",
+          "清理测试中的 React `act(...)`、Canvas 与 i18n 初始化噪声，使新增告警可被识别，而不是淹没在日志中。",
+          "建立最小端到端测试环境，使用本地隔离的 SSH / SFTP 服务覆盖连接、主机密钥、终端输入、上传下载、取消与重连。",
+          "为数据库迁移、自动更新清单和旧配置兼容建立版本化回归样例。"
+        ]
+      },
+      {
+        "auditId": "now-workspace-recovery",
+        "section": "2. 工作区恢复",
+        "items": [
+          "完成终端标签、分屏结构、固定状态与会话身份的崩溃安全持久化。",
+          "启动后以“已断开、可重连”方式恢复远程会话，不伪造连接仍然存活。",
+          "正确处理已删除连接、已丢失钥匙串条目、跳板机变化和版本升级后的陈旧状态。",
+          "保存并恢复 SFTP 标签、左右栏来源、路径、书签与分栏比例；不自动恢复可能产生副作用的传输。",
+          "提供“重新打开上次工作区”和“清除恢复状态”的明确入口。"
+        ]
+      },
+      {
+        "auditId": "now-transfer-safety",
+        "section": "3. 传输与文件安全",
+        "items": [
+          "统一上传、下载、跨远端复制、批量删除的队列状态和取消语义。",
+          "对可续传任务保存必要元数据，并在重启后提供人工确认的恢复入口。",
+          "对覆盖操作采用临时文件、校验与原子替换；失败后保留原文件并可清理临时产物。",
+          "增加超大目录、深层目录、权限变化、磁盘不足、网络中断和同名冲突的端到端覆盖。",
+          "在退出、关闭标签和升级重启前集中展示仍在运行的传输与潜在影响。"
+        ]
+      },
+      {
+        "auditId": "now-ai-safety",
+        "section": "4. AI 安全基线",
+        "items": [
+          "将 AI API 密钥纳入系统钥匙串，配置数据库只保存非敏感元数据。",
+          "在发送上下文前提供可见范围与预览；默认遮蔽密码、令牌、私钥、环境变量秘密和疑似凭证。",
+          "保持诊断 Agent 只读、命令白名单、命令数量上限和逐步批准机制，并为绕过、拼接、重定向等场景补充安全测试。",
+          "明确区分“插入终端”和“执行命令”；未经用户动作不得发送回车执行。",
+          "AI 会话归档、日志导出与错误信息遵守相同的脱敏规则。"
+        ]
+      },
+      {
+        "auditId": "now-diagnostics",
+        "section": "5. 可诊断性",
+        "items": [
+          "建立统一的操作 ID，串联连接、SFTP、端口转发、AI 请求与前后端日志。",
+          "提供一键生成脱敏诊断包，包含版本、平台、功能状态和用户主动选择的日志。",
+          "给连接、传输和更新失败提供稳定错误类别、可行动提示与重试入口。"
+        ]
+      }
+    ],
+    "NEXT": [
+      {
+        "auditId": "next-connection-assets",
+        "section": "1. 连接资产组织",
+        "items": [
+          "为连接增加分组、标签、收藏、备注和最近活动筛选。",
+          "支持从 OpenSSH config 导入主机、别名、端口、用户、IdentityFile 与 ProxyJump；秘密仍单独进入钥匙串。",
+          "提供可预览、可选择、可回滚的连接配置导入 / 导出，默认不包含秘密。",
+          "在创建连接前提供可解释的连通性检查：DNS、TCP、主机密钥、认证和跳板链路分步呈现。"
+        ]
+      },
+      {
+        "auditId": "next-host-context",
+        "section": "2. 主机上下文贯通",
+        "items": [
+          "以连接配置作为稳定主机身份，使终端、SFTP、AI 会话和连接健康共享上下文。",
+          "从终端一键在同一主机打开 SFTP，从 SFTP 一键在当前目录打开终端。",
+          "在主机概览中集中展示活动终端、文件传输、端口转发、最近断联和 AI 诊断。",
+          "切换标签或分屏时，AI 面板明确显示当前绑定的会话和上下文来源，避免向错误主机发送建议。"
+        ]
+      },
+      {
+        "auditId": "next-quick-actions",
+        "section": "3. 快速操作入口",
+        "items": [
+          "增加命令面板，统一连接、切换标签、分屏、打开路径、启动转发和常用设置。",
+          "提供面向键盘的全局搜索，覆盖连接、书签、已打开会话和设置项。",
+          "支持把常用目录、命令片段和连接动作固定到主机快捷操作，但默认只插入、不自动执行。"
+        ]
+      },
+      {
+        "auditId": "next-port-forwarding",
+        "section": "4. 端口转发产品化",
+        "items": [
+          "为已有本地 / 远程转发能力补齐创建、启动、停止、状态、错误和占用端口提示界面。",
+          "支持将转发配置绑定到连接，并明确区分“随连接启动”和“手动启动”。",
+          "在退出、断线和重连时保证转发生命周期可见且无孤儿监听端口。",
+          "记录启动时间、流量和最近错误，但不记录传输内容。"
+        ]
+      },
+      {
+        "auditId": "next-health-snapshot",
+        "section": "5. 远端健康快照",
+        "items": [
+          "在用户主动授权后，通过只读命令采集远端 CPU、内存、磁盘、负载与基础系统信息。",
+          "将本机应用监控与远端主机快照明确分层，避免把两者混为同一状态。",
+          "支持从异常指标跳转到只读诊断 Agent，并附带数据时间与来源。"
+        ]
+      }
+    ],
+    "LATER": [
+      {
+        "auditId": "later-runbooks",
+        "section": "1. 本地 Runbook",
+        "items": [
+          "将命令、说明、变量、前置检查和预期结果保存为本地 Runbook。",
+          "区分只读检查、状态修改和破坏性操作三个风险等级。",
+          "执行前展示变量解析结果、目标主机、完整命令与影响范围。",
+          "支持逐步执行、暂停、跳过、失败停止和从安全步骤重试。",
+          "Runbook 使用可审阅的文本格式，便于版本控制；秘密仅以钥匙串引用出现。"
+        ]
+      },
+      {
+        "auditId": "later-multi-host",
+        "section": "2. 多主机任务",
+        "items": [
+          "基于连接标签选择目标，提供并发上限、分批执行和单主机熔断。",
+          "默认先运行只读预检，再允许进入修改步骤。",
+          "按主机隔离输出、退出码和失败原因，禁止把一台主机的上下文混入另一台。",
+          "对部分成功提供明确结果，不把“多数成功”包装为整体成功。"
+        ]
+      },
+      {
+        "auditId": "later-ai-execution",
+        "section": "3. AI 辅助执行",
+        "items": [
+          "AI 先输出结构化计划、证据需求和风险等级，再生成命令。",
+          "每条建议关联其依据的终端输出或健康快照，并标明信息是否过期。",
+          "对修改型命令强制逐步批准；高风险命令同时要求影响说明与回滚建议。",
+          "Agent 只通过受约束的本地执行接口工作，不开放不受限 shell 或静默后台执行。",
+          "支持将一次成功诊断整理为待审阅 Runbook，而不是直接形成自动执行规则。"
+        ]
+      },
+      {
+        "auditId": "later-operation-history",
+        "section": "4. 操作记录",
+        "items": [
+          "形成按任务组织的本地时间线：目标、批准、命令、结果、传输和错误。",
+          "支持脱敏导出 Markdown / JSON，用于复盘与问题报告。",
+          "提供可配置保留周期和一键清除；默认不上传云端。"
+        ]
+      }
+    ]
+  },
+  "phaseExitCriteria": {
+    "NOW": [
+      {
+        "roadmapItem": "Windows 与 macOS 的常规 CI 全绿，前后端测试无已知失败，测试告警有明确基线。",
+        "status": "pending-external",
+        "finding": "本地全量门禁可验证，但当前审计提交尚未进入远端 Windows/macOS 必需检查，不能把托管 CI 预先宣称为通过。",
+        "evidence": [".github/workflows/quality-gate.yml", "docs/review-process.md"],
+        "tests": ["scripts/__tests__/check-roadmap-audit.test.mjs"]
+      },
+      {
+        "roadmapItem": "五条关键链路具备端到端测试：首次连接、会话重连、文件上传下载、工作区恢复、更新前退出保护。",
+        "status": "verified",
+        "finding": "隔离 SSH/SFTP、重连、恢复与退出保护均有自动化覆盖。",
+        "evidence": [".github/workflows/quality-gate.yml", "tests/ssh-e2e/compose.yml"],
+        "tests": ["src-tauri/src/connection.rs", "src-tauri/src/remote_fs.rs", "src/lib/__tests__/terminal-workspace.test.ts", "src/components/__tests__/update-restart-dialog.test.tsx"]
+      },
+      {
+        "roadmapItem": "崩溃或强制退出后不会造成配置损坏、秘密落盘或远端文件被静默截断。",
+        "status": "verified",
+        "finding": "工作区版本边界、数据库敏感字段拒绝以及传输临时文件/原子替换均有回归。",
+        "evidence": ["src/lib/terminal-workspace.ts", "src-tauri/src/db.rs", "src-tauri/src/remote_fs.rs"],
+        "tests": ["src/lib/__tests__/terminal-workspace.test.ts", "src-tauri/src/db.rs", "src-tauri/src/remote_fs.rs"]
+      },
+      {
+        "roadmapItem": "AI 上下文和诊断包通过秘密泄露回归测试。",
+        "status": "verified",
+        "finding": "AI 上下文、归档、错误路径和诊断包共享脱敏策略并有秘密回归。",
+        "evidence": ["src/lib/terminal-output-buffer.ts", "src/lib/diagnostic-bundle.ts"],
+        "tests": ["src/lib/__tests__/terminal-output-buffer.test.ts", "src/lib/__tests__/diagnostic-bundle.test.ts"]
+      }
+    ],
+    "NEXT": [
+      {
+        "roadmapItem": "用户可从一个连接入口完成终端、SFTP、转发、健康检查和 AI 诊断，无需重新选择主机或凭证。",
+        "status": "verified",
+        "finding": "稳定 profileId 贯通五条功能链并由主机概览聚合。",
+        "evidence": ["src/lib/host-context.ts", "src/components/workbench/host-overview-dialog.tsx"],
+        "tests": ["src/lib/__tests__/host-context.test.ts", "src/lib/__tests__/host-overview.test.ts"]
+      },
+      {
+        "roadmapItem": "高频动作可以通过命令面板完成，且所有跨功能跳转保留正确主机上下文。",
+        "status": "verified",
+        "finding": "命令面板和跨功能跳转以 profileId 作为上下文键。",
+        "evidence": ["src/components/command-palette.tsx", "src/lib/host-context.ts"],
+        "tests": ["src/components/__tests__/command-palette.test.tsx", "src/lib/__tests__/host-context.test.ts"]
+      },
+      {
+        "roadmapItem": "端口转发具备完整的可见生命周期和失败恢复路径。",
+        "status": "verified",
+        "finding": "创建、启停、断线清理、错误和指标均有前后端覆盖。",
+        "evidence": ["src/components/workbench/port-forward-dialog.tsx", "src-tauri/src/port_forward.rs"],
+        "tests": ["src/components/workbench/__tests__/port-forward-dialog.test.tsx", "src-tauri/src/port_forward.rs"]
+      },
+      {
+        "roadmapItem": "导入配置不会覆盖现有连接或秘密，除非用户在预览中明确确认。",
+        "status": "verified",
+        "finding": "导入预览、冲突选择和钥匙串分离由独立测试约束。",
+        "evidence": ["src/lib/connection-import.ts", "src-tauri/src/keychain.rs"],
+        "tests": ["src/lib/__tests__/connection-import.test.ts", "src-tauri/src/keychain.rs"]
+      }
+    ],
+    "LATER": [
+      {
+        "roadmapItem": "Runbook 和多主机任务在中断、部分失败与重试时结果可预测。",
+        "status": "verified",
+        "finding": "执行状态机、恢复决策与多主机熔断均有自动化回归。",
+        "evidence": ["docs/later-exit-criteria.md", "src-tauri/src/runbook.rs", "src/lib/multi-host-runbook.ts"],
+        "tests": ["src-tauri/src/runbook.rs", "src/lib/__tests__/multi-host-runbook.test.ts"]
+      },
+      {
+        "roadmapItem": "每个远端修改都能追溯到用户批准、具体命令、目标主机与执行结果。",
+        "status": "verified",
+        "finding": "本地操作时间线绑定批准、命令、目标与结果。",
+        "evidence": ["docs/later-exit-criteria.md", "src-tauri/src/operation_history.rs"],
+        "tests": ["src-tauri/src/operation_history.rs", "src/lib/__tests__/operation-history.test.ts"]
+      },
+      {
+        "roadmapItem": "AI 不可绕过风险分级、审批、命令上限或秘密遮蔽策略。",
+        "status": "verified",
+        "finding": "结构化计划、只读执行接口、审批状态机与统一脱敏均有绕过测试。",
+        "evidence": ["docs/later-exit-criteria.md", "src/lib/diagnostic-agent.ts", "src-tauri/src/ai.rs"],
+        "tests": ["src/lib/__tests__/diagnostic-agent.test.ts", "src-tauri/src/ai.rs"]
+      }
+    ]
+  },
+  "securityClosure": {
+    "knownHostsFailClosed": {
+      "status": "verified",
+      "finding": "远程文件、交互会话、Runbook、健康快照及本地/远程转发均在认证前强制解析 Known Hosts 路径；未知与变化密钥继续失败关闭。",
+      "evidence": ["src-tauri/src/known_hosts.rs", "src-tauri/src/commands.rs", "src-tauri/src/remote_fs.rs", "src-tauri/src/session.rs", "src-tauri/src/port_forward.rs"],
+      "tests": ["src-tauri/src/known_hosts.rs", "src-tauri/src/connection.rs", "src-tauri/src/remote_fs.rs", "src-tauri/src/port_forward.rs", "src-tauri/src/runbook.rs", "src-tauri/src/remote_health.rs"]
+    },
+    "aiApiKeyKeychainOnly": {
+      "status": "verified",
+      "finding": "旧 SQLite 明文只向系统钥匙串迁移并清理；钥匙串写入失败保留数据库，数据库清理失败保留双副本，运行时只读钥匙串且错误不含秘密。",
+      "evidence": ["src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/stores/aiSettingsStore.ts", "src/components/ai/ai-settings-section.tsx"],
+      "tests": ["src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/stores/__tests__/aiSettingsStore.test.ts"]
+    },
+    "terminalWorkspaceContract": {
+      "status": "verified",
+      "finding": "终端恢复快照使用 v1，兼容旧无版本形状，拒绝未来版本并限制字节、会话数量、字段长度和布局深度。",
+      "evidence": ["src/lib/terminal-workspace.ts", "src-tauri/src/db.rs"],
+      "tests": ["src/lib/__tests__/terminal-workspace.test.ts", "src-tauri/src/db.rs"]
+    }
+  },
   "items": [
     {
       "id": "now-quality-gates",
       "phase": "NOW",
       "title": "质量门禁",
-      "status": "in-progress",
+      "status": "verified",
+      "verifiedAt": "2026-08-24",
       "owner": "maintainers",
       "risk": "跨平台回归或测试噪声掩盖真实失败",
       "failurePath": "任一构建、测试、Clippy、格式或审计检查失败即阻止合并",
       "recovery": "保留失败日志与测试产物，修复后重新运行同一门禁",
       "testStrategy": "前端全量测试与构建、脚本测试、Windows/macOS Rust 检查，以及隔离 SSH/SFTP 的主机密钥、PTY 和文件往返 E2E",
-      "evidence": ["package.json", ".github/workflows/quality-gate.yml", "tests/ssh-e2e/compose.yml", "scripts/run-ssh-e2e.ps1", "src/setupTests.ts"]
+      "evidence": ["package.json", ".github/workflows/quality-gate.yml", "tests/ssh-e2e/compose.yml", "scripts/run-ssh-e2e.ps1", "src/setupTests.ts", "scripts/check-roadmap-audit.mjs"],
+      "tests": ["scripts/__tests__/check-roadmap-audit.test.mjs", "src-tauri/src/connection.rs", "src-tauri/src/remote_fs.rs", "src-tauri/src/port_forward.rs"]
     },
     {
       "id": "now-workspace-recovery",
@@ -26,8 +283,8 @@
       "failurePath": "无效版本或缺失连接降级为可关闭的断开标签，持久化失败仅记录错误",
       "recovery": "允许重连、重新打开或清除保存状态，写入采用单队列快照",
       "testStrategy": "序列化、崩溃安全刷新、陈旧 profile 与重连竞态单元测试",
-      "evidence": ["src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/lib/terminal-workspace-persistence.ts", "src/lib/sftp-workspace-persistence.ts"],
-      "tests": ["src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/stores/__tests__/sftpStore.test.ts"]
+      "evidence": ["src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/lib/terminal-workspace-persistence.ts", "src/lib/sftp-workspace-persistence.ts", "src-tauri/src/db.rs"],
+      "tests": ["src/lib/__tests__/terminal-workspace.test.ts", "src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/stores/__tests__/sftpStore.test.ts", "src-tauri/src/db.rs"]
     },
     {
       "id": "now-transfer-safety",
@@ -54,8 +311,8 @@
       "failurePath": "不安全命令在解析阶段拒绝，AI 失败不影响终端主链路",
       "recovery": "取消请求、清除本地会话、撤销待插入命令",
       "testStrategy": "脱敏、命令白名单、拼接/重定向绕过和审批状态测试",
-      "evidence": ["src/lib/terminal-output-buffer.ts", "src/lib/ai-sessions.ts", "src/lib/diagnostic-agent.ts"],
-      "tests": ["src/lib/__tests__/terminal-output-buffer.test.ts", "src/lib/__tests__/ai-sessions.test.ts", "src/lib/__tests__/diagnostic-agent.test.ts", "src/components/ai/__tests__/ai-panel.test.ts"]
+      "evidence": ["src/lib/terminal-output-buffer.ts", "src/lib/ai-sessions.ts", "src/lib/diagnostic-agent.ts", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/stores/aiSettingsStore.ts"],
+      "tests": ["src/lib/__tests__/terminal-output-buffer.test.ts", "src/lib/__tests__/ai-sessions.test.ts", "src/lib/__tests__/diagnostic-agent.test.ts", "src/components/ai/__tests__/ai-panel.test.ts", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/stores/__tests__/aiSettingsStore.test.ts"]
     },
     {
       "id": "now-diagnostics",
@@ -295,7 +552,7 @@
         },
         "securityModel": {
           "status": "not-met",
-          "finding": "没有直接 KDF/AEAD 依赖、备份容器、完整性验证或秘密生命周期测试；preferences 还包含写入 SQLite 的 AI API Key，故原始数据库和整表设置复制都不满足默认无秘密与不落盘新明文凭据。"
+          "finding": "AI API Key 已修正为只从旧 SQLite 明文迁入系统钥匙串，preferences 也拒绝敏感 provider 字段；但仍没有直接 KDF/AEAD 依赖、备份容器、完整性验证或覆盖全部本地数据类别的秘密生命周期测试，原始数据库和整表设置复制仍不构成安全备份。"
         },
         "upgradeStrategy": {
           "status": "unknown",
@@ -402,7 +659,7 @@
         },
         "securityModel": {
           "status": "not-met",
-          "finding": "现有回环监听、Known Hosts、钥匙串、跳板机、metadata/link-local 显式阻断和脱敏是可复用基础；但转发命令会把 Known Hosts 路径错误降级为无校验路径，且没有逐请求目标/端口 allowlist、远端 DNS 解析后策略、CONNECT-only、帧/连接上限、全部子通道强制取消或目标元数据记录边界。"
+          "finding": "现有回环监听、Known Hosts 路径失败关闭、未知/变化 host-key 拒绝、钥匙串、跳板机、metadata/link-local 显式阻断和脱敏是可复用基础；但动态 SOCKS 仍没有逐请求目标/端口 allowlist、远端 DNS 解析后策略、CONNECT-only、帧/连接上限、全部子通道强制取消或目标元数据记录边界。"
         },
         "upgradeStrategy": {
           "status": "not-met",
@@ -421,33 +678,33 @@
       "roadmapItem": "团队共享、集中策略与审计服务仅在个人工作区模型稳定后进入产品发现。",
       "status": "researching",
       "decision": "candidate",
-      "decisionRationale": "TermBridge 自身没有可复核的团队需求；个人工作区还存在 Known Hosts 路径失败降级、AI API Key 写回 SQLite、无版本终端恢复契约和正式平台 E2E 等阻断。保持候选，稳定后也先只发现无秘密团队资料共享问题，不实现账户、同步、策略或审计服务。",
+      "decisionRationale": "TermBridge 自身没有可复核的团队需求；本次已关闭 Known Hosts 路径降级、AI API Key 反向迁移和无版本终端恢复契约，但个人工作区仍缺正式平台桌面/凭据/故障 E2E、完整数据库灾难恢复与团队身份安全模型。保持候选，稳定后也先只发现无秘密团队资料共享问题，不实现账户、同步、策略或审计服务。",
       "necessary": false,
       "necessityFinding": "外部用户讨论和同类产品证明共享、策略、审计问题类别存在，但没有 TermBridge 团队规模、任务频率、失败成本、合规期限、部署偏好或试用队列，不能证明三者中任何一个现在对本产品必要。",
       "owner": "maintainers",
       "risk": "在个人 host-key、秘密、恢复、数据库和跨平台边界稳定前引入团队控制面，会把本地缺口放大为跨成员凭据泄露、越权、跨租户数据混淆、策略旁路和不完整审计；把三个不同问题捆绑还会形成账户、服务可用性、隐私和长期兼容承诺。",
       "failurePath": "任一个人工作区前置缺证据即保持 personalWorkspaceModel=not-stable 且产品发现门禁 blocked；未来候选遇到身份/租户/工作区/主机/凭据错配、越权、未知/过期版本、超限、host-key 失败、秘密或策略验证失败时必须在写入、认证或执行前失败关闭，服务中断和审计缓冲溢出不得静默放行或丢弃。",
       "recovery": "本次不产生团队数据或服务；未来候选必须可取消并清理临时产物，保留 last-known-good 和本地未发布草稿，以版本化 checkpoint/tombstone 恢复，撤权立即阻止新操作；失败重试有界且幂等，升级失败原子回滚，保留/删除和脱敏语义不得因离线或服务恢复而反转。",
-      "testStrategy": "个人模型先补所有 SSH/SFTP/转发/Runbook 入口 host-key 失败关闭、钥匙串秘密迁移、版本化工作区/数据库故障和 Windows/macOS E2E；团队候选再覆盖身份/租户/工作区隔离、最小权限、撤权竞态、大小/数量/并发/重试上限、冲突/重放/断网/磁盘满/取消/恢复、策略过期/旁路、审计幂等/缓冲/保留/删除/脱敏及 N-1/较新版本。",
+      "testStrategy": "个人模型继续补完整数据库故障与 Windows/macOS 桌面/原生钥匙串/恢复 E2E，并保持所有 SSH/SFTP/转发/Runbook 入口 host-key 失败关闭、钥匙串秘密迁移和版本化工作区回归；团队候选再覆盖身份/租户/工作区隔离、最小权限、撤权竞态、大小/数量/并发/重试上限、冲突/重放/断网/磁盘满/取消/恢复、策略过期/旁路、审计幂等/缓冲/保留/删除/脱敏及 N-1/较新版本。",
       "teamDiscoveryGates": {
         "personalWorkspaceModel": "not-stable",
         "productDiscoveryGate": "blocked",
         "independentReviewGate": "blocked",
         "firstDiscoveryObject": "secret-free-team-artifact-sharing",
         "comparedObjects": ["team-sharing", "central-policy", "central-audit"],
-        "finding": "十个个人工作区前置中只有 Runbook/多主机、个人本地操作记录、个人脱敏导出和个人显式审批语义满足；直接团队需求也不足，因此只能记录稳定后的首个发现问题，不能开始正式产品发现或独立评审。",
+        "finding": "Known Hosts、凭据和会话恢复安全收口后，十个个人工作区前置仍有本地数据库灾难恢复、正式平台 E2E 和完整自动化三项不满足；直接团队需求也不足，因此只能记录稳定后的首个发现问题，不能开始正式产品发现或独立评审。",
         "prerequisites": {
           "connectionCredentials": {
-            "status": "not-met",
-            "finding": "连接 profile 秘密有 OS 钥匙串基础，但 AI legacy key 迁移会把 API Key 写入 SQLite ai.providers 后删除钥匙串副本，通用 preferences 也没有秘密拒绝边界。"
+            "status": "met",
+            "finding": "连接 profile 与 AI API Key 都只从系统钥匙串读取；旧 AI 明文只向钥匙串迁移，写入失败保留旧值、清理失败保留双副本，通用 preferences 拒绝敏感 provider 字段。"
           },
           "knownHosts": {
-            "status": "not-met",
-            "finding": "预检和 Runbook 可失败关闭，但多条远程文件/传输和转发命令把 known_hosts_path 错误降级为 None，随后认证路径会跳过 host-key 检查。"
+            "status": "met",
+            "finding": "交互连接、远程文件/传输、转发、健康与 Runbook 均在认证前强制解析 Known Hosts 路径；路径错误、未知和变化 host-key 有自动化失败关闭，正常可信路径继续通过。"
           },
           "sessionWorkspaceRecovery": {
-            "status": "not-met",
-            "finding": "SFTP workspace v1 有字段上限且恢复为断开状态；终端快照无版本、总大小、会话数和字符串上限，Rust 保存边界接受任意 JSON，且没有正式平台崩溃/N-1 E2E。"
+            "status": "met",
+            "finding": "SFTP 与终端 workspace 均有版本化契约、字段/数量/大小边界和损坏降级；终端 v1 兼容旧无版本形状、拒绝未来版本，Rust 保存边界同步拒绝超限和未知版本。正式平台故障 E2E 单独保留在跨平台前置。"
           },
           "runbookMultiHost": {
             "status": "met",
@@ -463,7 +720,7 @@
           },
           "localDatabase": {
             "status": "not-met",
-            "finding": "SQLite v1–v5 迁移、WAL 和较新版本拒绝有测试，但 preferences/workspace 缺后端大小/形状边界，API Key 可落库，也缺全迁移链路断电/磁盘满/损坏恢复证据。"
+            "finding": "SQLite v1–v5 迁移、WAL、较新版本拒绝、AI 敏感字段拒绝和终端 workspace 后端版本/大小/数量边界已有测试；但通用 preferences 与其他 workspace 尚未统一后端总量边界，也缺全迁移链路断电/磁盘满/损坏恢复夹具。"
           },
           "authorizationApproval": {
             "status": "met",
@@ -475,7 +732,7 @@
           },
           "automatedTesting": {
             "status": "not-met",
-            "finding": "常规前端、两平台 Rust 与隔离 SSH job 已定义，但 now-quality-gates 仍为 in-progress，五条桌面关键 E2E、数据库/旧配置故障注入和正式平台端到端门禁未全部闭合。"
+            "finding": "now-quality-gates 的仓库内门禁、精确映射与安全回归已 verified，五条关键链路具备自动化基础；但当前提交仍需托管 Windows/macOS 检查，且正式平台原生钥匙串、休眠/网络切换、更新恢复和完整数据库故障 E2E 未闭合。"
           }
         }
       },
@@ -500,7 +757,7 @@
         },
         "securityModel": {
           "status": "not-met",
-          "finding": "尚无稳定 tenant/workspace/member/artifact 身份、角色与撤权模型；现有 host-key 路径和 API Key 落库缺口未闭合，交互 shell/SFTP 也不是集中策略执行点，本地 best-effort 记录不能证明中央审计完整。"
+          "finding": "Known Hosts 与 API Key 本地缺口已闭合，但仍无稳定 tenant/workspace/member/artifact 身份、角色与撤权模型；交互 shell/SFTP 也不是集中策略执行点，本地 best-effort 记录不能证明中央审计完整。"
         },
         "upgradeStrategy": {
           "status": "not-met",

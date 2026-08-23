@@ -3,6 +3,74 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const CURRENT_SCHEMA_VERSION: i32 = 5;
+const TERMINAL_WORKSPACE_VERSION: u64 = 1;
+const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
+const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
+
+fn validate_terminal_workspace(workspace_json: &str) -> Result<(), String> {
+    if workspace_json.len() > MAX_TERMINAL_WORKSPACE_BYTES {
+        return Err("terminal workspace exceeds the storage limit".to_string());
+    }
+    let workspace: serde_json::Value = serde_json::from_str(workspace_json)
+        .map_err(|_| "terminal workspace must be valid JSON".to_string())?;
+    let object = workspace
+        .as_object()
+        .ok_or_else(|| "terminal workspace must be an object".to_string())?;
+    if object
+        .get("version")
+        .is_some_and(|version| version.as_u64() != Some(TERMINAL_WORKSPACE_VERSION))
+    {
+        return Err("terminal workspace version is unsupported".to_string());
+    }
+    let sessions = object
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "terminal workspace sessions must be an array".to_string())?;
+    if sessions.len() > MAX_TERMINAL_WORKSPACE_SESSIONS {
+        return Err("terminal workspace has too many sessions".to_string());
+    }
+    Ok(())
+}
+
+fn contains_sensitive_ai_field(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
+            let normalized = key
+                .chars()
+                .filter(|character| character.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            matches!(
+                normalized.as_str(),
+                "apikey"
+                    | "password"
+                    | "passphrase"
+                    | "privatekey"
+                    | "secret"
+                    | "token"
+                    | "credential"
+                    | "authorization"
+            ) || contains_sensitive_ai_field(value)
+        }),
+        serde_json::Value::Array(values) => values.iter().any(contains_sensitive_ai_field),
+        _ => false,
+    }
+}
+
+fn validate_preference_entries(entries: &[(String, String)]) -> Result<(), String> {
+    for (key, value) in entries {
+        if key == "ai.providers" {
+            let providers: serde_json::Value = serde_json::from_str(value)
+                .map_err(|_| "AI provider preferences must be valid JSON".to_string())?;
+            if contains_sensitive_ai_field(&providers) {
+                return Err(
+                    "AI provider preferences may only contain non-sensitive metadata".to_string(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -619,6 +687,7 @@ impl Database {
     }
 
     pub(crate) fn save_preferences(&self, entries: &[(String, String)]) -> Result<(), String> {
+        validate_preference_entries(entries)?;
         let conn = self
             .conn
             .lock()
@@ -779,6 +848,7 @@ impl Database {
     }
 
     pub(crate) fn save_terminal_workspace(&self, sessions_json: &str) -> Result<(), String> {
+        validate_terminal_workspace(sessions_json)?;
         let conn = self
             .conn
             .lock()
@@ -1121,6 +1191,29 @@ mod tests {
     }
 
     #[test]
+    fn ai_provider_preferences_reject_inline_secrets_without_logging_the_value() {
+        let db = test_db();
+        let secret = "must-never-reach-sqlite";
+        let error = db
+            .save_preferences(&[(
+                "ai.providers".to_string(),
+                serde_json::json!([{
+                    "id": "openai",
+                    "apiKey": secret,
+                }])
+                .to_string(),
+            )])
+            .unwrap_err();
+
+        assert!(!error.contains(secret));
+        assert!(db
+            .load_preferences()
+            .unwrap()
+            .iter()
+            .all(|(key, _)| key != "ai.providers"));
+    }
+
+    #[test]
     fn recent_profiles_ordering() {
         let db = test_db();
         db.insert_profile(&test_profile("p1", "S1")).unwrap();
@@ -1261,18 +1354,59 @@ mod tests {
         let db = test_db();
         assert_eq!(db.load_terminal_workspace().unwrap(), None);
 
-        let sessions = r#"[{"profileId":"p1","title":"Server"}]"#;
+        let sessions =
+            r#"{"version":1,"sessions":[{"profileId":"p1","title":"Server"}],"layout":null}"#;
         db.save_terminal_workspace(sessions).unwrap();
         assert_eq!(
             db.load_terminal_workspace().unwrap().as_deref(),
             Some(sessions)
         );
 
-        db.save_terminal_workspace("[]").unwrap();
-        assert_eq!(db.load_terminal_workspace().unwrap().as_deref(), Some("[]"));
+        let empty = r#"{"version":1,"sessions":[],"layout":null}"#;
+        db.save_terminal_workspace(empty).unwrap();
+        assert_eq!(
+            db.load_terminal_workspace().unwrap().as_deref(),
+            Some(empty)
+        );
 
         db.clear_terminal_workspace().unwrap();
         assert_eq!(db.load_terminal_workspace().unwrap(), None);
+    }
+
+    #[test]
+    fn terminal_workspace_rejects_unknown_versions_and_unbounded_payloads() {
+        let db = test_db();
+        let valid = r#"{"version":1,"sessions":[],"layout":null}"#;
+        db.save_terminal_workspace(valid).unwrap();
+
+        assert!(db
+            .save_terminal_workspace(r#"{"version":2,"sessions":[],"layout":null}"#)
+            .unwrap_err()
+            .contains("unsupported"));
+        let too_many = serde_json::json!({
+            "version": 1,
+            "sessions": (0..=MAX_TERMINAL_WORKSPACE_SESSIONS)
+                .map(|index| serde_json::json!({ "profileId": index }))
+                .collect::<Vec<_>>(),
+            "layout": null,
+        })
+        .to_string();
+        assert!(db
+            .save_terminal_workspace(&too_many)
+            .unwrap_err()
+            .contains("too many"));
+        let oversized = format!(
+            "{{\"version\":1,\"sessions\":[],\"padding\":\"{}\"}}",
+            "x".repeat(MAX_TERMINAL_WORKSPACE_BYTES)
+        );
+        assert!(db
+            .save_terminal_workspace(&oversized)
+            .unwrap_err()
+            .contains("storage limit"));
+        assert_eq!(
+            db.load_terminal_workspace().unwrap().as_deref(),
+            Some(valid)
+        );
     }
 
     #[test]

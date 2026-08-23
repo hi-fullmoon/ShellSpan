@@ -556,9 +556,9 @@ pub(crate) async fn list_remote_directory(
     );
     let pool = pool.inner().clone();
     let cache = cache.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        list_remote_directory_blocking(request, Some(&pool), Some(&cache), known_hosts.as_deref())
+        list_remote_directory_blocking(request, Some(&pool), Some(&cache), Some(&known_hosts))
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -591,14 +591,9 @@ pub(crate) async fn resolve_remote_entry_owners(
         .map_err(|message| RemoteFsError::Other { message })?;
     let pool = pool.inner().clone();
     let cache = cache.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        resolve_remote_entry_owners_blocking(
-            request,
-            Some(&pool),
-            Some(&cache),
-            known_hosts.as_deref(),
-        )
+        resolve_remote_entry_owners_blocking(request, Some(&pool), Some(&cache), Some(&known_hosts))
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -616,9 +611,9 @@ pub(crate) async fn warm_remote_connection(
     resolve_keychain_key_for_remote(&credentials, &mut request)
         .map_err(|message| RemoteFsError::Other { message })?;
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        warm_remote_connection_blocking(request, Some(&pool), known_hosts.as_deref())
+        warm_remote_connection_blocking(request, Some(&pool), Some(&known_hosts))
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -643,9 +638,9 @@ pub(crate) async fn create_remote_entry(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        create_remote_entry_blocking(request, Some(&pool), known_hosts.as_deref())
+        create_remote_entry_blocking(request, Some(&pool), Some(&known_hosts))
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -675,9 +670,9 @@ pub(crate) async fn rename_remote_path(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        rename_remote_path_blocking(request, Some(&pool), known_hosts.as_deref())
+        rename_remote_path_blocking(request, Some(&pool), Some(&known_hosts))
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -752,9 +747,9 @@ pub(crate) async fn copy_remote_path(
         .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        copy_remote_path_blocking(request, cancel_flag, Some(&pool), known_hosts.as_deref())
+        copy_remote_path_blocking(request, cancel_flag, Some(&pool), Some(&known_hosts))
     })
     .await;
     // Remove the registry entry before propagating a JoinError so the
@@ -788,15 +783,9 @@ pub(crate) async fn copy_remote_to_remote(
         .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        copy_remote_to_remote_blocking(
-            app,
-            request,
-            cancel_flag,
-            Some(&pool),
-            known_hosts.as_deref(),
-        )
+        copy_remote_to_remote_blocking(app, request, cancel_flag, Some(&pool), Some(&known_hosts))
     })
     .await;
     // Remove the registry entry before propagating a JoinError so the
@@ -1117,7 +1106,7 @@ pub(crate) async fn open_remote_file(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let open_root = app
         .path()
         .home_dir()
@@ -1127,7 +1116,7 @@ pub(crate) async fn open_remote_file(
         open_remote_file_blocking(
             request,
             Some(&pool),
-            known_hosts.as_deref(),
+            Some(&known_hosts),
             open_root.as_deref(),
         )
     })
@@ -1178,9 +1167,9 @@ pub(crate) async fn preview_remote_file(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        read_remote_file_blocking(request, Some(&pool), known_hosts.as_deref())
+        read_remote_file_blocking(request, Some(&pool), Some(&known_hosts))
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -1216,9 +1205,9 @@ pub(crate) async fn update_remote_permissions(
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
+    let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        update_remote_permissions_blocking(request, Some(&pool), known_hosts.as_deref())
+        update_remote_permissions_blocking(request, Some(&pool), Some(&known_hosts))
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -1576,6 +1565,10 @@ pub(crate) fn resolve_keychain_key_for_remote(
     Ok(())
 }
 
+fn remote_known_hosts_path(app: &AppHandle) -> Result<std::path::PathBuf, RemoteFsError> {
+    crate::known_hosts::known_hosts_path(app).map_err(|message| RemoteFsError::Other { message })
+}
+
 fn resolve_keychain_key_for_session(
     credentials: &crate::keychain::CredentialManager,
     request: &mut SessionCreateRequest,
@@ -1608,6 +1601,7 @@ pub(crate) fn start_port_forward(
     );
     validate_connection_fields(&request.connection.host, &request.connection.username)?;
     crate::port_forward::validate_start_request(&request)?;
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)?;
     resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
 
     let local_listener = if request.forward.kind == crate::models::PortForwardKind::Local {
@@ -1627,9 +1621,7 @@ pub(crate) fn start_port_forward(
 
     let manager = (*forwards_state).clone();
     let worker_app = app.clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app)
-        .ok()
-        .map(|p| p.to_string_lossy().to_string());
+    let known_hosts = known_hosts.to_string_lossy().to_string();
     thread::spawn(move || {
         crate::port_forward::start_port_forward(
             worker_app,

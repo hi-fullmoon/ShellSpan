@@ -417,8 +417,9 @@ pub(crate) fn delete_remote_path_blocking(
     pool: Option<&SftpPool>,
 ) -> Result<(), RemoteFsError> {
     let connection = request.connection.clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    let result = delete_remote_path_inner(app, request, cancel_flag, known_hosts.as_deref());
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let result = delete_remote_path_inner(app, request, cancel_flag, Some(&known_hosts));
     if let Err(ref error) = result {
         if let Some(pool) = pool {
             if is_connection_error(error) {
@@ -543,8 +544,9 @@ pub(crate) fn upload_local_paths_blocking(
     pool: Option<&SftpPool>,
 ) -> Result<TransferBatchResult, RemoteFsError> {
     let connection = request.connection.clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    let result = upload_local_paths_inner(app, request, cancel_flag, known_hosts.as_deref());
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let result = upload_local_paths_inner(app, request, cancel_flag, Some(&known_hosts));
     if let Some(pool) = pool {
         match &result {
             Err(error) if is_connection_error(error) => pool.invalidate(&connection),
@@ -707,8 +709,9 @@ pub(crate) fn download_remote_paths_blocking(
     pool: Option<&SftpPool>,
 ) -> Result<TransferBatchResult, RemoteFsError> {
     let connection = request.connection.clone();
-    let known_hosts = crate::known_hosts::known_hosts_path(&app).ok();
-    let result = download_remote_paths_inner(app, request, cancel_flag, known_hosts.as_deref());
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let result = download_remote_paths_inner(app, request, cancel_flag, Some(&known_hosts));
     if let Some(pool) = pool {
         match &result {
             Err(error) if is_connection_error(error) => pool.invalidate(&connection),

@@ -1527,25 +1527,16 @@ mod tests {
             passphrase: None,
             jump_host: None,
         };
-        let tcp = connect_tcp_stream(&connection.host, connection.port).expect("connect tcp");
-        let target = open_authenticated_session(
-            tcp,
-            &connection.username,
-            connection.auth_method,
-            connection.password.as_deref(),
-            None,
-            None,
-            &connection.host,
-            connection.port,
-            None,
-        )
-        .expect("authenticate isolated SSH");
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let target = open_runbook_session(&connection, &known_hosts_path)
+            .expect("authenticate isolated SSH with the trusted host key");
         let expected = RunbookExpectedResult {
             exit_code: 0,
             stdout_contains: vec!["TERMBRIDGE_RUNBOOK_OK".to_string()],
         };
         let outcome = execute_channel(
-            &target,
+            &target.target,
             "printf TERMBRIDGE_RUNBOOK_OK",
             &expected,
             &AtomicBool::new(false),
@@ -1582,29 +1573,20 @@ mod tests {
             passphrase: None,
             jump_host: None,
         };
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
         let handles = ["TERMBRIDGE_HOST_ALPHA", "TERMBRIDGE_HOST_BRAVO"].map(|marker| {
             let worker_connection = connection.clone();
+            let worker_known_hosts_path = known_hosts_path.clone();
             std::thread::spawn(move || {
-                let tcp = connect_tcp_stream(&worker_connection.host, worker_connection.port)
-                    .expect("connect isolated multi-host tcp");
-                let session = open_authenticated_session(
-                    tcp,
-                    &worker_connection.username,
-                    worker_connection.auth_method,
-                    worker_connection.password.as_deref(),
-                    None,
-                    None,
-                    &worker_connection.host,
-                    worker_connection.port,
-                    None,
-                )
-                .expect("authenticate isolated multi-host SSH");
+                let session = open_runbook_session(&worker_connection, &worker_known_hosts_path)
+                    .expect("authenticate isolated multi-host SSH with the trusted host key");
                 let expected = RunbookExpectedResult {
                     exit_code: 0,
                     stdout_contains: vec![marker.to_string()],
                 };
                 match execute_channel(
-                    &session,
+                    &session.target,
                     &format!("printf {marker}"),
                     &expected,
                     &AtomicBool::new(false),

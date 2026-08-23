@@ -1,7 +1,7 @@
 # EXPLORE 团队共享、集中策略与集中审计产品发现评估
 
-> 基线：`7836b34`
-> 审核日期：2026-08-23
+> 独立审计基线：`6c14836`
+> 审核日期：2026-08-24
 > 路线图范围：团队共享、集中策略与审计服务仅在个人工作区模型稳定后进入产品发现
 > 首个发现对象：无秘密、待审阅的团队运维资料共享问题；不实现同步或服务
 
@@ -11,7 +11,7 @@
 
 - TermBridge 自身公开 issue 中没有可复核的团队共享、集中策略或集中审计请求，且 issue 创建受限。外部 SSH/连接工具的用户讨论能证明这些问题类别存在，但不能替代 TermBridge 用户需求。
 - Runbook、多主机、操作记录、脱敏导出和逐步审批已有较完整的本地证据；这些是未来发现工作的输入，不是团队服务已经安全。
-- 个人模型仍有硬阻断：`now-quality-gates` 是 `in-progress`；若 Known Hosts 路径解析失败，多条远程文件和端口转发命令会把错误降级为无路径并继续认证；AI API Key 迁移会把钥匙串值写回 SQLite preferences；终端工作区没有版本/数量/大小契约；Windows/macOS 没有真实桌面、凭据、恢复和故障 E2E。
+- 本次独立审计已关闭三项仓库内硬缺口：所有相关远程入口在认证前强制解析 Known Hosts 路径；AI API Key 只从旧 SQLite 明文迁入系统钥匙串；终端工作区采用 v1 并限制大小、数量、字段和布局深度。个人模型仍受完整数据库灾难恢复、当前提交的托管平台检查以及 Windows/macOS 原生钥匙串、休眠/网络切换、更新恢复和故障 E2E 阻断。
 - 团队共享、集中策略和集中审计面向不同角色，不能作为一个“企业版”包自动一起实现。共享主要解决资料一致性，策略解决授权决策，审计解决跨成员证据；后两者都要求稳定身份、租户、服务可用性和不可绕过的执行边界。
 - 若前置稳定性完成，首个产品发现问题只验证 **2–20 人运维团队能否通过共享不含秘密的连接元数据与待审 Runbook 降低配置漂移和交接成本**。发现可用访谈和无后端原型进行；真实文件试用仍依赖扩展数据契约另行达到稳定，不授权同步后端。
 
@@ -51,16 +51,16 @@
 
 | 边界 | 可复用证据 | 未闭合缺口 | 结论 |
 | --- | --- | --- | --- |
-| 连接与凭据 | profile 密码、私钥与 passphrase 有 OS 钥匙串接口；数据库 v2 清理旧秘密列；连接预检在可信 host-key 前不认证 | `migrate_legacy_api_keys` 会从钥匙串读取 AI API Key、写入 `ai.providers` preferences 后删除钥匙串副本；通用 preferences 没有秘密拒绝边界 | `not-met` |
-| Known Hosts | 未知/不匹配 key 有明确状态；信任/移除写入串行化；预检和 Runbook 用 `known_hosts_path(...)?` 失败关闭 | `commands.rs` 的远程目录、文件操作、传输与端口转发多处使用 `known_hosts_path(...).ok()`；路径失败会变成 `None`，`open_authenticated_session` 随后跳过 host-key 检查并进入认证 | `not-met` |
-| 会话与工作区恢复 | 远程会话恢复为断开状态；持久化写入串行；SFTP v1 校验路径、书签和分栏；有清除入口 | 终端快照没有 schemaVersion、总字节、会话数量或字符串长度上限；Rust 保存边界接受任意 JSON；没有损坏/超限数据库、休眠、崩溃和 N-1 升级的正式平台 E2E | `not-met` |
+| 连接与凭据 | profile 密码、私钥、passphrase 与 AI API Key 均走 OS 钥匙串；旧 AI 明文只向钥匙串迁移，写入/清理失败保留可恢复副本；preferences 拒绝敏感 provider 字段 | 正式平台原生钥匙串故障 E2E 单独归入跨平台边界 | `met` |
+| Known Hosts | 未知/不匹配 key 有明确状态；信任/移除写入串行化；交互连接、远程文件/传输、转发、健康与 Runbook 都在认证前强制解析路径并失败关闭 | 当前仓库内无 `None` 降级旁路；正式平台文件权限/休眠故障仍归入跨平台边界 | `met` |
+| 会话与工作区恢复 | 远程会话恢复为断开状态；SFTP 与终端均有版本化契约、数量/大小/字段边界和清除入口；终端 v1 兼容旧无版本形状、拒绝未来版本，Rust 保存同步校验 | 正式平台崩溃、休眠与 N-1 端到端证据仍归入跨平台边界 | `met` |
 | Runbook / 多主机 | v1 严格字段，512 KiB 文档、8 KiB 命令、64 KiB 输出、5 分钟超时；风险分级、逐步批准、1–8 并发、1–50 批次、按主机熔断和安全重试均有 TS/Rust/隔离 SSH 证据 | 当前缺口主要归入跨平台真实运行；本地模型本身的失败、取消、身份隔离和部分成功语义已经闭合 | `met` |
 | 操作记录 | SQLite v5 结构化事件关联 task/operation/profile/批准/结果；最大读取 20,000 事件，失败和部分成功是一等状态 | 写入是观察性 best-effort，失败不会阻止操作；这适合个人记录，但不能被集中审计宣称为完整、不可绕过的合规证据 | `met`（仅个人本地语义） |
 | 脱敏导出 | 不存终端输入、原始输出或文件内容；可疑命令整体替换；导出最多 5,000 个任务，临时文件 `sync_all` 后替换，失败清理临时文件 | 中央收集所需的成员身份、事件真实性、端到端确认、驻留位置、法律保留和租户删除尚不存在 | `met`（仅个人本地语义） |
-| 本地数据库 | schema v1–v5 迁移、WAL、foreign keys、较新版本拒绝和 CRUD 测试存在 | API Key 可进入 preferences；workspace/preferences 写入缺少后端大小/形状上限；没有全迁移链路断电/磁盘满/损坏恢复夹具，数据库不是团队同步契约 | `not-met` |
+| 本地数据库 | schema v1–v5 迁移、WAL、foreign keys、较新版本拒绝、AI 敏感字段拒绝及终端 workspace 后端版本/大小/数量校验存在 | 通用 preferences 与其他 workspace 尚未统一总量边界；没有全迁移链路断电/磁盘满/损坏恢复夹具，数据库也不是团队同步契约 | `not-met` |
 | 权限与审批 | Runbook 的 exact risk、command、profile/host/port/user 和证据在前后端复验；多主机逐主机批准 | 交互终端输入有意不进操作记录，也没有策略执行点；直接 SFTP/终端用户动作不是组织身份下的角色授权。集中策略不能声称覆盖这些旁路 | `met`（仅个人显式操作） |
 | 跨平台 | Windows x86_64 与 macOS ARM 运行常规 Rust fmt/Clippy/unit tests，并各自构建发行物 | SSH/SFTP、Runbook、多主机、健康和转发的隔离 E2E 只在 Ubuntu Docker；没有正式平台的原生钥匙串、Known Hosts 失败、工作区恢复、休眠/网络切换和更新恢复 E2E | `not-met` |
-| 自动化门禁 | `review:frontend`、Windows/macOS Rust job 与隔离 SSH job 已定义；当前功能有大量单元与故障状态测试 | `now-quality-gates` 仍为 `in-progress`；路线图要求的五条桌面关键 E2E、数据库迁移/旧配置故障注入和正式平台测试没有全部闭合 | `not-met` |
+| 自动化门禁 | `now-quality-gates` 的仓库内工作流、精确 ROADMAP 映射、安全收口与回归证据为 `verified`；`review:frontend`、Windows/macOS Rust 与隔离 SSH job 已定义 | 当前提交仍需托管 Windows/macOS 检查；正式平台原生钥匙串、休眠/网络切换、更新恢复和完整数据库故障 E2E 没有全部闭合 | `not-met` |
 
 只要任一前置不是 `met`，`personalWorkspaceModel` 就不能标记为 `stable`，团队产品发现门禁也不能打开。
 
