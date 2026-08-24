@@ -348,6 +348,8 @@ describe('ConnectionFormDrawer', () => {
 
     const saveButton = screen.getByRole('button', { name: 'common.save' });
     const connectButton = screen.getByRole('button', { name: 'connection.form.saveAndConnect' });
+    expect(saveButton).toHaveClass('h-8');
+    expect(connectButton).toHaveClass('h-8');
     expect(saveButton).toHaveClass('border');
     expect(connectButton).toHaveClass('bg-app-button');
     expect(saveButton.compareDocumentPosition(connectButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);

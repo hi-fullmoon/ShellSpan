@@ -125,6 +125,13 @@ describe('LogPanel', () => {
     expect(screen.queryByText('workbench.logs.copyHint')).not.toBeInTheDocument();
   });
 
+  it('renders the header refresh action as a text button', () => {
+    render(<LogPanel />);
+
+    expect(screen.getByRole('button', { name: 'common.refresh' }))
+      .toHaveTextContent('common.refresh');
+  });
+
   it('shows an empty-filter message when no log entries match', () => {
     mockContent =
       '[2000-01-01][12:34:56][INFO][termbridge] persisted log entry\n';

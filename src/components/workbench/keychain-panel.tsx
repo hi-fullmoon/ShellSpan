@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { KeyRound, Lock, RefreshCwIcon, SearchIcon, SearchXIcon, Trash2Icon, PencilIcon, CopyIcon, FileKey, UploadCloud } from 'lucide-react';
+import { KeyRound, Lock, SearchIcon, SearchXIcon, Trash2Icon, PencilIcon, CopyIcon, FileKey, UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
@@ -18,6 +19,11 @@ import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { FormRow, MANAGEMENT_CARD_MIN_WIDTH, keyTypeBadgeClass } from './shared';
 import type { KeychainKey, KeychainKeyKind } from '@/types';
+import {
+  WorkbenchPage,
+  WorkbenchPageContent,
+  WorkbenchPageHeader,
+} from './workbench-page';
 
 interface KeyFormState {
   kind: KeychainKeyKind;
@@ -170,121 +176,117 @@ export const KeychainPanel: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col">
-        <div className="flex shrink-0 flex-col gap-2 border-b border-app-border/50 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-app-text">{t('workbench.keychain.title')}</div>
-            <div className="text-[11px] text-muted-foreground">
-              {t('workbench.keychain.count', {
-                count: filteredKeys.length,
-                total: keys.length,
-              })}
-            </div>
-          </div>
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            <div className="relative min-w-0 flex-1 sm:w-64">
-              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('workbench.keychain.searchPlaceholder')}
-                aria-label={t('workbench.keychain.searchPlaceholder')}
-                className="h-8 pl-7"
-              />
-            </div>
-            <IconActionButton
-              className="size-7 text-app-text hover:bg-app-text/10"
-              aria-label={t('common.refresh')}
-              tooltip={t('common.refresh')}
-              onClick={hydrate}
-            >
-              <RefreshCwIcon data-icon="inline-start" className={cn(!initialized && 'animate-spin')} />
-            </IconActionButton>
-            <Button size="sm" onClick={openCreate}>
-              {t('common.create')}
-            </Button>
-          </div>
-        </div>
+      <WorkbenchPage>
+        <WorkbenchPageHeader
+          icon={KeyRound}
+          title={t('workbench.keychain.title')}
+          description={t('workbench.keychain.count', {
+            count: filteredKeys.length,
+            total: keys.length,
+          })}
+          actions={(
+            <>
+              <div className="relative min-w-0 flex-1 sm:w-64">
+                <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t('workbench.keychain.searchPlaceholder')}
+                  aria-label={t('workbench.keychain.searchPlaceholder')}
+                  className="h-8 pl-7"
+                />
+              </div>
+              <Button variant="outline" size="sm" onClick={hydrate}>
+                {t('common.refresh')}
+              </Button>
+              <Button size="sm" onClick={openCreate}>
+                {t('common.create')}
+              </Button>
+            </>
+          )}
+        />
 
-        <div className="flex-1 overflow-y-auto p-2">
-          {!initialized && keys.length === 0 && <PanelLoadingState />}
-          {initialized && keys.length === 0 && (
-            <PanelEmptyState
-              title={t('workbench.keychain.empty')}
-              description={t('workbench.keychain.emptyDescription')}
-              icon={<KeyRound className="size-5" />}
-            />
-          )}
-          {initialized && keys.length > 0 && filteredKeys.length === 0 && (
-            <PanelEmptyState
-              title={t('workbench.keychain.filteredEmpty')}
-              description={t('common.noSearchResults')}
-              icon={<SearchXIcon className="size-5" />}
-            />
-          )}
-          {filteredKeys.length > 0 && (
-            <ResponsiveCardGrid
-              columns={1}
-              minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
-              gap="0.375rem"
-            >
-              {filteredKeys.map((key) => {
-                const isProfilePassword = key.service === 'com.termbridge.profile-password';
-                return (
-                  <ManagementCard key={key.id}>
-                    <div className="flex items-center gap-2.5">
-                      <ManagementCardIcon>{key.kind === 'password' ? <Lock /> : <FileKey />}</ManagementCardIcon>
-                      <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="truncate text-[13px] font-medium leading-tight text-app-text">{key.label}</span>
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span
-                            className={cn(
-                              'w-fit rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none tracking-wide',
-                              keyTypeBadgeClass(key.keyType),
-                            )}
-                          >
-                            {key.keyType.toUpperCase()}
-                          </span>
+        <ScrollArea className="min-h-0 flex-1">
+          <WorkbenchPageContent>
+            {!initialized && keys.length === 0 && <PanelLoadingState />}
+            {initialized && keys.length === 0 && (
+              <PanelEmptyState
+                title={t('workbench.keychain.empty')}
+                description={t('workbench.keychain.emptyDescription')}
+                icon={<KeyRound className="size-5" />}
+              />
+            )}
+            {initialized && keys.length > 0 && filteredKeys.length === 0 && (
+              <PanelEmptyState
+                title={t('workbench.keychain.filteredEmpty')}
+                description={t('common.noSearchResults')}
+                icon={<SearchXIcon className="size-5" />}
+              />
+            )}
+            {filteredKeys.length > 0 && (
+              <ResponsiveCardGrid
+                columns={1}
+                minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
+                gap="0.375rem"
+              >
+                {filteredKeys.map((key) => {
+                  const isProfilePassword = key.service === 'com.termbridge.profile-password';
+                  return (
+                    <ManagementCard key={key.id}>
+                      <div className="flex items-center gap-2.5">
+                        <ManagementCardIcon>{key.kind === 'password' ? <Lock /> : <FileKey />}</ManagementCardIcon>
+                        <div className="flex min-w-0 flex-1 flex-col gap-1">
+                          <span className="truncate text-[13px] font-medium leading-tight text-app-text">{key.label}</span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span
+                              className={cn(
+                                'w-fit rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none tracking-wide',
+                                keyTypeBadgeClass(key.keyType),
+                              )}
+                            >
+                              {key.keyType.toUpperCase()}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                      {!isProfilePassword && (
+                        {!isProfilePassword && (
+                          <IconActionButton
+                            onClick={() => {
+                              // Retrieve full key for editing.
+                              void useKeychainStore
+                                .getState()
+                                .getKey(key.id)
+                                .then((k) => {
+                                  if (k) {
+                                    openEdit(k);
+                                  } else {
+                                    showError(t('workbench.keychain.loadFailed'));
+                                  }
+                                });
+                            }}
+                            aria-label={t('common.edit')}
+                            tooltip={t('common.edit')}
+                            className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                          >
+                            <PencilIcon data-icon="inline-start" className="text-app-primary" />
+                          </IconActionButton>
+                        )}
                         <IconActionButton
-                          onClick={() => {
-                            // Retrieve full key for editing.
-                            void useKeychainStore
-                              .getState()
-                              .getKey(key.id)
-                              .then((k) => {
-                                if (k) {
-                                  openEdit(k);
-                                } else {
-                                  showError(t('workbench.keychain.loadFailed'));
-                                }
-                              });
-                          }}
-                          aria-label={t('common.edit')}
-                          tooltip={t('common.edit')}
+                          onClick={() => setDeleting(key)}
+                          aria-label={t('common.delete')}
+                          tooltip={t('common.delete')}
                           className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
                         >
-                          <PencilIcon data-icon="inline-start" className="text-app-primary" />
+                          <Trash2Icon data-icon="inline-start" className="text-destructive" />
                         </IconActionButton>
-                      )}
-                      <IconActionButton
-                        onClick={() => setDeleting(key)}
-                        aria-label={t('common.delete')}
-                        tooltip={t('common.delete')}
-                        className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                      >
-                        <Trash2Icon data-icon="inline-start" className="text-destructive" />
-                      </IconActionButton>
-                    </div>
-                  </ManagementCard>
-                );
-              })}
-            </ResponsiveCardGrid>
-          )}
-        </div>
-      </div>
+                      </div>
+                    </ManagementCard>
+                  );
+                })}
+              </ResponsiveCardGrid>
+            )}
+          </WorkbenchPageContent>
+        </ScrollArea>
+      </WorkbenchPage>
 
       <Drawer
         open={drawerOpen}
@@ -333,8 +335,8 @@ export const KeychainPanel: React.FC = () => {
               }}
             />
           </FieldGroup>
-          <DrawerFooter className="border-t-0 px-5 pb-4 pt-1">
-            <Button onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
+          <DrawerFooter className="px-5 pb-4 pt-1">
+            <Button size="sm" onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
               {t('common.save')}
             </Button>
           </DrawerFooter>

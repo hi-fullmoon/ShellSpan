@@ -10,13 +10,20 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  CompactDialogBody,
+  CompactDialogContent,
+  CompactDialogFooter,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
+import { Dialog } from '@/components/ui/dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { buildHostOverview } from '@/lib/host-overview';
 import { useAgentStore } from '@/stores/agentStore';
@@ -44,14 +51,16 @@ function MetricCard({
   detail: string;
 }): React.JSX.Element {
   return (
-    <div className="rounded-lg border border-app-border p-3">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Icon className="size-3.5" />
-        {label}
-      </div>
-      <div className="mt-2 text-xl font-semibold text-foreground">{value}</div>
-      <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
-    </div>
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription className="flex items-center gap-2">
+          <Icon />
+          {label}
+        </CardDescription>
+        <CardTitle className="text-xl">{value}</CardTitle>
+      </CardHeader>
+      <CardContent className="text-xs text-muted-foreground">{detail}</CardContent>
+    </Card>
   );
 }
 
@@ -77,17 +86,17 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
 
   return (
     <Dialog open={Boolean(profile)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('hostOverview.title')}</DialogTitle>
-          <DialogDescription>
-            {profile ? `${profile.name} · ${profile.username}@${profile.host}:${profile.port}` : ''}
-          </DialogDescription>
-        </DialogHeader>
+      <CompactDialogContent>
+        <CompactDialogHeader
+          title={t('hostOverview.title')}
+          description={profile
+            ? `${profile.name} · ${profile.username}@${profile.host}:${profile.port}`
+            : ''}
+        />
 
         {snapshot && (
-          <>
-            <div className="grid grid-cols-2 gap-2">
+          <CompactDialogBody className="flex flex-col gap-3">
+            <div className="grid shrink-0 grid-cols-2 gap-2">
               <MetricCard
                 icon={TerminalIcon}
                 label={t('hostOverview.terminals')}
@@ -117,28 +126,34 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-app-border p-3 text-sm">
-              <BotIcon className="size-4 text-muted-foreground" />
-              <span>{t('hostOverview.diagnostic')}</span>
-              <Badge variant="outline">
-                {snapshot.diagnosticPhase ?? t('hostOverview.none')}
-              </Badge>
-            </div>
+            <Card size="sm" className="shrink-0">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BotIcon />
+                  {t('hostOverview.diagnostic')}
+                </CardTitle>
+                <CardAction>
+                  <Badge variant="outline">
+                    {snapshot.diagnosticPhase ?? t('hostOverview.none')}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+            </Card>
 
             {snapshot.latestError && (
-              <Alert variant="destructive">
+              <Alert variant="destructive" className="shrink-0">
                 <ActivityIcon />
                 <AlertTitle>{t('hostOverview.latestError')}</AlertTitle>
                 <AlertDescription>{snapshot.latestError}</AlertDescription>
               </Alert>
             )}
-          </>
+          </CompactDialogBody>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
-        </DialogFooter>
-      </DialogContent>
+        <CompactDialogFooter>
+          <Button variant="outline" size="sm" onClick={onClose}>{t('common.close')}</Button>
+        </CompactDialogFooter>
+      </CompactDialogContent>
     </Dialog>
   );
 }

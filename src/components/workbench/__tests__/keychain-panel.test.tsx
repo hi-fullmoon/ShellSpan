@@ -67,6 +67,13 @@ describe('KeychainPanel', () => {
     expect(deleteButtons).toHaveLength(2);
   });
 
+  it('renders the header refresh action as a text button', () => {
+    render(<KeychainPanel />);
+
+    expect(screen.getByRole('button', { name: 'common.refresh' }))
+      .toHaveTextContent('common.refresh');
+  });
+
   it('creates key-file keys only and hides the kind selector', () => {
     render(<KeychainPanel />);
 

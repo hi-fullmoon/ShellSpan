@@ -9,14 +9,11 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDownToLineIcon,
   BugIcon,
-  CheckIcon,
   ChevronRightIcon,
   CircleAlertIcon,
-  CopyIcon,
-  DownloadIcon,
   FileSearchIcon,
+  FileTextIcon,
   Layers3Icon,
-  RefreshCwIcon,
   SearchIcon,
   SearchXIcon,
   XIcon,
@@ -52,6 +49,11 @@ import { useSftpStore } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { isTauriRuntime } from '@/lib/tauri';
+import {
+  WorkbenchPage,
+  WorkbenchPageHeader,
+  WorkbenchPageToolbar,
+} from './workbench-page';
 
 interface ParsedLogLine {
   raw: string;
@@ -435,11 +437,6 @@ const LogInspector: React.FC<{
               onClick={() => void handleCopy()}
               aria-live="polite"
             >
-              {copied ? (
-                <CheckIcon data-icon="inline-start" />
-              ) : (
-                <CopyIcon data-icon="inline-start" />
-              )}
               {t(copied
                 ? 'workbench.logs.inspector.copied'
                 : 'workbench.logs.inspector.copy')}
@@ -672,27 +669,26 @@ export const LogPanel: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <div className="@container flex h-full min-w-0 flex-col bg-background">
-        <header className="flex shrink-0 flex-col gap-3 border-b border-border bg-card px-4 pb-3 pt-3">
-          <div className="flex items-center justify-between gap-3 @max-[640px]:flex-col @max-[640px]:items-stretch">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-semibold tracking-tight text-foreground">
-                  {t('workbench.logs.title')}
-                </h1>
-                <Badge variant="outline" className="gap-1.5 font-normal text-muted-foreground">
-                  <span className={cn('size-1.5 rounded-full', isAtBottom ? 'bg-app-success' : 'bg-app-warning')} />
-                  {t(isAtBottom ? 'workbench.logs.live' : 'workbench.logs.followPaused')}
-                </Badge>
-              </div>
-              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-                <span className="truncate font-mono">
-                  {activeFileName ?? t('workbench.logs.noActiveFile')}
-                </span>
-                {activeFile && <span className="shrink-0">· {formatBytes(activeFile.size)}</span>}
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 @max-[640px]:justify-between">
+      <WorkbenchPage>
+        <WorkbenchPageHeader
+          icon={FileTextIcon}
+          title={t('workbench.logs.title')}
+          titleMeta={(
+            <Badge variant="outline" className="gap-1.5 font-normal text-muted-foreground">
+              <span className={cn('size-1.5 rounded-full', isAtBottom ? 'bg-app-success' : 'bg-app-warning')} />
+              {t(isAtBottom ? 'workbench.logs.live' : 'workbench.logs.followPaused')}
+            </Badge>
+          )}
+          description={(
+            <>
+              <span className="font-mono">
+                {activeFileName ?? t('workbench.logs.noActiveFile')}
+              </span>
+              {activeFile && <span> · {formatBytes(activeFile.size)}</span>}
+            </>
+          )}
+          actions={(
+            <>
               <ToggleGroup
                 value={[activeSource]}
                 onValueChange={(value) => handleSourceChange(value[0] as LogSource | undefined)}
@@ -704,33 +700,19 @@ export const LogPanel: React.FC = () => {
                 <ToggleGroupItem value="frontend">{t('workbench.logs.frontend')}</ToggleGroupItem>
                 <ToggleGroupItem value="backend">{t('workbench.logs.backend')}</ToggleGroupItem>
               </ToggleGroup>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="size-8"
-                      aria-label={t('common.refresh')}
-                      onClick={handleRefresh}
-                    />
-                  }
-                >
-                  <RefreshCwIcon />
-                </TooltipTrigger>
-                <TooltipContent>{t('common.refresh')}</TooltipContent>
-              </Tooltip>
+              <Button variant="outline" size="sm" onClick={handleRefresh}>
+                {t('common.refresh')}
+              </Button>
               <Button variant="outline" size="sm" onClick={handleExport} disabled={!content}>
-                <DownloadIcon data-icon="inline-start" />
                 {t('workbench.logs.export')}
               </Button>
               <Button variant="secondary" size="sm" onClick={handleDiagnosticBundle}>
-                <BugIcon data-icon="inline-start" />
                 {t('workbench.logs.diagnostic')}
               </Button>
-            </div>
-          </div>
-
+            </>
+          )}
+        />
+        <WorkbenchPageToolbar>
           <div className="flex min-w-0 items-center gap-5 rounded-lg border border-border bg-background px-3 py-2 @max-[600px]:flex-col @max-[600px]:items-stretch">
             <div className="grid shrink-0 grid-cols-2 gap-x-5 gap-y-2 @min-[960px]:grid-cols-4">
               <OverviewStat icon={<Layers3Icon />} label={t('workbench.logs.stats.results')} value={filteredLines.length} />
@@ -741,9 +723,9 @@ export const LogPanel: React.FC = () => {
             <div className="h-12 w-px shrink-0 bg-border @max-[600px]:h-px @max-[600px]:w-full" />
             <ActivityHistogram buckets={activityBuckets} label={t('workbench.logs.activity')} />
           </div>
-        </header>
+        </WorkbenchPageToolbar>
 
-        <section className="flex shrink-0 flex-col gap-2 border-b border-border bg-card px-4 py-2.5">
+        <WorkbenchPageToolbar>
           <InputGroup className="h-9 bg-background">
             <InputGroupAddon><SearchIcon /></InputGroupAddon>
             <InputGroupInput
@@ -810,10 +792,10 @@ export const LogPanel: React.FC = () => {
               <span>{t('workbench.logs.resultCount', { count: filteredLines.length })}</span>
             </div>
           </div>
-        </section>
+        </WorkbenchPageToolbar>
 
         {error && (
-          <Alert variant="destructive" className="mx-4 mt-3 shrink-0">
+          <Alert variant="destructive" className="mx-4 mt-3 w-auto shrink-0">
             <CircleAlertIcon />
             <AlertTitle>{t('workbench.logs.loadFailed')}</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
@@ -914,7 +896,7 @@ export const LogPanel: React.FC = () => {
             </Tooltip>
           )}
         </div>
-      </div>
+      </WorkbenchPage>
     </TooltipProvider>
   );
 };

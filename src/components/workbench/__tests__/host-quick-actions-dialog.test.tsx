@@ -50,6 +50,23 @@ describe('HostQuickActionsDialog', () => {
     });
   });
 
+  it('uses the shared scroll area while keeping the managed form at its intrinsic height', async () => {
+    render(<HostQuickActionsDialog profile={profile} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('dialog')).toHaveClass('h-[min(720px,calc(100vh-2rem))]');
+    fireEvent.click(screen.getByRole('button', { name: 'Add quick action' }));
+
+    const formTitle = await screen.findByText('Add quick action', {
+      selector: '[data-slot="card-title"]',
+    });
+    expect(formTitle.closest('[data-slot="card"]')).toHaveClass('shrink-0');
+    expect(document.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    const viewport = document.querySelector('[data-slot="scroll-area-viewport"]');
+    expect(viewport).toBeInTheDocument();
+    expect(viewport?.firstElementChild).toHaveAttribute('data-slot', 'scroll-area-content');
+    expect(viewport?.firstElementChild).toHaveClass('flex', 'flex-col', 'gap-3', 'px-4', 'py-3');
+  });
+
   it('blocks secret-bearing snippets before persistence', async () => {
     render(<HostQuickActionsDialog profile={profile} onClose={vi.fn()} />);
 

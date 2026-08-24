@@ -31,6 +31,13 @@ vi.mock('@/stores/knownHostsStore', () => ({
 }));
 
 describe('KnownHostsPanel', () => {
+  it('renders the header refresh action as a text button', () => {
+    render(<KnownHostsPanel />);
+
+    expect(screen.getByRole('button', { name: 'common.refresh' }))
+      .toHaveTextContent('common.refresh');
+  });
+
   it('uses the compact file-manager delete confirmation style', () => {
     render(<KnownHostsPanel />);
 

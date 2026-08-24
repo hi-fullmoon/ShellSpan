@@ -52,7 +52,7 @@ export const IconActionButton: React.FC<IconActionButtonProps> = ({
     <Button
       variant="ghost"
       size="icon"
-      className={cn(className)}
+      className={cn(className, 'size-8')}
       disabled={disabled}
       onClick={handleClick}
       {...props}

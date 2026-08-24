@@ -393,6 +393,7 @@ describe('SftpPane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'sftp.showFilter' }));
     const input = screen.getByPlaceholderText('sftp.filter');
+    expect(screen.queryByRole('button', { name: 'sftp.clearFilter' })).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: 'report' } });
     expect(input).toHaveValue('report');
 

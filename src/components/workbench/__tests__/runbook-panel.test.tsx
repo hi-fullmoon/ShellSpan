@@ -13,10 +13,6 @@ vi.mock('@/hooks/useToast', () => ({
   useToast: () => ({ error: vi.fn(), success: vi.fn() }),
 }));
 
-vi.mock('@/components/ui/scroll-area', () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
 describe('RunbookPanel', () => {
   afterEach(() => {
     act(() => {
@@ -25,13 +21,43 @@ describe('RunbookPanel', () => {
   });
 
   it('renders the reviewable local text contract and risk-aware workflow', () => {
-    render(<RunbookPanel />);
+    const { container } = render(<RunbookPanel />);
     expect(screen.getByRole('heading', { name: 'runbook.title' })).toBeInTheDocument();
     expect((screen.getByRole('textbox', { name: 'runbook.textTitle' }) as HTMLTextAreaElement).value)
       .toContain('"schemaVersion": 1');
     expect(screen.getByText('Reload nginx safely')).toBeInTheDocument();
     expect(screen.getByText('runbook.secretPolicy')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /runbook.reviewRun/ })).toBeDisabled();
+    const reviewButton = screen.getByRole('button', { name: /runbook.reviewRun/ });
+    expect(reviewButton).toHaveClass('h-9');
+    expect(reviewButton).toBeDisabled();
+    expect(reviewButton.querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'runbook.open' }).querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'runbook.save' }).querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'runbook.validate' }).querySelector('svg')).toBeNull();
+    expect(screen.getByRole('tab', { name: 'runbook.tab.source' }).querySelector('svg')).toBeNull();
+    expect(screen.getByRole('tab', { name: 'runbook.tab.workflow' }).querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'runbook.targetMode.single' }).querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'runbook.targetMode.tag' }).querySelector('svg')).toBeNull();
+
+    const panel = container.querySelector<HTMLElement>('[data-slot="runbook-panel"]');
+    const header = panel?.querySelector('[data-slot="workbench-page-header"]');
+    const scroller = panel?.querySelector('[data-slot="scroll-area"]');
+    const content = panel?.querySelector('[data-slot="workbench-page-content"]');
+    const overview = container.querySelector('[data-slot="runbook-overview"]');
+    const layout = container.querySelector('[data-slot="runbook-layout"]');
+    const workspace = container.querySelector('[data-slot="runbook-workspace"]');
+    const setup = container.querySelector('[data-slot="runbook-setup"]');
+    expect(panel).toHaveClass('@container', 'min-w-0');
+    expect(header).toBeInTheDocument();
+    expect(scroller).toHaveClass('min-h-0', 'flex-1');
+    expect(content).toHaveClass('@container');
+    expect(overview).toBeInTheDocument();
+    expect(workspace).toBeInTheDocument();
+    expect(setup).toBeInTheDocument();
+    expect(layout).toHaveClass(
+      'grid-cols-1',
+      '@min-[60rem]:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]',
+    );
   });
 
   it('uses the shadcn target-mode toggle and exposes tagged batching limits', () => {

@@ -9,8 +9,6 @@ import {
   MemoryStickIcon,
   NetworkIcon,
   PauseIcon,
-  PlayIcon,
-  RefreshCwIcon,
   ServerIcon,
   TerminalIcon,
 } from 'lucide-react';
@@ -25,6 +23,7 @@ import { cn, formatBytes } from '@/lib/utils';
 import { formatClockTime, formatDiskHint, formatUptime } from '@/lib/monitor';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardAction,
@@ -33,14 +32,18 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState, Spinner } from '@/components/ui/empty-state';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendArea } from '@/components/ui/trend-area';
-import { IconActionButton } from './icon-action-button';
 import { RemoteHealthSection } from './remote-health-section';
+import {
+  WorkbenchPage,
+  WorkbenchPageContent,
+  WorkbenchPageHeader,
+} from './workbench-page';
 
 const DISCONNECT_REASON_KEY: Record<ClosedReasonKind, LocaleKey> = {
   local_close: 'workbench.monitor.reason.localClose',
@@ -49,11 +52,6 @@ const DISCONNECT_REASON_KEY: Record<ClosedReasonKind, LocaleKey> = {
   transport_disconnect: 'workbench.monitor.reason.transportDisconnect',
   error: 'workbench.monitor.reason.error',
 };
-
-const METRIC_GRID_BREAKPOINTS = [
-  { minWidth: 420, columns: 2 },
-  { minWidth: 760, columns: 4 },
-] as const;
 
 const CONNECTION_GRID_BREAKPOINTS = [{ minWidth: 760, columns: 2 }] as const;
 
@@ -144,43 +142,41 @@ const SectionHeading: React.FC<{ id: string; title: string; description?: string
   </div>
 );
 
-const MetricCard: React.FC<{
+const OverviewMetric: React.FC<{
   icon: React.ElementType;
   label: string;
   value: string;
-  hint?: string;
+  detail: string;
+  tone?: Tone;
   data?: number[];
   chartTone?: 'primary' | 'warning';
-}> = ({ icon: Icon, label, value, hint, data, chartTone = 'primary' }) => (
-  <Card size="sm" className="min-h-32">
-    <CardHeader>
-      <CardDescription>{label}</CardDescription>
-      <CardAction>
-        <div className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <Icon className="size-3.5" aria-hidden />
-        </div>
-      </CardAction>
-    </CardHeader>
-    <CardContent
-      className={cn('flex flex-1 flex-col gap-1', !data && 'justify-center pb-4')}
-    >
-      <div className="font-mono text-xl font-semibold tracking-tight text-foreground tabular-nums">
+}> = ({ icon: Icon, label, value, detail, tone = 'muted', data, chartTone = 'primary' }) => (
+  <div className="flex min-w-0 items-start gap-3">
+    <div className={cn(
+      'flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted',
+      toneTextClass(tone),
+    )}>
+      <Icon aria-hidden />
+    </div>
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="font-mono text-xl font-semibold tracking-tight text-foreground tabular-nums">
         {value}
-      </div>
-      {hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>}
+      </span>
+      <span className="truncate text-xs text-muted-foreground" title={detail}>{detail}</span>
       {data && (
         <TrendArea
           data={data}
-          height={34}
+          height={28}
           className={cn(
-            'mt-auto pt-2',
+            'mt-1',
             chartTone === 'warning' ? 'text-app-warning' : 'text-app-primary',
           )}
           aria-label={label}
         />
       )}
-    </CardContent>
-  </Card>
+    </div>
+  </div>
 );
 
 const UsageBar: React.FC<{ percent: number; tone?: Tone }> = ({ percent, tone = 'ok' }) => {
@@ -201,7 +197,35 @@ const UsageBar: React.FC<{ percent: number; tone?: Tone }> = ({ percent, tone = 
   );
 };
 
-const ResourceCard: React.FC<{
+const ProcessTrend: React.FC<{
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  detail: string;
+  data: number[];
+  tone?: 'primary' | 'warning';
+}> = ({ icon: Icon, label, value, detail, data, tone = 'primary' }) => (
+  <div className="flex min-h-36 min-w-0 flex-col gap-2 rounded-lg bg-muted/50 p-3">
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <Icon aria-hidden />
+        <span className="truncate">{label}</span>
+      </div>
+      <span className="font-mono text-lg font-semibold tracking-tight text-foreground tabular-nums">
+        {value}
+      </span>
+    </div>
+    <span className="truncate text-xs text-muted-foreground" title={detail}>{detail}</span>
+    <TrendArea
+      data={data}
+      height={48}
+      className={cn('mt-auto', tone === 'warning' ? 'text-app-warning' : 'text-app-primary')}
+      aria-label={label}
+    />
+  </div>
+);
+
+const ResourceRow: React.FC<{
   icon: React.ElementType;
   label: string;
   value: string;
@@ -209,32 +233,28 @@ const ResourceCard: React.FC<{
   tone?: Tone;
   hint?: string;
 }> = ({ icon: Icon, label, value, percent, tone = 'ok', hint }) => (
-  <Card size="sm">
-    <CardHeader>
-      <div className="flex items-center gap-2">
-        <Icon className="size-4 text-muted-foreground" aria-hidden />
-        <CardTitle>{label}</CardTitle>
+  <div className="flex flex-col gap-2 py-2.5">
+    <div className="flex min-w-0 items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+        <Icon className="text-muted-foreground" aria-hidden />
+        <span className="truncate">{label}</span>
       </div>
-      <CardAction>
-        <span className="font-mono text-xs font-medium text-foreground tabular-nums">
-          {Math.round(percent)}%
+      <span className={cn('font-mono text-sm font-semibold tabular-nums', toneTextClass(tone))}>
+        {Math.round(percent)}%
+      </span>
+    </div>
+    <UsageBar percent={percent} tone={tone} />
+    <div className="flex min-w-0 items-center justify-between gap-3 text-xs">
+      <span className="shrink-0 whitespace-nowrap font-mono text-foreground tabular-nums">
+        {value}
+      </span>
+      {hint && (
+        <span className="min-w-0 truncate text-right text-muted-foreground" title={hint}>
+          {hint}
         </span>
-      </CardAction>
-    </CardHeader>
-    <CardContent className="flex flex-col gap-2">
-      <UsageBar percent={percent} tone={tone} />
-      <div className="flex min-w-0 items-center justify-between gap-3 text-xs">
-        <span className="shrink-0 whitespace-nowrap font-mono text-foreground tabular-nums">
-          {value}
-        </span>
-        {hint && (
-          <span className="min-w-0 truncate text-right text-muted-foreground" title={hint}>
-            {hint}
-          </span>
-        )}
-      </div>
-    </CardContent>
-  </Card>
+      )}
+    </div>
+  </div>
 );
 
 const StatusCount: React.FC<{ tone: Tone; count: number; label: string }> = ({
@@ -353,62 +373,105 @@ export const MonitorPanel: React.FC = () => {
   );
   const sftpActiveCount = sftpRemotePanes.length - sftpErrorCount;
   const recentDisconnects = useMemo(() => [...disconnectEvents].reverse(), [disconnectEvents]);
+  const activeConnectionCount = sessionCounts.connected + sftpActiveCount;
+  const connectionIssueCount = sessionCounts.disconnected + sessionCounts.error + sftpErrorCount;
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col bg-background">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-app-border/50 bg-card/80 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <ActivityIcon className="size-4" aria-hidden />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="truncate text-base font-semibold text-foreground">
-                  {t('workbench.monitor.title')}
-                </h1>
-                <Badge variant="outline">{t('workbench.monitor.local')}</Badge>
-                <HealthBadge status={status} />
-              </div>
-              <p className="truncate text-xs text-muted-foreground">
-                {lastUpdatedAt !== undefined ? (
-                  <>
-                    {t('workbench.monitor.updatedAt')}{' '}
-                    <span className="font-mono tabular-nums">{formatClockTime(lastUpdatedAt)}</span>
-                  </>
-                ) : (
-                  t('workbench.monitor.noDataDescription')
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {paused && (
-              <Badge variant="secondary">
-                <PauseIcon data-icon="inline-start" />
-                {t('workbench.monitor.paused')}
-              </Badge>
-            )}
-            <IconActionButton
-              tooltip={paused ? t('workbench.monitor.resume') : t('workbench.monitor.pause')}
-              aria-label={paused ? t('workbench.monitor.resume') : t('workbench.monitor.pause')}
-              onClick={() => setPaused(!paused)}
-            >
-              {paused ? <PlayIcon /> : <PauseIcon />}
-            </IconActionButton>
-            <IconActionButton
-              tooltip={t('common.refresh')}
-              aria-label={t('common.refresh')}
-              onClick={() => void refresh()}
-              disabled={paused}
-            >
-              <RefreshCwIcon className={cn(loading && 'animate-spin')} />
-            </IconActionButton>
-          </div>
-        </header>
+      <WorkbenchPage>
+        <WorkbenchPageHeader
+          icon={ActivityIcon}
+          title={t('workbench.monitor.title')}
+          titleMeta={(
+            <>
+              <Badge variant="outline">{t('workbench.monitor.local')}</Badge>
+              <HealthBadge status={status} />
+            </>
+          )}
+          description={lastUpdatedAt !== undefined ? (
+            <>
+              {t('workbench.monitor.updatedAt')}{' '}
+              <span className="font-mono tabular-nums">{formatClockTime(lastUpdatedAt)}</span>
+            </>
+          ) : t('workbench.monitor.noDataDescription')}
+          actions={(
+            <>
+              {paused && (
+                <Badge variant="secondary">
+                  <PauseIcon data-icon="inline-start" />
+                  {t('workbench.monitor.paused')}
+                </Badge>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPaused(!paused)}
+              >
+                {t(paused ? 'workbench.monitor.resume' : 'workbench.monitor.pause')}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void refresh()}
+                disabled={paused}
+              >
+                {loading && <Spinner data-icon="inline-start" />}
+                {t('common.refresh')}
+              </Button>
+            </>
+          )}
+        />
 
         <ScrollArea className="min-h-0 flex-1">
-          <main className="mx-auto flex w-full max-w-screen-2xl flex-col gap-5 p-3 sm:p-4">
+          <WorkbenchPageContent className="gap-5">
+            {snapshot && (
+              <Card aria-labelledby="monitor-overview-heading">
+                <CardHeader>
+                  <CardTitle id="monitor-overview-heading">
+                    {t('workbench.monitor.overviewTitle')}
+                  </CardTitle>
+                  <CardDescription>{t('workbench.monitor.overviewDescription')}</CardDescription>
+                  <CardAction><HealthBadge status={status} /></CardAction>
+                </CardHeader>
+                <CardContent className="grid gap-5 @min-[38rem]:grid-cols-2 @min-[72rem]:grid-cols-4">
+                  <OverviewMetric
+                    icon={ActivityIcon}
+                    label={t('workbench.monitor.overallHealth')}
+                    value={t(`workbench.monitor.status.${status}`)}
+                    detail={t('workbench.monitor.local')}
+                    tone={status}
+                  />
+                  <OverviewMetric
+                    icon={CpuIcon}
+                    label={t('workbench.monitor.appActivity')}
+                    value={`${snapshot.app.cpuPercent.toFixed(1)}%`}
+                    detail={t('workbench.monitor.cpu')}
+                    tone="connecting"
+                    data={cpuHistory}
+                    chartTone="warning"
+                  />
+                  <OverviewMetric
+                    icon={MemoryStickIcon}
+                    label={t('workbench.monitor.memoryPressure')}
+                    value={`${snapshot.system.memoryUsagePercent.toFixed(1)}%`}
+                    detail={`${formatBytes(snapshot.system.usedMemoryBytes)} / ${formatBytes(snapshot.system.totalMemoryBytes)}`}
+                    tone={usageTone(snapshot.system.memoryUsagePercent)}
+                  />
+                  <OverviewMetric
+                    icon={NetworkIcon}
+                    label={t('workbench.monitor.activeConnections')}
+                    value={String(activeConnectionCount)}
+                    detail={t('workbench.monitor.connectionBreakdown', {
+                      terminal: sessionCounts.connected,
+                      sftp: sftpActiveCount,
+                      issues: connectionIssueCount,
+                    })}
+                    tone={connectionIssueCount > 0 ? 'warning' : 'ok'}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
             <RemoteHealthSection />
             <Separator />
             <section aria-labelledby="local-monitor-heading" className="flex flex-col gap-4">
@@ -417,115 +480,141 @@ export const MonitorPanel: React.FC = () => {
                 title={t('workbench.monitor.localTitle')}
                 description={t('workbench.monitor.localDescription')}
               />
-            {error && !snapshot && (
-              <Alert variant="destructive">
-                <CircleAlertIcon />
-                <AlertTitle>{t('workbench.monitor.loadFailed')}</AlertTitle>
-                <AlertDescription>
-                  <p>{t('common.loadFailedDescription')}</p>
-                  <details className="mt-1">
-                    <summary className="cursor-pointer text-xs">{t('common.errorDetails')}</summary>
-                    <code className="mt-1 block break-all text-xs">{error}</code>
-                  </details>
-                </AlertDescription>
-              </Alert>
-            )}
+              {error && !snapshot && (
+                <Alert variant="destructive">
+                  <CircleAlertIcon />
+                  <AlertTitle>{t('workbench.monitor.loadFailed')}</AlertTitle>
+                  <AlertDescription>
+                    <p>{t('common.loadFailedDescription')}</p>
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs">{t('common.errorDetails')}</summary>
+                      <code className="mt-1 block break-all text-xs">{error}</code>
+                    </details>
+                  </AlertDescription>
+                </Alert>
+              )}
 
-            {loading && !snapshot && <PanelLoadingState />}
+              {loading && !snapshot && <PanelLoadingState />}
 
-            {!snapshot && !loading && !error && (
-              <PanelEmptyState
-                icon={<ActivityIcon />}
-                title={t('workbench.monitor.noData')}
-                description={t('workbench.monitor.noDataDescription')}
-              />
-            )}
+              {!snapshot && !loading && !error && (
+                <PanelEmptyState
+                  icon={<ActivityIcon />}
+                  title={t('workbench.monitor.noData')}
+                  description={t('workbench.monitor.noDataDescription')}
+                />
+              )}
 
             {snapshot && (
               <>
-                <section aria-labelledby="monitor-process-heading" className="flex flex-col gap-2.5">
-                  <SectionHeading
-                    id="monitor-process-heading"
-                    title={t('workbench.monitor.appProcess')}
-                  />
-                  <ResponsiveCardGrid
-                    columns={1}
-                    breakpoints={METRIC_GRID_BREAKPOINTS}
-                    gap="0.625rem"
-                  >
-                    <MetricCard
-                      icon={MemoryStickIcon}
-                      label={t('workbench.monitor.rss')}
-                      value={formatBytes(snapshot.app.rssBytes)}
-                      hint={`${t('workbench.monitor.vsz')} ${formatBytes(snapshot.app.vszBytes)}`}
-                      data={rssHistory}
-                    />
-                    <MetricCard
-                      icon={CpuIcon}
-                      label={t('workbench.monitor.cpu')}
-                      value={`${snapshot.app.cpuPercent.toFixed(1)}%`}
-                      data={cpuHistory}
-                      chartTone="warning"
-                    />
-                    <MetricCard
-                      icon={Layers3Icon}
-                      label={t('workbench.monitor.threads')}
-                      value={snapshot.app.threads != null ? String(snapshot.app.threads) : '—'}
-                    />
-                    <MetricCard
-                      icon={Clock3Icon}
-                      label={t('workbench.monitor.uptime')}
-                      value={formatUptime(snapshot.app.uptimeSecs)}
-                    />
-                  </ResponsiveCardGrid>
-                </section>
+                <div className="grid items-stretch gap-3 @min-[64rem]:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
+                  <Card aria-labelledby="monitor-process-heading" className="h-full">
+                    <CardHeader>
+                      <CardTitle id="monitor-process-heading">
+                        {t('workbench.monitor.appProcess')}
+                      </CardTitle>
+                      <CardDescription>
+                        {t('workbench.monitor.appProcessDescription')}
+                      </CardDescription>
+                      <CardAction>
+                        <Badge variant="outline">
+                          PID {snapshot.app.pid}
+                        </Badge>
+                      </CardAction>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-3">
+                      <div className="grid gap-3 @min-[34rem]:grid-cols-2">
+                        <ProcessTrend
+                          icon={MemoryStickIcon}
+                          label={t('workbench.monitor.rss')}
+                          value={formatBytes(snapshot.app.rssBytes)}
+                          detail={`${t('workbench.monitor.vsz')} ${formatBytes(snapshot.app.vszBytes)}`}
+                          data={rssHistory}
+                        />
+                        <ProcessTrend
+                          icon={CpuIcon}
+                          label={t('workbench.monitor.cpu')}
+                          value={`${snapshot.app.cpuPercent.toFixed(1)}%`}
+                          detail={t('workbench.monitor.cpuTrend')}
+                          data={cpuHistory}
+                          tone="warning"
+                        />
+                      </div>
+                      <Separator />
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="text-xs text-muted-foreground">
+                            {t('workbench.monitor.threads')}
+                          </span>
+                          <span className="font-mono text-sm font-semibold text-foreground tabular-nums">
+                            {snapshot.app.threads != null ? String(snapshot.app.threads) : '—'}
+                          </span>
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="text-xs text-muted-foreground">
+                            {t('workbench.monitor.uptime')}
+                          </span>
+                          <span className="font-mono text-sm font-semibold text-foreground tabular-nums">
+                            {formatUptime(snapshot.app.uptimeSecs)}
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                <section aria-labelledby="monitor-system-heading" className="flex flex-col gap-2.5">
-                  <SectionHeading id="monitor-system-heading" title={t('workbench.monitor.system')} />
-                  <ResponsiveCardGrid
-                    columns={1}
-                    breakpoints={METRIC_GRID_BREAKPOINTS}
-                    gap="0.625rem"
-                  >
-                    <ResourceCard
-                      icon={MemoryStickIcon}
-                      label={t('workbench.monitor.memory')}
-                      value={`${formatBytes(snapshot.system.usedMemoryBytes)} / ${formatBytes(snapshot.system.totalMemoryBytes)}`}
-                      percent={snapshot.system.memoryUsagePercent}
-                      tone={usageTone(snapshot.system.memoryUsagePercent)}
-                    />
-                    <ResourceCard
-                      icon={Layers3Icon}
-                      label={t('workbench.monitor.swap')}
-                      value={`${formatBytes(snapshot.system.usedSwapBytes)} / ${formatBytes(snapshot.system.totalSwapBytes)}`}
-                      percent={usageRatio(
-                        snapshot.system.usedSwapBytes,
-                        snapshot.system.totalSwapBytes,
-                      )}
-                      tone={usageTone(
-                        usageRatio(
+                  <Card aria-labelledby="monitor-system-heading" className="h-full">
+                    <CardHeader>
+                      <CardTitle id="monitor-system-heading">
+                        {t('workbench.monitor.system')}
+                      </CardTitle>
+                      <CardDescription>{t('workbench.monitor.systemDescription')}</CardDescription>
+                      <CardAction>
+                        <Badge variant="outline">
+                          {snapshot.appInfo.platform} / {snapshot.appInfo.arch}
+                        </Badge>
+                      </CardAction>
+                    </CardHeader>
+                    <CardContent className="flex flex-col">
+                      <ResourceRow
+                        icon={MemoryStickIcon}
+                        label={t('workbench.monitor.memory')}
+                        value={`${formatBytes(snapshot.system.usedMemoryBytes)} / ${formatBytes(snapshot.system.totalMemoryBytes)}`}
+                        percent={snapshot.system.memoryUsagePercent}
+                        tone={usageTone(snapshot.system.memoryUsagePercent)}
+                      />
+                      <Separator />
+                      <ResourceRow
+                        icon={Layers3Icon}
+                        label={t('workbench.monitor.swap')}
+                        value={`${formatBytes(snapshot.system.usedSwapBytes)} / ${formatBytes(snapshot.system.totalSwapBytes)}`}
+                        percent={usageRatio(
                           snapshot.system.usedSwapBytes,
                           snapshot.system.totalSwapBytes,
-                        ),
-                      )}
-                    />
-                    <ResourceCard
-                      icon={CpuIcon}
-                      label={t('workbench.monitor.cpu')}
-                      value={`${snapshot.system.cpuPercent.toFixed(1)}%`}
-                      percent={snapshot.system.cpuPercent}
-                      tone={usageTone(snapshot.system.cpuPercent)}
-                    />
-                    <ResourceCard
-                      icon={HardDriveIcon}
-                      label={t('workbench.monitor.disk')}
-                      value={`${formatBytes(snapshot.disk.usedBytes)} / ${formatBytes(snapshot.disk.totalBytes)}`}
-                      percent={snapshot.disk.usagePercent}
-                      tone={usageTone(snapshot.disk.usagePercent)}
-                      hint={formatDiskHint(snapshot.disk, snapshot.appInfo.platform)}
-                    />
-                  </ResponsiveCardGrid>
-                </section>
+                        )}
+                        tone={usageTone(usageRatio(
+                          snapshot.system.usedSwapBytes,
+                          snapshot.system.totalSwapBytes,
+                        ))}
+                      />
+                      <Separator />
+                      <ResourceRow
+                        icon={CpuIcon}
+                        label={t('workbench.monitor.cpu')}
+                        value={`${snapshot.system.cpuPercent.toFixed(1)}%`}
+                        percent={snapshot.system.cpuPercent}
+                        tone={usageTone(snapshot.system.cpuPercent)}
+                      />
+                      <Separator />
+                      <ResourceRow
+                        icon={HardDriveIcon}
+                        label={t('workbench.monitor.disk')}
+                        value={`${formatBytes(snapshot.disk.usedBytes)} / ${formatBytes(snapshot.disk.totalBytes)}`}
+                        percent={snapshot.disk.usagePercent}
+                        tone={usageTone(snapshot.disk.usagePercent)}
+                        hint={formatDiskHint(snapshot.disk, snapshot.appInfo.platform)}
+                      />
+                    </CardContent>
+                  </Card>
+                </div>
 
                 <section aria-labelledby="monitor-connections-heading" className="flex flex-col gap-2.5">
                   <SectionHeading
@@ -670,9 +759,9 @@ export const MonitorPanel: React.FC = () => {
               </>
             )}
             </section>
-          </main>
+          </WorkbenchPageContent>
         </ScrollArea>
-      </div>
+      </WorkbenchPage>
     </TooltipProvider>
   );
 };

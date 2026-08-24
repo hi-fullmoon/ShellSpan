@@ -2,23 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
-  CircleStopIcon,
-  PlayIcon,
-  RotateCcwIcon,
   ShieldAlertIcon,
   XCircleIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -77,6 +64,7 @@ import type {
   OperationHistoryEventKind,
   OperationHistoryStatus,
 } from '@/types/operation-history';
+import { RunbookDestructiveDialog } from './runbook-destructive-dialog';
 
 interface MultiHostRunbookExecutionProps {
   initialTask: MultiHostRunbookTask;
@@ -539,7 +527,6 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
           <span className="text-xs text-muted-foreground">{t('runbook.multi.safetyBoundary')}</span>
           {!isMultiHostRunbookTaskTerminal(task) && (
             <Button variant="destructive" size="sm" onClick={() => void cancelTask()}>
-              <CircleStopIcon data-icon="inline-start" />
               {t('runbook.multi.cancelAll')}
             </Button>
           )}
@@ -638,7 +625,6 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
               <div className="flex gap-2">
                 {canCancel && (
                   <Button size="sm" variant="outline" onClick={() => void cancelHost(host.target.profileId)}>
-                    <CircleStopIcon data-icon="inline-start" />
                     {t('runbook.cancel')}
                   </Button>
                 )}
@@ -648,7 +634,6 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                     variant={activeItem?.risk === 'destructive' ? 'destructive' : 'default'}
                     onClick={() => handleApprove(host)}
                   >
-                    <PlayIcon data-icon="inline-start" />
                     {t('runbook.multi.approveHost')}
                   </Button>
                 )}
@@ -666,7 +651,6 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                 )}
                 {retryable && (
                   <Button size="sm" variant="outline" onClick={() => retryHost(host.target.profileId)}>
-                    <RotateCcwIcon data-icon="inline-start" />
                     {t('runbook.multi.retryHost')}
                   </Button>
                 )}
@@ -676,38 +660,15 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
         );
       })}
 
-      <AlertDialog open={Boolean(confirmingProfileId)} onOpenChange={(open) => !open && setConfirmingProfileId(undefined)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('runbook.multi.destructiveHostTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('runbook.multi.destructiveHostDescription', { host: confirmingHost?.target.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {confirmingItem && (
-            <Alert variant="destructive">
-              <AlertTriangleIcon />
-              <AlertTitle>{confirmingItem.impact}</AlertTitle>
-              <AlertDescription>
-                <div className="flex flex-col gap-2">
-                  {confirmingItem.rollback && (
-                    <span>{t('runbook.rollback')}: {confirmingItem.rollback}</span>
-                  )}
-                  <code className="break-all">{confirmingItem.commandPreview}</code>
-                </div>
-              </AlertDescription>
-            </Alert>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => confirmingProfileId && approveHost(confirmingProfileId)}
-            >
-              {t('runbook.confirmDestructive')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RunbookDestructiveDialog
+        open={Boolean(confirmingProfileId)}
+        onOpenChange={(open) => !open && setConfirmingProfileId(undefined)}
+        title={t('runbook.multi.destructiveHostTitle')}
+        description={t('runbook.multi.destructiveHostDescription', { host: confirmingHost?.target.name ?? '' })}
+        target={confirmingHost?.target}
+        item={confirmingItem}
+        onConfirm={() => confirmingProfileId && approveHost(confirmingProfileId)}
+      />
     </div>
   );
 };

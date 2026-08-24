@@ -96,6 +96,18 @@ describe('PortForwardDialog', () => {
   it('shows lifecycle, traffic counters, port conflicts, stop, and retry controls', () => {
     render(<PortForwardDialog profile={profile} onClose={vi.fn()} />);
 
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveClass('flex', 'flex-col', 'gap-0', 'overflow-hidden');
+    expect(dialog.querySelector('[data-slot="dialog-header"]')).toHaveClass('border-b');
+    expect(dialog.querySelector('[data-slot="dialog-footer"]')).not.toHaveClass(
+      'border-t',
+      'bg-app-surface-muted/30',
+    );
+    dialog.querySelectorAll('[data-slot="card"]').forEach((card) => {
+      expect(card).toHaveAttribute('data-size', 'sm');
+      expect(card).toHaveClass('shrink-0');
+    });
+
     expect(screen.getByText('Database')).toBeInTheDocument();
     expect(screen.getByText('2.0 KB')).toBeInTheDocument();
     expect(screen.getByText('4.0 KB')).toBeInTheDocument();

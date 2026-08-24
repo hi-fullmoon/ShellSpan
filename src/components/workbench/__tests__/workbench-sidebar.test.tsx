@@ -20,8 +20,10 @@ describe('WorkbenchSidebar', () => {
   it('activates a menu item when WKWebView drops its trackpad pointerdown', () => {
     const onTabChange = vi.fn();
     render(<WorkbenchSidebar activeTab="connections" onTabChange={onTabChange} />);
+    const keychain = screen.getByRole('button', { name: 'Keychain' });
+    expect(keychain).toHaveClass('h-8');
 
-    fireEvent.pointerUp(screen.getByRole('button', { name: 'Keychain' }), {
+    fireEvent.pointerUp(keychain, {
       button: 0,
       pointerId: 12,
       pointerType: 'mouse',

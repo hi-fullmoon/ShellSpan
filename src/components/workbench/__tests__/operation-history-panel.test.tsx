@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OperationHistoryPanel } from '../operation-history-panel';
 import type { OperationHistoryEvent } from '@/types/operation-history';
@@ -100,10 +100,22 @@ describe('OperationHistoryPanel', () => {
     render(<OperationHistoryPanel />);
 
     expect(await screen.findByText('operationHistory.action.executeRunbookStep')).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'operationHistory.title' });
+    expect(within(table).getByRole('columnheader', { name: 'operationHistory.action' })).toBeInTheDocument();
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
     expect(screen.getByText((content) => content.includes('operator@example.test:22'))).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'operationHistory.viewDetails' }));
 
     expect(await screen.findByText('systemctl reload nginx')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveClass(
+      'max-h-[min(720px,calc(100vh-2rem))]',
+      'gap-0',
+      'overflow-hidden',
+      'p-0',
+    );
+    const timelineContent = dialog.querySelector<HTMLElement>('[data-slot="operation-history-timeline-content"]');
+    expect(timelineContent).toHaveClass('overflow-y-auto', 'px-6', 'py-4');
     expect(screen.getAllByText(/precheck-1/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('step-1').length).toBeGreaterThan(0);
     expect(screen.queryByText(/raw high-sensitive output/)).not.toBeInTheDocument();
@@ -125,7 +137,11 @@ describe('OperationHistoryPanel', () => {
     await screen.findByText('operationHistory.action.executeRunbookStep');
 
     fireEvent.click(screen.getByRole('button', { name: 'operationHistory.clear' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'operationHistory.clearConfirm' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveClass('max-h-[min(720px,calc(100vh-2rem))]', 'overflow-hidden');
+    const confirm = within(dialog).getByRole('button', { name: 'operationHistory.clearConfirm' });
+    expect(confirm).toHaveClass('bg-destructive');
+    fireEvent.click(confirm);
 
     await waitFor(() => expect(mocks.clear).toHaveBeenCalledOnce());
     expect(mocks.toast).toHaveBeenCalledWith('operationHistory.cleared:2');

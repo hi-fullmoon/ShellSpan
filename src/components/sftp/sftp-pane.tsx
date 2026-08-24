@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDndContext, useDroppable } from '@dnd-kit/core';
-import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon, SearchIcon, SquareTerminalIcon, XIcon } from 'lucide-react';
+import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon, SearchIcon, SquareTerminalIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -153,7 +153,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       setSearchQuery('');
     }, [path]);
 
-    // Escape dismisses the search the same way the icon and ✕ do (clear +
+    // Escape dismisses the search the same way the search icon does (clear +
     // collapse). It stands down while a context/bookmark menu owns the key so
     // the menu still handles its own Escape first.
     useEffect(() => {
@@ -481,14 +481,14 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             )}
             {/* Search — animated expand from icon. The inner row keeps a fixed
                 width so the container clip-reveals it instead of squishing the
-                input and buttons during the width transition. */}
+                input during the width transition. */}
             <div
               className={cn(
                 'h-[30px] overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-out',
                 showSearch ? 'w-56 bg-app-surface-muted' : 'w-7 bg-transparent',
               )}
             >
-              <div className="flex h-full w-56 items-center pr-1.5">
+              <div className="flex h-full w-56 items-center">
                 <button
                   type="button"
                   onClick={() => {
@@ -522,21 +522,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                     placeholder={t('sftp.filter')}
                     aria-label={t('sftp.filter')}
                     tabIndex={showSearch ? 0 : -1}
-                    className="h-full min-w-0 flex-1 bg-transparent text-sm text-app-text placeholder:text-app-text-soft/50 outline-none"
+                    className="h-full min-w-0 flex-1 bg-transparent pr-2 text-sm text-app-text placeholder:text-app-text-soft/50 outline-none"
                   />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    tabIndex={showSearch ? 0 : -1}
-                    onClick={() => {
-                      setShowSearch(false);
-                      setSearchQuery('');
-                    }}
-                    className="h-6 w-6 shrink-0 [&_svg]:size-3.5"
-                    aria-label={t('sftp.clearFilter')}
-                  >
-                    <XIcon className="text-app-text-soft/40" />
-                  </Button>
                 </div>
               </div>
             </div>

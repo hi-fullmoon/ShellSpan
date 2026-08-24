@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import { ConnectionList } from '../connection-list';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
@@ -56,6 +56,12 @@ describe('ConnectionList', () => {
     expect(
       screen.getByRole('button', { name: 'workbench.connections.new' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'workbench.connections.import' }),
+    ).toHaveTextContent('workbench.connections.import');
+    expect(
+      screen.getByRole('button', { name: 'workbench.connections.export' }),
+    ).toHaveTextContent('workbench.connections.export');
   });
 
   it('calls onAdd when the empty-state new-connection button is clicked', () => {
@@ -148,24 +154,33 @@ describe('ConnectionList', () => {
     );
 
     const actions = [
-      ['workbench.connections.connectTerminal', onConnectTerminal],
-      ['workbench.connections.connectSftp', onConnectSftp],
-      ['common.edit', onEdit],
-      ['common.duplicate', onDuplicate],
-      ['workbench.connections.favorite', onToggleFavorite],
-      ['common.delete', onDelete],
+      ['workbench.connections.connectTerminal', onConnectTerminal, false],
+      ['workbench.connections.connectSftp', onConnectSftp, false],
+      ['common.edit', onEdit, true],
+      ['common.duplicate', onDuplicate, true],
+      ['workbench.connections.favorite', onToggleFavorite, true],
+      ['common.delete', onDelete, true],
     ] as const;
 
-    for (const [accessibleName, handler] of actions) {
-      const button = screen.getByRole('button', { name: accessibleName });
-      fireEvent.click(button);
-      vi.advanceTimersByTime(100);
-      fireEvent.click(button);
+    const clickAction = (accessibleName: string, inMenu: boolean): void => {
+      if (!inMenu) {
+        fireEvent.click(screen.getByRole('button', { name: accessibleName }));
+        return;
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.moreActions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: accessibleName }));
+    };
+
+    for (const [accessibleName, handler, inMenu] of actions) {
+      clickAction(accessibleName, inMenu);
+      act(() => vi.advanceTimersByTime(100));
+      clickAction(accessibleName, inMenu);
       expect(handler).toHaveBeenCalledTimes(1);
-      vi.advanceTimersByTime(400);
-      fireEvent.click(button);
+      act(() => vi.advanceTimersByTime(400));
+      clickAction(accessibleName, inMenu);
       expect(handler).toHaveBeenCalledTimes(2);
     }
+    act(() => vi.runOnlyPendingTimers());
     vi.useRealTimers();
   });
 
@@ -216,7 +231,8 @@ describe('ConnectionList', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'hostOverview.open' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.moreActions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'hostOverview.open' }));
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('hostOverview.title')).toBeInTheDocument();
@@ -244,9 +260,75 @@ describe('ConnectionList', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'remoteHealth.open' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.moreActions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'remoteHealth.open' }));
 
     expect(onOpenHealth).toHaveBeenCalledOnce();
     expect(onOpenHealth).toHaveBeenCalledWith(profile);
+  });
+
+  it('shows at most two direct action icons and groups the rest under more', () => {
+    render(
+      <ConnectionList
+        profiles={[makeProfile()]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    const card = screen.getByText('My Server').closest('.group');
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getAllByRole('button')).toHaveLength(3);
+    const terminalButton = within(card as HTMLElement).getByRole('button', {
+      name: 'workbench.connections.connectTerminal',
+    });
+    expect(terminalButton).not.toHaveTextContent('workbench.connections.connectTerminal');
+    expect(terminalButton).not.toHaveClass('bg-app-button', 'border');
+    expect(within(card as HTMLElement).getByRole('button', {
+      name: 'workbench.connections.connectSftp',
+    })).not.toHaveTextContent('workbench.connections.connectSftp');
+
+    const moreButton = within(card as HTMLElement).getByRole('button', {
+      name: 'workbench.connections.moreActions',
+    });
+    expect(moreButton).not.toHaveTextContent('workbench.connections.moreActions');
+    fireEvent.click(moreButton);
+
+    const menu = screen.getByRole('menu');
+    expect(menu).toHaveClass(
+      'border-app-border',
+      'bg-app-surface',
+      'shadow-[var(--shadow-dialog)]',
+      'ring-0',
+    );
+    const separators = menu.querySelectorAll('[data-slot="dropdown-menu-separator"]');
+    expect(separators).toHaveLength(2);
+    separators.forEach((separator) => {
+      expect(separator).toHaveClass('mx-0');
+      expect(separator).not.toHaveClass('-mx-1');
+    });
+
+    const menuActionNames = [
+      'remoteHealth.open',
+      'portForward.open',
+      'hostQuickActions.open',
+      'hostOverview.open',
+      'workbench.connections.favorite',
+      'common.edit',
+      'common.duplicate',
+      'common.delete',
+    ];
+
+    for (const name of menuActionNames) {
+      expect(screen.getByRole('menuitem', { name })).toBeInTheDocument();
+    }
   });
 });

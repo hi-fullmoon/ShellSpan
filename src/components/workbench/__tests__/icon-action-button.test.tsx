@@ -11,13 +11,21 @@ describe('IconActionButton', () => {
 
     render(
       <TooltipProvider>
-        <IconActionButton aria-label="Delete" tooltip="Delete">
+        <IconActionButton
+          aria-label="Delete"
+          tooltip="Delete"
+          className="size-7"
+        >
           <Trash2Icon data-icon="inline-start" />
         </IconActionButton>
       </TooltipProvider>,
     );
 
-    await user.hover(screen.getByRole('button', { name: 'Delete' }));
+    const button = screen.getByRole('button', { name: 'Delete' });
+    expect(button).toHaveClass('size-8');
+    expect(button).not.toHaveClass('size-7');
+
+    await user.hover(button);
 
     expect(await screen.findByText('Delete')).toHaveAttribute(
       'data-slot',

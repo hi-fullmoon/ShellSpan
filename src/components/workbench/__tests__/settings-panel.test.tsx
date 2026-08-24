@@ -114,9 +114,23 @@ describe('SettingsPanel', () => {
     const tabScroller = tabList.closest('[data-slot="scroll-area"]');
 
     expect(tabScroller).toBeInTheDocument();
-    expect(tabScroller).toHaveClass('h-9', 'w-full');
-    expect(tabList).toHaveClass('min-w-max', 'group-data-horizontal/tabs:h-9');
+    expect(tabScroller).toHaveClass('h-8', 'w-full');
+    expect(tabList).toHaveClass('min-w-max');
+    expect(tabList).not.toHaveClass('group-data-horizontal/tabs:h-9');
     expect(tabList).not.toHaveClass('overflow-x-auto');
+  });
+
+  it('keeps settings inputs and selects at 32px', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const settingsPage = screen.getByText('workbench.settings.title').closest('[data-slot="workbench-page"]');
+
+    expect(settingsPage).toHaveClass(
+      '[&_[data-slot=input]]:h-8',
+      '[&_[data-slot=input-group]]:h-8',
+      '[&_[data-slot=select-trigger]]:h-8',
+    );
   });
 
   it('sizes the AI provider layout from the settings pane instead of the window', async () => {
@@ -125,11 +139,13 @@ describe('SettingsPanel', () => {
     openSection('settings.ai.title');
 
     const providerCard = screen.getByText('settings.ai.providers').closest('[data-slot="card"]');
-    const providerLayout = providerCard?.parentElement;
+    const providerColumn = providerCard?.parentElement;
+    const providerLayout = providerColumn?.parentElement;
     const section = providerLayout?.parentElement;
     const firstFormRow = screen.getByText('settings.ai.providerName').closest('[data-slot="field"]')?.parentElement;
 
     expect(section).toHaveClass('@container');
+    expect(providerColumn).toHaveClass('contents', '@min-[44rem]:flex', '@min-[44rem]:flex-col');
     expect(providerLayout).toHaveClass('@min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]');
     expect(providerLayout).not.toHaveClass('lg:grid-cols-[15rem_minmax(0,1fr)]');
     expect(firstFormRow).toHaveClass('@min-[36rem]:grid-cols-2');
