@@ -1,28 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangleIcon,
-  CheckCircle2Icon,
-  CircleStopIcon,
-  FileInputIcon,
-  FileOutputIcon,
-  PauseIcon,
-  PlayIcon,
-  RotateCcwIcon,
+  BracesIcon,
+  Clock3Icon,
+  ListChecksIcon,
   ShieldAlertIcon,
-  SkipForwardIcon,
+  ShieldCheckIcon,
+  WorkflowIcon,
   XCircleIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -37,6 +23,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -48,6 +35,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Spinner } from '@/components/ui/empty-state';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -102,8 +90,25 @@ import type {
   RunbookStepExecutionResult,
 } from '@/types/runbook';
 import { MultiHostRunbookExecution } from './multi-host-runbook-execution';
+import { RunbookDestructiveDialog } from './runbook-destructive-dialog';
+import {
+  WorkbenchPage,
+  WorkbenchPageContent,
+  WorkbenchPageHeader,
+} from './workbench-page';
 
 type RunbookTargetMode = 'single' | 'tag';
+
+interface RunbookPreviewItem {
+  id: string;
+  kind: 'precheck' | 'step';
+  description: string;
+  command: string;
+  risk: RunbookRisk;
+  timeoutSeconds: number;
+  impact?: string;
+  rollback?: string;
+}
 
 function riskVariant(risk: RunbookRisk): 'outline' | 'secondary' | 'destructive' {
   if (risk === 'destructive') return 'destructive';
@@ -155,7 +160,7 @@ export const RunbookPanel: React.FC = () => {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
   const profiles = useProfileStore((state) => state.profiles);
-  const [sourceText, setSourceText] = useState(RUNBOOK_EXAMPLE);
+  const [sourceText, setSourceText] = useState(() => serializeRunbook(parseRunbookText(RUNBOOK_EXAMPLE)));
   const [sourcePath, setSourcePath] = useState<string>();
   const [document, setDocument] = useState<RunbookDocument>(() => parseRunbookText(RUNBOOK_EXAMPLE));
   const [validatedText, setValidatedText] = useState(() => serializeRunbook(parseRunbookText(RUNBOOK_EXAMPLE)));
@@ -185,6 +190,26 @@ export const RunbookPanel: React.FC = () => {
   const activeItem = run?.items.find((item) => item.id === run.activeItemId);
   const executionLocked = run?.phase === 'running'
     || Boolean(multiHostTask && !isMultiHostRunbookTaskTerminal(multiHostTask));
+  const hasUnvalidatedChanges = sourceText !== validatedText;
+  const previewItems = useMemo<RunbookPreviewItem[]>(() => [
+    ...document.prechecks.map((item) => ({
+      ...item,
+      kind: 'precheck' as const,
+      risk: 'readOnly' as const,
+    })),
+    ...document.steps.map((item) => ({
+      ...item,
+      kind: 'step' as const,
+    })),
+  ], [document]);
+  const highestRisk = useMemo<RunbookRisk>(() => {
+    if (document.steps.some((step) => step.risk === 'destructive')) return 'destructive';
+    if (document.steps.some((step) => step.risk === 'stateChange')) return 'stateChange';
+    return 'readOnly';
+  }, [document.steps]);
+  const selectedTargetCount = targetMode === 'single'
+    ? Number(Boolean(selectedProfile))
+    : multiHostTargets.length;
 
   const recordRunbookTransition = (
     current: RunbookRun,
@@ -505,93 +530,212 @@ export const RunbookPanel: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-base font-semibold">{t('runbook.title')}</h1>
-          <p className="text-sm text-muted-foreground">{t('runbook.description')}</p>
-          {sourcePath && <p className="text-xs text-muted-foreground">{sourcePath}</p>}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => void handleOpen()} disabled={executionLocked}>
-            <FileInputIcon data-icon="inline-start" />
-            {t('runbook.open')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void handleSave()} disabled={executionLocked}>
-            <FileOutputIcon data-icon="inline-start" />
-            {t('runbook.save')}
-          </Button>
-          <Button size="sm" onClick={handleValidate} disabled={executionLocked}>
-            <CheckCircle2Icon data-icon="inline-start" />
-            {t('runbook.validate')}
-          </Button>
-        </div>
-      </div>
+    <WorkbenchPage data-slot="runbook-panel">
+      <WorkbenchPageHeader
+        icon={ListChecksIcon}
+        title={t('runbook.title')}
+        titleMeta={(
+          <Badge variant={hasUnvalidatedChanges ? 'secondary' : 'outline'}>
+            {t(hasUnvalidatedChanges ? 'runbook.status.needsValidation' : 'runbook.status.validated')}
+          </Badge>
+        )}
+        description={(
+          <>
+            {t('runbook.description')}
+            {sourcePath && <span className="font-mono"> · {sourcePath}</span>}
+          </>
+        )}
+        actions={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => void handleOpen()} disabled={executionLocked}>
+              {t('runbook.open')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void handleSave()} disabled={executionLocked}>
+              {t('runbook.save')}
+            </Button>
+            <Button size="sm" onClick={handleValidate} disabled={executionLocked}>
+              {t('runbook.validate')}
+            </Button>
+          </>
+        )}
+      />
 
-      {validationError && (
-        <Alert variant="destructive">
-          <XCircleIcon />
-          <AlertTitle>{t('runbook.validationFailed')}</AlertTitle>
-          <AlertDescription>{validationError}</AlertDescription>
-        </Alert>
-      )}
+      <ScrollArea className="min-h-0 flex-1">
+        <WorkbenchPageContent className="@container">
+          {validationError && (
+            <Alert variant="destructive">
+              <XCircleIcon />
+              <AlertTitle>{t('runbook.validationFailed')}</AlertTitle>
+              <AlertDescription>{validationError}</AlertDescription>
+            </Alert>
+          )}
 
-      {aiDraft && (
-        <Alert>
-          <ShieldAlertIcon />
-          <AlertTitle>{t('runbook.aiDraftTitle')}</AlertTitle>
-          <AlertDescription>
-            <div className="flex flex-col gap-1">
-              <span>{t('runbook.aiDraftDescription')}</span>
-              <span>{t('ai.agent.objective')}: {aiDraft.objective}</span>
-              <span>{t('ai.agent.target')}: {aiDraft.target}</span>
-              <span>{t('ai.agent.boundTarget')}: {aiDraft.contextLabel}</span>
-              <span>
-                {t('runbook.aiDraftObservedAt')}: {new Date(aiDraft.contextObservedAt).toLocaleString()}
-              </span>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
+          {aiDraft && (
+            <Alert>
+              <ShieldAlertIcon />
+              <AlertTitle>{t('runbook.aiDraftTitle')}</AlertTitle>
+              <AlertDescription>
+                <div className="flex flex-col gap-1">
+                  <span>{t('runbook.aiDraftDescription')}</span>
+                  <span>{t('ai.agent.objective')}: {aiDraft.objective}</span>
+                  <span>{t('ai.agent.target')}: {aiDraft.target}</span>
+                  <span>{t('ai.agent.boundTarget')}: {aiDraft.contextLabel}</span>
+                  <span>
+                    {t('runbook.aiDraftObservedAt')}: {new Date(aiDraft.contextObservedAt).toLocaleString()}
+                  </span>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(22rem,0.8fr)_minmax(30rem,1.2fr)] gap-3">
-        <Card className="min-h-0">
-          <CardHeader>
-            <CardTitle>{t('runbook.textTitle')}</CardTitle>
-            <CardDescription>{t('runbook.textDescription')}</CardDescription>
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1">
-            <Textarea
-              aria-label={t('runbook.textTitle')}
-              className="h-full min-h-80 resize-none"
-              value={sourceText}
-              disabled={executionLocked}
-              onChange={(event) => {
-                setSourceText(event.target.value);
-                setValidationError(undefined);
-                setRun(undefined);
-                setMultiHostTask(undefined);
-              }}
-              spellCheck={false}
-            />
-          </CardContent>
-          <CardFooter className="justify-between gap-3">
-            <span className="text-xs text-muted-foreground">{t('runbook.secretPolicy')}</span>
-            <Badge variant="outline">JSON · schema v1</Badge>
-          </CardFooter>
-        </Card>
+          <Card data-slot="runbook-overview" size="sm">
+            <CardHeader>
+              <CardTitle>{document.name}</CardTitle>
+              <CardDescription>{document.description}</CardDescription>
+              <CardAction>
+                <Badge variant="outline">{document.id}</Badge>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-3 @min-[52rem]:grid-cols-4">
+              <div className="flex items-center gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <WorkflowIcon className="size-4" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">{t('runbook.overview.workflow')}</p>
+                  <p className="font-medium">{t('runbook.overview.itemCount', { count: previewItems.length })}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <BracesIcon className="size-4" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">{t('runbook.overview.variables')}</p>
+                  <p className="font-medium">{document.variables.length}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <ShieldAlertIcon className="size-4" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">{t('runbook.overview.highestRisk')}</p>
+                  <Badge variant={riskVariant(highestRisk)}>{t(`runbook.risk.${highestRisk}` as LocaleKey)}</Badge>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <Clock3Icon className="size-4" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">{t('runbook.overview.evidenceWindow')}</p>
+                  <p className="font-medium">{document.evidenceMaxAgeSeconds}s</p>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="gap-2 text-xs text-muted-foreground">
+              <ShieldCheckIcon className="size-4 shrink-0" aria-hidden />
+              <span>{t('runbook.secretPolicy')}</span>
+            </CardFooter>
+          </Card>
 
-        <ScrollArea className="min-h-0">
-          <div className="flex flex-col gap-3 pr-2">
-            <Card>
+          <div
+            data-slot="runbook-layout"
+            className="grid min-w-0 grid-cols-1 items-start gap-3 @min-[60rem]:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]"
+          >
+            <Tabs defaultValue="source" className="min-w-0 gap-0">
+              <Card data-slot="runbook-workspace" className="min-w-0">
+                <CardHeader>
+                  <CardTitle>{t('runbook.workspaceTitle')}</CardTitle>
+                  <CardDescription>{t('runbook.workspaceDescription')}</CardDescription>
+                  <CardAction className="@max-[34rem]:col-start-1 @max-[34rem]:row-start-3 @max-[34rem]:justify-self-start">
+                    <TabsList variant="line">
+                      <TabsTrigger value="source">
+                        {t('runbook.tab.source')}
+                      </TabsTrigger>
+                      <TabsTrigger value="workflow">
+                        {t('runbook.tab.workflow')}
+                      </TabsTrigger>
+                    </TabsList>
+                  </CardAction>
+                </CardHeader>
+                <CardContent className="min-h-0">
+                  <TabsContent value="source">
+                    <Textarea
+                      aria-label={t('runbook.textTitle')}
+                      className="min-h-[30rem] resize-y"
+                      value={sourceText}
+                      disabled={executionLocked}
+                      onChange={(event) => {
+                        setSourceText(event.target.value);
+                        setValidationError(undefined);
+                        setRun(undefined);
+                        setMultiHostTask(undefined);
+                      }}
+                      spellCheck={false}
+                    />
+                  </TabsContent>
+                  <TabsContent value="workflow">
+                    <ol className="flex min-h-[30rem] flex-col">
+                      {previewItems.map((item, index) => (
+                        <React.Fragment key={`${item.kind}-${item.id}`}>
+                          {index > 0 && <Separator />}
+                          <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 py-4 first:pt-0 last:pb-0">
+                            <div className="flex size-7 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+                              {index + 1}
+                            </div>
+                            <div className="flex min-w-0 flex-col gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-medium">{item.description}</span>
+                                <Badge variant="outline">
+                                  {t(item.kind === 'precheck' ? 'runbook.item.precheck' : 'runbook.item.step')}
+                                </Badge>
+                                <Badge variant={riskVariant(item.risk)}>
+                                  {t(`runbook.risk.${item.risk}` as LocaleKey)}
+                                </Badge>
+                              </div>
+                              <code className="break-all rounded-lg bg-muted/60 px-3 py-2 text-foreground">
+                                {item.command}
+                              </code>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                <span>{t('runbook.timeout')}: {item.timeoutSeconds}s</span>
+                                {item.impact && <span>{t('runbook.impact')}: {item.impact}</span>}
+                              </div>
+                              {item.rollback && (
+                                <p className="text-xs text-muted-foreground">
+                                  {t('runbook.rollback')}: {item.rollback}
+                                </p>
+                              )}
+                            </div>
+                          </li>
+                        </React.Fragment>
+                      ))}
+                    </ol>
+                  </TabsContent>
+                </CardContent>
+                <CardFooter className="flex-col items-start gap-2 @min-[34rem]:flex-row @min-[34rem]:items-center @min-[34rem]:justify-between">
+                  <span className="text-xs text-muted-foreground">{t('runbook.textDescription')}</span>
+                  <Badge className="shrink-0" variant={hasUnvalidatedChanges ? 'secondary' : 'outline'}>
+                    {hasUnvalidatedChanges
+                      ? t('runbook.status.needsValidation')
+                      : 'JSON · schema v1'}
+                  </Badge>
+                </CardFooter>
+              </Card>
+            </Tabs>
+
+            <Card data-slot="runbook-setup" className="min-w-0 @min-[60rem]:sticky @min-[60rem]:top-4">
               <CardHeader>
-                <CardTitle>{document.name}</CardTitle>
-                <CardDescription>{document.description}</CardDescription>
+                <CardTitle>{t('runbook.setupTitle')}</CardTitle>
+                <CardDescription>{t('runbook.setupDescription')}</CardDescription>
                 <CardAction>
-                  <Badge variant="outline">{document.id}</Badge>
+                  <Badge variant={selectedTargetCount > 0 ? 'secondary' : 'outline'}>
+                    {t('runbook.targetsSelected', { count: selectedTargetCount })}
+                  </Badge>
                 </CardAction>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex flex-col gap-4">
                 <FieldGroup>
                   <Field>
                     <FieldLabel>{t('runbook.targetMode')}</FieldLabel>
@@ -606,6 +750,9 @@ export const RunbookPanel: React.FC = () => {
                           setValidationError(undefined);
                         }
                       }}
+                      variant="outline"
+                      size="sm"
+                      spacing={0}
                       className="w-full"
                       aria-label={t('runbook.targetMode')}
                       disabled={executionLocked}
@@ -621,29 +768,29 @@ export const RunbookPanel: React.FC = () => {
                   </Field>
 
                   {targetMode === 'single' ? (
-                  <Field>
-                    <FieldLabel>{t('runbook.target')}</FieldLabel>
-                    <Select
-                      value={targetProfileId ?? null}
-                      onValueChange={(value) => setTargetProfileId(value ?? undefined)}
-                      disabled={executionLocked}
-                    >
-                      <SelectTrigger aria-label={t('runbook.target')}>
-                        <SelectValue placeholder={t('runbook.chooseTarget')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectLabel>{t('runbook.profiles')}</SelectLabel>
-                          {profiles.map((profile) => (
-                            <SelectItem key={profile.id} value={profile.id}>
-                              {profile.name} · {profile.username}@{profile.host}:{profile.port}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FieldDescription>{t('runbook.targetDescription')}</FieldDescription>
-                  </Field>
+                    <Field>
+                      <FieldLabel>{t('runbook.target')}</FieldLabel>
+                      <Select
+                        value={targetProfileId ?? null}
+                        onValueChange={(value) => setTargetProfileId(value ?? undefined)}
+                        disabled={executionLocked}
+                      >
+                        <SelectTrigger aria-label={t('runbook.target')}>
+                          <SelectValue placeholder={t('runbook.chooseTarget')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>{t('runbook.profiles')}</SelectLabel>
+                            {profiles.map((profile) => (
+                              <SelectItem key={profile.id} value={profile.id}>
+                                {profile.name} · {profile.username}@{profile.host}:{profile.port}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>{t('runbook.targetDescription')}</FieldDescription>
+                    </Field>
                   ) : (
                     <>
                       <Field data-invalid={Boolean(selectedTag && multiHostTargets.length === 0)}>
@@ -672,7 +819,7 @@ export const RunbookPanel: React.FC = () => {
                           {t('runbook.multi.targetCount', { count: multiHostTargets.length })}
                         </FieldDescription>
                       </Field>
-                      <FieldGroup className="grid grid-cols-2 gap-3">
+                      <FieldGroup className="grid grid-cols-1 gap-3 @min-[34rem]:grid-cols-2">
                         <Field data-invalid={concurrencyLimit < 1 || concurrencyLimit > MULTI_HOST_MAX_CONCURRENCY}>
                           <FieldLabel htmlFor="runbook-multi-concurrency">{t('runbook.multi.concurrency')}</FieldLabel>
                           <Input
@@ -704,105 +851,121 @@ export const RunbookPanel: React.FC = () => {
                       </FieldGroup>
                     </>
                   )}
-
-                  {document.variables.map((variable) => (
-                    <Field key={variable.name}>
-                      <FieldLabel htmlFor={`runbook-${variable.name}`}>{variable.name}</FieldLabel>
-                      {variable.keychainRef ? (
-                        <Badge variant="outline">{variable.keychainRef}</Badge>
-                      ) : (
-                        <Input
-                          id={`runbook-${variable.name}`}
-                          value={variableValues[variable.name] ?? ''}
-                          placeholder={variable.default}
-                          disabled={executionLocked}
-                          onChange={(event) => setVariableValues((current) => ({
-                            ...current,
-                            [variable.name]: event.target.value,
-                          }))}
-                        />
-                      )}
-                      <FieldDescription>{variable.description}</FieldDescription>
-                    </Field>
-                  ))}
                 </FieldGroup>
+
+                {document.variables.length > 0 && (
+                  <>
+                    <Separator />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{t('runbook.variablesTitle')}</span>
+                      <Badge variant="outline">{document.variables.length}</Badge>
+                    </div>
+                    <FieldGroup>
+                      {document.variables.map((variable) => (
+                        <Field key={variable.name}>
+                          <FieldLabel htmlFor={`runbook-${variable.name}`}>{variable.name}</FieldLabel>
+                          {variable.keychainRef ? (
+                            <Badge variant="outline">{variable.keychainRef}</Badge>
+                          ) : (
+                            <Input
+                              id={`runbook-${variable.name}`}
+                              value={variableValues[variable.name] ?? ''}
+                              placeholder={variable.default}
+                              disabled={executionLocked}
+                              onChange={(event) => setVariableValues((current) => ({
+                                ...current,
+                                [variable.name]: event.target.value,
+                              }))}
+                            />
+                          )}
+                          <FieldDescription>{variable.description}</FieldDescription>
+                        </Field>
+                      ))}
+                    </FieldGroup>
+                  </>
+                )}
               </CardContent>
-              <CardFooter className="justify-end">
+              <CardFooter className="flex-col items-stretch gap-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <ShieldCheckIcon className="size-4 shrink-0" aria-hidden />
+                  <span>{t('runbook.setupSafety')}</span>
+                </div>
                 <Button
                   onClick={handleStart}
-                  disabled={executionLocked || (targetMode === 'single' ? !selectedProfile : !selectedTag || multiHostTargets.length === 0)}
+                  disabled={executionLocked || hasUnvalidatedChanges || (targetMode === 'single' ? !selectedProfile : !selectedTag || multiHostTargets.length === 0)}
                 >
-                  <PlayIcon data-icon="inline-start" />
                   {t(targetMode === 'single' ? 'runbook.reviewRun' : 'runbook.multi.startPreflight')}
                 </Button>
               </CardFooter>
             </Card>
+          </div>
 
-            {run && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t('runbook.executionReview')}</CardTitle>
-                  <CardDescription>
-                    {run.target.name} · {run.target.username}@{run.target.host}:{run.target.port}
-                  </CardDescription>
-                  <CardAction>
-                    <Badge variant={run.phase === 'completed' ? 'default' : 'secondary'}>
-                      {t(`runbook.phase.${run.phase}` as LocaleKey)}
-                    </Badge>
-                  </CardAction>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
+          {run && (
+            <Card data-slot="runbook-execution-review">
+              <CardHeader>
+                <CardTitle>{t('runbook.executionReview')}</CardTitle>
+                <CardDescription>
+                  {run.target.name} · {run.target.username}@{run.target.host}:{run.target.port}
+                </CardDescription>
+                <CardAction>
+                  <Badge variant={run.phase === 'completed' ? 'default' : 'secondary'}>
+                    {t(`runbook.phase.${run.phase}` as LocaleKey)}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {Object.keys(run.resolvedVariables).length > 0 && (
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-medium text-muted-foreground">{t('runbook.resolvedVariables')}</span>
-                    {Object.entries(run.resolvedVariables).map(([name, value]) => (
-                      <div key={name} className="grid grid-cols-[8rem_1fr] gap-2 text-xs">
-                        <span>{name}</span>
-                        <code className="break-all">{value}</code>
-                      </div>
-                    ))}
-                  </div>
-
-                  {activeItem && (
-                    <Alert variant={activeItem.risk === 'destructive' ? 'destructive' : 'default'}>
-                      <ShieldAlertIcon />
-                      <AlertTitle className="flex items-center gap-2">
-                        {activeItem.description}
-                        <Badge variant={riskVariant(activeItem.risk)}>{t(`runbook.risk.${activeItem.risk}` as LocaleKey)}</Badge>
-                      </AlertTitle>
-                      <AlertDescription>
-                        <div className="flex flex-col gap-2">
-                          <span>{t('runbook.impact')}: {activeItem.impact}</span>
-                          {activeItem.rollback && (
-                            <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
-                          )}
-                          <code className="break-all rounded-md bg-muted p-2 text-foreground">{activeItem.commandPreview}</code>
-                          <span>{t('runbook.timeout')}: {activeItem.timeoutSeconds}s</span>
+                    <div className="grid grid-cols-1 gap-2 @min-[42rem]:grid-cols-2">
+                      {Object.entries(run.resolvedVariables).map(([name, value]) => (
+                        <div key={name} className="grid grid-cols-[8rem_1fr] gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs">
+                          <span>{name}</span>
+                          <code className="break-all">{value}</code>
                         </div>
-                      </AlertDescription>
-                    </Alert>
-                  )}
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                  <div className="flex flex-col gap-2">
-                    {run.items.map((item) => {
-                      const stale = item.kind === 'precheck'
-                        && item.status === 'completed'
-                        && isRunbookEvidenceStale(item.evidence, run.evidenceMaxAgeSeconds);
-                      return (
-                        <Card key={item.id} size="sm">
-                          <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                              {item.description}
-                              <Badge variant={riskVariant(item.risk)}>{t(`runbook.risk.${item.risk}` as LocaleKey)}</Badge>
-                            </CardTitle>
-                            <CardDescription>{item.commandPreview}</CardDescription>
-                            <CardAction>
-                              <Badge variant={stale ? 'destructive' : itemStatusVariant(item.status)}>
-                                {stale ? t('runbook.evidenceStale') : t(`runbook.status.${item.status}` as LocaleKey)}
-                              </Badge>
-                            </CardAction>
-                          </CardHeader>
+                {activeItem && (
+                  <Alert variant={activeItem.risk === 'destructive' ? 'destructive' : 'default'}>
+                    <ShieldAlertIcon />
+                    <AlertTitle className="flex items-center gap-2">
+                      {activeItem.description}
+                      <Badge variant={riskVariant(activeItem.risk)}>{t(`runbook.risk.${activeItem.risk}` as LocaleKey)}</Badge>
+                    </AlertTitle>
+                    <AlertDescription>
+                      <div className="flex flex-col gap-2">
+                        <span>{t('runbook.impact')}: {activeItem.impact}</span>
+                        {activeItem.rollback && (
+                          <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
+                        )}
+                        <code className="break-all rounded-md bg-muted p-2 text-foreground">{activeItem.commandPreview}</code>
+                        <span>{t('runbook.timeout')}: {activeItem.timeoutSeconds}s</span>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                <ol className="flex flex-col gap-2">
+                  {run.items.map((item, index) => {
+                    const stale = item.kind === 'precheck'
+                      && item.status === 'completed'
+                      && isRunbookEvidenceStale(item.evidence, run.evidenceMaxAgeSeconds);
+                    return (
+                      <li key={item.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 rounded-lg bg-muted/40 p-3 ring-1 ring-foreground/10">
+                        <div className="flex size-7 items-center justify-center rounded-full bg-background text-xs font-medium">
+                          {index + 1}
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{item.description}</span>
+                            <Badge variant={riskVariant(item.risk)}>{t(`runbook.risk.${item.risk}` as LocaleKey)}</Badge>
+                          </div>
+                          <code className="break-all text-xs text-muted-foreground">{item.commandPreview}</code>
                           {(item.evidence || item.error) && (
-                            <CardContent className="flex flex-col gap-1 text-xs">
+                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                               {item.evidence && (
                                 <>
                                   <span>{t('runbook.evidenceOperation')}: {item.evidence.operationId}</span>
@@ -818,107 +981,79 @@ export const RunbookPanel: React.FC = () => {
                               {item.evidence?.stdout && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stdout}</code>}
                               {item.evidence?.stderr && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stderr}</code>}
                               {item.error && <span className="text-destructive">{item.error}</span>}
-                            </CardContent>
+                            </div>
                           )}
                           {item.safeToRetry && ['stopped', 'cancelled', 'staleEvidence'].includes(run.phase) && (
-                            <CardFooter className="justify-end">
+                            <div>
                               <Button size="xs" variant="outline" onClick={() => handleRetry(item)}>
-                                <RotateCcwIcon data-icon="inline-start" />
                                 {t('runbook.retryFrom')}
                               </Button>
-                            </CardFooter>
+                            </div>
                           )}
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-                <CardFooter className="justify-between gap-2">
-                  <div className="flex gap-2">
-                    {run.phase === 'awaitingApproval' && (
-                      <>
-                        <Button size="sm" variant="outline" onClick={handlePause}>
-                          <PauseIcon data-icon="inline-start" />
-                          {t('runbook.pause')}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={handleReject}>
-                          <CircleStopIcon data-icon="inline-start" />
-                          {t('runbook.reject')}
-                        </Button>
-                        {activeItem?.kind === 'step' && (
-                          <Button size="sm" variant="outline" onClick={handleSkip}>
-                            <SkipForwardIcon data-icon="inline-start" />
-                            {t('runbook.skip')}
-                          </Button>
-                        )}
-                      </>
-                    )}
-                    {run.phase === 'paused' && (
-                      <Button size="sm" variant="outline" onClick={handleResume}>
-                        <PlayIcon data-icon="inline-start" />
-                        {t('runbook.resume')}
-                      </Button>
-                    )}
-                    {run.phase === 'running' && (
-                      <Button size="sm" variant="destructive" onClick={() => void handleCancel()} disabled={!operationId}>
-                        <CircleStopIcon data-icon="inline-start" />
-                        {t('runbook.cancel')}
-                      </Button>
-                    )}
-                  </div>
+                        </div>
+                        <Badge variant={stale ? 'destructive' : itemStatusVariant(item.status)}>
+                          {stale ? t('runbook.evidenceStale') : t(`runbook.status.${item.status}` as LocaleKey)}
+                        </Badge>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </CardContent>
+              <CardFooter className="flex-col gap-2 @min-[36rem]:flex-row @min-[36rem]:justify-between">
+                <div className="flex flex-wrap gap-2">
                   {run.phase === 'awaitingApproval' && (
-                    <Button
-                      size="sm"
-                      variant={activeItem?.risk === 'destructive' ? 'destructive' : 'default'}
-                      onClick={handleApprove}
-                      disabled={preparing}
-                    >
-                      {preparing ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
-                      {t('runbook.approveExecute')}
+                    <>
+                      <Button size="sm" variant="outline" onClick={handlePause}>{t('runbook.pause')}</Button>
+                      <Button size="sm" variant="outline" onClick={handleReject}>{t('runbook.reject')}</Button>
+                      {activeItem?.kind === 'step' && (
+                        <Button size="sm" variant="outline" onClick={handleSkip}>{t('runbook.skip')}</Button>
+                      )}
+                    </>
+                  )}
+                  {run.phase === 'paused' && (
+                    <Button size="sm" variant="outline" onClick={handleResume}>{t('runbook.resume')}</Button>
+                  )}
+                  {run.phase === 'running' && (
+                    <Button size="sm" variant="destructive" onClick={() => void handleCancel()} disabled={!operationId}>
+                      {t('runbook.cancel')}
                     </Button>
                   )}
-                </CardFooter>
-              </Card>
-            )}
-
-            {multiHostTask && (
-              <MultiHostRunbookExecution
-                key={multiHostTask.id}
-                initialTask={multiHostTask}
-                profiles={profiles}
-                onTaskChange={setMultiHostTask}
-              />
-            )}
-          </div>
-        </ScrollArea>
-      </div>
-
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('runbook.destructiveTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>{t('runbook.destructiveDescription')}</AlertDialogDescription>
-          </AlertDialogHeader>
-          {activeItem && (
-            <Alert variant="destructive">
-              <AlertTriangleIcon />
-              <AlertTitle>{activeItem.impact}</AlertTitle>
-              <AlertDescription>
-                <div className="flex flex-col gap-2">
-                  {activeItem.rollback && (
-                    <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
-                  )}
-                  <code className="break-all">{activeItem.commandPreview}</code>
                 </div>
-              </AlertDescription>
-            </Alert>
+                {run.phase === 'awaitingApproval' && (
+                  <Button
+                    size="sm"
+                    variant={activeItem?.risk === 'destructive' ? 'destructive' : 'default'}
+                    onClick={handleApprove}
+                    disabled={preparing}
+                  >
+                    {preparing && <Spinner data-icon="inline-start" />}
+                    {t('runbook.approveExecute')}
+                  </Button>
+                )}
+              </CardFooter>
+            </Card>
           )}
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void performExecute()}>{t('runbook.confirmDestructive')}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+
+          {multiHostTask && (
+            <MultiHostRunbookExecution
+              key={multiHostTask.id}
+              initialTask={multiHostTask}
+              profiles={profiles}
+              onTaskChange={setMultiHostTask}
+            />
+          )}
+
+          <RunbookDestructiveDialog
+            open={confirming}
+            onOpenChange={setConfirming}
+            title={t('runbook.destructiveTitle')}
+            description={t('runbook.destructiveDescription')}
+            target={run?.target}
+            item={activeItem}
+            onConfirm={() => void performExecute()}
+          />
+        </WorkbenchPageContent>
+      </ScrollArea>
+    </WorkbenchPage>
   );
 };

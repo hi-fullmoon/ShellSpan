@@ -1,25 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  BrainCircuitIcon,
   Clock3Icon,
   CpuIcon,
   HardDriveIcon,
   MemoryStickIcon,
-  RefreshCwIcon,
   ServerCogIcon,
   ShieldCheckIcon,
-  SquareIcon,
 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogMedia,
-  AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -29,13 +21,20 @@ import {
   CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { PanelEmptyState } from '@/components/ui/empty-state';
+import { Spinner } from '@/components/ui/empty-state';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
+import {
+  CompactAlertDialogBody,
+  CompactAlertDialogContent,
+  CompactAlertDialogDescription,
+  CompactAlertDialogFooter,
+  CompactAlertDialogHeader,
+  CompactAlertDialogTitle,
+} from '@/components/ui/compact-alert-dialog';
 import {
   Select,
   SelectContent,
@@ -54,7 +53,7 @@ import {
 } from '@/lib/remote-health';
 import { findConnectedTerminalSession } from '@/lib/host-quick-actions';
 import { formatClockTime, formatUptime } from '@/lib/monitor';
-import { formatBytes } from '@/lib/utils';
+import { cn, formatBytes } from '@/lib/utils';
 import { useAiStore } from '@/stores/aiStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
@@ -93,6 +92,26 @@ function statusBadgeVariant(status: HealthStatus): 'outline' | 'secondary' | 'de
   return 'outline';
 }
 
+function statusDotClass(status: HealthStatus): string {
+  if (status === 'error') return 'bg-app-error';
+  if (status === 'warning') return 'bg-app-warning';
+  return 'bg-app-success';
+}
+
+function RemoteHealthStatusBadge({ status }: { status: HealthStatus }): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <Badge variant={statusBadgeVariant(status)}>
+      <span
+        aria-hidden
+        data-slot="health-status-dot"
+        className={cn('size-1.5 rounded-full', statusDotClass(status))}
+      />
+      {t(`workbench.monitor.status.${status}`)}
+    </Badge>
+  );
+}
+
 function RemoteMetricCard({
   icon: Icon,
   label,
@@ -106,7 +125,6 @@ function RemoteMetricCard({
   detail: string;
   status: HealthStatus;
 }): React.JSX.Element {
-  const { t } = useI18n();
   return (
     <Card size="sm">
       <CardHeader>
@@ -115,9 +133,7 @@ function RemoteMetricCard({
           {label}
         </CardDescription>
         <CardAction>
-          <Badge variant={statusBadgeVariant(status)}>
-            {t(`workbench.monitor.status.${status}`)}
-          </Badge>
+          <RemoteHealthStatusBadge status={status} />
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
@@ -155,6 +171,13 @@ export function RemoteHealthSection(): React.JSX.Element {
 
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId)
     ?? profiles[0];
+  const profileItems = useMemo(
+    () => profiles.map((profile) => ({
+      value: profile.id,
+      label: `${profile.name} · ${profile.username}@${profile.host}:${profile.port}`,
+    })),
+    [profiles],
+  );
   const entry = selectedProfile ? entries[selectedProfile.id] : undefined;
   const remoteSnapshot = entry?.snapshot;
   const capturedResult = entry ? snapshotResult(entry) : undefined;
@@ -214,31 +237,51 @@ export function RemoteHealthSection(): React.JSX.Element {
 
   return (
     <section aria-labelledby="remote-health-heading" className="flex flex-col gap-2.5">
-      <div className="flex flex-col gap-0.5">
-        <h2 id="remote-health-heading" className="text-sm font-medium text-foreground">
-          {t('remoteHealth.title')}
-        </h2>
-        <p className="text-xs text-muted-foreground">{t('remoteHealth.description')}</p>
+      <div
+        data-slot="remote-health-section-header"
+        className="flex flex-col gap-3 @min-[42rem]:flex-row @min-[42rem]:items-center @min-[42rem]:justify-between"
+      >
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 id="remote-health-heading" className="text-sm font-medium text-foreground">
+            {t('remoteHealth.title')}
+          </h2>
+          <p className="text-xs text-muted-foreground">{t('remoteHealth.description')}</p>
+        </div>
+        {selectedProfile && (
+          <Button
+            size="sm"
+            className="shrink-0 self-start @min-[42rem]:self-auto"
+            onClick={() => setAuthorizationProfileId(selectedProfile.id)}
+            disabled={busy}
+          >
+            {busy && <Spinner data-icon="inline-start" />}
+            {entry?.phase === 'preparing'
+              ? t('remoteHealth.preparing')
+              : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
+                ? t('remoteHealth.collecting')
+                : remoteSnapshot
+                  ? t('remoteHealth.collectAgain')
+                  : t('remoteHealth.collect')}
+          </Button>
+        )}
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>{selectedProfile?.name ?? t('remoteHealth.noProfile')}</CardTitle>
-          <CardDescription>
-            {selectedProfile
-              ? `${selectedProfile.username}@${selectedProfile.host}:${selectedProfile.port}`
-              : t('remoteHealth.noProfileDescription')}
-          </CardDescription>
-          <CardAction>
-            {statuses && (
+          {selectedProfile && (
+            <CardDescription>
+              {selectedProfile.username}@{selectedProfile.host}:{selectedProfile.port}
+            </CardDescription>
+          )}
+          {statuses && (
+            <CardAction>
               <div className="flex items-center gap-1">
                 {stale && <Badge variant="secondary">{t('remoteHealth.stale')}</Badge>}
-                <Badge variant={statusBadgeVariant(statuses.overall)}>
-                  {t(`workbench.monitor.status.${statuses.overall}`)}
-                </Badge>
+                <RemoteHealthStatusBadge status={statuses.overall} />
               </div>
-            )}
-          </CardAction>
+            </CardAction>
+          )}
         </CardHeader>
 
         <CardContent className="flex flex-col gap-3">
@@ -247,6 +290,7 @@ export function RemoteHealthSection(): React.JSX.Element {
               <Field className="sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <FieldLabel htmlFor="remote-health-profile">{t('remoteHealth.profile')}</FieldLabel>
                 <Select
+                  items={profileItems}
                   value={selectedProfile?.id}
                   onValueChange={(value) => value && selectProfile(value)}
                   disabled={busy}
@@ -256,9 +300,9 @@ export function RemoteHealthSection(): React.JSX.Element {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      {profiles.map((profile) => (
-                        <SelectItem key={profile.id} value={profile.id}>
-                          {profile.name} · {profile.username}@{profile.host}:{profile.port}
+                      {profileItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
                         </SelectItem>
                       ))}
                     </SelectGroup>
@@ -267,11 +311,9 @@ export function RemoteHealthSection(): React.JSX.Element {
               </Field>
             </FieldGroup>
           ) : (
-            <PanelEmptyState
-              icon={<ServerCogIcon />}
-              title={t('remoteHealth.noProfile')}
-              description={t('remoteHealth.noProfileDescription')}
-            />
+            <p className="text-xs text-muted-foreground">
+              {t('remoteHealth.noProfileDescription')}
+            </p>
           )}
 
           {entry?.lastResult && entry.lastResult.status !== 'success' && (
@@ -353,77 +395,68 @@ export function RemoteHealthSection(): React.JSX.Element {
               </div>
             </>
           ) : profiles.length > 0 ? (
-            <PanelEmptyState
-              icon={<ServerCogIcon />}
-              title={t('remoteHealth.empty')}
-              description={t('remoteHealth.emptyDescription')}
-            />
+            <Alert>
+              <ServerCogIcon />
+              <AlertTitle>{t('remoteHealth.empty')}</AlertTitle>
+              <AlertDescription>{t('remoteHealth.emptyDescription')}</AlertDescription>
+            </Alert>
           ) : null}
-        </CardContent>
 
-        {selectedProfile && (
-          <CardFooter className="flex flex-wrap justify-end gap-2">
-            {entry?.phase === 'collecting' || entry?.phase === 'cancelling' ? (
-              <Button
-                variant="outline"
-                onClick={() => void cancel(selectedProfile.id)}
-                disabled={entry.phase === 'cancelling'}
-              >
-                <SquareIcon data-icon="inline-start" />
-                {entry.phase === 'cancelling'
-                  ? t('remoteHealth.cancelling')
-                  : t('common.cancel')}
-              </Button>
-            ) : null}
-            {statuses && statuses.overall !== 'ok' && capturedResult && sourceMatchesProfile && (
-              <Button variant="secondary" onClick={() => void diagnose(selectedProfile)}>
-                <BrainCircuitIcon data-icon="inline-start" />
-                {t('remoteHealth.diagnose')}
-              </Button>
-            )}
-            <Button
-              onClick={() => setAuthorizationProfileId(selectedProfile.id)}
-              disabled={busy}
-            >
-              {busy
-                ? <RefreshCwIcon data-icon="inline-start" className="animate-spin" />
-                : <ShieldCheckIcon data-icon="inline-start" />}
-              {entry?.phase === 'preparing'
-                ? t('remoteHealth.preparing')
-                : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
-                  ? t('remoteHealth.collecting')
-                  : remoteSnapshot
-                    ? t('remoteHealth.collectAgain')
-                    : t('remoteHealth.collect')}
-            </Button>
-          </CardFooter>
-        )}
+          {selectedProfile && (
+            entry?.phase === 'collecting'
+            || entry?.phase === 'cancelling'
+            || Boolean(statuses && statuses.overall !== 'ok' && capturedResult && sourceMatchesProfile)
+          ) && (
+            <div data-slot="remote-health-actions" className="flex flex-wrap justify-end gap-2 pt-1">
+              {entry?.phase === 'collecting' || entry?.phase === 'cancelling' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void cancel(selectedProfile.id)}
+                  disabled={entry.phase === 'cancelling'}
+                >
+                  {entry.phase === 'cancelling'
+                    ? t('remoteHealth.cancelling')
+                    : t('common.cancel')}
+                </Button>
+              ) : null}
+              {statuses && statuses.overall !== 'ok' && capturedResult && sourceMatchesProfile && (
+                <Button variant="secondary" size="sm" onClick={() => void diagnose(selectedProfile)}>
+                  {t('remoteHealth.diagnose')}
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
       </Card>
 
       <AlertDialog
         open={Boolean(authorizationProfile)}
         onOpenChange={(open) => !open && setAuthorizationProfileId(undefined)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogMedia><ShieldCheckIcon /></AlertDialogMedia>
-            <AlertDialogTitle>{t('remoteHealth.authorization.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
+        <CompactAlertDialogContent className="max-w-md">
+          <CompactAlertDialogHeader>
+            <AlertDialogMedia className="mb-0"><ShieldCheckIcon /></AlertDialogMedia>
+            <CompactAlertDialogTitle>{t('remoteHealth.authorization.title')}</CompactAlertDialogTitle>
+            <CompactAlertDialogDescription>
               {t('remoteHealth.authorization.description', {
                 host: authorizationProfile
                   ? `${authorizationProfile.username}@${authorizationProfile.host}:${authorizationProfile.port}`
                   : '',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Alert variant="default">
-            <ShieldCheckIcon />
-            <AlertTitle>{t('remoteHealth.authorization.scopeTitle')}</AlertTitle>
-            <AlertDescription>{t('remoteHealth.authorization.scope')}</AlertDescription>
-          </Alert>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            </CompactAlertDialogDescription>
+          </CompactAlertDialogHeader>
+          <CompactAlertDialogBody>
+            <Alert variant="default">
+              <ShieldCheckIcon />
+              <AlertTitle>{t('remoteHealth.authorization.scopeTitle')}</AlertTitle>
+              <AlertDescription>{t('remoteHealth.authorization.scope')}</AlertDescription>
+            </Alert>
+          </CompactAlertDialogBody>
+          <CompactAlertDialogFooter>
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
+              size="sm"
               onClick={() => {
                 if (authorizationProfile) void collect(authorizationProfile, true);
                 setAuthorizationProfileId(undefined);
@@ -431,8 +464,8 @@ export function RemoteHealthSection(): React.JSX.Element {
             >
               {t('remoteHealth.authorization.confirm')}
             </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
+          </CompactAlertDialogFooter>
+        </CompactAlertDialogContent>
       </AlertDialog>
     </section>
   );

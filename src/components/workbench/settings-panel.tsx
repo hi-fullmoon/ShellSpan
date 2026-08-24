@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { BotIcon, FolderCogIcon, Globe2Icon, KeyboardIcon, PaletteIcon, RotateCcwIcon, Settings2Icon, SquareTerminalIcon, XIcon } from 'lucide-react';
+import { Globe2Icon, KeyboardIcon, RotateCcwIcon, Settings2Icon, XIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
@@ -32,6 +32,12 @@ import type {
 } from '@/types';
 import { invokePickLocalFolder } from '@/lib/tauri';
 import type { LocaleKey } from '@/locales';
+import {
+  WorkbenchPage,
+  WorkbenchPageContent,
+  WorkbenchPageHeader,
+  WorkbenchPageToolbar,
+} from './workbench-page';
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
 import { clearTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
 import { clearSftpWorkspace } from '@/lib/sftp-workspace-persistence';
@@ -76,13 +82,13 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
   sftp: 'settings.shortcuts.groupSftp',
 };
 
-const SETTINGS_SECTIONS: { id: SettingsSection; icon: React.ElementType; titleKey: LocaleKey }[] = [
-  { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title' },
-  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title' },
-  { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title' },
-  { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title' },
-  { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title' },
-  { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title' },
+const SETTINGS_SECTIONS: { id: SettingsSection; titleKey: LocaleKey }[] = [
+  { id: 'general', titleKey: 'settings.general.title' },
+  { id: 'appearance', titleKey: 'settings.appearance.title' },
+  { id: 'terminal', titleKey: 'settings.terminal.title' },
+  { id: 'sftp', titleKey: 'settings.sftp.title' },
+  { id: 'ai', titleKey: 'settings.ai.title' },
+  { id: 'shortcuts', titleKey: 'settings.shortcuts.title' },
 ];
 
 interface SettingRowProps {
@@ -254,36 +260,34 @@ export const SettingsPanel: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <Tabs value={activeSection} onValueChange={handleSectionChange} className="h-full min-h-0 gap-0 overflow-hidden bg-background">
-        <header className="flex shrink-0 items-center border-b border-app-border/50 px-3 py-1.5">
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold text-app-text">{t('workbench.settings.title')}</h1>
-            <p className="text-xs text-muted-foreground">{t('settings.description')}</p>
-          </div>
-        </header>
+      <Tabs value={activeSection} onValueChange={handleSectionChange} className="h-full min-h-0 gap-0 overflow-hidden">
+        <WorkbenchPage className="[&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8">
+          <WorkbenchPageHeader
+            icon={Settings2Icon}
+            title={t('workbench.settings.title')}
+            description={t('settings.description')}
+          />
 
-        <div className="shrink-0 border-b border-app-border/50">
-          <ScrollArea horizontal vertical={false} size="thin" className="h-9 w-full">
+        <WorkbenchPageToolbar className="block p-0">
+          <ScrollArea horizontal vertical={false} size="thin" className="h-8 w-full">
             <TabsList
               aria-label={t('settings.sectionNavigation')}
               variant="line"
-              className="min-w-max justify-start group-data-horizontal/tabs:h-9"
+              className="min-w-max justify-start"
             >
               {SETTINGS_SECTIONS.map((section) => {
-                const Icon = section.icon;
                 return (
                   <TabsTrigger key={section.id} value={section.id} className="flex-none px-2.5 text-[13px]">
-                    <Icon data-icon="inline-start" />
                     {t(section.titleKey)}
                   </TabsTrigger>
                 );
               })}
             </TabsList>
           </ScrollArea>
-        </div>
+        </WorkbenchPageToolbar>
 
         <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-          <div className="mx-auto flex w-full max-w-4xl flex-col p-3">
+          <WorkbenchPageContent className="max-w-4xl">
             <TabsContent value="appearance" className="w-full">
               <div>
                 <div className="px-3 pb-2 pt-1">
@@ -699,7 +703,7 @@ export const SettingsPanel: React.FC = () => {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="shrink-0"
+                        className="size-8 shrink-0"
                         aria-label={t('settings.sftp.downloadDirectoryClear')}
                         onClick={() => setSftpDownloadDirectory('')}
                       >
@@ -740,7 +744,6 @@ export const SettingsPanel: React.FC = () => {
                 <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
                   <p className="min-w-0 text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
                   <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
-                    <RotateCcwIcon data-icon="inline-start" />
                     {t('settings.shortcuts.resetAll')}
                   </Button>
                 </div>
@@ -786,6 +789,7 @@ export const SettingsPanel: React.FC = () => {
                                     <Button
                                       variant="ghost"
                                       size="icon"
+                                      className="size-8"
                                       disabled={binding === DEFAULT_SHORTCUTS[action]}
                                       aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
                                     />
@@ -806,7 +810,7 @@ export const SettingsPanel: React.FC = () => {
                 ))}
               </div>
             </TabsContent>
-          </div>
+          </WorkbenchPageContent>
         </ScrollArea>
 
         <Dialog
@@ -842,6 +846,7 @@ export const SettingsPanel: React.FC = () => {
             )}
           </DialogContent>
         </Dialog>
+        </WorkbenchPage>
       </Tabs>
     </TooltipProvider>
   );

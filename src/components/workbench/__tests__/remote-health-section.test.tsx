@@ -15,7 +15,9 @@ const mocks = vi.hoisted(() => ({ connect: vi.fn() }));
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, variables?: Record<string, string | number>) => variables
+      ? `${key}:${Object.values(variables).join(':')}`
+      : key,
     ready: true,
     locale: 'en-US',
     setLocale: () => {},
@@ -46,6 +48,14 @@ beforeEach(() => {
 });
 
 describe('RemoteHealthSection authorization', () => {
+  it('shows the profile label instead of its internal ID in the target select', () => {
+    render(<RemoteHealthSection />);
+
+    const select = screen.getByRole('combobox', { name: 'remoteHealth.profile' });
+    expect(select).toHaveTextContent('Production · root@prod.example.com:22');
+    expect(select).not.toHaveTextContent(profile.id);
+  });
+
   it('does not collect until the user approves the one-shot read-only scope', async () => {
     const result: RemoteHealthSnapshotResult = {
       operationId: 'remote-health:test',
@@ -65,10 +75,19 @@ describe('RemoteHealthSection authorization', () => {
     useRemoteHealthStore.setState({ collect });
     render(<RemoteHealthSection />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'remoteHealth.collect' }));
+    const collectButton = screen.getByRole('button', { name: 'remoteHealth.collect' });
+    expect(collectButton).toHaveClass('h-8');
+    expect(collectButton.closest('[data-slot="card-footer"]')).toBeNull();
+    expect(collectButton.closest('[data-slot="card-action"]')).toBeNull();
+    expect(collectButton.closest('[data-slot="remote-health-section-header"]'))
+      .toBeInTheDocument();
+    expect(document.querySelector('[data-slot="remote-health-actions"]')).toBeNull();
+    fireEvent.click(collectButton);
     expect(collect).not.toHaveBeenCalled();
 
     const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveClass('max-h-[min(720px,calc(100vh-2rem))]', 'overflow-hidden');
+    expect(within(dialog).getByText(/root@prod\.example\.com:22/)).toBeInTheDocument();
     expect(within(dialog).getByText('remoteHealth.authorization.scope')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', {
       name: 'remoteHealth.authorization.confirm',
@@ -145,6 +164,21 @@ describe('RemoteHealthSection authorization', () => {
 
     try {
       render(<RemoteHealthSection />);
+      const collectAgain = screen.getByRole('button', { name: 'remoteHealth.collectAgain' });
+      expect(collectAgain.closest('[data-slot="card-action"]')).toBeNull();
+      expect(collectAgain.closest('[data-slot="remote-health-section-header"]'))
+        .toBeInTheDocument();
+      expect(collectAgain.closest('[data-slot="card-footer"]')).toBeNull();
+      const remoteCard = screen.getByText(profile.name, { exact: true }).closest('[data-slot="card"]');
+      const remoteHeader = remoteCard?.querySelector('[data-slot="card-header"]');
+      expect(remoteHeader).toBeInTheDocument();
+      const headerStatus = within(remoteHeader as HTMLElement)
+        .getByText('workbench.monitor.status.error');
+      expect(headerStatus.closest('[data-slot="card-action"]')).toBeInTheDocument();
+      const normalBadge = screen.getAllByText('workbench.monitor.status.ok')[0]
+        .closest('[data-slot="badge"]');
+      const normalDot = normalBadge?.querySelector('[data-slot="health-status-dot"]');
+      expect(normalDot).toHaveClass('bg-app-success');
       fireEvent.click(screen.getByRole('button', { name: 'remoteHealth.diagnose' }));
 
       await waitFor(() => expect(diagnosis).toHaveBeenCalledOnce());

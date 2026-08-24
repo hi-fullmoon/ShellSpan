@@ -4,7 +4,6 @@ import {
   CheckCircle2Icon,
   CircleDashedIcon,
   LoaderCircleIcon,
-  ShieldAlertIcon,
   XCircleIcon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
@@ -12,13 +11,12 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  CompactDialogBody,
+  CompactDialogContent,
+  CompactDialogFooter,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
+import { Dialog } from '@/components/ui/dialog';
 import type {
   ConnectionPreflightResult,
   ConnectionPreflightStep,
@@ -99,7 +97,6 @@ function PreflightStepRow({
           variant="outline"
           onClick={() => onTrust(step.host!, step.port!)}
         >
-          <ShieldAlertIcon data-icon="inline-start" />
           {t('connection.preflight.trust')}
         </Button>
       )}
@@ -122,60 +119,62 @@ export function ConnectionPreflightDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className="max-h-[min(720px,calc(100vh-2rem))] overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>{t('connection.preflight.title')}</DialogTitle>
-          <DialogDescription>{t('connection.preflight.description')}</DialogDescription>
-        </DialogHeader>
+      <CompactDialogContent>
+        <CompactDialogHeader
+          title={t('connection.preflight.title')}
+          description={t('connection.preflight.description')}
+        />
 
-        {checking ? (
-          <Alert>
-            <LoaderCircleIcon className="animate-spin" />
-            <AlertTitle>{t('connection.preflight.checking')}</AlertTitle>
-            <AlertDescription>{t('connection.preflight.checkingHint')}</AlertDescription>
-          </Alert>
-        ) : (
-          <Alert variant={destructive ? 'destructive' : 'default'}>
-            {destructive ? <XCircleIcon /> : result?.status === 'passed' ? <CheckCircle2Icon /> : <CircleDashedIcon />}
-            <AlertTitle>
-              {error
-                ? t('connection.preflight.failed')
-                : t(`connection.preflight.result.${result?.status ?? 'cancelled'}`)}
-            </AlertTitle>
-            <AlertDescription>
-              {error ?? t(`connection.preflight.resultHint.${result?.status ?? 'cancelled'}`)}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {result && (
-          <div className="min-h-0 overflow-y-auto pr-1">
-            <ol className="flex flex-col gap-2">
-              {result.steps.map((step) => (
-                <PreflightStepRow key={step.id} step={step} onTrust={onTrust} />
-              ))}
-            </ol>
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              {t('connection.preflight.operation')}: {result.operationId}
-            </p>
-          </div>
-        )}
-
-        <DialogFooter>
+        <CompactDialogBody className="flex flex-col gap-3">
           {checking ? (
-            <Button variant="outline" onClick={onCancel}>
+            <Alert>
+              <LoaderCircleIcon className="animate-spin" />
+              <AlertTitle>{t('connection.preflight.checking')}</AlertTitle>
+              <AlertDescription>{t('connection.preflight.checkingHint')}</AlertDescription>
+            </Alert>
+          ) : (
+            <Alert variant={destructive ? 'destructive' : 'default'}>
+              {destructive ? <XCircleIcon /> : result?.status === 'passed' ? <CheckCircle2Icon /> : <CircleDashedIcon />}
+              <AlertTitle>
+                {error
+                  ? t('connection.preflight.failed')
+                  : t(`connection.preflight.result.${result?.status ?? 'cancelled'}`)}
+              </AlertTitle>
+              <AlertDescription>
+                {error ?? t(`connection.preflight.resultHint.${result?.status ?? 'cancelled'}`)}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {result && (
+            <div className="min-h-0">
+              <ol className="flex flex-col gap-2">
+                {result.steps.map((step) => (
+                  <PreflightStepRow key={step.id} step={step} onTrust={onTrust} />
+                ))}
+              </ol>
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                {t('connection.preflight.operation')}: {result.operationId}
+              </p>
+            </div>
+          )}
+        </CompactDialogBody>
+
+        <CompactDialogFooter>
+          {checking ? (
+            <Button variant="outline" size="sm" onClick={onCancel}>
               {t('common.cancel')}
             </Button>
           ) : (
             <>
-              <Button variant="outline" onClick={onClose}>
+              <Button variant="outline" size="sm" onClick={onClose}>
                 {t('common.close')}
               </Button>
-              <Button onClick={onRetry}>{t('connection.preflight.retry')}</Button>
+              <Button size="sm" onClick={onRetry}>{t('connection.preflight.retry')}</Button>
             </>
           )}
-        </DialogFooter>
-      </DialogContent>
+        </CompactDialogFooter>
+      </CompactDialogContent>
     </Dialog>
   );
 }

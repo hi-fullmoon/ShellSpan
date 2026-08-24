@@ -4,9 +4,6 @@ import {
   FolderIcon,
   InfoIcon,
   PencilIcon,
-  PlayIcon,
-  PlusIcon,
-  SaveIcon,
   SquareTerminalIcon,
   Trash2Icon,
   WrenchIcon,
@@ -23,13 +20,11 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  CompactDialogContent,
+  CompactDialogFooter,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
+import { Dialog } from '@/components/ui/dialog';
 import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import {
   Field,
@@ -39,7 +34,6 @@ import {
   FieldLabel,
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -48,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -228,24 +223,24 @@ export function HostQuickActionsDialog({
 
   return (
     <Dialog open={Boolean(profile)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col gap-4 overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>{t('hostQuickActions.title')}</DialogTitle>
-          <DialogDescription>
-            {currentProfile
-              ? t('hostQuickActions.description', { name: currentProfile.name })
-              : t('hostQuickActions.descriptionEmpty')}
-          </DialogDescription>
-        </DialogHeader>
+      <CompactDialogContent className="h-[min(720px,calc(100vh-2rem))] max-w-3xl">
+        <CompactDialogHeader
+          title={t('hostQuickActions.title')}
+          description={currentProfile
+            ? t('hostQuickActions.description', { name: currentProfile.name })
+            : t('hostQuickActions.descriptionEmpty')}
+        />
 
-        <Alert>
-          <WrenchIcon />
-          <AlertTitle>{t('hostQuickActions.safetyTitle')}</AlertTitle>
-          <AlertDescription>{t('hostQuickActions.safetyDescription')}</AlertDescription>
-        </Alert>
+        <ScrollArea className="min-h-0 flex-1">
+          <ScrollAreaContent className="flex min-w-0 flex-col gap-3 px-4 py-3">
+          <Alert>
+            <WrenchIcon />
+            <AlertTitle>{t('hostQuickActions.safetyTitle')}</AlertTitle>
+            <AlertDescription>{t('hostQuickActions.safetyDescription')}</AlertDescription>
+          </Alert>
 
-        {draft && (
-          <Card size="sm">
+          {draft && (
+          <Card size="sm" className="shrink-0">
             <CardHeader>
               <CardTitle>
                 {draft.id ? t('hostQuickActions.edit') : t('hostQuickActions.create')}
@@ -370,21 +365,18 @@ export function HostQuickActionsDialog({
               </FieldGroup>
             </CardContent>
             <CardFooter className="justify-end gap-2">
-              <Button variant="ghost" onClick={() => setDraft(undefined)} disabled={saving}>
+              <Button variant="ghost" size="sm" onClick={() => setDraft(undefined)} disabled={saving}>
                 {t('common.cancel')}
               </Button>
-              <Button onClick={() => void saveDraft()} disabled={saving}>
-                {saving
-                  ? <span data-icon="inline-start"><Spinner /></span>
-                  : <SaveIcon data-icon="inline-start" />}
+              <Button size="sm" onClick={() => void saveDraft()} disabled={saving}>
+                {saving && <span data-icon="inline-start"><Spinner /></span>}
                 {t('common.save')}
               </Button>
             </CardFooter>
           </Card>
-        )}
+          )}
 
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="flex flex-col gap-2 pr-3">
+          <div className="flex flex-col gap-2">
             {actions.length === 0 ? (
               <EmptyState
                 className="min-h-40"
@@ -412,6 +404,7 @@ export function HostQuickActionsDialog({
                       <Button
                         size="icon"
                         variant="ghost"
+                        className="size-8"
                         aria-label={t('common.edit')}
                         onClick={() => setDraft(toDraft(action))}
                       >
@@ -420,6 +413,7 @@ export function HostQuickActionsDialog({
                       <Button
                         size="icon"
                         variant="ghost"
+                        className="size-8"
                         aria-label={t('common.delete')}
                         onClick={() => void removeAction(action.id)}
                         disabled={saving}
@@ -436,7 +430,6 @@ export function HostQuickActionsDialog({
                       disabled={commandDisabled}
                       title={commandDisabled ? t('hostQuickActions.noTerminal') : undefined}
                     >
-                      <PlayIcon data-icon="inline-start" />
                       {action.kind === 'command'
                         ? t('hostQuickActions.insert')
                         : t('hostQuickActions.run')}
@@ -446,23 +439,24 @@ export function HostQuickActionsDialog({
               );
             })}
           </div>
+          </ScrollAreaContent>
         </ScrollArea>
 
-        <DialogFooter>
+        <CompactDialogFooter>
           <Button
             variant="outline"
+            size="sm"
             onClick={() => {
               setDraft({ ...EMPTY_DRAFT });
               setValidationError(undefined);
             }}
             disabled={Boolean(draft) || actions.length >= 24}
           >
-            <PlusIcon data-icon="inline-start" />
             {t('hostQuickActions.create')}
           </Button>
-          <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
-        </DialogFooter>
-      </DialogContent>
+          <Button variant="outline" size="sm" onClick={onClose}>{t('common.close')}</Button>
+        </CompactDialogFooter>
+      </CompactDialogContent>
     </Dialog>
   );
 }
