@@ -115,9 +115,13 @@ describe('ConnectionFormDrawer', () => {
   it('renders the auth method as a segmented toggle with the translated label', () => {
     render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
 
+    const unpressedItem = document.body.querySelector(
+      '[data-slot="toggle-group-item"][aria-pressed="false"]',
+    );
     const pressedItem = document.body.querySelector(
       '[data-slot="toggle-group-item"][aria-pressed="true"]',
     );
+    expect(unpressedItem).toHaveClass('bg-muted/60');
     expect(pressedItem).toHaveTextContent(/^connection\.form\.auth\.password$/);
   });
 
@@ -240,6 +244,8 @@ describe('ConnectionFormDrawer', () => {
     expect(passwordInput).toHaveAttribute('autocomplete', 'new-password');
     expect(passwordInput).toHaveValue('secret');
     expect(showButton).toHaveAttribute('aria-pressed', 'false');
+    expect(passwordInput).toHaveClass('h-9');
+    expect(showButton).toHaveClass('h-9');
 
     fireEvent.click(showButton);
 
