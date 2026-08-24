@@ -727,7 +727,7 @@ const PasswordInput: React.FC<PasswordInputProps> = ({
         type="button"
         variant="outline"
         size="icon"
-        className="size-8 shrink-0 rounded-l-none border-l-0"
+        className="shrink-0 rounded-l-none border-l-0"
         aria-label={visible ? t('common.hidePassword') : t('common.showPassword')}
         aria-pressed={visible}
         onClick={() => setVisible((current) => !current)}
@@ -771,6 +771,7 @@ const AuthMethodToggle: React.FC<AuthMethodToggleProps> = ({ value, onChange }) 
         if (selected) onChange(selected);
       }}
       className="w-full"
+      variant="segmented"
       aria-label={t('common.authMethod')}
     >
       <ToggleGroupItem value="password" className="flex-1">
