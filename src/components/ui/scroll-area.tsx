@@ -43,6 +43,10 @@ function ScrollArea({
   );
 }
 
+function ScrollAreaContent(props: ScrollAreaPrimitive.Content.Props) {
+  return <ScrollAreaPrimitive.Content {...props} data-slot="scroll-area-content" />;
+}
+
 interface ScrollBarProps extends ScrollAreaPrimitive.Scrollbar.Props {
   size?: ScrollbarSize;
 }
@@ -75,4 +79,4 @@ function ScrollBar({ className, orientation = 'vertical', size = 'default', ...p
   );
 }
 
-export { ScrollArea, ScrollBar };
+export { ScrollArea, ScrollAreaContent, ScrollBar };
