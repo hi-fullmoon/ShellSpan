@@ -2,9 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2Icon,
   CircleAlertIcon,
-  KeyRoundIcon,
-  PlusIcon,
-  RefreshCwIcon,
   ServerIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -56,7 +53,6 @@ import {
   invokeListAiModels,
   invokeStoreAiApiKey,
 } from '@/lib/tauri';
-import { cn } from '@/lib/utils';
 import { AI_PROVIDER_PRESETS, useAiSettingsStore } from '@/stores/aiSettingsStore';
 import type { AiProviderKind, AiProviderPreset } from '@/types/ai';
 import {
@@ -237,157 +233,205 @@ export const AiSettingsSection: React.FC = () => {
   };
 
   return (
-    <div className="@container flex flex-col gap-4 px-4 py-3">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">{t('settings.ai.title')}</h2>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
+    <div className="@container flex flex-col gap-5 px-4 py-4">
+      <div className="flex flex-col gap-3 @min-[36rem]:flex-row @min-[36rem]:items-start @min-[36rem]:justify-between">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
+          <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
+        </div>
+        <Button className="shrink-0" size="sm" onClick={() => setAddOpen(true)} disabled={busy}>
+          {t('settings.ai.addProvider')}
+        </Button>
       </div>
 
-      <div className="grid min-w-0 gap-4 @min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]">
-        <Card size="sm" className="min-w-0">
-          <CardHeader className="border-b">
-            <CardTitle>{t('settings.ai.providers')}</CardTitle>
-            <CardDescription>{t('settings.ai.providersHint')}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1">
-            {providers.map((provider) => {
-              const ProviderIcon = PRESET_ICONS[provider.preset];
-              const selected = provider.id === selectedProvider.id;
-              return (
-                <Button
-                  key={provider.id}
-                  variant="ghost"
-                  className={cn(
-                    'h-auto w-full justify-start px-2 py-2 text-left',
-                    selected && 'bg-accent text-accent-foreground',
-                  )}
-                  onClick={() => setSelectedProviderId(provider.id)}
-                  disabled={busy}
-                  aria-pressed={selected}
-                >
-                  <ProviderIcon data-icon="inline-start" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{provider.name}</span>
-                    <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                      {provider.model || t('ai.modelMissing')}
+      <div className="grid min-w-0 items-start gap-4 @min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]">
+        <div className="contents @min-[44rem]:flex @min-[44rem]:min-w-0 @min-[44rem]:flex-col @min-[44rem]:gap-4">
+          <Card size="sm" className="order-1 min-w-0 @min-[44rem]:order-none">
+            <CardHeader className="border-b">
+              <CardTitle>{t('settings.ai.providers')}</CardTitle>
+              <CardDescription>{t('settings.ai.providersHint')}</CardDescription>
+              <CardAction>
+                <Badge variant="outline">{t('settings.ai.providerCount', { count: providers.length })}</Badge>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-1">
+              {providers.map((provider) => {
+                const selected = provider.id === selectedProvider.id;
+                return (
+                  <Button
+                    key={provider.id}
+                    variant={selected ? 'secondary' : 'ghost'}
+                    className="h-auto w-full justify-start px-2 py-2 text-left"
+                    onClick={() => setSelectedProviderId(provider.id)}
+                    disabled={busy}
+                    aria-pressed={selected}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{provider.name}</span>
+                      <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                        {provider.model || t('ai.modelMissing')}
+                      </span>
                     </span>
-                  </span>
-                  {provider.id === defaultProviderId && (
-                    <Badge variant="secondary">{t('settings.ai.default')}</Badge>
-                  )}
-                </Button>
-              );
-            })}
-          </CardContent>
-          <CardFooter>
-            <Button variant="outline" size="sm" className="w-full" onClick={() => setAddOpen(true)} disabled={busy}>
-              <PlusIcon data-icon="inline-start" />
-              {t('settings.ai.addProvider')}
-            </Button>
-          </CardFooter>
-        </Card>
+                    {provider.id === defaultProviderId && (
+                      <Badge variant="outline">{t('settings.ai.default')}</Badge>
+                    )}
+                  </Button>
+                );
+              })}
+            </CardContent>
+          </Card>
 
-        <div className="flex min-w-0 flex-col gap-3">
+          <Card size="sm" className="order-3 @min-[44rem]:order-none">
+            <CardHeader className="border-b">
+              <CardTitle>{t('settings.ai.contextLines')}</CardTitle>
+              <CardDescription>{t('settings.ai.contextHint')}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Select value={String(contextLines)} onValueChange={(value) => setContextLines(Number(value))}>
+                <SelectTrigger aria-label={t('settings.ai.contextLines')} className="w-full">
+                  <SelectValue>{t('settings.ai.contextLinesValue', { count: contextLines })}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {[50, 100, 200, 500].map((count) => (
+                      <SelectItem key={count} value={String(count)}>
+                        {t('settings.ai.contextLinesValue', { count })}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="order-2 flex min-w-0 flex-col gap-3 @min-[44rem]:order-none">
           <Card size="sm" className="min-w-0">
             <CardHeader className="border-b">
-              <div className="flex min-w-0 items-center gap-2">
-                <SelectedIcon />
-                <CardTitle className="truncate">{selectedProvider.name}</CardTitle>
-                <Badge variant="outline">
-                  {selectedProvider.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
-                </Badge>
-                {selectedProvider.id === defaultProviderId && (
-                  <Badge variant="secondary">{t('settings.ai.default')}</Badge>
-                )}
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+                  <SelectedIcon aria-hidden />
+                </div>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <CardTitle className="truncate">{selectedProvider.name}</CardTitle>
+                    <Badge variant="outline">
+                      {selectedProvider.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
+                    </Badge>
+                    {selectedProvider.id === defaultProviderId && (
+                      <Badge variant="secondary">{t('settings.ai.default')}</Badge>
+                    )}
+                  </div>
+                  <CardDescription>{t(PRESET_DESCRIPTION_KEYS[selectedProvider.preset])}</CardDescription>
+                </div>
               </div>
-              <CardDescription>{t(PRESET_DESCRIPTION_KEYS[selectedProvider.preset])}</CardDescription>
               {selectedProvider.id !== defaultProviderId && (
                 <CardAction>
                   <Button variant="outline" size="sm" onClick={() => setDefaultProvider(selectedProvider.id)} disabled={busy}>
-                    <CheckCircle2Icon data-icon="inline-start" />
                     {t('settings.ai.setDefault')}
                   </Button>
                 </CardAction>
               )}
             </CardHeader>
-            <CardContent>
-              <FieldGroup>
-                <div className="grid gap-4 @min-[36rem]:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="ai-provider-name">{t('settings.ai.providerName')}</FieldLabel>
-                    <Input
-                      id="ai-provider-name"
-                      value={selectedProvider.name}
-                      onChange={(event) => updateProvider(selectedProvider.id, { name: event.target.value })}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel>{t('settings.ai.protocol')}</FieldLabel>
-                    <Select
-                      value={selectedProvider.kind}
-                      onValueChange={(value) => {
-                        if (value) updateProvider(selectedProvider.id, protocolOutputDefaults(value as AiProviderKind));
-                      }}
-                    >
-                      <SelectTrigger aria-label={t('settings.ai.protocol')}>
-                        <SelectValue>{t(PROTOCOL_LABEL_KEYS[selectedProvider.kind])}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="ollama">{t('settings.ai.protocol.ollama')}</SelectItem>
-                          <SelectItem value="openAi">{t('settings.ai.protocol.openAi')}</SelectItem>
-                          <SelectItem value="openAiCompatible">{t('settings.ai.protocol.openAiCompatible')}</SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FieldDescription>{t('settings.ai.protocolHint')}</FieldDescription>
-                  </Field>
+            <CardContent className="flex flex-col gap-5">
+              <section className="flex flex-col gap-4" aria-labelledby="ai-connection-heading">
+                <div className="flex flex-col gap-0.5">
+                  <h3 id="ai-connection-heading" className="text-sm font-medium text-foreground">
+                    {t('settings.ai.connectionDetails')}
+                  </h3>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t('settings.ai.connectionDetailsHint')}
+                  </p>
                 </div>
+                <FieldGroup>
+                  <FieldGroup className="@min-[36rem]:grid @min-[36rem]:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="ai-provider-name">{t('settings.ai.providerName')}</FieldLabel>
+                      <Input
+                        id="ai-provider-name"
+                        value={selectedProvider.name}
+                        onChange={(event) => updateProvider(selectedProvider.id, { name: event.target.value })}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>{t('settings.ai.protocol')}</FieldLabel>
+                      <Select
+                        value={selectedProvider.kind}
+                        onValueChange={(value) => {
+                          if (value) updateProvider(selectedProvider.id, protocolOutputDefaults(value as AiProviderKind));
+                        }}
+                      >
+                        <SelectTrigger aria-label={t('settings.ai.protocol')}>
+                          <SelectValue>{t(PROTOCOL_LABEL_KEYS[selectedProvider.kind])}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="ollama">{t('settings.ai.protocol.ollama')}</SelectItem>
+                            <SelectItem value="openAi">{t('settings.ai.protocol.openAi')}</SelectItem>
+                            <SelectItem value="openAiCompatible">{t('settings.ai.protocol.openAiCompatible')}</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>{t('settings.ai.protocolHint')}</FieldDescription>
+                    </Field>
+                  </FieldGroup>
 
-                <Field>
-                  <FieldLabel htmlFor="ai-base-url">{t('settings.ai.baseUrl')}</FieldLabel>
-                  <Input
-                    id="ai-base-url"
-                    value={selectedProvider.baseUrl}
-                    onChange={(event) => updateProvider(selectedProvider.id, { baseUrl: event.target.value })}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                  />
-                </Field>
-
-                <Field>
-                  <FieldLabel htmlFor="ai-model">{t('settings.ai.model')}</FieldLabel>
-                  <Combobox
-                    items={models}
-                    value={selectedProvider.model}
-                    inputValue={selectedProvider.model}
-                    onValueChange={(model) => {
-                      if (model) updateProvider(selectedProvider.id, { model });
-                    }}
-                    onInputValueChange={(model) => updateProvider(selectedProvider.id, { model })}
-                  >
-                    <ComboboxInput
-                      id="ai-model"
+                  <Field>
+                    <FieldLabel htmlFor="ai-base-url">{t('settings.ai.baseUrl')}</FieldLabel>
+                    <Input
+                      id="ai-base-url"
+                      value={selectedProvider.baseUrl}
+                      onChange={(event) => updateProvider(selectedProvider.id, { baseUrl: event.target.value })}
                       autoCapitalize="none"
                       autoCorrect="off"
                     />
-                    <ComboboxContent>
-                      <ComboboxEmpty>{t('settings.ai.modelNoResults')}</ComboboxEmpty>
-                      <ComboboxList>
-                        {(model) => (
-                          <ComboboxItem key={model} value={model}>
-                            {model}
-                          </ComboboxItem>
-                        )}
-                      </ComboboxList>
-                    </ComboboxContent>
-                  </Combobox>
-                  <FieldDescription>{t('settings.ai.modelHint')}</FieldDescription>
-                </Field>
+                  </Field>
 
-                {selectedProvider.kind === 'openAiCompatible' && (
-                  <>
-                    <Separator />
+                  <Field>
+                    <FieldLabel htmlFor="ai-model">{t('settings.ai.model')}</FieldLabel>
+                    <Combobox
+                      items={models}
+                      value={selectedProvider.model}
+                      inputValue={selectedProvider.model}
+                      onValueChange={(model) => {
+                        if (model) updateProvider(selectedProvider.id, { model });
+                      }}
+                      onInputValueChange={(model) => updateProvider(selectedProvider.id, { model })}
+                    >
+                      <ComboboxInput
+                        id="ai-model"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                      />
+                      <ComboboxContent>
+                        <ComboboxEmpty>{t('settings.ai.modelNoResults')}</ComboboxEmpty>
+                        <ComboboxList>
+                          {(model) => (
+                            <ComboboxItem key={model} value={model}>
+                              {model}
+                            </ComboboxItem>
+                          )}
+                        </ComboboxList>
+                      </ComboboxContent>
+                    </Combobox>
+                    <FieldDescription>{t('settings.ai.modelHint')}</FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </section>
+
+              <Separator />
+
+              <section className="flex flex-col gap-4" aria-labelledby="ai-credentials-heading">
+                <div className="flex flex-col gap-0.5">
+                  <h3 id="ai-credentials-heading" className="text-sm font-medium text-foreground">
+                    {t('settings.ai.credentials')}
+                  </h3>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t('settings.ai.credentialsHint')}
+                  </p>
+                </div>
+                <FieldGroup>
+                  {selectedProvider.kind === 'openAiCompatible' && (
                     <Field className="flex-row items-center gap-3">
                       <div className="flex-1">
                         <FieldLabel htmlFor="ai-requires-key">{t('settings.ai.authRequired')}</FieldLabel>
@@ -399,69 +443,72 @@ export const AiSettingsSection: React.FC = () => {
                         onCheckedChange={(checked) => updateProvider(selectedProvider.id, { requiresApiKey: checked })}
                       />
                     </Field>
-                  </>
-                )}
+                  )}
 
-                {selectedProvider.requiresApiKey && (
-                  <Field>
-                    <div className="flex items-center justify-between gap-2">
-                      <FieldLabel htmlFor="ai-api-key">{t('settings.ai.apiKey')}</FieldLabel>
-                      <Badge variant={hasApiKey ? 'secondary' : 'outline'}>
-                        {hasApiKey ? t('settings.ai.keyStored') : t('settings.ai.keyMissing')}
-                      </Badge>
-                    </div>
-                    <InputGroup>
-                      <InputGroupInput
-                        id="ai-api-key"
-                        type="password"
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                        placeholder={hasApiKey ? t('settings.ai.keyReplacePlaceholder') : 'sk-...'}
-                        autoComplete="off"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                      />
-                      <InputGroupAddon align="inline-end">
-                        <InputGroupButton onClick={() => void handleSaveKey()} disabled={busy || !apiKey.trim()}>
-                          <KeyRoundIcon data-icon="inline-start" />
-                          {t('common.save')}
-                        </InputGroupButton>
-                        {hasApiKey && (
-                          <InputGroupButton
-                            size="icon-xs"
-                            onClick={() => void handleDeleteKey()}
-                            disabled={busy}
-                            aria-label={t('settings.ai.deleteKey')}
-                          >
-                            <Trash2Icon />
+                  {selectedProvider.requiresApiKey && (
+                    <Field>
+                      <div className="flex items-center justify-between gap-2">
+                        <FieldLabel htmlFor="ai-api-key">{t('settings.ai.apiKey')}</FieldLabel>
+                        <Badge variant={hasApiKey ? 'secondary' : 'outline'}>
+                          {hasApiKey ? t('settings.ai.keyStored') : t('settings.ai.keyMissing')}
+                        </Badge>
+                      </div>
+                      <InputGroup>
+                        <InputGroupInput
+                          id="ai-api-key"
+                          type="password"
+                          value={apiKey}
+                          onChange={(event) => setApiKey(event.target.value)}
+                          placeholder={hasApiKey ? t('settings.ai.keyReplacePlaceholder') : 'sk-...'}
+                          autoComplete="off"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                        />
+                        <InputGroupAddon align="inline-end">
+                          <InputGroupButton onClick={() => void handleSaveKey()} disabled={busy || !apiKey.trim()}>
+                            {t('common.save')}
                           </InputGroupButton>
-                        )}
-                      </InputGroupAddon>
-                    </InputGroup>
-                    <FieldDescription>{t('settings.ai.keyHint')}</FieldDescription>
-                  </Field>
-                )}
-              </FieldGroup>
+                          {hasApiKey && (
+                            <InputGroupButton
+                              size="icon-xs"
+                              onClick={() => void handleDeleteKey()}
+                              disabled={busy}
+                              aria-label={t('settings.ai.deleteKey')}
+                            >
+                              <Trash2Icon />
+                            </InputGroupButton>
+                          )}
+                        </InputGroupAddon>
+                      </InputGroup>
+                      <FieldDescription>{t('settings.ai.keyHint')}</FieldDescription>
+                    </Field>
+                  )}
+
+                  {!selectedProvider.requiresApiKey && (
+                    <Alert>
+                      <AlertTitle>{t('settings.ai.noApiKey')}</AlertTitle>
+                      <AlertDescription>{t('settings.ai.noApiKeyHint')}</AlertDescription>
+                    </Alert>
+                  )}
+                </FieldGroup>
+              </section>
             </CardContent>
             <CardFooter className="justify-between gap-2">
               <Button
-                variant="ghost"
+                variant="destructive"
                 size="sm"
-                className="text-destructive hover:text-destructive"
                 onClick={() => setDeleteOpen(true)}
                 disabled={busy || providers.length <= 1}
               >
-                <Trash2Icon data-icon="inline-start" />
                 {t('settings.ai.deleteProvider')}
               </Button>
               <Button
-                variant="outline"
                 size="sm"
                 onClick={() => void handleTest()}
                 disabled={busy || !selectedProvider.baseUrl.trim()}
               >
-                {busy ? <Spinner /> : <RefreshCwIcon data-icon="inline-start" />}
+                {busy && <Spinner data-icon="inline-start" />}
                 {t('settings.ai.testConnection')}
               </Button>
             </CardFooter>
@@ -484,29 +531,6 @@ export const AiSettingsSection: React.FC = () => {
         </div>
       </div>
 
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>{t('settings.ai.contextLines')}</CardTitle>
-          <CardDescription>{t('settings.ai.contextHint')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select value={String(contextLines)} onValueChange={(value) => setContextLines(Number(value))}>
-            <SelectTrigger aria-label={t('settings.ai.contextLines')} className="max-w-xs">
-              <SelectValue>{t('settings.ai.contextLinesValue', { count: contextLines })}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {[50, 100, 200, 500].map((count) => (
-                  <SelectItem key={count} value={String(count)}>
-                    {t('settings.ai.contextLinesValue', { count })}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
-
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>
           <DialogHeader>
@@ -515,7 +539,6 @@ export const AiSettingsSection: React.FC = () => {
           </DialogHeader>
           <div className="grid gap-2 sm:grid-cols-2">
             {AI_PROVIDER_PRESETS.map((preset) => {
-              const PresetIcon = PRESET_ICONS[preset.preset];
               return (
                 <Button
                   key={preset.preset}
@@ -523,9 +546,13 @@ export const AiSettingsSection: React.FC = () => {
                   className="h-auto min-w-0 items-start justify-start whitespace-normal px-3 py-3 text-left"
                   onClick={() => handleAddProvider(preset.preset)}
                 >
-                  <PresetIcon data-icon="inline-start" />
-                  <span className="min-w-0 text-left">
-                    <span className="block truncate">{preset.name}</span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
+                    <span className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="truncate">{preset.name}</span>
+                      <Badge variant="outline">
+                        {preset.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
+                      </Badge>
+                    </span>
                     <span className="block break-words text-xs leading-snug font-normal text-muted-foreground">
                       {t(PRESET_DESCRIPTION_KEYS[preset.preset])}
                     </span>

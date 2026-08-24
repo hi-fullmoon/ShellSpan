@@ -94,19 +94,25 @@ const MarkdownContent = React.memo(function MarkdownContent({
           const code = textFromNode(codeChildren).replace(/\n$/, '');
           const copied = copiedCode === code;
           return (
-            <div className="relative">
+            <div className="group/code-block relative">
               <Button
                 variant="outline"
-                size="sm"
-                className="absolute right-2 top-2"
+                size="xs"
+                className={cn(
+                  'absolute right-1.5 top-1.5 size-6 p-0 transition-opacity',
+                  !copied && 'pointer-events-none opacity-0 group-hover/code-block:pointer-events-auto group-hover/code-block:opacity-100 group-focus-within/code-block:pointer-events-auto group-focus-within/code-block:opacity-100',
+                )}
                 onClick={() => copyCode(code)}
+                aria-label={copied ? copiedLabel : copyLabel}
               >
                 {copied
                   ? <CheckIcon data-icon="inline-start" />
                   : <ClipboardIcon data-icon="inline-start" />}
-                <span aria-live="polite">{copied ? copiedLabel : copyLabel}</span>
+                <span className="sr-only" aria-live="polite">
+                  {copied ? copiedLabel : copyLabel}
+                </span>
               </Button>
-              <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 pt-12 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
+              <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
                 {codeChildren}
               </pre>
             </div>
@@ -143,13 +149,17 @@ const AssistantMessageContentComponent: React.FC<{
   const { answer, reasoning, reasoningComplete } = parseAssistantContent(renderedContent);
   const answerChunks = useMemo(() => splitStreamingMarkdown(answer), [answer]);
   const hasAnswer = Boolean(answer.trim());
+  const hasReasoning = Boolean(reasoning);
   const hadAnswer = useRef(hasAnswer);
-  const [reasoningOpen, setReasoningOpen] = useState(!hasAnswer && Boolean(reasoning));
+  const hadReasoning = useRef(hasReasoning);
+  const [reasoningOpen, setReasoningOpen] = useState(!hasAnswer && hasReasoning);
 
   useEffect(() => {
+    if (!hadReasoning.current && hasReasoning && !hasAnswer) setReasoningOpen(true);
     if (!hadAnswer.current && hasAnswer) setReasoningOpen(false);
+    hadReasoning.current = hasReasoning;
     hadAnswer.current = hasAnswer;
-  }, [hasAnswer]);
+  }, [hasAnswer, hasReasoning]);
 
   if (!renderedContent) {
     return <span className="shimmer text-xs">{t('ai.thinking.inProgress')}</span>;

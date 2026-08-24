@@ -376,12 +376,18 @@ describe('AI panel width', () => {
       expect(chatMode).toHaveTextContent('问答');
       expect(commandMode).toHaveTextContent('生成命令');
       expect(agentMode).toHaveTextContent('诊断 Agent');
+      expect(chatMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
+      expect(commandMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
+      expect(agentMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
 
       fireEvent.keyDown(handle, { key: 'ArrowRight' });
 
       expect(chatMode).not.toHaveTextContent('问答');
       expect(commandMode).not.toHaveTextContent('生成命令');
       expect(agentMode).not.toHaveTextContent('诊断 Agent');
+      expect(chatMode.querySelector('svg')).not.toHaveAttribute('data-icon');
+      expect(commandMode.querySelector('svg')).not.toHaveAttribute('data-icon');
+      expect(agentMode.querySelector('svg')).not.toHaveAttribute('data-icon');
       expect(screen.getByText('我能帮你处理什么？')).toBeInTheDocument();
       unmount();
     } finally {

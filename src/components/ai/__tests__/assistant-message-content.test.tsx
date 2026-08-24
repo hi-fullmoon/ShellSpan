@@ -12,6 +12,22 @@ vi.mock('@/hooks/useI18n', () => ({
 }));
 
 describe('AssistantMessageContent', () => {
+  it('expands reasoning when thinking content starts streaming', async () => {
+    const { rerender } = render(
+      <AssistantMessageContent content="" streaming />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'ai.thinking.inProgress' })).not.toBeInTheDocument();
+
+    rerender(
+      <AssistantMessageContent content="<think>Check the terminal state." streaming />,
+    );
+
+    const trigger = await screen.findByRole('button', { name: 'ai.thinking.inProgress' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Check the terminal state.')).toBeVisible();
+  });
+
   it('rotates the reasoning arrow with the controlled expanded state', () => {
     const { container } = render(
       <AssistantMessageContent
@@ -52,8 +68,11 @@ describe('AssistantMessageContent', () => {
     );
 
     const copyButton = screen.getByRole('button', { name: 'common.copy' });
-    expect(copyButton).toHaveClass('h-8');
-    expect(copyButton).not.toHaveClass('opacity-0');
+    expect(copyButton).toHaveClass('size-6', 'p-0', 'opacity-0');
+    expect(copyButton).toHaveClass(
+      'group-hover/code-block:opacity-100',
+      'group-focus-within/code-block:opacity-100',
+    );
 
     fireEvent.click(copyButton);
 

@@ -1184,7 +1184,8 @@ export const AiPanel: React.FC = () => {
                       render={(
                         <Button
                           variant={viewingHistory ? 'secondary' : 'ghost'}
-                          size="icon"
+                          size="sm"
+                          className="size-8 p-0"
                           aria-label={t('ai.history')}
                         />
                       )}
@@ -1238,7 +1239,8 @@ export const AiPanel: React.FC = () => {
                       render={(
                         <Button
                           variant="ghost"
-                          size="icon"
+                          size="sm"
+                          className="size-8 p-0"
                           disabled={busy || viewingHistory || !hasCurrentConversation}
                           aria-label={t('ai.clear')}
                         />
@@ -1291,7 +1293,13 @@ export const AiPanel: React.FC = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-            <Button variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label={t('ai.close')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="size-8 p-0"
+              onClick={() => setOpen(false)}
+              aria-label={t('ai.close')}
+            >
               <PanelRightCloseIcon />
             </Button>
           </div>
@@ -1650,7 +1658,7 @@ export const AiPanel: React.FC = () => {
                     <TooltipTrigger
                       render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}
                     >
-                      <MessageCircleIcon data-icon="inline-start" />
+                      <MessageCircleIcon data-icon={compactModeControls ? undefined : 'inline-start'} />
                       {!compactModeControls && t('ai.mode.chat')}
                     </TooltipTrigger>
                     <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
@@ -1659,7 +1667,7 @@ export const AiPanel: React.FC = () => {
                     <TooltipTrigger
                       render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
                     >
-                      <SquareTerminalIcon data-icon="inline-start" />
+                      <SquareTerminalIcon data-icon={compactModeControls ? undefined : 'inline-start'} />
                       {!compactModeControls && t('ai.mode.command')}
                     </TooltipTrigger>
                     <TooltipContent>{t('ai.mode.command')}</TooltipContent>
@@ -1674,7 +1682,7 @@ export const AiPanel: React.FC = () => {
                         />
                       )}
                     >
-                      <BrainCircuitIcon data-icon="inline-start" />
+                      <BrainCircuitIcon data-icon={compactModeControls ? undefined : 'inline-start'} />
                       {!compactModeControls && t('ai.mode.agent')}
                     </TooltipTrigger>
                     <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
