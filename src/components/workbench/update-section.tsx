@@ -51,8 +51,8 @@ export const UpdateSection: React.FC = () => {
   const displayProgress = Math.max(0, Math.min(100, downloadProgress ?? 0));
 
   return (
-    <div className="flex flex-col gap-1 px-3 py-2">
-      <div className="flex items-center justify-between gap-4">
+    <div className="flex min-h-16 flex-col gap-1 px-4 py-2.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_11rem] items-center gap-6">
         <div className="min-w-0">
           <Label className="text-sm font-medium text-foreground">{t('settings.general.update')}</Label>
           <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
@@ -60,9 +60,11 @@ export const UpdateSection: React.FC = () => {
           </p>
         </div>
         {!downloading && !downloaded && (
-          <Button size="xs" disabled={checking} onClick={() => void runCheck('manual')}>
-            {checking ? t('settings.general.checkingUpdate') : t('settings.general.checkUpdate')}
-          </Button>
+          <div className="flex justify-end">
+            <Button size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
+              {checking ? t('settings.general.checkingUpdate') : t('settings.general.checkUpdate')}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -102,7 +104,7 @@ export const UpdateSection: React.FC = () => {
             </TooltipTrigger>
             <TooltipContent className="break-all">{error ?? t('update.failed', { error: '' })}</TooltipContent>
           </Tooltip>
-          <Button variant="outline" size="xs" onClick={() => void runCheck('manual')}>
+          <Button variant="outline" size="sm" onClick={() => void runCheck('manual')}>
             {t('settings.general.retry')}
           </Button>
         </div>
