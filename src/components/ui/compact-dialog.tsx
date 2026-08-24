@@ -20,7 +20,7 @@ export const CompactDialogContent: React.FC<CompactDialogContentProps> = ({
 }) => (
   <DialogContent
     className={cn(
-      'w-[calc(100%-2rem)] min-w-0 gap-0 overflow-hidden border-app-border bg-app-surface p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-lg',
+      'flex max-h-[min(720px,calc(100vh-2rem))] w-[calc(100%-2rem)] min-w-0 flex-col gap-0 overflow-hidden border-app-border bg-app-surface p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-lg',
       className,
     )}
     {...props}
@@ -36,10 +36,10 @@ export const CompactDialogHeader: React.FC<CompactDialogHeaderProps> = ({
   title,
   description,
 }) => (
-  <DialogHeader className="px-4 py-2.5 pr-11">
+  <DialogHeader className="shrink-0 gap-1 border-b border-app-border/60 px-4 py-3 pr-11">
     <DialogTitle className="text-sm leading-5">{title}</DialogTitle>
     {description && (
-      <DialogDescription className="leading-5">{description}</DialogDescription>
+      <DialogDescription className="text-xs leading-5">{description}</DialogDescription>
     )}
   </DialogHeader>
 );
@@ -49,7 +49,10 @@ export const CompactDialogBody: React.FC<React.ComponentProps<'div'>> = ({
   ...props
 }) => (
   <div
-    className={cn('flex min-w-0 flex-col gap-3 px-4 py-3', className)}
+    className={cn(
+      'flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto overscroll-contain px-4 py-3',
+      className,
+    )}
     {...props}
   />
 );
@@ -59,7 +62,7 @@ export const CompactDialogFooter: React.FC<React.ComponentProps<typeof DialogFoo
 ) => (
   <DialogFooter
     className={cn(
-      'mx-0 mb-0 min-w-0 flex-wrap rounded-none border-t-0 bg-app-surface px-4 py-2.5',
+      'mx-0 mb-0 min-w-0 shrink-0 flex-wrap rounded-none px-4 pb-4 pt-1',
       className,
     )}
     {...props}

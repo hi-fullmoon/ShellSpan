@@ -96,7 +96,7 @@ function DrawerFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="drawer-footer"
       className={cn(
-        "mt-auto flex flex-col-reverse gap-2 border-t border-app-border pt-3 sm:flex-row sm:justify-end",
+        "mt-auto flex flex-col-reverse gap-2 pt-3 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
