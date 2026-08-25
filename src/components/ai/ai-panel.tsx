@@ -105,6 +105,7 @@ import type {
   AiStreamEvent,
   AiTaskKind,
 } from '@/types/ai';
+import type { Locale } from '@/types';
 import type { LocaleKey } from '@/locales';
 
 const AI_STREAM_EVENT = 'ai-stream';
@@ -114,6 +115,7 @@ const AI_PANEL_MAX_WIDTH = 720;
 const MAIN_CONTENT_MIN_WIDTH = 480;
 const AI_PANEL_KEYBOARD_RESIZE_STEP = 24;
 const AI_PANEL_COMPACT_CONTROLS_WIDTH = 380;
+const AI_PANEL_ENGLISH_COMPACT_CONTROLS_WIDTH = 440;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'termbridge.aiPanelWidth';
 const logger = createLogger('ai');
 type ConversationTask = Exclude<AiTaskKind, 'diagnosticAgent'>;
@@ -192,6 +194,13 @@ export function getAiPanelWidthBounds(containerWidth: number): { min: number; ma
 export function clampAiPanelWidth(width: number, containerWidth: number): number {
   const bounds = getAiPanelWidthBounds(containerWidth);
   return Math.round(Math.min(Math.max(width, bounds.min), bounds.max));
+}
+
+export function shouldCompactAiModeControls(panelWidth: number, locale: Locale): boolean {
+  const compactWidth = locale === 'en-US'
+    ? AI_PANEL_ENGLISH_COMPACT_CONTROLS_WIDTH
+    : AI_PANEL_COMPACT_CONTROLS_WIDTH;
+  return panelWidth < compactWidth;
 }
 
 function conversationLane(task: ConversationTask): 'conversation' | 'command' {
@@ -517,6 +526,7 @@ export const AiPanel: React.FC = () => {
   const defaultProvider = providers.find((provider) => provider.id === defaultProviderId) ?? providers[0];
   const model = defaultProvider?.model ?? '';
   const activeSection = useAppStore((state) => state.activeSection);
+  const locale = useAppStore((state) => state.locale);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId);
@@ -1066,7 +1076,7 @@ export const AiPanel: React.FC = () => {
     || !model.trim()
     || (task === 'diagnosticAgent' && (!contextEnabled || !agentContext?.context));
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
-  const compactModeControls = panelWidth < AI_PANEL_COMPACT_CONTROLS_WIDTH;
+  const compactModeControls = shouldCompactAiModeControls(panelWidth, locale);
   const currentLane = conversationLane(task === 'generateCommand' ? 'generateCommand' : 'chat');
   const hasCurrentConversation = task === 'diagnosticAgent'
     ? Boolean(agentRun)
