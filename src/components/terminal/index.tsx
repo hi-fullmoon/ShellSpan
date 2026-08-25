@@ -19,7 +19,7 @@ import { terminalRegistry } from './registry/terminal-registry';
 import { TerminalControllerLayer } from './terminal-controller-layer';
 import { TerminalTabBar } from './terminal-tab-bar';
 import { TerminalPane } from './terminal-pane';
-import { NewTabMenu } from './new-tab-menu';
+import { NewSessionDialog } from './new-session-dialog';
 import { TerminalContextMenu } from './terminal-context-menu';
 import {
   findAdjacentTerminalGroup,
@@ -60,7 +60,7 @@ const Terminal: React.FC = () => {
   const activeSection = useAppStore((state) => state.activeSection);
   const { connect, openLocal } = useConnectSession();
 
-  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
+  const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     session: TerminalSession;
     x: number;
@@ -158,7 +158,7 @@ const Terminal: React.FC = () => {
   }, [restoreWorkspace, sessions, split]);
 
   useEffect(() => {
-    const handleNewTabRequest = (): void => setNewTabMenuOpen((previous) => !previous);
+    const handleNewTabRequest = (): void => setNewSessionDialogOpen((previous) => !previous);
     document.addEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
     return () => document.removeEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
   }, []);
@@ -661,7 +661,7 @@ const Terminal: React.FC = () => {
           activeGroup={focused}
           onNewTabClick={() => {
             focusGroup(slot);
-            setNewTabMenuOpen(true);
+            setNewSessionDialogOpen(true);
           }}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot })}
           onTabActivate={(sessionId) => activateGroupTab(slot, sessionId)}
@@ -729,7 +729,7 @@ const Terminal: React.FC = () => {
       <TerminalControllerLayer />
       {sessions.length > 0 && !split && (
         <TerminalTabBar
-          onNewTabClick={() => setNewTabMenuOpen(true)}
+          onNewTabClick={() => setNewSessionDialogOpen(true)}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot: null })}
           onTabActivate={(sessionId) => {
             useTerminalStore.getState().setActiveSession(sessionId);
@@ -748,7 +748,7 @@ const Terminal: React.FC = () => {
               title={t('terminal.empty')}
               description={t('terminal.openFromWorkbench')}
               action={(
-                <Button variant="default" size="sm" onClick={() => setNewTabMenuOpen(true)}>
+                <Button variant="default" size="sm" onClick={() => setNewSessionDialogOpen(true)}>
                   {t('terminal.empty.open')}
                 </Button>
               )}
@@ -774,9 +774,9 @@ const Terminal: React.FC = () => {
             )}
           />
         )}
-        <NewTabMenu
-          open={newTabMenuOpen}
-          onClose={() => setNewTabMenuOpen(false)}
+        <NewSessionDialog
+          open={newSessionDialogOpen}
+          onClose={() => setNewSessionDialogOpen(false)}
           onConnect={connect}
           onOpenLocal={openLocal}
         />
