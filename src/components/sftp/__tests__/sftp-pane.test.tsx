@@ -218,6 +218,28 @@ describe('SftpPane', () => {
     expect(screen.queryByRole('button', { name: 'sftp.openTerminalHere' })).not.toBeInTheDocument();
   });
 
+  it('uses matching button and icon sizes for remote pane toolbar actions', () => {
+    const connection = createConnection();
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        onOpenTerminal={vi.fn()}
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    const terminalButton = screen.getByRole('button', { name: 'sftp.openTerminalHere' });
+    const searchButton = screen.getByRole('button', { name: 'sftp.showFilter' });
+
+    expect(terminalButton).toHaveClass('size-7');
+    expect(searchButton).toHaveClass('size-7');
+    expect(terminalButton.className).toContain('[&_svg]:size-4');
+    expect(searchButton.className).toContain('[&_svg]:size-4');
+  });
+
   it('renders the right pane as local with a source switch action', () => {
     const connection = createConnection();
     const onTitleClick = vi.fn();
