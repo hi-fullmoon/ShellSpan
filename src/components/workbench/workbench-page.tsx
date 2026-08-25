@@ -41,7 +41,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
     {...props}
   >
     <div className="flex flex-col gap-3 @min-[42rem]:flex-row @min-[42rem]:items-center @min-[42rem]:justify-between">
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3 @min-[42rem]:shrink-0">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon className="size-4" aria-hidden />
         </div>
@@ -56,7 +56,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
         </div>
       </div>
       {actions && (
-        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 @min-[42rem]:flex-1 @min-[42rem]:justify-end">
           {actions}
         </div>
       )}
