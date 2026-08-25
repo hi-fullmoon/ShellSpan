@@ -21,6 +21,11 @@ import {
   retryRunbookWithFreshPrechecks,
   startRunbookRun,
 } from '@/lib/runbook';
+import {
+  throwRunbookError,
+  type RunbookErrorCode,
+  type RunbookErrorVariables,
+} from '@/lib/runbook-error';
 
 export const MULTI_HOST_MIN_CONCURRENCY = 1;
 export const MULTI_HOST_MAX_CONCURRENCY = 8;
@@ -36,8 +41,12 @@ const TERMINAL_HOST_STATUSES = new Set<MultiHostRunbookHostStatus>([
   'identityMismatch',
 ]);
 
-function fail(message: string): never {
-  throw new Error(`Multi-host Runbook: ${message}`);
+function fail(
+  code: RunbookErrorCode,
+  message: string,
+  variables: RunbookErrorVariables = {},
+): never {
+  return throwRunbookError('multiHost', code, message, variables);
 }
 
 function normalizedTag(value: string): string {
@@ -92,16 +101,26 @@ function validateConfig(concurrencyLimit: number, batchSize: number): void {
     || concurrencyLimit < MULTI_HOST_MIN_CONCURRENCY
     || concurrencyLimit > MULTI_HOST_MAX_CONCURRENCY
   ) {
-    fail(`concurrencyLimit must be an integer from ${MULTI_HOST_MIN_CONCURRENCY} to ${MULTI_HOST_MAX_CONCURRENCY}`);
+    fail(
+      'concurrencyRange',
+      `concurrencyLimit must be an integer from ${MULTI_HOST_MIN_CONCURRENCY} to ${MULTI_HOST_MAX_CONCURRENCY}`,
+      { min: MULTI_HOST_MIN_CONCURRENCY, max: MULTI_HOST_MAX_CONCURRENCY },
+    );
   }
   if (
     !Number.isInteger(batchSize)
     || batchSize < MULTI_HOST_MIN_BATCH_SIZE
     || batchSize > MULTI_HOST_MAX_BATCH_SIZE
   ) {
-    fail(`batchSize must be an integer from ${MULTI_HOST_MIN_BATCH_SIZE} to ${MULTI_HOST_MAX_BATCH_SIZE}`);
+    fail(
+      'batchSizeRange',
+      `batchSize must be an integer from ${MULTI_HOST_MIN_BATCH_SIZE} to ${MULTI_HOST_MAX_BATCH_SIZE}`,
+      { min: MULTI_HOST_MIN_BATCH_SIZE, max: MULTI_HOST_MAX_BATCH_SIZE },
+    );
   }
-  if (concurrencyLimit > batchSize) fail('concurrencyLimit cannot exceed batchSize');
+  if (concurrencyLimit > batchSize) {
+    fail('concurrencyExceedsBatch', 'concurrencyLimit cannot exceed batchSize');
+  }
 }
 
 export interface CreateMultiHostRunbookTaskOptions {
@@ -127,13 +146,15 @@ export function createMultiHostRunbookTask({
   now = Date.now(),
   createRunId,
 }: CreateMultiHostRunbookTaskOptions): MultiHostRunbookTask {
-  if (!id.trim()) fail('task identity is required');
+  if (!id.trim()) fail('taskIdentityRequired', 'task identity is required');
   validateConfig(concurrencyLimit, batchSize);
   const targets = selectMultiHostProfilesByTag(profiles, selectedTag);
-  if (targets.length === 0) fail('the selected connection tag has no targets');
+  if (targets.length === 0) fail('tagHasNoTargets', 'the selected connection tag has no targets');
   const profileIds = new Set<string>();
   for (const profile of targets) {
-    if (profileIds.has(profile.id)) fail(`duplicate target profile ${profile.id}`);
+    if (profileIds.has(profile.id)) {
+      fail('duplicateTarget', `duplicate target profile ${profile.id}`, { id: profile.id });
+    }
     profileIds.add(profile.id);
   }
 

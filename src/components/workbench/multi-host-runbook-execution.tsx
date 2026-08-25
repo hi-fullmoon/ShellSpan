@@ -43,6 +43,7 @@ import {
 } from '@/lib/multi-host-runbook';
 import { createOperationId } from '@/lib/operation-id';
 import { recordOperationHistoryTransition } from '@/lib/operation-history';
+import { getLocalizedRunbookErrorMessage } from '@/lib/runbook-error';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
 import {
   buildRemoteConnectionRequest,
@@ -138,7 +139,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
   profiles,
   onTaskChange,
 }) => {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { error: showError } = useToast();
   const [task, setTask] = useState(initialTask);
   const [confirmingProfileId, setConfirmingProfileId] = useState<string>();
@@ -326,7 +327,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
               createMultiHostSyntheticResult(
                 dispatch,
                 'failed',
-                error instanceof Error ? error.message : String(error),
+                getLocalizedRunbookErrorMessage(error, t),
               ),
             ));
           }
@@ -371,7 +372,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
               value: createMultiHostSyntheticResult(
                 dispatch,
                 'failed',
-                error instanceof Error ? error.message : String(error),
+                getLocalizedRunbookErrorMessage(error, t),
               ),
             };
           }
@@ -572,7 +573,11 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                   </AlertTitle>
                   <AlertDescription>
                     <div className="flex flex-col gap-2">
-                      <span>{t('runbook.impact')}: {activeItem.impact}</span>
+                      <span>
+                        {t('runbook.impact')}: {activeItem.kind === 'precheck'
+                          ? t('runbook.precheckImpact')
+                          : activeItem.impact}
+                      </span>
                       {activeItem.rollback && (
                         <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
                       )}
@@ -602,11 +607,13 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                               {t('runbook.evidenceTarget')}: {item.evidence.username}@{item.evidence.host}:{item.evidence.port}
                             </span>
                             <span>
-                              {t('runbook.evidenceCompletedAt')}: {new Date(item.evidence.completedAt).toLocaleString()}
+                              {t('runbook.evidenceCompletedAt')}: {new Date(item.evidence.completedAt).toLocaleString(locale)}
                             </span>
                           </>
                         )}
-                        {item.evidence?.exitCode !== undefined && <span>exit {item.evidence.exitCode}</span>}
+                        {item.evidence?.exitCode !== undefined && (
+                          <span>{t('runbook.exitCode')}: {item.evidence.exitCode}</span>
+                        )}
                         {item.evidence?.stdout && (
                           <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stdout}</code>
                         )}

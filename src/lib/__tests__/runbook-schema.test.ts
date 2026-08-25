@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RUNBOOK_JSON_SCHEMA,
+  createRunbookJsonSchema,
   RUNBOOK_SCHEMA_URI,
   runbookVariableNames,
 } from '@/lib/runbook-schema';
@@ -8,6 +8,7 @@ import { RUNBOOK_EXAMPLE } from '@/lib/runbook';
 
 describe('runbook editor schema', () => {
   it('models the closed v1 document contract and its safety-sensitive enums', () => {
+    const RUNBOOK_JSON_SCHEMA = createRunbookJsonSchema((key) => key);
     expect(RUNBOOK_JSON_SCHEMA.$id).toBe(RUNBOOK_SCHEMA_URI);
     expect(RUNBOOK_JSON_SCHEMA.additionalProperties).toBe(false);
     expect(RUNBOOK_JSON_SCHEMA.required).toEqual(expect.arrayContaining([

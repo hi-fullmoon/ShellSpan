@@ -16,9 +16,10 @@ import 'monaco-editor/editor/contrib/linesOperations/browser/linesOperations';
 import 'monaco-editor/editor/contrib/snippet/browser/snippetController2';
 import 'monaco-editor/editor/contrib/suggest/browser/suggestController';
 import 'monaco-editor/editor/contrib/wordOperations/browser/wordOperations';
+import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import {
-  RUNBOOK_JSON_SCHEMA,
+  createRunbookJsonSchema,
   RUNBOOK_MODEL_URI,
   RUNBOOK_SCHEMA_URI,
   runbookVariableNames,
@@ -32,21 +33,6 @@ globalThis.MonacoEnvironment = {
     label === 'json' ? new JsonWorker() : new EditorWorker()
   ),
 };
-
-jsonDefaults.setDiagnosticsOptions({
-  validate: true,
-  allowComments: false,
-  comments: 'error',
-  trailingCommas: 'error',
-  enableSchemaRequest: false,
-  schemaRequest: 'error',
-  schemaValidation: 'error',
-  schemas: [{
-    uri: RUNBOOK_SCHEMA_URI,
-    fileMatch: [RUNBOOK_MODEL_URI],
-    schema: RUNBOOK_JSON_SCHEMA,
-  }],
-});
 
 interface RunbookJsonEditorProps {
   value: string;
@@ -69,15 +55,35 @@ export const RunbookJsonEditor: React.FC<RunbookJsonEditorProps> = ({
   ariaLabel,
   className,
 }) => {
+  const { locale, t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | undefined>(undefined);
   const modelRef = useRef<monaco.editor.ITextModel | undefined>(undefined);
   const onChangeRef = useRef(onChange);
   const onProblemsChangeRef = useRef(onProblemsChange);
   const applyingExternalValueRef = useRef(false);
+  const tRef = useRef(t);
 
   onChangeRef.current = onChange;
   onProblemsChangeRef.current = onProblemsChange;
+  tRef.current = t;
+
+  useEffect(() => {
+    jsonDefaults.setDiagnosticsOptions({
+      validate: true,
+      allowComments: false,
+      comments: 'error',
+      trailingCommas: 'error',
+      enableSchemaRequest: false,
+      schemaRequest: 'error',
+      schemaValidation: 'error',
+      schemas: [{
+        uri: RUNBOOK_SCHEMA_URI,
+        fileMatch: [RUNBOOK_MODEL_URI],
+        schema: createRunbookJsonSchema(t),
+      }],
+    });
+  }, [locale, t]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -161,8 +167,8 @@ export const RunbookJsonEditor: React.FC<RunbookJsonEditorProps> = ({
           suggestions: runbookVariableNames(completionModel.getValue()).map((name) => ({
             label: `{{${name}}}`,
             kind: monaco.languages.CompletionItemKind.Variable,
-            detail: 'Runbook variable',
-            documentation: `Insert the declared ${name} variable as a shell-quoted argument.`,
+            detail: tRef.current('runbook.editor.variableCompletion'),
+            documentation: tRef.current('runbook.editor.variableDocumentation', { name }),
             insertText: `${name}}}`,
             range,
             sortText: `0-${name}`,
