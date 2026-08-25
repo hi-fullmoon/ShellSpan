@@ -19,6 +19,7 @@ import {
   retrySnapshotForMessage,
   sanitizeTerminalSelection,
   selectConversationHistory,
+  shouldCompactAiModeControls,
   shouldSubmitAiDraft,
   stopActiveAgentRun,
   summarizeAiError,
@@ -598,6 +599,9 @@ describe('AI panel width', () => {
     expect(clampAiPanelWidth(200, 1480)).toBe(320);
     expect(clampAiPanelWidth(800, 1480)).toBe(720);
     expect(clampAiPanelWidth(461.6, 1480)).toBe(462);
+    expect(shouldCompactAiModeControls(400, 'en-US')).toBe(true);
+    expect(shouldCompactAiModeControls(440, 'en-US')).toBe(false);
+    expect(shouldCompactAiModeControls(400, 'zh-CN')).toBe(false);
   });
 
   it('preserves the minimum main-content width in a smaller container', () => {
