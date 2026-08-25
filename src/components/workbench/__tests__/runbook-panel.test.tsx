@@ -5,6 +5,28 @@ import { dispatchAgentRunbookDraft } from '@/lib/diagnostic-agent';
 import { RUNBOOK_EXAMPLE } from '@/lib/runbook';
 import { RunbookPanel } from '../runbook-panel';
 
+vi.mock('../runbook-json-editor', () => ({
+  default: ({
+    value,
+    onChange,
+    disabled,
+    ariaLabel,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    disabled?: boolean;
+    ariaLabel: string;
+  }) => (
+    <textarea
+      data-slot="runbook-json-editor-test-double"
+      aria-label={ariaLabel}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
+}));
+
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
@@ -20,11 +42,12 @@ describe('RunbookPanel', () => {
     });
   });
 
-  it('renders the reviewable local text contract and risk-aware workflow', () => {
+  it('renders the reviewable local text contract and risk-aware workflow', async () => {
     const { container } = render(<RunbookPanel />);
     expect(screen.getByRole('heading', { name: 'runbook.title' })).toBeInTheDocument();
-    expect((screen.getByRole('textbox', { name: 'runbook.textTitle' }) as HTMLTextAreaElement).value)
+    expect((await screen.findByRole('textbox', { name: 'runbook.textTitle' }) as HTMLTextAreaElement).value)
       .toContain('"schemaVersion": 1');
+    expect(container.querySelector('[data-slot="runbook-json-editor-test-double"]')).toBeInTheDocument();
     expect(screen.getByText('Reload nginx safely')).toBeInTheDocument();
     expect(screen.getByText('runbook.secretPolicy')).toBeInTheDocument();
     const reviewButton = screen.getByRole('button', { name: /runbook.reviewRun/ });

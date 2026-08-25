@@ -54,6 +54,7 @@ describe('RemoteHealthSection authorization', () => {
     const select = screen.getByRole('combobox', { name: 'remoteHealth.profile' });
     expect(select).toHaveTextContent('Production · root@prod.example.com:22');
     expect(select).not.toHaveTextContent(profile.id);
+    expect(select).toHaveClass('w-full', 'sm:w-72');
   });
 
   it('does not collect until the user approves the one-shot read-only scope', async () => {
