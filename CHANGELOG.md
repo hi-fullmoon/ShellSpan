@@ -3,6 +3,66 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.50](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.50) - 2026-08-25
+
+
+### Bug Fixes
+
+- **audit:** 锁定 Runbook 批准事件至已审核命令与多主机任务
+
+### CI/CD
+
+- **workflows:** 显式指定 Rust 工具链并增加一致性校验
+
+### Chore
+
+- remove standalone agent preview page
+- **locales:** sync en/zh strings and base styles
+- **locales:** sync en/zh strings for new agent and workbench UI
+- **audit:** 关闭三项安全缺口并收紧路线图审计门禁
+
+### Documentation
+
+- **roadmap:** 完善扩展契约评估与审核门禁
+- **roadmap:** 新增 EXPLORE 阶段评估与便携性候选准入
+- **roadmap:** 新增受限动态 SOCKS5 转发 EXPLORE 评估
+- 新增本地加密备份与设备迁移 EXPLORE 评估
+- 添加团队共享、集中策略与审计服务的 EXPLORE 评估
+
+### Features
+
+- **ai:** AI 辅助执行重构——引入结构化计划与显式 Runbook 交接
+- **workbench:** add Monaco runbook JSON editor with schema
+- **ui:** add Table and refresh shared dialog/drawer primitives
+- **ui:** add outline variant to Card primitive
+- **ui:** add segmented variant to toggle and apply to auth method
+- **ai:** add standalone agent preview page
+- **lib:** add truncateAiContext helper for AI payloads
+- **workbench:** integrate runbook editor and refresh remote health
+- **ai:** redesign agent run timeline and assistant reasoning
+- **ai:** redesign agent run view with evidence-first workflow
+- **ai:** retry diagnostic runs on original terminal sessions
+- **workbench:** wire up workbench page with new dialogs and panels
+- **ui:** 完善主机快速操作入口与命令面板集成
+- **port-forward:** 完善端口转发生命周期管理与 UI
+- **tauri:** 实现远端健康快照采集与诊断
+- **ui:** 新增操作记录面板与本地审计链路
+- **term:** 添加多主机 Runbook 调度与按主机熔断
+- **core:** 落地 v2.1 可信基础（质量门禁、工作区恢复、连接预检）
+- **runbook:** 落地本地 Runbook 执行流程
+
+### Refactoring
+
+- **sftp:** polish preview dialog
+- **sftp:** polish sftp tab bar and pane behavior
+- **terminal:** polish terminal tab bar behavior
+- **ui:** refine split-pane and resizable primitives
+- **ai:** tighten agent run view spacing and adopt outline cards
+
+### Style
+
+- refine update section layout in workbench
+
 ## [v2.0.49](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.49) - 2026-08-22
 
 
