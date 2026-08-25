@@ -81,7 +81,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
       orientation={direction}
       defaultLayout={defaultLayout}
       onLayoutChanged={handleLayoutChanged}
-      resizeTargetMinimumSize={{ fine: 8, coarse: 24 }}
+      resizeTargetMinimumSize={{ fine: 4, coarse: 4 }}
       data-direction={direction}
       className={cn('isolate overflow-hidden', className)}
     >
@@ -92,7 +92,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
       >
         {left}
       </ResizablePanel>
-      {/* Terminal panes use z-10 status/inactive masks; the divider's 3px
+      {/* Terminal panes use z-10 status/inactive masks; the divider's 4px
           indicator crosses the 1px gutter and must paint above those masks.
           A horizontal divider overlaps the preceding pane by 1px so it does
           not push the following pane's tab strip down by a visible pixel. */}
@@ -100,7 +100,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
         id={`${groupId}-divider`}
         data-slot="split-pane-divider"
         className={cn(
-          'group z-20 bg-transparent shadow-none after:pointer-events-none after:bg-transparent after:transition-colors after:duration-150 hover:after:bg-app-primary focus-visible:after:bg-app-primary data-[separator=active]:after:bg-app-primary',
+          'group z-20 bg-transparent shadow-none after:pointer-events-none after:bg-transparent after:transition-colors after:duration-150 after:delay-0 focus-visible:after:bg-app-primary data-[separator=hover]:after:bg-app-primary data-[separator=hover]:after:delay-200 data-[separator=active]:after:bg-app-primary data-[separator=active]:after:delay-0',
           direction === 'vertical' && '-mt-px',
           dividerStyle === 'subtle' ? 'bg-app-border/15' : 'bg-app-border',
         )}

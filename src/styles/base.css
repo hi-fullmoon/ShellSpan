@@ -19,6 +19,8 @@
   --color-app-error: var(--app-error);
   --color-app-warning: var(--app-warning);
   --color-app-success: var(--app-success);
+  --color-app-tab-active: var(--app-tab-active);
+  --color-app-tab-accent: var(--app-tab-accent);
 }
 
 :root {
@@ -37,6 +39,8 @@
   --app-error: #dc2626;
   --app-warning: #d97706;
   --app-success: #16a34a;
+  --app-tab-active: color-mix(in srgb, var(--app-primary) 10%, transparent);
+  --app-tab-accent: var(--app-primary);
   --radius: 0.375rem;
   --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.04), 0 1px 3px 0 rgba(0, 0, 0, 0.03);
   --shadow-dialog: 0 24px 48px -12px rgba(0, 0, 0, 0.18);
@@ -91,6 +95,8 @@
   --app-error: #fb7185;
   --app-warning: #fbbf24;
   --app-success: #4ade80;
+  --app-tab-active: color-mix(in srgb, var(--app-primary) 14%, transparent);
+  --app-tab-accent: var(--app-primary);
   --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.035), 0 16px 32px -20px rgba(0, 0, 0, 0.86);
   --shadow-dialog: 0 28px 64px -20px rgba(0, 0, 0, 0.88), 0 0 0 1px rgba(255, 255, 255, 0.045);
   --shadow-toast: 0 14px 32px -12px rgba(0, 0, 0, 0.78), 0 0 0 1px rgba(255, 255, 255, 0.06);
