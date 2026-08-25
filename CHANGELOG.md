@@ -3,6 +3,23 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.52](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.52) - 2026-08-25
+
+
+### Chore
+
+- **locales:** sync en/zh strings
+
+### Features
+
+- **ai:** rebind retry to reconnected session and warn on unsafe commands
+- **terminal:** replace new tab menu with command-palette session dialog
+- **workbench:** route new-connection requests through the app store
+
+### Refactoring
+
+- **sftp:** polish sftp pane
+
 ## [v2.0.51](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.51) - 2026-08-25
 
 
