@@ -20,7 +20,6 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 
@@ -40,24 +39,26 @@ export const MessageScroller: React.FC<{
         role="log"
         aria-label={ariaLabel}
       >
-        <ScrollArea
-          className="size-full"
-          size="thin"
-          viewportRender={<MessageScrollerViewport />}
-        >
+        <MessageScrollerViewport>
           <MessageScrollerContent className={cn('gap-5 px-4 py-5', contentClassName)}>
-            {React.Children.toArray(children).map((child, index) => (
-              <MessageScrollerItem
-                key={React.isValidElement(child) && child.key !== null ? child.key : index}
-                scrollAnchor={
-                  React.isValidElement<{ role?: string }>(child) && child.props.role === 'user'
-                }
-              >
-                {child}
-              </MessageScrollerItem>
-            ))}
+            {React.Children.toArray(children).map((child, index) => {
+              const itemKey = React.isValidElement(child) && child.key !== null
+                ? child.key
+                : index;
+              return (
+                <MessageScrollerItem
+                  key={itemKey}
+                  messageId={String(itemKey)}
+                  scrollAnchor={
+                    React.isValidElement<{ role?: string }>(child) && child.props.role === 'user'
+                  }
+                >
+                  {child}
+                </MessageScrollerItem>
+              );
+            })}
           </MessageScrollerContent>
-        </ScrollArea>
+        </MessageScrollerViewport>
         <MessageScrollerButton>
           <ArrowDownIcon />
           <span className="sr-only">{t('ai.scrollToLatest')}</span>
