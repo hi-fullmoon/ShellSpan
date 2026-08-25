@@ -16,6 +16,7 @@ import {
   extractSingleLineCommand,
   getAiPanelWidthBounds,
   isMessageBoundToTerminal,
+  retrySnapshotForMessage,
   sanitizeTerminalSelection,
   selectConversationHistory,
   shouldSubmitAiDraft,
@@ -280,6 +281,127 @@ describe('terminal conversation binding', () => {
       undefined,
       'new-session',
     )).toBe(true);
+  });
+
+  it('retries with the original context and the reconnected terminal identity', () => {
+    const context = { label: 'root@example.com', content: 'original evidence' };
+    expect(retrySnapshotForMessage(
+      {
+        context,
+        conversationId: 'conversation-1',
+        sessionId: 'old-session',
+      },
+      [{ conversationId: 'conversation-1', sessionId: 'new-session' }],
+    )).toEqual({
+      context,
+      conversationId: 'conversation-1',
+      sessionId: 'new-session',
+    });
+  });
+
+  it('wires the failed request snapshot into retry instead of reading new terminal output', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    const originalContext = { label: 'root@example.com', content: 'original evidence' };
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'reconnected-session',
+        title: 'Server',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'retry-conversation',
+        conversationStartedAt: '2026-08-25T09:00:00.000Z',
+      }],
+      activeSessionId: 'reconnected-session',
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().beginRequest({
+      requestId: 'failed-request',
+      task: 'explainTerminal',
+      userContent: 'Explain the failure',
+      providerId: 'ollama',
+      conversationId: 'retry-conversation',
+      sessionId: 'disconnected-session',
+      context: originalContext,
+    });
+    useAiStore.getState().failRequest('failed-request', 'AI provider request timed out');
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const errorTitle = await screen.findByText('Request failed');
+      const alert = errorTitle.closest('[role="alert"]');
+      expect(alert).not.toBeNull();
+      fireEvent.click(within(alert as HTMLElement).getByRole('button', { name: 'Retry' }));
+
+      await waitFor(() => {
+        const startCall = tauriCoreMock.invoke.mock.calls.find(([command]) => (
+          command === 'ai_start_request'
+        ));
+        expect(startCall?.[1]).toMatchObject({
+          request: {
+            task: 'explainTerminal',
+            context: originalContext,
+          },
+        });
+      });
+      const retryRequestId = useAiStore.getState().activeRequestId;
+      expect(useAiStore.getState().messages.find((item) => (
+        item.requestId === retryRequestId && item.role === 'user'
+      ))).toMatchObject({
+        context: originalContext,
+        conversationId: 'retry-conversation',
+        sessionId: 'reconnected-session',
+      });
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('warns about commands outside the read-only allowlist and exposes one copy action', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useTerminalStore.setState({ sessions: [], activeSessionId: null });
+    useAiStore.getState().clear();
+    useAiStore.getState().beginRequest({
+      requestId: 'manual-review-command',
+      task: 'generateCommand',
+      userContent: 'Restart the service',
+      providerId: 'ollama',
+    });
+    useAiStore.getState().appendDelta(
+      'manual-review-command',
+      '```bash\nsystemctl restart nginx\n```',
+    );
+    useAiStore.getState().completeRequest('manual-review-command');
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Generate command' }));
+
+      expect(await screen.findByText('Manual command review required')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: 'Insert into terminal' })).toBeNull();
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
   });
 
   it('does not offer to insert an unbound command from a non-terminal section', async () => {

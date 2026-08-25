@@ -4,10 +4,8 @@ import {
   ArrowUpIcon,
   BotIcon,
   BrainCircuitIcon,
-  CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
-  ClipboardIcon,
   Code2Icon,
   EraserIcon,
   HistoryIcon,
@@ -128,6 +126,12 @@ interface TerminalContextSnapshot {
   sessionId?: string;
   label?: string;
   lineCount: number;
+}
+
+interface AiRequestSnapshot {
+  context?: AiContext;
+  conversationId?: string;
+  sessionId?: string;
 }
 
 export interface AiErrorPresentation {
@@ -273,6 +277,20 @@ export function isMessageBoundToTerminal(
   return message.conversationId
     ? message.conversationId === activeConversationId
     : Boolean(message.sessionId && message.sessionId === activeSessionId);
+}
+
+export function retrySnapshotForMessage(
+  message: Pick<AiChatMessage, 'context' | 'conversationId' | 'sessionId'>,
+  sessions: Array<{ conversationId?: string; sessionId: string }>,
+): AiRequestSnapshot {
+  const reboundSession = message.conversationId
+    ? sessions.find((session) => session.conversationId === message.conversationId)
+    : undefined;
+  return {
+    context: message.context,
+    conversationId: message.conversationId,
+    sessionId: reboundSession?.sessionId ?? message.sessionId,
+  };
 }
 
 export function canStartAiRequest(
@@ -513,7 +531,6 @@ export const AiPanel: React.FC = () => {
   const [containerWidth, setContainerWidth] = useState(() => window.innerWidth);
   const [resizing, setResizing] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
-  const [copiedCommandId, setCopiedCommandId] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [loadingConversationIds, setLoadingConversationIds] = useState<string[]>([]);
   const [failedConversationLoadIds, setFailedConversationLoadIds] = useState<string[]>([]);
@@ -528,7 +545,6 @@ export const AiPanel: React.FC = () => {
   } | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
   const pendingPanelWidthRef = useRef<number | null>(null);
-  const copyResetTimerRef = useRef<number | null>(null);
   const streamDeltaBatcherRef = useRef<AiStreamDeltaBatcher | null>(null);
   const loadingConversationIdsRef = useRef(new Set<string>());
   const compactViewport = useCompactAiPanelViewport();
@@ -562,10 +578,6 @@ export const AiPanel: React.FC = () => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [panelWidth]);
-
-  useEffect(() => () => {
-    if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
-  }, []);
 
   const measureContainerWidth = useCallback((): number => {
     if (compactViewport) return window.innerWidth;
@@ -695,7 +707,7 @@ export const AiPanel: React.FC = () => {
   const send = useCallback(async (
     requestTask: ConversationTask,
     text: string,
-    providedSnapshot?: { context?: AiContext; conversationId?: string; sessionId?: string },
+    providedSnapshot?: AiRequestSnapshot,
   ): Promise<void> => {
     const trimmed = text.trim();
     if (!trimmed || useAiStore.getState().phase === 'streaming') return;
@@ -944,17 +956,6 @@ export const AiPanel: React.FC = () => {
       return;
     }
     terminalRegistry.get(state.activeSessionId)?.terminal.paste(command.replace(/[\r\n]+$/g, ''));
-  };
-
-  const handleCopyCommand = async (messageId: string, command: string): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopiedCommandId(messageId);
-      if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
-      copyResetTimerRef.current = window.setTimeout(() => setCopiedCommandId(null), 1600);
-    } catch (reason) {
-      logger.warn('Failed to copy AI command', reason);
-    }
   };
 
   const applySuggestedPrompt = (prompt: string, nextTask: ConversationTask = 'chat'): void => {
@@ -1543,10 +1544,11 @@ export const AiPanel: React.FC = () => {
                 && message.status === 'completed'
                 ? extractSingleLineCommand(message.content)
                 : undefined;
+              const commandIsSafe = Boolean(command && isSafeReadOnlyAgentCommand(command));
               const commandIsInsertable = Boolean(
                 command
                 && activeSection === 'terminal'
-                && isSafeReadOnlyAgentCommand(command)
+                && commandIsSafe
                 && isMessageBoundToTerminal(
                   message,
                   activeConversationId,
@@ -1571,40 +1573,35 @@ export const AiPanel: React.FC = () => {
                     {message.status === 'failed' && (
                       <div className="text-destructive">{t('ai.message.failed')}</div>
                     )}
-                    {command && (
+                    {command && commandIsSafe && (
                       <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
                         <Button
-                          variant="ghost"
+                          variant="secondary"
                           size="xs"
-                          onClick={() => void handleCopyCommand(message.id, command)}
+                          onClick={() => handleInsertCommand(
+                            command,
+                            message.conversationId,
+                            message.sessionId,
+                          )}
+                          disabled={
+                            !commandIsInsertable
+                            || !activeSession
+                            || activeSession.status !== 'connected'
+                          }
                         >
-                          {copiedCommandId === message.id
-                            ? <CheckIcon data-icon="inline-start" />
-                            : <ClipboardIcon data-icon="inline-start" />}
-                          <span aria-live="polite">
-                            {copiedCommandId === message.id ? t('common.copied') : t('common.copy')}
-                          </span>
+                          <Code2Icon data-icon="inline-start" />
+                          {t('ai.insertCommand')}
                         </Button>
-                        {isSafeReadOnlyAgentCommand(command) && (
-                          <Button
-                            variant="secondary"
-                            size="xs"
-                            onClick={() => handleInsertCommand(
-                              command,
-                              message.conversationId,
-                              message.sessionId,
-                            )}
-                            disabled={
-                              !commandIsInsertable
-                              || !activeSession
-                              || activeSession.status !== 'connected'
-                            }
-                          >
-                            <Code2Icon data-icon="inline-start" />
-                            {t('ai.insertCommand')}
-                          </Button>
-                        )}
                       </div>
+                    )}
+                    {command && !commandIsSafe && (
+                      <Alert variant="destructive" className="mt-3">
+                        <CircleAlertIcon />
+                        <AlertTitle>{t('ai.commandReviewRequired')}</AlertTitle>
+                        <AlertDescription>
+                          {t('ai.commandReviewRequiredDescription')}
+                        </AlertDescription>
+                      </Alert>
                     )}
                   </Bubble>
                 </Message>
@@ -1643,6 +1640,10 @@ export const AiPanel: React.FC = () => {
                     onClick={() => void send(
                       failedRequestMessage.task,
                       failedRequestMessage.content,
+                      retrySnapshotForMessage(
+                        failedRequestMessage,
+                        useTerminalStore.getState().sessions,
+                      ),
                     )}
                   >
                     <RotateCcwIcon data-icon="inline-start" />
