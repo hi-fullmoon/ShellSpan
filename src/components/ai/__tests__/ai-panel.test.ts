@@ -23,6 +23,10 @@ import {
   summarizeAiError,
 } from '../ai-panel';
 
+const tauriCoreMock = vi.hoisted(() => ({ invoke: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: tauriCoreMock.invoke }));
+
 function message(
   requestId: string,
   role: AiChatMessage['role'],
@@ -43,6 +47,8 @@ function message(
 
 beforeEach(() => {
   window.localStorage.removeItem('termbridge.aiPanelWidth');
+  tauriCoreMock.invoke.mockReset();
+  tauriCoreMock.invoke.mockResolvedValue(undefined);
 });
 
 describe('extractSingleLineCommand', () => {
@@ -186,6 +192,77 @@ describe('terminal conversation binding', () => {
     }
   });
 
+  it('retries a diagnostic run on its original terminal after the active tab changes', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAgentStore.getState().clear();
+    useAiStore.getState().clear();
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [
+        {
+          sessionId: 'session-a',
+          title: 'Server A',
+          host: 'a.example.com',
+          port: 22,
+          username: 'root',
+          status: 'connected',
+          profileId: 'profile-a',
+          conversationId: 'conversation-a',
+          conversationStartedAt: '2026-08-22T09:00:00.000Z',
+        },
+        {
+          sessionId: 'session-b',
+          title: 'Server B',
+          host: 'b.example.com',
+          port: 22,
+          username: 'root',
+          status: 'connected',
+          profileId: 'profile-b',
+          conversationId: 'conversation-b',
+          conversationStartedAt: '2026-08-22T09:05:00.000Z',
+        },
+      ],
+      activeSessionId: 'session-b',
+    });
+    useAgentStore.getState().beginRun(
+      'failed-on-a',
+      'Diagnose server A',
+      'session-a',
+      'root@a.example.com',
+      'profile-a',
+      'terminal',
+      1_234,
+      'conversation-a',
+    );
+    useAgentStore.getState().failRun('failed-on-a', 'Provider failed');
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Diagnostic Agent' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+
+      await waitFor(() => expect(useAgentStore.getState().run).toMatchObject({
+        phase: 'planning',
+        sessionId: 'session-a',
+        conversationId: 'conversation-a',
+        profileId: 'profile-a',
+      }));
+      expect(useTerminalStore.getState().activeSessionId).toBe('session-a');
+      expect(useAgentStore.getState().run?.requestId).not.toBe('failed-on-a');
+    } finally {
+      unmount();
+      useAgentStore.getState().clear();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
   it('keeps commands bound after a terminal reconnect changes sessionId', () => {
     expect(isMessageBoundToTerminal(
       { conversationId: 'conversation-1', sessionId: 'old-session' },
@@ -197,6 +274,55 @@ describe('terminal conversation binding', () => {
       'conversation-1',
       'new-session',
     )).toBe(false);
+    expect(isMessageBoundToTerminal({}, 'conversation-1', 'new-session')).toBe(false);
+    expect(isMessageBoundToTerminal(
+      { sessionId: 'new-session' },
+      undefined,
+      'new-session',
+    )).toBe(true);
+  });
+
+  it('does not offer to insert an unbound command from a non-terminal section', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'background-session',
+        title: 'Background terminal',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'background-conversation',
+        conversationStartedAt: '2026-08-22T09:00:00.000Z',
+      }],
+      activeSessionId: 'background-session',
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().beginRequest({
+      requestId: 'unbound-command',
+      task: 'generateCommand',
+      userContent: 'Show disk usage',
+      providerId: 'provider-1',
+    });
+    useAiStore.getState().appendDelta('unbound-command', '```bash\ndf -h\n```');
+    useAiStore.getState().completeRequest('unbound-command');
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Generate command' }));
+      expect(await screen.findByRole('button', { name: 'Insert into terminal' })).toBeDisabled();
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
   });
 
   it('does not start a request after its terminal conversation closes', () => {
@@ -423,10 +549,12 @@ describe('AI panel width', () => {
       });
       const panel = container.querySelector('[data-slot="ai-panel"]') as HTMLElement;
       const handle = screen.getByRole('separator', { name: '调整 AI 助手宽度' });
+      expect(handle).toHaveClass('w-1', '-left-0.5');
       expect(container.querySelector('[data-slot="ai-panel-resize-indicator"]')).toHaveClass(
         'w-px',
-        'group-hover:w-[3px]',
-        'group-data-[resizing]:w-[3px]',
+        'group-hover:w-1',
+        'group-hover:delay-200',
+        'group-data-[resizing]:w-1',
       );
       Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() });
       Object.defineProperty(handle, 'releasePointerCapture', { value: vi.fn() });
@@ -630,6 +758,64 @@ describe('conversation history', () => {
       unmount();
       useAiStore.getState().clear();
       useAiStore.getState().setOpen(false);
+    }
+  });
+
+  it('keeps a failed history load retryable instead of caching an empty session', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useTerminalStore.setState({ sessions: [], activeSessionId: null });
+    useAiStore.getState().clear();
+    const conversation = {
+      id: 'retryable-history',
+      startedAt: '2026-08-22T09:00:00.000Z',
+      updatedAt: '2026-08-22T09:01:00.000Z',
+      title: 'root@retry.example.com',
+      archived: true,
+      sessionId: 'closed-session',
+      host: 'retry.example.com',
+      port: 22,
+      username: 'root',
+    };
+    useAiStore.getState().hydrateSessionIndex([conversation]);
+    let loadAttempts = 0;
+    tauriCoreMock.invoke.mockImplementation((command: string) => {
+      if (command !== 'load_ai_session') return Promise.resolve(undefined);
+      loadAttempts += 1;
+      if (loadAttempts === 1) return Promise.reject(new Error('temporary read failure'));
+      return Promise.resolve({
+        conversation,
+        messages: [message('loaded-after-retry', 'user', 'Recovered history', {
+          conversationId: conversation.id,
+          sessionId: conversation.sessionId,
+        })],
+      });
+    });
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+      fireEvent.click(await screen.findByText(conversation.title));
+
+      const loadFailure = await screen.findByText('Conversation history unavailable');
+      expect(useAiStore.getState().loadedConversationIds).not.toContain(conversation.id);
+      const alert = loadFailure.closest('[role="alert"]');
+      expect(alert).not.toBeNull();
+      fireEvent.click(within(alert as HTMLElement).getByRole('button', { name: 'Retry' }));
+
+      expect(await screen.findByText('Recovered history')).toBeInTheDocument();
+      expect(useAiStore.getState().loadedConversationIds).toContain(conversation.id);
+      expect(loadAttempts).toBe(2);
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
     }
   });
 });

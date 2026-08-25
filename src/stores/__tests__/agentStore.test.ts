@@ -78,10 +78,12 @@ describe('agentStore', () => {
       'profile-health',
       'remoteHealth',
       1_234,
+      'conversation-health',
     );
 
     expect(useAgentStore.getState().run).toMatchObject({
       sessionId: 'session-health',
+      conversationId: 'conversation-health',
       profileId: 'profile-health',
       contextSource: 'remoteHealth',
       contextObservedAt: 1_234,

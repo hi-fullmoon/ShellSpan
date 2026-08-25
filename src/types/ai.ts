@@ -150,6 +150,7 @@ export interface AgentRun {
   requestId: string;
   goal: string;
   sessionId: string;
+  conversationId?: string;
   profileId?: string;
   contextLabel: string;
   contextSource?: 'terminal' | 'remoteHealth';
