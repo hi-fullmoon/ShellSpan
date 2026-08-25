@@ -8,6 +8,7 @@ import {
   redactTerminalSecrets,
   stripAnsi,
   subscribeTerminalOutput,
+  truncateAiContext,
 } from '../terminal-output-buffer';
 
 describe('terminal output buffer', () => {
@@ -73,6 +74,17 @@ describe('terminal output buffer', () => {
     expect(output.endsWith('你')).toBe(true);
     expect(output).not.toContain('\uFFFD');
     expect(new TextEncoder().encode(output).length).toBeLessThanOrEqual(256 * 1024);
+  });
+
+  it('bounds oversized selected context by UTF-8 bytes and keeps the newest text', () => {
+    const context = `old-prefix-${'你'.repeat(100)}-latest`;
+    const truncated = truncateAiContext(context, 80);
+
+    expect(truncated).toContain('earlier terminal content omitted');
+    expect(truncated).not.toContain('old-prefix');
+    expect(truncated).toContain('-latest');
+    expect(truncated).not.toContain('\uFFFD');
+    expect(new TextEncoder().encode(truncated).length).toBeLessThanOrEqual(80);
   });
 
   it('retains ordering across many small chunks after trimming', () => {

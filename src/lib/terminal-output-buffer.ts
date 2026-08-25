@@ -1,4 +1,6 @@
-const MAX_BUFFER_BYTES = 256 * 1024;
+export const MAX_AI_CONTEXT_BYTES = 256 * 1024;
+const MAX_BUFFER_BYTES = MAX_AI_CONTEXT_BYTES;
+const AI_CONTEXT_TRUNCATION_MARKER = '[... earlier terminal content omitted ...]\n';
 
 interface TerminalOutputBuffer {
   chunks: Uint8Array[];
@@ -50,7 +52,27 @@ export function rebindTerminalOutput(oldSessionId: string, newSessionId: string)
 export function getRecentTerminalOutput(sessionId: string, maxLines: number): string {
   const raw = decodeBuffer(buffers.get(sessionId));
   const normalized = redactTerminalSecrets(renderTerminalText(stripAnsi(raw)));
-  return normalized.split('\n').slice(-Math.max(1, maxLines)).join('\n').trim();
+  const recent = normalized.split('\n').slice(-Math.max(1, maxLines)).join('\n').trim();
+  return truncateAiContext(recent);
+}
+
+export function truncateAiContext(
+  value: string,
+  maxBytes = MAX_AI_CONTEXT_BYTES,
+): string {
+  const limit = Math.max(0, Math.floor(maxBytes));
+  if (limit === 0 || !value) return '';
+  const bytes = encoder.encode(value);
+  if (bytes.length <= limit) return value;
+
+  const marker = encoder.encode(AI_CONTEXT_TRUNCATION_MARKER);
+  if (marker.length >= limit) {
+    return decoder.decode(marker.slice(0, limit));
+  }
+
+  let start = bytes.length - (limit - marker.length);
+  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start += 1;
+  return AI_CONTEXT_TRUNCATION_MARKER + decoder.decode(bytes.slice(start));
 }
 
 export function stripAnsi(value: string): string {
