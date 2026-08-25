@@ -15,14 +15,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  CompactDialogBody,
   CompactDialogContent,
   CompactDialogHeader,
 } from '@/components/ui/compact-dialog';
 import { Dialog } from '@/components/ui/dialog';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -453,83 +452,84 @@ export const OperationHistoryPanel: React.FC = () => {
             title={t('operationHistory.detailsTitle')}
             description={selected?.taskId}
           />
-          <CompactDialogBody
-            data-slot="operation-history-timeline-content"
-            className="gap-3 px-6 py-4"
-          >
-            {selected?.events.map((event, index) => (
-              <React.Fragment key={event.eventId}>
-                {index > 0 && <Separator />}
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={statusVariant(event.status)}>
-                        {t(`operationHistory.status.${event.status}` as LocaleKey)}
-                      </Badge>
-                      <span className="text-sm font-medium">
-                        {t(`operationHistory.event.${event.eventKind}` as LocaleKey)}
-                      </span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{formatTime(event.occurredAt)}</span>
-                  </div>
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-                    <dt className="text-muted-foreground">{t('operationHistory.operationId')}</dt>
-                    <dd className="break-all font-mono">{event.operationId}</dd>
-                    <dt className="text-muted-foreground">{t('operationHistory.target')}</dt>
-                    <dd className="break-all">{targetLabel(event)}</dd>
-                    {event.subjectId && (
-                      <>
-                        <dt className="text-muted-foreground">{t('operationHistory.subject')}</dt>
-                        <dd className="break-all">{event.subjectId}</dd>
-                      </>
-                    )}
-                    {event.exitCode !== undefined && (
-                      <>
-                        <dt className="text-muted-foreground">{t('operationHistory.exitCode')}</dt>
-                        <dd>{event.exitCode}</dd>
-                      </>
-                    )}
-                    {event.itemCount !== undefined && (
-                      <>
-                        <dt className="text-muted-foreground">{t('operationHistory.itemCount')}</dt>
-                        <dd>{event.itemCount}</dd>
-                      </>
-                    )}
-                    {event.batchIndex !== undefined && event.batchTotal !== undefined && (
-                      <>
-                        <dt className="text-muted-foreground">{t('operationHistory.batch')}</dt>
-                        <dd>{event.batchIndex}/{event.batchTotal}</dd>
-                      </>
-                    )}
-                    {event.errorCategory && (
-                      <>
-                        <dt className="text-muted-foreground">{t('operationHistory.errorCategory')}</dt>
-                        <dd>{t(`operationHistory.error.${event.errorCategory}` as LocaleKey)}</dd>
-                      </>
-                    )}
-                  </dl>
-                  {event.commandPreview && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-muted-foreground">{t('operationHistory.commandPreview')}</span>
-                      <code className="overflow-x-auto rounded-md bg-muted p-2 text-xs">{event.commandPreview}</code>
-                    </div>
-                  )}
-                  {event.evidence.length > 0 && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-muted-foreground">{t('operationHistory.evidence')}</span>
-                      <div className="flex flex-wrap gap-1">
-                        {event.evidence.map((evidence) => (
-                          <Badge key={`${evidence.kind}:${evidence.operationId}`} variant="outline">
-                            {evidence.kind}: {evidence.operationId}
-                          </Badge>
-                        ))}
+          <ScrollArea className="h-[min(640px,calc(100vh-8rem))] min-h-0">
+            <ScrollAreaContent
+              className="flex min-w-0 flex-col gap-3 px-6 py-4"
+            >
+              {selected?.events.map((event, index) => (
+                <React.Fragment key={event.eventId}>
+                  {index > 0 && <Separator />}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={statusVariant(event.status)}>
+                          {t(`operationHistory.status.${event.status}` as LocaleKey)}
+                        </Badge>
+                        <span className="text-sm font-medium">
+                          {t(`operationHistory.event.${event.eventKind}` as LocaleKey)}
+                        </span>
                       </div>
+                      <span className="text-xs text-muted-foreground">{formatTime(event.occurredAt)}</span>
                     </div>
-                  )}
-                </div>
-              </React.Fragment>
-            ))}
-          </CompactDialogBody>
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                      <dt className="text-muted-foreground">{t('operationHistory.operationId')}</dt>
+                      <dd className="break-all font-mono">{event.operationId}</dd>
+                      <dt className="text-muted-foreground">{t('operationHistory.target')}</dt>
+                      <dd className="break-all">{targetLabel(event)}</dd>
+                      {event.subjectId && (
+                        <>
+                          <dt className="text-muted-foreground">{t('operationHistory.subject')}</dt>
+                          <dd className="break-all">{event.subjectId}</dd>
+                        </>
+                      )}
+                      {event.exitCode !== undefined && (
+                        <>
+                          <dt className="text-muted-foreground">{t('operationHistory.exitCode')}</dt>
+                          <dd>{event.exitCode}</dd>
+                        </>
+                      )}
+                      {event.itemCount !== undefined && (
+                        <>
+                          <dt className="text-muted-foreground">{t('operationHistory.itemCount')}</dt>
+                          <dd>{event.itemCount}</dd>
+                        </>
+                      )}
+                      {event.batchIndex !== undefined && event.batchTotal !== undefined && (
+                        <>
+                          <dt className="text-muted-foreground">{t('operationHistory.batch')}</dt>
+                          <dd>{event.batchIndex}/{event.batchTotal}</dd>
+                        </>
+                      )}
+                      {event.errorCategory && (
+                        <>
+                          <dt className="text-muted-foreground">{t('operationHistory.errorCategory')}</dt>
+                          <dd>{t(`operationHistory.error.${event.errorCategory}` as LocaleKey)}</dd>
+                        </>
+                      )}
+                    </dl>
+                    {event.commandPreview && (
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-muted-foreground">{t('operationHistory.commandPreview')}</span>
+                        <code className="overflow-x-auto rounded-md bg-muted p-2 text-xs">{event.commandPreview}</code>
+                      </div>
+                    )}
+                    {event.evidence.length > 0 && (
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-muted-foreground">{t('operationHistory.evidence')}</span>
+                        <div className="flex flex-wrap gap-1">
+                          {event.evidence.map((evidence) => (
+                            <Badge key={`${evidence.kind}:${evidence.operationId}`} variant="outline">
+                              {evidence.kind}: {evidence.operationId}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </React.Fragment>
+              ))}
+            </ScrollAreaContent>
+          </ScrollArea>
         </CompactDialogContent>
       </Dialog>
 

@@ -114,8 +114,27 @@ describe('OperationHistoryPanel', () => {
       'overflow-hidden',
       'p-0',
     );
-    const timelineContent = dialog.querySelector<HTMLElement>('[data-slot="operation-history-timeline-content"]');
-    expect(timelineContent).toHaveClass('overflow-y-auto', 'px-6', 'py-4');
+    const timelineScroller = dialog.querySelector<HTMLElement>('[data-slot="scroll-area"]');
+    const timelineContent = timelineScroller?.querySelector<HTMLElement>('[data-slot="scroll-area-content"]');
+    expect(timelineScroller).toHaveClass(
+      'h-[min(640px,calc(100vh-8rem))]',
+      'min-h-0',
+    );
+    const timelineViewport = timelineScroller?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    expect(timelineViewport).toBeInTheDocument();
+    Object.defineProperties(timelineViewport, {
+      clientHeight: { configurable: true, value: 640 },
+      scrollHeight: { configurable: true, value: 1_280 },
+      clientWidth: { configurable: true, value: 640 },
+      scrollWidth: { configurable: true, value: 640 },
+    });
+    fireEvent.scroll(timelineViewport as HTMLElement);
+    await waitFor(() => {
+      expect(timelineScroller?.querySelector('[data-slot="scroll-area-scrollbar"]'))
+        .toBeInTheDocument();
+    });
+    expect(timelineContent).toHaveClass('flex', 'px-6', 'py-4');
+    expect(timelineContent).not.toHaveClass('overflow-y-auto');
     expect(screen.getAllByText(/precheck-1/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('step-1').length).toBeGreaterThan(0);
     expect(screen.queryByText(/raw high-sensitive output/)).not.toBeInTheDocument();
