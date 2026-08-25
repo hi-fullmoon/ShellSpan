@@ -220,7 +220,7 @@ export const RunbookJsonEditor: React.FC<RunbookJsonEditorProps> = ({
       data-slot="runbook-json-editor"
       className={cn(
         'h-[30rem] min-h-[24rem] resize-y overflow-hidden rounded-lg border bg-background',
-        'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
+        'focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50',
         disabled && 'opacity-60',
         className,
       )}
