@@ -3,7 +3,6 @@ import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useKnownHostsStore } from '@/stores/knownHostsStore';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -14,7 +13,6 @@ import {
   CircleAlertIcon,
   FingerprintIcon,
   PlusIcon,
-  SearchIcon,
   SearchXIcon,
   ShieldCheckIcon,
   Trash2Icon,
@@ -27,7 +25,7 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
-  WORKBENCH_SEARCH_WIDTH_CLASS,
+  WorkbenchSearchInput,
 } from './workbench-page';
 
 export interface KnownHostsPanelProps {
@@ -85,16 +83,12 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
           })}
           actions={(
             <>
-              <div className={`relative min-w-0 ${WORKBENCH_SEARCH_WIDTH_CLASS}`}>
-                <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t('workbench.knownHosts.searchPlaceholder')}
-                  aria-label={t('workbench.knownHosts.searchPlaceholder')}
-                  className="h-8 pl-7"
-                />
-              </div>
+              <WorkbenchSearchInput
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('workbench.knownHosts.searchPlaceholder')}
+                aria-label={t('workbench.knownHosts.searchPlaceholder')}
+              />
               <Button variant="outline" size="sm" onClick={loadHosts}>
                 {t('common.refresh')}
               </Button>

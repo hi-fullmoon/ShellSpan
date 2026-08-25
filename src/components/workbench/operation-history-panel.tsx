@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Clock3Icon,
   RefreshCwIcon,
-  SearchIcon,
   ShieldCheckIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -20,7 +19,6 @@ import {
 } from '@/components/ui/compact-dialog';
 import { Dialog } from '@/components/ui/dialog';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
-import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -68,7 +66,7 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
-  WORKBENCH_SEARCH_WIDTH_CLASS,
+  WorkbenchSearchInput,
 } from './workbench-page';
 
 const CATEGORIES: OperationHistoryCategory[] = [
@@ -267,17 +265,13 @@ export const OperationHistoryPanel: React.FC = () => {
           </Alert>
 
           <div className="flex flex-wrap items-center gap-2">
-            <InputGroup className={`h-8 min-w-52 ${WORKBENCH_SEARCH_WIDTH_CLASS}`}>
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-              <InputGroupInput
-                aria-label={t('operationHistory.search')}
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('operationHistory.searchPlaceholder')}
-              />
-            </InputGroup>
+            <WorkbenchSearchInput
+              containerClassName="min-w-52"
+              aria-label={t('operationHistory.search')}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t('operationHistory.searchPlaceholder')}
+            />
             <Select value={category} onValueChange={(value) => setCategory((value ?? 'all') as OperationHistoryCategory | 'all')}>
               <SelectTrigger
                 size="sm"

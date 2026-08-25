@@ -1,8 +1,57 @@
 import React from 'react';
+import { SearchIcon, XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group';
 
 export const WORKBENCH_SEARCH_WIDTH_CLASS =
   'flex-1 @min-[42rem]:w-72 @min-[42rem]:flex-none';
+
+type WorkbenchSearchClearProps =
+  | { onClear?: never; clearLabel?: never }
+  | { onClear: () => void; clearLabel: string };
+
+type WorkbenchSearchInputProps = React.ComponentProps<typeof InputGroupInput> &
+  WorkbenchSearchClearProps & {
+    containerClassName?: string;
+  };
+
+export const WorkbenchSearchInput: React.FC<WorkbenchSearchInputProps> = ({
+  className,
+  containerClassName,
+  onClear,
+  clearLabel,
+  value,
+  ...props
+}) => (
+  <InputGroup
+    className={cn(
+      'h-8 bg-background has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-ring',
+      WORKBENCH_SEARCH_WIDTH_CLASS,
+      containerClassName,
+    )}
+  >
+    <InputGroupInput className={className} value={value} {...props} />
+    <InputGroupAddon align="inline-start">
+      <SearchIcon aria-hidden />
+    </InputGroupAddon>
+    {onClear && Boolean(value) && (
+      <InputGroupAddon align="inline-end">
+        <InputGroupButton
+          size="icon-xs"
+          onClick={onClear}
+          aria-label={clearLabel}
+        >
+          <XIcon />
+        </InputGroupButton>
+      </InputGroupAddon>
+    )}
+  </InputGroup>
+);
 
 type WorkbenchPageProps = React.ComponentProps<'div'>;
 

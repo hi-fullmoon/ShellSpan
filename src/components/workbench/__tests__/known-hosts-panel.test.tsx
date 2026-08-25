@@ -36,9 +36,11 @@ describe('KnownHostsPanel', () => {
 
     expect(screen.getByRole('button', { name: 'common.refresh' }))
       .toHaveTextContent('common.refresh');
-    expect(screen.getByRole('textbox', {
+    const search = screen.getByRole('textbox', {
       name: 'workbench.knownHosts.searchPlaceholder',
-    }).parentElement).toHaveClass(
+    });
+    expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
+    expect(search.parentElement).toHaveClass(
       'flex-1',
       '@min-[42rem]:w-72',
       '@min-[42rem]:flex-none',

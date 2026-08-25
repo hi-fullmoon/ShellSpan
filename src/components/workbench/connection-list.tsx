@@ -3,7 +3,6 @@ import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
-import { Input } from '@/components/ui/input';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -42,7 +41,6 @@ import {
   FolderIcon,
   MonitorIcon,
   PencilIcon,
-  SearchIcon,
   SearchXIcon,
   ServerIcon,
   Trash2Icon,
@@ -57,8 +55,8 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
+  WorkbenchSearchInput,
   WorkbenchPageToolbar,
-  WORKBENCH_SEARCH_WIDTH_CLASS,
 } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
@@ -165,16 +163,12 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           })}
           actions={(
             <>
-              <div className={`relative min-w-0 ${WORKBENCH_SEARCH_WIDTH_CLASS}`}>
-                <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t('workbench.connections.searchPlaceholder')}
-                  aria-label={t('workbench.connections.searchPlaceholder')}
-                  className="h-8 pl-7"
-                />
-              </div>
+              <WorkbenchSearchInput
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('workbench.connections.searchPlaceholder')}
+                aria-label={t('workbench.connections.searchPlaceholder')}
+              />
               <Button
                 variant="outline"
                 size="sm"

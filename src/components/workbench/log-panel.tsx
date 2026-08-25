@@ -14,7 +14,6 @@ import {
   FileSearchIcon,
   FileTextIcon,
   Layers3Icon,
-  SearchIcon,
   SearchXIcon,
   XIcon,
 } from 'lucide-react';
@@ -25,12 +24,6 @@ import type { LogSource } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from '@/components/ui/input-group';
 import {
   Tooltip,
   TooltipTrigger,
@@ -52,8 +45,8 @@ import { isTauriRuntime } from '@/lib/tauri';
 import {
   WorkbenchPage,
   WorkbenchPageHeader,
+  WorkbenchSearchInput,
   WorkbenchPageToolbar,
-  WORKBENCH_SEARCH_WIDTH_CLASS,
 } from './workbench-page';
 
 interface ParsedLogLine {
@@ -727,23 +720,15 @@ export const LogPanel: React.FC = () => {
         </WorkbenchPageToolbar>
 
         <WorkbenchPageToolbar>
-          <InputGroup className={cn('h-9 bg-background', WORKBENCH_SEARCH_WIDTH_CLASS)}>
-            <InputGroupAddon><SearchIcon /></InputGroupAddon>
-            <InputGroupInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('workbench.logs.searchPlaceholder')}
-              aria-label={t('workbench.logs.searchPlaceholder')}
-              className="font-mono text-xs"
-            />
-            {query && (
-              <InputGroupAddon align="inline-end">
-                <InputGroupButton size="icon-xs" onClick={() => setQuery('')} aria-label={t('workbench.logs.clearSearch')}>
-                  <XIcon />
-                </InputGroupButton>
-              </InputGroupAddon>
-            )}
-          </InputGroup>
+          <WorkbenchSearchInput
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onClear={() => setQuery('')}
+            clearLabel={t('workbench.logs.clearSearch')}
+            placeholder={t('workbench.logs.searchPlaceholder')}
+            aria-label={t('workbench.logs.searchPlaceholder')}
+            className="font-mono text-xs"
+          />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">

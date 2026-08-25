@@ -99,9 +99,11 @@ describe('OperationHistoryPanel', () => {
   it('renders task summaries and a traceable detail timeline without raw output', async () => {
     render(<OperationHistoryPanel />);
 
-    expect(screen.getByRole('textbox', {
+    const search = screen.getByRole('textbox', {
       name: 'operationHistory.search',
-    }).parentElement).toHaveClass(
+    });
+    expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
+    expect(search.parentElement).toHaveClass(
       'flex-1',
       '@min-[42rem]:w-72',
       '@min-[42rem]:flex-none',
