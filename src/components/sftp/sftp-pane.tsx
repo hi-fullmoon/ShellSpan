@@ -89,9 +89,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     );
     const loading = side === 'local' ? connection.localLoading : connection.remoteLoading;
     const restorePending = !isLocal && connection.restorePending?.[side] === true;
-    const error = restorePending
-      ? t('sftp.restore.disconnected')
-      : side === 'local' ? connection.localError : connection.remoteError;
+    const error = restorePending ? t('sftp.restore.disconnected') : side === 'local' ? connection.localError : connection.remoteError;
     const isHostKeyError = !isLocal && !!error && (error.toLowerCase().includes('host key') || error.toLowerCase().includes('trust this host'));
     const pane = side === 'local' ? connection.localPane : connection.remotePane;
     const remoteBookmarks = connection.remoteBookmarks[side];
@@ -211,16 +209,14 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
 
     useEffect(() => {
       const handleOpenPath = (event: Event): void => {
-        const detail = (event as CustomEvent<{
-          connectionId?: string;
-          side?: SftpSide;
-          path?: string;
-        }>).detail;
-        if (
-          detail?.connectionId !== connection.id
-          || detail.side !== side
-          || !detail.path
-        ) return;
+        const detail = (
+          event as CustomEvent<{
+            connectionId?: string;
+            side?: SftpSide;
+            path?: string;
+          }>
+        ).detail;
+        if (detail?.connectionId !== connection.id || detail.side !== side || !detail.path) return;
         navigateTo(detail.path);
       };
       document.addEventListener('termbridge:open-sftp-path', handleOpenPath);
@@ -473,7 +469,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 variant="ghost"
                 size="icon"
                 onClick={onOpenTerminal}
-                className="h-[30px] w-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
+                className="h-[24px] w-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
                 aria-label={t('sftp.openTerminalHere')}
               >
                 <SquareTerminalIcon />
@@ -586,17 +582,9 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={
-                  restorePending && onReconnect
-                    ? onReconnect
-                    : isHostKeyError && onVerifyHostKey
-                      ? onVerifyHostKey
-                      : () => navigateTo(path)
-                }
+                onClick={restorePending && onReconnect ? onReconnect : isHostKeyError && onVerifyHostKey ? onVerifyHostKey : () => navigateTo(path)}
               >
-                {restorePending
-                  ? t('sftp.restore.reconnect')
-                  : isHostKeyError ? t('sftp.hostKey.verify') : t('common.retry')}
+                {restorePending ? t('sftp.restore.reconnect') : isHostKeyError ? t('sftp.hostKey.verify') : t('common.retry')}
               </Button>
             </div>
           )}
