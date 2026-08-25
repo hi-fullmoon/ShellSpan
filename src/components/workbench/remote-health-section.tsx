@@ -295,7 +295,7 @@ export function RemoteHealthSection(): React.JSX.Element {
                   onValueChange={(value) => value && selectProfile(value)}
                   disabled={busy}
                 >
-                  <SelectTrigger id="remote-health-profile" className="w-full max-w-sm">
+                  <SelectTrigger id="remote-health-profile" className="w-full sm:w-72">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

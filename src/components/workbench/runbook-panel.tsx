@@ -33,7 +33,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Spinner } from '@/components/ui/empty-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -96,6 +95,8 @@ import {
   WorkbenchPageContent,
   WorkbenchPageHeader,
 } from './workbench-page';
+
+const RunbookJsonEditor = React.lazy(() => import('./runbook-json-editor'));
 
 type RunbookTargetMode = 'single' | 'tag';
 
@@ -176,6 +177,7 @@ export const RunbookPanel: React.FC = () => {
   const [preparing, setPreparing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [validationError, setValidationError] = useState<string>();
+  const [editorProblemCount, setEditorProblemCount] = useState(0);
   const [aiDraft, setAiDraft] = useState<AiRunbookDraftDetail>();
 
   const selectedProfile = useMemo(
@@ -256,6 +258,7 @@ export const RunbookPanel: React.FC = () => {
     setRun(undefined);
     setMultiHostTask(undefined);
     setValidationError(undefined);
+    setEditorProblemCount(0);
   }, []);
 
   useEffect(() => {
@@ -662,19 +665,30 @@ export const RunbookPanel: React.FC = () => {
                 </CardHeader>
                 <CardContent className="min-h-0">
                   <TabsContent value="source">
-                    <Textarea
-                      aria-label={t('runbook.textTitle')}
-                      className="min-h-[30rem] resize-y"
-                      value={sourceText}
-                      disabled={executionLocked}
-                      onChange={(event) => {
-                        setSourceText(event.target.value);
-                        setValidationError(undefined);
-                        setRun(undefined);
-                        setMultiHostTask(undefined);
-                      }}
-                      spellCheck={false}
-                    />
+                    <React.Suspense
+                      fallback={(
+                        <div
+                          className="flex h-[30rem] items-center justify-center rounded-lg border bg-background"
+                          aria-label={t('runbook.editor.loading')}
+                          aria-busy="true"
+                        >
+                          <Spinner />
+                        </div>
+                      )}
+                    >
+                      <RunbookJsonEditor
+                        ariaLabel={t('runbook.textTitle')}
+                        value={sourceText}
+                        disabled={executionLocked}
+                        onProblemsChange={setEditorProblemCount}
+                        onChange={(nextText) => {
+                          setSourceText(nextText);
+                          setValidationError(undefined);
+                          setRun(undefined);
+                          setMultiHostTask(undefined);
+                        }}
+                      />
+                    </React.Suspense>
                   </TabsContent>
                   <TabsContent value="workflow">
                     <ol className="flex min-h-[30rem] flex-col">
@@ -716,11 +730,20 @@ export const RunbookPanel: React.FC = () => {
                 </CardContent>
                 <CardFooter className="flex-col items-start gap-2 @min-[34rem]:flex-row @min-[34rem]:items-center @min-[34rem]:justify-between">
                   <span className="text-xs text-muted-foreground">{t('runbook.textDescription')}</span>
-                  <Badge className="shrink-0" variant={hasUnvalidatedChanges ? 'secondary' : 'outline'}>
-                    {hasUnvalidatedChanges
-                      ? t('runbook.status.needsValidation')
-                      : 'JSON · schema v1'}
-                  </Badge>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{t('runbook.editor.shortcuts')}</span>
+                    <Badge
+                      variant={editorProblemCount > 0
+                        ? 'destructive'
+                        : hasUnvalidatedChanges ? 'secondary' : 'outline'}
+                    >
+                      {editorProblemCount > 0
+                        ? t('runbook.editor.problems', { count: editorProblemCount })
+                        : hasUnvalidatedChanges
+                          ? t('runbook.status.needsValidation')
+                          : 'JSON · schema v1'}
+                    </Badge>
+                  </div>
                 </CardFooter>
               </Card>
             </Tabs>
