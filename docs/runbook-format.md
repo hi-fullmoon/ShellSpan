@@ -2,6 +2,8 @@
 
 TermBridge Runbooks are UTF-8 JSON files ending in `.runbook.json`. JSON is intentionally used as the first local format because it is readable in code review, produces stable version-control diffs after normalization, and can be validated without executing code. The current `schemaVersion` is `1`; unknown fields fail closed.
 
+The Runbook workspace uses an offline Monaco JSON editor backed by the same v1 structural contract. It provides field and enum completion, hover documentation, folding, formatting, syntax errors, and live JSON Schema diagnostics. Typing `{{` inside a command also offers declared Runbook variables. Schema diagnostics improve editing feedback, but the explicit **Validate** action remains authoritative for semantic safety checks such as command risk, secret detection, duplicate identifiers, and undeclared placeholders.
+
 ## Security model
 
 - A Runbook binds to one connection profile when a run starts. The review freezes the profile ID, host, port, username, source digest, resolved non-secret variables, and keychain references.
