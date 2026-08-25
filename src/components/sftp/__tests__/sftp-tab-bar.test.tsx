@@ -133,7 +133,7 @@ describe('SftpTabBar', () => {
     expect(useSftpStore.getState().activeConnectionId).toBe(idB);
   });
 
-  it('shows separators only between tabs that are not adjacent to the active tab', () => {
+  it('shows separators between every pair of tabs', () => {
     addConnection('Conn A');
     addConnection('Conn B');
     addConnection('Conn C');
@@ -144,8 +144,8 @@ describe('SftpTabBar', () => {
     render(<SftpTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs[0].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
-    expect(tabs[1].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+    expect(tabs[0].querySelector('[data-tab-separator]')).toBeInTheDocument();
+    expect(tabs[1].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[2].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[3].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
   });
@@ -209,7 +209,21 @@ describe('SftpTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalled();
   });
 
-  it('renders a 1px top line with the theme color on the active tab', () => {
+  it('uses inset rounded tabs with a bordered active state', () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    const connections = useSftpStore.getState().connections;
+    useSftpStore.getState().setActiveConnection(connections[0]?.id ?? null);
+
+    const { container } = render(<SftpTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    expect(container.firstChild).toHaveClass('h-10', 'bg-app-bg', 'px-1');
+    expect(tabs[0]).toHaveClass('h-8', 'rounded-md', 'bg-app-tab-active', 'text-app-tab-accent');
+    expect(tabs[1]).toHaveClass('bg-transparent', 'hover:bg-app-surface-muted');
+  });
+
+  it('renders a rounded accent border on the active tab', () => {
     addConnection('Conn A');
     addConnection('Conn B');
     const connections = useSftpStore.getState().connections;
@@ -220,10 +234,10 @@ describe('SftpTabBar', () => {
     const tabs = screen.getAllByRole('tab');
     const indicator = tabs[0].querySelector<HTMLElement>('[data-active-tab-indicator]');
     expect(indicator).not.toBeNull();
-    expect(indicator?.className).toContain('bg-app-primary');
+    expect(indicator).toHaveClass('inset-0', 'rounded-md', 'border-app-tab-accent');
   });
 
-  it('does not render the top line on inactive tabs', () => {
+  it('does not render the accent border on inactive tabs', () => {
     addConnection('Conn A');
     addConnection('Conn B');
     const connections = useSftpStore.getState().connections;

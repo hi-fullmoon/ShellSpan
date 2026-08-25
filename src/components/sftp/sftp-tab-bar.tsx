@@ -85,40 +85,29 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
           e.preventDefault();
           onActivate(connection.id);
         }
-        if (
-          (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
-          e.target === e.currentTarget
-        ) {
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.target === e.currentTarget) {
           e.preventDefault();
-          const tabs = Array.from(
-            e.currentTarget
-              .closest('[role="tablist"]')
-              ?.querySelectorAll<HTMLElement>('[data-sftp-tab]') ?? [],
-          );
+          const tabs = Array.from(e.currentTarget.closest('[role="tablist"]')?.querySelectorAll<HTMLElement>('[data-sftp-tab]') ?? []);
           const index = tabs.indexOf(e.currentTarget);
           const next = tabs[e.key === 'ArrowLeft' ? index - 1 : index + 1];
           next?.focus();
         }
       }}
       className={cn(
-        'group relative flex w-48 shrink-0 items-center gap-1.5 px-2 text-left text-xs transition-colors select-none',
-        active ? 'h-[31px] bg-app-surface text-app-text' : 'h-[31px] bg-app-border/25 text-app-text-soft',
-        dragging ? 'cursor-default opacity-80 shadow-md' : 'cursor-pointer',
+        'group relative flex h-8 w-42 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        active ? 'bg-app-tab-active text-app-tab-accent' : 'bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
     >
       {active && (
-        <div
-          aria-hidden="true"
-          data-active-tab-indicator
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-app-primary"
-        />
+        <div aria-hidden="true" data-active-tab-indicator className="pointer-events-none absolute inset-0 rounded-md border border-app-tab-accent" />
       )}
       {showSeparatorAfter && (
         <Separator
           orientation="vertical"
           aria-hidden="true"
           data-tab-separator
-          className="pointer-events-none absolute right-0 top-1/2 h-5 -translate-y-1/2 bg-app-border"
+          className="pointer-events-none absolute -right-1 top-1/2 h-4 -translate-y-1/2 bg-app-border"
         />
       )}
       {showDropIndicatorLeft && (
@@ -316,13 +305,11 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   // lastPointerDownTabRef). Listeners run in the capture phase so they see the
   // events before the close/pin buttons can stop their propagation.
   useEffect(() => {
-    const getElement = (target: EventTarget | null): Element | null =>
-      target instanceof Element ? target : null;
+    const getElement = (target: EventTarget | null): Element | null => (target instanceof Element ? target : null);
     const isInteractiveControl = (target: EventTarget | null): boolean =>
       Boolean(getElement(target)?.closest('button, a[href], input, select, textarea'));
     const getTabId = (target: EventTarget | null): string | null =>
-      getElement(target)?.closest('[data-sftp-tab]')
-        ?.getAttribute('data-sftp-tab') ?? null;
+      getElement(target)?.closest('[data-sftp-tab]')?.getAttribute('data-sftp-tab') ?? null;
 
     const handlePointerDown = (event: PointerEvent): void => {
       lastPointerDownTabRef.current = getTabId(event.target);
@@ -427,9 +414,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     // A pinned tab must stay inside the pinned region; a regular tab must not
     // move ahead of it. Clamp on the component side too instead of relying on
     // the store to defend the bounds.
-    const maxInsertIndex = draggedConnection?.pinned
-      ? Math.max(minInsertIndex, pinnedCount - 1)
-      : visibleTabs.length;
+    const maxInsertIndex = draggedConnection?.pinned ? Math.max(minInsertIndex, pinnedCount - 1) : visibleTabs.length;
     setInsertIndex(Math.min(maxInsertIndex, Math.max(minInsertIndex, newInsertIndex)));
   };
 
@@ -439,9 +424,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
       const dragged = connections.find((c) => c.id === activeId);
       const pinnedCount = connections.filter((c) => c.pinned).length;
       const minIndex = dragged?.pinned ? 0 : pinnedCount;
-      const maxIndex = dragged?.pinned
-        ? Math.max(minIndex, pinnedCount - 1)
-        : connections.length - 1;
+      const maxIndex = dragged?.pinned ? Math.max(minIndex, pinnedCount - 1) : connections.length - 1;
       reorderConnections(activeId, Math.min(maxIndex, Math.max(minIndex, insertIndex)));
     }
     finishDrag();
@@ -465,9 +448,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const draggingConnection = draggingConnectionId ? (connections.find((c) => c.id === draggingConnectionId) ?? null) : null;
 
   const closingConnection = closingConnectionId ? (connections.find((c) => c.id === closingConnectionId) ?? null) : null;
-  const closingTransferCount = closingConnection
-    ? countActiveTransfersForOwners([closingConnection.id], transferOperations)
-    : 0;
+  const closingTransferCount = closingConnection ? countActiveTransfersForOwners([closingConnection.id], transferOperations) : 0;
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
   const visibleConnections = draggingConnectionId ? connections.filter((connection) => connection.id !== draggingConnectionId) : connections;
@@ -475,12 +456,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   // Dropping back into the dragged tab's own slot is a no-op, so suppress the
   // indicator that would otherwise sit between the dragged tab and its right
   // neighbor.
-  const draggedOriginalIndex = draggingConnectionId
-    ? connections.findIndex((c) => c.id === draggingConnectionId)
-    : -1;
-  const effectiveInsertIndex = insertIndex !== null && insertIndex === draggedOriginalIndex
-    ? null
-    : insertIndex;
+  const draggedOriginalIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
+  const effectiveInsertIndex = insertIndex !== null && insertIndex === draggedOriginalIndex ? null : insertIndex;
 
   if (connections.length === 0) {
     return null;
@@ -499,7 +476,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
         onNewTabClick();
       }}
-      className="group/tabbar relative flex h-8 items-start gap-0 border-b-[0.5px] border-app-border/40 bg-app-bg px-0"
+      className="group/tabbar relative flex h-10 items-start border-b border-app-border/40 bg-app-bg px-1"
     >
       <DndContext
         sensors={sensors}
@@ -510,38 +487,32 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={connections.map((c) => c.id)} strategy={() => null}>
-          <ScrollArea
-            viewportRef={scrollRef}
-            horizontal
-            vertical={false}
-            size="thin"
-            className="h-[31px] min-w-0 flex-1"
-          >
-            <div role="tablist" className="flex min-w-0 items-start gap-0">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-10 min-w-0 flex-1">
+            <div role="tablist" className="flex min-w-0 items-center gap-1 py-1">
               {connections.map((connection, index) => {
-              const isDragging = draggingConnectionId === connection.id;
-              const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
-              const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
-              const isLastVisible = visibleIndex === visibleTabCount - 1;
-              const isActive = activeConnectionId === connection.id;
-              const nextVisibleConnection = visibleIndex >= 0 ? visibleConnections[visibleIndex + 1] : undefined;
-              const showSeparatorAfter = !isActive && !!nextVisibleConnection && nextVisibleConnection.id !== activeConnectionId;
+                const isDragging = draggingConnectionId === connection.id;
+                const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
+                const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
+                const isLastVisible = visibleIndex === visibleTabCount - 1;
+                const isActive = activeConnectionId === connection.id;
+                const nextVisibleConnection = visibleIndex >= 0 ? visibleConnections[visibleIndex + 1] : undefined;
+                const showSeparatorAfter = !!nextVisibleConnection;
 
-              return (
-                <SortableTab
-                  key={connection.id}
-                  connection={connection}
-                  active={isActive}
-                  onActivate={setActiveConnection}
-                  onContextMenu={(conn, x, y) => onTabContextMenu?.(conn, x, y)}
-                  onClose={handleCloseConnection}
-                  onTogglePin={togglePin}
-                  showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
-                  showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
-                  showSeparatorAfter={showSeparatorAfter}
-                />
-              );
-            })}
+                return (
+                  <SortableTab
+                    key={connection.id}
+                    connection={connection}
+                    active={isActive}
+                    onActivate={setActiveConnection}
+                    onContextMenu={(conn, x, y) => onTabContextMenu?.(conn, x, y)}
+                    onClose={handleCloseConnection}
+                    onTogglePin={togglePin}
+                    showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
+                    showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
+                    showSeparatorAfter={showSeparatorAfter}
+                  />
+                );
+              })}
             </div>
           </ScrollArea>
         </SortableContext>
