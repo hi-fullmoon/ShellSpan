@@ -21,4 +21,13 @@ describe('Card', () => {
       expect.arrayContaining([expect.stringMatching(/^bg-/)]),
     );
   });
+
+  it('offers an outline surface without the dark foreground ring', () => {
+    render(<Card variant="outline">Outlined content</Card>);
+
+    const card = screen.getByText('Outlined content');
+    expect(card).toHaveAttribute('data-variant', 'outline');
+    expect(card).toHaveClass('border', 'border-border');
+    expect(card).not.toHaveClass('ring-1', 'ring-foreground/10');
+  });
 });
