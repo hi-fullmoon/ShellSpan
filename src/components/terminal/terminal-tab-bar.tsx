@@ -116,10 +116,10 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-[31px] w-40 shrink-0 items-center gap-1.5 rounded-t-sm px-2 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-primary focus-visible:ring-inset',
+        'group relative flex h-8 w-40 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         active
-          ? 'z-10 bg-app-bg text-app-text after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-app-bg'
-          : 'bg-transparent text-app-text-soft hover:bg-app-surface/70 hover:text-app-text',
+          ? 'bg-app-tab-active text-app-tab-accent'
+          : 'bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
@@ -128,8 +128,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
         <div
           aria-hidden="true"
           data-active-tab-indicator
-          className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-sm bg-app-primary"
-          style={session.color ? { backgroundColor: session.color } : undefined}
+          className="pointer-events-none absolute inset-0 rounded-md border border-app-tab-accent"
+          style={session.color ? { borderColor: session.color } : undefined}
         />
       )}
       {showSeparatorAfter && (
@@ -137,7 +137,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
           orientation="vertical"
           aria-hidden="true"
           data-tab-separator
-          className="pointer-events-none absolute right-0 top-1/2 h-5 -translate-y-1/2 bg-app-border"
+          className="pointer-events-none absolute -right-1 top-1/2 h-4 -translate-y-1/2 bg-app-border"
         />
       )}
       {showDropIndicatorLeft && (
@@ -620,7 +620,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
         onNewTabClick();
       }}
-      className={cn('group/tabbar relative flex h-8 items-start gap-0 border-b-[0.5px] border-app-border/40 bg-app-surface-muted px-0', shouldHide && 'h-0 overflow-hidden')}
+      className={cn('group/tabbar relative flex h-10 items-start border-b border-app-border/40 bg-app-bg px-1', shouldHide && 'h-0 overflow-hidden border-0 px-0')}
     >
       <DndContext
         sensors={sensors}
@@ -638,9 +638,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             vertical={false}
             size="thin"
             onWheel={handleWheel}
-            className="h-[31px] min-w-0 flex-1"
+            className="h-10 min-w-0 flex-1"
           >
-            <div className="flex min-w-0 items-start gap-0">
+            <div role="tablist" className="flex min-w-0 items-center gap-1 py-1">
               {sessions.map((session, index) => {
               const isDragging = draggingSessionId === session.sessionId;
               const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
@@ -648,7 +648,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               const isLastVisible = visibleIndex === visibleTabCount - 1;
               const isActive = activeSessionId === session.sessionId;
               const nextVisibleSession = visibleIndex >= 0 ? visibleSessions[visibleIndex + 1] : undefined;
-              const showSeparatorAfter = !isActive && !!nextVisibleSession && nextVisibleSession.sessionId !== activeSessionId;
+              const showSeparatorAfter = !!nextVisibleSession;
 
               return (
                 <SortableTab

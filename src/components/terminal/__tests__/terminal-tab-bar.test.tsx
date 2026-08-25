@@ -133,7 +133,7 @@ describe('TerminalTabBar', () => {
     }
   });
 
-  it('shows separators only between tabs that are not adjacent to the active tab', () => {
+  it('shows separators between every pair of tabs', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -143,8 +143,8 @@ describe('TerminalTabBar', () => {
     render(<TerminalTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs[0].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
-    expect(tabs[1].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+    expect(tabs[0].querySelector('[data-tab-separator]')).toBeInTheDocument();
+    expect(tabs[1].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[2].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[3].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
   });
@@ -210,15 +210,15 @@ describe('TerminalTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalledTimes(1);
   });
 
-  it('uses an IDE-style active tab that joins the terminal content', () => {
+  it('uses inset rounded tabs with a bordered active state', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setActiveSession('s1');
     const { container } = render(<TerminalTabBar />);
 
-    expect(container.querySelector('[data-terminal-tab-bar]')).toHaveClass('bg-app-surface-muted');
-    expect(screen.getAllByRole('tab')[0]).toHaveClass('bg-app-bg');
-    expect(screen.getAllByRole('tab')[1]).toHaveClass('bg-transparent');
+    expect(container.querySelector('[data-terminal-tab-bar]')).toHaveClass('h-10', 'bg-app-bg', 'px-1');
+    expect(screen.getAllByRole('tab')[0]).toHaveClass('h-8', 'rounded-md', 'bg-app-tab-active', 'text-app-tab-accent');
+    expect(screen.getAllByRole('tab')[1]).toHaveClass('bg-transparent', 'hover:bg-app-surface-muted');
 
     expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
   });
@@ -560,7 +560,7 @@ describe('TerminalTabBar', () => {
     );
   });
 
-  it('renders a 1px top line with the theme color on the active tab', () => {
+  it('renders a rounded accent border on the active tab', () => {
     addSession('s1', 'A');
     useTerminalStore.getState().setActiveSession('s1');
 
@@ -568,11 +568,11 @@ describe('TerminalTabBar', () => {
 
     const indicator = screen.getByRole('tab').querySelector<HTMLElement>('[data-active-tab-indicator]');
     expect(indicator).not.toBeNull();
-    expect(indicator?.className).toContain('bg-app-primary');
-    expect(indicator?.style.backgroundColor).toBe('');
+    expect(indicator).toHaveClass('inset-0', 'rounded-md', 'border-app-tab-accent');
+    expect(indicator?.style.borderColor).toBe('');
   });
 
-  it('uses the session color for the top line on the active tab when set', () => {
+  it('uses the session color for the active border when set', () => {
     addSession('s1', 'A');
     useTerminalStore.getState().setTabColor('s1', '#ef4444');
     useTerminalStore.getState().setActiveSession('s1');
@@ -581,10 +581,10 @@ describe('TerminalTabBar', () => {
 
     const indicator = screen.getByRole('tab').querySelector<HTMLElement>('[data-active-tab-indicator]');
     expect(indicator).not.toBeNull();
-    expect(indicator?.style.backgroundColor).toBe('rgb(239, 68, 68)');
+    expect(indicator?.style.borderColor).toBe('rgb(239, 68, 68)');
   });
 
-  it('does not render the top line on inactive tabs', () => {
+  it('does not render the accent border on inactive tabs', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setActiveSession('s2');
