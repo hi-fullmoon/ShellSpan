@@ -3,6 +3,17 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.51](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.51) - 2026-08-25
+
+
+### Refactoring
+
+- **lib:** localize runbook errors, schema, and starter content
+
+### Style
+
+- tighten runbook editor focus ring and workbench header layout
+
 ## [v2.0.50](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.50) - 2026-08-25
 
 
