@@ -99,15 +99,21 @@ function renderView(value: AgentRun | undefined, overrides?: {
 }
 
 describe('AgentRunView', () => {
-  it('uses the shared panel empty state before a run starts', () => {
+  it('introduces the evidence-first workflow before a run starts', () => {
     const { container } = renderView(undefined);
-    expect(screen.getByText('ai.mode.agent')).toBeInTheDocument();
+    expect(screen.getByText('ai.agent.emptyTitle')).toBeInTheDocument();
     expect(screen.getByText('ai.agent.empty')).toBeInTheDocument();
+    expect(screen.getByText('ai.agent.emptyStage.observe')).toBeInTheDocument();
+    expect(screen.getByText('ai.agent.emptyStage.reason')).toBeInTheDocument();
+    expect(screen.getByText('ai.agent.emptyStage.review')).toBeInTheDocument();
+    expect(screen.getByText('ai.agent.emptyBoundary')).toBeInTheDocument();
     expect(container.querySelector('[data-slot="message-scroller"]')).not.toBeInTheDocument();
   });
 
   it('shows objective, target, evidence provenance, risk, impact, and rollback', () => {
     renderView(run);
+    expect(screen.getByLabelText('ai.agent.progressLabel')).toBeInTheDocument();
+    expect(screen.getByText('ai.agent.path')).toBeInTheDocument();
     expect(screen.getByText('Reload nginx safely')).toBeInTheDocument();
     expect(screen.getByText(/The bound production host only/)).toBeInTheDocument();
     expect(screen.getByText('Original context')).toBeInTheDocument();
