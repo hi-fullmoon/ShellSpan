@@ -101,7 +101,7 @@ describe('SplitPane', () => {
       .toHaveClass('isolate');
   });
 
-  it('supports a subtle divider without changing its larger hit target', () => {
+  it('supports a subtle divider with the system-wide 4px hover indicator', () => {
     render(
       <SplitPane
         dividerStyle="subtle"
@@ -112,8 +112,44 @@ describe('SplitPane', () => {
 
     expect(screen.getByRole('separator')).toHaveClass(
       'bg-app-border/15',
-      'after:w-[3px]',
-      'hover:after:bg-app-primary',
+      'after:w-1',
+      'after:delay-0',
+      'data-[separator=hover]:after:bg-app-primary',
+      'data-[separator=hover]:after:delay-200',
+      'data-[separator=active]:after:delay-0',
+    );
+  });
+
+  it('uses the same 4px area for dragging and hover feedback', () => {
+    rectSpy.mockImplementation(function mockResizeTargetRect(this: HTMLElement) {
+      if (this.hasAttribute('data-separator')) {
+        return new DOMRect(500, 0, 1, 500);
+      }
+      if (this.hasAttribute('data-panel')) {
+        const left = this.id.endsWith('-second') ? 501 : 0;
+        return new DOMRect(left, 0, 500, 500);
+      }
+      return new DOMRect(0, 0, 1000, 500);
+    });
+    render(
+      <SplitPane
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+
+    const separator = screen.getByRole('separator');
+    // 497px is inside the previous 8px target, but outside the new 4px target.
+    fireEvent.pointerMove(document, { clientX: 497, clientY: 100 });
+    expect(separator).toHaveAttribute('data-separator', 'inactive');
+
+    fireEvent.pointerMove(document, { clientX: 499, clientY: 100 });
+
+    expect(separator).toHaveAttribute('data-separator', 'hover');
+    expect(separator).toHaveClass('after:w-1');
+    expect(separator).toHaveClass(
+      'data-[separator=hover]:after:bg-app-primary',
+      'data-[separator=hover]:after:delay-200',
     );
   });
 
@@ -130,8 +166,8 @@ describe('SplitPane', () => {
     expect(screen.getByRole('separator')).toHaveAttribute('aria-orientation', 'horizontal');
     expect(screen.getByRole('separator')).toHaveClass(
       '-mt-px',
-      'after:w-[3px]',
-      'aria-[orientation=horizontal]:after:h-[3px]',
+      'after:w-1',
+      'aria-[orientation=horizontal]:after:h-1',
     );
   });
 
