@@ -58,6 +58,7 @@ import {
   WorkbenchPageContent,
   WorkbenchPageHeader,
   WorkbenchPageToolbar,
+  WORKBENCH_SEARCH_WIDTH_CLASS,
 } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
@@ -164,7 +165,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           })}
           actions={(
             <>
-              <div className="relative min-w-0 flex-1 sm:w-64">
+              <div className={`relative min-w-0 ${WORKBENCH_SEARCH_WIDTH_CLASS}`}>
                 <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}

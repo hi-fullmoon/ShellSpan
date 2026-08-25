@@ -72,6 +72,13 @@ describe('KeychainPanel', () => {
 
     expect(screen.getByRole('button', { name: 'common.refresh' }))
       .toHaveTextContent('common.refresh');
+    expect(screen.getByRole('textbox', {
+      name: 'workbench.keychain.searchPlaceholder',
+    }).parentElement).toHaveClass(
+      'flex-1',
+      '@min-[42rem]:w-72',
+      '@min-[42rem]:flex-none',
+    );
   });
 
   it('creates key-file keys only and hides the kind selector', () => {

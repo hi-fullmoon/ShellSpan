@@ -89,6 +89,33 @@ describe('ConnectionList', () => {
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
+  it('caps the desktop search field width while keeping it flexible on smaller layouts', () => {
+    render(
+      <ConnectionList
+        profiles={[]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    const search = screen.getByRole('textbox', {
+      name: 'workbench.connections.searchPlaceholder',
+    });
+    expect(search.parentElement).toHaveClass(
+      'flex-1',
+      '@min-[42rem]:w-72',
+      '@min-[42rem]:flex-none',
+    );
+  });
+
   it('renders the profile list in a grid capped at three columns', () => {
     const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 1200,

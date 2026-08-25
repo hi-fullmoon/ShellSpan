@@ -72,10 +72,13 @@ interface AppState extends AppPreferences {
   activeSection: AppSection;
   activeWorkbenchTab: WorkbenchTab;
   activeSettingsSection: SettingsSection;
+  pendingWorkbenchAction: 'newConnection' | null;
   hydrateFromDb: () => Promise<void>;
   setActiveSection: (section: AppSection) => void;
   setActiveWorkbenchTab: (tab: WorkbenchTab) => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
+  requestNewConnection: () => void;
+  consumeWorkbenchAction: (action: 'newConnection') => void;
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
@@ -246,6 +249,7 @@ export const useAppStore = create<AppState>()(
     activeSection: defaults.startupSection,
     activeWorkbenchTab: 'connections' as WorkbenchTab,
     activeSettingsSection: 'general' as SettingsSection,
+    pendingWorkbenchAction: null,
 
     hydrateFromDb: async () => {
       try {
@@ -269,6 +273,16 @@ export const useAppStore = create<AppState>()(
     setActiveSection: (activeSection) => set({ activeSection }),
     setActiveWorkbenchTab: (activeWorkbenchTab) => set({ activeWorkbenchTab }),
     setActiveSettingsSection: (activeSettingsSection) => set({ activeSettingsSection }),
+    requestNewConnection: () => set({
+      activeSection: 'workbench',
+      activeWorkbenchTab: 'connections',
+      pendingWorkbenchAction: 'newConnection',
+    }),
+    consumeWorkbenchAction: (action) => set((state) => (
+      state.pendingWorkbenchAction === action
+        ? { pendingWorkbenchAction: null }
+        : {}
+    )),
     setTheme: (theme) => set({ theme }),
     setLocale: (locale) => {
       void changeLocale(locale);

@@ -26,6 +26,22 @@ describe('appStore', () => {
     expect(useAppStore.getState().activeWorkbenchTab).toBe('settings');
   });
 
+  it('routes a new connection request to the workbench until it is consumed', () => {
+    useAppStore.getState().setActiveSection('terminal');
+    useAppStore.getState().setActiveWorkbenchTab('settings');
+
+    useAppStore.getState().requestNewConnection();
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeSection: 'workbench',
+      activeWorkbenchTab: 'connections',
+      pendingWorkbenchAction: 'newConnection',
+    });
+
+    useAppStore.getState().consumeWorkbenchAction('newConnection');
+    expect(useAppStore.getState().pendingWorkbenchAction).toBeNull();
+  });
+
   it('customizes and resets shortcuts', () => {
     useAppStore.getState().setShortcut('openTerminal', 'mod+shift+t');
     expect(useAppStore.getState().shortcuts.openTerminal).toBe('mod+shift+t');

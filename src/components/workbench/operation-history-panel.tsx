@@ -68,6 +68,7 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
+  WORKBENCH_SEARCH_WIDTH_CLASS,
 } from './workbench-page';
 
 const CATEGORIES: OperationHistoryCategory[] = [
@@ -266,7 +267,7 @@ export const OperationHistoryPanel: React.FC = () => {
           </Alert>
 
           <div className="flex flex-wrap items-center gap-2">
-            <InputGroup className="h-8 min-w-52 flex-1">
+            <InputGroup className={`h-8 min-w-52 ${WORKBENCH_SEARCH_WIDTH_CLASS}`}>
               <InputGroupAddon>
                 <SearchIcon />
               </InputGroupAddon>
