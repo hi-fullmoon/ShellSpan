@@ -13,6 +13,7 @@ interface AgentState {
     profileId?: string,
     contextSource?: 'terminal' | 'remoteHealth',
     contextObservedAt?: number,
+    conversationId?: string,
   ) => boolean;
   appendDelta: (requestId: string, text: string) => void;
   completePlanning: (requestId: string) => void;
@@ -32,6 +33,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
     profileId,
     contextSource = 'terminal',
     contextObservedAt = Date.now(),
+    conversationId,
   ) => {
     let started = false;
     set((state) => {
@@ -43,6 +45,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
           requestId,
           goal,
           sessionId,
+          conversationId,
           profileId,
           contextLabel,
           contextSource,
