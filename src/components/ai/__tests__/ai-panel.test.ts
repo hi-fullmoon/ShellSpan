@@ -627,6 +627,9 @@ describe('AI panel width', () => {
       expect(chatMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
       expect(commandMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
       expect(agentMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
+      expect(chatMode.querySelector('svg')).toHaveClass('-translate-y-px');
+      expect(commandMode.querySelector('svg')).toHaveClass('-translate-y-px');
+      expect(agentMode.querySelector('svg')).toHaveClass('-translate-y-px');
 
       fireEvent.keyDown(handle, { key: 'ArrowRight' });
 
@@ -636,6 +639,9 @@ describe('AI panel width', () => {
       expect(chatMode.querySelector('svg')).not.toHaveAttribute('data-icon');
       expect(commandMode.querySelector('svg')).not.toHaveAttribute('data-icon');
       expect(agentMode.querySelector('svg')).not.toHaveAttribute('data-icon');
+      expect(chatMode.querySelector('svg')).not.toHaveClass('-translate-y-px');
+      expect(commandMode.querySelector('svg')).not.toHaveClass('-translate-y-px');
+      expect(agentMode.querySelector('svg')).not.toHaveClass('-translate-y-px');
       expect(screen.getByText('我能帮你处理什么？')).toBeInTheDocument();
       unmount();
     } finally {

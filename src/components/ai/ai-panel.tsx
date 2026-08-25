@@ -1732,7 +1732,10 @@ export const AiPanel: React.FC = () => {
                     <TooltipTrigger
                       render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}
                     >
-                      <MessageCircleIcon data-icon={compactModeControls ? undefined : 'inline-start'} />
+                      <MessageCircleIcon
+                        data-icon={compactModeControls ? undefined : 'inline-start'}
+                        className={cn(!compactModeControls && '-translate-y-px')}
+                      />
                       {!compactModeControls && t('ai.mode.chat')}
                     </TooltipTrigger>
                     <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
@@ -1741,7 +1744,10 @@ export const AiPanel: React.FC = () => {
                     <TooltipTrigger
                       render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
                     >
-                      <SquareTerminalIcon data-icon={compactModeControls ? undefined : 'inline-start'} />
+                      <SquareTerminalIcon
+                        data-icon={compactModeControls ? undefined : 'inline-start'}
+                        className={cn(!compactModeControls && '-translate-y-px')}
+                      />
                       {!compactModeControls && t('ai.mode.command')}
                     </TooltipTrigger>
                     <TooltipContent>{t('ai.mode.command')}</TooltipContent>
@@ -1756,7 +1762,10 @@ export const AiPanel: React.FC = () => {
                         />
                       )}
                     >
-                      <BrainCircuitIcon data-icon={compactModeControls ? undefined : 'inline-start'} />
+                      <BrainCircuitIcon
+                        data-icon={compactModeControls ? undefined : 'inline-start'}
+                        className={cn(!compactModeControls && '-translate-y-px')}
+                      />
                       {!compactModeControls && t('ai.mode.agent')}
                     </TooltipTrigger>
                     <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
