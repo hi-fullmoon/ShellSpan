@@ -111,33 +111,33 @@ const AgentEmptyState: React.FC = () => {
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <EmptyState
-        className="min-h-full justify-start px-5 py-6"
+        className="min-h-full justify-start px-4 py-4"
         icon={<ScanSearchIcon />}
         title={t('ai.agent.emptyTitle')}
         description={t('ai.agent.empty')}
         action={(
-          <div className="flex w-full max-w-md flex-col gap-3 pt-2 text-left">
+          <div className="flex w-full max-w-md flex-col gap-2 pt-1 text-left">
             <Alert>
               <LockKeyholeIcon />
               <AlertTitle>{t('ai.agent.emptyBoundary')}</AlertTitle>
               <AlertDescription>{t('ai.agent.emptyBoundaryHint')}</AlertDescription>
             </Alert>
-            <Card size="sm">
+            <Card size="sm" variant="outline">
               <CardHeader>
                 <CardTitle>{t('ai.agent.emptyFlow')}</CardTitle>
                 <CardDescription>{t('ai.agent.emptyFlowHint')}</CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3">
+              <CardContent className="flex flex-col gap-2">
                 {stages.map(({ icon: Icon, title, description }, index) => (
                   <React.Fragment key={title}>
                     {index > 0 && <Separator />}
-                    <div className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-3">
-                      <Badge variant="secondary" className="size-7 rounded-full p-0">
+                    <div className="grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2">
+                      <Badge variant="secondary" className="size-6 rounded-full p-0">
                         <Icon />
                       </Badge>
                       <div className="flex min-w-0 flex-col gap-0.5">
                         <span className="text-sm font-medium text-foreground">{title}</span>
-                        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+                        <span className="text-xs leading-4 text-muted-foreground">{description}</span>
                       </div>
                     </div>
                   </React.Fragment>
@@ -191,7 +191,7 @@ const PlanningActivity: React.FC<{
   const canRetry = run.phase === 'error' || run.phase === 'cancelled';
 
   return (
-    <Card>
+    <Card size="sm" variant="outline">
       <CardHeader>
         <CardTitle>{canRetry ? t('ai.agent.interruptedTitle') : t('ai.agent.analysisTitle')}</CardTitle>
         <CardDescription>
@@ -204,12 +204,12 @@ const PlanningActivity: React.FC<{
           </Badge>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-1">
+      <CardContent className="flex flex-col">
         {run.steps.map((step, index) => (
           <React.Fragment key={step.id}>
             {index > 0 && <Separator />}
             <div
-              className="flex items-start gap-3 py-2"
+              className="flex items-start gap-2 py-1.5"
               aria-current={step.status === 'running' ? 'step' : undefined}
             >
               <Badge
@@ -218,7 +218,7 @@ const PlanningActivity: React.FC<{
                   : step.status === 'running'
                     ? 'default'
                     : 'secondary'}
-                className="size-7 rounded-full p-0"
+                className="size-6 rounded-full p-0"
               >
                 <StepStatusIcon status={step.status} />
               </Badge>
@@ -231,7 +231,7 @@ const PlanningActivity: React.FC<{
                       : t('ai.agent.tool.plan')
                 }</span>
                 {step.description && (
-                  <span className="text-xs leading-5 text-muted-foreground">{step.description}</span>
+                  <span className="text-xs leading-4 text-muted-foreground">{step.description}</span>
                 )}
               </div>
               <Badge variant="outline">
@@ -266,7 +266,7 @@ const EvidenceCard: React.FC<{ run: AgentRun }> = ({ run }) => {
   const contextAgeSeconds = Math.floor((Date.now() - run.contextObservedAt) / 1000);
 
   return (
-    <Card size="sm">
+    <Card size="sm" variant="outline">
       <CardHeader>
         <CardTitle>{t('ai.agent.evidence')}</CardTitle>
         <CardDescription>{t('ai.agent.evidenceDescription')}</CardDescription>
@@ -281,14 +281,14 @@ const EvidenceCard: React.FC<{ run: AgentRun }> = ({ run }) => {
           return (
             <React.Fragment key={evidence.id}>
               {index > 0 && <Separator />}
-              <div className="flex items-start gap-3 py-2">
+              <div className="flex items-start gap-2 py-1.5">
                 <Badge
                   variant={stale
                     ? 'destructive'
                     : evidence.source === 'context'
                       ? 'secondary'
                       : 'outline'}
-                  className="size-7 rounded-full p-0"
+                  className="size-6 rounded-full p-0"
                 >
                   {stale
                     ? <XCircleIcon />
@@ -296,9 +296,9 @@ const EvidenceCard: React.FC<{ run: AgentRun }> = ({ run }) => {
                       ? <CheckCircle2Icon />
                       : <CircleDotDashedIcon />}
                 </Badge>
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="text-xs font-medium text-foreground">{evidence.description}</span>
-                  <span className="text-xs leading-5 text-muted-foreground">
+                  <span className="text-xs leading-4 text-muted-foreground">
                     {evidence.source === 'context'
                       ? `${run.contextSource === 'remoteHealth'
                         ? t('ai.agent.tool.remoteHealth')
@@ -335,22 +335,22 @@ const PlanStep: React.FC<{
   if (step.kind !== 'command' || !step.command || !step.risk) return null;
 
   return (
-    <Collapsible defaultOpen={step.risk !== 'readOnly'} className="flex flex-col gap-3 py-3">
-      <div className="flex items-start gap-3">
-        <Badge variant="secondary" className="size-7 rounded-full p-0">{index + 1}</Badge>
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
+    <Collapsible defaultOpen={step.risk !== 'readOnly'} className="flex flex-col gap-2 py-2">
+      <div className="flex items-start gap-2">
+        <Badge variant="secondary" className="size-6 rounded-full p-0">{index + 1}</Badge>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <div className="flex items-start justify-between gap-2">
             <div className="flex min-w-0 flex-col gap-0.5">
               <span className="text-sm font-medium text-foreground">{step.title}</span>
               {step.description && (
-                <span className="text-xs leading-5 text-muted-foreground">{step.description}</span>
+                <span className="text-xs leading-4 text-muted-foreground">{step.description}</span>
               )}
             </div>
             <Badge variant={riskVariant(step.risk)}>
               {t(`runbook.risk.${step.risk}` as LocaleKey)}
             </Badge>
           </div>
-          <code className="break-all rounded-lg bg-muted p-3 text-xs leading-5 text-foreground">
+          <code className="break-all rounded-lg bg-muted p-2 text-xs leading-4 text-foreground">
             {step.command}
           </code>
           <div className="flex flex-wrap gap-1.5">
@@ -365,7 +365,7 @@ const PlanStep: React.FC<{
             <ChevronDownIcon data-icon="inline-end" />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <dl className="grid gap-2 rounded-lg bg-muted p-3 text-xs leading-5">
+            <dl className="grid gap-1.5 rounded-lg bg-muted p-2 text-xs leading-4">
               <div>
                 <dt className="font-medium text-foreground">{t('runbook.impact')}</dt>
                 <dd className="text-muted-foreground">{step.impact}</dd>
@@ -391,7 +391,7 @@ const PlanPathCard: React.FC<{ run: AgentRun }> = ({ run }) => {
   const commandSteps = run.steps.filter((step) => step.kind === 'command');
 
   return (
-    <Card size="sm">
+    <Card size="sm" variant="outline">
       <CardHeader>
         <CardTitle>{t('ai.agent.path')}</CardTitle>
         <CardDescription>{t('ai.agent.pathHint')}</CardDescription>
@@ -417,18 +417,18 @@ const PlanOverviewCard: React.FC<{ run: AgentRun }> = ({ run }) => {
   if (!plan) return null;
 
   return (
-    <Card>
+    <Card size="sm" variant="outline">
       <CardHeader>
         <CardTitle>{t('ai.agent.summary')}</CardTitle>
         <CardDescription>{plan.summary}</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <dl className="grid gap-3">
-          <div className="flex flex-col gap-1">
+      <CardContent className="flex flex-col gap-3">
+        <dl className="grid gap-2">
+          <div className="flex flex-col gap-0.5">
             <dt className="text-xs font-medium text-muted-foreground">{t('ai.agent.objective')}</dt>
             <dd className="text-sm leading-5 text-foreground">{plan.objective}</dd>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-0.5">
             <dt className="text-xs font-medium text-muted-foreground">{t('ai.agent.target')}</dt>
             <dd className="text-sm leading-5 text-foreground">{plan.target}</dd>
           </div>
@@ -469,10 +469,11 @@ export const AgentRunView: React.FC<{
   return (
     <MessageScroller
       className="flex-1"
+      contentClassName="gap-2 px-3 py-3"
       followKey={`${run.phase}:${run.steps.length}:${run.responseText.length}`}
       ariaLabel={t('ai.agent.runLog')}
     >
-      <Card>
+      <Card size="sm" variant="outline">
         <CardHeader>
           <CardTitle>{run.goal}</CardTitle>
           <CardDescription className="flex items-center gap-1.5">
@@ -518,7 +519,7 @@ export const AgentRunView: React.FC<{
       </Alert>
 
       {plan && ['awaitingReview', 'handedOff'].includes(run.phase) && (
-        <Card>
+        <Card size="sm" variant="outline">
           <CardHeader>
             <CardTitle>{run.phase === 'handedOff'
               ? t('ai.agent.handedOffTitle')
@@ -527,7 +528,7 @@ export const AgentRunView: React.FC<{
               ? t('ai.agent.handedOffDescription')
               : t('ai.agent.reviewRunbookDescription')}</CardDescription>
           </CardHeader>
-          <CardFooter className="flex-col items-stretch gap-3">
+          <CardFooter className="flex-col items-stretch gap-2">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <LockKeyholeIcon className="size-3.5" />
               {t('ai.agent.reviewBoundary')}
