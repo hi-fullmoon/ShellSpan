@@ -42,6 +42,8 @@ const Workbench: React.FC = () => {
   const { error: showError, success: showSuccess } = useToast();
   const activeTab = useAppStore((state) => state.activeWorkbenchTab);
   const setActiveTab = useAppStore((state) => state.setActiveWorkbenchTab);
+  const pendingWorkbenchAction = useAppStore((state) => state.pendingWorkbenchAction);
+  const consumeWorkbenchAction = useAppStore((state) => state.consumeWorkbenchAction);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ConnectionProfile | undefined>();
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
@@ -77,6 +79,13 @@ const Workbench: React.FC = () => {
     setInitialValues(undefined);
     setFormOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (pendingWorkbenchAction !== 'newConnection') return;
+    setActiveTab('connections');
+    handleAdd();
+    consumeWorkbenchAction('newConnection');
+  }, [consumeWorkbenchAction, handleAdd, pendingWorkbenchAction, setActiveTab]);
 
   const handleEdit = useCallback((profile: ConnectionProfile): void => {
     setEditing(profile);

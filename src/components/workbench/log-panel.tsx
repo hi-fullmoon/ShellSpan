@@ -53,6 +53,7 @@ import {
   WorkbenchPage,
   WorkbenchPageHeader,
   WorkbenchPageToolbar,
+  WORKBENCH_SEARCH_WIDTH_CLASS,
 } from './workbench-page';
 
 interface ParsedLogLine {
@@ -726,7 +727,7 @@ export const LogPanel: React.FC = () => {
         </WorkbenchPageToolbar>
 
         <WorkbenchPageToolbar>
-          <InputGroup className="h-9 bg-background">
+          <InputGroup className={cn('h-9 bg-background', WORKBENCH_SEARCH_WIDTH_CLASS)}>
             <InputGroupAddon><SearchIcon /></InputGroupAddon>
             <InputGroupInput
               value={query}

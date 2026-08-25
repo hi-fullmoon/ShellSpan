@@ -99,6 +99,13 @@ describe('OperationHistoryPanel', () => {
   it('renders task summaries and a traceable detail timeline without raw output', async () => {
     render(<OperationHistoryPanel />);
 
+    expect(screen.getByRole('textbox', {
+      name: 'operationHistory.search',
+    }).parentElement).toHaveClass(
+      'flex-1',
+      '@min-[42rem]:w-72',
+      '@min-[42rem]:flex-none',
+    );
     expect(await screen.findByText('operationHistory.action.executeRunbookStep')).toBeInTheDocument();
     const table = screen.getByRole('table', { name: 'operationHistory.title' });
     expect(within(table).getByRole('columnheader', { name: 'operationHistory.action' })).toBeInTheDocument();

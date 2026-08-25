@@ -1,6 +1,9 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
+export const WORKBENCH_SEARCH_WIDTH_CLASS =
+  'flex-1 @min-[42rem]:w-72 @min-[42rem]:flex-none';
+
 type WorkbenchPageProps = React.ComponentProps<'div'>;
 
 export const WorkbenchPage: React.FC<WorkbenchPageProps> = ({ className, ...props }) => (
