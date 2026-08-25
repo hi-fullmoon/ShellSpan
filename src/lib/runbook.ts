@@ -10,6 +10,12 @@ import type {
   RunbookTarget,
   RunbookVariable,
 } from '@/types/runbook';
+import type { Locale } from '@/types';
+import {
+  throwRunbookError,
+  type RunbookErrorCode,
+  type RunbookErrorVariables,
+} from '@/lib/runbook-error';
 
 const MAX_TEXT_LENGTH = 512 * 1024;
 const MAX_COMMAND_LENGTH = 8 * 1024;
@@ -23,37 +29,49 @@ const READ_ONLY_PROGRAMS = new Set([
   'wc', 'whoami',
 ]);
 
-function fail(message: string): never {
-  throw new Error(`Runbook: ${message}`);
+function fail(
+  code: RunbookErrorCode,
+  message: string,
+  variables: RunbookErrorVariables = {},
+): never {
+  return throwRunbookError('runbook', code, message, variables);
 }
 
 function objectValue(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${field} must be an object`);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail('expectedObject', `${field} must be an object`, { field });
+  }
   return value as Record<string, unknown>;
 }
 
 function exactKeys(value: Record<string, unknown>, allowed: string[], field: string): void {
   const unknown = Object.keys(value).find((key) => !allowed.includes(key));
-  if (unknown) fail(`${field} contains unsupported field ${unknown}`);
+  if (unknown) fail('unsupportedField', `${field} contains unsupported field ${unknown}`, { field, unknown });
 }
 
 function stringValue(value: unknown, field: string, max = 4000): string {
-  if (typeof value !== 'string' || !value.trim()) fail(`${field} must be a non-empty string`);
+  if (typeof value !== 'string' || !value.trim()) {
+    fail('nonEmptyString', `${field} must be a non-empty string`, { field });
+  }
   const result = value.trim();
-  if (result.length > max || /[\u0000\u007f]/u.test(result)) fail(`${field} is invalid`);
+  if (result.length > max || /[\u0000\u007f]/u.test(result)) {
+    fail('invalidValue', `${field} is invalid`, { field });
+  }
   return result;
 }
 
 function integerValue(value: unknown, field: string, min: number, max: number): number {
   if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
-    fail(`${field} must be an integer from ${min} to ${max}`);
+    fail('integerRange', `${field} must be an integer from ${min} to ${max}`, { field, min, max });
   }
   return value as number;
 }
 
 function idValue(value: unknown, field: string): string {
   const result = stringValue(value, field, 64);
-  if (!ID_PATTERN.test(result)) fail(`${field} must use lowercase letters, numbers, dots, underscores or dashes`);
+  if (!ID_PATTERN.test(result)) {
+    fail('idFormat', `${field} must use lowercase letters, numbers, dots, underscores or dashes`, { field });
+  }
   return result;
 }
 
@@ -70,19 +88,31 @@ function parseVariable(value: unknown, index: number): RunbookVariable {
   const entry = objectValue(value, field);
   exactKeys(entry, ['name', 'description', 'required', 'default', 'keychainRef'], field);
   const name = stringValue(entry.name, `${field}.name`, 64);
-  if (!VARIABLE_PATTERN.test(name)) fail(`${field}.name must be uppercase shell-style identifier`);
-  if (typeof entry.required !== 'boolean') fail(`${field}.required must be boolean`);
+  if (!VARIABLE_PATTERN.test(name)) {
+    fail('variableNameFormat', `${field}.name must be uppercase shell-style identifier`, { field: `${field}.name` });
+  }
+  if (typeof entry.required !== 'boolean') {
+    fail('booleanRequired', `${field}.required must be boolean`, { field: `${field}.required` });
+  }
   const defaultValue = entry.default === undefined ? undefined : stringValue(entry.default, `${field}.default`);
   const keychainRef = entry.keychainRef === undefined
     ? undefined
     : stringValue(entry.keychainRef, `${field}.keychainRef`, 128);
-  if (keychainRef && !KEYCHAIN_REF_PATTERN.test(keychainRef)) fail(`${field}.keychainRef is unsupported`);
-  if (keychainRef && defaultValue !== undefined) fail(`${field} cannot contain both default and keychainRef`);
+  if (keychainRef && !KEYCHAIN_REF_PATTERN.test(keychainRef)) {
+    fail('keychainRefUnsupported', `${field}.keychainRef is unsupported`, { field: `${field}.keychainRef` });
+  }
+  if (keychainRef && defaultValue !== undefined) {
+    fail('variableSourceConflict', `${field} cannot contain both default and keychainRef`, { field });
+  }
   if (!keychainRef && secretVariableName(name)) {
-    fail(`${field}.name identifies a secret and therefore requires keychainRef`);
+    fail(
+      'secretVariableNeedsKeychain',
+      `${field}.name identifies a secret and therefore requires keychainRef`,
+      { field: `${field}.name` },
+    );
   }
   if (defaultValue && hasSecretLiteral(defaultValue)) {
-    fail(`${field}.default appears to contain a secret; use keychainRef`);
+    fail('secretDefault', `${field}.default appears to contain a secret; use keychainRef`, { field: `${field}.default` });
   }
   return {
     name,
@@ -100,8 +130,10 @@ function parseExpected(value: unknown, field: string): RunbookExpectedResult {
     ? undefined
     : Array.isArray(expected.stdoutContains)
       ? expected.stdoutContains.map((item, index) => stringValue(item, `${field}.stdoutContains[${index}]`, 1000))
-      : fail(`${field}.stdoutContains must be an array`);
-  if (stdoutContains && stdoutContains.length > 20) fail(`${field}.stdoutContains has too many entries`);
+      : fail('arrayRequired', `${field}.stdoutContains must be an array`, { field: `${field}.stdoutContains` });
+  if (stdoutContains && stdoutContains.length > 20) {
+    fail('arrayTooLong', `${field}.stdoutContains has too many entries`, { field: `${field}.stdoutContains`, max: 20 });
+  }
   return {
     exitCode: integerValue(expected.exitCode, `${field}.exitCode`, 0, 255),
     ...(stdoutContains?.length ? { stdoutContains } : {}),
@@ -132,12 +164,12 @@ function validateReadOnlyArguments(program: string, args: string[], field: strin
     argument === flag || (flag.length === 2 && /^-[^-]+$/.test(argument) && argument.includes(flag[1]))
   ));
   if (program === 'tail' && (combinedFlag('-f') || combinedFlag('-F') || args.some((argument) => argument.startsWith('--follow')))) {
-    fail(`${field}.command cannot follow an unbounded stream`);
+    fail('unboundedStream', `${field}.command cannot follow an unbounded stream`, { field: `${field}.command` });
   }
   if (program === 'cat' && (
     !args.some((argument) => !argument.startsWith('-'))
     || args.some((argument) => /^\/dev\/(?:full|null|random|urandom|zero)$/.test(argument))
-  )) fail(`${field}.command has no safe bounded input`);
+  )) fail('unsafeBoundedInput', `${field}.command has no safe bounded input`, { field: `${field}.command` });
   if (program === 'date' && args.some((argument) => !(
     argument === '-u'
     || argument === '--utc'
@@ -146,11 +178,13 @@ function validateReadOnlyArguments(program: string, args: string[], field: strin
     || argument.startsWith('+')
     || argument.startsWith('--iso-8601')
     || argument.startsWith('--rfc-3339')
-  ))) fail(`${field}.command contains a mutating date option`);
+  ))) fail('mutatingDateOption', `${field}.command contains a mutating date option`, { field: `${field}.command` });
   if (program === 'hostname' && args.some((argument) => ![
     '-A', '-d', '-f', '-i', '-I', '-s', '--all-fqdns', '--all-ip-addresses', '--domain',
     '--fqdn', '--help', '--ip-address', '--short', '--version',
-  ].includes(argument))) fail(`${field}.command contains a mutating hostname argument`);
+  ].includes(argument))) {
+    fail('mutatingHostnameArgument', `${field}.command contains a mutating hostname argument`, { field: `${field}.command` });
+  }
   if (program === 'journalctl') {
     const forbidden = args.some((argument) => (
       combinedFlag('-f')
@@ -164,29 +198,43 @@ function validateReadOnlyArguments(program: string, args: string[], field: strin
       || /^-n\d+$/.test(argument)
       || (argument === '-n' && /^\d+$/.test(args[index + 1] ?? ''))
     ));
-    if (forbidden || !bounded) fail(`${field}.command must use a bounded, non-mutating journal query`);
+    if (forbidden || !bounded) {
+      fail('boundedJournalQuery', `${field}.command must use a bounded, non-mutating journal query`, { field: `${field}.command` });
+    }
   }
   if (program === 'ss' && args.some((argument) => argument === '-K' || argument === '--kill')) {
-    fail(`${field}.command contains a mutating socket option`);
+    fail('mutatingSocketOption', `${field}.command contains a mutating socket option`, { field: `${field}.command` });
   }
   if (program === 'systemctl') {
     const action = args.find((argument) => !argument.startsWith('-'));
     if (!action || !['status', 'show', 'is-active', 'is-enabled', 'list-units', 'list-unit-files'].includes(action)) {
-      fail(`${field}.command contains a mutating systemctl action`);
+      fail('mutatingSystemctlAction', `${field}.command contains a mutating systemctl action`, { field: `${field}.command` });
     }
   }
 }
 
 function validateDeclaredRisk(command: string, declared: RunbookRisk, field: string): void {
   const detected = commandRisk(command);
-  if (riskRank(declared) < riskRank(detected)) fail(`${field}.risk understates detected ${detected} behavior`);
+  if (riskRank(declared) < riskRank(detected)) {
+    fail(
+      'understatedRisk',
+      `${field}.risk understates detected ${detected} behavior`,
+      { field: `${field}.risk`, detected },
+    );
+  }
   if (declared === 'readOnly') {
     const normalized = command.replace(TEMPLATE_PATTERN, "'VALUE'");
     if (/[;&|`<>\n\r]/.test(normalized) || /\$\(/.test(normalized)) {
-      fail(`${field}.command uses shell control syntax not allowed for readOnly actions`);
+      fail(
+        'readOnlyShellSyntax',
+        `${field}.command uses shell control syntax not allowed for readOnly actions`,
+        { field: `${field}.command` },
+      );
     }
     const program = normalized.trim().split(/\s+/, 1)[0];
-    if (!READ_ONLY_PROGRAMS.has(program)) fail(`${field}.command is not in the readOnly command set`);
+    if (!READ_ONLY_PROGRAMS.has(program)) {
+      fail('readOnlyCommand', `${field}.command is not in the readOnly command set`, { field: `${field}.command` });
+    }
     validateReadOnlyArguments(program, normalized.trim().split(/\s+/).slice(1), field);
   }
 }
@@ -194,7 +242,9 @@ function validateDeclaredRisk(command: string, declared: RunbookRisk, field: str
 function parseActionBase(value: unknown, field: string): RunbookPrecheck {
   const entry = objectValue(value, field);
   const command = stringValue(entry.command, `${field}.command`, MAX_COMMAND_LENGTH);
-  if (hasSecretLiteral(command)) fail(`${field}.command appears to contain a literal secret; use a keychain variable`);
+  if (hasSecretLiteral(command)) {
+    fail('sensitiveLiteral', `${field}.command appears to contain a literal secret; use a keychain variable`, { field: `${field}.command` });
+  }
   return {
     id: idValue(entry.id, `${field}.id`),
     description: stringValue(entry.description, `${field}.description`),
@@ -221,12 +271,18 @@ function parseStep(value: unknown, index: number): RunbookStep {
     'safeToRetry',
   ], field);
   const risk: RunbookRisk = entry.risk as RunbookRisk;
-  if (risk !== 'readOnly' && risk !== 'stateChange' && risk !== 'destructive') fail(`${field}.risk is invalid`);
-  if (typeof entry.safeToRetry !== 'boolean') fail(`${field}.safeToRetry must be boolean`);
+  if (risk !== 'readOnly' && risk !== 'stateChange' && risk !== 'destructive') {
+    fail('invalidRisk', `${field}.risk is invalid`, { field: `${field}.risk` });
+  }
+  if (typeof entry.safeToRetry !== 'boolean') {
+    fail('booleanRequired', `${field}.safeToRetry must be boolean`, { field: `${field}.safeToRetry` });
+  }
   const rollback = entry.rollback === undefined
     ? undefined
     : stringValue(entry.rollback, `${field}.rollback`);
-  if (risk !== 'readOnly' && !rollback) fail(`${field}.rollback is required for modifying actions`);
+  if (risk !== 'readOnly' && !rollback) {
+    fail('rollbackRequired', `${field}.rollback is required for modifying actions`, { field: `${field}.rollback` });
+  }
   const step = {
     ...parseActionBase(entry, field),
     risk,
@@ -253,34 +309,36 @@ function interpolatePreview(
 ): string {
   return command.replace(TEMPLATE_PATTERN, (_match, name: string) => {
     const variable = variables.get(name);
-    if (!variable) fail(`command references undeclared variable ${name}`);
+    if (!variable) fail('undeclaredVariable', `command references undeclared variable ${name}`, { name });
     if (variable.keychainRef) return shellQuote(`<${variable.keychainRef}>`);
     const value = values[name] ?? variable.default ?? '';
-    if (variable.required && !value) fail(`variable ${name} is required`);
+    if (variable.required && !value) fail('requiredVariable', `variable ${name} is required`, { name });
     return shellQuote(value);
   });
 }
 
 export function parseRunbookText(text: string): RunbookDocument {
-  if (!text.trim()) fail('text is empty');
-  if (text.length > MAX_TEXT_LENGTH) fail('text exceeds 512 KiB');
+  if (!text.trim()) fail('emptyText', 'text is empty');
+  if (text.length > MAX_TEXT_LENGTH) fail('textTooLarge', 'text exceeds 512 KiB');
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
-    fail('text is not valid JSON');
+    fail('invalidJson', 'text is not valid JSON');
   }
   const document = objectValue(value, 'document');
   exactKeys(document, [
     'schemaVersion', 'id', 'name', 'description', 'evidenceMaxAgeSeconds', 'variables', 'prechecks', 'steps',
   ], 'document');
-  if (document.schemaVersion !== 1) fail('schemaVersion must be 1');
-  if (!Array.isArray(document.variables) || document.variables.length > 32) fail('variables must contain at most 32 entries');
+  if (document.schemaVersion !== 1) fail('schemaVersion', 'schemaVersion must be 1');
+  if (!Array.isArray(document.variables) || document.variables.length > 32) {
+    fail('variablesLimit', 'variables must contain at most 32 entries', { max: 32 });
+  }
   if (!Array.isArray(document.prechecks) || document.prechecks.length === 0 || document.prechecks.length > 16) {
-    fail('prechecks must contain 1-16 entries');
+    fail('prechecksLimit', 'prechecks must contain 1-16 entries', { min: 1, max: 16 });
   }
   if (!Array.isArray(document.steps) || document.steps.length > 64) {
-    fail('steps must contain at most 64 entries');
+    fail('stepsLimit', 'steps must contain at most 64 entries', { max: 64 });
   }
   const result: RunbookDocument = {
     schemaVersion: 1,
@@ -294,15 +352,23 @@ export function parseRunbookText(text: string): RunbookDocument {
   };
   const variableNames = new Set<string>();
   for (const variable of result.variables) {
-    if (variableNames.has(variable.name)) fail(`duplicate variable ${variable.name}`);
+    if (variableNames.has(variable.name)) {
+      fail('duplicateVariable', `duplicate variable ${variable.name}`, { name: variable.name });
+    }
     variableNames.add(variable.name);
   }
   const itemIds = new Set<string>();
   for (const item of [...result.prechecks, ...result.steps]) {
-    if (itemIds.has(item.id)) fail(`duplicate action id ${item.id}`);
+    if (itemIds.has(item.id)) fail('duplicateAction', `duplicate action id ${item.id}`, { id: item.id });
     itemIds.add(item.id);
     for (const name of placeholders(item.command)) {
-      if (!variableNames.has(name)) fail(`action ${item.id} references undeclared variable ${name}`);
+      if (!variableNames.has(name)) {
+        fail(
+          'actionUndeclaredVariable',
+          `action ${item.id} references undeclared variable ${name}`,
+          { id: item.id, name },
+        );
+      }
     }
   }
   return result;
@@ -343,7 +409,7 @@ export function prepareRunbook(
   ]));
   for (const variable of document.variables) {
     if (variable.required && !variable.keychainRef && !resolvedVariables[variable.name]) {
-      fail(`variable ${variable.name} is required`);
+      fail('requiredVariable', `variable ${variable.name} is required`, { name: variable.name });
     }
   }
   const items: RunbookRunItem[] = [
@@ -614,3 +680,45 @@ export const RUNBOOK_EXAMPLE = `{
     }
   ]
 }`;
+
+export const RUNBOOK_EXAMPLE_ZH_CN = `{
+  "schemaVersion": 1,
+  "id": "nginx-reload",
+  "name": "安全重载 nginx",
+  "description": "重载服务前先验证 nginx 配置。",
+  "evidenceMaxAgeSeconds": 300,
+  "variables": [
+    {
+      "name": "SERVICE",
+      "description": "需要检查并重载的 systemd 服务单元。",
+      "required": true,
+      "default": "nginx"
+    }
+  ],
+  "prechecks": [
+    {
+      "id": "service-status",
+      "description": "确认目标服务当前存在。",
+      "command": "systemctl status {{SERVICE}}",
+      "expected": { "exitCode": 0 },
+      "timeoutSeconds": 15
+    }
+  ],
+  "steps": [
+    {
+      "id": "reload-service",
+      "description": "重载已验证的服务配置。",
+      "command": "sudo systemctl reload {{SERVICE}}",
+      "risk": "stateChange",
+      "impact": "重载所选服务，不停止当前进程。",
+      "rollback": "若重载失败，保持当前进程运行；重试前恢复上一份已验证的配置。",
+      "expected": { "exitCode": 0 },
+      "timeoutSeconds": 30,
+      "safeToRetry": true
+    }
+  ]
+}`;
+
+export function runbookExampleForLocale(locale: Locale | undefined): string {
+  return locale === 'zh-CN' ? RUNBOOK_EXAMPLE_ZH_CN : RUNBOOK_EXAMPLE;
+}

@@ -42,6 +42,7 @@ import type { LocaleKey } from '@/locales';
 import { ensureKeychainKeyForProfile } from '@/lib/keychain-key-prompt';
 import { createOperationId } from '@/lib/operation-id';
 import { recordOperationHistoryTransition } from '@/lib/operation-history';
+import { getLocalizedRunbookErrorMessage } from '@/lib/runbook-error';
 import {
   AI_RUNBOOK_DRAFT_EVENT,
   consumePendingAgentRunbookDraft,
@@ -66,7 +67,7 @@ import {
   rejectRunbookItem,
   resumeRunbook,
   retryRunbookFrom,
-  RUNBOOK_EXAMPLE,
+  runbookExampleForLocale,
   serializeRunbook,
   skipRunbookItem,
   startRunbookRun,
@@ -124,6 +125,13 @@ function itemStatusVariant(status: RunbookRunItem['status']): 'default' | 'outli
   return 'outline';
 }
 
+function editorShortcutsKey(): LocaleKey {
+  if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)) {
+    return 'runbook.editor.shortcuts.mac';
+  }
+  return 'runbook.editor.shortcuts';
+}
+
 function syntheticResult(
   run: RunbookRun,
   item: RunbookRunItem,
@@ -158,13 +166,19 @@ function syntheticResult(
 }
 
 export const RunbookPanel: React.FC = () => {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
   const profiles = useProfileStore((state) => state.profiles);
-  const [sourceText, setSourceText] = useState(() => serializeRunbook(parseRunbookText(RUNBOOK_EXAMPLE)));
+  const [sourceText, setSourceText] = useState(() => (
+    serializeRunbook(parseRunbookText(runbookExampleForLocale(locale)))
+  ));
   const [sourcePath, setSourcePath] = useState<string>();
-  const [document, setDocument] = useState<RunbookDocument>(() => parseRunbookText(RUNBOOK_EXAMPLE));
-  const [validatedText, setValidatedText] = useState(() => serializeRunbook(parseRunbookText(RUNBOOK_EXAMPLE)));
+  const [document, setDocument] = useState<RunbookDocument>(() => (
+    parseRunbookText(runbookExampleForLocale(locale))
+  ));
+  const [validatedText, setValidatedText] = useState(() => (
+    serializeRunbook(parseRunbookText(runbookExampleForLocale(locale)))
+  ));
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [targetMode, setTargetMode] = useState<RunbookTargetMode>('single');
   const [targetProfileId, setTargetProfileId] = useState<string>();
@@ -284,8 +298,7 @@ export const RunbookPanel: React.FC = () => {
       applyValidatedText(sourceText, sourcePath);
       showSuccess(t('runbook.valid'));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setValidationError(message);
+      setValidationError(getLocalizedRunbookErrorMessage(error, t));
       showError(t('runbook.invalid'));
     }
   };
@@ -298,8 +311,7 @@ export const RunbookPanel: React.FC = () => {
         setAiDraft(undefined);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setValidationError(message);
+      setValidationError(getLocalizedRunbookErrorMessage(error, t));
       showError(t('runbook.openFailed'));
     }
   };
@@ -313,8 +325,7 @@ export const RunbookPanel: React.FC = () => {
         showSuccess(t('runbook.saved', { path: file.path }));
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setValidationError(message);
+      setValidationError(getLocalizedRunbookErrorMessage(error, t));
       showError(t('runbook.saveFailed'));
     }
   };
@@ -344,7 +355,7 @@ export const RunbookPanel: React.FC = () => {
         setMultiHostTask(task);
         setValidationError(undefined);
       } catch (error) {
-        setValidationError(error instanceof Error ? error.message : String(error));
+        setValidationError(getLocalizedRunbookErrorMessage(error, t));
       }
       return;
     }
@@ -374,7 +385,7 @@ export const RunbookPanel: React.FC = () => {
       );
       setValidationError(undefined);
     } catch (error) {
-      setValidationError(error instanceof Error ? error.message : String(error));
+      setValidationError(getLocalizedRunbookErrorMessage(error, t));
     }
   };
 
@@ -471,7 +482,7 @@ export const RunbookPanel: React.FC = () => {
         activeItem,
         operationId ?? createOperationId('runbook'),
         'failed',
-        error instanceof Error ? error.message : String(error),
+        getLocalizedRunbookErrorMessage(error, t),
       );
       setRun((current) => current
         ? applyRunbookStepResult(
@@ -584,7 +595,7 @@ export const RunbookPanel: React.FC = () => {
                   <span>{t('ai.agent.target')}: {aiDraft.target}</span>
                   <span>{t('ai.agent.boundTarget')}: {aiDraft.contextLabel}</span>
                   <span>
-                    {t('runbook.aiDraftObservedAt')}: {new Date(aiDraft.contextObservedAt).toLocaleString()}
+                    {t('runbook.aiDraftObservedAt')}: {new Date(aiDraft.contextObservedAt).toLocaleString(locale)}
                   </span>
                 </div>
               </AlertDescription>
@@ -633,7 +644,9 @@ export const RunbookPanel: React.FC = () => {
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">{t('runbook.overview.evidenceWindow')}</p>
-                  <p className="font-medium">{document.evidenceMaxAgeSeconds}s</p>
+                  <p className="font-medium">
+                    {t('runbook.durationSeconds', { count: document.evidenceMaxAgeSeconds })}
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -713,7 +726,9 @@ export const RunbookPanel: React.FC = () => {
                                 {item.command}
                               </code>
                               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                                <span>{t('runbook.timeout')}: {item.timeoutSeconds}s</span>
+                                <span>
+                                  {t('runbook.timeout')}: {t('runbook.durationSeconds', { count: item.timeoutSeconds })}
+                                </span>
                                 {item.impact && <span>{t('runbook.impact')}: {item.impact}</span>}
                               </div>
                               {item.rollback && (
@@ -731,7 +746,7 @@ export const RunbookPanel: React.FC = () => {
                 <CardFooter className="flex-col items-start gap-2 @min-[34rem]:flex-row @min-[34rem]:items-center @min-[34rem]:justify-between">
                   <span className="text-xs text-muted-foreground">{t('runbook.textDescription')}</span>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{t('runbook.editor.shortcuts')}</span>
+                    <span className="text-xs text-muted-foreground">{t(editorShortcutsKey())}</span>
                     <Badge
                       variant={editorProblemCount > 0
                         ? 'destructive'
@@ -741,7 +756,7 @@ export const RunbookPanel: React.FC = () => {
                         ? t('runbook.editor.problems', { count: editorProblemCount })
                         : hasUnvalidatedChanges
                           ? t('runbook.status.needsValidation')
-                          : 'JSON · schema v1'}
+                          : t('runbook.editor.ready')}
                     </Badge>
                   </div>
                 </CardFooter>
@@ -960,12 +975,18 @@ export const RunbookPanel: React.FC = () => {
                     </AlertTitle>
                     <AlertDescription>
                       <div className="flex flex-col gap-2">
-                        <span>{t('runbook.impact')}: {activeItem.impact}</span>
+                        <span>
+                          {t('runbook.impact')}: {activeItem.kind === 'precheck'
+                            ? t('runbook.precheckImpact')
+                            : activeItem.impact}
+                        </span>
                         {activeItem.rollback && (
                           <span>{t('runbook.rollback')}: {activeItem.rollback}</span>
                         )}
                         <code className="break-all rounded-md bg-muted p-2 text-foreground">{activeItem.commandPreview}</code>
-                        <span>{t('runbook.timeout')}: {activeItem.timeoutSeconds}s</span>
+                        <span>
+                          {t('runbook.timeout')}: {t('runbook.durationSeconds', { count: activeItem.timeoutSeconds })}
+                        </span>
                       </div>
                     </AlertDescription>
                   </Alert>
@@ -996,11 +1017,13 @@ export const RunbookPanel: React.FC = () => {
                                     {t('runbook.evidenceTarget')}: {item.evidence.username}@{item.evidence.host}:{item.evidence.port}
                                   </span>
                                   <span>
-                                    {t('runbook.evidenceCompletedAt')}: {new Date(item.evidence.completedAt).toLocaleString()}
+                                    {t('runbook.evidenceCompletedAt')}: {new Date(item.evidence.completedAt).toLocaleString(locale)}
                                   </span>
                                 </>
                               )}
-                              {item.evidence?.exitCode !== undefined && <span>exit {item.evidence.exitCode}</span>}
+                              {item.evidence?.exitCode !== undefined && (
+                                <span>{t('runbook.exitCode')}: {item.evidence.exitCode}</span>
+                              )}
                               {item.evidence?.stdout && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stdout}</code>}
                               {item.evidence?.stderr && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stderr}</code>}
                               {item.error && <span className="text-destructive">{item.error}</span>}
