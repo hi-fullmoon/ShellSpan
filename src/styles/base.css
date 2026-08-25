@@ -178,6 +178,13 @@ textarea,
   -webkit-user-select: none;
 }
 
+/* Monaco renders editable text as layered divs rather than a native textarea. */
+[data-slot='runbook-json-editor'],
+[data-slot='runbook-json-editor'] * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 *:hover {
   scrollbar-color: var(--app-text-soft) transparent;
 }
