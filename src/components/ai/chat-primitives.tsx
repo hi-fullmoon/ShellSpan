@@ -28,8 +28,9 @@ export const MessageScroller: React.FC<{
   children: React.ReactNode;
   followKey: string;
   className?: string;
+  contentClassName?: string;
   ariaLabel?: string;
-}> = ({ children, followKey, className, ariaLabel }) => {
+}> = ({ children, followKey, className, contentClassName, ariaLabel }) => {
   const { t } = useI18n();
   return (
     <MessageScrollerProvider autoScroll>
@@ -44,8 +45,8 @@ export const MessageScroller: React.FC<{
           size="thin"
           viewportRender={<MessageScrollerViewport />}
         >
-          <MessageScrollerContent className="gap-5 px-4 py-5">
-            {React.Children.map(children, (child, index) => (
+          <MessageScrollerContent className={cn('gap-5 px-4 py-5', contentClassName)}>
+            {React.Children.toArray(children).map((child, index) => (
               <MessageScrollerItem
                 key={React.isValidElement(child) && child.key !== null ? child.key : index}
                 scrollAnchor={
