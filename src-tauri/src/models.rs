@@ -12,7 +12,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -927,21 +927,38 @@ cancellation_registry!(PreflightCancellationRegistry, "connection preflight");
 cancellation_registry!(RemoteHealthCancellationRegistry, "remote health snapshot");
 cancellation_registry!(RunbookCancellationRegistry, "runbook step");
 
+pub(crate) trait TransferEventEmitter: Clone {
+    fn emit_transfer_event<S>(&self, event: &str, payload: S) -> Result<(), String>
+    where
+        S: Serialize + Clone;
+}
+
+impl<R: Runtime> TransferEventEmitter for AppHandle<R> {
+    fn emit_transfer_event<S>(&self, event: &str, payload: S) -> Result<(), String>
+    where
+        S: Serialize + Clone,
+    {
+        self.emit(event, payload).map_err(|error| error.to_string())
+    }
+}
+
 #[derive(Default, Clone, Copy)]
 pub(crate) struct DownloadScanStats {
     pub(crate) total_bytes: u64,
     pub(crate) total_steps: u64,
+    pub(crate) total_files: u64,
 }
 
 impl DownloadScanStats {
     pub(crate) fn combine(&mut self, other: DownloadScanStats) {
         self.total_bytes += other.total_bytes;
         self.total_steps += other.total_steps;
+        self.total_files += other.total_files;
     }
 }
 
-pub(crate) struct DownloadProgressTracker {
-    app: AppHandle,
+pub(crate) struct DownloadProgressTracker<E: TransferEventEmitter> {
+    emitter: E,
     operation_id: String,
     cancel_flag: Arc<AtomicBool>,
     current_path: Option<String>,
@@ -960,15 +977,15 @@ fn should_emit_progress(last_emitted_at: Option<Instant>) -> bool {
     last_emitted_at.is_none_or(|instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
 }
 
-impl DownloadProgressTracker {
+impl<E: TransferEventEmitter> DownloadProgressTracker<E> {
     pub(crate) fn new(
-        app: AppHandle,
+        emitter: E,
         operation_id: String,
         cancel_flag: Arc<AtomicBool>,
         stats: DownloadScanStats,
     ) -> Self {
         Self {
-            app,
+            emitter,
             operation_id,
             cancel_flag,
             current_path: None,
@@ -1011,7 +1028,7 @@ impl DownloadProgressTracker {
     pub(crate) fn emit(&self) -> Result<(), String> {
         self.last_emitted_at.set(Some(Instant::now()));
         // A failed progress emit must not abort the transfer; log and continue.
-        if let Err(error) = self.app.emit(
+        if let Err(error) = self.emitter.emit_transfer_event(
             super::DOWNLOAD_PROGRESS_EVENT,
             DownloadProgressEvent {
                 operation_id: self.operation_id.clone(),
@@ -1035,17 +1052,19 @@ cancellation_registry!(RemoteCopyCancellationRegistry, "remote copy");
 pub(crate) struct RemoteCopyScanStats {
     pub(crate) total_bytes: u64,
     pub(crate) total_steps: u64,
+    pub(crate) total_files: u64,
 }
 
 impl RemoteCopyScanStats {
     pub(crate) fn combine(&mut self, other: RemoteCopyScanStats) {
         self.total_bytes += other.total_bytes;
         self.total_steps += other.total_steps;
+        self.total_files += other.total_files;
     }
 }
 
-pub(crate) struct RemoteCopyProgressTracker {
-    app: AppHandle,
+pub(crate) struct RemoteCopyProgressTracker<E: TransferEventEmitter> {
+    emitter: E,
     operation_id: String,
     cancel_flag: Arc<AtomicBool>,
     current_path: Option<String>,
@@ -1056,15 +1075,15 @@ pub(crate) struct RemoteCopyProgressTracker {
     last_emitted_at: Cell<Option<Instant>>,
 }
 
-impl RemoteCopyProgressTracker {
+impl<E: TransferEventEmitter> RemoteCopyProgressTracker<E> {
     pub(crate) fn new(
-        app: AppHandle,
+        emitter: E,
         operation_id: String,
         cancel_flag: Arc<AtomicBool>,
         stats: RemoteCopyScanStats,
     ) -> Self {
         Self {
-            app,
+            emitter,
             operation_id,
             cancel_flag,
             current_path: None,
@@ -1107,7 +1126,7 @@ impl RemoteCopyProgressTracker {
     pub(crate) fn emit(&self) -> Result<(), String> {
         self.last_emitted_at.set(Some(Instant::now()));
         // A failed progress emit must not abort the transfer; log and continue.
-        if let Err(error) = self.app.emit(
+        if let Err(error) = self.emitter.emit_transfer_event(
             super::REMOTE_COPY_PROGRESS_EVENT,
             RemoteCopyProgressEvent {
                 operation_id: self.operation_id.clone(),
@@ -1128,17 +1147,19 @@ impl RemoteCopyProgressTracker {
 pub(crate) struct UploadScanStats {
     pub(crate) total_bytes: u64,
     pub(crate) total_steps: u64,
+    pub(crate) total_files: u64,
 }
 
 impl UploadScanStats {
     pub(crate) fn combine(&mut self, other: UploadScanStats) {
         self.total_bytes += other.total_bytes;
         self.total_steps += other.total_steps;
+        self.total_files += other.total_files;
     }
 }
 
-pub(crate) struct UploadProgressTracker {
-    app: AppHandle,
+pub(crate) struct UploadProgressTracker<E: TransferEventEmitter> {
+    emitter: E,
     operation_id: String,
     cancel_flag: Arc<AtomicBool>,
     current_path: Option<String>,
@@ -1158,15 +1179,15 @@ pub(crate) struct DeleteProgressTracker {
     completed_steps: u64,
 }
 
-impl UploadProgressTracker {
+impl<E: TransferEventEmitter> UploadProgressTracker<E> {
     pub(crate) fn new(
-        app: AppHandle,
+        emitter: E,
         operation_id: String,
         cancel_flag: Arc<AtomicBool>,
         stats: UploadScanStats,
     ) -> Self {
         Self {
-            app,
+            emitter,
             operation_id,
             cancel_flag,
             current_path: None,
@@ -1209,7 +1230,7 @@ impl UploadProgressTracker {
     pub(crate) fn emit(&self) -> Result<(), String> {
         self.last_emitted_at.set(Some(Instant::now()));
         // A failed progress emit must not abort the transfer; log and continue.
-        if let Err(error) = self.app.emit(
+        if let Err(error) = self.emitter.emit_transfer_event(
             super::UPLOAD_PROGRESS_EVENT,
             UploadProgressEvent {
                 operation_id: self.operation_id.clone(),

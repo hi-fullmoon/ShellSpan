@@ -7,9 +7,9 @@ use crate::models::{
     ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
     RemoteCopyProgressTracker, RemoteCopyScanStats, RemoteDirectoryListing, RemoteDirectoryRequest,
     RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileEntry, RemoteFileKind, RemoteFsError,
-    RenameRemotePathRequest, TransferBatchResult, TransferItemResult, TransferItemStatus,
-    UpdateRemotePermissionsRequest, UploadConflictPolicy, UploadLocalPathsRequest,
-    UploadProgressTracker, UploadScanStats,
+    RenameRemotePathRequest, TransferBatchResult, TransferEventEmitter, TransferItemResult,
+    TransferItemStatus, UpdateRemotePermissionsRequest, UploadConflictPolicy,
+    UploadLocalPathsRequest, UploadProgressTracker, UploadScanStats,
 };
 use crate::portable_local_path;
 use crate::posix_join;
@@ -29,10 +29,14 @@ use std::{
         Arc,
     },
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 use tauri::AppHandle;
 use uuid::Uuid;
+
+#[cfg(test)]
+static TEST_TRANSFER_METRIC_RECORDS: std::sync::Mutex<Vec<String>> =
+    std::sync::Mutex::new(Vec::new());
 
 const OPEN_TEMP_RETENTION: Duration = Duration::from_secs(60 * 60 * 24);
 const MAX_REMOTE_RECURSION_DEPTH: u32 = 512;
@@ -43,6 +47,140 @@ const REMOTE_COPY_TEMP_SUFFIX: &str = ".tb-part";
 /// temp file, so they only re-send what never reached the destination.
 const REMOTE_COPY_MAX_ATTEMPTS: u32 = 3;
 const REMOTE_COPY_RETRY_BACKOFF_BASE_MS: u64 = 500;
+
+#[derive(Clone, Copy)]
+enum TransferPhase {
+    Connect,
+    Scan,
+    Transfer,
+    Finalize,
+}
+
+struct TransferBatchMetrics {
+    operation: &'static str,
+    operation_id: String,
+    started_at: Instant,
+    phase_started_at: Instant,
+    current_phase: Option<TransferPhase>,
+    connect: Duration,
+    scan: Duration,
+    transfer: Duration,
+    finalize: Duration,
+    total_bytes: u64,
+    total_files: u64,
+    logged: bool,
+}
+
+impl TransferBatchMetrics {
+    fn new(operation: &'static str, operation_id: String) -> Self {
+        let now = Instant::now();
+        Self {
+            operation,
+            operation_id,
+            started_at: now,
+            phase_started_at: now,
+            current_phase: Some(TransferPhase::Connect),
+            connect: Duration::ZERO,
+            scan: Duration::ZERO,
+            transfer: Duration::ZERO,
+            finalize: Duration::ZERO,
+            total_bytes: 0,
+            total_files: 0,
+            logged: false,
+        }
+    }
+
+    fn start_phase(&mut self, phase: TransferPhase) {
+        self.finish_current_phase();
+        self.current_phase = Some(phase);
+        self.phase_started_at = Instant::now();
+    }
+
+    fn set_inventory(&mut self, total_bytes: u64, total_files: u64) {
+        self.total_bytes = total_bytes;
+        self.total_files = total_files;
+    }
+
+    fn finish(&mut self, status: &'static str) {
+        self.finish_current_phase();
+        self.log(status);
+        self.logged = true;
+    }
+
+    fn finish_current_phase(&mut self) {
+        let Some(phase) = self.current_phase.take() else {
+            return;
+        };
+        let elapsed = self.phase_started_at.elapsed();
+        match phase {
+            TransferPhase::Connect => self.connect += elapsed,
+            TransferPhase::Scan => self.scan += elapsed,
+            TransferPhase::Transfer => self.transfer += elapsed,
+            TransferPhase::Finalize => self.finalize += elapsed,
+        }
+    }
+
+    fn log(&self, status: &'static str) {
+        let record = self.record(status);
+        info!("{record}");
+        #[cfg(test)]
+        TEST_TRANSFER_METRIC_RECORDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(record);
+    }
+
+    fn record(&self, status: &'static str) -> String {
+        let total = self.started_at.elapsed();
+        let throughput_bytes_per_second = throughput_bytes_per_second(self.total_bytes, total);
+        format!(
+            "sftp_transfer_metrics operation={} operation_id={:?} status={} connect_us={} scan_us={} transfer_us={} finalize_us={} total_us={} total_bytes={} file_count={} throughput_bytes_per_second={}",
+            self.operation,
+            self.operation_id,
+            status,
+            self.connect.as_micros(),
+            self.scan.as_micros(),
+            self.transfer.as_micros(),
+            self.finalize.as_micros(),
+            total.as_micros(),
+            self.total_bytes,
+            self.total_files,
+            throughput_bytes_per_second,
+        )
+    }
+}
+
+impl Drop for TransferBatchMetrics {
+    fn drop(&mut self) {
+        if !self.logged {
+            self.finish_current_phase();
+            self.log("failed");
+        }
+    }
+}
+
+fn throughput_bytes_per_second(total_bytes: u64, elapsed: Duration) -> u64 {
+    let elapsed_nanos = elapsed.as_nanos();
+    if total_bytes == 0 || elapsed_nanos == 0 {
+        return 0;
+    }
+    ((u128::from(total_bytes) * 1_000_000_000) / elapsed_nanos).min(u128::from(u64::MAX)) as u64
+}
+
+fn transfer_batch_status(batch: &TransferBatchResult) -> &'static str {
+    let failed = batch
+        .items
+        .iter()
+        .filter(|item| item.status == TransferItemStatus::Failed)
+        .count();
+    if failed == 0 {
+        "completed"
+    } else if failed == batch.items.len() {
+        "failed"
+    } else {
+        "partial"
+    }
+}
 
 pub(crate) fn is_connection_error(error: &RemoteFsError) -> bool {
     let message = match error {
@@ -492,6 +630,7 @@ fn copy_remote_path_inner(
     cancel_flag: Arc<AtomicBool>,
     known_hosts: Option<&Path>,
 ) -> Result<(), RemoteFsError> {
+    let mut metrics = TransferBatchMetrics::new("remote_copy", request.operation_id.clone());
     // Same-host copies hold the connection for the whole (potentially long)
     // recursive walk, so they must not share the pooled connection: passing
     // `pool: None` opens a dedicated connection that is closed on drop, keeping
@@ -501,6 +640,7 @@ fn copy_remote_path_inner(
     let connected = connected
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    metrics.start_phase(TransferPhase::Scan);
     let source_path = Path::new(&request.source_path);
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
@@ -527,14 +667,22 @@ fn copy_remote_path_inner(
         .map_err(|error| RemoteFsError::Other {
             message: format!("failed to stat remote source: {error}"),
         })?;
-    copy_remote_entry_to_path(
+    let mut scan_stats = RemoteCopyScanStats::default();
+    metrics.start_phase(TransferPhase::Transfer);
+    let result = copy_remote_entry_to_path(
         &connected.sftp,
         source_path,
         &destination_path,
         source_stat,
         0,
         &cancel_flag,
-    )
+        &mut scan_stats,
+    );
+    metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
+    result?;
+    metrics.start_phase(TransferPhase::Finalize);
+    metrics.finish("completed");
+    Ok(())
 }
 
 pub(crate) fn upload_local_paths_blocking(
@@ -557,8 +705,8 @@ pub(crate) fn upload_local_paths_blocking(
     result
 }
 
-fn upload_local_paths_inner(
-    app: AppHandle,
+fn upload_local_paths_inner<E: TransferEventEmitter>(
+    emitter: E,
     request: UploadLocalPathsRequest,
     cancel_flag: Arc<AtomicBool>,
     known_hosts: Option<&Path>,
@@ -569,6 +717,8 @@ fn upload_local_paths_inner(
         });
     }
 
+    let mut metrics = TransferBatchMetrics::new("upload", request.operation_id.clone());
+
     // Uploads hold the connection for the whole transfer, so they must not
     // share the pooled connection: passing `pool: None` opens a dedicated
     // connection that is closed on drop, keeping the pooled connection free
@@ -578,6 +728,7 @@ fn upload_local_paths_inner(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
+    metrics.start_phase(TransferPhase::Scan);
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
     if !request.conflict_policies.is_empty()
@@ -593,12 +744,18 @@ fn upload_local_paths_inner(
         scan_stats.combine(scan_local_upload_path(Path::new(local_path), &cancel_flag)?);
     }
 
-    let mut progress =
-        UploadProgressTracker::new(app, request.operation_id.clone(), cancel_flag, scan_stats);
+    let mut progress = UploadProgressTracker::new(
+        emitter,
+        request.operation_id.clone(),
+        cancel_flag,
+        scan_stats,
+    );
     progress
         .emit()
         .map_err(|message| RemoteFsError::Other { message })?;
     let mut existing_names = remote_entry_names(&connected.sftp, destination_directory)?;
+    metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
+    metrics.start_phase(TransferPhase::Transfer);
 
     // A failing entry must not abort the rest of the batch: every entry is
     // attempted and the failures are reported together at the end. Explicit
@@ -646,6 +803,7 @@ fn upload_local_paths_inner(
         }
     }
 
+    metrics.start_phase(TransferPhase::Finalize);
     progress
         .set_current_path(None)
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -654,16 +812,18 @@ fn upload_local_paths_inner(
         return Err(RemoteFsError::Other { message });
     }
 
-    Ok(TransferBatchResult { items })
+    let batch = TransferBatchResult { items };
+    metrics.finish(transfer_batch_status(&batch));
+    Ok(batch)
 }
 
-fn upload_single_local_path(
+fn upload_single_local_path<E: TransferEventEmitter>(
     sftp: &Sftp,
     local_path: &Path,
     destination_directory: &Path,
     conflict_policy: UploadConflictPolicy,
     existing_names: &mut HashSet<String>,
-    progress: &mut UploadProgressTracker,
+    progress: &mut UploadProgressTracker<E>,
 ) -> Result<Option<PathBuf>, RemoteFsError> {
     let file_name = local_path
         .file_name()
@@ -722,8 +882,8 @@ pub(crate) fn download_remote_paths_blocking(
     result
 }
 
-fn download_remote_paths_inner(
-    app: AppHandle,
+fn download_remote_paths_inner<E: TransferEventEmitter>(
+    emitter: E,
     request: DownloadRemotePathsRequest,
     cancel_flag: Arc<AtomicBool>,
     known_hosts: Option<&Path>,
@@ -741,6 +901,8 @@ fn download_remote_paths_inner(
         });
     }
 
+    let mut metrics = TransferBatchMetrics::new("download", request.operation_id.clone());
+
     // Downloads hold the connection for the whole transfer, so they must not
     // share the pooled connection: passing `pool: None` opens a dedicated
     // connection that is closed on drop, keeping the pooled connection free
@@ -750,6 +912,7 @@ fn download_remote_paths_inner(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
+    metrics.start_phase(TransferPhase::Scan);
     let destination_directory = Path::new(&request.destination_directory);
     fs::create_dir_all(destination_directory).map_err(|error| RemoteFsError::Other {
         message: format!("failed to create destination directory: {error}"),
@@ -757,7 +920,7 @@ fn download_remote_paths_inner(
 
     // Emit an initial event so the UI shows activity during the scan phase.
     let mut scanning_progress = DownloadProgressTracker::new(
-        app.clone(),
+        emitter.clone(),
         request.operation_id.clone(),
         cancel_flag.clone(),
         DownloadScanStats::default(),
@@ -784,8 +947,12 @@ fn download_remote_paths_inner(
         )?);
     }
 
-    let mut progress =
-        DownloadProgressTracker::new(app, request.operation_id.clone(), cancel_flag, scan_stats);
+    let mut progress = DownloadProgressTracker::new(
+        emitter,
+        request.operation_id.clone(),
+        cancel_flag,
+        scan_stats,
+    );
     progress
         .emit()
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -795,6 +962,8 @@ fn download_remote_paths_inner(
     // Like the upload loop, a failing entry does not abort the rest of the
     // batch; failures are aggregated and reported at the end.
     let mut reserved_names = local_entry_names(destination_directory);
+    metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
+    metrics.start_phase(TransferPhase::Transfer);
     let mut items: Vec<TransferItemResult> = Vec::new();
     let mut cancel_message: Option<String> = None;
     for (index, remote_path) in request.remote_paths.iter().enumerate() {
@@ -881,6 +1050,7 @@ fn download_remote_paths_inner(
         }
     }
 
+    metrics.start_phase(TransferPhase::Finalize);
     progress
         .set_current_path(None)
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -889,7 +1059,9 @@ fn download_remote_paths_inner(
         return Err(RemoteFsError::Other { message });
     }
 
-    Ok(TransferBatchResult { items })
+    let batch = TransferBatchResult { items };
+    metrics.finish(transfer_batch_status(&batch));
+    Ok(batch)
 }
 
 fn local_entry_names(directory: &Path) -> HashSet<String> {
@@ -987,6 +1159,7 @@ fn scan_remote_download_path(
             let mut stats = DownloadScanStats {
                 total_bytes: 0,
                 total_steps: 1,
+                total_files: 0,
             };
             let entries = sftp
                 .readdir(remote_path)
@@ -1012,20 +1185,22 @@ fn scan_remote_download_path(
             Ok(DownloadScanStats {
                 total_bytes: 0,
                 total_steps: 1,
+                total_files: 1,
             })
         }
         _ => Ok(DownloadScanStats {
             total_bytes: stat.size.unwrap_or(0),
             total_steps: 1,
+            total_files: 1,
         }),
     }
 }
 
-fn download_remote_entry_to_path(
+fn download_remote_entry_to_path<E: TransferEventEmitter>(
     sftp: &Sftp,
     remote_path: &Path,
     local_path: &Path,
-    progress: &mut DownloadProgressTracker,
+    progress: &mut DownloadProgressTracker<E>,
 ) -> Result<(), RemoteFsError> {
     progress
         .ensure_not_cancelled()
@@ -1107,11 +1282,11 @@ fn download_remote_entry_to_path(
     }
 }
 
-fn download_remote_file(
+fn download_remote_file<E: TransferEventEmitter>(
     sftp: &Sftp,
     remote_path: &Path,
     local_path: &Path,
-    progress: &mut DownloadProgressTracker,
+    progress: &mut DownloadProgressTracker<E>,
 ) -> Result<(), RemoteFsError> {
     progress
         .set_current_path(Some(path_to_string(remote_path)))
@@ -1170,8 +1345,8 @@ fn download_remote_file(
     Ok(())
 }
 
-pub(crate) fn copy_remote_to_remote_blocking(
-    app: AppHandle,
+pub(crate) fn copy_remote_to_remote_blocking<E: TransferEventEmitter>(
+    emitter: E,
     request: CopyRemoteToRemoteRequest,
     cancel_flag: Arc<AtomicBool>,
     // Copies run on dedicated connections (pool: None), so the pool is never
@@ -1192,54 +1367,68 @@ pub(crate) fn copy_remote_to_remote_blocking(
         });
     }
 
+    let mut metrics = TransferBatchMetrics::new("remote_copy", request.operation_id.clone());
+
     // Pool keys differ when the same account is expressed with different
     // credentials, so Arc::ptr_eq misses those cases and would skip the
     // copy-into-itself validation. Compare the logical connection target
     // (host, port, username) instead.
-    if is_same_connection_target(&request.source_connection, &request.destination_connection) {
-        // Same-host copies hold the connection for the whole transfer, so they
-        // must not share the pooled connection: passing `pool: None` opens a
-        // dedicated connection that is closed on drop, keeping the pooled
-        // connection free for other operations while the copy runs. The single
-        // connection serves as both source and destination.
-        let connected = connect_sftp(&request.source_connection, None, known_hosts)?;
-        let connected = connected
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
-        return copy_remote_to_remote_with_sftp(
-            app,
-            request,
-            cancel_flag,
-            &connected.sftp,
-            &connected.sftp,
-            true,
-        );
-    }
-    // Cross-host copies hold both connections for the whole transfer, so each
-    // side gets a dedicated connection (see above) instead of a pooled one.
-    let source = connect_sftp(&request.source_connection, None, known_hosts)?;
-    let destination = connect_sftp(&request.destination_connection, None, known_hosts)?;
-    // These dedicated connections are created above and never shared, so no
-    // other code can hold their locks: no stable ordering is needed to avoid
-    // the ABBA deadlock that pooled connections required. Lock source, then
-    // destination.
-    let source = source
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let destination = destination
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let _source_transfer_timeout = TransferTimeoutGuard::new(&source.session);
-    let _destination_transfer_timeout = TransferTimeoutGuard::new(&destination.session);
-    copy_remote_to_remote_with_sftp(
-        app,
-        request,
-        cancel_flag,
-        &source.sftp,
-        &destination.sftp,
-        false,
-    )
+    let result =
+        if is_same_connection_target(&request.source_connection, &request.destination_connection) {
+            // Same-host copies hold the connection for the whole transfer, so they
+            // must not share the pooled connection: passing `pool: None` opens a
+            // dedicated connection that is closed on drop, keeping the pooled
+            // connection free for other operations while the copy runs. The single
+            // connection serves as both source and destination.
+            let connected = connect_sftp(&request.source_connection, None, known_hosts)?;
+            let connected = connected
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
+            metrics.start_phase(TransferPhase::Scan);
+            copy_remote_to_remote_with_sftp(
+                emitter,
+                request,
+                cancel_flag,
+                &connected.sftp,
+                &connected.sftp,
+                true,
+                &mut metrics,
+            )
+        } else {
+            // Cross-host copies hold both connections for the whole transfer, so each
+            // side gets a dedicated connection (see above) instead of a pooled one.
+            let source = connect_sftp(&request.source_connection, None, known_hosts)?;
+            let destination = connect_sftp(&request.destination_connection, None, known_hosts)?;
+            // These dedicated connections are created above and never shared, so no
+            // other code can hold their locks: no stable ordering is needed to avoid
+            // the ABBA deadlock that pooled connections required. Lock source, then
+            // destination.
+            let source = source
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let destination = destination
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _source_transfer_timeout = TransferTimeoutGuard::new(&source.session);
+            let _destination_transfer_timeout = TransferTimeoutGuard::new(&destination.session);
+            metrics.start_phase(TransferPhase::Scan);
+            copy_remote_to_remote_with_sftp(
+                emitter,
+                request,
+                cancel_flag,
+                &source.sftp,
+                &destination.sftp,
+                false,
+                &mut metrics,
+            )
+        };
+    metrics.finish(if result.is_ok() {
+        "completed"
+    } else {
+        "failed"
+    });
+    result
 }
 
 struct RemoteCopyTask {
@@ -1248,13 +1437,14 @@ struct RemoteCopyTask {
     allow_overwrite: bool,
 }
 
-fn copy_remote_to_remote_with_sftp(
-    app: AppHandle,
+fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
+    emitter: E,
     request: CopyRemoteToRemoteRequest,
     cancel_flag: Arc<AtomicBool>,
     source: &Sftp,
     destination: &Sftp,
     same_connection: bool,
+    metrics: &mut TransferBatchMetrics,
 ) -> Result<(), RemoteFsError> {
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(destination, destination_directory)?;
@@ -1324,8 +1514,11 @@ fn copy_remote_to_remote_with_sftp(
         });
     }
 
+    metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
+    metrics.start_phase(TransferPhase::Transfer);
+
     let mut progress =
-        RemoteCopyProgressTracker::new(app, request.operation_id, cancel_flag, scan_stats);
+        RemoteCopyProgressTracker::new(emitter, request.operation_id, cancel_flag, scan_stats);
     progress
         .emit()
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -1344,6 +1537,7 @@ fn copy_remote_to_remote_with_sftp(
         )?;
     }
 
+    metrics.start_phase(TransferPhase::Finalize);
     progress
         .set_current_path(None)
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -1375,6 +1569,7 @@ fn scan_remote_copy_path(
             0
         },
         total_steps: 1,
+        total_files: u64::from(kind != RemoteFileKind::Directory),
     };
     if kind == RemoteFileKind::Directory {
         for (child_path, _) in
@@ -1450,13 +1645,13 @@ fn validate_same_connection_copy_destination(
     Ok(())
 }
 
-fn copy_remote_entry_between(
+fn copy_remote_entry_between<E: TransferEventEmitter>(
     source: &Sftp,
     destination: &Sftp,
     source_path: &Path,
     destination_path: &Path,
     allow_overwrite: bool,
-    progress: &mut RemoteCopyProgressTracker,
+    progress: &mut RemoteCopyProgressTracker<E>,
 ) -> Result<(), RemoteFsError> {
     progress
         .ensure_not_cancelled()
@@ -1562,14 +1757,14 @@ fn copy_remote_entry_between(
 /// renamed into place only after every byte is written: an interrupted copy
 /// never leaves a partial file under the real name, and a leftover temp file
 /// doubles as the resume point for retries and later copies of the same name.
-fn copy_remote_file_between(
+fn copy_remote_file_between<E: TransferEventEmitter>(
     source: &Sftp,
     destination: &Sftp,
     source_path: &Path,
     destination_path: &Path,
     source_stat: &FileStat,
     allow_overwrite: bool,
-    progress: &mut RemoteCopyProgressTracker,
+    progress: &mut RemoteCopyProgressTracker<E>,
 ) -> Result<(), RemoteFsError> {
     let temp_path = remote_copy_temp_path(destination_path);
     let source_size = source_stat.size.unwrap_or(0);
@@ -1653,7 +1848,7 @@ fn copy_remote_file_between(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn copy_remote_file_attempt(
+fn copy_remote_file_attempt<E: TransferEventEmitter>(
     source: &Sftp,
     destination: &Sftp,
     source_path: &Path,
@@ -1661,7 +1856,7 @@ fn copy_remote_file_attempt(
     temp_path: &Path,
     source_size: u64,
     source_perm: Option<u32>,
-    progress: &mut RemoteCopyProgressTracker,
+    progress: &mut RemoteCopyProgressTracker<E>,
     credited: &mut u64,
 ) -> Result<(), RemoteFsError> {
     let temp_size = destination.stat(temp_path).ok().and_then(|stat| stat.size);
@@ -1752,9 +1947,9 @@ fn copy_remote_file_attempt(
 }
 
 /// Backoff between copy attempts, sliced so cancellation stays responsive.
-fn sleep_remote_copy_retry_backoff(
+fn sleep_remote_copy_retry_backoff<E: TransferEventEmitter>(
     attempt: u32,
-    progress: &RemoteCopyProgressTracker,
+    progress: &RemoteCopyProgressTracker<E>,
 ) -> Result<(), String> {
     let mut remaining = Duration::from_millis(REMOTE_COPY_RETRY_BACKOFF_BASE_MS << (attempt - 1));
     while !remaining.is_zero() {
@@ -2689,9 +2884,18 @@ fn copy_remote_entry_to_path(
     source_stat: FileStat,
     depth: u32,
     cancel_flag: &Arc<AtomicBool>,
+    scan_stats: &mut RemoteCopyScanStats,
 ) -> Result<(), RemoteFsError> {
     ensure_remote_recursion_depth(depth)?;
-    match kind_from_permissions(source_stat.perm) {
+    let kind = kind_from_permissions(source_stat.perm);
+    scan_stats.total_steps += 1;
+    if kind != RemoteFileKind::Directory {
+        scan_stats.total_files += 1;
+    }
+    if kind == RemoteFileKind::File {
+        scan_stats.total_bytes += source_stat.size.unwrap_or(0);
+    }
+    match kind {
         RemoteFileKind::Directory => {
             if destination_path.starts_with(source_path) {
                 return Err(RemoteFsError::Other {
@@ -2721,6 +2925,7 @@ fn copy_remote_entry_to_path(
                     child_stat,
                     depth + 1,
                     cancel_flag,
+                    scan_stats,
                 )?;
             }
             Ok(())
@@ -2932,6 +3137,7 @@ fn scan_local_upload_path(
         let mut stats = UploadScanStats {
             total_bytes: 0,
             total_steps: 1,
+            total_files: 0,
         };
         let entries = fs::read_dir(local_path).map_err(|error| RemoteFsError::Other {
             message: format!("failed to read local directory: {error}"),
@@ -2954,6 +3160,7 @@ fn scan_local_upload_path(
         return Ok(UploadScanStats {
             total_bytes: metadata.len(),
             total_steps: 1,
+            total_files: 1,
         });
     }
 
@@ -2977,12 +3184,12 @@ fn is_private_key_file(path: &std::path::Path) -> bool {
         || name == "id_dsa"
 }
 
-fn upload_local_entry_to_path(
+fn upload_local_entry_to_path<E: TransferEventEmitter>(
     sftp: &Sftp,
     local_path: &Path,
     remote_path: &Path,
     conflict_policy: UploadConflictPolicy,
-    progress: &mut UploadProgressTracker,
+    progress: &mut UploadProgressTracker<E>,
 ) -> Result<(), RemoteFsError> {
     progress
         .ensure_not_cancelled()
@@ -3058,14 +3265,14 @@ fn upload_local_entry_to_path(
     })
 }
 
-fn upload_regular_file(
+fn upload_regular_file<E: TransferEventEmitter>(
     sftp: &Sftp,
     local_path: &Path,
     remote_path: &Path,
     expected_size: u64,
     upload_mode: i32,
     conflict_policy: UploadConflictPolicy,
-    progress: &mut UploadProgressTracker,
+    progress: &mut UploadProgressTracker<E>,
 ) -> Result<(), RemoteFsError> {
     // Stage uploads through a hidden temp file and rename only after every byte
     // is written and verified. A cancelled or failed upload never leaves a
@@ -3187,13 +3394,13 @@ fn rollback_upload_backup(sftp: &Sftp, backup_path: Option<&Path>, remote_path: 
     }
 }
 
-fn upload_regular_file_to_temp(
+fn upload_regular_file_to_temp<E: TransferEventEmitter>(
     sftp: &Sftp,
     local_path: &Path,
     temp_path: &Path,
     expected_size: u64,
     upload_mode: i32,
-    progress: &mut UploadProgressTracker,
+    progress: &mut UploadProgressTracker<E>,
 ) -> Result<(), RemoteFsError> {
     let mut local_file = fs::File::open(local_path).map_err(|error| RemoteFsError::Other {
         message: format!("failed to open local file: {error}"),
@@ -3364,6 +3571,60 @@ fn open_path_with_default_app(path: &Path) -> Result<(), RemoteFsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Copy)]
+    struct NoopTransferEventEmitter;
+
+    impl TransferEventEmitter for NoopTransferEventEmitter {
+        fn emit_transfer_event<S>(&self, _event: &str, _payload: S) -> Result<(), String>
+        where
+            S: serde::Serialize + Clone,
+        {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn transfer_metric_record_contains_every_batch_field_without_connection_secrets() {
+        let mut metrics = TransferBatchMetrics::new("upload", "metric-test-operation".to_string());
+        metrics.connect = Duration::from_micros(11);
+        metrics.scan = Duration::from_micros(22);
+        metrics.transfer = Duration::from_micros(33);
+        metrics.finalize = Duration::from_micros(44);
+        metrics.set_inventory(1_024, 7);
+
+        let record = metrics.record("completed");
+        metrics.logged = true;
+
+        for field in [
+            "operation=upload",
+            "operation_id=\"metric-test-operation\"",
+            "status=completed",
+            "connect_us=11",
+            "scan_us=22",
+            "transfer_us=33",
+            "finalize_us=44",
+            "total_us=",
+            "total_bytes=1024",
+            "file_count=7",
+            "throughput_bytes_per_second=",
+        ] {
+            assert!(record.contains(field), "missing {field} in {record}");
+        }
+        for secret_field in ["password", "passphrase", "private_key_data"] {
+            assert!(!record.contains(secret_field));
+        }
+    }
+
+    #[test]
+    fn transfer_throughput_uses_end_to_end_elapsed_time() {
+        assert_eq!(
+            throughput_bytes_per_second(8 * 1024 * 1024, Duration::from_secs(2)),
+            4 * 1024 * 1024
+        );
+        assert_eq!(throughput_bytes_per_second(0, Duration::from_secs(2)), 0);
+        assert_eq!(throughput_bytes_per_second(100, Duration::ZERO), 0);
+    }
 
     #[test]
     fn preview_text_decoder_accepts_utf8_and_utf16_bom() {
@@ -3997,5 +4258,271 @@ mod tests {
             "expected a cancellation error, got {error:?}"
         );
         fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[test]
+    fn local_upload_scan_reports_file_count_and_bytes() {
+        let directory = tempfile::tempdir().expect("create scan fixture");
+        fs::create_dir(directory.path().join("nested")).expect("create nested fixture directory");
+        fs::write(directory.path().join("first.bin"), [1_u8; 3]).expect("write first fixture");
+        fs::write(directory.path().join("nested/second.bin"), [2_u8; 5])
+            .expect("write second fixture");
+
+        let stats = scan_local_upload_path(directory.path(), &Arc::new(AtomicBool::new(false)))
+            .expect("scan fixture");
+
+        assert_eq!(stats.total_bytes, 8);
+        assert_eq!(stats.total_files, 2);
+        assert_eq!(stats.total_steps, 4);
+    }
+
+    fn benchmark_env_u64(name: &str, default: u64) -> u64 {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(default)
+    }
+
+    fn write_benchmark_file(path: &Path, size: u64) {
+        let mut file = fs::File::create(path).expect("create benchmark file");
+        let chunk = (0..64 * 1024)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        let mut remaining = size;
+        while remaining > 0 {
+            let count = remaining.min(chunk.len() as u64) as usize;
+            file.write_all(&chunk[..count])
+                .expect("write benchmark file");
+            remaining -= count as u64;
+        }
+        file.flush().expect("flush benchmark file");
+    }
+
+    fn local_benchmark_inventory(path: &Path) -> (u64, u64) {
+        let metadata = fs::metadata(path).expect("read downloaded benchmark metadata");
+        if metadata.is_file() {
+            return (metadata.len(), 1);
+        }
+        let mut total_bytes = 0;
+        let mut total_files = 0;
+        for entry in fs::read_dir(path).expect("read downloaded benchmark directory") {
+            let (bytes, files) =
+                local_benchmark_inventory(&entry.expect("read benchmark entry").path());
+            total_bytes += bytes;
+            total_files += files;
+        }
+        (total_bytes, total_files)
+    }
+
+    fn take_transfer_metric(operation_id: &str) -> String {
+        let mut records = TEST_TRANSFER_METRIC_RECORDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let index = records
+            .iter()
+            .position(|record| record.contains(operation_id))
+            .unwrap_or_else(|| panic!("missing transfer metrics for {operation_id}"));
+        records.remove(index)
+    }
+
+    fn assert_benchmark_metric(
+        record: &str,
+        operation: &str,
+        password: &str,
+        total_bytes: u64,
+        total_files: u64,
+    ) {
+        for field in [
+            format!("operation={operation}"),
+            "status=completed".to_string(),
+            "connect_us=".to_string(),
+            "scan_us=".to_string(),
+            "transfer_us=".to_string(),
+            "finalize_us=".to_string(),
+            "total_us=".to_string(),
+            format!("total_bytes={total_bytes}"),
+            format!("file_count={total_files}"),
+            "throughput_bytes_per_second=".to_string(),
+        ] {
+            assert!(record.contains(&field), "missing {field} in {record}");
+        }
+        assert!(
+            !record.contains(password),
+            "transfer metrics must not contain credentials"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service and is run by scripts/run-sftp-benchmark.ps1"]
+    fn isolated_sftp_transfer_benchmark() {
+        let host =
+            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(22222);
+        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
+            .unwrap_or_else(|_| "termbridge".to_string());
+        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
+            .unwrap_or_else(|_| "termbridge-e2e".to_string());
+        let iterations = benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_ITERATIONS", 3);
+        let large_bytes = benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_LARGE_BYTES", 16 * 1024 * 1024);
+        let small_file_count = benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_SMALL_FILE_COUNT", 128);
+        let small_file_bytes =
+            benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_SMALL_FILE_BYTES", 4 * 1024);
+        let connection = RemoteConnectionRequest {
+            host: host.clone(),
+            port,
+            username,
+            auth_method: crate::models::AuthMethod::Password,
+            password: Some(password.clone()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let (_known_hosts_temp, known_hosts) =
+            crate::connection::trusted_known_hosts_fixture(&host, port);
+        let local_root = tempfile::tempdir().expect("create benchmark workspace");
+        let remote_root = format!(
+            "/home/termbridge/upload/termbridge-benchmark-{}",
+            Uuid::new_v4()
+        );
+        let emitter = NoopTransferEventEmitter;
+        TEST_TRANSFER_METRIC_RECORDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+
+        let large_path = local_root.path().join("large.bin");
+        write_benchmark_file(&large_path, large_bytes);
+        let small_directory = local_root.path().join("small-files");
+        fs::create_dir(&small_directory).expect("create small-file benchmark directory");
+        for index in 0..small_file_count {
+            write_benchmark_file(
+                &small_directory.join(format!("file-{index:04}.bin")),
+                small_file_bytes,
+            );
+        }
+
+        for (scenario, local_path, source_name, total_bytes, total_files) in [
+            (
+                "large-file",
+                large_path.as_path(),
+                "large.bin",
+                large_bytes,
+                1,
+            ),
+            (
+                "many-small-files",
+                small_directory.as_path(),
+                "small-files",
+                small_file_count * small_file_bytes,
+                small_file_count,
+            ),
+        ] {
+            for iteration in 1..=iterations {
+                let case_root = format!("{remote_root}/{scenario}/{iteration}");
+                let upload_directory = format!("{case_root}/upload");
+                let copy_directory = format!("{case_root}/copy");
+                let uploaded_path = format!("{upload_directory}/{source_name}");
+                let copied_path = format!("{copy_directory}/{source_name}");
+                let download_directory = local_root
+                    .path()
+                    .join(format!("download-{scenario}-{iteration}"));
+                let id_prefix = format!("sftp-benchmark-{scenario}-{iteration}");
+                let upload_id = format!("{id_prefix}-upload");
+                let copy_id = format!("{id_prefix}-copy");
+                let download_id = format!("{id_prefix}-download");
+
+                let upload = upload_local_paths_inner(
+                    emitter,
+                    UploadLocalPathsRequest {
+                        connection: connection.clone(),
+                        destination_directory: upload_directory,
+                        local_paths: vec![path_to_string(local_path)],
+                        conflict_policies: Vec::new(),
+                        operation_id: upload_id.clone(),
+                    },
+                    Arc::new(AtomicBool::new(false)),
+                    Some(&known_hosts),
+                )
+                .expect("benchmark upload should succeed");
+                assert!(
+                    upload
+                        .items
+                        .iter()
+                        .all(|item| item.status == TransferItemStatus::Completed),
+                    "every benchmark upload item should complete"
+                );
+
+                copy_remote_to_remote_blocking(
+                    emitter,
+                    CopyRemoteToRemoteRequest {
+                        source_connection: connection.clone(),
+                        destination_connection: connection.clone(),
+                        source_paths: vec![uploaded_path],
+                        destination_directory: copy_directory,
+                        conflict_policies: Vec::new(),
+                        operation_id: copy_id.clone(),
+                    },
+                    Arc::new(AtomicBool::new(false)),
+                    None,
+                    Some(&known_hosts),
+                )
+                .expect("benchmark remote copy should succeed");
+
+                let download = download_remote_paths_inner(
+                    emitter,
+                    DownloadRemotePathsRequest {
+                        connection: connection.clone(),
+                        remote_paths: vec![copied_path],
+                        destination_directory: path_to_string(&download_directory),
+                        conflict_policies: Vec::new(),
+                        operation_id: download_id.clone(),
+                    },
+                    Arc::new(AtomicBool::new(false)),
+                    Some(&known_hosts),
+                )
+                .expect("benchmark download should succeed");
+                assert!(
+                    download
+                        .items
+                        .iter()
+                        .all(|item| item.status == TransferItemStatus::Completed),
+                    "every benchmark download item should complete"
+                );
+                assert_eq!(
+                    local_benchmark_inventory(&download_directory.join(source_name)),
+                    (total_bytes, total_files),
+                    "downloaded benchmark inventory should match the source"
+                );
+
+                for (operation_id, operation) in [
+                    (&upload_id, "upload"),
+                    (&copy_id, "remote_copy"),
+                    (&download_id, "download"),
+                ] {
+                    let record = take_transfer_metric(operation_id);
+                    assert_benchmark_metric(
+                        &record,
+                        operation,
+                        &password,
+                        total_bytes,
+                        total_files,
+                    );
+                    println!("SFTP_BENCHMARK scenario={scenario} iteration={iteration} {record}");
+                }
+            }
+        }
+
+        let connected = connect_sftp(&connection, None, Some(&known_hosts))
+            .expect("connect for benchmark cleanup");
+        let connected = connected
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        remove_remote_entry_simple(&connected.sftp, Path::new(&remote_root))
+            .expect("remove remote benchmark fixtures");
     }
 }
