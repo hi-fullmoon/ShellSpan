@@ -469,7 +469,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 variant="ghost"
                 size="icon"
                 onClick={onOpenTerminal}
-                className="h-[24px] w-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
+                className="size-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
                 aria-label={t('sftp.openTerminalHere')}
               >
                 <SquareTerminalIcon />
@@ -485,8 +485,10 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               )}
             >
               <div className="flex h-full w-56 items-center">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => {
                     if (showSearch) {
                       setShowSearch(false);
@@ -496,13 +498,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                     }
                   }}
                   className={cn(
-                    'h-7 w-7 shrink-0 flex items-center justify-center rounded',
+                    'size-7 shrink-0 rounded',
                     showSearch ? 'text-app-text hover:bg-app-border/50' : 'text-app-text-soft hover:bg-app-border/50 hover:text-app-text',
                   )}
                   aria-label={showSearch ? t('sftp.hideFilter') : t('sftp.showFilter')}
                 >
-                  <SearchIcon className="h-3.5 w-3.5" />
-                </button>
+                  <SearchIcon />
+                </Button>
                 <div
                   className={cn(
                     'flex min-w-0 flex-1 items-center transition-opacity duration-150',
