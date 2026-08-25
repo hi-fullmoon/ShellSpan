@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
-import { NewTabMenu } from '../new-tab-menu';
+import { NewSessionDialog } from '../new-session-dialog';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
@@ -41,7 +41,7 @@ function makeProfile(
   };
 }
 
-describe('NewTabMenu', () => {
+describe('NewSessionDialog', () => {
   beforeEach(() => {
     useProfileStore.setState(initialProfile, true);
     useAppStore.setState(initialApp, true);
@@ -62,7 +62,7 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [p1, p2] });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
 
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [profile] });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
 
     const row = screen.getByRole('button', { name: 'Alpha' });
     fireEvent.click(row, { detail: 1 });
@@ -98,9 +98,9 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [p1, p2, p3] });
     useRecentProfilesStore.setState({ recentIds: ['p3', 'p2'] });
 
-    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={vi.fn()} onConnect={mockConnect} />);
 
-    const section = screen.getByText('terminal.newTabMenu.recentConnections');
+    const section = screen.getByText('terminal.newSession.recentConnections');
     expect(section).toBeInTheDocument();
 
     const buttons = screen.getAllByRole('button', { name: /^(Alpha|Beta|Gamma)$/ });
@@ -114,10 +114,10 @@ describe('NewTabMenu', () => {
     const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
     useProfileStore.setState({ profiles: [p1, p2] });
 
-    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={vi.fn()} onConnect={mockConnect} />);
 
     const searchInput = screen.getByPlaceholderText(
-      'terminal.newTabMenu.searchPlaceholder',
+      'terminal.newSession.searchPlaceholder',
     );
     fireEvent.change(searchInput, { target: { value: 'beta' } });
 
@@ -130,15 +130,15 @@ describe('NewTabMenu', () => {
       profiles: [makeProfile('p1', 'Alpha', 'host1.io', 'user1')],
     });
 
-    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={vi.fn()} onConnect={mockConnect} />);
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'terminal.newTabMenu.title' }),
+      screen.getByRole('heading', { name: 'terminal.newSession.title' }),
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(
-        screen.getByPlaceholderText('terminal.newTabMenu.searchPlaceholder'),
+        screen.getByPlaceholderText('terminal.newSession.searchPlaceholder'),
       ).toHaveFocus();
     });
   });
@@ -149,7 +149,7 @@ describe('NewTabMenu', () => {
     useProfileStore.setState({ profiles: [p1, p2] });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
 
     fireEvent.keyDown(document, { key: 'ArrowDown' });
     fireEvent.keyDown(document, { key: 'Enter' });
@@ -166,7 +166,7 @@ describe('NewTabMenu', () => {
     const onClose = vi.fn();
 
     render(
-      <NewTabMenu
+      <NewSessionDialog
         open
         onClose={onClose}
         onConnect={mockConnect}
@@ -174,7 +174,7 @@ describe('NewTabMenu', () => {
       />,
     );
 
-    expect(screen.getByText('terminal.newTabMenu.localTerminal')).toBeInTheDocument();
+    expect(screen.getByText('terminal.newSession.localTerminal')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'n', ctrlKey: true });
     fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
     fireEvent.keyDown(document, { key: 'Enter' });
@@ -189,7 +189,7 @@ describe('NewTabMenu', () => {
     const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');
     useProfileStore.setState({ profiles: [p1, p2] });
 
-    render(<NewTabMenu open onClose={vi.fn()} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={vi.fn()} onConnect={mockConnect} />);
 
     fireEvent.keyDown(document, { key: 'ArrowUp' });
     fireEvent.keyDown(document, { key: 'Enter' });
@@ -201,9 +201,9 @@ describe('NewTabMenu', () => {
     const profile = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
     useProfileStore.setState({ profiles: [profile] });
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
     const workbenchButton = screen.getByRole('button', {
-      name: 'terminal.newTabMenu.openWorkbench',
+      name: 'terminal.newSession.manageConnections',
     });
     workbenchButton.focus();
 
@@ -215,19 +215,19 @@ describe('NewTabMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the empty hint and opens workbench from footer when no profiles', () => {
+  it('shows the empty hint and opens the connection manager from the footer', () => {
     useProfileStore.setState({ profiles: [] });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
 
-    expect(screen.getByText('terminal.tab.noProfiles')).toBeInTheDocument();
+    expect(screen.getByText('terminal.newSession.noSearchResults')).toBeInTheDocument();
     expect(
-      screen.getByText('terminal.newTabMenu.openWorkbenchHint'),
+      screen.getByText('terminal.newSession.noSearchResultsHint'),
     ).toBeInTheDocument();
 
     const workbenchButton = screen.getByRole('button', {
-      name: 'terminal.newTabMenu.openWorkbench',
+      name: 'terminal.newSession.manageConnections',
     });
     expect(workbenchButton).toBeInTheDocument();
 
@@ -238,9 +238,26 @@ describe('NewTabMenu', () => {
     expect(mockConnect).not.toHaveBeenCalled();
   });
 
+  it('routes a new SSH connection request to the workbench form', () => {
+    useAppStore.getState().setActiveSection('terminal');
+    const onClose = vi.fn();
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'terminal.newSession.createConnection',
+    }));
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeSection: 'workbench',
+      activeWorkbenchTab: 'connections',
+      pendingWorkbenchAction: 'newConnection',
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('renders nothing when open is false', () => {
     const { container } = render(
-      <NewTabMenu open={false} onClose={vi.fn()} onConnect={mockConnect} />,
+      <NewSessionDialog open={false} onClose={vi.fn()} onConnect={mockConnect} />,
     );
     expect(container.firstChild).toBeNull();
   });
@@ -251,7 +268,7 @@ describe('NewTabMenu', () => {
     });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
 
     const backdrop = document.body.querySelector('[role="presentation"]') as HTMLElement;
     expect(backdrop).not.toBeNull();
@@ -267,7 +284,7 @@ describe('NewTabMenu', () => {
     });
 
     const onClose = vi.fn();
-    render(<NewTabMenu open onClose={onClose} onConnect={mockConnect} />);
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
 
     fireEvent.keyDown(document, { key: 'Escape' });
 

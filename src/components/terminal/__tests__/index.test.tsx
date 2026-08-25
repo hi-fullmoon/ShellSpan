@@ -37,8 +37,8 @@ vi.mock('../terminal-pane', () => ({
   ),
 }));
 
-vi.mock('../new-tab-menu', () => ({
-  NewTabMenu: ({
+vi.mock('../new-session-dialog', () => ({
+  NewSessionDialog: ({
     open,
     onConnect,
   }: {
@@ -48,10 +48,10 @@ vi.mock('../new-tab-menu', () => ({
     open ? (
       <button
         type="button"
-        data-testid="new-tab-menu"
+        data-testid="new-session-dialog"
         onClick={() => void onConnect({ id: 'p1' })}
       >
-        NewTabMenu
+        NewSessionDialog
       </button>
     ) : null,
 }));
@@ -98,43 +98,43 @@ describe('Terminal', () => {
     ).toBeInTheDocument();
   });
 
-  it('opens the new tab menu when the empty-state new-connection button is clicked', () => {
+  it('opens the new session dialog when the empty-state new-connection button is clicked', () => {
     render(<Terminal />);
 
-    expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('new-session-dialog')).not.toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'terminal.empty.open' }),
     );
 
-    expect(screen.getByTestId('new-tab-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('new-session-dialog')).toBeInTheDocument();
   });
 
-  it('passes the dialog-owning connection callback to the new tab menu', () => {
+  it('passes the dialog-owning connection callback to the new session dialog', () => {
     render(<Terminal />);
 
     fireEvent.click(
       screen.getByRole('button', { name: 'terminal.empty.open' }),
     );
-    fireEvent.click(screen.getByTestId('new-tab-menu'));
+    fireEvent.click(screen.getByTestId('new-session-dialog'));
 
     expect(mockConnect).toHaveBeenCalledWith({ id: 'p1' });
   });
 
-  it('toggles the new tab menu via the new-terminal-tab event', () => {
+  it('toggles the new session dialog via the new-terminal-tab event', () => {
     render(<Terminal />);
 
-    expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('new-session-dialog')).not.toBeInTheDocument();
 
     act(() => {
       document.dispatchEvent(new Event('termbridge:new-terminal-tab'));
     });
-    expect(screen.getByTestId('new-tab-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('new-session-dialog')).toBeInTheDocument();
 
     act(() => {
       document.dispatchEvent(new Event('termbridge:new-terminal-tab'));
     });
-    expect(screen.queryByTestId('new-tab-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('new-session-dialog')).not.toBeInTheDocument();
   });
 
   it('renders the terminal pane when there is an active session', () => {
