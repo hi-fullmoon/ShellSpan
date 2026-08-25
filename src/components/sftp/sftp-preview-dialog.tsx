@@ -379,7 +379,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
           }
           description={displayTarget.path}
         />
-        <SftpDialogBody className="min-h-0 gap-0 overflow-hidden border-t p-0">
+        <SftpDialogBody className="min-h-0 gap-0 overflow-hidden p-0">
           <div className="flex min-h-11 items-center gap-2 px-3">
             <Badge variant="secondary">{extensionLabel}</Badge>
             <span className="text-xs text-muted-foreground">{kindLabel}</span>
