@@ -53,6 +53,8 @@ describe('SftpPreviewDialog', () => {
     expect(screen.getByText('/srv/readme.txt')).toBeInTheDocument();
     expect(screen.getByText('2 lines')).toBeInTheDocument();
     expect(document.querySelector('pre')).toHaveTextContent(/first\s+second/);
+    const dialogHeader = document.querySelector('[data-slot="dialog-header"]');
+    expect(dialogHeader?.nextElementSibling).not.toHaveClass('border-t');
     const metadataSeparator = document.querySelector(
       '[data-slot="separator"][data-orientation="vertical"]',
     );
