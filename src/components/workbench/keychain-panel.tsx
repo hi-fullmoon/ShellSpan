@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { KeyRound, Lock, SearchIcon, SearchXIcon, Trash2Icon, PencilIcon, CopyIcon, FileKey, UploadCloud } from 'lucide-react';
+import { KeyRound, Lock, SearchXIcon, Trash2Icon, PencilIcon, CopyIcon, FileKey, UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -23,7 +23,7 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
-  WORKBENCH_SEARCH_WIDTH_CLASS,
+  WorkbenchSearchInput,
 } from './workbench-page';
 
 interface KeyFormState {
@@ -187,16 +187,12 @@ export const KeychainPanel: React.FC = () => {
           })}
           actions={(
             <>
-              <div className={`relative min-w-0 ${WORKBENCH_SEARCH_WIDTH_CLASS}`}>
-                <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t('workbench.keychain.searchPlaceholder')}
-                  aria-label={t('workbench.keychain.searchPlaceholder')}
-                  className="h-8 pl-7"
-                />
-              </div>
+              <WorkbenchSearchInput
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('workbench.keychain.searchPlaceholder')}
+                aria-label={t('workbench.keychain.searchPlaceholder')}
+              />
               <Button variant="outline" size="sm" onClick={hydrate}>
                 {t('common.refresh')}
               </Button>
