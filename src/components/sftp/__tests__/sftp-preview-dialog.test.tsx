@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { strToU8, zipSync } from 'fflate';
 import { SftpPreviewDialog } from '../sftp-preview-dialog';
 import type { ReadRemoteFileResponse } from '@/types';
 
@@ -20,6 +21,12 @@ const response = (overrides: Partial<ReadRemoteFileResponse> = {}): ReadRemoteFi
   truncated: false,
   ...overrides,
 });
+
+const toBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+};
 
 describe('SftpPreviewDialog', () => {
   it('opens immediately with a loading state before remote content arrives', () => {
@@ -64,6 +71,76 @@ describe('SftpPreviewDialog', () => {
     expect(onOpenExternally).toHaveBeenCalledWith('/srv/readme.txt');
   });
 
+  it('renders Markdown as a document with a source view', () => {
+    render(
+      <SftpPreviewDialog
+        open
+        content={response({ name: 'guide.md', path: '/srv/guide.md', content: '# Deploy guide\n\nReady.' })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Deploy guide' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'sftp.preview.view.preview' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'sftp.preview.view.source' })).toBeInTheDocument();
+  });
+
+  it('renders CSV files as a table', () => {
+    render(
+      <SftpPreviewDialog
+        open
+        content={response({ name: 'hosts.csv', path: '/srv/hosts.csv', content: 'host,port\nweb-01,22\ndb-01,5432' })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('columnheader', { name: 'host' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'port' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'web-01' })).toBeInTheDocument();
+  });
+
+  it('renders a ZIP archive as a file listing', () => {
+    const archive = zipSync({ 'logs/app.log': strToU8('ok') });
+    render(
+      <SftpPreviewDialog
+        open
+        content={response({
+          name: 'bundle.zip',
+          path: '/srv/bundle.zip',
+          content: toBase64(archive),
+          size: archive.length,
+          isText: false,
+          contentEncoding: 'base64',
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('logs/app.log')).toBeInTheDocument();
+    expect(screen.queryByText('sftp.preview.archiveTitle')).not.toBeInTheDocument();
+  });
+
+  it('renders extracted legacy DOC text as a document instead of hexadecimal data', async () => {
+    render(
+      <SftpPreviewDialog
+        open
+        content={response({
+          name: 'overtime.doc',
+          path: '/srv/overtime.doc',
+          content: 'Overtime request\nName\tAda\nApproved',
+          size: 50 * 1024,
+          isText: true,
+          contentEncoding: 'utf8',
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Overtime request' })).toBeInTheDocument();
+    expect(await screen.findByText((_content, element) => element?.textContent === 'Name\tAda')).toHaveClass('whitespace-pre-wrap');
+    expect(screen.queryByText('sftp.preview.binaryTitle')).not.toBeInTheDocument();
+  });
+
   it('renders image data with the correct MIME type', () => {
     render(
       <SftpPreviewDialog
@@ -85,6 +162,27 @@ describe('SftpPreviewDialog', () => {
       'data:image/png;base64,iVBORw0KGgo=',
     );
     expect(screen.getByText('PNG')).toBeInTheDocument();
+  });
+
+  it('stretches PDF previews through the remaining dialog height', () => {
+    render(
+      <SftpPreviewDialog
+        open
+        content={response({
+          path: '/srv/manual.pdf',
+          name: 'manual.pdf',
+          content: 'JVBERi0xLjQ=',
+          size: 8,
+          isText: false,
+          contentEncoding: 'base64',
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const frame = screen.getByTitle('manual.pdf');
+    expect(frame).toHaveClass('min-h-0', 'w-full', 'flex-1');
+    expect(frame.parentElement).toHaveClass('min-h-0', 'flex-1', 'overflow-hidden');
   });
 
   it('renders UTF-8 SVG content as an encoded image source', () => {

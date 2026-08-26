@@ -165,6 +165,7 @@ export function parseDelimitedTable(content: string, delimiter: ',' | '\t'): Tab
 }
 
 function readZipEntries(bytes: Uint8Array): ArchivePreviewEntry[] | undefined {
+  if (bytes.length < 22) return undefined;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const minimumOffset = Math.max(0, bytes.length - 65_557);
   let endOffset = -1;
@@ -334,6 +335,20 @@ function extractPresentation(files: Record<string, Uint8Array>): OfficePreview |
 
 export function parseOfficePreview(content: string, extension: string): OfficePreview | undefined {
   if (!content) return undefined;
+  if (extension === 'doc') {
+    const paragraphs = content
+      .split(/\r?\n/)
+      .map((text) => text.trimEnd())
+      .filter((text) => text.trim());
+    if (paragraphs.length === 0) return undefined;
+    return {
+      kind: 'document',
+      blocks: paragraphs.map((text, index) => ({
+        kind: index === 0 ? 'heading' : 'paragraph',
+        text,
+      })),
+    };
+  }
   let extractedSize = 0;
   let selectedParts = 0;
   const files = unzipSync(decodePreviewBase64(content), {

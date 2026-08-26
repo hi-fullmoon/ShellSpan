@@ -129,8 +129,8 @@ const PreviewTabs: React.FC<{
         </TabsList>
         {summary && <span className="ml-auto text-xs text-muted-foreground">{summary}</span>}
       </div>
-      <TabsContent value="preview" className="min-h-0 flex-1">{preview}</TabsContent>
-      <TabsContent value="source" className="min-h-0 flex-1"><PlainTextPreview content={source} /></TabsContent>
+      <TabsContent value="preview" className="min-h-0 flex flex-1 flex-col">{preview}</TabsContent>
+      <TabsContent value="source" className="min-h-0 flex flex-1 flex-col"><PlainTextPreview content={source} /></TabsContent>
     </Tabs>
   );
 };
@@ -229,7 +229,7 @@ export const ArchivePreview: React.FC<{ content: string; extension: string; fall
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
-        <FileArchiveIcon />
+        <FileArchiveIcon className="size-4" />
         <span>{t('sftp.preview.archive.summary', { count: entries.length })}</span>
       </div>
       <ScrollArea className="min-h-0 flex-1" size="thin">
@@ -246,7 +246,7 @@ export const ArchivePreview: React.FC<{ content: string; extension: string; fall
               <TableRow key={`${entry.name}-${index}`}>
                 <TableCell className="max-w-xl">
                   <span className="flex min-w-0 items-center gap-2">
-                    {entry.isDirectory ? <FolderIcon className="shrink-0 text-muted-foreground" /> : <FileArchiveIcon className="shrink-0 text-muted-foreground" />}
+                    {entry.isDirectory ? <FolderIcon className="size-4 shrink-0 text-muted-foreground" /> : <FileArchiveIcon className="size-4 shrink-0 text-muted-foreground" />}
                     <span className="truncate" title={entry.name}>{entry.name}</span>
                   </span>
                 </TableCell>
@@ -291,7 +291,7 @@ export const OfficeDocumentPreview: React.FC<{ content: string; extension: strin
         <article className="mx-auto my-6 flex min-h-[34rem] max-w-3xl flex-col gap-3 rounded-lg border bg-background px-12 py-10 shadow-sm">
           {preview.blocks.map((block, index) => block.kind === 'heading'
             ? <h2 key={index} className="mt-3 text-lg font-semibold tracking-tight first:mt-0">{block.text}</h2>
-            : <p key={index} className="text-sm leading-6">{block.text}</p>)}
+            : <p key={index} className="whitespace-pre-wrap text-sm leading-6">{block.text}</p>)}
         </article>
       </ScrollArea>
     );
@@ -304,7 +304,7 @@ export const OfficeDocumentPreview: React.FC<{ content: string; extension: strin
             {preview.sheets.map((sheet, index) => <TabsTrigger key={`${sheet.name}-${index}`} value={String(index)}>{sheet.name}</TabsTrigger>)}
           </TabsList>
         </div>
-        {preview.sheets.map((sheet, index) => <TabsContent key={`${sheet.name}-${index}`} value={String(index)} className="min-h-0 flex-1"><SpreadsheetSheet sheet={sheet} /></TabsContent>)}
+        {preview.sheets.map((sheet, index) => <TabsContent key={`${sheet.name}-${index}`} value={String(index)} className="min-h-0 flex flex-1 flex-col"><SpreadsheetSheet sheet={sheet} /></TabsContent>)}
       </Tabs>
     );
   }
