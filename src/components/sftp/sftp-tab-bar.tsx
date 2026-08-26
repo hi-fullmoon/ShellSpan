@@ -44,6 +44,7 @@ interface ConnectionTabProps {
   dragging?: boolean;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
+  dropIndicatorLeftInGap?: boolean;
   showSeparatorAfter?: boolean;
   onActivate: (id: string) => void;
   onContextMenu: (connection: SftpConnection, x: number, y: number) => void;
@@ -57,6 +58,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
   dragging = false,
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
+  dropIndicatorLeftInGap = false,
   showSeparatorAfter = false,
   onActivate,
   onContextMenu,
@@ -107,14 +109,22 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
           orientation="vertical"
           aria-hidden="true"
           data-tab-separator
-          className="pointer-events-none absolute right-[-3px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
+          className="pointer-events-none absolute right-[-4px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
         />
       )}
       {showDropIndicatorLeft && (
-        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary" />
+        <div
+          data-drop-indicator="left"
+          className={cn(
+            'pointer-events-none absolute top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary',
+            // Absolute offsets start at the tab's inner border edge. Account
+            // for that 1px border when centering in the 5px outer gap.
+            dropIndicatorLeftInGap ? 'left-[-3.5px]' : 'left-0',
+          )}
+        />
       )}
       {showDropIndicatorRight && (
-        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
+        <div data-drop-indicator="right" className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
@@ -162,6 +172,7 @@ interface SortableTabProps {
   onTogglePin: (id: string) => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
+  dropIndicatorLeftInGap?: boolean;
   showSeparatorAfter?: boolean;
 }
 
@@ -174,6 +185,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onTogglePin,
   showDropIndicatorLeft,
   showDropIndicatorRight,
+  dropIndicatorLeftInGap,
   showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -198,6 +210,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
         dragging={isDragging}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
+        dropIndicatorLeftInGap={dropIndicatorLeftInGap}
         showSeparatorAfter={showSeparatorAfter}
         onActivate={onActivate}
         onContextMenu={onContextMenu}
@@ -463,7 +476,11 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   // indicator that would otherwise sit between the dragged tab and its right
   // neighbor.
   const draggedOriginalIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
-  const effectiveInsertIndex = insertIndex !== null && insertIndex === draggedOriginalIndex ? null : insertIndex;
+  const effectiveInsertIndex = draggingConnectionId
+    && insertIndex !== null
+    && insertIndex !== draggedOriginalIndex
+    ? insertIndex
+    : null;
 
   if (connections.length === 0) {
     return null;
@@ -502,7 +519,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                 const isLastVisible = visibleIndex === visibleTabCount - 1;
                 const isActive = activeConnectionId === connection.id;
                 const nextVisibleConnection = visibleIndex >= 0 ? visibleConnections[visibleIndex + 1] : undefined;
-                const showSeparatorAfter = !!nextVisibleConnection;
+                const showSeparatorAfter = !!nextVisibleConnection
+                  && effectiveInsertIndex !== visibleIndex + 1;
 
                 return (
                   <SortableTab
@@ -515,6 +533,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                     onTogglePin={togglePin}
                     showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
                     showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
+                    dropIndicatorLeftInGap={visibleIndex > 0}
                     showSeparatorAfter={showSeparatorAfter}
                   />
                 );
