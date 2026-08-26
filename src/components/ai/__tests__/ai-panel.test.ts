@@ -9,7 +9,12 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import type { AiChatMessage } from '@/types/ai';
 import {
+  appendTerminalOutput,
+  clearTerminalOutput,
+} from '@/lib/terminal-output-buffer';
+import {
   AiPanel,
+  LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS,
   canStartAiRequest,
   cancelActiveAiRequests,
   clampAiPanelWidth,
@@ -742,6 +747,177 @@ describe('AI panel width', () => {
 });
 
 describe('AI panel compact and context behavior', () => {
+  it('reads the latest redacted context when manually sending before a live refresh', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAiStore.getState().clear();
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'manual-latest',
+        title: 'Manual latest',
+        host: 'manual.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+      }],
+      activeSessionId: 'manual-latest',
+    });
+    appendTerminalOutput('manual-latest', 'initial\n');
+    useAiStore.getState().setOpen(true);
+    const pendingFrames = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 0;
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      nextFrameId += 1;
+      pendingFrames.set(nextFrameId, callback);
+      return nextFrameId;
+    });
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((frameId) => {
+      pendingFrames.delete(frameId);
+    });
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      act(() => {
+        appendTerminalOutput(
+          'manual-latest',
+          'password=manual-send-secret\nlatest-before-send\n',
+        );
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Analyze terminal' }));
+
+      await waitFor(() => {
+        const startCall = tauriCoreMock.invoke.mock.calls.find(([command]) => (
+          command === 'ai_start_request'
+        ));
+        expect(startCall?.[1]).toMatchObject({
+          request: {
+            context: {
+              content: expect.stringContaining('latest-before-send'),
+            },
+          },
+        });
+        expect(startCall?.[1].request.context.content).toContain('password=[REDACTED]');
+        expect(startCall?.[1].request.context.content).not.toContain('manual-send-secret');
+      });
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      clearTerminalOutput('manual-latest');
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('coalesces only active-session output and flushes the trailing update within 50ms', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [
+        {
+          sessionId: 'live-active',
+          title: 'Active',
+          host: 'active.example.com',
+          port: 22,
+          username: 'root',
+          status: 'connected',
+        },
+        {
+          sessionId: 'live-background',
+          title: 'Background',
+          host: 'background.example.com',
+          port: 22,
+          username: 'root',
+          status: 'connected',
+        },
+      ],
+      activeSessionId: 'live-active',
+    });
+    appendTerminalOutput('live-active', 'initial\n');
+    appendTerminalOutput('live-background', 'background initial\n');
+    useAiStore.getState().setOpen(true);
+
+    vi.useFakeTimers();
+    let nextFrameId = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      nextFrameId += 1;
+      frames.set(nextFrameId, callback);
+      return nextFrameId;
+    });
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((frameId) => {
+      frames.delete(frameId);
+    });
+    const flushFrames = (): void => {
+      for (const [frameId, callback] of [...frames]) {
+        frames.delete(frameId);
+        callback(0);
+      }
+    };
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      act(flushFrames);
+      expect(screen.getByRole('button', {
+        name: /root@active\.example\.com · Latest 1 lines/,
+      })).toBeInTheDocument();
+
+      act(() => appendTerminalOutput('live-background', 'background ignored\n'));
+      expect(frames).toHaveLength(0);
+
+      act(() => {
+        appendTerminalOutput('live-active', 'next\n');
+        appendTerminalOutput('live-active', 'password=latest-secret\n');
+      });
+      expect(frames).toHaveLength(1);
+      expect(screen.getByRole('button', {
+        name: /root@active\.example\.com · Latest 1 lines/,
+      })).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS - 1));
+      expect(screen.getByRole('button', {
+        name: /root@active\.example\.com · Latest 1 lines/,
+      })).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1));
+      expect(frames).toHaveLength(0);
+      expect(screen.getByRole('button', {
+        name: /root@active\.example\.com · Latest 3 lines/,
+      })).toBeInTheDocument();
+
+      act(() => useTerminalStore.getState().setActiveSession('live-background'));
+      expect(screen.getByRole('button', {
+        name: /root@background\.example\.com · Latest 2 lines/,
+      })).toBeInTheDocument();
+      act(() => appendTerminalOutput('live-active', 'old active output\n'));
+      expect(frames).toHaveLength(0);
+      act(() => appendTerminalOutput('live-background', 'new active output\n'));
+      expect(frames).toHaveLength(1);
+
+      act(() => useAiStore.getState().setOpen(false));
+      act(flushFrames);
+      act(() => appendTerminalOutput('live-background', 'closed panel output\n'));
+      expect(frames).toHaveLength(0);
+    } finally {
+      unmount();
+      useAiStore.getState().setOpen(false);
+      clearTerminalOutput('live-active');
+      clearTerminalOutput('live-background');
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+      vi.useRealTimers();
+      await initI18n(previousApp.locale);
+    }
+  });
+
   it('uses a modal drawer instead of an inline overlay on narrow screens', async () => {
     const initialWidth = window.innerWidth;
     const initialMatchMedia = window.matchMedia;
