@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpTabBar } from '../sftp-tab-bar';
@@ -21,6 +21,11 @@ describe('SftpTabBar', () => {
     useSftpStore.setState(initialState, true);
     useTransferStore.setState({ operations: [] });
     translationSpy.mockClear();
+  });
+
+  afterEach(async () => {
+    // dnd-kit removes its one-shot click suppressor on the next timer tick.
+    await new Promise((resolve) => setTimeout(resolve, 60));
   });
 
   it('warns when closing a tab would interrupt an active transfer', () => {
@@ -178,11 +183,58 @@ describe('SftpTabBar', () => {
     const tabs = screen.getAllByRole('tab');
     const firstSeparator = tabs[0].querySelector('[data-tab-separator]');
     expect(firstSeparator).toBeInTheDocument();
-    expect(firstSeparator).toHaveClass('right-[-3px]');
+    expect(firstSeparator).toHaveClass('right-[-4px]');
     expect(firstSeparator).not.toHaveClass('translate-x-1/2');
     expect(tabs[1].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[2].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[3].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+  });
+
+  it('replaces the separator with an aligned drag insert indicator in the tab gap', async () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    addConnection('Conn C');
+    render(<SftpTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    const setRect = (element: HTMLElement, left: number): void => {
+      element.getBoundingClientRect = vi.fn(() => ({
+        left,
+        right: left + 100,
+        top: 0,
+        bottom: 24,
+        x: left,
+        y: 0,
+        width: 100,
+        height: 24,
+        toJSON: () => ({}),
+      }));
+    };
+    setRect(tabs[0], 0);
+    setRect(tabs[1], 105);
+    setRect(tabs[2], 210);
+
+    await act(async () => {
+      fireEvent.pointerDown(tabs[2], {
+        button: 0,
+        isPrimary: true,
+        pointerType: 'mouse',
+        clientX: 260,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 272, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 110, clientY: 10 });
+    });
+
+    const separator = tabs[0].querySelector('[data-tab-separator]');
+    const indicator = tabs[1].querySelector('[data-drop-indicator="left"]');
+    expect(separator).not.toBeInTheDocument();
+    expect(indicator).toHaveClass('left-[-3.5px]', '-translate-x-1/2');
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 110, clientY: 10 });
+    });
+    expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
   });
 
   it('closes a tab after confirming in the dialog', async () => {
