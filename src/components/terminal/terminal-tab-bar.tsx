@@ -137,7 +137,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
           orientation="vertical"
           aria-hidden="true"
           data-tab-separator
-          className="pointer-events-none absolute -right-1 top-1/2 h-4 -translate-y-1/2 bg-app-border"
+          className="pointer-events-none absolute right-[-3px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
         />
       )}
       {showDropIndicatorLeft && (
@@ -640,7 +640,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             onWheel={handleWheel}
             className="h-10 min-w-0 flex-1"
           >
-            <div role="tablist" className="flex min-w-0 items-center gap-1 py-1">
+            <div role="tablist" className="flex min-w-0 items-center gap-[5px] py-1">
               {sessions.map((session, index) => {
               const isDragging = draggingSessionId === session.sessionId;
               const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;

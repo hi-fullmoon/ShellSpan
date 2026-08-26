@@ -176,7 +176,10 @@ describe('SftpTabBar', () => {
     render(<SftpTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs[0].querySelector('[data-tab-separator]')).toBeInTheDocument();
+    const firstSeparator = tabs[0].querySelector('[data-tab-separator]');
+    expect(firstSeparator).toBeInTheDocument();
+    expect(firstSeparator).toHaveClass('right-[-3px]');
+    expect(firstSeparator).not.toHaveClass('translate-x-1/2');
     expect(tabs[1].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[2].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[3].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
