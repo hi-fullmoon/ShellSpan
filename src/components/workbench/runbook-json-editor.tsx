@@ -3,6 +3,11 @@ import * as monaco from 'monaco-editor/editor/editor.api';
 import { jsonDefaults } from 'monaco-editor/languages/features/json/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker';
+// Monaco's JSON worker manager lazily loads editor contributions before these
+// standalone service registrations. Register them up front so the late-loaded
+// CodeLens and drop controllers can be instantiated safely.
+import 'monaco-editor/editor/contrib/codelens/browser/codeLensCache';
+import 'monaco-editor/editor/common/services/treeViewsDndService';
 import 'monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching';
 import 'monaco-editor/editor/contrib/clipboard/browser/clipboard';
 import 'monaco-editor/editor/contrib/contextmenu/browser/contextmenu';
