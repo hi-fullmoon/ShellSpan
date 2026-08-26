@@ -197,6 +197,14 @@ export function RemoteHealthSection(): React.JSX.Element {
   const busy = entry?.phase === 'preparing'
     || entry?.phase === 'collecting'
     || entry?.phase === 'cancelling';
+  const canDiagnose = Boolean(
+    selectedProfile
+    && !busy
+    && statuses
+    && statuses.overall !== 'ok'
+    && capturedResult
+    && sourceMatchesProfile,
+  );
   const authorizationProfile = profiles.find((profile) => profile.id === authorizationProfileId);
 
   useEffect(() => {
@@ -248,21 +256,37 @@ export function RemoteHealthSection(): React.JSX.Element {
           <p className="text-xs text-muted-foreground">{t('remoteHealth.description')}</p>
         </div>
         {selectedProfile && (
-          <Button
-            size="sm"
-            className="shrink-0 self-start @min-[42rem]:self-auto"
-            onClick={() => setAuthorizationProfileId(selectedProfile.id)}
-            disabled={busy}
+          <div
+            data-slot="remote-health-section-actions"
+            className="flex shrink-0 flex-wrap items-center gap-2 self-start @min-[42rem]:self-auto"
           >
-            {busy && <Spinner data-icon="inline-start" />}
-            {entry?.phase === 'preparing'
-              ? t('remoteHealth.preparing')
-              : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
-                ? t('remoteHealth.collecting')
-                : remoteSnapshot
-                  ? t('remoteHealth.collectAgain')
-                  : t('remoteHealth.collect')}
-          </Button>
+            <Button
+              size="sm"
+              onClick={() => setAuthorizationProfileId(selectedProfile.id)}
+              disabled={busy}
+            >
+              {busy && <Spinner data-icon="inline-start" />}
+              {entry?.phase === 'preparing'
+                ? t('remoteHealth.preparing')
+                : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
+                  ? t('remoteHealth.collecting')
+                  : remoteSnapshot
+                    ? t('remoteHealth.collectAgain')
+                    : t('remoteHealth.collect')}
+            </Button>
+            {(entry?.phase === 'collecting' || entry?.phase === 'cancelling') && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void cancel(selectedProfile.id)}
+                disabled={entry.phase === 'cancelling'}
+              >
+                {entry.phase === 'cancelling'
+                  ? t('remoteHealth.cancelling')
+                  : t('common.cancel')}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -402,29 +426,11 @@ export function RemoteHealthSection(): React.JSX.Element {
             </Alert>
           ) : null}
 
-          {selectedProfile && (
-            entry?.phase === 'collecting'
-            || entry?.phase === 'cancelling'
-            || Boolean(statuses && statuses.overall !== 'ok' && capturedResult && sourceMatchesProfile)
-          ) && (
+          {canDiagnose && selectedProfile && (
             <div data-slot="remote-health-actions" className="flex flex-wrap justify-end gap-2 pt-1">
-              {entry?.phase === 'collecting' || entry?.phase === 'cancelling' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void cancel(selectedProfile.id)}
-                  disabled={entry.phase === 'cancelling'}
-                >
-                  {entry.phase === 'cancelling'
-                    ? t('remoteHealth.cancelling')
-                    : t('common.cancel')}
-                </Button>
-              ) : null}
-              {statuses && statuses.overall !== 'ok' && capturedResult && sourceMatchesProfile && (
-                <Button variant="secondary" size="sm" onClick={() => void diagnose(selectedProfile)}>
-                  {t('remoteHealth.diagnose')}
-                </Button>
-              )}
+              <Button variant="secondary" size="sm" onClick={() => void diagnose(selectedProfile)}>
+                {t('remoteHealth.diagnose')}
+              </Button>
             </div>
           )}
         </CardContent>

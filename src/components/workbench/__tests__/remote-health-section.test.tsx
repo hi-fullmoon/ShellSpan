@@ -98,6 +98,33 @@ describe('RemoteHealthSection authorization', () => {
     expect(collect).toHaveBeenCalledWith(profile, true);
   });
 
+  it('keeps cancel next to the active collection control', () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    useRemoteHealthStore.setState({
+      cancel,
+      entries: {
+        [profile.id]: {
+          profileId: profile.id,
+          phase: 'collecting',
+          operationId: 'remote-health:test',
+        },
+      },
+    });
+
+    render(<RemoteHealthSection />);
+
+    const collectingButton = screen.getByRole('button', { name: 'remoteHealth.collecting' });
+    const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
+    const sectionActions = collectingButton.closest('[data-slot="remote-health-section-actions"]');
+
+    expect(sectionActions).toBeInTheDocument();
+    expect(sectionActions).toContainElement(cancelButton);
+    expect(cancelButton.closest('[data-slot="remote-health-actions"]')).toBeNull();
+
+    fireEvent.click(cancelButton);
+    expect(cancel).toHaveBeenCalledWith(profile.id);
+  });
+
   it('reuses the connected profile when handing an abnormal snapshot to the Agent', async () => {
     const checkedAt = Date.parse('2026-08-23T08:00:00.000Z');
     const source = {
