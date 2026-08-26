@@ -845,6 +845,33 @@ class TerminalControllerImpl implements TerminalController {
 
   focus(): void {
     if (this.disposed) return;
+
+    // A restored terminal can be opened while the whole terminal section is
+    // hidden. ResizeObserver intentionally ignores that state, so the first
+    // section activation must synchronously fit before the user can press
+    // Enter to reconnect. Otherwise the delayed resize lands after the new
+    // shell has printed its prompt and SIGWINCH can leave duplicated glyphs.
+    // A full refresh also repaints WebGL content that was first opened under a
+    // display:none ancestor.
+    if (this.host) {
+      this.cancelPendingResize();
+      const previousCols = this.terminal.cols;
+      const previousRows = this.terminal.rows;
+      try {
+        this.fitAddon.fit();
+      } catch {
+        // The host can still be unmeasurable during a section transition.
+      }
+      if (this.terminal.cols !== previousCols || this.terminal.rows !== previousRows) {
+        this.sendResize(this.terminal.cols, this.terminal.rows);
+      }
+      try {
+        this.terminal.refresh(0, this.terminal.rows - 1);
+      } catch {
+        // Ignore redraw failures on a terminal being detached concurrently.
+      }
+    }
+
     try {
       this.terminal.focus();
     } catch {
