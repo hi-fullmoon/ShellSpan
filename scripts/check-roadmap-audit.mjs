@@ -38,7 +38,7 @@ const maximumReviewAgeDays = 35;
 const committedPhases = ['NOW', 'NEXT', 'LATER'];
 const requiredSecurityClosures = [
   'knownHostsFailClosed',
-  'aiApiKeyKeychainOnly',
+  'aiApiKeyLocalStorage',
   'terminalWorkspaceContract',
 ];
 const rustWorkflowPaths = [
@@ -461,20 +461,21 @@ const [aiSource, aiTypes, aiSettingsStore, databaseSource, terminalWorkspaceSour
   readFile(resolve(root, 'src-tauri/src/db.rs'), 'utf8'),
   readFile(resolve(root, 'src/lib/terminal-workspace.ts'), 'utf8'),
 ]);
-if (/\bapiKey\b/.test(aiTypes) || /\bapiKey\b/.test(aiSettingsStore)) {
-  fail('AI provider metadata must not contain apiKey');
+if (!/\bapiKey\b/.test(aiTypes) || !/\bapiKey\b/.test(aiSettingsStore)) {
+  fail('AI provider configuration must persist its API key locally');
 }
-const migrationStart = aiSource.indexOf('fn migrate_legacy_api_keys_with');
+const migrationStart = aiSource.indexOf('fn migrate_keychain_api_keys_with');
 const migrationEnd = aiSource.indexOf('#[tauri::command]', migrationStart);
 const migrationSource = aiSource.slice(migrationStart, migrationEnd);
 if (migrationStart < 0 || migrationEnd < 0
-  || !migrationSource.includes('provider.remove("apiKey")')
-  || !migrationSource.includes('credentials.set_api_key')
-  || migrationSource.includes('delete_api_key')) {
-  fail('AI legacy migration must move SQLite secrets to keychain without deleting the secure copy');
+  || !migrationSource.includes('provider.insert("apiKey"')
+  || !migrationSource.includes('credentials.delete_api_key')
+  || migrationSource.includes('set_api_key')) {
+  fail('AI API key migration must move keychain values into provider preferences before deleting the old copy');
 }
-if (!databaseSource.includes('AI provider preferences may only contain non-sensitive metadata')) {
-  fail('database must reject sensitive AI provider metadata');
+if (!aiSource.includes('pub(crate) api_key: Option<String>')
+  || databaseSource.includes('AI provider preferences may only contain non-sensitive metadata')) {
+  fail('AI requests and preferences must use the API key stored with the provider');
 }
 if (!terminalWorkspaceSource.includes('TERMINAL_WORKSPACE_VERSION = 1')
   || !databaseSource.includes('validate_terminal_workspace')) {
