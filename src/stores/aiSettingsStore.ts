@@ -89,6 +89,7 @@ interface AiPreferences {
 
 interface AiSettingsState extends AiPreferences {
   initialized: boolean;
+  persistenceStatus: 'idle' | 'pending' | 'saving' | 'saved' | 'error';
   hydrateFromDb: () => Promise<void>;
   addProvider: (preset: AiProviderPreset) => string;
   updateProvider: (id: string, changes: Partial<Omit<AiProviderProfile, 'id'>>) => void;
@@ -237,17 +238,60 @@ export function parseAiPreferences(entries: [string, string][]): AiPreferences {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingPreferences: AiPreferences | undefined;
+let saveInFlight: Promise<void> | null = null;
 
-function savePreferences(preferences: AiPreferences): void {
+function preferenceEntries(preferences: AiPreferences): [string, string][] {
+  return PREFERENCE_KEYS.map((key) => [
+    storageKey(key),
+    JSON.stringify(preferences[key]),
+  ]);
+}
+
+async function savePendingPreferences(): Promise<void> {
+  while (pendingPreferences) {
+    const preferences = pendingPreferences;
+    pendingPreferences = undefined;
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    useAiSettingsStore.setState({ persistenceStatus: 'saving' });
+    try {
+      await invokeSavePreferences(preferenceEntries(preferences));
+    } catch (error) {
+      // A newer full snapshot supersedes the failed one. Otherwise retain the
+      // failed snapshot so an explicit exit flush or the next edit can retry it.
+      pendingPreferences ??= preferences;
+      useAiSettingsStore.setState({ persistenceStatus: 'error' });
+      logger.error('failed to save AI preferences', error);
+      throw error;
+    }
+  }
+  useAiSettingsStore.setState({ persistenceStatus: 'saved' });
+}
+
+export function flushAiSettingsPreferences(): Promise<void> {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!saveInFlight && pendingPreferences) {
+    saveInFlight = savePendingPreferences().finally(() => {
+      saveInFlight = null;
+    });
+  }
+  if (!saveInFlight) return Promise.resolve();
+  return saveInFlight.then(() => (
+    pendingPreferences ? flushAiSettingsPreferences() : undefined
+  ));
+}
+
+function schedulePreferencesSave(preferences: AiPreferences): void {
+  pendingPreferences = preferences;
+  useAiSettingsStore.setState({ persistenceStatus: 'pending' });
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    const entries: [string, string][] = PREFERENCE_KEYS.map((key) => [
-      storageKey(key),
-      JSON.stringify(preferences[key]),
-    ]);
-    invokeSavePreferences(entries).catch((error) => {
-      logger.error('failed to save AI preferences', error);
-    });
+    saveTimer = null;
+    void flushAiSettingsPreferences().catch(() => undefined);
   }, 400);
 }
 
@@ -255,6 +299,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
   subscribeWithSelector((set, get) => ({
     ...defaults,
     initialized: false,
+    persistenceStatus: 'idle',
     hydrateFromDb: async () => {
       try {
         const entries = await invokeLoadPreferences();
@@ -316,7 +361,7 @@ useAiSettingsStore.subscribe(
     contextLines: state.contextLines,
   }),
   (preferences) => {
-    if (useAiSettingsStore.getState().initialized) savePreferences(preferences);
+    if (useAiSettingsStore.getState().initialized) schedulePreferencesSave(preferences);
   },
   { equalityFn: shallow },
 );
