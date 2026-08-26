@@ -30,7 +30,12 @@ describe('SftpFileListHeader', () => {
 
     expect(header).not.toHaveClass('border-b', 'text-muted-foreground');
     cells.forEach((cell) => {
-      expect(cell).toHaveClass('border-b', 'border-app-border/50');
+      expect(cell).toHaveClass(
+        'border-b',
+        'border-app-border/50',
+        'bg-app-bg',
+      );
+      expect(cell).not.toHaveClass('bg-app-surface-muted');
     });
     expect(screen.getByRole('button', { name: 'sftp.columns.name' })).toHaveClass('text-app-text');
     expect(screen.getByRole('button', { name: 'sftp.columns.dateModified' })).toHaveClass('text-muted-foreground');

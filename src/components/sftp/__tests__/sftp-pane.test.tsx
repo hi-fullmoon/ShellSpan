@@ -145,6 +145,23 @@ describe('SftpPane', () => {
     expect(screen.getByText('sftp.local')).toBeInTheDocument();
   });
 
+  it('uses a distinct background for the path bar', () => {
+    const connection = createConnection();
+    const { container } = render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+    const pathBar = container.querySelector('[data-slot="sftp-path-bar"]');
+
+    expect(pathBar).toHaveClass('bg-app-bg');
+    expect(pathBar).not.toHaveClass('bg-app-surface-muted');
+  });
+
   it('renders remote pane title', () => {
     const connection = createConnection();
     render(

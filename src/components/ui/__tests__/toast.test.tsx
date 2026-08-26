@@ -19,6 +19,22 @@ describe('Toaster', () => {
     ).toBeInTheDocument();
   });
 
+  it('places the notification stack below the center of the title bar', async () => {
+    useToastStore.getState().addToast('Positioned toast', 'info', 3000);
+    render(<Toaster />);
+
+    const toaster = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[data-sonner-toaster]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(toaster).toHaveAttribute('data-x-position', 'center');
+    expect(toaster).toHaveAttribute('data-y-position', 'top');
+    expect(toaster.style.getPropertyValue('--offset-top')).toBe('52px');
+    expect(toaster.style.getPropertyValue('--mobile-offset-left')).toBe('12px');
+    expect(toaster.style.getPropertyValue('--mobile-offset-right')).toBe('12px');
+  });
+
   it('top-aligns the icon for multiline toast content', async () => {
     useToastStore.getState().addToast('First line\nSecond line', 'error', 3000);
     render(<Toaster />);
@@ -29,6 +45,17 @@ describe('Toaster', () => {
         'self-start!',
       );
     });
+  });
+
+  it('uses a compact content-responsive width', async () => {
+    const id = useToastStore.getState().addToast('Saved', 'success', 3000);
+    render(<Toaster />);
+
+    expect(await screen.findByTestId(id)).toHaveClass(
+      'w-fit!',
+      'min-w-48!',
+      'max-w-[var(--width)]!',
+    );
   });
 
   it('exposes toast store add/remove API', () => {
@@ -78,6 +105,21 @@ describe('Toaster', () => {
 
     await waitFor(() => {
       expect(useToastStore.getState().toasts).toHaveLength(0);
+    });
+  });
+
+  it('dismisses the selected toast from an expanded stack', async () => {
+    const firstId = useToastStore.getState().addToast('First toast', 'info', 3000);
+    const secondId = useToastStore.getState().addToast('Second toast', 'success', 3000);
+    render(<Toaster />);
+
+    const firstToast = await screen.findByTestId(firstId);
+    fireEvent.doubleClick(firstToast);
+
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts.map((toast) => toast.id)).toEqual([
+        secondId,
+      ]);
     });
   });
 
