@@ -1,5 +1,4 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MonitorPanel } from '../monitor-panel';
 import { useAppStore } from '@/stores/appStore';
@@ -68,20 +67,16 @@ beforeEach(() => {
 });
 
 describe('MonitorPanel health layers', () => {
-  it('separates local monitoring from remote host snapshots with tabs', async () => {
-    const user = userEvent.setup();
+  it('shows local monitoring and remote snapshots on one page without tabs', () => {
     render(<MonitorPanel />);
 
     expect(screen.getByText('workbench.monitor.localDescription')).toBeInTheDocument();
-    expect(screen.queryByText('remote-health-layer')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('tab', { name: 'workbench.monitor.remote' }));
-
     expect(screen.getByText('remote-health-layer')).toBeInTheDocument();
-    expect(screen.queryByText('workbench.monitor.localDescription')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'workbench.monitor.resume' }))
-      .not.toBeInTheDocument();
-    expect(screen.getByRole('banner').querySelector('p')).toBeNull();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'workbench.monitor.resume' }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('banner').querySelector('p')).not.toBeNull();
   });
 
   it('renders header actions as text buttons', () => {
@@ -119,7 +114,7 @@ describe('MonitorPanel health layers', () => {
 
     render(<MonitorPanel />);
 
-    const overviewHeading = screen.getByText('workbench.monitor.overviewTitle');
+    const overviewHeading = screen.getByText('workbench.monitor.localTitle');
     const connectionHeading = screen.getByText('workbench.monitor.connectionHealth');
     const processCard = screen.getByText('workbench.monitor.appProcess')
       .closest('[data-slot="card"]');
@@ -133,6 +128,6 @@ describe('MonitorPanel health layers', () => {
     expect(processCard).not.toBe(systemCard);
     expect(screen.getAllByRole('progressbar')).toHaveLength(4);
     expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(5);
-    expect(screen.queryByText('remote-health-layer')).not.toBeInTheDocument();
+    expect(screen.getByText('remote-health-layer')).toBeInTheDocument();
   });
 });
