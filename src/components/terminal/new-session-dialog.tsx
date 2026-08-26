@@ -246,7 +246,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         </DialogHeader>
 
         <div className="px-5 pb-4">
-          <InputGroup className="h-10">
+          <InputGroup className="h-10 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
             <InputGroupInput
               ref={searchInputRef}
               type="search"
