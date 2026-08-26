@@ -3,6 +3,50 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.53](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.53) - 2026-08-26
+
+
+### Bug Fixes
+
+- **ui:** align mode icons vertically with text labels in AI panel
+
+### Chore
+
+- **term:** merge terminal performance work
+
+### Documentation
+
+- align roadmap and assessments with AI key local-storage policy
+- **terminal:** record phase 2-6 terminal performance results
+
+### Features
+
+- **ui:** add locale-aware compact mode for AI panel controls
+- **terminal:** add versioned AI context cache and registry tests
+- **sftp:** cancel remote directory reads and surface host fingerprint
+- **tauri:** track remote directory request generations and update core modules
+- **workbench:** wire request cancellation through SFTP panes
+
+### Refactoring
+
+- **workbench:** extract WorkbenchSearchInput and migrate panels
+- **ai:** persist API keys with provider config in local database
+- **ai:** polish ai panel and extend coverage
+- **workbench:** polish preflight dialog, form drawer, and host overview
+- **hooks:** polish session and sftp hooks with tests
+- **sftp:** polish sftp pane and extend coverage
+- **lib:** polish tauri bridge, host-key prompt, stores, and types
+
+### Style
+
+- **workbench:** swap header copy and actions flex sizing
+
+### Testing
+
+- **terminal:** add performance baselines
+- **sftp:** cover cancellation, supersession, and prompt flows
+- **terminal:** extend performance benchmark scripts and contract
+
 ## [v2.0.52](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.52) - 2026-08-25
 
 

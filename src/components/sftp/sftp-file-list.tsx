@@ -14,15 +14,17 @@ import { SftpParentRow } from './sftp-parent-row';
 import { SftpFileListRow } from './sftp-file-list-row';
 import { isPortableRootPath } from '@/lib/path-utils';
 
+const EMPTY_SELECTED_ENTRIES: FileEntry[] = [];
+
 export interface SftpFileListProps {
   entries: FileEntry[];
   side: SftpSide;
   localMode?: boolean;
-  selectedPaths: string[];
+  selectedPaths: ReadonlySet<string>;
   filterQuery: string;
   batchMode: boolean;
   currentPath?: string;
-  onSelect: (paths: string[]) => void;
+  onSelect: (paths: Set<string>) => void;
   onDoubleClick: (entry: FileEntry) => void;
   onContextMenu: (entry: FileEntry, e: React.MouseEvent) => void;
   onBlankContextMenu?: (e: React.MouseEvent) => void;
@@ -93,6 +95,8 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   const [sortDirection, setSortDirection] = useState<SftpFileListSortDirection>('default');
   const lastSelectedIndexRef = useRef<number | undefined>(undefined);
   const [focusedIndex, setFocusedIndex] = useState<number | undefined>(undefined);
+  const selectedPathsRef = useRef(selectedPaths);
+  selectedPathsRef.current = selectedPaths;
 
   // Shift-range selection is anchored to an index into the current listing;
   // drop the anchor whenever the directory or filter reshapes that listing.
@@ -105,8 +109,6 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   useEffect(() => {
     setFocusedIndex(undefined);
   }, [currentPath, filterQuery, sortColumn, sortDirection]);
-
-  const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
 
   const filteredEntries = useMemo(() => {
     const query = filterQuery.trim().toLowerCase();
@@ -146,10 +148,26 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     return () => contentViewport.removeEventListener('scroll', syncHeaderScroll);
   }, []);
 
-  const selectedEntries = useMemo(
-    () => sortedEntries.filter((entry) => selectedSet.has(entry.path)),
-    [sortedEntries, selectedSet],
-  );
+  const entryLookup = useMemo(() => {
+    const lookup = new Map<string, { entry: FileEntry; index: number }>();
+    sortedEntries.forEach((entry, index) => {
+      lookup.set(entry.path, { entry, index });
+    });
+    return lookup;
+  }, [sortedEntries]);
+
+  // Selection is normally much smaller than a directory listing. Resolve and
+  // order only the selected entries instead of scanning every entry on each
+  // click, and reuse the same lookup for shift-click anchors.
+  const selectedEntries = useMemo(() => {
+    const matches: Array<{ entry: FileEntry; index: number }> = [];
+    selectedPaths.forEach((path) => {
+      const match = entryLookup.get(path);
+      if (match) matches.push(match);
+    });
+    matches.sort((left, right) => left.index - right.index);
+    return matches.map((match) => match.entry);
+  }, [entryLookup, selectedPaths]);
 
   const handleSort = useCallback((column: SftpFileListSortColumn): void => {
     setSortColumn((current) => {
@@ -168,7 +186,8 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
 
   const handleSelect = useCallback(
     (entry: FileEntry, e: { shiftKey: boolean }): void => {
-      const index = sortedEntries.findIndex((item) => item.path === entry.path);
+      const index = entryLookup.get(entry.path)?.index;
+      if (index === undefined) return;
       const isShift = e.shiftKey;
 
       if (batchMode) {
@@ -176,27 +195,27 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
           const start = Math.min(lastSelectedIndexRef.current, index);
           const end = Math.max(lastSelectedIndexRef.current, index);
           const range = sortedEntries.slice(start, end + 1);
-          const next = new Set(selectedPaths);
+          const next = new Set(selectedPathsRef.current);
           range.forEach((item) => next.add(item.path));
-          onSelect(Array.from(next));
+          onSelect(next);
           return;
         }
 
-        const next = new Set(selectedPaths);
+        const next = new Set(selectedPathsRef.current);
         if (next.has(entry.path)) {
           next.delete(entry.path);
         } else {
           next.add(entry.path);
         }
-        onSelect(Array.from(next));
+        onSelect(next);
         lastSelectedIndexRef.current = index;
         return;
       }
 
-      onSelect([entry.path]);
+      onSelect(new Set([entry.path]));
       lastSelectedIndexRef.current = index;
     },
-    [batchMode, onSelect, selectedPaths, sortedEntries],
+    [batchMode, entryLookup, onSelect, sortedEntries],
   );
 
   const handleParentDirectory = useCallback(() => {
@@ -211,7 +230,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
       if (anchor === undefined) {
         const entry = sortedEntries[index];
         if (!entry) return;
-        onSelect([entry.path]);
+        onSelect(new Set([entry.path]));
         lastSelectedIndexRef.current = index;
         return;
       }
@@ -219,11 +238,11 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
       const start = Math.min(anchor, index);
       const end = Math.max(anchor, index);
       const range = sortedEntries.slice(start, end + 1);
-      const next = new Set(selectedPaths);
+      const next = new Set(selectedPathsRef.current);
       range.forEach((item) => next.add(item.path));
-      onSelect(Array.from(next));
+      onSelect(next);
     },
-    [onSelect, selectedPaths, sortedEntries],
+    [onSelect, sortedEntries],
   );
 
   // Keyboard navigation lives on the list container itself so the filter
@@ -274,9 +293,9 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
           break;
         }
         case 'Escape': {
-          if (selectedPaths.length === 0) break;
+          if (selectedPaths.size === 0) break;
           e.preventDefault();
-          onSelect([]);
+          onSelect(new Set());
           break;
         }
       }
@@ -291,7 +310,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
       handleParentDirectory,
       onDoubleClick,
       handleSelect,
-      selectedPaths.length,
+      selectedPaths.size,
       onSelect,
     ],
   );
@@ -348,7 +367,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
                 <div
                   key={isParent ? '..' : entry!.path}
                   role="option"
-                  aria-selected={isParent ? false : selectedSet.has(entry!.path)}
+                  aria-selected={isParent ? false : selectedPaths.has(entry!.path)}
                   className={cn(
                     'absolute left-0 w-full',
                     focusedIndex === virtualItem.index && 'ring-1 ring-inset ring-app-primary',
@@ -371,9 +390,13 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
                       entry={entry!}
                       side={side}
                       presentationSide={presentationSide}
-                      selected={selectedSet.has(entry!.path)}
+                      selected={selectedPaths.has(entry!.path)}
                       batchMode={batchMode}
-                      selectedEntries={selectedEntries}
+                      selectedEntries={
+                        selectedPaths.has(entry!.path)
+                          ? selectedEntries
+                          : EMPTY_SELECTED_ENTRIES
+                      }
                       onSelect={handleSelect}
                       onDoubleClick={onDoubleClick}
                       onContextMenu={onContextMenu}

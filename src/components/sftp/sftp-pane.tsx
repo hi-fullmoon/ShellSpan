@@ -93,6 +93,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const isHostKeyError = !isLocal && !!error && (error.toLowerCase().includes('host key') || error.toLowerCase().includes('trust this host'));
     const pane = side === 'local' ? connection.localPane : connection.remotePane;
     const remoteBookmarks = connection.remoteBookmarks[side];
+    const selectedPathsRef = useRef(selectedPaths);
+    selectedPathsRef.current = selectedPaths;
 
     const { loadLocalDirectory } = useLocalDirectory(connection, side);
     const { loadRemoteDirectory } = useSftpConnection(connection, side);
@@ -243,13 +245,6 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       navigateTo(parentPortablePath(path));
     }, [path, navigateTo]);
 
-    const handleSelect = useCallback(
-      (paths: string[]): void => {
-        onSelectedPathsChange(new Set(paths));
-      },
-      [onSelectedPathsChange],
-    );
-
     const handleDoubleClick = useCallback(
       (entry: FileEntry): void => {
         // Symlinks may point at a directory; try navigating and let a failure
@@ -265,14 +260,15 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       (entry: FileEntry, e: React.MouseEvent): void => {
         e.preventDefault();
         e.stopPropagation();
-        if (!selectedPaths.has(entry.path)) {
-          onSelectedPathsChange(pane.batchMode ? new Set([...selectedPaths, entry.path]) : new Set([entry.path]));
+        const currentSelection = selectedPathsRef.current;
+        if (!currentSelection.has(entry.path)) {
+          onSelectedPathsChange(pane.batchMode ? new Set([...currentSelection, entry.path]) : new Set([entry.path]));
         }
         setBlankContextMenu(null);
         setBookmarkMenu(null);
         setFileContextMenu({ x: e.clientX, y: e.clientY, entry });
       },
-      [onSelectedPathsChange, pane.batchMode, selectedPaths],
+      [onSelectedPathsChange, pane.batchMode],
     );
 
     const handleBlankContextMenu = useCallback((e: React.MouseEvent): void => {
@@ -286,17 +282,23 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const paneTitle = isLocal ? t('sftp.local') : side === 'local' ? (connection.leftTitle ?? connection.title) : connection.title;
 
     const selectedEntries = useMemo(() => visibleEntries.filter((entry) => selectedPaths.has(entry.path)), [visibleEntries, selectedPaths]);
-    // Stable array for SftpFileList: a fresh Array.from on every render would
-    // defeat its memoized selection set on each transfer progress update.
-    const selectedPathList = useMemo(() => Array.from(selectedPaths), [selectedPaths]);
-    const transferOperations = useTransferStore((state) => state.operations);
-    const selectionBusy =
-      !isLocal &&
-      hasActivePathOperation(
-        getSftpPaneConnectionKey(connection, side),
-        selectedEntries.map((entry) => entry.path),
-        transferOperations,
-      );
+    const selectedEntryPaths = useMemo(
+      () => selectedEntries.map((entry) => entry.path),
+      [selectedEntries],
+    );
+    const pathOccupancyRevision = useTransferStore(
+      (state) => state.pathOccupancyRevision,
+    );
+    const selectionBusy = useMemo(
+      () =>
+        !isLocal &&
+        hasActivePathOperation(
+          getSftpPaneConnectionKey(connection, side),
+          selectedEntryPaths,
+        ),
+      // The revision changes only when active path ownership can change.
+      [connection, isLocal, pathOccupancyRevision, selectedEntryPaths, side],
+    );
     const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
     const isCurrentPathBookmarked = path ? remoteBookmarks.includes(path) : false;
 
@@ -631,11 +633,11 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               entries={visibleEntries}
               side={side}
               localMode={isLocal}
-              selectedPaths={selectedPathList}
+              selectedPaths={selectedPaths}
               filterQuery={searchQuery}
               batchMode={pane.batchMode}
               currentPath={path}
-              onSelect={handleSelect}
+              onSelect={onSelectedPathsChange}
               onDoubleClick={handleDoubleClick}
               onContextMenu={handleFileContextMenu}
               onBlankContextMenu={handleBlankContextMenu}

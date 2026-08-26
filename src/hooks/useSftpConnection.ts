@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   buildRemoteConnectionRequest,
+  invokeCancelRemoteFileRead,
   invokeCopyRemotePath,
   invokeCancelDelete,
   invokeCancelDownload,
@@ -36,6 +37,7 @@ import { normalizePortablePath } from '@/lib/path-utils';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import {
+  getBackendDirectoryListRequestKey,
   isLatestDirectoryListRequest,
   nextDirectoryListRequestId,
 } from '@/hooks/utils';
@@ -118,6 +120,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   downloadRemotePaths: (remotePaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[]) => Promise<void>;
   openRemoteFile: (path: string) => Promise<void>;
   previewRemoteFile: (path: string) => Promise<ReadRemoteFileResponse>;
+  cancelRemoteFileOpen: () => void;
+  cancelRemoteFilePreview: () => void;
   invalidatePaneListingCache: () => void;
 } {
   const remoteConnection = getSftpPaneConnection(connection, side);
@@ -141,12 +145,68 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   const markOperationCancelled = useTransferStore(
     (state) => state.markOperationCancelled,
   );
+  const openRemoteFileOperationRef = useRef<string | undefined>(undefined);
+  const previewRemoteFileOperationRef = useRef<string | undefined>(undefined);
+  const locallyCancelledRemoteFileReadsRef = useRef(new Set<string>());
+
+  const cancelRemoteFileReadOperation = useCallback((operationId: string | undefined) => {
+    if (!operationId) return;
+    locallyCancelledRemoteFileReadsRef.current.add(operationId);
+    void invokeCancelRemoteFileRead(operationId).catch((error) => {
+      logger.warn(`Failed to cancel remote file read operation_id=${operationId}`, error);
+    });
+  }, []);
+
+  const cancelRemoteFileOpen = useCallback(() => {
+    const operationId = openRemoteFileOperationRef.current;
+    openRemoteFileOperationRef.current = undefined;
+    cancelRemoteFileReadOperation(operationId);
+  }, [cancelRemoteFileReadOperation]);
+
+  const cancelRemoteFilePreview = useCallback(() => {
+    const operationId = previewRemoteFileOperationRef.current;
+    previewRemoteFileOperationRef.current = undefined;
+    cancelRemoteFileReadOperation(operationId);
+  }, [cancelRemoteFileReadOperation]);
+
+  useEffect(() => () => {
+    cancelRemoteFileOpen();
+    cancelRemoteFilePreview();
+  }, [
+    cancelRemoteFileOpen,
+    cancelRemoteFilePreview,
+    connection.id,
+    side,
+    remoteConnection.profileId,
+    remoteConnection.host,
+    remoteConnection.port,
+    remoteConnection.username,
+    remoteConnection.authMethod,
+    remoteConnection.password,
+    remoteConnection.keychainKeyId,
+    remoteConnection.privateKeyData,
+    remoteConnection.passphrase,
+    remoteConnection.jumpHost?.host,
+    remoteConnection.jumpHost?.port,
+    remoteConnection.jumpHost?.username,
+    remoteConnection.jumpHost?.authMethod,
+    remoteConnection.jumpHost?.password,
+    remoteConnection.jumpHost?.keychainKeyId,
+    remoteConnection.jumpHost?.privateKeyData,
+    remoteConnection.jumpHost?.passphrase,
+  ]);
 
   // Fills in owner/group names after the listing is already on screen: ids
   // that miss the backend identity cache are resolved via a single remote
   // exec, then merged into the entries if the pane is still on this path.
   const resolveEntryOwners = useCallback(
-    async (listing: RemoteDirectoryListing, isLatest: () => boolean) => {
+    async (
+      listing: RemoteDirectoryListing,
+      isLatest: () => boolean,
+      backendRequestKey: string,
+      requestId: number,
+    ) => {
+      if (!isLatest()) return;
       const ownerIds = [
         ...new Set(
           listing.entries
@@ -162,9 +222,12 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         ),
       ];
       if (ownerIds.length === 0 && groupIds.length === 0) return;
+      if (!isLatest()) return;
       try {
         const owners = await invokeResolveRemoteEntryOwners({
           ...remoteConnection,
+          requestKey: backendRequestKey,
+          requestId,
           ownerIds,
           groupIds,
         });
@@ -196,6 +259,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           entries: merged,
         });
       } catch (error) {
+        if (!isLatest()) return;
         logger.warn('Failed to resolve remote entry owners', error);
       }
     },
@@ -207,6 +271,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       const requestKey = `${connection.id}:${side}`;
       const requestId = nextDirectoryListRequestId(requestKey);
       const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId);
+      const backendRequestKey = getBackendDirectoryListRequestKey(requestKey);
       const cacheKey = `${requestKey}:${path ?? ''}`;
       const cached = getCachedDirectoryListing(cacheKey);
       if (cached) {
@@ -223,16 +288,19 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         setEntries(connection.id, side, listing.entries);
         setCachedDirectoryListing(cacheKey, listing);
         setCachedDirectoryListing(`${requestKey}:${listing.path}`, listing);
-        void resolveEntryOwners(listing, isLatest);
+        void resolveEntryOwners(listing, isLatest, backendRequestKey, requestId);
       };
       try {
         const listing = await invokeListRemoteDirectory({
           ...remoteConnection,
           path,
+          requestKey: backendRequestKey,
+          requestId,
         });
         if (!isLatest()) return;
         applyListing(listing);
       } catch (error) {
+        if (!isLatest()) return;
         logger.error(`Failed to list remote directory${path ? `: ${path}` : ''}`, error);
 
         const message = getErrorMessage(error);
@@ -246,6 +314,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           const profile = useProfileStore.getState().getProfile(profileId);
           if (profile) {
             const recovered = await promptForMissingKeychainKey(profile);
+            if (!isLatest()) return;
             if (recovered) {
               const newRequest = buildRemoteConnectionRequest(recovered);
               updateConnectionRequest(connection.id, side, newRequest);
@@ -253,6 +322,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
                 const retryListing = await invokeListRemoteDirectory({
                   ...newRequest,
                   path,
+                  requestKey: backendRequestKey,
+                  requestId,
                 });
                 if (!isLatest()) return;
                 applyListing(retryListing);
@@ -656,22 +727,51 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const openRemoteFile = useCallback(
     async (path: string) => {
-      await invokeOpenRemoteFile({
-        ...remoteConnection,
-        path,
-      });
+      const previousOperationId = openRemoteFileOperationRef.current;
+      openRemoteFileOperationRef.current = undefined;
+      cancelRemoteFileReadOperation(previousOperationId);
+
+      const operationId = createOperationId(connection.id, 'open');
+      openRemoteFileOperationRef.current = operationId;
+      try {
+        await invokeOpenRemoteFile({
+          ...remoteConnection,
+          path,
+          operationId,
+        });
+      } catch (error) {
+        if (!locallyCancelledRemoteFileReadsRef.current.has(operationId)) {
+          throw error;
+        }
+      } finally {
+        locallyCancelledRemoteFileReadsRef.current.delete(operationId);
+        if (openRemoteFileOperationRef.current === operationId) {
+          openRemoteFileOperationRef.current = undefined;
+        }
+      }
     },
-    [remoteConnection],
+    [cancelRemoteFileReadOperation, connection.id, remoteConnection],
   );
 
   const previewRemoteFile = useCallback(
     async (path: string): Promise<ReadRemoteFileResponse> => {
-      return invokePreviewRemoteFile({
-        ...remoteConnection,
-        path,
-      });
+      cancelRemoteFilePreview();
+      const operationId = createOperationId(connection.id, 'preview');
+      previewRemoteFileOperationRef.current = operationId;
+      try {
+        return await invokePreviewRemoteFile({
+          ...remoteConnection,
+          path,
+          operationId,
+        });
+      } finally {
+        locallyCancelledRemoteFileReadsRef.current.delete(operationId);
+        if (previewRemoteFileOperationRef.current === operationId) {
+          previewRemoteFileOperationRef.current = undefined;
+        }
+      }
     },
-    [remoteConnection],
+    [cancelRemoteFilePreview, connection.id, remoteConnection],
   );
 
   return {
@@ -685,6 +785,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
     downloadRemotePaths,
     openRemoteFile,
     previewRemoteFile,
+    cancelRemoteFileOpen,
+    cancelRemoteFilePreview,
     invalidatePaneListingCache,
   };
 }

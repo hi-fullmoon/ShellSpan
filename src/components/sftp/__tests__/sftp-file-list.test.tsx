@@ -5,9 +5,11 @@ import userEvent from '@testing-library/user-event';
 import { SftpFileList } from '../sftp-file-list';
 import type { FileEntry } from '../utils';
 
+const translationSpy = vi.hoisted(() => vi.fn((key: string) => key));
+
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: translationSpy,
     locale: 'en-US',
   }),
 }));
@@ -60,8 +62,8 @@ interface RenderOptions {
   filterQuery?: string;
   side?: 'local' | 'remote';
   batchMode?: boolean;
-  selectedPaths?: string[];
-  onSelect?: (paths: string[]) => void;
+  selectedPaths?: ReadonlySet<string>;
+  onSelect?: (paths: Set<string>) => void;
   onDoubleClick?: (entry: FileEntry) => void;
   onParentDirectory?: () => void;
 }
@@ -73,7 +75,7 @@ function renderFileList(options: RenderOptions = {}) {
     filterQuery = '',
     side = 'local',
     batchMode = false,
-    selectedPaths = [],
+    selectedPaths = new Set(),
     onSelect = vi.fn(),
     onDoubleClick = vi.fn(),
     onParentDirectory = vi.fn(),
@@ -186,7 +188,7 @@ describe('SftpFileList', () => {
       <SftpFileList
         entries={sampleEntries}
         side="local"
-        selectedPaths={[]}
+        selectedPaths={new Set()}
         filterQuery=""
         batchMode={false}
         currentPath="/home/user"
@@ -210,7 +212,7 @@ describe('SftpFileList', () => {
       <SftpFileList
         entries={sampleEntries}
         side="local"
-        selectedPaths={[]}
+        selectedPaths={new Set()}
         filterQuery=""
         batchMode={false}
         currentPath="/home/user"
@@ -232,7 +234,7 @@ describe('SftpFileList', () => {
       <SftpFileList
         entries={sampleEntries}
         side="local"
-        selectedPaths={[]}
+        selectedPaths={new Set()}
         filterQuery=""
         batchMode={false}
         onSelect={vi.fn()}
@@ -251,7 +253,7 @@ describe('SftpFileList', () => {
 
   it('toggles multiple rows with plain clicks in batch mode', () => {
     const Harness = () => {
-      const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+      const [selectedPaths, setSelectedPaths] = useState(new Set<string>());
       return (
         <SftpFileList
           entries={sampleEntries}
@@ -287,6 +289,41 @@ describe('SftpFileList', () => {
     secondRowCells.forEach((cell) => expect(cell).toHaveClass('bg-app-primary/10'));
   });
 
+  it('does not rerender unaffected rows when the batch selection changes', () => {
+    const stableHandler = vi.fn();
+    const Harness = () => {
+      const [selectedPaths, setSelectedPaths] = useState(new Set<string>());
+      return (
+        <SftpFileList
+          entries={sampleEntries}
+          side="local"
+          selectedPaths={selectedPaths}
+          filterQuery=""
+          batchMode
+          onSelect={setSelectedPaths}
+          onDoubleClick={stableHandler}
+          onContextMenu={stableHandler}
+          onBlankContextMenu={stableHandler}
+          onParentDirectory={stableHandler}
+        />
+      );
+    };
+
+    render(<Harness />);
+    translationSpy.mockClear();
+
+    fireEvent.click(getFileName('a.txt'));
+    expect(
+      translationSpy.mock.calls.filter(([key]) => key === 'sftp.kind.file'),
+    ).toHaveLength(1);
+
+    translationSpy.mockClear();
+    fireEvent.click(getFileName('z.txt'));
+    expect(
+      translationSpy.mock.calls.filter(([key]) => key === 'sftp.kind.file'),
+    ).toHaveLength(2);
+  });
+
   it('resets the shift-range anchor when the directory changes', () => {
     const onSelect = vi.fn();
     const firstEntries: FileEntry[] = [
@@ -303,7 +340,7 @@ describe('SftpFileList', () => {
       <SftpFileList
         entries={firstEntries}
         side="local"
-        selectedPaths={[]}
+        selectedPaths={new Set()}
         filterQuery=""
         batchMode
         currentPath="/a"
@@ -321,7 +358,7 @@ describe('SftpFileList', () => {
       <SftpFileList
         entries={secondEntries}
         side="local"
-        selectedPaths={[]}
+        selectedPaths={new Set()}
         filterQuery=""
         batchMode
         currentPath="/b"
@@ -336,7 +373,7 @@ describe('SftpFileList', () => {
     // With a stale anchor (index 0 from /a), this shift-click would select the
     // whole x..z range; after the reset it toggles only z.txt.
     fireEvent.click(getFileName('z.txt'), { shiftKey: true });
-    expect(onSelect).toHaveBeenLastCalledWith(['/b/z.txt']);
+    expect(onSelect).toHaveBeenLastCalledWith(new Set(['/b/z.txt']));
   });
 
   it('resets the shift-range anchor when the filter changes', () => {
@@ -351,7 +388,7 @@ describe('SftpFileList', () => {
       <SftpFileList
         entries={entries}
         side="local"
-        selectedPaths={[]}
+        selectedPaths={new Set()}
         filterQuery={filterQuery}
         batchMode
         currentPath="/a"
@@ -370,7 +407,7 @@ describe('SftpFileList', () => {
     // shift-range over apple..banana; after the reset only apple is toggled.
     rerender(renderList('a'));
     fireEvent.click(getFileName('apple.txt'), { shiftKey: true });
-    expect(onSelect).toHaveBeenLastCalledWith(['/a/apple.txt']);
+    expect(onSelect).toHaveBeenLastCalledWith(new Set(['/a/apple.txt']));
   });
 
   it('moves keyboard focus with arrow keys and scrolls it into view', () => {
@@ -433,12 +470,12 @@ describe('SftpFileList', () => {
     fireEvent.keyDown(listbox, { key: 'ArrowDown' });
     fireEvent.keyDown(listbox, { key: ' ' });
 
-    expect(onSelect).toHaveBeenCalledWith(['/home/user/a.txt']);
+    expect(onSelect).toHaveBeenCalledWith(new Set(['/home/user/a.txt']));
   });
 
   it('toggles the focused entry with Space in batch mode', () => {
     const Harness = () => {
-      const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+      const [selectedPaths, setSelectedPaths] = useState(new Set<string>());
       return (
         <SftpFileList
           entries={sampleEntries}
@@ -469,17 +506,17 @@ describe('SftpFileList', () => {
 
   it('clears the selection with Escape', () => {
     const onSelect = vi.fn();
-    renderFileList({ selectedPaths: ['/home/user/a.txt'], onSelect });
+    renderFileList({ selectedPaths: new Set(['/home/user/a.txt']), onSelect });
     const listbox = screen.getByRole('listbox');
 
     fireEvent.keyDown(listbox, { key: 'Escape' });
 
-    expect(onSelect).toHaveBeenCalledWith([]);
+    expect(onSelect).toHaveBeenCalledWith(new Set());
   });
 
   it('extends the selection range with Shift+Arrow from the anchor', () => {
     const Harness = () => {
-      const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+      const [selectedPaths, setSelectedPaths] = useState(new Set<string>());
       return (
         <SftpFileList
           entries={sampleEntries}
@@ -521,7 +558,7 @@ describe('SftpFileList', () => {
         <SftpFileList
           entries={sampleEntries}
           side="local"
-          selectedPaths={[]}
+          selectedPaths={new Set()}
           filterQuery=""
           batchMode={false}
           onSelect={onSelect}

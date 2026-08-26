@@ -178,13 +178,18 @@ pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
                         },
                     );
                 }
-                ConnectionError::HostKeyMismatch { ref host, ref port } => {
+                ConnectionError::HostKeyMismatch {
+                    ref host,
+                    ref port,
+                    ref fingerprint,
+                } => {
                     let _ = emit_session_error(
                         app,
                         SessionErrorEvent::HostKeyMismatch {
                             session_id: session_id.to_string(),
                             host: host.clone(),
                             port: *port,
+                            fingerprint: fingerprint.clone(),
                         },
                     );
                 }

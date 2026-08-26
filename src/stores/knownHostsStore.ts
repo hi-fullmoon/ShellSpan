@@ -12,7 +12,7 @@ interface KnownHostsState {
   error?: string;
   loadHosts: () => Promise<void>;
   removeHost: (host: string, port: number) => Promise<void>;
-  trustHost: (host: string, port: number) => Promise<void>;
+  trustHost: (host: string, port: number, expectedFingerprint: string) => Promise<void>;
 }
 
 export const useKnownHostsStore = create<KnownHostsState>()((set) => ({
@@ -44,10 +44,10 @@ export const useKnownHostsStore = create<KnownHostsState>()((set) => ({
       throw error;
     }
   },
-  trustHost: async (host, port) => {
+  trustHost: async (host, port, expectedFingerprint) => {
     set({ error: undefined });
     try {
-      await invokeTrustHost(host, port);
+      await invokeTrustHost(host, port, expectedFingerprint);
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
       throw error;

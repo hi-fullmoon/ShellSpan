@@ -30,7 +30,7 @@ export function openHostKeyPrompt(options: HostKeyPromptOptions): void {
       fingerprint,
       mismatch,
       onTrust: () => {
-        invokeTrustHost(host, port)
+        invokeTrustHost(host, port, fingerprint ?? '')
           .then(() => {
             useHostKeyDialogStore.getState().closeDialog();
             if (errorSessionId) processingSessionErrors.delete(errorSessionId);
@@ -66,7 +66,7 @@ export function handleSessionErrorEvent(
   }
   processingSessionErrors.add(sessionId);
 
-  const fingerprint = errorEvent.type === 'HostKeyUnknown' ? errorEvent.payload.fingerprint : undefined;
+  const fingerprint = errorEvent.payload.fingerprint;
 
   logger.warn(
     `Host key verification prompt (${errorEvent.type}) for session ${sessionId} ${host}:${port}`,

@@ -53,7 +53,11 @@ describe('ConnectionPreflightDialog', () => {
     expect(screen.getByText('connection.preflight.status.blocked')).toBeInTheDocument();
     expect(screen.getByText('Authentication was not attempted.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'connection.preflight.trust' }));
-    expect(onTrust).toHaveBeenCalledWith('server.example.com', 22);
+    expect(onTrust).toHaveBeenCalledWith(
+      'server.example.com',
+      22,
+      'SHA256:abc',
+    );
   });
 
   it('offers cancellation while a check is running', () => {

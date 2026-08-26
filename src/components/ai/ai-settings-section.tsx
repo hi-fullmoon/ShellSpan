@@ -3,7 +3,6 @@ import {
   CheckCircle2Icon,
   CircleAlertIcon,
   ServerIcon,
-  Trash2Icon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -35,24 +34,13 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from '@/components/ui/input-group';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
-import {
-  invokeDeleteAiApiKey,
-  invokeHasAiApiKey,
-  invokeListAiModels,
-  invokeStoreAiApiKey,
-} from '@/lib/tauri';
+import { invokeListAiModels } from '@/lib/tauri';
 import { AI_PROVIDER_PRESETS, useAiSettingsStore } from '@/stores/aiSettingsStore';
 import type { AiProviderKind, AiProviderPreset } from '@/types/ai';
 import {
@@ -110,8 +98,6 @@ export const AiSettingsSection: React.FC = () => {
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [hasApiKey, setHasApiKey] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -129,33 +115,14 @@ export const AiSettingsSection: React.FC = () => {
   }, [selectedProvider, selectedProviderId]);
 
   useEffect(() => {
-    let cancelled = false;
-    setApiKey('');
-    setHasApiKey(false);
     setModels([]);
     setError(undefined);
     setSuccess(undefined);
-    if (!selectedProvider?.requiresApiKey) {
-      setHasApiKey(false);
-      return;
-    }
-    void invokeHasAiApiKey(selectedProvider.id)
-      .then((value) => {
-        if (!cancelled) setHasApiKey(value);
-      })
-      .catch((reason) => {
-        if (!cancelled) {
-          setHasApiKey(false);
-          setError(reason instanceof Error ? reason.message : String(reason));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedProvider?.id, selectedProvider?.requiresApiKey]);
+  }, [selectedProvider?.id]);
 
   if (!selectedProvider) return null;
 
+  const hasApiKey = Boolean(selectedProvider.apiKey?.trim());
   const SelectedIcon = PRESET_ICONS[selectedProvider.preset];
 
   const handleAddProvider = (preset: AiProviderPreset): void => {
@@ -164,55 +131,14 @@ export const AiSettingsSection: React.FC = () => {
     setAddOpen(false);
   };
 
-  const handleSaveKey = async (): Promise<void> => {
-    if (!apiKey.trim()) return;
+  const handleDeleteProvider = (): void => {
     setBusy(true);
     setError(undefined);
-    setSuccess(undefined);
-    try {
-      await invokeStoreAiApiKey(selectedProvider.id, apiKey);
-      setApiKey('');
-      setHasApiKey(true);
-      setSuccess(t('settings.ai.keySaved'));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDeleteKey = async (): Promise<void> => {
-    setBusy(true);
-    setError(undefined);
-    setSuccess(undefined);
-    try {
-      await invokeDeleteAiApiKey(selectedProvider.id);
-      setHasApiKey(false);
-      setSuccess(t('settings.ai.keyDeleted'));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDeleteProvider = async (): Promise<void> => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      if (selectedProvider.requiresApiKey) {
-        await invokeDeleteAiApiKey(selectedProvider.id);
-      }
-      removeProvider(selectedProvider.id);
-      const state = useAiSettingsStore.getState();
-      setSelectedProviderId(state.defaultProviderId);
-      setDeleteOpen(false);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-      setDeleteOpen(false);
-    } finally {
-      setBusy(false);
-    }
+    removeProvider(selectedProvider.id);
+    const state = useAiSettingsStore.getState();
+    setSelectedProviderId(state.defaultProviderId);
+    setDeleteOpen(false);
+    setBusy(false);
   };
 
   const handleTest = async (): Promise<void> => {
@@ -453,34 +379,17 @@ export const AiSettingsSection: React.FC = () => {
                           {hasApiKey ? t('settings.ai.keyStored') : t('settings.ai.keyMissing')}
                         </Badge>
                       </div>
-                      <InputGroup>
-                        <InputGroupInput
-                          id="ai-api-key"
-                          type="password"
-                          value={apiKey}
-                          onChange={(event) => setApiKey(event.target.value)}
-                          placeholder={hasApiKey ? t('settings.ai.keyReplacePlaceholder') : 'sk-...'}
-                          autoComplete="off"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                        />
-                        <InputGroupAddon align="inline-end">
-                          <InputGroupButton onClick={() => void handleSaveKey()} disabled={busy || !apiKey.trim()}>
-                            {t('common.save')}
-                          </InputGroupButton>
-                          {hasApiKey && (
-                            <InputGroupButton
-                              size="icon-xs"
-                              onClick={() => void handleDeleteKey()}
-                              disabled={busy}
-                              aria-label={t('settings.ai.deleteKey')}
-                            >
-                              <Trash2Icon />
-                            </InputGroupButton>
-                          )}
-                        </InputGroupAddon>
-                      </InputGroup>
+                      <Input
+                        id="ai-api-key"
+                        type="password"
+                        value={selectedProvider.apiKey ?? ''}
+                        onChange={(event) => updateProvider(selectedProvider.id, { apiKey: event.target.value })}
+                        placeholder="sk-..."
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                      />
                       <FieldDescription>{t('settings.ai.keyHint')}</FieldDescription>
                     </Field>
                   )}
