@@ -15,11 +15,16 @@ import {
 
 export type SftpPreviewKind =
   | 'text'
+  | 'markdown'
+  | 'data'
   | 'image'
   | 'audio'
   | 'video'
   | 'pdf'
   | 'font'
+  | 'document'
+  | 'spreadsheet'
+  | 'presentation'
   | 'archive'
   | 'binary'
   | 'unavailable';
@@ -35,10 +40,12 @@ const MIME_TYPES: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
   webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif',
   svg: 'image/svg+xml',
+  apng: 'image/apng', jfif: 'image/jpeg', tif: 'image/tiff', tiff: 'image/tiff',
   mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg',
   flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac', opus: 'audio/ogg',
+  aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf',
   mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime',
-  m4v: 'video/x-m4v',
+  m4v: 'video/x-m4v', mpg: 'video/mpeg', mpeg: 'video/mpeg', mkv: 'video/x-matroska',
   pdf: 'application/pdf',
   woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
   zip: 'application/zip', gz: 'application/gzip', tgz: 'application/gzip',
@@ -52,9 +59,9 @@ const MIME_TYPES: Record<string, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif', 'svg']);
-const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'oga', 'flac', 'm4a', 'aac', 'opus']);
-const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'ogv', 'mov', 'm4v']);
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'bmp', 'ico', 'avif', 'apng', 'tif', 'tiff', 'svg']);
+const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'oga', 'flac', 'm4a', 'aac', 'opus', 'aif', 'aiff', 'caf']);
+const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'ogv', 'mov', 'm4v', 'mpg', 'mpeg', 'mkv']);
 const ARCHIVE_EXTENSIONS = new Set(['zip', 'gz', 'tgz', 'tar', 'bz2', 'xz', '7z', 'rar']);
 const FONT_EXTENSIONS = new Set(['woff', 'woff2', 'ttf', 'otf']);
 const CODE_EXTENSIONS = new Set([
@@ -63,6 +70,7 @@ const CODE_EXTENSIONS = new Set([
   'sh', 'sql', 'svelte', 'swift', 'ts', 'tsx', 'vue', 'xml', 'yaml', 'yml',
 ]);
 const DATA_EXTENSIONS = new Set(['csv', 'json', 'jsonl', 'ndjson', 'toml', 'tsv']);
+const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkd']);
 const TEXT_EXTENSIONS = new Set([
   ...CODE_EXTENSIONS,
   ...DATA_EXTENSIONS,
@@ -104,10 +112,25 @@ export function getSftpPreviewDescriptor(
     return { kind: 'archive', mimeType: MIME_TYPES[extension], extension, icon: ArchiveIcon };
   }
   if (contentEncoding === 'utf8') {
+    if (MARKDOWN_EXTENSIONS.has(extension)) {
+      return { kind: 'markdown', mimeType: 'text/markdown;charset=utf-8', extension, icon: FileTextIcon };
+    }
+    if (DATA_EXTENSIONS.has(extension)) {
+      return { kind: 'data', mimeType: 'text/plain;charset=utf-8', extension, icon: extension === 'json' || extension === 'jsonl' || extension === 'ndjson' ? BracesIcon : Table2Icon };
+    }
     const icon = DATA_EXTENSIONS.has(extension)
       ? (extension === 'json' || extension === 'jsonl' ? BracesIcon : Table2Icon)
       : (CODE_EXTENSIONS.has(extension) ? FileCode2Icon : FileTextIcon);
     return { kind: 'text', mimeType: 'text/plain;charset=utf-8', extension, icon };
+  }
+  if (extension === 'docx') {
+    return { kind: 'document', mimeType: MIME_TYPES.docx, extension, icon: FileTextIcon };
+  }
+  if (extension === 'xlsx') {
+    return { kind: 'spreadsheet', mimeType: MIME_TYPES.xlsx, extension, icon: Table2Icon };
+  }
+  if (extension === 'pptx') {
+    return { kind: 'presentation', mimeType: MIME_TYPES.pptx, extension, icon: FileImageIcon };
   }
   return {
     kind: 'binary',
