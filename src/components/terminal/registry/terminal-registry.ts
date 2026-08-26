@@ -2,6 +2,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
+import { WebglAddon } from '@xterm/addon-webgl';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
@@ -361,6 +362,8 @@ class TerminalControllerImpl implements TerminalController {
   private lastSentDimensions: { cols: number; rows: number } | null = null;
   private rendererMode: RendererMode = 'dom';
   private rendererInitialized = false;
+  private webglAddon?: WebglAddon;
+  private webglContextLossDisposable?: IDisposable;
   private pendingOutputCharacters = 0;
   private outputPaused = false;
   private outputGeneration = 0;
@@ -479,20 +482,50 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
-  // Renderer addons need the terminal element, so they are loaded once after
-  // the first successful open().
-  // NOTE: the WebGL renderer (@xterm/addon-webgl) is temporarily disabled;
-  // the DOM renderer is always used. To restore it, re-add the WebglAddon
-  // import and the try/catch block that loads it here.
+  // Renderer addons need the terminal element, so WebGL is attempted once
+  // after the first successful open(). Keeping the attempt controller-scoped
+  // prevents detach/reattach and reconnect from accumulating addons.
   private setupRenderer(): void {
     if (this.rendererInitialized) return;
     this.rendererInitialized = true;
-    this.setRendererMode('dom');
+
+    try {
+      const addon = new WebglAddon();
+      this.webglAddon = addon;
+      this.webglContextLossDisposable = addon.onContextLoss(() => {
+        if (this.disposed || this.webglAddon !== addon) return;
+        logger.warn(`WebGL context lost for session ${this.sessionId}; falling back to DOM renderer`);
+        this.disposeWebglRenderer(addon);
+      });
+      this.terminal.loadAddon(addon);
+      this.setRendererMode('webgl');
+    } catch (error) {
+      // loadAddon wraps dispose before calling activate, so disposing here
+      // also removes a partially activated addon from xterm's addon manager.
+      this.disposeWebglRenderer();
+      this.setRendererMode('dom');
+      logger.warn(`WebGL renderer unavailable for session ${this.sessionId}; using DOM renderer`, error);
+    }
   }
 
   private setRendererMode(mode: RendererMode): void {
     this.rendererMode = mode;
     this.container.classList.toggle(VIEWPORT_HIDDEN_CLASS, mode === 'dom');
+  }
+
+  private disposeWebglRenderer(expectedAddon?: WebglAddon): void {
+    const addon = this.webglAddon;
+    if (!addon || (expectedAddon && addon !== expectedAddon)) return;
+
+    this.webglAddon = undefined;
+    this.webglContextLossDisposable?.dispose();
+    this.webglContextLossDisposable = undefined;
+    try {
+      addon.dispose();
+    } catch (error) {
+      logger.warn(`Failed to dispose WebGL renderer for session ${this.sessionId}`, error);
+    }
+    this.setRendererMode('dom');
   }
 
   private writeSystemLine(line: string): void {
@@ -917,6 +950,7 @@ class TerminalControllerImpl implements TerminalController {
     this.detach();
     this.clearListeners();
     this.linkProviderDisposable?.dispose();
+    this.disposeWebglRenderer();
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);
     this.removeFromRegistry(this.sessionId);

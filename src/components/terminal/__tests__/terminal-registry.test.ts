@@ -1,7 +1,64 @@
 import { act } from '@testing-library/react';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
+import {
+  appendTerminalOutput,
+  getRecentTerminalOutput,
+  getRecentTerminalOutputSnapshot,
+} from '@/lib/terminal-output-buffer';
 import { findHttpLinksInLine, resolveTerminalTheme, terminalRegistry } from '../registry/terminal-registry';
+
+const webglMocks = vi.hoisted(() => {
+  type Behavior = 'success' | 'constructor-throw' | 'activate-throw';
+  let behavior: Behavior = 'activate-throw';
+  const instances: MockWebglAddon[] = [];
+
+  class MockWebglAddon {
+    private readonly contextLossListeners = new Set<() => void>();
+    readonly activate = vi.fn(() => {
+      if (behavior === 'activate-throw') throw new Error('WebGL unavailable');
+    });
+    readonly rawDispose = vi.fn(() => {
+      this.contextLossListeners.clear();
+    });
+    readonly onContextLoss = vi.fn((listener: () => void) => {
+      this.contextLossListeners.add(listener);
+      return {
+        dispose: vi.fn(() => this.contextLossListeners.delete(listener)),
+      };
+    });
+
+    constructor() {
+      if (behavior === 'constructor-throw') throw new Error('WebGL initialization failed');
+      instances.push(this);
+    }
+
+    dispose(): void {
+      this.rawDispose();
+    }
+
+    emitContextLoss(): void {
+      for (const listener of [...this.contextLossListeners]) listener();
+    }
+
+    get contextLossListenerCount(): number {
+      return this.contextLossListeners.size;
+    }
+  }
+
+  return {
+    MockWebglAddon,
+    instances,
+    reset(nextBehavior: Behavior = 'activate-throw') {
+      behavior = nextBehavior;
+      instances.length = 0;
+    },
+  };
+});
+
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: webglMocks.MockWebglAddon,
+}));
 
 // xterm + addons work in jsdom for write/buffer; fit yields 0x0 (harmless).
 // Polyfill ResizeObserver if undefined.
@@ -59,6 +116,7 @@ describe('terminalRegistry', () => {
       urlDetection: true,
       bellStyle: 'none',
     });
+    webglMocks.reset();
     vi.clearAllMocks();
   });
 
@@ -160,6 +218,84 @@ describe('terminalRegistry', () => {
     expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
   });
 
+  it('activates WebGL once and keeps the viewport scrollbar visible', () => {
+    webglMocks.reset('success');
+    const controller = createController('s1');
+    const host1 = document.createElement('div');
+    const host2 = document.createElement('div');
+
+    controller.attach(host1);
+
+    expect(webglMocks.instances).toHaveLength(1);
+    expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
+    expect(webglMocks.instances[0].contextLossListenerCount).toBe(1);
+    expect(controller.container).not.toHaveClass('[&_.xterm-viewport]:opacity-0');
+
+    controller.detach();
+    controller.attach(host2);
+
+    expect(webglMocks.instances).toHaveLength(1);
+    expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
+    expect(webglMocks.instances[0].contextLossListenerCount).toBe(1);
+    expect(controller.container).not.toHaveClass('[&_.xterm-viewport]:opacity-0');
+  });
+
+  it.each(['constructor-throw', 'activate-throw'] as const)(
+    'keeps the DOM renderer when WebGL %s fails',
+    (behavior) => {
+      webglMocks.reset(behavior);
+      const controller = createController('s1');
+
+      expect(() => controller.attach(document.createElement('div'))).not.toThrow();
+      expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
+      if (behavior === 'activate-throw') {
+        expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
+        expect(webglMocks.instances[0].rawDispose).toHaveBeenCalledOnce();
+        expect(webglMocks.instances[0].contextLossListenerCount).toBe(0);
+      } else {
+        expect(webglMocks.instances).toHaveLength(0);
+      }
+    },
+  );
+
+  it('falls back to DOM after context loss without replacing the terminal or buffer', async () => {
+    webglMocks.reset('success');
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+    const terminal = controller.terminal;
+    await new Promise<void>((resolve) => terminal.write('history-before-context-loss\r\n', resolve));
+    const bufferLength = terminal.buffer.active.length;
+
+    webglMocks.instances[0].emitContextLoss();
+
+    expect(controller.terminal).toBe(terminal);
+    expect(controller.terminal.buffer.active.length).toBe(bufferLength);
+    expect(webglMocks.instances[0].rawDispose).toHaveBeenCalledOnce();
+    expect(webglMocks.instances[0].contextLossListenerCount).toBe(0);
+    expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
+  });
+
+  it('keeps one WebGL addon through rebind and disposes its context listener once', () => {
+    webglMocks.reset('success');
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+    const addon = webglMocks.instances[0];
+
+    terminalRegistry.rebindSession('s1', 's2');
+    controller.detach();
+    controller.attach(document.createElement('div'));
+
+    expect(webglMocks.instances).toHaveLength(1);
+    expect(addon.activate).toHaveBeenCalledOnce();
+    expect(addon.contextLossListenerCount).toBe(1);
+
+    terminalRegistry.dispose('s2');
+    controller.dispose();
+
+    expect(addon.rawDispose).toHaveBeenCalledOnce();
+    expect(addon.contextLossListenerCount).toBe(0);
+  });
+
   it('detach keeps buffer intact; reattach to a different host preserves buffer', () => {
     const controller = createController('s1');
     const host1 = document.createElement('div');
@@ -213,6 +349,22 @@ describe('terminalRegistry', () => {
     expect(host.firstChild).toBeNull();
   });
 
+  it('dispose invalidates cached AI output before the session id is reused', () => {
+    createController('s1');
+    appendTerminalOutput('s1', 'password=disposed-secret\n');
+    const disposedSnapshot = getRecentTerminalOutputSnapshot('s1', 20);
+    expect(disposedSnapshot.content).toBe('password=[REDACTED]');
+
+    terminalRegistry.dispose('s1');
+    expect(getRecentTerminalOutput('s1', 20)).toBe('');
+
+    createController('s1');
+    appendTerminalOutput('s1', 'rebuilt session\n');
+    const rebuiltSnapshot = getRecentTerminalOutputSnapshot('s1', 20);
+    expect(rebuiltSnapshot).not.toBe(disposedSnapshot);
+    expect(rebuiltSnapshot.content).toBe('rebuilt session');
+  });
+
   it('detach nulls resizeObserver; reattach creates a fresh observer', () => {
     const controller = createController('s1');
     const host1 = document.createElement('div');
@@ -235,6 +387,55 @@ describe('terminalRegistry', () => {
     const host2 = document.createElement('div');
     controller.attach(host2);
     expect(controller.resizeObserver).not.toBe(firstObserver);
+  });
+
+  it('debounces resize for 100ms and drops an unchanged grid size', async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const callbacks: ResizeObserverCallback[] = [];
+    class RecordingResizeObserver implements ResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        callbacks.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords(): ResizeObserverEntry[] {
+        return [];
+      }
+    }
+    globalThis.ResizeObserver = RecordingResizeObserver;
+    vi.useFakeTimers();
+
+    try {
+      const { invokeResizeSession } = await import('@/lib/tauri');
+      const controller = createController('s1');
+      Object.defineProperty(controller.container, 'offsetParent', {
+        configurable: true,
+        get: () => document.body,
+      });
+      controller.attach(document.createElement('div'));
+      vi.mocked(invokeResizeSession).mockClear();
+      vi.spyOn(controller.fitAddon, 'proposeDimensions')
+        .mockReturnValueOnce({ cols: 100, rows: 30 })
+        .mockReturnValue({ cols: 101, rows: 31 });
+
+      callbacks[0]([], controller.resizeObserver!);
+      callbacks[0]([], controller.resizeObserver!);
+      vi.advanceTimersByTime(99);
+      expect(invokeResizeSession).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(invokeResizeSession).toHaveBeenCalledOnce();
+      expect(invokeResizeSession).toHaveBeenCalledWith('s1', 101, 31);
+
+      callbacks[0]([], controller.resizeObserver!);
+      vi.advanceTimersByTime(100);
+      expect(invokeResizeSession).toHaveBeenCalledOnce();
+    } finally {
+      terminalRegistry.disposeAll();
+      vi.useRealTimers();
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 
   it('double dispose is a no-op', () => {
