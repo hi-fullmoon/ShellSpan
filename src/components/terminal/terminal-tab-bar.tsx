@@ -73,6 +73,7 @@ interface SessionTabProps {
   dragging?: boolean;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
+  dropIndicatorLeftInGap?: boolean;
   showSeparatorAfter?: boolean;
   onActivate: (sessionId: string) => void;
   onContextMenu: (session: TerminalSession, x: number, y: number) => void;
@@ -86,6 +87,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
   dragging = false,
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
+  dropIndicatorLeftInGap = false,
   showSeparatorAfter = false,
   onActivate,
   onContextMenu,
@@ -137,14 +139,22 @@ const SessionTab: React.FC<SessionTabProps> = ({
           orientation="vertical"
           aria-hidden="true"
           data-tab-separator
-          className="pointer-events-none absolute right-[-3px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
+          className="pointer-events-none absolute right-[-4px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
         />
       )}
       {showDropIndicatorLeft && (
-        <div className="pointer-events-none absolute left-0 top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary" />
+        <div
+          data-drop-indicator="left"
+          className={cn(
+            'pointer-events-none absolute top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary',
+            // Absolute offsets start at the tab's inner border edge. Account
+            // for that 1px border when centering in the 5px outer gap.
+            dropIndicatorLeftInGap ? 'left-[-3.5px]' : 'left-0',
+          )}
+        />
       )}
       {showDropIndicatorRight && (
-        <div className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
+        <div data-drop-indicator="right" className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span
@@ -196,6 +206,7 @@ interface SortableTabProps {
   onTogglePin: (sessionId: string) => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
+  dropIndicatorLeftInGap?: boolean;
   showSeparatorAfter?: boolean;
 }
 
@@ -208,6 +219,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onTogglePin,
   showDropIndicatorLeft,
   showDropIndicatorRight,
+  dropIndicatorLeftInGap,
   showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -231,6 +243,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
         dragging={isDragging}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
+        dropIndicatorLeftInGap={dropIndicatorLeftInGap}
         showSeparatorAfter={showSeparatorAfter}
         onActivate={onActivate}
         onContextMenu={onContextMenu}
@@ -596,7 +609,11 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
   const visibleSessions = draggingSessionId ? sessions.filter((session) => session.sessionId !== draggingSessionId) : sessions;
-  const displayedInsertIndex = externalInsertIndex ?? insertIndex;
+  const displayedInsertIndex = externalInsertIndex !== null
+    ? externalInsertIndex
+    : draggingSessionId
+      ? insertIndex
+      : null;
   // Dropping back into the dragged tab's own slot is a no-op, so suppress the
   // indicator that would otherwise sit between the dragged tab and its right
   // neighbor.
@@ -648,7 +665,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               const isLastVisible = visibleIndex === visibleTabCount - 1;
               const isActive = activeSessionId === session.sessionId;
               const nextVisibleSession = visibleIndex >= 0 ? visibleSessions[visibleIndex + 1] : undefined;
-              const showSeparatorAfter = !!nextVisibleSession;
+              const showSeparatorAfter = !!nextVisibleSession
+                && effectiveInsertIndex !== visibleIndex + 1;
 
               return (
                 <SortableTab
@@ -661,6 +679,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                   onTogglePin={togglePin}
                   showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
                   showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
+                  dropIndicatorLeftInGap={visibleIndex > 0}
                   showSeparatorAfter={showSeparatorAfter}
                 />
               );
