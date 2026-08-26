@@ -68,7 +68,13 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
   const { t } = useI18n();
   const sessions = useTerminalStore((state) => state.sessions);
   const sftpConnections = useSftpStore((state) => state.connections);
-  const transfers = useTransferStore((state) => state.operations);
+  const pathOccupancyRevision = useTransferStore(
+    (state) => state.pathOccupancyRevision,
+  );
+  const transfers = useMemo(
+    () => useTransferStore.getState().operations,
+    [pathOccupancyRevision],
+  );
   const disconnectEvents = useMonitorStore((state) => state.disconnectEvents);
   const agentRun = useAgentStore((state) => state.run);
   const portForwards = usePortForwardStore((state) => state.runtimes);
