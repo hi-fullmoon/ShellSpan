@@ -41,7 +41,7 @@
         "auditId": "now-ai-safety",
         "section": "4. AI 安全基线",
         "items": [
-          "将 AI API 密钥纳入系统钥匙串，配置数据库只保存非敏感元数据。",
+          "将 AI API 密钥随厂商配置保存在本机数据库，并提供从旧钥匙串安全迁移的恢复路径。",
           "在发送上下文前提供可见范围与预览；默认遮蔽密码、令牌、私钥、环境变量秘密和疑似凭证。",
           "保持诊断 Agent 只读、命令白名单、命令数量上限和逐步批准机制，并为绕过、拼接、重定向等场景补充安全测试。",
           "明确区分“插入终端”和“执行命令”；未经用户动作不得发送回车执行。",
@@ -244,9 +244,9 @@
       "evidence": ["src-tauri/src/known_hosts.rs", "src-tauri/src/commands.rs", "src-tauri/src/remote_fs.rs", "src-tauri/src/session.rs", "src-tauri/src/port_forward.rs"],
       "tests": ["src-tauri/src/known_hosts.rs", "src-tauri/src/connection.rs", "src-tauri/src/remote_fs.rs", "src-tauri/src/port_forward.rs", "src-tauri/src/runbook.rs", "src-tauri/src/remote_health.rs"]
     },
-    "aiApiKeyKeychainOnly": {
+    "aiApiKeyLocalStorage": {
       "status": "verified",
-      "finding": "旧 SQLite 明文只向系统钥匙串迁移并清理；钥匙串写入失败保留数据库，数据库清理失败保留双副本，运行时只读钥匙串且错误不含秘密。",
+      "finding": "AI API Key 随厂商配置保存在本机数据库；升级时先写入从系统钥匙串读取的旧值，再删除钥匙串副本，任一步失败均保留至少一份可恢复副本。",
       "evidence": ["src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/stores/aiSettingsStore.ts", "src/components/ai/ai-settings-section.tsx"],
       "tests": ["src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/stores/__tests__/aiSettingsStore.test.ts"]
     },
@@ -552,7 +552,7 @@
         },
         "securityModel": {
           "status": "not-met",
-          "finding": "AI API Key 已修正为只从旧 SQLite 明文迁入系统钥匙串，preferences 也拒绝敏感 provider 字段；但仍没有直接 KDF/AEAD 依赖、备份容器、完整性验证或覆盖全部本地数据类别的秘密生命周期测试，原始数据库和整表设置复制仍不构成安全备份。"
+          "finding": "AI API Key 随厂商配置保存在本机数据库，原始数据库与整表设置复制会包含该秘密；仍没有直接 KDF/AEAD 依赖、备份容器、完整性验证或覆盖全部本地数据类别的秘密生命周期测试，因此它们不构成安全备份。"
         },
         "upgradeStrategy": {
           "status": "unknown",
@@ -696,7 +696,7 @@
         "prerequisites": {
           "connectionCredentials": {
             "status": "met",
-            "finding": "连接 profile 与 AI API Key 都只从系统钥匙串读取；旧 AI 明文只向钥匙串迁移，写入失败保留旧值、清理失败保留双副本，通用 preferences 拒绝敏感 provider 字段。"
+            "finding": "连接 profile 只从系统钥匙串读取；AI API Key 随 provider 配置保存在本机数据库，旧钥匙串值先写入数据库再删除，任一步失败均保留可恢复副本。"
           },
           "knownHosts": {
             "status": "met",

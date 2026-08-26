@@ -32,46 +32,6 @@ fn validate_terminal_workspace(workspace_json: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn contains_sensitive_ai_field(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
-            let normalized = key
-                .chars()
-                .filter(|character| character.is_ascii_alphanumeric())
-                .collect::<String>()
-                .to_ascii_lowercase();
-            matches!(
-                normalized.as_str(),
-                "apikey"
-                    | "password"
-                    | "passphrase"
-                    | "privatekey"
-                    | "secret"
-                    | "token"
-                    | "credential"
-                    | "authorization"
-            ) || contains_sensitive_ai_field(value)
-        }),
-        serde_json::Value::Array(values) => values.iter().any(contains_sensitive_ai_field),
-        _ => false,
-    }
-}
-
-fn validate_preference_entries(entries: &[(String, String)]) -> Result<(), String> {
-    for (key, value) in entries {
-        if key == "ai.providers" {
-            let providers: serde_json::Value = serde_json::from_str(value)
-                .map_err(|_| "AI provider preferences must be valid JSON".to_string())?;
-            if contains_sensitive_ai_field(&providers) {
-                return Err(
-                    "AI provider preferences may only contain non-sensitive metadata".to_string(),
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
@@ -687,7 +647,6 @@ impl Database {
     }
 
     pub(crate) fn save_preferences(&self, entries: &[(String, String)]) -> Result<(), String> {
-        validate_preference_entries(entries)?;
         let conn = self
             .conn
             .lock()
@@ -1191,26 +1150,22 @@ mod tests {
     }
 
     #[test]
-    fn ai_provider_preferences_reject_inline_secrets_without_logging_the_value() {
+    fn ai_provider_preferences_store_inline_api_keys() {
         let db = test_db();
-        let secret = "must-never-reach-sqlite";
-        let error = db
-            .save_preferences(&[(
-                "ai.providers".to_string(),
-                serde_json::json!([{
-                    "id": "openai",
-                    "apiKey": secret,
-                }])
-                .to_string(),
-            )])
-            .unwrap_err();
+        let secret = "stored-with-provider";
+        let providers = serde_json::json!([{
+            "id": "openai",
+            "apiKey": secret,
+        }])
+        .to_string();
+        db.save_preferences(&[("ai.providers".to_string(), providers.clone())])
+            .unwrap();
 
-        assert!(!error.contains(secret));
         assert!(db
             .load_preferences()
             .unwrap()
             .iter()
-            .all(|(key, _)| key != "ai.providers"));
+            .any(|(key, value)| key == "ai.providers" && value == &providers));
     }
 
     #[test]

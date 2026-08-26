@@ -217,7 +217,13 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const removeConnection = useSftpStore((state) => state.removeConnection);
   const reorderConnections = useSftpStore((state) => state.reorderConnections);
   const togglePin = useSftpStore((state) => state.togglePin);
-  const transferOperations = useTransferStore((state) => state.operations);
+  const pathOccupancyRevision = useTransferStore(
+    (state) => state.pathOccupancyRevision,
+  );
+  const transferOperations = React.useMemo(
+    () => useTransferStore.getState().operations,
+    [pathOccupancyRevision],
+  );
 
   // macOS tap-to-click in WKWebView can drop the pointerdown of a tap that
   // immediately follows another one (the single-tap gesture recognizer stays

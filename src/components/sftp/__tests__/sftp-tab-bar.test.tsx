@@ -1,13 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpTabBar } from '../sftp-tab-bar';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 
+const translationSpy = vi.hoisted(() => vi.fn((key: string) => key));
+
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: translationSpy,
     locale: 'en-US',
   }),
 }));
@@ -18,6 +20,7 @@ describe('SftpTabBar', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
     useTransferStore.setState({ operations: [] });
+    translationSpy.mockClear();
   });
 
   it('warns when closing a tab would interrupt an active transfer', () => {
@@ -37,6 +40,35 @@ describe('SftpTabBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'close' }));
 
     expect(screen.getByText('sftp.tab.closeTransferWarning')).toBeInTheDocument();
+  });
+
+  it('does not rerender for a progress-only transfer update', () => {
+    const id = addConnection('Busy connection');
+    useTransferStore.getState().addOperation({
+      operationId: 'busy-upload',
+      kind: 'upload',
+      ownerId: id,
+      totalBytes: 10,
+      processedBytes: 1,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+    render(<SftpTabBar />);
+    translationSpy.mockClear();
+
+    act(() => {
+      useTransferStore.getState().updateUpload({
+        operationId: 'busy-upload',
+        currentPath: '/tmp/archive.zip',
+        totalBytes: 10,
+        uploadedBytes: 5,
+        totalSteps: 1,
+        completedSteps: 0,
+      });
+    });
+
+    expect(translationSpy).not.toHaveBeenCalled();
   });
 
   const addConnection = (title: string): string => {

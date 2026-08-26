@@ -10,6 +10,8 @@ import { useTransferStore } from '@/stores/transferStore';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
+import { setCachedDirectoryListing } from '@/lib/directory-listing-cache';
+import type { ReadRemoteFileResponse } from '@/types';
 
 const tauri = vi.hoisted(() => ({
   buildRemoteConnectionRequest: vi.fn((connection: SftpConnection['connection']) => connection),
@@ -17,6 +19,7 @@ const tauri = vi.hoisted(() => ({
   invokeCancelDelete: vi.fn().mockResolvedValue(undefined),
   invokeCancelDownload: vi.fn().mockResolvedValue(undefined),
   invokeCancelRemoteCopy: vi.fn().mockResolvedValue(undefined),
+  invokeCancelRemoteFileRead: vi.fn().mockResolvedValue(undefined),
   invokeCancelUpload: vi.fn().mockResolvedValue(undefined),
   invokeCreateRemoteEntry: vi.fn().mockResolvedValue(undefined),
   invokeDeleteRemotePath: vi.fn().mockResolvedValue(undefined),
@@ -28,6 +31,10 @@ const tauri = vi.hoisted(() => ({
   invokeOpenRemoteFile: vi.fn().mockResolvedValue(undefined),
   invokePreviewRemoteFile: vi.fn().mockResolvedValue(undefined),
   invokeRenameRemotePath: vi.fn().mockResolvedValue(undefined),
+  invokeResolveRemoteEntryOwners: vi.fn().mockResolvedValue({
+    ownerNames: {},
+    groupNames: {},
+  }),
   invokeUpdateRemotePermissions: vi.fn().mockResolvedValue(undefined),
   invokeUploadLocalPaths: vi.fn().mockResolvedValue({ items: [] }),
 }));
@@ -197,6 +204,70 @@ describe('useSftpConnection directory listing race', () => {
     const state = useSftpStore.getState().connections[0]!;
     expect(state.remotePath).toBe('/new');
     expect(state.remoteEntries).toEqual([file]);
+    expect(state.remoteLoading).toBe(false);
+
+    const firstRequest = tauri.invokeListRemoteDirectory.mock.calls[0]![0];
+    const secondRequest = tauri.invokeListRemoteDirectory.mock.calls[1]![0];
+    expect(firstRequest.requestKey).toBe(secondRequest.requestKey);
+    expect(firstRequest.requestKey).toMatch(/:connection-1:remote$/);
+    expect(secondRequest.requestId).toBe(firstRequest.requestId + 1);
+  });
+
+  it('passes the listing generation to owner lookup and ignores its stale failure', async () => {
+    let rejectOwners!: (error: Error) => void;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    tauri.invokeResolveRemoteEntryOwners.mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectOwners = reject; }),
+    );
+    tauri.invokeListRemoteDirectory
+      .mockResolvedValueOnce({
+        path: '/old',
+        entries: [{ ...file, path: '/old/draft.txt', ownerUid: 1000 }],
+      })
+      .mockResolvedValueOnce({ path: '/new', entries: [file] });
+
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() => result.current.loadRemoteDirectory('/old'));
+    const listingRequest = tauri.invokeListRemoteDirectory.mock.calls[0]![0];
+    expect(tauri.invokeResolveRemoteEntryOwners).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestKey: listingRequest.requestKey,
+        requestId: listingRequest.requestId,
+        ownerIds: [1000],
+      }),
+    );
+
+    await act(() => result.current.loadRemoteDirectory('/new'));
+    await act(async () => {
+      rejectOwners(new Error('remote directory request superseded'));
+      await Promise.resolve();
+    });
+
+    const state = useSftpStore.getState().connections[0]!;
+    expect(state.remotePath).toBe('/new');
+    expect(state.remoteEntries).toEqual([file]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('keeps cached entries while surfacing the latest revalidation error', async () => {
+    setCachedDirectoryListing('connection-1:remote:/cached', {
+      path: '/cached',
+      entries: [file],
+    });
+    tauri.invokeListRemoteDirectory.mockRejectedValueOnce(new Error('refresh failed'));
+
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() => result.current.loadRemoteDirectory('/cached'));
+
+    const state = useSftpStore.getState().connections[0]!;
+    expect(state.remotePath).toBe('/cached');
+    expect(state.remoteEntries).toEqual([file]);
+    expect(state.remoteError).toBe('refresh failed');
     expect(state.remoteLoading).toBe(false);
   });
 });
@@ -448,6 +519,149 @@ describe('useSftpConnection downloads', () => {
   });
 });
 
+describe('useSftpConnection remote file reads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const connection = createConnection();
+    useSftpStore.setState({
+      connections: [connection],
+      activeConnectionId: connection.id,
+    });
+    tauri.invokeOpenRemoteFile.mockResolvedValue(undefined);
+    tauri.invokePreviewRemoteFile.mockResolvedValue({
+      path: file.path,
+      name: file.name,
+      content: 'hello',
+      size: file.size,
+      isText: true,
+      contentEncoding: 'utf8',
+      truncated: false,
+    });
+  });
+
+  it('cancels the previous open and gives each request a unique operation id', async () => {
+    let resolveFirst!: () => void;
+    tauri.invokeOpenRemoteFile
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce(undefined);
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    const first = result.current.openRemoteFile('/remote/first.log');
+    await act(() => result.current.openRemoteFile('/remote/second.log'));
+
+    const firstRequest = tauri.invokeOpenRemoteFile.mock.calls[0]![0];
+    const secondRequest = tauri.invokeOpenRemoteFile.mock.calls[1]![0];
+    expect(firstRequest).toMatchObject({
+      path: '/remote/first.log',
+      operationId: expect.stringContaining('-open-'),
+    });
+    expect(secondRequest).toMatchObject({
+      path: '/remote/second.log',
+      operationId: expect.stringContaining('-open-'),
+    });
+    expect(secondRequest.operationId).not.toBe(firstRequest.operationId);
+    expect(tauri.invokeCancelRemoteFileRead).toHaveBeenCalledWith(firstRequest.operationId);
+
+    resolveFirst();
+    await act(() => first);
+  });
+
+  it('cancels the previous preview and lets close cancel the current preview', async () => {
+    let resolveFirst!: (value: ReadRemoteFileResponse) => void;
+    let resolveSecond!: (value: ReadRemoteFileResponse) => void;
+    tauri.invokePreviewRemoteFile
+      .mockImplementationOnce(
+        () => new Promise<ReadRemoteFileResponse>((resolve) => { resolveFirst = resolve; }),
+      )
+      .mockImplementationOnce(
+        () => new Promise<ReadRemoteFileResponse>((resolve) => { resolveSecond = resolve; }),
+      );
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    const first = result.current.previewRemoteFile('/remote/first.log');
+    const second = result.current.previewRemoteFile('/remote/second.log');
+    const firstRequest = tauri.invokePreviewRemoteFile.mock.calls[0]![0];
+    const secondRequest = tauri.invokePreviewRemoteFile.mock.calls[1]![0];
+
+    expect(tauri.invokeCancelRemoteFileRead).toHaveBeenCalledWith(firstRequest.operationId);
+    act(() => result.current.cancelRemoteFilePreview());
+    expect(tauri.invokeCancelRemoteFileRead).toHaveBeenCalledWith(secondRequest.operationId);
+
+    resolveFirst({
+      path: '/remote/first.log',
+      name: 'first.log',
+      content: 'first',
+      size: 5,
+      isText: true,
+      contentEncoding: 'utf8',
+      truncated: false,
+    });
+    resolveSecond({
+      path: '/remote/second.log',
+      name: 'second.log',
+      content: 'second',
+      size: 6,
+      isText: true,
+      contentEncoding: 'utf8',
+      truncated: false,
+    });
+    await act(async () => {
+      await first;
+      await second;
+    });
+  });
+
+  it('cancels active open and preview operations on unmount', () => {
+    tauri.invokeOpenRemoteFile.mockImplementationOnce(() => new Promise<void>(() => undefined));
+    tauri.invokePreviewRemoteFile.mockImplementationOnce(
+      () => new Promise<ReadRemoteFileResponse>(() => undefined),
+    );
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result, unmount } = renderHook(() => useSftpConnection(connection));
+
+    void result.current.openRemoteFile('/remote/open.log');
+    void result.current.previewRemoteFile('/remote/preview.log');
+    const openOperationId = tauri.invokeOpenRemoteFile.mock.calls[0]![0].operationId;
+    const previewOperationId = tauri.invokePreviewRemoteFile.mock.calls[0]![0].operationId;
+    unmount();
+
+    expect(tauri.invokeCancelRemoteFileRead).toHaveBeenCalledWith(openOperationId);
+    expect(tauri.invokeCancelRemoteFileRead).toHaveBeenCalledWith(previewOperationId);
+  });
+
+  it('cancels active reads when same-endpoint credentials change', () => {
+    tauri.invokeOpenRemoteFile.mockImplementationOnce(() => new Promise<void>(() => undefined));
+    tauri.invokePreviewRemoteFile.mockImplementationOnce(
+      () => new Promise<ReadRemoteFileResponse>(() => undefined),
+    );
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result, rerender } = renderHook(
+      ({ currentConnection }) => useSftpConnection(currentConnection),
+      { initialProps: { currentConnection: connection } },
+    );
+
+    void result.current.openRemoteFile('/remote/open.log');
+    void result.current.previewRemoteFile('/remote/preview.log');
+    const openOperationId = tauri.invokeOpenRemoteFile.mock.calls[0]![0].operationId;
+    const previewOperationId = tauri.invokePreviewRemoteFile.mock.calls[0]![0].operationId;
+
+    rerender({
+      currentConnection: {
+        ...connection,
+        connection: {
+          ...connection.connection,
+          password: 'rotated-secret',
+        },
+      },
+    });
+
+    expect(tauri.invokeCancelRemoteFileRead).toHaveBeenCalledWith(openOperationId);
+    expect(tauri.invokeCancelRemoteFileRead).toHaveBeenCalledWith(previewOperationId);
+  });
+});
+
 describe('useSftpConnection keychain key recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -509,6 +723,69 @@ describe('useSftpConnection keychain key recovery', () => {
     expect(tauri.invokeListRemoteDirectory).toHaveBeenCalledTimes(2);
     expect(useSftpStore.getState().connections[0]?.connection.keychainKeyId).toBe('new-key');
     expect(useSftpStore.getState().connections[0]?.remoteEntries).toEqual([file]);
+  });
+
+  it('does not prompt, retry, or log when an older missing-key error arrives late', async () => {
+    const profileId = 'profile-stale';
+    const keychainConnection: SftpConnection = {
+      ...createConnection(),
+      profileId,
+      connection: {
+        host: 'example.com',
+        port: 22,
+        username: 'tester',
+        authMethod: 'key',
+        keychainKeyId: 'old-key',
+      },
+    };
+    useProfileStore.setState({
+      profiles: [
+        {
+          id: profileId,
+          name: 'Test',
+          host: 'example.com',
+          port: 22,
+          username: 'tester',
+          authMethod: 'key',
+          keychainKeyId: 'old-key',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    });
+    useSftpStore.setState({
+      connections: [keychainConnection],
+      activeConnectionId: keychainConnection.id,
+    });
+    let rejectStale!: (error: unknown) => void;
+    tauri.invokeListRemoteDirectory
+      .mockImplementationOnce(
+        () => new Promise((_, reject) => { rejectStale = reject; }),
+      )
+      .mockResolvedValueOnce({ path: '/new', entries: [file] });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { result } = renderHook(() => useSftpConnection(keychainConnection));
+
+    let staleLoad!: Promise<void>;
+    act(() => {
+      staleLoad = result.current.loadRemoteDirectory('/old');
+    });
+    await act(() => result.current.loadRemoteDirectory('/new'));
+    await act(async () => {
+      rejectStale({ type: 'Other', payload: { message: 'keychain key not found: old-key' } });
+      await staleLoad;
+    });
+
+    expect(promptForMissingKeychainKey).not.toHaveBeenCalled();
+    expect(tauri.invokeListRemoteDirectory).toHaveBeenCalledTimes(2);
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      remotePath: '/new',
+      remoteEntries: [file],
+      remoteError: undefined,
+      connection: { keychainKeyId: 'old-key' },
+    });
+    errorLog.mockRestore();
   });
 
   it('surfaces a failed recovery retry through the pane error state', async () => {

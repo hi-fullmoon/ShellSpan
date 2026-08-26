@@ -306,6 +306,7 @@ export interface CreateSessionErrorHostKeyMismatch {
   payload: {
     host: string;
     port: number;
+    fingerprint?: string;
   };
 }
 
@@ -370,6 +371,7 @@ export interface SessionErrorEventHostKeyMismatch {
     sessionId: string;
     host: string;
     port: number;
+    fingerprint?: string;
   };
 }
 
@@ -391,6 +393,7 @@ export interface RemoteFsErrorHostKeyMismatch {
   payload: {
     host: string;
     port: number;
+    fingerprint?: string;
   };
 }
 
@@ -433,9 +436,13 @@ export interface DeleteProgressEvent {
 
 export interface RemoteDirectoryRequest extends RemoteConnectionRequest {
   path?: string;
+  requestKey: string;
+  requestId: number;
 }
 
 export interface RemoteEntryOwnersRequest extends RemoteConnectionRequest {
+  requestKey: string;
+  requestId: number;
   ownerIds: number[];
   groupIds: number[];
 }
@@ -469,10 +476,12 @@ export interface CopyRemotePathRequest extends RemoteConnectionRequest {
 
 export interface OpenRemoteFileRequest extends RemoteConnectionRequest {
   path: string;
+  operationId: string;
 }
 
 export interface ReadRemoteFileRequest extends RemoteConnectionRequest {
   path: string;
+  operationId: string;
 }
 
 export interface ReadRemoteFileResponse {

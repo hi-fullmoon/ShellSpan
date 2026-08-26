@@ -16,7 +16,7 @@ use crate::{db::Database, keychain::CredentialManager};
 
 pub(crate) const AI_STREAM_EVENT: &str = "ai-stream";
 const AI_KEY_SERVICE: &str = "com.termbridge.ai-provider";
-const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV2";
+const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV3";
 const MAX_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
 
@@ -45,6 +45,8 @@ pub(crate) struct AiProviderConfig {
     pub(crate) model: String,
     pub(crate) requires_api_key: bool,
     pub(crate) structured_output: AiStructuredOutputMode,
+    #[serde(default)]
+    pub(crate) api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -135,17 +137,17 @@ impl AiRequestRegistry {
 }
 
 trait AiCredentialStore {
-    fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String>;
     fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String>;
+    fn delete_api_key(&self, provider_id: &str) -> Result<(), String>;
 }
 
 impl AiCredentialStore for CredentialManager {
-    fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
-        self.set_credential(AI_KEY_SERVICE, provider_id, api_key)
-    }
-
     fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String> {
         self.get_credential(AI_KEY_SERVICE, provider_id)
+    }
+
+    fn delete_api_key(&self, provider_id: &str) -> Result<(), String> {
+        self.delete_credential(AI_KEY_SERVICE, provider_id)
     }
 }
 
@@ -164,14 +166,39 @@ impl AiPreferenceStore for Database {
     }
 }
 
-pub(crate) fn migrate_legacy_api_keys(
+pub(crate) fn migrate_keychain_api_keys(
     credentials: &CredentialManager,
     database: &Database,
 ) -> Result<usize, String> {
-    migrate_legacy_api_keys_with(credentials, database)
+    migrate_keychain_api_keys_with(credentials, database)
 }
 
-fn migrate_legacy_api_keys_with(
+fn default_provider_preferences() -> Value {
+    json!([
+        {
+            "id": "ollama",
+            "name": "Ollama",
+            "preset": "ollama",
+            "kind": "ollama",
+            "baseUrl": "http://127.0.0.1:11434",
+            "model": "qwen3",
+            "requiresApiKey": false,
+            "structuredOutput": "jsonSchema"
+        },
+        {
+            "id": "openai",
+            "name": "OpenAI",
+            "preset": "openai",
+            "kind": "openAi",
+            "baseUrl": "https://api.openai.com",
+            "model": "gpt-5.4-mini",
+            "requiresApiKey": true,
+            "structuredOutput": "jsonSchema"
+        }
+    ])
+}
+
+fn migrate_keychain_api_keys_with(
     credentials: &impl AiCredentialStore,
     preferences: &impl AiPreferenceStore,
 ) -> Result<usize, String> {
@@ -182,36 +209,21 @@ fn migrate_legacy_api_keys_with(
     {
         return Ok(0);
     }
-    let Some((_, raw_providers)) = entries.iter().find(|(key, _)| key == "ai.providers") else {
-        preferences.save_ai_preferences(&[(
-            AI_KEY_MIGRATION_PREFERENCE.to_string(),
-            "true".to_string(),
-        )])?;
-        return Ok(0);
-    };
-    let mut providers: Value = serde_json::from_str(raw_providers)
-        .map_err(|error| format!("invalid stored AI providers: {error}"))?;
+    let mut providers: Value =
+        if let Some((_, raw_providers)) = entries.iter().find(|(key, _)| key == "ai.providers") {
+            serde_json::from_str(raw_providers)
+                .map_err(|error| format!("invalid stored AI providers: {error}"))?
+        } else {
+            default_provider_preferences()
+        };
     let Some(provider_items) = providers.as_array_mut() else {
         return Err("invalid stored AI providers: expected an array".to_string());
     };
 
-    let mut pending_keys = Vec::new();
+    let mut migrated_provider_ids = Vec::new();
     let mut provider_ids = HashSet::new();
-    let mut providers_changed = false;
     for provider in provider_items {
         let Some(provider) = provider.as_object_mut() else {
-            continue;
-        };
-        let legacy_key = provider
-            .get("apiKey")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|key| !key.is_empty())
-            .map(str::to_string);
-        if provider.remove("apiKey").is_some() {
-            providers_changed = true;
-        }
-        let Some(legacy_key) = legacy_key else {
             continue;
         };
         let provider_id = provider
@@ -227,71 +239,36 @@ fn migrate_legacy_api_keys_with(
                 "cannot migrate duplicate AI provider id: {provider_id}"
             ));
         }
-        let already_stored = credentials
+        let Some(api_key) = credentials
             .get_api_key(&provider_id)?
-            .is_some_and(|key| !key.trim().is_empty());
-        if !already_stored {
-            pending_keys.push((provider_id, legacy_key));
-        }
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty())
+        else {
+            continue;
+        };
+        provider.insert("apiKey".to_string(), Value::String(api_key));
+        migrated_provider_ids.push(provider_id);
     }
 
-    for (provider_id, legacy_key) in &pending_keys {
-        credentials.set_api_key(provider_id, legacy_key)?;
-    }
-
-    let mut cleaned_entries = Vec::with_capacity(2);
-    if providers_changed {
-        cleaned_entries.push((
+    if !migrated_provider_ids.is_empty() {
+        preferences.save_ai_preferences(&[(
             "ai.providers".to_string(),
             serde_json::to_string(&providers)
                 .map_err(|error| format!("failed to serialize migrated AI providers: {error}"))?,
-        ));
+        )])?;
     }
-    cleaned_entries.push((AI_KEY_MIGRATION_PREFERENCE.to_string(), "true".to_string()));
-    preferences.save_ai_preferences(&cleaned_entries)?;
-    Ok(pending_keys.len())
-}
-
-#[tauri::command]
-pub(crate) fn ai_store_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-    api_key: String,
-) -> Result<(), String> {
-    validate_provider_id(&provider_id)?;
-    if api_key.trim().is_empty() {
-        return Err("API key cannot be empty".to_string());
+    for provider_id in &migrated_provider_ids {
+        credentials.delete_api_key(provider_id)?;
     }
-    credentials.set_credential(AI_KEY_SERVICE, &provider_id, api_key.trim())
+    preferences
+        .save_ai_preferences(&[(AI_KEY_MIGRATION_PREFERENCE.to_string(), "true".to_string())])?;
+    Ok(migrated_provider_ids.len())
 }
 
 #[tauri::command]
-pub(crate) fn ai_has_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-) -> Result<bool, String> {
-    validate_provider_id(&provider_id)?;
-    Ok(credentials
-        .get_credential(AI_KEY_SERVICE, &provider_id)?
-        .is_some_and(|value| !value.trim().is_empty()))
-}
-
-#[tauri::command]
-pub(crate) fn ai_delete_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-) -> Result<(), String> {
-    validate_provider_id(&provider_id)?;
-    credentials.delete_credential(AI_KEY_SERVICE, &provider_id)
-}
-
-#[tauri::command]
-pub(crate) async fn ai_list_models(
-    credentials: State<'_, CredentialManager>,
-    provider: AiProviderConfig,
-) -> Result<Vec<String>, String> {
+pub(crate) async fn ai_list_models(provider: AiProviderConfig) -> Result<Vec<String>, String> {
     validate_provider_config(&provider, false)?;
-    let api_key = api_key_for_provider(credentials.inner(), &provider)?;
+    let api_key = api_key_for_provider(&provider)?;
     let client = build_client()?;
     let response = match provider.kind {
         AiProviderKind::Ollama => client
@@ -336,12 +313,11 @@ pub(crate) async fn ai_list_models(
 #[tauri::command]
 pub(crate) fn ai_start_request(
     app: AppHandle,
-    credentials: State<'_, CredentialManager>,
     registry: State<'_, AiRequestRegistry>,
     request: AiStartRequest,
 ) -> Result<(), String> {
     validate_request(&request)?;
-    let api_key = api_key_for_provider(credentials.inner(), &request.provider)?;
+    let api_key = api_key_for_provider(&request.provider)?;
     let cancellation = registry.register(&request.request_id)?;
     let registry = registry.inner().clone();
     let request_id = request.request_id.clone();
@@ -1093,23 +1069,19 @@ fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> 
     Ok(url)
 }
 
-fn api_key_for_provider(
-    credentials: &impl AiCredentialStore,
-    provider: &AiProviderConfig,
-) -> Result<Option<String>, String> {
+fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option<String>, String> {
+    let api_key = provider
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_string);
     match provider.kind {
         AiProviderKind::Ollama => Ok(None),
-        AiProviderKind::OpenAi => credentials
-            .get_api_key(&provider.id)?
-            .map(|key| key.trim().to_string())
-            .filter(|key| !key.is_empty())
+        AiProviderKind::OpenAi => api_key
             .map(Some)
             .ok_or_else(|| "API key is required".to_string()),
         AiProviderKind::OpenAiCompatible => {
-            let api_key = credentials
-                .get_api_key(&provider.id)?
-                .map(|key| key.trim().to_string())
-                .filter(|key| !key.is_empty());
             if provider.requires_api_key && api_key.is_none() {
                 Err("API key is required".to_string())
             } else {
@@ -1188,8 +1160,8 @@ mod tests {
     #[derive(Default)]
     struct MockAiCredentials {
         keys: Mutex<HashMap<String, String>>,
-        fail_set_for: Mutex<Option<String>>,
-        set_calls: Mutex<usize>,
+        fail_delete_for: Mutex<Option<String>>,
+        delete_calls: Mutex<usize>,
     }
 
     impl MockAiCredentials {
@@ -1197,28 +1169,25 @@ mod tests {
             self.keys.lock().unwrap().get(provider_id).cloned()
         }
 
-        fn set_call_count(&self) -> usize {
-            *self.set_calls.lock().unwrap()
+        fn delete_call_count(&self) -> usize {
+            *self.delete_calls.lock().unwrap()
         }
     }
 
     impl AiCredentialStore for MockAiCredentials {
-        fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
-            *self.set_calls.lock().unwrap() += 1;
-            if self.fail_set_for.lock().unwrap().as_deref() == Some(provider_id) {
-                return Err(format!(
-                    "simulated keychain write failure for {provider_id}"
-                ));
-            }
-            self.keys
-                .lock()
-                .unwrap()
-                .insert(provider_id.to_string(), api_key.to_string());
-            Ok(())
-        }
-
         fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String> {
             Ok(self.key(provider_id))
+        }
+
+        fn delete_api_key(&self, provider_id: &str) -> Result<(), String> {
+            *self.delete_calls.lock().unwrap() += 1;
+            if self.fail_delete_for.lock().unwrap().as_deref() == Some(provider_id) {
+                return Err(format!(
+                    "simulated keychain delete failure for {provider_id}"
+                ));
+            }
+            self.keys.lock().unwrap().remove(provider_id);
+            Ok(())
         }
     }
 
@@ -1268,16 +1237,23 @@ mod tests {
         }
     }
 
-    fn legacy_ai_preferences(secret: &str) -> MockAiPreferences {
+    fn ai_preferences(api_key: Option<&str>) -> MockAiPreferences {
+        let mut provider = json!({
+            "id": "openai",
+            "name": "OpenAI",
+            "preset": "openai",
+            "kind": "openAi",
+            "baseUrl": "https://api.openai.com",
+            "model": "gpt-5.4-mini",
+            "requiresApiKey": true,
+            "structuredOutput": "jsonSchema",
+        });
+        if let Some(api_key) = api_key {
+            provider["apiKey"] = Value::String(api_key.to_string());
+        }
         MockAiPreferences::new(vec![(
             "ai.providers".to_string(),
-            json!([{
-                "id": "openai",
-                "name": "OpenAI",
-                "kind": "openAi",
-                "apiKey": secret,
-            }])
-            .to_string(),
+            json!([provider]).to_string(),
         )])
     }
 
@@ -1464,6 +1440,7 @@ mod tests {
             model: "qwen3".to_string(),
             requires_api_key: false,
             structured_output: AiStructuredOutputMode::JsonSchema,
+            api_key: None,
         };
         assert!(validate_provider_config(&local, true).is_ok());
         let remote = AiProviderConfig {
@@ -1482,6 +1459,7 @@ mod tests {
             model: "MiniMax-M3".to_string(),
             requires_api_key: true,
             structured_output: AiStructuredOutputMode::Prompt,
+            api_key: None,
         };
 
         assert_eq!(
@@ -1551,13 +1529,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_and_trims_api_key_from_the_system_keychain() {
-        let credentials = MockAiCredentials::default();
-        credentials
-            .keys
-            .lock()
-            .unwrap()
-            .insert("minimax".to_string(), "  keychain-key  ".to_string());
+    fn reads_and_trims_api_key_from_provider_configuration() {
         let provider = AiProviderConfig {
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
@@ -1565,19 +1537,17 @@ mod tests {
             model: "MiniMax-M3".to_string(),
             requires_api_key: true,
             structured_output: AiStructuredOutputMode::Prompt,
+            api_key: Some("  database-key  ".to_string()),
         };
 
         assert_eq!(
-            api_key_for_provider(&credentials, &provider)
-                .unwrap()
-                .as_deref(),
-            Some("keychain-key")
+            api_key_for_provider(&provider).unwrap().as_deref(),
+            Some("database-key")
         );
     }
 
     #[test]
     fn rejects_a_required_provider_without_a_saved_api_key() {
-        let credentials = MockAiCredentials::default();
         let provider = AiProviderConfig {
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
@@ -1585,102 +1555,142 @@ mod tests {
             model: "MiniMax-M3".to_string(),
             requires_api_key: true,
             structured_output: AiStructuredOutputMode::Prompt,
+            api_key: None,
         };
 
         assert_eq!(
-            api_key_for_provider(&credentials, &provider).unwrap_err(),
+            api_key_for_provider(&provider).unwrap_err(),
             "API key is required"
         );
     }
 
     #[test]
-    fn migrates_legacy_inline_api_keys_to_the_keychain_and_scrubs_preferences() {
-        let secret = "migration-secret-must-not-remain-in-sqlite";
-        let credentials = MockAiCredentials::default();
-        let preferences = legacy_ai_preferences(secret);
-
-        assert_eq!(
-            migrate_legacy_api_keys_with(&credentials, &preferences).unwrap(),
-            1
-        );
-        assert_eq!(credentials.key("openai").as_deref(), Some(secret));
-        assert_eq!(
-            preferences.value(AI_KEY_MIGRATION_PREFERENCE).as_deref(),
-            Some("true")
-        );
-        let cleaned = preferences.value("ai.providers").unwrap();
-        assert!(!cleaned.contains("apiKey"));
-        assert!(!cleaned.contains(secret));
-    }
-
-    #[test]
-    fn legacy_api_key_migration_is_idempotent() {
-        let credentials = MockAiCredentials::default();
-        let preferences = legacy_ai_preferences("repeatable-secret");
-
-        assert_eq!(
-            migrate_legacy_api_keys_with(&credentials, &preferences).unwrap(),
-            1
-        );
-        assert_eq!(
-            migrate_legacy_api_keys_with(&credentials, &preferences).unwrap(),
-            0
-        );
-        assert_eq!(credentials.set_call_count(), 1);
-    }
-
-    #[test]
-    fn keychain_write_failure_preserves_the_legacy_value_for_recovery() {
-        let secret = "recover-after-keychain-write-failure";
-        let credentials = MockAiCredentials::default();
-        *credentials.fail_set_for.lock().unwrap() = Some("openai".to_string());
-        let preferences = legacy_ai_preferences(secret);
-
-        let error = migrate_legacy_api_keys_with(&credentials, &preferences).unwrap_err();
-
-        assert!(!error.contains(secret));
-        assert!(preferences.value("ai.providers").unwrap().contains(secret));
-        assert!(preferences.value(AI_KEY_MIGRATION_PREFERENCE).is_none());
-        assert!(credentials.key("openai").is_none());
-    }
-
-    #[test]
-    fn preference_cleanup_failure_keeps_both_recoverable_copies_without_leaking_secret() {
-        let secret = "recover-after-preference-cleanup-failure";
-        let credentials = MockAiCredentials::default();
-        let mut preferences = legacy_ai_preferences(secret);
-        preferences.fail_save = true;
-
-        let error = migrate_legacy_api_keys_with(&credentials, &preferences).unwrap_err();
-
-        assert!(!error.contains(secret));
-        assert_eq!(credentials.key("openai").as_deref(), Some(secret));
-        assert!(preferences.value("ai.providers").unwrap().contains(secret));
-        assert!(preferences.value(AI_KEY_MIGRATION_PREFERENCE).is_none());
-    }
-
-    #[test]
-    fn migration_preserves_an_existing_keychain_key_and_only_scrubs_the_legacy_copy() {
+    fn migrates_keychain_api_keys_to_provider_preferences_then_deletes_the_old_copy() {
+        let secret = "migration-secret-now-stored-with-provider";
         let credentials = MockAiCredentials::default();
         credentials
             .keys
             .lock()
             .unwrap()
-            .insert("openai".to_string(), "newer-keychain-secret".to_string());
-        let preferences = legacy_ai_preferences("stale-database-secret");
+            .insert("openai".to_string(), format!("  {secret}  "));
+        let preferences = ai_preferences(None);
 
         assert_eq!(
-            migrate_legacy_api_keys_with(&credentials, &preferences).unwrap(),
-            0
+            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            1
+        );
+        assert!(credentials.key("openai").is_none());
+        assert_eq!(
+            preferences.value(AI_KEY_MIGRATION_PREFERENCE).as_deref(),
+            Some("true")
+        );
+        let stored = preferences.value("ai.providers").unwrap();
+        assert!(stored.contains("apiKey"));
+        assert!(stored.contains(secret));
+    }
+
+    #[test]
+    fn keychain_api_key_migration_is_idempotent() {
+        let credentials = MockAiCredentials::default();
+        credentials
+            .keys
+            .lock()
+            .unwrap()
+            .insert("openai".to_string(), "repeatable-secret".to_string());
+        let preferences = ai_preferences(None);
+
+        assert_eq!(
+            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            1
         );
         assert_eq!(
-            credentials.key("openai").as_deref(),
-            Some("newer-keychain-secret")
+            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            0
         );
-        assert_eq!(credentials.set_call_count(), 0);
-        assert!(!preferences
-            .value("ai.providers")
+        assert_eq!(credentials.delete_call_count(), 1);
+    }
+
+    #[test]
+    fn migration_recovers_a_default_openai_key_without_stored_provider_preferences() {
+        let secret = "default-provider-key";
+        let credentials = MockAiCredentials::default();
+        credentials
+            .keys
+            .lock()
             .unwrap()
-            .contains("apiKey"));
+            .insert("openai".to_string(), secret.to_string());
+        let preferences = MockAiPreferences::new(Vec::new());
+
+        assert_eq!(
+            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            1
+        );
+
+        let stored = preferences.value("ai.providers").unwrap();
+        assert!(stored.contains("\"id\":\"ollama\""));
+        assert!(stored.contains("\"id\":\"openai\""));
+        assert!(stored.contains(secret));
+        assert!(credentials.key("openai").is_none());
+    }
+
+    #[test]
+    fn preference_write_failure_preserves_the_keychain_copy_for_recovery() {
+        let secret = "recover-after-preference-write-failure";
+        let credentials = MockAiCredentials::default();
+        credentials
+            .keys
+            .lock()
+            .unwrap()
+            .insert("openai".to_string(), secret.to_string());
+        let mut preferences = ai_preferences(None);
+        preferences.fail_save = true;
+
+        let error = migrate_keychain_api_keys_with(&credentials, &preferences).unwrap_err();
+
+        assert!(!error.contains(secret));
+        assert_eq!(credentials.key("openai").as_deref(), Some(secret));
+        assert!(!preferences.value("ai.providers").unwrap().contains(secret));
+        assert!(preferences.value(AI_KEY_MIGRATION_PREFERENCE).is_none());
+    }
+
+    #[test]
+    fn keychain_delete_failure_keeps_both_copies_and_retries_later() {
+        let secret = "recover-after-keychain-delete-failure";
+        let credentials = MockAiCredentials::default();
+        credentials
+            .keys
+            .lock()
+            .unwrap()
+            .insert("openai".to_string(), secret.to_string());
+        *credentials.fail_delete_for.lock().unwrap() = Some("openai".to_string());
+        let preferences = ai_preferences(None);
+
+        let error = migrate_keychain_api_keys_with(&credentials, &preferences).unwrap_err();
+
+        assert!(!error.contains(secret));
+        assert_eq!(credentials.key("openai").as_deref(), Some(secret));
+        assert!(preferences.value("ai.providers").unwrap().contains(secret));
+        assert!(preferences.value(AI_KEY_MIGRATION_PREFERENCE).is_none());
+    }
+
+    #[test]
+    fn migration_prefers_the_current_keychain_key_over_a_stale_inline_copy() {
+        let credentials = MockAiCredentials::default();
+        credentials
+            .keys
+            .lock()
+            .unwrap()
+            .insert("openai".to_string(), "current-key".to_string());
+        let preferences = ai_preferences(Some("stale-key"));
+
+        assert_eq!(
+            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            1
+        );
+
+        let stored = preferences.value("ai.providers").unwrap();
+        assert!(stored.contains("current-key"));
+        assert!(!stored.contains("stale-key"));
+        assert!(credentials.key("openai").is_none());
     }
 }

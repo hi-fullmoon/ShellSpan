@@ -96,7 +96,7 @@
 ### 3.2 LLM 接入策略：BYOK 优先
 
 - 抽象一个 `LlmProvider` trait，首版支持：OpenAI 兼容协议（覆盖 DeepSeek、通义、Kimi 等国内模型）、Anthropic、Ollama（纯本地模型）。
-- API Key 存系统钥匙串（复用 `keychain.rs`），不落盘明文。
+- API Key 随厂商配置保存在本机 TermBridge 数据库，并只在发起对应厂商请求时传给后端。
 - 请求直连用户配置的 endpoint，**不经过 TermBridge 任何服务器**——这既是成本优势（零推理成本），也是隐私卖点。
 
 ### 3.3 Agent 执行循环（Rust 侧）
@@ -122,7 +122,7 @@
 |----------|----------|
 | `src-tauri/src/session.rs` | Agent 命令执行通道，附带 pty 输出流 |
 | `src-tauri/src/sftp_pool.rs` | SFTP 类工具的实现基础 |
-| `src-tauri/src/keychain.rs` | LLM API Key 托管 |
+| `src/stores/aiSettingsStore.ts` | LLM 厂商配置与 API Key 本机持久化 |
 | `src-tauri/src/db.rs` (rusqlite) | 会话摘要、片段库、Agent 审计日志 |
 | `src/stores/terminalStore.ts` | 终端输出上下文采集入口 |
 | 日志面板 / 审计 | Agent 所有操作写入操作日志，可导出（企业合规刚需） |

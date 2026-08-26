@@ -424,9 +424,13 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
     setPreflightOpen(false);
   };
 
-  const trustPreflightHost = async (host: string, port: number): Promise<void> => {
+  const trustPreflightHost = async (
+    host: string,
+    port: number,
+    fingerprint?: string,
+  ): Promise<void> => {
     try {
-      await invokeTrustHost(host, port);
+      await invokeTrustHost(host, port, fingerprint ?? '');
       void runPreflight();
     } catch (error) {
       logger.error(`failed to trust preflight host host=${host} port=${port}`, error);
@@ -683,7 +687,9 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
         onClose={closePreflight}
         onCancel={cancelPreflight}
         onRetry={() => void runPreflight()}
-        onTrust={(host, port) => void trustPreflightHost(host, port)}
+        onTrust={(host, port, fingerprint) =>
+          void trustPreflightHost(host, port, fingerprint)
+        }
       />
     </>
   );

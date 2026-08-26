@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import {
   buildRemoteConnectionRequest,
   invokeCheckHostKey,
-  invokeListRemoteDirectory,
   invokeTrustHost,
   invokeWarmRemoteConnection,
   parseRemoteFsError,
@@ -86,10 +85,6 @@ export function useSftpConnectionOpener(): {
       } else {
         addConnection(summary, connection, profile.id);
       }
-      // Warm the pooled SFTP connection in the background so the first
-      // directory listing does not pay the full connect/handshake cost. Any
-      // failure is logged by invokeLogged and will surface on the listing.
-      void invokeWarmRemoteConnection(connection).catch(() => {});
       const connectionId = targetConnectionId ?? useSftpStore.getState().activeConnectionId;
       if (connectionId) {
         if (initialDirectory) {
@@ -130,7 +125,7 @@ export function useSftpConnectionOpener(): {
             fingerprint: result.fingerprint,
             mismatch: result.status === 'mismatch',
             onTrust: () => {
-              void invokeTrustHost(host, port)
+              void invokeTrustHost(host, port, result.fingerprint ?? '')
                 .then(() => {
                   setHostKeyDialog(CLOSED_DIALOG);
                   onVerified();
@@ -192,23 +187,12 @@ export function useSftpConnectionOpener(): {
         finishOpen(preparedProfile, targetConnectionId, targetSide, initialDirectory);
       };
 
-      // Non-jump-host sessions can be pre-probed with a direct TCP connection.
-      if (!preparedProfile.jumpHost) {
-        await verifyHostKey(
-          preparedProfile.host,
-          preparedProfile.port,
-          () => {
-            finish();
-          },
-        );
-        return;
-      }
-
-      // Jump-host sessions cannot be pre-probed from the frontend. We attempt
-      // a lightweight SFTP operation so the backend can surface host-key errors.
+      // Let the real pooled connection perform host-key verification,
+      // authentication, and SFTP initialization on the same SSH session. This
+      // avoids a separate host-key-only handshake for direct connections.
       const attemptSftpConnection = async () => {
         const request = buildRemoteConnectionRequest(preparedProfile);
-        await invokeListRemoteDirectory({ ...request });
+        await invokeWarmRemoteConnection(request);
       };
 
       const handleRemoteFsError = (error: RemoteFsError): boolean => {
@@ -217,10 +201,14 @@ export function useSftpConnectionOpener(): {
             open: true,
             host: error.payload.host,
             port: error.payload.port,
-            fingerprint: error.type === 'HostKeyUnknown' ? error.payload.fingerprint : undefined,
+            fingerprint: error.payload.fingerprint,
             mismatch: error.type === 'HostKeyMismatch',
             onTrust: () => {
-              void invokeTrustHost(error.payload.host, error.payload.port)
+              void invokeTrustHost(
+                error.payload.host,
+                error.payload.port,
+                error.payload.fingerprint ?? '',
+              )
                 .then(() => {
                   setHostKeyDialog(CLOSED_DIALOG);
                   return attemptSftpConnection();
@@ -257,7 +245,7 @@ export function useSftpConnectionOpener(): {
           .addToast(getToastErrorMessage(error), 'error');
       }
     },
-    [finishOpen, verifyHostKey],
+    [finishOpen],
   );
 
   const closeHostKeyDialog = (): void => {
