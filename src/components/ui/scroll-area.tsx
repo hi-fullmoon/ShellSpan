@@ -62,8 +62,8 @@ function ScrollBar({ className, orientation = 'vertical', size = 'default', ...p
       orientation={orientation}
       className={cn(
         'flex touch-none select-none',
-        isHorizontal ? cn('w-full flex-row', isThin ? 'h-1' : 'h-2') : cn('h-full flex-col', isThin ? 'w-1' : 'w-2'),
-        isThin ? 'bg-transparent' : 'transition-colors',
+        isHorizontal ? cn('w-full flex-row', isThin ? 'h-1' : 'h-2.5') : cn('h-full flex-col', isThin ? 'w-1' : 'w-2.5'),
+        isThin ? 'bg-transparent' : 'p-0.5',
         className,
       )}
       {...props}
@@ -71,8 +71,8 @@ function ScrollBar({ className, orientation = 'vertical', size = 'default', ...p
       <ScrollAreaPrimitive.Thumb
         data-slot="scroll-area-thumb"
         className={cn(
-          'relative transition-colors',
-          isThin ? 'bg-transparent group-hover/scroll-area:bg-app-text-soft/35 hover:bg-app-text-soft/50' : 'bg-app-border hover:bg-app-text-soft/60',
+          'relative rounded-full transition-colors',
+          isThin ? 'bg-transparent group-hover/scroll-area:bg-app-text-soft/35 hover:bg-app-text-soft/50' : 'bg-app-text-soft/30 hover:bg-app-text-soft/50',
         )}
       />
     </ScrollAreaPrimitive.Scrollbar>

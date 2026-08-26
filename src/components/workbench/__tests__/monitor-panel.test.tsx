@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MonitorPanel } from '../monitor-panel';
 import { useAppStore } from '@/stores/appStore';
@@ -67,12 +68,20 @@ beforeEach(() => {
 });
 
 describe('MonitorPanel health layers', () => {
-  it('renders remote host snapshots separately from local app monitoring', () => {
+  it('separates local monitoring from remote host snapshots with tabs', async () => {
+    const user = userEvent.setup();
     render(<MonitorPanel />);
-    const remote = screen.getByText('remote-health-layer');
-    const local = screen.getByText('workbench.monitor.localTitle');
-    expect(remote.compareDocumentPosition(local) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
     expect(screen.getByText('workbench.monitor.localDescription')).toBeInTheDocument();
+    expect(screen.queryByText('remote-health-layer')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'workbench.monitor.remote' }));
+
+    expect(screen.getByText('remote-health-layer')).toBeInTheDocument();
+    expect(screen.queryByText('workbench.monitor.localDescription')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'workbench.monitor.resume' }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole('banner').querySelector('p')).toBeNull();
   });
 
   it('renders header actions as text buttons', () => {
@@ -86,7 +95,19 @@ describe('MonitorPanel health layers', () => {
     expect(refresh.querySelector('svg')).toBeNull();
   });
 
-  it('prioritizes the live overview and consolidates local detail cards', () => {
+  it('keeps empty connection states compact', () => {
+    render(<MonitorPanel />);
+
+    const disconnectEmptyState = screen.getByText('workbench.monitor.noDisconnects').parentElement;
+    const sftpEmptyState = screen.getByText('workbench.monitor.noSftpConnections').parentElement;
+
+    expect(disconnectEmptyState).toHaveClass('min-h-16');
+    expect(sftpEmptyState).toHaveClass('min-h-16');
+    expect(disconnectEmptyState).not.toHaveClass('h-52');
+    expect(sftpEmptyState).not.toHaveClass('h-64');
+  });
+
+  it('flattens local monitoring into peer cards', () => {
     useMonitorStore.setState({
       snapshot,
       history: [
@@ -98,16 +119,20 @@ describe('MonitorPanel health layers', () => {
 
     render(<MonitorPanel />);
 
-    const overview = screen.getByText('workbench.monitor.overviewTitle');
-    const remote = screen.getByText('remote-health-layer');
-    expect(overview.compareDocumentPosition(remote) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(screen.getByText('workbench.monitor.appProcessDescription')).toBeInTheDocument();
-    expect(screen.getByText('workbench.monitor.systemDescription')).toBeInTheDocument();
-    expect(screen.getAllByRole('progressbar')).toHaveLength(4);
-    const processCard = screen.getByText('workbench.monitor.appProcessDescription')
+    const overviewHeading = screen.getByText('workbench.monitor.overviewTitle');
+    const connectionHeading = screen.getByText('workbench.monitor.connectionHealth');
+    const processCard = screen.getByText('workbench.monitor.appProcess')
       .closest('[data-slot="card"]');
+    const systemCard = screen.getByText('workbench.monitor.system')
+      .closest('[data-slot="card"]');
+
+    expect(overviewHeading.closest('[data-slot="card"]')).toBeNull();
+    expect(connectionHeading.closest('[data-slot="card"]')).toBeNull();
     expect(processCard).toBeInTheDocument();
-    expect(processCard?.querySelector('[data-slot="card-footer"]')).toBeNull();
+    expect(systemCard).toBeInTheDocument();
+    expect(processCard).not.toBe(systemCard);
+    expect(screen.getAllByRole('progressbar')).toHaveLength(4);
+    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(5);
+    expect(screen.queryByText('remote-health-layer')).not.toBeInTheDocument();
   });
 });

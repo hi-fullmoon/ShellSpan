@@ -41,6 +41,8 @@
   --app-success: #16a34a;
   --app-tab-active: color-mix(in srgb, var(--app-primary) 10%, transparent);
   --app-tab-accent: var(--app-primary);
+  --app-scrollbar-thumb: color-mix(in srgb, var(--app-text-soft) 32%, transparent);
+  --app-scrollbar-thumb-hover: color-mix(in srgb, var(--app-text-soft) 52%, transparent);
   --radius: 0.375rem;
   --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.04), 0 1px 3px 0 rgba(0, 0, 0, 0.03);
   --shadow-dialog: 0 24px 48px -12px rgba(0, 0, 0, 0.18);
@@ -153,7 +155,6 @@ body {
    below so users can still select and correct text inside fields. */
 * {
   box-sizing: border-box;
-  scrollbar-color: var(--app-border) transparent;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -185,36 +186,55 @@ textarea,
   -webkit-user-select: text;
 }
 
-*:hover {
-  scrollbar-color: var(--app-text-soft) transparent;
+/* Chromium gives the standards-based scrollbar properties precedence over
+   the WebKit pseudo-elements. Keep them as a Firefox fallback so WebView2 can
+   render the rounded, inset thumb and suppress native arrow buttons below. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-color: var(--app-scrollbar-thumb) transparent;
+    scrollbar-width: thin;
+  }
+
+  *:hover {
+    scrollbar-color: var(--app-scrollbar-thumb-hover) transparent;
+  }
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
+  border-radius: 9999px;
 }
 
-::-webkit-scrollbar-button {
-  display: none;
+::-webkit-scrollbar-button,
+::-webkit-scrollbar-button:single-button {
+  width: 0;
+  height: 0;
+  appearance: none;
   background: transparent;
+  display: none;
 }
 
 ::-webkit-scrollbar-corner {
-  display: none;
   background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--app-border);
-  border-radius: 0;
+  min-width: 32px;
+  min-height: 32px;
+  background: var(--app-scrollbar-thumb);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--app-text-soft);
+  background: var(--app-scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 @theme inline {
