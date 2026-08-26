@@ -30,6 +30,7 @@ sha2 = "0.11"
 hmac = "0.12"
 sha1 = "0.10"
 base64 = "0.23"
+crossbeam-channel = "0.5"
 portable-pty = "0.9"
 trash = "5"
 rusqlite = { version = "0.40", features = ["bundled"] }

@@ -1,3 +1,4 @@
+use crossbeam_channel::Sender as EventSender;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use ssh2::{Session, Sftp};
@@ -7,7 +8,7 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering as AtomicOrdering},
-        mpsc::Sender,
+        mpsc::Sender as StandardSender,
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -855,18 +856,37 @@ pub(crate) enum SessionCommand {
     Close,
 }
 
+pub(crate) enum SessionCommandSender {
+    Standard(StandardSender<SessionCommand>),
+    Event(EventSender<SessionCommand>),
+}
+
+impl SessionCommandSender {
+    fn send(&self, command: SessionCommand) -> Result<(), ()> {
+        match self {
+            Self::Standard(sender) => sender.send(command).map_err(|_| ()),
+            Self::Event(sender) => sender.send(command).map_err(|_| ()),
+        }
+    }
+}
+
 pub(crate) struct ManagedSession {
-    pub(crate) sender: Sender<SessionCommand>,
+    pub(crate) sender: SessionCommandSender,
     /// Poked after each enqueued command so an event-driven session worker
-    /// wakes from its idle poll immediately. Local sessions poll their command
-    /// channel on a timer instead and leave this empty.
+    /// wakes from its idle socket wait immediately. Local sessions select on
+    /// their command channel directly and leave this empty.
     pub(crate) waker: Option<crate::session::SessionWaker>,
+    /// Local workers block in a channel select rather than on the SSH socket.
+    /// A capacity-one notification coalesces ready/pause/resume changes while
+    /// still waking an idle local worker immediately.
+    pub(crate) output_state_sender: Option<EventSender<()>>,
     pub(crate) status: StatusEvent,
     /// Signals that the frontend has attached its event listeners, so the
     /// session worker may emit output live instead of buffering it.
     pub(crate) output_ready: Arc<AtomicBool>,
     /// Set by the frontend when xterm's parser backlog crosses its high
-    /// watermark. Workers stop reading their PTY until the backlog drains.
+    /// watermark. Remote workers stop reading; local workers stop draining
+    /// their bounded reader queue until the backlog drains.
     pub(crate) output_paused: Arc<AtomicBool>,
 }
 
@@ -1651,9 +1671,7 @@ impl SessionManager {
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
         managed.output_ready.store(true, AtomicOrdering::Relaxed);
-        if let Some(waker) = managed.waker.as_ref() {
-            waker.wake();
-        }
+        managed.wake_for_output_state_change();
         Ok(())
     }
 
@@ -1666,9 +1684,7 @@ impl SessionManager {
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
         managed.output_paused.store(paused, AtomicOrdering::Relaxed);
-        if let Some(waker) = managed.waker.as_ref() {
-            waker.wake();
-        }
+        managed.wake_for_output_state_change();
         Ok(())
     }
 
@@ -1682,16 +1698,33 @@ impl SessionManager {
     }
 }
 
+impl ManagedSession {
+    fn wake_for_output_state_change(&self) {
+        if let Some(sender) = self.output_state_sender.as_ref() {
+            // The flag itself is authoritative. A full queue already contains
+            // a wakeup, so coalescing this notification cannot lose state.
+            let _ = sender.try_send(());
+        } else if let Some(waker) = self.waker.as_ref() {
+            waker.wake();
+        }
+    }
+}
+
 #[cfg(test)]
 mod session_manager_tests {
-    use super::{ManagedSession, SessionCommand, SessionManager, SessionStatus, StatusEvent};
+    use super::{
+        ManagedSession, SessionCommand, SessionCommandSender, SessionManager, SessionStatus,
+        StatusEvent,
+    };
+    use crossbeam_channel::{bounded, unbounded, Sender as EventSender};
     use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-    use std::sync::{mpsc, Arc};
+    use std::sync::Arc;
 
-    fn managed_session(sender: mpsc::Sender<SessionCommand>) -> ManagedSession {
+    fn managed_session(sender: EventSender<SessionCommand>) -> ManagedSession {
         ManagedSession {
-            sender,
+            sender: SessionCommandSender::Event(sender),
             waker: None,
+            output_state_sender: None,
             status: StatusEvent {
                 session_id: "local-1".to_string(),
                 status: SessionStatus::Connecting,
@@ -1705,7 +1738,7 @@ mod session_manager_tests {
     #[test]
     fn stores_and_updates_latest_session_status() {
         let manager = SessionManager::default();
-        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
         manager
             .insert("local-1".to_string(), managed_session(sender))
             .unwrap();
@@ -1729,7 +1762,7 @@ mod session_manager_tests {
     #[test]
     fn mark_output_ready_flips_the_session_flag() {
         let manager = SessionManager::default();
-        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
         let managed = managed_session(sender);
         let flag = managed.output_ready.clone();
         manager.insert("local-1".to_string(), managed).unwrap();
@@ -1743,7 +1776,7 @@ mod session_manager_tests {
     #[test]
     fn set_output_paused_updates_the_session_flag() {
         let manager = SessionManager::default();
-        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
         let managed = managed_session(sender);
         let flag = managed.output_paused.clone();
         manager.insert("local-1".to_string(), managed).unwrap();
@@ -1753,6 +1786,24 @@ mod session_manager_tests {
         manager.set_output_paused("local-1", false).unwrap();
         assert!(!flag.load(AtomicOrdering::Relaxed));
         assert!(manager.set_output_paused("missing", true).is_err());
+    }
+
+    #[test]
+    fn local_output_state_changes_coalesce_into_a_bounded_wakeup() {
+        let manager = SessionManager::default();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
+        let (state_sender, state_receiver) = bounded(1);
+        let mut managed = managed_session(sender);
+        managed.output_state_sender = Some(state_sender);
+        manager.insert("local-1".to_string(), managed).unwrap();
+
+        manager.mark_output_ready("local-1").unwrap();
+        manager.set_output_paused("local-1", true).unwrap();
+        manager.set_output_paused("local-1", false).unwrap();
+
+        assert_eq!(state_receiver.len(), 1);
+        state_receiver.recv().unwrap();
+        assert!(state_receiver.try_recv().is_err());
     }
 }
 

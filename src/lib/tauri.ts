@@ -120,6 +120,24 @@ async function invokeLogged<T>(
   }
 }
 
+type TerminalHotPathCommand =
+  | 'write_session'
+  | 'set_session_output_paused'
+  | 'resize_session';
+
+/**
+ * Dispatch transient terminal data/control directly to Tauri. These commands
+ * are intentionally excluded from operation history and their callers already
+ * provide contextual error handling. Returning invoke's promise unchanged also
+ * avoids adding logging and async bookkeeping to each interactive event.
+ */
+function invokeTerminalHotPath<T>(
+  cmd: TerminalHotPathCommand,
+  args: Record<string, unknown>,
+): Promise<T> {
+  return invoke<T>(cmd, args);
+}
+
 export function parseRemoteFsError(error: unknown): RemoteFsError | null {
   if (typeof error !== 'object' || error === null) {
     return null;
@@ -166,8 +184,8 @@ export async function invokeCreateLocalSession(
   return invokeLogged<SessionSummary>('create_local_session', { cols, rows });
 }
 
-export async function invokeWriteSession(sessionId: string, data: string): Promise<void> {
-  return invokeLogged('write_session', { sessionId, data });
+export function invokeWriteSession(sessionId: string, data: string): Promise<void> {
+  return invokeTerminalHotPath('write_session', { sessionId, data });
 }
 
 export async function invokeGetSessionStatus(sessionId: string): Promise<StatusEvent> {
@@ -178,19 +196,19 @@ export async function invokeMarkSessionReady(sessionId: string): Promise<void> {
   return invokeLogged('mark_session_ready', { sessionId });
 }
 
-export async function invokeSetSessionOutputPaused(
+export function invokeSetSessionOutputPaused(
   sessionId: string,
   paused: boolean,
 ): Promise<void> {
-  return invokeLogged('set_session_output_paused', { sessionId, paused });
+  return invokeTerminalHotPath('set_session_output_paused', { sessionId, paused });
 }
 
-export async function invokeResizeSession(
+export function invokeResizeSession(
   sessionId: string,
   cols: number,
   rows: number,
 ): Promise<void> {
-  return invokeLogged('resize_session', { sessionId, cols, rows });
+  return invokeTerminalHotPath('resize_session', { sessionId, cols, rows });
 }
 
 export async function invokeCloseSession(sessionId: string): Promise<void> {
