@@ -107,7 +107,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
           orientation="vertical"
           aria-hidden="true"
           data-tab-separator
-          className="pointer-events-none absolute -right-1 top-1/2 h-4 -translate-y-1/2 bg-app-border"
+          className="pointer-events-none absolute right-[-3px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
         />
       )}
       {showDropIndicatorLeft && (
@@ -494,7 +494,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
       >
         <SortableContext items={connections.map((c) => c.id)} strategy={() => null}>
           <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-10 min-w-0 flex-1">
-            <div role="tablist" className="flex min-w-0 items-center gap-1 py-1">
+            <div role="tablist" className="flex min-w-0 items-center gap-[5px] py-1">
               {connections.map((connection, index) => {
                 const isDragging = draggingConnectionId === connection.id;
                 const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
