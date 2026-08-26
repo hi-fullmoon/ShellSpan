@@ -2,16 +2,25 @@ import { Terminal } from '@xterm/xterm';
 import { afterAll, bench, describe, vi } from 'vitest';
 import {
   BUFFER_BURST_BYTES,
+  COALESCED_INCREMENTAL_CHUNKS,
   CONTEXT_LINE_LIMIT,
+  INCREMENTAL_APPEND_BYTES,
+  INCREMENTAL_RESET_BYTES,
+  INCREMENTAL_SEED_BYTES,
   MULTI_SESSION_COUNT,
   XTERM_OUTPUT_BYTES,
   XTERM_OUTPUT_CHUNKS,
+  appendCoalescedIncrementalTerminalContext,
+  appendIncrementalTerminalContext,
   preloadOutputBuffer,
+  primeIncrementalOutputBuffer,
+  runMultiSessionOutputBurst,
   runOutputBufferBurst,
 } from './terminal-workloads';
 import {
   clearTerminalOutput,
   getRecentTerminalOutput,
+  subscribeTerminalOutput,
 } from '@/lib/terminal-output-buffer';
 
 const instrumentation = vi.hoisted(() => ({
@@ -58,6 +67,19 @@ const EXPENSIVE_BENCH = {
 const INPUT_EVENTS_PER_OPERATION = 1_000;
 const contextSessionId = 'perf-context';
 preloadOutputBuffer(contextSessionId);
+const incrementalSessionId = 'perf-context-incremental';
+let incrementalBufferBytes = INCREMENTAL_SEED_BYTES;
+primeIncrementalOutputBuffer(incrementalSessionId);
+const coalescedIncrementalSessionId = 'perf-context-incremental-coalesced';
+let coalescedIncrementalBufferBytes = INCREMENTAL_SEED_BYTES;
+primeIncrementalOutputBuffer(coalescedIncrementalSessionId);
+let activeOutputNotificationPending = false;
+const stopActiveOutputSubscription = subscribeTerminalOutput(
+  'perf-buffer-multi-active-0',
+  () => {
+    activeOutputNotificationPending = true;
+  },
+);
 
 const singleXterm = new Terminal({ cols: 120, rows: 30, scrollback: 10_000 });
 const multiXterms = Array.from(
@@ -99,9 +121,38 @@ describe('terminal output buffer and AI context', () => {
     getRecentTerminalOutput(contextSessionId, CONTEXT_LINE_LIMIT);
   }, STANDARD_BENCH);
 
-  bench(`${MULTI_SESSION_COUNT} sessions append + extract (${BUFFER_BURST_BYTES / 1024} KiB each)`, () => {
+  bench(`incremental append + context (${INCREMENTAL_APPEND_BYTES} bytes, below buffer cap)`, () => {
+    if (incrementalBufferBytes + INCREMENTAL_APPEND_BYTES > INCREMENTAL_RESET_BYTES) {
+      primeIncrementalOutputBuffer(incrementalSessionId);
+      incrementalBufferBytes = INCREMENTAL_SEED_BYTES;
+    }
+    incrementalBufferBytes += INCREMENTAL_APPEND_BYTES;
+    appendIncrementalTerminalContext(incrementalSessionId);
+  }, STANDARD_BENCH);
+
+  bench(`${COALESCED_INCREMENTAL_CHUNKS} coalesced appends + one context (${INCREMENTAL_APPEND_BYTES * COALESCED_INCREMENTAL_CHUNKS} bytes)`, () => {
+    const appendedBytes = INCREMENTAL_APPEND_BYTES * COALESCED_INCREMENTAL_CHUNKS;
+    if (coalescedIncrementalBufferBytes + appendedBytes > INCREMENTAL_RESET_BYTES) {
+      primeIncrementalOutputBuffer(coalescedIncrementalSessionId);
+      coalescedIncrementalBufferBytes = INCREMENTAL_SEED_BYTES;
+    }
+    coalescedIncrementalBufferBytes += appendedBytes;
+    appendCoalescedIncrementalTerminalContext(coalescedIncrementalSessionId);
+  }, STANDARD_BENCH);
+
+  bench(`${MULTI_SESSION_COUNT} sessions append, AI closed/unsubscribed (${BUFFER_BURST_BYTES / 1024} KiB each)`, () => {
+    runMultiSessionOutputBurst('perf-buffer-multi-closed', false);
+  }, EXPENSIVE_BENCH);
+
+  bench(`${MULTI_SESSION_COUNT} sessions append, one active AI subscription + extraction (${BUFFER_BURST_BYTES / 1024} KiB each)`, () => {
+    activeOutputNotificationPending = false;
+    runMultiSessionOutputBurst('perf-buffer-multi-active', true);
+    if (!activeOutputNotificationPending) throw new Error('active output subscription was not notified');
+  }, EXPENSIVE_BENCH);
+
+  bench(`${MULTI_SESSION_COUNT} sessions append + cold extract every session (legacy stress)`, () => {
     for (let index = 0; index < MULTI_SESSION_COUNT; index += 1) {
-      runOutputBufferBurst(`perf-buffer-multi-${index}`, true);
+      runOutputBufferBurst(`perf-buffer-multi-stress-${index}`, true);
     }
   }, EXPENSIVE_BENCH);
 });
@@ -118,6 +169,9 @@ describe('xterm large-output parsing', () => {
 
 afterAll(() => {
   clearTerminalOutput(contextSessionId);
+  clearTerminalOutput(incrementalSessionId);
+  clearTerminalOutput(coalescedIncrementalSessionId);
+  stopActiveOutputSubscription();
   singleXterm.dispose();
   for (const terminal of multiXterms) terminal.dispose();
 });
