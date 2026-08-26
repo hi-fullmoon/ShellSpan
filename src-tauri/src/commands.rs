@@ -12,12 +12,13 @@ use crate::models::{
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
     RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
     RemoteFileKind, RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest,
-    SessionCommand, SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary,
-    SftpBookmarkRow, TransferBatchResult, TrustHostRequest, UpdateRemotePermissionsRequest,
-    UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
+    SessionCommand, SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus,
+    SessionSummary, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
+    UpdateRemotePermissionsRequest, UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
 use base64::Engine;
+use crossbeam_channel::{after, bounded, never, unbounded, Receiver};
 use log::{debug, error, info, warn};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,67 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
+
+const LOCAL_OUTPUT_QUEUE_CAPACITY: usize = 32;
+const LOCAL_OUTPUT_DRAIN_BUDGET: usize = 64;
+const LOCAL_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
+const LOCAL_READER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
+enum LocalWorkerActivity {
+    Command(Result<SessionCommand, crossbeam_channel::RecvError>),
+    Output(Result<Vec<u8>, crossbeam_channel::RecvError>),
+    OutputStateChanged,
+    ChildExited,
+    StartupTimeout,
+}
+
+fn wait_for_local_worker_activity(
+    command_rx: &Receiver<SessionCommand>,
+    child_exit_rx: &Receiver<()>,
+    output_state_rx: &Receiver<()>,
+    output_rx: &Receiver<Vec<u8>>,
+    startup_timeout_rx: &Receiver<Instant>,
+) -> LocalWorkerActivity {
+    crossbeam_channel::select_biased! {
+        recv(command_rx) -> command => LocalWorkerActivity::Command(command),
+        recv(child_exit_rx) -> _ => LocalWorkerActivity::ChildExited,
+        recv(output_state_rx) -> _ => LocalWorkerActivity::OutputStateChanged,
+        recv(output_rx) -> output => LocalWorkerActivity::Output(output),
+        recv(startup_timeout_rx) -> _ => LocalWorkerActivity::StartupTimeout,
+    }
+}
+
+fn collect_local_output_batch(
+    first: Vec<u8>,
+    output_rx: &Receiver<Vec<u8>>,
+    pending_bytes: &mut Vec<u8>,
+) -> usize {
+    pending_bytes.extend_from_slice(&first);
+    let mut chunks = 1;
+    for bytes in output_rx
+        .try_iter()
+        .take(LOCAL_OUTPUT_DRAIN_BUDGET.saturating_sub(1))
+    {
+        pending_bytes.extend_from_slice(&bytes);
+        chunks += 1;
+    }
+    chunks
+}
+
+fn should_release_local_startup_output(
+    output_live: bool,
+    output_paused: bool,
+    output_ready: bool,
+    elapsed: Duration,
+    buffered_bytes: usize,
+) -> bool {
+    !output_live
+        && !output_paused
+        && (output_ready
+            || elapsed >= LOCAL_OUTPUT_READY_TIMEOUT
+            || buffered_bytes > LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES)
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,8 +170,9 @@ pub(crate) async fn create_session(
         .insert(
             session_id.clone(),
             ManagedSession {
-                sender: tx,
+                sender: SessionCommandSender::Standard(tx),
                 waker: Some(waker),
+                output_state_sender: None,
                 status: StatusEvent {
                     session_id: session_id.clone(),
                     status: SessionStatus::Connecting,
@@ -239,15 +302,17 @@ pub(crate) fn create_local_session(
         format!("failed to write local terminal: {error}")
     })?;
     let master = pair.master;
-    let (tx, rx) = mpsc::channel::<SessionCommand>();
+    let (tx, rx) = unbounded::<SessionCommand>();
+    let (output_state_tx, output_state_rx) = bounded::<()>(1);
     let output_ready = Arc::new(AtomicBool::new(false));
     let output_paused = Arc::new(AtomicBool::new(false));
     state
         .insert(
             session_id.clone(),
             ManagedSession {
-                sender: tx,
+                sender: SessionCommandSender::Event(tx),
                 waker: None,
+                output_state_sender: Some(output_state_tx),
                 status: StatusEvent {
                     session_id: session_id.clone(),
                     status: SessionStatus::Connected,
@@ -272,15 +337,17 @@ pub(crate) fn create_local_session(
         username: summary.username.clone(),
     };
     thread::spawn(move || {
-        let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
+        let (output_tx, output_rx) = bounded::<Vec<u8>>(LOCAL_OUTPUT_QUEUE_CAPACITY);
+        let (child_exit_tx, child_exit_rx) = bounded::<()>(1);
+        let mut child_killer = child.clone_killer();
+        let child_handle = thread::spawn(move || {
+            let _ = child.wait();
+            let _ = child_exit_tx.send(());
+        });
         let reader_id = worker_id.clone();
-        let reader_output_paused = worker_output_paused.clone();
         let reader_handle = thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
             loop {
-                while reader_output_paused.load(AtomicOrdering::Relaxed) {
-                    thread::sleep(Duration::from_millis(8));
-                }
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
                     Err(error) => {
@@ -316,36 +383,49 @@ pub(crate) fn create_local_session(
         let output_wait_started = Instant::now();
         let mut output_live = false;
         let mut closed_by_user = false;
+        let mut controller_dropped = false;
+        let mut child_exited = false;
+        let mut reader_closed = false;
         let mut pending_bytes: Vec<u8> = Vec::new();
         let mut pending_output = String::new();
+        let never_output: Receiver<Vec<u8>> = never();
+        let never_timeout: Receiver<Instant> = never();
+        let startup_timeout = after(LOCAL_OUTPUT_READY_TIMEOUT);
         loop {
-            if !output_live
-                && !worker_output_paused.load(AtomicOrdering::Relaxed)
-                && (worker_output_ready.load(AtomicOrdering::Relaxed)
-                    || output_wait_started.elapsed() > Duration::from_secs(5)
-                    || buffered_bytes > 1_000_000)
-            {
+            let output_paused = worker_output_paused.load(AtomicOrdering::Relaxed);
+            if should_release_local_startup_output(
+                output_live,
+                output_paused,
+                worker_output_ready.load(AtomicOrdering::Relaxed),
+                output_wait_started.elapsed(),
+                buffered_bytes,
+            ) {
                 output_live = true;
                 for chunk in buffered_output.drain(..) {
                     let _ = emit_data(&app, &worker_id, chunk);
                 }
             }
-            if !worker_output_paused.load(AtomicOrdering::Relaxed) {
-                while let Ok(bytes) = output_rx.try_recv() {
-                    pending_bytes.extend_from_slice(&bytes);
-                }
-                drain_decoded_output(&mut pending_bytes, &mut pending_output);
-                if !pending_output.is_empty() {
-                    if output_live {
-                        let _ = emit_data(&app, &worker_id, std::mem::take(&mut pending_output));
-                    } else {
-                        buffered_bytes += pending_output.len();
-                        buffered_output.push(std::mem::take(&mut pending_output));
-                    }
-                }
-            }
-            match rx.recv_timeout(Duration::from_millis(16)) {
-                Ok(SessionCommand::Write(data)) => {
+
+            let selectable_output = if output_paused || reader_closed {
+                &never_output
+            } else {
+                &output_rx
+            };
+            let selectable_startup_timeout = if !output_live && !output_paused {
+                &startup_timeout
+            } else {
+                &never_timeout
+            };
+            let activity = wait_for_local_worker_activity(
+                &rx,
+                &child_exit_rx,
+                &output_state_rx,
+                selectable_output,
+                selectable_startup_timeout,
+            );
+
+            match activity {
+                LocalWorkerActivity::Command(Ok(SessionCommand::Write(data))) => {
                     if let Err(error) = writer.write_all(data.as_bytes()) {
                         warn!("Failed to write local shell input session_id={worker_id}: {error}");
                     }
@@ -353,7 +433,7 @@ pub(crate) fn create_local_session(
                         warn!("Failed to flush local shell input session_id={worker_id}: {error}");
                     }
                 }
-                Ok(SessionCommand::Resize { cols, rows }) => {
+                LocalWorkerActivity::Command(Ok(SessionCommand::Resize { cols, rows })) => {
                     if let Err(error) = master.resize(PtySize {
                         rows: rows.max(1) as u16,
                         cols: cols.max(1) as u16,
@@ -365,28 +445,44 @@ pub(crate) fn create_local_session(
                         );
                     }
                 }
-                Ok(SessionCommand::Close) => {
+                LocalWorkerActivity::Command(Ok(SessionCommand::Close)) => {
                     closed_by_user = true;
                     worker_output_paused.store(false, AtomicOrdering::Relaxed);
-                    if let Err(error) = child.kill() {
+                    if let Err(error) = child_killer.kill() {
                         warn!("Failed to kill local shell session_id={worker_id}: {error}");
                     }
                     break;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                LocalWorkerActivity::Command(Err(_)) => {
                     // The controller went away without a Close command; kill
                     // the shell so it does not outlive the session and the
                     // reader thread below can observe EOF and finish.
                     worker_output_paused.store(false, AtomicOrdering::Relaxed);
-                    if let Err(error) = child.kill() {
+                    controller_dropped = true;
+                    if let Err(error) = child_killer.kill() {
                         warn!("Failed to kill local shell session_id={worker_id}: {error}");
                     }
                     break;
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-            }
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                break;
+                LocalWorkerActivity::Output(Ok(bytes)) => {
+                    collect_local_output_batch(bytes, &output_rx, &mut pending_bytes);
+                    drain_decoded_output(&mut pending_bytes, &mut pending_output);
+                    if !pending_output.is_empty() {
+                        if output_live {
+                            let _ =
+                                emit_data(&app, &worker_id, std::mem::take(&mut pending_output));
+                        } else {
+                            buffered_bytes += pending_output.len();
+                            buffered_output.push(std::mem::take(&mut pending_output));
+                        }
+                    }
+                }
+                LocalWorkerActivity::Output(Err(_)) => reader_closed = true,
+                LocalWorkerActivity::ChildExited => {
+                    child_exited = true;
+                    break;
+                }
+                LocalWorkerActivity::OutputStateChanged | LocalWorkerActivity::StartupTimeout => {}
             }
         }
         // Wait for the reader thread to finish so output still in flight
@@ -399,21 +495,101 @@ pub(crate) fn create_local_session(
         worker_output_paused.store(false, AtomicOrdering::Relaxed);
         drop(writer);
         drop(master);
-        let (reader_done_tx, reader_done_rx) = mpsc::channel();
-        thread::spawn(move || {
-            let _ = reader_handle.join();
-            let _ = reader_done_tx.send(());
-        });
-        if reader_done_rx.recv_timeout(Duration::from_secs(2)).is_err() {
-            warn!("Local shell reader did not stop session_id={worker_id}; detaching it");
+        let shutdown_timeout = after(LOCAL_READER_SHUTDOWN_TIMEOUT);
+        while !reader_closed || !child_exited {
+            let selectable_output = if reader_closed {
+                &never_output
+            } else {
+                &output_rx
+            };
+            let never_child: Receiver<()> = never();
+            let selectable_child = if child_exited {
+                &never_child
+            } else {
+                &child_exit_rx
+            };
+            crossbeam_channel::select_biased! {
+                recv(shutdown_timeout) -> _ => {
+                    warn!("Local shell shutdown did not complete session_id={worker_id}; detaching remaining waiter");
+                    break;
+                },
+                recv(selectable_output) -> output => match output {
+                    Ok(bytes) => pending_bytes.extend_from_slice(&bytes),
+                    Err(_) => reader_closed = true,
+                },
+                recv(selectable_child) -> _ => child_exited = true,
+            }
         }
-        for chunk in buffered_output.drain(..) {
-            let _ = emit_data(&app, &worker_id, chunk);
+        if reader_closed {
+            let _ = reader_handle.join();
+        }
+        if child_exited {
+            let _ = child_handle.join();
         }
         while let Ok(bytes) = output_rx.try_recv() {
             pending_bytes.extend_from_slice(&bytes);
         }
-        flush_pending_output(&app, &worker_id, &mut pending_bytes, &mut pending_output);
+        drain_decoded_output(&mut pending_bytes, &mut pending_output);
+        if !pending_output.is_empty() {
+            if output_live || worker_output_ready.load(AtomicOrdering::Relaxed) {
+                output_live = true;
+                buffered_output.push(std::mem::take(&mut pending_output));
+            } else {
+                buffered_bytes += pending_output.len();
+                buffered_output.push(std::mem::take(&mut pending_output));
+            }
+        }
+        let has_gated_output = buffered_bytes > 0
+            || !buffered_output.is_empty()
+            || !pending_bytes.is_empty()
+            || !pending_output.is_empty();
+        while !output_live && has_gated_output && !closed_by_user && !controller_dropped {
+            let output_paused = worker_output_paused.load(AtomicOrdering::Relaxed);
+            if should_release_local_startup_output(
+                output_live,
+                output_paused,
+                worker_output_ready.load(AtomicOrdering::Relaxed),
+                output_wait_started.elapsed(),
+                buffered_bytes,
+            ) {
+                output_live = true;
+                break;
+            }
+            let selectable_startup_timeout = if output_paused {
+                &never_timeout
+            } else {
+                &startup_timeout
+            };
+            crossbeam_channel::select_biased! {
+                recv(rx) -> command => match command {
+                    Ok(SessionCommand::Close) => {
+                        closed_by_user = true;
+                        break;
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                    Ok(SessionCommand::Write(_)) | Ok(SessionCommand::Resize { .. }) => {}
+                },
+                recv(output_state_rx) -> state => {
+                    if state.is_err() {
+                        break;
+                    }
+                },
+                recv(selectable_startup_timeout) -> _ => {}
+            }
+        }
+        if output_live {
+            for chunk in buffered_output.drain(..) {
+                let _ = emit_data(&app, &worker_id, chunk);
+            }
+            flush_pending_output(&app, &worker_id, &mut pending_bytes, &mut pending_output);
+        } else if buffered_bytes > 0 {
+            debug!(
+                "Dropping gated local output after session ended before frontend ready session_id={} bytes={}",
+                worker_id, buffered_bytes
+            );
+        }
         let reason = if closed_by_user {
             "local shell closed"
         } else {
@@ -2462,9 +2638,256 @@ pub(crate) fn clear_sftp_workspace(db: State<'_, Database>) -> Result<(), String
 
 #[cfg(test)]
 mod tests {
-    use super::{configure_local_terminal_environment, detect_key_type, expand_home_path};
+    use super::{
+        collect_local_output_batch, configure_local_terminal_environment, detect_key_type,
+        expand_home_path, should_release_local_startup_output, wait_for_local_worker_activity,
+        LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET, LOCAL_OUTPUT_QUEUE_CAPACITY,
+        LOCAL_OUTPUT_READY_TIMEOUT,
+    };
+    use crate::models::SessionCommand;
+    use crossbeam_channel::{bounded, never, unbounded, TryRecvError, TrySendError};
     use portable_pty::CommandBuilder;
     use std::ffi::OsStr;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    fn never_activity_channels() -> (
+        crossbeam_channel::Receiver<()>,
+        crossbeam_channel::Receiver<()>,
+        crossbeam_channel::Receiver<Instant>,
+    ) {
+        (never(), never(), never())
+    }
+
+    #[test]
+    fn local_output_arrival_wakes_an_idle_worker_without_polling() {
+        let (command_tx, command_rx) = unbounded();
+        let _keep_commands_open = command_tx;
+        let (output_tx, output_rx) = bounded(1);
+        let (child_rx, state_rx, timeout_rx) = never_activity_channels();
+        let barrier = Arc::new(Barrier::new(2));
+        let worker_barrier = Arc::clone(&barrier);
+        let (activity_tx, activity_rx) = bounded(1);
+        let worker = thread::spawn(move || {
+            worker_barrier.wait();
+            let activity = wait_for_local_worker_activity(
+                &command_rx,
+                &child_rx,
+                &state_rx,
+                &output_rx,
+                &timeout_rx,
+            );
+            activity_tx.send(activity).unwrap();
+        });
+
+        barrier.wait();
+        assert!(matches!(activity_rx.try_recv(), Err(TryRecvError::Empty)));
+        output_tx.send(b"first".to_vec()).unwrap();
+
+        match activity_rx.recv().unwrap() {
+            LocalWorkerActivity::Output(Ok(bytes)) => assert_eq!(bytes, b"first"),
+            _ => panic!("output did not wake the idle local worker"),
+        }
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn local_commands_win_a_ready_output_race() {
+        let (command_tx, command_rx) = unbounded();
+        let (output_tx, output_rx) = bounded(1);
+        let (child_rx, state_rx, timeout_rx) = never_activity_channels();
+        output_tx.send(b"output".to_vec()).unwrap();
+        command_tx
+            .send(SessionCommand::Write("input".to_string()))
+            .unwrap();
+
+        match wait_for_local_worker_activity(
+            &command_rx,
+            &child_rx,
+            &state_rx,
+            &output_rx,
+            &timeout_rx,
+        ) {
+            LocalWorkerActivity::Command(Ok(SessionCommand::Write(data))) => {
+                assert_eq!(data, "input")
+            }
+            _ => panic!("a ready output item starved a ready command"),
+        }
+        assert_eq!(output_rx.recv().unwrap(), b"output");
+    }
+
+    #[test]
+    fn local_pause_leaves_output_queued_until_resume_notification() {
+        let (command_tx, command_rx) = unbounded();
+        let _keep_commands_open = command_tx;
+        let (output_tx, output_rx) = bounded(1);
+        let paused_output_rx = never();
+        let (state_tx, state_rx) = bounded(1);
+        let (child_rx, _, timeout_rx) = never_activity_channels();
+        output_tx.send(b"held".to_vec()).unwrap();
+        state_tx.send(()).unwrap();
+
+        assert!(matches!(
+            wait_for_local_worker_activity(
+                &command_rx,
+                &child_rx,
+                &state_rx,
+                &paused_output_rx,
+                &timeout_rx,
+            ),
+            LocalWorkerActivity::OutputStateChanged
+        ));
+        assert_eq!(output_rx.len(), 1, "pause consumed output before resume");
+
+        match wait_for_local_worker_activity(
+            &command_rx,
+            &child_rx,
+            &state_rx,
+            &output_rx,
+            &timeout_rx,
+        ) {
+            LocalWorkerActivity::Output(Ok(bytes)) => assert_eq!(bytes, b"held"),
+            _ => panic!("resume did not continue the queued output"),
+        }
+    }
+
+    #[test]
+    fn local_ready_gate_holds_then_releases_startup_output() {
+        assert!(!should_release_local_startup_output(
+            false,
+            false,
+            false,
+            Duration::from_secs(1),
+            32,
+        ));
+        assert!(should_release_local_startup_output(
+            false,
+            false,
+            true,
+            Duration::from_secs(1),
+            32,
+        ));
+        assert!(!should_release_local_startup_output(
+            false,
+            true,
+            true,
+            LOCAL_OUTPUT_READY_TIMEOUT,
+            32,
+        ));
+    }
+
+    #[test]
+    fn local_close_and_child_exit_leave_tail_output_for_shutdown_drain() {
+        for exit_first in [false, true] {
+            let (command_tx, command_rx) = unbounded();
+            let (output_tx, output_rx) = bounded(1);
+            let (child_tx, child_rx) = bounded(1);
+            let state_rx = never();
+            let timeout_rx = never();
+            output_tx.send(b"tail".to_vec()).unwrap();
+            if exit_first {
+                child_tx.send(()).unwrap();
+            } else {
+                command_tx.send(SessionCommand::Close).unwrap();
+            }
+
+            let activity = wait_for_local_worker_activity(
+                &command_rx,
+                &child_rx,
+                &state_rx,
+                &output_rx,
+                &timeout_rx,
+            );
+            assert!(matches!(
+                activity,
+                LocalWorkerActivity::ChildExited
+                    | LocalWorkerActivity::Command(Ok(SessionCommand::Close))
+            ));
+            assert_eq!(output_rx.recv().unwrap(), b"tail");
+        }
+    }
+
+    #[test]
+    fn local_output_batch_is_ordered_bounded_and_yields_for_commands() {
+        let (output_tx, output_rx) = bounded(LOCAL_OUTPUT_DRAIN_BUDGET + 2);
+        for index in 0..LOCAL_OUTPUT_DRAIN_BUDGET + 2 {
+            output_tx.send(vec![index as u8]).unwrap();
+        }
+        let first = output_rx.recv().unwrap();
+        let mut pending = Vec::new();
+
+        let chunks = collect_local_output_batch(first, &output_rx, &mut pending);
+
+        assert_eq!(chunks, LOCAL_OUTPUT_DRAIN_BUDGET);
+        assert_eq!(
+            pending,
+            (0..LOCAL_OUTPUT_DRAIN_BUDGET as u8).collect::<Vec<_>>()
+        );
+        assert_eq!(output_rx.len(), 2, "batch drained past its fairness budget");
+    }
+
+    #[test]
+    fn local_reader_queue_has_a_fixed_backpressure_bound() {
+        let (output_tx, output_rx) = bounded(LOCAL_OUTPUT_QUEUE_CAPACITY);
+        for _ in 0..LOCAL_OUTPUT_QUEUE_CAPACITY {
+            output_tx.try_send(vec![0]).unwrap();
+        }
+        assert!(matches!(
+            output_tx.try_send(vec![1]),
+            Err(TrySendError::Full(_))
+        ));
+        assert_eq!(output_rx.len(), LOCAL_OUTPUT_QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn local_sessions_have_independent_wakeups() {
+        let barrier = Arc::new(Barrier::new(3));
+        let mut outputs = Vec::new();
+        let mut completions = Vec::new();
+        let mut workers = Vec::new();
+        for session in 0..2_u8 {
+            let (command_tx, command_rx) = unbounded();
+            let (output_tx, output_rx) = bounded(1);
+            let (child_rx, state_rx, timeout_rx) = never_activity_channels();
+            let barrier = Arc::clone(&barrier);
+            let (done_tx, done_rx) = bounded(1);
+            workers.push(thread::spawn(move || {
+                let _keep_commands_open = command_tx;
+                barrier.wait();
+                let activity = wait_for_local_worker_activity(
+                    &command_rx,
+                    &child_rx,
+                    &state_rx,
+                    &output_rx,
+                    &timeout_rx,
+                );
+                done_tx.send(activity).unwrap();
+            }));
+            outputs.push((session, output_tx));
+            completions.push(done_rx);
+        }
+        barrier.wait();
+
+        outputs[1].1.send(vec![1]).unwrap();
+        assert!(matches!(
+            completions[1].recv().unwrap(),
+            LocalWorkerActivity::Output(Ok(bytes)) if bytes == vec![1]
+        ));
+        assert!(matches!(
+            completions[0].try_recv(),
+            Err(TryRecvError::Empty)
+        ));
+
+        outputs[0].1.send(vec![0]).unwrap();
+        assert!(matches!(
+            completions[0].recv().unwrap(),
+            LocalWorkerActivity::Output(Ok(bytes)) if bytes == vec![0]
+        ));
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    }
 
     #[test]
     fn local_shell_uses_xterm_terminal_capabilities() {

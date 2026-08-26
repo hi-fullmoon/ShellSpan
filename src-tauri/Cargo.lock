@@ -10,6 +10,7 @@ dependencies = [
  "base64 0.23.0",
  "core-foundation",
  "core-foundation-sys",
+ "crossbeam-channel",
  "dbus-secret-service-keyring-store",
  "futures-util",
  "hmac",

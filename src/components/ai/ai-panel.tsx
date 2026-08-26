@@ -117,6 +117,7 @@ const AI_PANEL_KEYBOARD_RESIZE_STEP = 24;
 const AI_PANEL_COMPACT_CONTROLS_WIDTH = 380;
 const AI_PANEL_ENGLISH_COMPACT_CONTROLS_WIDTH = 440;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'termbridge.aiPanelWidth';
+export const LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS = 50;
 const logger = createLogger('ai');
 type ConversationTask = Exclude<AiTaskKind, 'diagnosticAgent'>;
 type CancelAiRequest = (requestId: string) => Promise<void>;
@@ -403,16 +404,24 @@ function useLiveTerminalContext(
   useEffect(() => {
     if (!open || activeSection !== 'terminal' || !activeSessionId) return;
     let frame: number | null = null;
-    const refresh = (): void => {
-      if (frame !== null) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = null;
-        setRevision((value) => value + 1);
-      });
+    let deadline: number | null = null;
+    let scheduled = false;
+    const flush = (): void => {
+      if (!scheduled) return;
+      scheduled = false;
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      if (deadline !== null) window.clearTimeout(deadline);
+      frame = null;
+      deadline = null;
+      setRevision((value) => value + 1);
     };
-    const stopOutputListener = subscribeTerminalOutput((sessionId) => {
-      if (sessionId === activeSessionId) refresh();
-    });
+    const refresh = (): void => {
+      if (scheduled) return;
+      scheduled = true;
+      deadline = window.setTimeout(flush, LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS);
+      frame = window.requestAnimationFrame(flush);
+    };
+    const stopOutputListener = subscribeTerminalOutput(activeSessionId, refresh);
     let selectionDisposable = terminalRegistry
       .get(activeSessionId)
       ?.terminal.onSelectionChange(refresh);
@@ -424,14 +433,18 @@ function useLiveTerminalContext(
       refresh();
     });
     return () => {
+      scheduled = false;
       if (frame !== null) window.cancelAnimationFrame(frame);
+      if (deadline !== null) window.clearTimeout(deadline);
       stopOutputListener();
       stopRegistryListener();
       selectionDisposable?.dispose();
     };
   }, [activeSection, activeSessionId, open]);
 
-  return currentTerminalContext();
+  return open && activeSection === 'terminal'
+    ? currentTerminalContext()
+    : { selection: false, lineCount: 0 };
 }
 
 function useCompactAiPanelViewport(): boolean {
