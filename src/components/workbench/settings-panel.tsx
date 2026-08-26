@@ -57,6 +57,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     actions: [
       'newTerminalTab',
       'closeTerminalTab',
+      'switchTerminalTab',
       'nextTerminalTab',
       'previousTerminalTab',
       'findTerminal',
@@ -210,6 +211,7 @@ export const SettingsPanel: React.FC = () => {
       toggleAiPanel: t('settings.shortcuts.toggleAiPanel'),
       newTerminalTab: t('settings.shortcuts.newTerminalTab'),
       closeTerminalTab: t('settings.shortcuts.closeTerminalTab'),
+      switchTerminalTab: t('settings.shortcuts.switchTerminalTab'),
       nextTerminalTab: t('settings.shortcuts.nextTerminalTab'),
       previousTerminalTab: t('settings.shortcuts.previousTerminalTab'),
       findTerminal: t('settings.shortcuts.findTerminal'),

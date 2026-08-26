@@ -14,6 +14,7 @@ export const SHORTCUT_SCOPES: Record<ShortcutAction, ShortcutScope> = {
   toggleAiPanel: 'global',
   newTerminalTab: 'terminal',
   closeTerminalTab: 'terminal',
+  switchTerminalTab: 'terminal',
   nextTerminalTab: 'terminal',
   previousTerminalTab: 'terminal',
   findTerminal: 'terminal',
