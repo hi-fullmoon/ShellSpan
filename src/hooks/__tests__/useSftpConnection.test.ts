@@ -10,7 +10,7 @@ import { useTransferStore } from '@/stores/transferStore';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
-import { setCachedDirectoryListing } from '@/lib/directory-listing-cache';
+import { clearDirectoryListingCache } from '@/lib/directory-listing-cache';
 import type { ReadRemoteFileResponse } from '@/types';
 
 const tauri = vi.hoisted(() => ({
@@ -172,6 +172,7 @@ describe('useSftpConnection remote delete', () => {
 describe('useSftpConnection directory listing race', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearDirectoryListingCache();
     const connection = createConnection();
     useSftpStore.setState({
       connections: [connection],
@@ -253,15 +254,14 @@ describe('useSftpConnection directory listing race', () => {
   });
 
   it('keeps cached entries while surfacing the latest revalidation error', async () => {
-    setCachedDirectoryListing('connection-1:remote:/cached', {
-      path: '/cached',
-      entries: [file],
-    });
-    tauri.invokeListRemoteDirectory.mockRejectedValueOnce(new Error('refresh failed'));
+    tauri.invokeListRemoteDirectory
+      .mockResolvedValueOnce({ path: '/cached', entries: [file] })
+      .mockRejectedValueOnce(new Error('refresh failed'));
 
     const connection = useSftpStore.getState().connections[0]!;
     const { result } = renderHook(() => useSftpConnection(connection));
 
+    await act(() => result.current.loadRemoteDirectory('/cached'));
     await act(() => result.current.loadRemoteDirectory('/cached'));
 
     const state = useSftpStore.getState().connections[0]!;
@@ -269,6 +269,45 @@ describe('useSftpConnection directory listing race', () => {
     expect(state.remoteEntries).toEqual([file]);
     expect(state.remoteError).toBe('refresh failed');
     expect(state.remoteLoading).toBe(false);
+  });
+
+  it('does not reuse a pane listing after switching its remote profile', async () => {
+    tauri.invokeListRemoteDirectory.mockResolvedValueOnce({
+      path: '/shared',
+      entries: [file],
+    });
+    const connection: SftpConnection = {
+      ...useSftpStore.getState().connections[0]!,
+      profileId: 'profile-one',
+    };
+    useSftpStore.setState({ connections: [connection] });
+    const { result, rerender } = renderHook(
+      ({ currentConnection }) => useSftpConnection(currentConnection),
+      { initialProps: { currentConnection: connection } },
+    );
+    await act(() => result.current.loadRemoteDirectory('/shared'));
+
+    const nextConnection: SftpConnection = {
+      ...connection,
+      profileId: 'profile-two',
+      connection: {
+        ...connection.connection,
+        host: 'other.example.com',
+      },
+      remotePath: '',
+      remoteEntries: [],
+    };
+    useSftpStore.setState({ connections: [nextConnection] });
+    rerender({ currentConnection: nextConnection });
+    tauri.invokeListRemoteDirectory.mockRejectedValueOnce(new Error('new host unavailable'));
+
+    await act(() => result.current.loadRemoteDirectory('/shared'));
+
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      remotePath: '',
+      remoteEntries: [],
+      remoteError: 'new host unavailable',
+    });
   });
 });
 

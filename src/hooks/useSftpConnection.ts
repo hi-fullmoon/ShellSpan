@@ -126,6 +126,17 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 } {
   const remoteConnection = getSftpPaneConnection(connection, side);
   const remoteConnectionKey = getSftpPaneConnectionKey(connection, side);
+  const profileId = side === 'local' ? connection.leftProfileId : connection.profileId;
+  const directoryCacheScope = JSON.stringify([
+    connection.id,
+    side,
+    remoteConnectionKey,
+    profileId ?? '',
+    remoteConnection.authMethod,
+    remoteConnection.keychainKeyId ?? '',
+    remoteConnection.jumpHost?.authMethod ?? '',
+    remoteConnection.jumpHost?.keychainKeyId ?? '',
+  ]);
   const panePath = side === 'local' ? connection.localPath : connection.remotePath;
   const setPath = useSftpStore((state) => state.setPath);
   const setEntries = useSftpStore((state) => state.setEntries);
@@ -253,8 +264,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         setEntries(connection.id, side, merged);
         // Keep the directory cache in sync so revisiting this path shows the
         // resolved names instantly too.
-        const requestKey = `${connection.id}:${side}`;
-        setCachedDirectoryListing(`${requestKey}:${listing.path}`, {
+        setCachedDirectoryListing(directoryCacheScope, listing.path, {
           ...listing,
           entries: merged,
         });
@@ -263,7 +273,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         logger.warn('Failed to resolve remote entry owners', error);
       }
     },
-    [connection.id, remoteConnection, setEntries, side],
+    [connection.id, directoryCacheScope, remoteConnection, setEntries, side],
   );
 
   const loadRemoteDirectory = useCallback(
@@ -272,8 +282,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       const requestId = nextDirectoryListRequestId(requestKey);
       const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId);
       const backendRequestKey = getBackendDirectoryListRequestKey(requestKey);
-      const cacheKey = `${requestKey}:${path ?? ''}`;
-      const cached = getCachedDirectoryListing(cacheKey);
+      const requestedPath = path ?? '';
+      const cached = getCachedDirectoryListing(directoryCacheScope, requestedPath);
       if (cached) {
         // Render the cached listing instantly and revalidate below; only a
         // cold load shows the loading state.
@@ -286,8 +296,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       const applyListing = (listing: RemoteDirectoryListing): void => {
         setPath(connection.id, side, listing.path);
         setEntries(connection.id, side, listing.entries);
-        setCachedDirectoryListing(cacheKey, listing);
-        setCachedDirectoryListing(`${requestKey}:${listing.path}`, listing);
+        setCachedDirectoryListing(directoryCacheScope, requestedPath, listing);
+        setCachedDirectoryListing(directoryCacheScope, listing.path, listing);
         void resolveEntryOwners(listing, isLatest, backendRequestKey, requestId);
       };
       try {
@@ -355,14 +365,14 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         }
       }
     },
-    [connection.id, connection.leftProfileId, connection.profileId, remoteConnection, setPath, setEntries, setLoading, setError, updateConnectionRequest, resolveEntryOwners, side],
+    [connection.id, connection.leftProfileId, connection.profileId, directoryCacheScope, remoteConnection, setPath, setEntries, setLoading, setError, updateConnectionRequest, resolveEntryOwners, side],
   );
 
   // Mutating operations invalidate this pane's cached listings up front so
   // the reload after the mutation never flashes the pre-mutation entries.
   const invalidatePaneListingCache = useCallback((): void => {
-    invalidateDirectoryListingCache(`${connection.id}:${side}:`);
-  }, [connection.id, side]);
+    invalidateDirectoryListingCache(directoryCacheScope);
+  }, [directoryCacheScope]);
 
   const createRemoteEntry = useCallback(
     async (parentPath: string, name: string, kind: 'file' | 'directory') => {
