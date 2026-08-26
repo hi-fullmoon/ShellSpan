@@ -197,7 +197,11 @@ describe('useConnectSession', () => {
     await waitFor(() =>
       expect(vi.mocked(invokeCreateSession)).toHaveBeenCalledTimes(2),
     );
-    expect(vi.mocked(invokeTrustHost)).toHaveBeenCalledWith('h', 22);
+    expect(vi.mocked(invokeTrustHost)).toHaveBeenCalledWith(
+      'h',
+      22,
+      'fp',
+    );
     expect(hostKeyDialog().open).toBe(false);
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
       sessionId: 's1',

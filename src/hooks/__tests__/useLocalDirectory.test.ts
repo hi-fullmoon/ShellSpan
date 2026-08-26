@@ -18,6 +18,7 @@ const tauri = vi.hoisted(() => ({
     contentEncoding: 'utf8',
     truncated: false,
   }),
+  invokeSupersedeRemoteDirectoryRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/tauri', () => tauri);
@@ -94,6 +95,9 @@ describe('useLocalDirectory', () => {
     act(() => {
       staleLoad = result.current.loadLocalDirectory('/old');
     });
+    await vi.waitFor(() => {
+      expect(tauri.invokeListLocalDirectory).toHaveBeenCalledTimes(1);
+    });
     await act(() => result.current.loadLocalDirectory('/new'));
     await act(async () => {
       resolveStale({ path: '/old', entries: [] });
@@ -104,6 +108,12 @@ describe('useLocalDirectory', () => {
     expect(state.localPath).toBe('/new');
     expect(state.localEntries).toEqual([file]);
     expect(state.localLoading).toBe(false);
+    expect(tauri.invokeSupersedeRemoteDirectoryRequest).toHaveBeenCalledTimes(2);
+    const [firstKey, firstId] = tauri.invokeSupersedeRemoteDirectoryRequest.mock.calls[0]!;
+    const [secondKey, secondId] = tauri.invokeSupersedeRemoteDirectoryRequest.mock.calls[1]!;
+    expect(firstKey).toContain(`:${connection.id}:local`);
+    expect(secondKey).toBe(firstKey);
+    expect(secondId).toBe(firstId + 1);
   });
 
   it('surfaces listing failures through the pane error state', async () => {
@@ -119,6 +129,23 @@ describe('useLocalDirectory', () => {
     const state = useSftpStore.getState().connections[0]!;
     expect(state.localError).toBe('permission denied');
     expect(state.localLoading).toBe(false);
+  });
+
+  it('still loads locally if the best-effort remote supersede notification fails', async () => {
+    tauri.invokeSupersedeRemoteDirectoryRequest.mockRejectedValueOnce(
+      new Error('registry unavailable'),
+    );
+    tauri.invokeListLocalDirectory.mockResolvedValueOnce({ path: '/local/new', entries: [file] });
+
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useLocalDirectory(connection));
+
+    await act(() => result.current.loadLocalDirectory('/local/new'));
+
+    const state = useSftpStore.getState().connections[0]!;
+    expect(state.localPath).toBe('/local/new');
+    expect(state.localEntries).toEqual([file]);
+    expect(state.localError).toBeUndefined();
   });
 
   it('loads local preview content through the Tauri command', async () => {
