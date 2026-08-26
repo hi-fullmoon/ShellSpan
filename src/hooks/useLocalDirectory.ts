@@ -1,8 +1,14 @@
 import { useCallback } from 'react';
-import { invokeListLocalDirectory, invokeOpenPath, invokePreviewLocalFile } from '@/lib/tauri';
+import {
+  invokeListLocalDirectory,
+  invokeOpenPath,
+  invokePreviewLocalFile,
+  invokeSupersedeRemoteDirectoryRequest,
+} from '@/lib/tauri';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
 import {
+  getBackendDirectoryListRequestKey,
   isLatestDirectoryListRequest,
   nextDirectoryListRequestId,
 } from '@/hooks/utils';
@@ -26,6 +32,14 @@ export function useLocalDirectory(connection: SftpConnection, side: SftpSide = '
       setLoading(connection.id, side, true);
       setError(connection.id, side);
       try {
+        // Local and remote loads share a generation. Advance the Rust-side
+        // watermark first so switching this pane to local cancels an older
+        // remote readdir/health-check/owner lookup before local I/O begins.
+        await invokeSupersedeRemoteDirectoryRequest(
+          getBackendDirectoryListRequestKey(requestKey),
+          requestId,
+        ).catch(() => undefined);
+        if (!isLatest()) return;
         const listing = await invokeListLocalDirectory(path ?? '');
         if (!isLatest()) return;
         setPath(connection.id, side, listing.path);
