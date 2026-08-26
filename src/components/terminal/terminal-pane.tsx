@@ -160,7 +160,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     return () => document.removeEventListener('termbridge:find-terminal', handleOpenSearchRequest);
   }, [handleOpenSearch, isActive]);
 
-  // Bind xterm custom key handler for find/escape and copy.
+  // Bind xterm custom key handler for app shortcuts, find/escape, and copy.
   useEffect(() => {
     if (!terminal) return;
 
@@ -184,6 +184,20 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
       // app-level shortcut map. Copy stays hardcoded: it mirrors the OS
       // clipboard convention whose default differs per platform.
       const isFindShortcut = eventMatchesShortcut(event, effectiveShortcuts().findTerminal);
+      const isTabSwitcherShortcut = eventMatchesShortcut(
+        event,
+        effectiveShortcuts().switchTerminalTab,
+      );
+
+      // Document-level handlers run after xterm's textarea handler. Consume
+      // the chord here so it opens the app UI without first writing a control
+      // sequence to the active remote shell.
+      if (isTabSwitcherShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        document.dispatchEvent(new Event('termbridge:switch-terminal-tab'));
+        return false;
+      }
 
       if (isFindShortcut) {
         event.preventDefault();

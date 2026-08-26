@@ -137,6 +137,25 @@ describe('Terminal', () => {
     expect(screen.queryByTestId('new-session-dialog')).not.toBeInTheDocument();
   });
 
+  it('opens the terminal tab switcher event and activates the chosen tab', () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 's1', title: 'Session A', host: 'one.example.com', port: 22, username: 'u',
+    });
+    useTerminalStore.getState().addSession({
+      sessionId: 's2', title: 'Session B', host: 'two.example.com', port: 22, username: 'u',
+    });
+    useTerminalStore.getState().setActiveSession('s1');
+
+    render(<Terminal />);
+    act(() => {
+      document.dispatchEvent(new Event('termbridge:switch-terminal-tab'));
+    });
+
+    expect(screen.getByTestId('terminal-tab-switcher')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: /Session B/ }));
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
   it('renders the terminal pane when there is an active session', () => {
     useTerminalStore.getState().addSession({
       sessionId: 's1',
