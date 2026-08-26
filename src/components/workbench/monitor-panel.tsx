@@ -160,7 +160,7 @@ const ProcessTrend: React.FC<{
   data: number[];
   tone?: 'primary' | 'warning';
 }> = ({ icon: Icon, label, value, detail, data, tone = 'primary' }) => (
-  <div className="flex min-h-40 min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3">
+  <div className="flex min-h-32 min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3">
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
         <Icon aria-hidden />
@@ -173,7 +173,7 @@ const ProcessTrend: React.FC<{
     <span className="truncate text-xs text-muted-foreground" title={detail}>{detail}</span>
     <TrendArea
       data={data}
-      height={56}
+      height={40}
       className={cn('mt-auto', tone === 'warning' ? 'text-app-warning' : 'text-app-primary')}
       aria-label={label}
     />
@@ -479,10 +479,10 @@ export const MonitorPanel: React.FC = () => {
               )}
 
               {snapshot && (
-                <div className="grid items-stretch gap-3 @min-[72rem]:grid-cols-12">
+                <div className="flex flex-col gap-3">
                   <Card
                     aria-labelledby="monitor-process-heading"
-                    className="h-full @min-[72rem]:col-span-7"
+                    className="h-full"
                   >
                     <CardHeader>
                       <CardTitle id="monitor-process-heading">
@@ -534,7 +534,7 @@ export const MonitorPanel: React.FC = () => {
 
                   <Card
                     aria-labelledby="monitor-system-heading"
-                    className="h-full @min-[72rem]:col-span-5"
+                    className="h-full"
                   >
                     <CardHeader>
                       <CardTitle id="monitor-system-heading">
@@ -548,7 +548,7 @@ export const MonitorPanel: React.FC = () => {
                       </CardAction>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid gap-3 @min-[42rem]:grid-cols-2">
+                      <div className="grid gap-3 @min-[42rem]:grid-cols-2 @min-[72rem]:grid-cols-4">
                         <ResourceRow
                           icon={MemoryStickIcon}
                           label={t('workbench.monitor.memory')}

@@ -102,7 +102,7 @@ describe('MonitorPanel health layers', () => {
     expect(sftpEmptyState).not.toHaveClass('h-64');
   });
 
-  it('flattens local monitoring into peer cards', () => {
+  it('stacks system monitoring directly below the app process', () => {
     useMonitorStore.setState({
       snapshot,
       history: [
@@ -126,6 +126,9 @@ describe('MonitorPanel health layers', () => {
     expect(processCard).toBeInTheDocument();
     expect(systemCard).toBeInTheDocument();
     expect(processCard).not.toBe(systemCard);
+    expect(processCard?.parentElement).toBe(systemCard?.parentElement);
+    expect(processCard?.nextElementSibling).toBe(systemCard);
+    expect(processCard?.parentElement).toHaveClass('flex', 'flex-col');
     expect(screen.getAllByRole('progressbar')).toHaveLength(4);
     expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(5);
     expect(screen.getByText('remote-health-layer')).toBeInTheDocument();
