@@ -13,8 +13,15 @@ import { formatSize } from '@/lib/sftp-utils';
 import { createPreviewDataUrl, formatHexPreview, getFileExtension, getSftpPreviewDescriptor, type SftpPreviewDescriptor } from '@/lib/sftp-preview';
 import { cn } from '@/lib/utils';
 import type { ReadRemoteFileResponse } from '@/types';
-import { CheckIcon, CopyIcon, ExternalLinkIcon, FileIcon, FileWarningIcon, RotateCcwIcon, WrapTextIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react';
+import { ExternalLinkIcon, FileIcon, FileWarningIcon, RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react';
 import { SftpDialogBody, SftpDialogContent, SftpDialogHeader } from './sftp-dialog-layout';
+import {
+  ArchivePreview,
+  MarkdownPreview,
+  OfficeDocumentPreview,
+  PlainTextPreview,
+  StructuredDataPreview,
+} from './sftp-rich-preview';
 
 export interface SftpPreviewDialogProps {
   target?: {
@@ -41,85 +48,6 @@ const MediaUnavailable: React.FC = () => {
       <AlertTitle>{t('sftp.preview.mediaUnavailableTitle')}</AlertTitle>
       <AlertDescription>{t('sftp.preview.mediaUnavailableDescription')}</AlertDescription>
     </Alert>
-  );
-};
-
-const TextPreview: React.FC<{ content: string }> = ({ content }) => {
-  const { t } = useI18n();
-  const [wrap, setWrap] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const lineCount = useMemo(() => {
-    if (!content) return 0;
-    let count = 1;
-    let index = content.indexOf('\n');
-    while (index !== -1) {
-      count += 1;
-      index = content.indexOf('\n', index + 1);
-    }
-    return count;
-  }, [content]);
-
-  useEffect(() => {
-    setWrap(false);
-    setCopied(false);
-  }, [content]);
-
-  const handleCopy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Clipboard access can be denied by the host WebView. Keep the preview
-      // usable and leave the button in its original state.
-    }
-  };
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 items-center justify-between gap-3 border-b px-3">
-        <span className="text-xs text-muted-foreground">{t('sftp.preview.lineCount', { count: lineCount })}</span>
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={<Button variant={wrap ? 'secondary' : 'ghost'} size="icon" className="size-7" onClick={() => setWrap((value) => !value)} />}
-            >
-              <WrapTextIcon />
-              <span className="sr-only">{t('sftp.preview.toggleWrap')}</span>
-            </TooltipTrigger>
-            <TooltipContent>{t('sftp.preview.toggleWrap')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7"
-                  onClick={() => {
-                    void handleCopy();
-                  }}
-                />
-              }
-            >
-              {copied ? <CheckIcon /> : <CopyIcon />}
-              <span className="sr-only">{t('sftp.preview.copyContent')}</span>
-            </TooltipTrigger>
-            <TooltipContent>{copied ? t('sftp.preview.copied') : t('sftp.preview.copyContent')}</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-      <ScrollArea className="min-h-0 flex-1" horizontal={!wrap} size="thin">
-        <pre
-          className={cn(
-            'min-h-full p-4 font-mono text-xs leading-5 text-foreground selection:bg-primary/20',
-            wrap ? 'whitespace-pre-wrap break-words' : 'w-max min-w-full whitespace-pre',
-          )}
-        >
-          {content || t('sftp.preview.emptyFile')}
-        </pre>
-      </ScrollArea>
-    </div>
   );
 };
 
@@ -319,7 +247,9 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }
       </div>
     );
   }
-  if (descriptor.kind === 'text') return <TextPreview content={content.content} />;
+  if (descriptor.kind === 'text') return <PlainTextPreview content={content.content} />;
+  if (descriptor.kind === 'markdown') return <MarkdownPreview content={content.content} />;
+  if (descriptor.kind === 'data') return <StructuredDataPreview content={content.content} extension={descriptor.extension} />;
   const dataUrl =
     content.contentEncoding === 'base64'
       ? createPreviewDataUrl(content.content, descriptor.mimeType)
@@ -334,7 +264,19 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }
     return <iframe className="min-h-0 flex-1 bg-muted/35" src={dataUrl} title={content.name} />;
   }
   if (descriptor.kind === 'font') return <FontPreview dataUrl={dataUrl} />;
-  return <BinaryPreview content={content.content} isArchive={descriptor.kind === 'archive'} />;
+  if (descriptor.kind === 'document' || descriptor.kind === 'spreadsheet' || descriptor.kind === 'presentation') {
+    return <OfficeDocumentPreview content={content.content} extension={descriptor.extension} />;
+  }
+  if (descriptor.kind === 'archive') {
+    return (
+      <ArchivePreview
+        content={content.content}
+        extension={descriptor.extension}
+        fallback={<BinaryPreview content={content.content} isArchive />}
+      />
+    );
+  }
+  return <BinaryPreview content={content.content} isArchive={false} />;
 };
 
 export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, content, open, onClose, onOpenExternally }) => {
