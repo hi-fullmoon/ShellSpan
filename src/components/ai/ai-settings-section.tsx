@@ -95,6 +95,7 @@ export const AiSettingsSection: React.FC = () => {
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
+  const persistenceStatus = useAiSettingsStore((state) => state.persistenceStatus);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -123,6 +124,15 @@ export const AiSettingsSection: React.FC = () => {
   if (!selectedProvider) return null;
 
   const hasApiKey = Boolean(selectedProvider.apiKey?.trim());
+  const keySavePending = persistenceStatus === 'pending' || persistenceStatus === 'saving';
+  const keySaveFailed = persistenceStatus === 'error';
+  const keyStatusKey: LocaleKey = keySaveFailed
+    ? 'settings.ai.keySaveFailed'
+    : keySavePending
+      ? 'settings.ai.keySaving'
+      : hasApiKey
+        ? 'settings.ai.keyStored'
+        : 'settings.ai.keyMissing';
   const SelectedIcon = PRESET_ICONS[selectedProvider.preset];
 
   const handleAddProvider = (preset: AiProviderPreset): void => {
@@ -372,11 +382,14 @@ export const AiSettingsSection: React.FC = () => {
                   )}
 
                   {selectedProvider.requiresApiKey && (
-                    <Field>
+                    <Field data-invalid={keySaveFailed || undefined}>
                       <div className="flex items-center justify-between gap-2">
                         <FieldLabel htmlFor="ai-api-key">{t('settings.ai.apiKey')}</FieldLabel>
-                        <Badge variant={hasApiKey ? 'secondary' : 'outline'}>
-                          {hasApiKey ? t('settings.ai.keyStored') : t('settings.ai.keyMissing')}
+                        <Badge
+                          variant={keySaveFailed ? 'destructive' : hasApiKey && !keySavePending ? 'secondary' : 'outline'}
+                          aria-live="polite"
+                        >
+                          {t(keyStatusKey)}
                         </Badge>
                       </div>
                       <Input
@@ -384,13 +397,16 @@ export const AiSettingsSection: React.FC = () => {
                         type="password"
                         value={selectedProvider.apiKey ?? ''}
                         onChange={(event) => updateProvider(selectedProvider.id, { apiKey: event.target.value })}
+                        aria-invalid={keySaveFailed || undefined}
                         placeholder="sk-..."
                         autoComplete="off"
                         autoCapitalize="none"
                         autoCorrect="off"
                         spellCheck={false}
                       />
-                      <FieldDescription>{t('settings.ai.keyHint')}</FieldDescription>
+                      <FieldDescription>
+                        {t(keySaveFailed ? 'settings.ai.keySaveFailedHint' : 'settings.ai.keyHint')}
+                      </FieldDescription>
                     </Field>
                   )}
 

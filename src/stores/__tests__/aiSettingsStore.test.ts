@@ -1,5 +1,16 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { parseAiPreferences, useAiSettingsStore } from '../aiSettingsStore';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  flushAiSettingsPreferences,
+  parseAiPreferences,
+  useAiSettingsStore,
+} from '../aiSettingsStore';
+
+const tauri = vi.hoisted(() => ({
+  invokeLoadPreferences: vi.fn().mockResolvedValue([]),
+  invokeSavePreferences: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/lib/tauri', () => tauri);
 
 const initialState = useAiSettingsStore.getState();
 
@@ -9,7 +20,14 @@ function preference(key: string, value: unknown): [string, string] {
 
 describe('aiSettingsStore', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    tauri.invokeLoadPreferences.mockResolvedValue([]);
+    tauri.invokeSavePreferences.mockResolvedValue(undefined);
     useAiSettingsStore.setState(initialState, true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('migrates the legacy single-provider preferences without losing values', () => {
@@ -112,7 +130,7 @@ describe('aiSettingsStore', () => {
       preference('providers', [provider]),
       preference('defaultProviderId', provider.id),
     ]);
-    useAiSettingsStore.setState({ ...preferences, initialized: true });
+    useAiSettingsStore.setState({ ...preferences, initialized: false });
 
     expect(preferences.providers[0]).toHaveProperty('apiKey', '  database-key  ');
     expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
@@ -135,5 +153,54 @@ describe('aiSettingsStore', () => {
 
     useAiSettingsStore.getState().removeProvider('ollama');
     expect(useAiSettingsStore.getState().providers).toHaveLength(1);
+  });
+
+  it('reports pending and saved states around the debounced database write', async () => {
+    vi.useFakeTimers();
+    useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
+
+    useAiSettingsStore.getState().updateProvider('openai', { apiKey: 'database-key' });
+
+    expect(useAiSettingsStore.getState().persistenceStatus).toBe('pending');
+    expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(tauri.invokeSavePreferences).toHaveBeenCalledOnce();
+    expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
+  });
+
+  it('flushes a pending API key immediately before application exit', async () => {
+    vi.useFakeTimers();
+    useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
+    useAiSettingsStore.getState().updateProvider('openai', { apiKey: 'exit-key' });
+
+    await flushAiSettingsPreferences();
+
+    expect(tauri.invokeSavePreferences).toHaveBeenCalledWith(expect.arrayContaining([
+      ['ai.providers', expect.stringContaining('exit-key')],
+    ]));
+    expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('surfaces a failed write and retains the latest preferences for retry', async () => {
+    vi.useFakeTimers();
+    tauri.invokeSavePreferences.mockRejectedValueOnce(new Error('database unavailable'));
+    useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
+    useAiSettingsStore.getState().updateProvider('openai', { apiKey: 'retry-key' });
+
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(useAiSettingsStore.getState().persistenceStatus).toBe('error');
+    tauri.invokeSavePreferences.mockResolvedValueOnce(undefined);
+
+    await flushAiSettingsPreferences();
+
+    expect(tauri.invokeSavePreferences).toHaveBeenCalledTimes(2);
+    expect(tauri.invokeSavePreferences).toHaveBeenLastCalledWith(expect.arrayContaining([
+      ['ai.providers', expect.stringContaining('retry-key')],
+    ]));
+    expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
   });
 });

@@ -32,6 +32,7 @@ import { AiPanel } from '@/components/ai/ai-panel';
 import { finalizeAiSessionsBeforeExit } from '@/lib/ai-sessions';
 import { flushTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
 import { flushSftpWorkspace } from '@/lib/sftp-workspace-persistence';
+import { flushAiSettingsPreferences } from '@/stores/aiSettingsStore';
 import { CommandPalette } from '@/components/command-palette';
 import { isTransferActive, useTransferStore } from '@/stores/transferStore';
 import {
@@ -96,6 +97,9 @@ export const App: React.FC = () => {
     if (exitInFlightRef.current) return;
     exitInFlightRef.current = true;
     void Promise.all([
+      flushAiSettingsPreferences().catch((error) => {
+        logger.warn('Failed to flush AI settings before exit', error);
+      }),
       finalizeAiSessionsBeforeExit().catch((error) => {
         logger.warn('Failed to flush AI session history before exit', error);
       }),
