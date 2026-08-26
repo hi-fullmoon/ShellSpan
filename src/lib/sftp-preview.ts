@@ -112,6 +112,9 @@ export function getSftpPreviewDescriptor(
     return { kind: 'archive', mimeType: MIME_TYPES[extension], extension, icon: ArchiveIcon };
   }
   if (contentEncoding === 'utf8') {
+    if (extension === 'doc') {
+      return { kind: 'document', mimeType: MIME_TYPES.doc, extension, icon: FileTextIcon };
+    }
     if (MARKDOWN_EXTENSIONS.has(extension)) {
       return { kind: 'markdown', mimeType: 'text/markdown;charset=utf-8', extension, icon: FileTextIcon };
     }

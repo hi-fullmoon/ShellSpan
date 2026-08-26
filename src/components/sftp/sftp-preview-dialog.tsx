@@ -261,7 +261,7 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }
     return <MediaPreview dataUrl={dataUrl} kind={descriptor.kind} name={content.name} />;
   }
   if (descriptor.kind === 'pdf') {
-    return <iframe className="min-h-0 flex-1 bg-muted/35" src={dataUrl} title={content.name} />;
+    return <iframe className="min-h-0 w-full flex-1 bg-muted/35" src={dataUrl} title={content.name} />;
   }
   if (descriptor.kind === 'font') return <FontPreview dataUrl={dataUrl} />;
   if (descriptor.kind === 'document' || descriptor.kind === 'spreadsheet' || descriptor.kind === 'presentation') {
@@ -308,7 +308,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
         if (!next) onClose();
       }}
     >
-      <SftpDialogContent className="h-[min(84vh,780px)] max-w-5xl grid-rows-[auto_minmax(0,1fr)]">
+      <SftpDialogContent className="h-[min(84vh,780px)] max-w-5xl">
         <SftpDialogHeader
           title={
             <span className="flex min-w-0 items-center gap-2">
@@ -321,7 +321,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
           }
           description={displayTarget.path}
         />
-        <SftpDialogBody className="min-h-0 gap-0 overflow-hidden p-0">
+        <SftpDialogBody className="min-h-0 flex-1 gap-0 overflow-hidden p-0">
           <div className="flex min-h-11 items-center gap-2 px-3">
             <Badge variant="secondary">{extensionLabel}</Badge>
             <span className="text-xs text-muted-foreground">{kindLabel}</span>
