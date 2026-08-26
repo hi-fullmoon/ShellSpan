@@ -17,6 +17,7 @@ tauri-build = { version = "2.5.6", features = [] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 ssh2 = { version = "0.9.6", features = ["vendored-openssl"] }
+libssh2-sys = "0.3.2"
 tauri = { version = "2.11.5", features = ["tray-icon", "macos-private-api"] }
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 rfd = "0.17.2"
@@ -26,7 +27,10 @@ tauri-plugin-updater = "2.10.1"
 socket2 = "0.6.5"
 libc = "0.2.189"
 sha2 = "0.11"
+hmac = "0.12"
+sha1 = "0.10"
 base64 = "0.23"
+crossbeam-channel = "0.5"
 portable-pty = "0.9"
 trash = "5"
 rusqlite = { version = "0.40", features = ["bundled"] }

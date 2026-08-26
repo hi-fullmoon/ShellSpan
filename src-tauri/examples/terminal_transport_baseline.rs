@@ -1,10 +1,11 @@
+use crossbeam_channel::bounded;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use ssh2::Session;
 use std::env;
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,10 @@ const DEFAULT_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_REPETITIONS: usize = 5;
 const DEFAULT_SESSIONS: usize = 4;
 const EMIT_CHUNK_BYTES: usize = 8 * 1024;
+const LOCAL_OUTPUT_QUEUE_CAPACITY: usize = 32;
+const LOCAL_WORKER_POLL_INTERVAL: Duration = Duration::from_millis(16);
+const LATENCY_SAMPLES: usize = 41;
+const LOW_FREQUENCY_BURST_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Copy)]
 struct Config {
@@ -46,6 +51,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
     }
 
+    println!("latency_scenario\tmedian_ms\tp95_ms\tmax_ms\tsamples");
+    run_local_worker_latency_suite(
+        "local_worker_legacy_16ms_first_byte",
+        LocalWorkerWaitMode::LegacyPoll,
+        None,
+    )?;
+    run_local_worker_latency_suite(
+        "local_worker_event_first_byte",
+        LocalWorkerWaitMode::EventDriven,
+        None,
+    )?;
+    run_local_worker_latency_suite(
+        "local_worker_legacy_16ms_low_frequency_burst",
+        LocalWorkerWaitMode::LegacyPoll,
+        Some(LOW_FREQUENCY_BURST_INTERVAL),
+    )?;
+    run_local_worker_latency_suite(
+        "local_worker_event_low_frequency_burst",
+        LocalWorkerWaitMode::EventDriven,
+        Some(LOW_FREQUENCY_BURST_INTERVAL),
+    )?;
+
     if config.ssh {
         let ssh_config = Arc::new(SshConfig::from_env()?);
         run_suite("ssh_pty_single", config, 1, {
@@ -65,6 +92,180 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum LocalWorkerWaitMode {
+    LegacyPoll,
+    EventDriven,
+}
+
+fn run_local_worker_latency_suite(
+    name: &str,
+    mode: LocalWorkerWaitMode,
+    interval: Option<Duration>,
+) -> Result<(), Box<dyn Error>> {
+    let mut elapsed_ms = measure_local_worker_latency(mode, interval, LATENCY_SAMPLES)?;
+    elapsed_ms.sort_by(f64::total_cmp);
+    let median_ms = percentile(&elapsed_ms, 0.50);
+    let p95_ms = percentile(&elapsed_ms, 0.95);
+    let max_ms = elapsed_ms.last().copied().unwrap_or_default();
+    println!(
+        "{name}\t{median_ms:.3}\t{p95_ms:.3}\t{max_ms:.3}\t{}",
+        elapsed_ms.len()
+    );
+    Ok(())
+}
+
+fn measure_local_worker_latency(
+    mode: LocalWorkerWaitMode,
+    interval: Option<Duration>,
+    samples: usize,
+) -> Result<Vec<f64>, String> {
+    if interval.is_none() {
+        return (0..samples)
+            .map(|_| measure_local_worker_first_byte(mode))
+            .collect();
+    }
+
+    match mode {
+        LocalWorkerWaitMode::LegacyPoll => {
+            measure_legacy_poll_burst_latency(interval.unwrap(), samples)
+        }
+        LocalWorkerWaitMode::EventDriven => measure_event_burst_latency(interval.unwrap(), samples),
+    }
+}
+
+fn measure_legacy_poll_burst_latency(
+    interval: Duration,
+    samples: usize,
+) -> Result<Vec<f64>, String> {
+    let (output_tx, output_rx) = mpsc::channel::<Instant>();
+    let (ready_tx, ready_rx) = mpsc::channel::<()>();
+    let worker = thread::spawn(move || -> Result<Vec<f64>, String> {
+        let (command_tx, command_rx) = mpsc::channel::<()>();
+        let _keep_command_channel_open = command_tx;
+        let mut elapsed_ms = Vec::with_capacity(samples);
+        ready_tx
+            .send(())
+            .map_err(|_| "latency producer stopped before worker became ready".to_string())?;
+
+        while elapsed_ms.len() < samples {
+            let _ = command_rx.recv_timeout(LOCAL_WORKER_POLL_INTERVAL);
+            let arrived_at = output_rx.try_recv().ok();
+            if let Some(arrived_at) = arrived_at {
+                elapsed_ms.push(arrived_at.elapsed().as_secs_f64() * 1_000.0);
+            }
+        }
+        Ok(elapsed_ms)
+    });
+
+    ready_rx
+        .recv()
+        .map_err(|_| "latency worker stopped before becoming ready".to_string())?;
+    for index in 0..samples {
+        output_tx
+            .send(Instant::now())
+            .map_err(|_| "latency worker stopped before receiving output".to_string())?;
+        if index + 1 < samples {
+            thread::sleep(interval);
+        }
+    }
+
+    worker
+        .join()
+        .map_err(|_| "latency benchmark worker panicked".to_string())?
+}
+
+fn measure_event_burst_latency(interval: Duration, samples: usize) -> Result<Vec<f64>, String> {
+    let (output_tx, output_rx) = bounded::<Instant>(LOCAL_OUTPUT_QUEUE_CAPACITY);
+    let (ready_tx, ready_rx) = bounded::<()>(1);
+    let worker = thread::spawn(move || -> Result<Vec<f64>, String> {
+        let mut elapsed_ms = Vec::with_capacity(samples);
+        ready_tx
+            .send(())
+            .map_err(|_| "latency producer stopped before worker became ready".to_string())?;
+        while elapsed_ms.len() < samples {
+            let arrived_at = output_rx
+                .recv()
+                .map_err(|_| "latency producer stopped during event wait".to_string())?;
+            elapsed_ms.push(arrived_at.elapsed().as_secs_f64() * 1_000.0);
+        }
+        Ok(elapsed_ms)
+    });
+
+    ready_rx
+        .recv()
+        .map_err(|_| "latency worker stopped before becoming ready".to_string())?;
+    for index in 0..samples {
+        output_tx
+            .send(Instant::now())
+            .map_err(|_| "latency worker stopped before receiving output".to_string())?;
+        if index + 1 < samples {
+            thread::sleep(interval);
+        }
+    }
+    worker
+        .join()
+        .map_err(|_| "latency benchmark worker panicked".to_string())?
+}
+
+fn measure_local_worker_first_byte(mode: LocalWorkerWaitMode) -> Result<f64, String> {
+    match mode {
+        LocalWorkerWaitMode::LegacyPoll => measure_legacy_poll_first_byte(),
+        LocalWorkerWaitMode::EventDriven => measure_event_first_byte(),
+    }
+}
+
+fn measure_legacy_poll_first_byte() -> Result<f64, String> {
+    let (output_tx, output_rx) = mpsc::channel::<Instant>();
+    let (ready_tx, ready_rx) = mpsc::channel::<()>();
+    let worker = thread::spawn(move || -> Result<f64, String> {
+        let (command_tx, command_rx) = mpsc::channel::<()>();
+        let _keep_command_channel_open = command_tx;
+        ready_tx
+            .send(())
+            .map_err(|_| "first-byte producer stopped before worker became ready".to_string())?;
+        let _ = command_rx.recv_timeout(LOCAL_WORKER_POLL_INTERVAL);
+        let arrived_at = output_rx
+            .recv()
+            .map_err(|_| "first-byte producer stopped during legacy wait".to_string())?;
+        Ok(arrived_at.elapsed().as_secs_f64() * 1_000.0)
+    });
+
+    ready_rx
+        .recv()
+        .map_err(|_| "first-byte worker stopped before becoming ready".to_string())?;
+    output_tx
+        .send(Instant::now())
+        .map_err(|_| "first-byte worker stopped before receiving output".to_string())?;
+    worker
+        .join()
+        .map_err(|_| "first-byte benchmark worker panicked".to_string())?
+}
+
+fn measure_event_first_byte() -> Result<f64, String> {
+    let (output_tx, output_rx) = bounded::<Instant>(1);
+    let (ready_tx, ready_rx) = bounded::<()>(1);
+    let worker = thread::spawn(move || -> Result<f64, String> {
+        ready_tx
+            .send(())
+            .map_err(|_| "first-byte producer stopped before worker became ready".to_string())?;
+        let arrived_at = output_rx
+            .recv()
+            .map_err(|_| "first-byte producer stopped during event wait".to_string())?;
+        Ok(arrived_at.elapsed().as_secs_f64() * 1_000.0)
+    });
+
+    ready_rx
+        .recv()
+        .map_err(|_| "first-byte worker stopped before becoming ready".to_string())?;
+    output_tx
+        .send(Instant::now())
+        .map_err(|_| "first-byte worker stopped before receiving output".to_string())?;
+    worker
+        .join()
+        .map_err(|_| "first-byte benchmark worker panicked".to_string())?
 }
 
 fn parse_config(args: &[String]) -> Result<Config, Box<dyn Error>> {
