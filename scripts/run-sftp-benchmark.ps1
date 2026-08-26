@@ -11,6 +11,9 @@ param(
   [ValidateRange(1, [long]::MaxValue)]
   [long]$SmallFileBytes = 4096,
 
+  [ValidateRange(65536, 2097152)]
+  [int]$TransferBufferBytes = 65536,
+
   [switch]$DebugBuild
 )
 
@@ -30,6 +33,7 @@ try {
   $env:TERMBRIDGE_SFTP_BENCH_LARGE_BYTES = $LargeBytes.ToString()
   $env:TERMBRIDGE_SFTP_BENCH_SMALL_FILE_COUNT = $SmallFileCount.ToString()
   $env:TERMBRIDGE_SFTP_BENCH_SMALL_FILE_BYTES = $SmallFileBytes.ToString()
+  $env:TERMBRIDGE_SFTP_BENCH_TRANSFER_BUFFER_BYTES = $TransferBufferBytes.ToString()
 
   $cargoArguments = @('test')
   if (-not $DebugBuild) { $cargoArguments += '--release' }
