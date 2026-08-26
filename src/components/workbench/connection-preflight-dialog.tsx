@@ -31,7 +31,7 @@ interface ConnectionPreflightDialogProps {
   onClose: () => void;
   onCancel: () => void;
   onRetry: () => void;
-  onTrust: (host: string, port: number) => void;
+  onTrust: (host: string, port: number, fingerprint?: string) => void;
 }
 
 const STEP_LABELS = {
@@ -64,7 +64,7 @@ function PreflightStepRow({
   onTrust,
 }: {
   step: ConnectionPreflightStep;
-  onTrust: (host: string, port: number) => void;
+  onTrust: (host: string, port: number, fingerprint?: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const canTrust = step.trustable && step.host && step.port !== undefined;
@@ -95,7 +95,7 @@ function PreflightStepRow({
         <Button
           size="sm"
           variant="outline"
-          onClick={() => onTrust(step.host!, step.port!)}
+          onClick={() => onTrust(step.host!, step.port!, step.fingerprint)}
         >
           {t('connection.preflight.trust')}
         </Button>
