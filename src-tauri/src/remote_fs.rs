@@ -2833,11 +2833,7 @@ fn read_remote_file_inner(
         truncated = true;
     }
 
-    let decoded_text = if preview_extension_requires_binary(&file_name) {
-        None
-    } else {
-        decode_preview_text(&buffer, truncated)
-    };
+    let decoded_text = decode_file_preview_text(&file_name, &buffer, truncated);
     let (content, is_text, content_encoding) = match decoded_text {
         Some(text) => (text, true, "utf8".to_string()),
         None => (
@@ -2906,6 +2902,31 @@ pub(crate) fn decode_preview_text(buffer: &[u8], allow_incomplete_tail: bool) ->
     Some(text.to_string())
 }
 
+pub(crate) fn decode_file_preview_text(
+    file_name: &str,
+    buffer: &[u8],
+    truncated: bool,
+) -> Option<String> {
+    let extension = Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if extension == "doc" {
+        if truncated {
+            return None;
+        }
+        return rwml::extract_text(buffer)
+            .ok()
+            .filter(|text| !text.trim().is_empty());
+    }
+    if preview_extension_requires_binary(file_name) {
+        None
+    } else {
+        decode_preview_text(buffer, truncated)
+    }
+}
+
 pub(crate) fn preview_extension_requires_complete_file(file_name: &str) -> bool {
     let extension = Path::new(file_name)
         .extension()
@@ -2952,6 +2973,7 @@ pub(crate) fn preview_extension_requires_complete_file(file_name: &str) -> bool 
             | "ttf"
             | "otf"
             | "zip"
+            | "doc"
             | "docx"
             | "xlsx"
             | "pptx"
@@ -4934,7 +4956,21 @@ mod tests {
         assert!(preview_extension_requires_complete_file("diagram.svg"));
         assert!(preview_extension_requires_complete_file("manual.pdf"));
         assert!(!preview_extension_requires_complete_file("server.log"));
-        assert!(!preview_extension_requires_complete_file("backup.zip"));
+        assert!(preview_extension_requires_complete_file("backup.zip"));
+        assert!(preview_extension_requires_complete_file("legacy.doc"));
+        assert!(preview_extension_requires_complete_file("report.docx"));
+    }
+
+    #[test]
+    fn legacy_doc_preview_rejects_incomplete_or_invalid_compound_files() {
+        assert_eq!(
+            decode_file_preview_text("legacy.doc", b"not a compound file", false),
+            None
+        );
+        assert_eq!(
+            decode_file_preview_text("legacy.doc", b"partial", true),
+            None
+        );
     }
 
     #[test]
