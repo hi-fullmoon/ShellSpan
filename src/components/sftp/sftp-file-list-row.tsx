@@ -74,7 +74,7 @@ function getKindLabel(
   }
 }
 
-export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
+export const SftpFileListRow = React.memo(function SftpFileListRow({
   entry,
   side,
   presentationSide = side,
@@ -84,7 +84,7 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
   onSelect,
   onDoubleClick,
   onContextMenu,
-}) => {
+}: SftpFileListRowProps) {
   const { t } = useI18n();
   const { stem: nameStem, extension: nameExtension } = splitFileName(
     entry.name,
@@ -310,4 +310,4 @@ export const SftpFileListRow: React.FC<SftpFileListRowProps> = ({
       )}
     </div>
   );
-};
+});
