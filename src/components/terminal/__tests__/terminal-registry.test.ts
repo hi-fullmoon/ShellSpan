@@ -310,6 +310,35 @@ describe('terminalRegistry', () => {
     expect(controller.terminal.buffer.active.length).toBe(lenAfterWrite);
   });
 
+  it('refits, resizes, and redraws an attached terminal before focusing it', async () => {
+    const { invokeResizeSession } = await import('@/lib/tauri');
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+    vi.mocked(invokeResizeSession).mockClear();
+    const nextCols = controller.terminal.cols + 1;
+    const nextRows = controller.terminal.rows + 1;
+    const order: string[] = [];
+    vi.spyOn(controller.fitAddon, 'fit').mockImplementation(() => {
+      order.push('fit');
+      controller.terminal.resize(nextCols, nextRows);
+    });
+    vi.spyOn(controller.terminal, 'refresh').mockImplementation(() => {
+      order.push('refresh');
+    });
+    vi.spyOn(controller.terminal, 'focus').mockImplementation(() => {
+      order.push('focus');
+    });
+
+    controller.focus();
+
+    expect(order).toEqual(['fit', 'refresh', 'focus']);
+    expect(invokeResizeSession).toHaveBeenCalledWith('s1', nextCols, nextRows);
+    expect(controller.terminal.refresh).toHaveBeenCalledWith(
+      0,
+      controller.terminal.rows - 1,
+    );
+  });
+
   it('rebinds a reconnected session without replacing its terminal or buffer', async () => {
     const { invokeWriteSession, listenToSshData } = await import('@/lib/tauri');
     const controller = createController('s1');
