@@ -44,11 +44,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     println!("scenario\tmedian_ms\tp95_ms\tmedian_mib_per_s\trepetitions");
 
-    run_suite("local_pty_single", config, 1, |bytes| run_local_pty(bytes))?;
+    run_suite("local_pty_single", config, 1, run_local_pty)?;
     if config.sessions > 1 {
-        run_suite("local_pty_multi", config, config.sessions, |bytes| {
-            run_local_pty(bytes)
-        })?;
+        run_suite("local_pty_multi", config, config.sessions, run_local_pty)?;
     }
 
     println!("latency_scenario\tmedian_ms\tp95_ms\tmax_ms\tsamples");
