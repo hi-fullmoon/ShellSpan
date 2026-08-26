@@ -1,2 +1,4 @@
 allowBuilds:
   react-intl-universal: true
+patchedDependencies:
+  sonner@2.0.8: patches/sonner@2.0.8.patch
