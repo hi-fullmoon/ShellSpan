@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertDialog,
@@ -60,7 +60,13 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const togglePin = useSftpStore((state) => state.togglePin);
   const addConnection = useSftpStore((state) => state.addConnection);
   const getProfile = useProfileStore((state) => state.getProfile);
-  const transferOperations = useTransferStore((state) => state.operations);
+  const pathOccupancyRevision = useTransferStore(
+    (state) => state.pathOccupancyRevision,
+  );
+  const transferOperations = useMemo(
+    () => useTransferStore.getState().operations,
+    [pathOccupancyRevision],
+  );
   const [renameTarget, setRenameTarget] = useState<SftpConnection | null>(null);
   const [confirmationTarget, setConfirmationTarget] = useState<SftpConnection | null>(null);
   const [closeConfirm, setCloseConfirm] = useState(false);

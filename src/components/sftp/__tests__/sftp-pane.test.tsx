@@ -2,7 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { SftpPane } from '../sftp-pane';
-import { useSftpStore } from '@/stores/sftpStore';
+import { getSftpPaneConnectionKey, useSftpStore } from '@/stores/sftpStore';
+import { useTransferStore } from '@/stores/transferStore';
 import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import { useAppStore } from '@/stores/appStore';
 import { invokeListLocalDirectory, invokeListRemoteDirectory } from '@/lib/tauri';
@@ -16,15 +17,18 @@ vi.mock('@/hooks/useI18n', () => ({
 
 const fileListRenderProps = vi.hoisted(() => ({
   selectedPathsHistory: [] as unknown[],
+  contextMenuHistory: [] as unknown[],
 }));
 
 vi.mock('../sftp-file-list', () => ({
   SftpFileList: (props: {
     entries: Array<{ path: string; name: string; kind: string }>;
-    selectedPaths?: string[];
+    selectedPaths?: ReadonlySet<string>;
     onDoubleClick?: (entry: { path: string; name: string; kind: string }) => void;
+    onContextMenu?: unknown;
   }) => {
     fileListRenderProps.selectedPathsHistory.push(props.selectedPaths);
+    fileListRenderProps.contextMenuHistory.push(props.onContextMenu);
     return (
       <div data-testid="mock-file-list">
         {props.entries.map((entry) => (
@@ -50,6 +54,7 @@ vi.mock('@/lib/tauri', () => ({
     path: '/remote',
     entries: [],
   }),
+  invokeSupersedeRemoteDirectoryRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
 const initialState = useSftpStore.getState();
@@ -102,7 +107,9 @@ describe('SftpPane', () => {
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
     useAppStore.setState({ sftpShowHiddenFiles: true });
+    useTransferStore.setState({ operations: [] });
     fileListRenderProps.selectedPathsHistory.length = 0;
+    fileListRenderProps.contextMenuHistory.length = 0;
   });
 
   const createConnection = (): ReturnType<typeof useSftpStore.getState>['connections'][number] => {
@@ -362,6 +369,55 @@ describe('SftpPane', () => {
     expect(actions.onToggleBatchMode).toHaveBeenCalledTimes(1);
   });
 
+  it('does not rerender for progress-only updates while selection stays busy', () => {
+    const connection = createConnection();
+    const entry = {
+      path: '/remote/archive.zip',
+      name: 'archive.zip',
+      kind: 'file' as const,
+      size: 100,
+    };
+    connection.remoteEntries = [entry];
+    connection.remotePane.batchMode = true;
+    useTransferStore.getState().addOperation({
+      operationId: 'download-1',
+      kind: 'download',
+      connectionId: getSftpPaneConnectionKey(connection, 'remote'),
+      paths: [entry.path],
+      currentPath: entry.path,
+      totalBytes: 100,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        actions={createMockActions()}
+        selectedPaths={new Set([entry.path])}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('common.delete').closest('button')).toBeDisabled();
+    const renderCount = fileListRenderProps.selectedPathsHistory.length;
+
+    act(() => {
+      useTransferStore.getState().updateDownload({
+        operationId: 'download-1',
+        currentPath: entry.path,
+        totalBytes: 100,
+        downloadedBytes: 50,
+        totalSteps: 1,
+        completedSteps: 0,
+      });
+    });
+
+    expect(fileListRenderProps.selectedPathsHistory).toHaveLength(renderCount);
+  });
+
   it('exits batch selection mode with Escape', () => {
     const connection = createConnection();
     connection.localPane.batchMode = true;
@@ -477,7 +533,7 @@ describe('SftpPane', () => {
     expect(input.tabIndex).toBe(-1);
   });
 
-  it('passes a referentially stable selectedPaths array to the file list', () => {
+  it('passes the selectedPaths Set through to the file list without conversion', () => {
     const connection = createConnection();
     const selected = new Set(['/home/a.txt']);
     const { rerender } = render(
@@ -503,6 +559,41 @@ describe('SftpPane', () => {
     const history = fileListRenderProps.selectedPathsHistory;
     expect(history.length).toBeGreaterThan(1);
     history.forEach((entry) => expect(entry).toBe(history[0]));
+    expect(history[0]).toBe(selected);
+  });
+
+  it('keeps the row context-menu handler stable across selection changes', () => {
+    const connection = createConnection();
+    const actions = createMockActions();
+    const onSelectedPathsChange = vi.fn();
+    const { rerender } = render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={actions}
+        selectedPaths={new Set(['/home/a.txt'])}
+        onSelectedPathsChange={onSelectedPathsChange}
+      />,
+    );
+    const firstHandler = fileListRenderProps.contextMenuHistory[
+      fileListRenderProps.contextMenuHistory.length - 1
+    ];
+
+    rerender(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={actions}
+        selectedPaths={new Set(['/home/b.txt'])}
+        onSelectedPathsChange={onSelectedPathsChange}
+      />,
+    );
+
+    expect(
+      fileListRenderProps.contextMenuHistory[
+        fileListRenderProps.contextMenuHistory.length - 1
+      ],
+    ).toBe(firstHandler);
   });
 
   it('syncs the initial history entry and navigates back and forward exactly once', async () => {
@@ -549,11 +640,15 @@ describe('SftpPane', () => {
     fireEvent.click(backButton);
     // Back lands on the real first path — not '' — and StrictMode does not
     // fire the navigation twice.
-    expect(invokeListLocalDirectory).toHaveBeenCalledTimes(1);
-    expect(invokeListLocalDirectory).toHaveBeenCalledWith('/home');
+    await waitFor(() => {
+      expect(invokeListLocalDirectory).toHaveBeenCalledTimes(1);
+      expect(invokeListLocalDirectory).toHaveBeenCalledWith('/home');
+    });
 
     fireEvent.click(forwardButton);
-    expect(invokeListLocalDirectory).toHaveBeenCalledTimes(2);
-    expect(invokeListLocalDirectory).toHaveBeenLastCalledWith('/home/docs');
+    await waitFor(() => {
+      expect(invokeListLocalDirectory).toHaveBeenCalledTimes(2);
+      expect(invokeListLocalDirectory).toHaveBeenLastCalledWith('/home/docs');
+    });
   });
 });

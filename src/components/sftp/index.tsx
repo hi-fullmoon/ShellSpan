@@ -270,6 +270,18 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     () => new Set(connection.localPane.selectedPaths),
     [connection.localPane.selectedPaths],
   );
+  const handleLocalSelectedPathsChange = useCallback(
+    (paths: Set<string>): void => {
+      setPaneState(connection.id, 'local', { selectedPaths: Array.from(paths) });
+    },
+    [connection.id, setPaneState],
+  );
+  const handleRemoteSelectedPathsChange = useCallback(
+    (paths: Set<string>): void => {
+      setPaneState(connection.id, 'remote', { selectedPaths: Array.from(paths) });
+    },
+    [connection.id, setPaneState],
+  );
 
   const uploadQueueRef = useRef<UploadQueue | null>(null);
   // FIFO chain of upload batches: a drag/drop that arrives while another batch
@@ -812,9 +824,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 side="local"
                 actions={localActions}
                 selectedPaths={selectedLocalPaths}
-                onSelectedPathsChange={(paths) =>
-                  setPaneState(connection.id, 'local', { selectedPaths: Array.from(paths) })
-                }
+                onSelectedPathsChange={handleLocalSelectedPathsChange}
                 systemDropActive={systemDragActive}
                 systemDropHovered={systemHoveredSide === 'local'}
                 localMode={leftIsLocal}
@@ -867,9 +877,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 side="remote"
                 actions={remoteActions}
                 selectedPaths={selectedRemotePaths}
-                onSelectedPathsChange={(paths) =>
-                  setPaneState(connection.id, 'remote', { selectedPaths: Array.from(paths) })
-                }
+                onSelectedPathsChange={handleRemoteSelectedPathsChange}
                 onVerifyHostKey={() => {
                   const request = getSftpPaneConnection(connection, 'remote');
                   void verifyHostKey(
