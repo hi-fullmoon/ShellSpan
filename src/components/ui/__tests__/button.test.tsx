@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DownloadIcon } from 'lucide-react';
 import { Button } from '../button';
+import { Spinner } from '../empty-state';
 
 describe('Button', () => {
   it('renders children', () => {
@@ -28,5 +29,17 @@ describe('Button', () => {
     const button = screen.getByRole('button', { name: 'Export' });
     expect(button).toHaveClass('leading-none');
     expect(button.className).toContain('[&_svg]:size-3.5');
+  });
+
+  it('lets loading indicators inherit the button foreground color', () => {
+    const { container } = render(
+      <Button disabled>
+        <Spinner data-icon="inline-start" />
+        Loading
+      </Button>,
+    );
+
+    const spinner = container.querySelector('svg.animate-spin');
+    expect(spinner).not.toHaveClass('text-muted-foreground');
   });
 });

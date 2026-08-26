@@ -1,14 +1,12 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIcon,
   CircleAlertIcon,
-  Clock3Icon,
   CpuIcon,
   HardDriveIcon,
   Layers3Icon,
   MemoryStickIcon,
   NetworkIcon,
-  PauseIcon,
   ServerIcon,
   TerminalIcon,
 } from 'lucide-react';
@@ -32,10 +30,15 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { PanelEmptyState, PanelLoadingState, Spinner } from '@/components/ui/empty-state';
-import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
+import {
+  EmptyState,
+  PanelEmptyState,
+  PanelLoadingState,
+  Spinner,
+} from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendArea } from '@/components/ui/trend-area';
 import { RemoteHealthSection } from './remote-health-section';
@@ -53,11 +56,15 @@ const DISCONNECT_REASON_KEY: Record<ClosedReasonKind, LocaleKey> = {
   error: 'workbench.monitor.reason.error',
 };
 
-const CONNECTION_GRID_BREAKPOINTS = [{ minWidth: 760, columns: 2 }] as const;
-
-const STATUS_GRID_BREAKPOINTS = [{ minWidth: 480, columns: 4 }] as const;
-
 type Tone = HealthStatus | 'connecting' | 'muted';
+type MonitorView = 'local' | 'remote';
+
+interface SftpRemotePane {
+  id: string;
+  title: string;
+  path: string;
+  error?: string;
+}
 
 function toneDotClass(tone: Tone): string {
   switch (tone) {
@@ -129,56 +136,6 @@ const HealthBadge: React.FC<{ status: HealthStatus }> = ({ status }) => {
   );
 };
 
-const SectionHeading: React.FC<{ id: string; title: string; description?: string }> = ({
-  id,
-  title,
-  description,
-}) => (
-  <div className="flex flex-col gap-0.5">
-    <h2 id={id} className="text-sm font-medium text-foreground">
-      {title}
-    </h2>
-    {description && <p className="text-xs text-muted-foreground">{description}</p>}
-  </div>
-);
-
-const OverviewMetric: React.FC<{
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  detail: string;
-  tone?: Tone;
-  data?: number[];
-  chartTone?: 'primary' | 'warning';
-}> = ({ icon: Icon, label, value, detail, tone = 'muted', data, chartTone = 'primary' }) => (
-  <div className="flex min-w-0 items-start gap-3">
-    <div className={cn(
-      'flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted',
-      toneTextClass(tone),
-    )}>
-      <Icon aria-hidden />
-    </div>
-    <div className="flex min-w-0 flex-1 flex-col gap-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="font-mono text-xl font-semibold tracking-tight text-foreground tabular-nums">
-        {value}
-      </span>
-      <span className="truncate text-xs text-muted-foreground" title={detail}>{detail}</span>
-      {data && (
-        <TrendArea
-          data={data}
-          height={28}
-          className={cn(
-            'mt-1',
-            chartTone === 'warning' ? 'text-app-warning' : 'text-app-primary',
-          )}
-          aria-label={label}
-        />
-      )}
-    </div>
-  </div>
-);
-
 const UsageBar: React.FC<{ percent: number; tone?: Tone }> = ({ percent, tone = 'ok' }) => {
   const clamped = Math.min(100, Math.max(0, Number.isFinite(percent) ? percent : 0));
   return (
@@ -205,23 +162,32 @@ const ProcessTrend: React.FC<{
   data: number[];
   tone?: 'primary' | 'warning';
 }> = ({ icon: Icon, label, value, detail, data, tone = 'primary' }) => (
-  <div className="flex min-h-36 min-w-0 flex-col gap-2 rounded-lg bg-muted/50 p-3">
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+  <div className="flex min-h-40 min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3">
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
         <Icon aria-hidden />
         <span className="truncate">{label}</span>
       </div>
-      <span className="font-mono text-lg font-semibold tracking-tight text-foreground tabular-nums">
+      <span className="font-mono text-xl font-semibold tracking-tight text-foreground tabular-nums">
         {value}
       </span>
     </div>
     <span className="truncate text-xs text-muted-foreground" title={detail}>{detail}</span>
     <TrendArea
       data={data}
-      height={48}
+      height={56}
       className={cn('mt-auto', tone === 'warning' ? 'text-app-warning' : 'text-app-primary')}
       aria-label={label}
     />
+  </div>
+);
+
+const RuntimeStat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="flex min-w-0 flex-col gap-1">
+    <dt className="text-[11px] text-muted-foreground">{label}</dt>
+    <dd className="truncate font-mono text-sm font-semibold text-foreground tabular-nums" title={value}>
+      {value}
+    </dd>
   </div>
 );
 
@@ -233,10 +199,10 @@ const ResourceRow: React.FC<{
   tone?: Tone;
   hint?: string;
 }> = ({ icon: Icon, label, value, percent, tone = 'ok', hint }) => (
-  <div className="flex flex-col gap-2 py-2.5">
+  <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3">
     <div className="flex min-w-0 items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
-        <Icon className="text-muted-foreground" aria-hidden />
+        <Icon aria-hidden />
         <span className="truncate">{label}</span>
       </div>
       <span className={cn('font-mono text-sm font-semibold tabular-nums', toneTextClass(tone))}>
@@ -303,8 +269,58 @@ const DisconnectRow: React.FC<{ event: DisconnectEvent }> = ({ event }) => {
   );
 };
 
+const DisconnectList: React.FC<{ events: DisconnectEvent[] }> = ({ events }) => {
+  const rows = events.map((event, index) => (
+    <React.Fragment key={`${event.sessionId}-${event.at}`}>
+      {index > 0 && <Separator />}
+      <DisconnectRow event={event} />
+    </React.Fragment>
+  ));
+
+  return events.length > 3 ? (
+    <ScrollArea className="h-40 rounded-lg border border-border/70 px-3">
+      {rows}
+    </ScrollArea>
+  ) : (
+    <div className="rounded-lg border border-border/70 px-3">{rows}</div>
+  );
+};
+
+const SftpPaneList: React.FC<{ panes: SftpRemotePane[] }> = ({ panes }) => {
+  const { t } = useI18n();
+  const rows = panes.map((pane, index) => {
+    const hasError = Boolean(pane.error);
+    return (
+      <React.Fragment key={pane.id}>
+        {index > 0 && <Separator />}
+        <div className="flex items-center gap-3 py-2.5">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <ServerIcon aria-hidden />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-mono text-xs text-foreground">{pane.title}</div>
+            <div className="truncate font-mono text-[11px] text-muted-foreground">{pane.path}</div>
+          </div>
+          <Badge variant={hasError ? 'destructive' : 'outline'}>
+            {hasError ? t('workbench.monitor.sftpError') : t('workbench.monitor.sftpOk')}
+          </Badge>
+        </div>
+      </React.Fragment>
+    );
+  });
+
+  return panes.length > 3 ? (
+    <ScrollArea className="h-44 rounded-lg border border-border/70 px-3">
+      {rows}
+    </ScrollArea>
+  ) : (
+    <div className="rounded-lg border border-border/70 px-3">{rows}</div>
+  );
+};
+
 export const MonitorPanel: React.FC = () => {
   const { t } = useI18n();
+  const [view, setView] = useState<MonitorView>('local');
   const {
     snapshot,
     history,
@@ -345,7 +361,7 @@ export const MonitorPanel: React.FC = () => {
   const sftpRemotePanes = useMemo(
     () =>
       sftpConnections.flatMap((connection) => {
-        const panes: Array<{ id: string; title: string; path: string; error?: string }> = [];
+        const panes: SftpRemotePane[] = [];
         if (getSftpPaneSource(connection, 'local') === 'remote') {
           panes.push({
             id: `${connection.id}-left`,
@@ -373,8 +389,35 @@ export const MonitorPanel: React.FC = () => {
   );
   const sftpActiveCount = sftpRemotePanes.length - sftpErrorCount;
   const recentDisconnects = useMemo(() => [...disconnectEvents].reverse(), [disconnectEvents]);
-  const activeConnectionCount = sessionCounts.connected + sftpActiveCount;
   const connectionIssueCount = sessionCounts.disconnected + sessionCounts.error + sftpErrorCount;
+  const headerDescription = view === 'remote'
+    ? undefined
+    : lastUpdatedAt !== undefined ? (
+        <>
+          {t('workbench.monitor.updatedAt')}{' '}
+          <span className="font-mono tabular-nums">{formatClockTime(lastUpdatedAt)}</span>
+        </>
+      ) : t('workbench.monitor.noDataDescription');
+  const headerActions = view === 'local' ? (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setPaused(!paused)}
+      >
+        {t(paused ? 'workbench.monitor.resume' : 'workbench.monitor.pause')}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => void refresh()}
+        disabled={paused}
+      >
+        {loading && <Spinner data-icon="inline-start" />}
+        {t('common.refresh')}
+      </Button>
+    </>
+  ) : undefined;
 
   return (
     <TooltipProvider>
@@ -382,265 +425,207 @@ export const MonitorPanel: React.FC = () => {
         <WorkbenchPageHeader
           icon={ActivityIcon}
           title={t('workbench.monitor.title')}
-          titleMeta={(
-            <>
-              <Badge variant="outline">{t('workbench.monitor.local')}</Badge>
-              <HealthBadge status={status} />
-            </>
-          )}
-          description={lastUpdatedAt !== undefined ? (
-            <>
-              {t('workbench.monitor.updatedAt')}{' '}
-              <span className="font-mono tabular-nums">{formatClockTime(lastUpdatedAt)}</span>
-            </>
-          ) : t('workbench.monitor.noDataDescription')}
-          actions={(
-            <>
-              {paused && (
-                <Badge variant="secondary">
-                  <PauseIcon data-icon="inline-start" />
-                  {t('workbench.monitor.paused')}
-                </Badge>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPaused(!paused)}
-              >
-                {t(paused ? 'workbench.monitor.resume' : 'workbench.monitor.pause')}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void refresh()}
-                disabled={paused}
-              >
-                {loading && <Spinner data-icon="inline-start" />}
-                {t('common.refresh')}
-              </Button>
-            </>
-          )}
+          description={headerDescription}
+          actions={headerActions}
         />
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkbenchPageContent className="gap-5">
-            {snapshot && (
-              <Card aria-labelledby="monitor-overview-heading">
-                <CardHeader>
-                  <CardTitle id="monitor-overview-heading">
-                    {t('workbench.monitor.overviewTitle')}
-                  </CardTitle>
-                  <CardDescription>{t('workbench.monitor.overviewDescription')}</CardDescription>
-                  <CardAction><HealthBadge status={status} /></CardAction>
-                </CardHeader>
-                <CardContent className="grid gap-5 @min-[38rem]:grid-cols-2 @min-[72rem]:grid-cols-4">
-                  <OverviewMetric
-                    icon={ActivityIcon}
-                    label={t('workbench.monitor.overallHealth')}
-                    value={t(`workbench.monitor.status.${status}`)}
-                    detail={t('workbench.monitor.local')}
-                    tone={status}
-                  />
-                  <OverviewMetric
-                    icon={CpuIcon}
-                    label={t('workbench.monitor.appActivity')}
-                    value={`${snapshot.app.cpuPercent.toFixed(1)}%`}
-                    detail={t('workbench.monitor.cpu')}
-                    tone="connecting"
-                    data={cpuHistory}
-                    chartTone="warning"
-                  />
-                  <OverviewMetric
-                    icon={MemoryStickIcon}
-                    label={t('workbench.monitor.memoryPressure')}
-                    value={`${snapshot.system.memoryUsagePercent.toFixed(1)}%`}
-                    detail={`${formatBytes(snapshot.system.usedMemoryBytes)} / ${formatBytes(snapshot.system.totalMemoryBytes)}`}
-                    tone={usageTone(snapshot.system.memoryUsagePercent)}
-                  />
-                  <OverviewMetric
-                    icon={NetworkIcon}
-                    label={t('workbench.monitor.activeConnections')}
-                    value={String(activeConnectionCount)}
-                    detail={t('workbench.monitor.connectionBreakdown', {
-                      terminal: sessionCounts.connected,
-                      sftp: sftpActiveCount,
-                      issues: connectionIssueCount,
-                    })}
-                    tone={connectionIssueCount > 0 ? 'warning' : 'ok'}
-                  />
-                </CardContent>
-              </Card>
-            )}
+          <WorkbenchPageContent>
+            <Tabs
+              value={view}
+              onValueChange={(value) => setView(value === 'remote' ? 'remote' : 'local')}
+              className="gap-4"
+            >
+              <TabsList aria-label={t('workbench.monitor.title')}>
+                <TabsTrigger value="local">
+                  <ActivityIcon data-icon="inline-start" />
+                  {t('workbench.monitor.local')}
+                </TabsTrigger>
+                <TabsTrigger value="remote">
+                  <ServerIcon data-icon="inline-start" />
+                  {t('workbench.monitor.remote')}
+                </TabsTrigger>
+              </TabsList>
 
-            <RemoteHealthSection />
-            <Separator />
-            <section aria-labelledby="local-monitor-heading" className="flex flex-col gap-4">
-              <SectionHeading
-                id="local-monitor-heading"
-                title={t('workbench.monitor.localTitle')}
-                description={t('workbench.monitor.localDescription')}
-              />
-              {error && !snapshot && (
-                <Alert variant="destructive">
-                  <CircleAlertIcon />
-                  <AlertTitle>{t('workbench.monitor.loadFailed')}</AlertTitle>
-                  <AlertDescription>
-                    <p>{t('common.loadFailedDescription')}</p>
-                    <details className="mt-1">
-                      <summary className="cursor-pointer text-xs">{t('common.errorDetails')}</summary>
-                      <code className="mt-1 block break-all text-xs">{error}</code>
-                    </details>
-                  </AlertDescription>
-                </Alert>
-              )}
+              <TabsContent value="local" className="flex flex-col gap-4">
+                <section aria-labelledby="local-monitor-heading" className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-0.5">
+                    <h2 id="local-monitor-heading" className="text-sm font-medium text-foreground">
+                      {t('workbench.monitor.localTitle')}
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      {t('workbench.monitor.localDescription')}
+                    </p>
+                  </div>
+                </section>
 
-              {loading && !snapshot && <PanelLoadingState />}
+                <section aria-labelledby="monitor-overview-heading" className="flex flex-col gap-3">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <h2 id="monitor-overview-heading" className="text-sm font-medium text-foreground">
+                        {t('workbench.monitor.overviewTitle')}
+                      </h2>
+                      <p className="text-xs text-muted-foreground">
+                        {t('workbench.monitor.overviewDescription')}
+                      </p>
+                    </div>
+                    {snapshot && <HealthBadge status={status} />}
+                  </div>
 
-              {!snapshot && !loading && !error && (
-                <PanelEmptyState
-                  icon={<ActivityIcon />}
-                  title={t('workbench.monitor.noData')}
-                  description={t('workbench.monitor.noDataDescription')}
-                />
-              )}
+                  {error && !snapshot && (
+                    <Alert variant="destructive">
+                      <CircleAlertIcon />
+                      <AlertTitle>{t('workbench.monitor.loadFailed')}</AlertTitle>
+                      <AlertDescription>
+                        <p>{t('common.loadFailedDescription')}</p>
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-xs">
+                            {t('common.errorDetails')}
+                          </summary>
+                          <code className="mt-1 block break-all text-xs">{error}</code>
+                        </details>
+                      </AlertDescription>
+                    </Alert>
+                  )}
 
-            {snapshot && (
-              <>
-                <div className="grid items-stretch gap-3 @min-[64rem]:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
-                  <Card aria-labelledby="monitor-process-heading" className="h-full">
-                    <CardHeader>
-                      <CardTitle id="monitor-process-heading">
-                        {t('workbench.monitor.appProcess')}
-                      </CardTitle>
-                      <CardDescription>
-                        {t('workbench.monitor.appProcessDescription')}
-                      </CardDescription>
-                      <CardAction>
-                        <Badge variant="outline">
-                          PID {snapshot.app.pid}
-                        </Badge>
-                      </CardAction>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-3">
-                      <div className="grid gap-3 @min-[34rem]:grid-cols-2">
-                        <ProcessTrend
-                          icon={MemoryStickIcon}
-                          label={t('workbench.monitor.rss')}
-                          value={formatBytes(snapshot.app.rssBytes)}
-                          detail={`${t('workbench.monitor.vsz')} ${formatBytes(snapshot.app.vszBytes)}`}
-                          data={rssHistory}
-                        />
-                        <ProcessTrend
-                          icon={CpuIcon}
-                          label={t('workbench.monitor.cpu')}
-                          value={`${snapshot.app.cpuPercent.toFixed(1)}%`}
-                          detail={t('workbench.monitor.cpuTrend')}
-                          data={cpuHistory}
-                          tone="warning"
-                        />
-                      </div>
-                      <Separator />
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="flex min-w-0 flex-col gap-0.5">
-                          <span className="text-xs text-muted-foreground">
-                            {t('workbench.monitor.threads')}
-                          </span>
-                          <span className="font-mono text-sm font-semibold text-foreground tabular-nums">
-                            {snapshot.app.threads != null ? String(snapshot.app.threads) : '—'}
-                          </span>
-                        </div>
-                        <div className="flex min-w-0 flex-col gap-0.5">
-                          <span className="text-xs text-muted-foreground">
-                            {t('workbench.monitor.uptime')}
-                          </span>
-                          <span className="font-mono text-sm font-semibold text-foreground tabular-nums">
-                            {formatUptime(snapshot.app.uptimeSecs)}
-                          </span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {loading && !snapshot && <PanelLoadingState className="min-h-60" />}
 
-                  <Card aria-labelledby="monitor-system-heading" className="h-full">
-                    <CardHeader>
-                      <CardTitle id="monitor-system-heading">
-                        {t('workbench.monitor.system')}
-                      </CardTitle>
-                      <CardDescription>{t('workbench.monitor.systemDescription')}</CardDescription>
-                      <CardAction>
-                        <Badge variant="outline">
-                          {snapshot.appInfo.platform} / {snapshot.appInfo.arch}
-                        </Badge>
-                      </CardAction>
-                    </CardHeader>
-                    <CardContent className="flex flex-col">
-                      <ResourceRow
-                        icon={MemoryStickIcon}
-                        label={t('workbench.monitor.memory')}
-                        value={`${formatBytes(snapshot.system.usedMemoryBytes)} / ${formatBytes(snapshot.system.totalMemoryBytes)}`}
-                        percent={snapshot.system.memoryUsagePercent}
-                        tone={usageTone(snapshot.system.memoryUsagePercent)}
-                      />
-                      <Separator />
-                      <ResourceRow
-                        icon={Layers3Icon}
-                        label={t('workbench.monitor.swap')}
-                        value={`${formatBytes(snapshot.system.usedSwapBytes)} / ${formatBytes(snapshot.system.totalSwapBytes)}`}
-                        percent={usageRatio(
-                          snapshot.system.usedSwapBytes,
-                          snapshot.system.totalSwapBytes,
-                        )}
-                        tone={usageTone(usageRatio(
-                          snapshot.system.usedSwapBytes,
-                          snapshot.system.totalSwapBytes,
-                        ))}
-                      />
-                      <Separator />
-                      <ResourceRow
-                        icon={CpuIcon}
-                        label={t('workbench.monitor.cpu')}
-                        value={`${snapshot.system.cpuPercent.toFixed(1)}%`}
-                        percent={snapshot.system.cpuPercent}
-                        tone={usageTone(snapshot.system.cpuPercent)}
-                      />
-                      <Separator />
-                      <ResourceRow
-                        icon={HardDriveIcon}
-                        label={t('workbench.monitor.disk')}
-                        value={`${formatBytes(snapshot.disk.usedBytes)} / ${formatBytes(snapshot.disk.totalBytes)}`}
-                        percent={snapshot.disk.usagePercent}
-                        tone={usageTone(snapshot.disk.usagePercent)}
-                        hint={formatDiskHint(snapshot.disk, snapshot.appInfo.platform)}
-                      />
-                    </CardContent>
-                  </Card>
-                </div>
+                  {!snapshot && !loading && !error && (
+                    <PanelEmptyState
+                      className="min-h-60"
+                      icon={<ActivityIcon />}
+                      title={t('workbench.monitor.noData')}
+                      description={t('workbench.monitor.noDataDescription')}
+                    />
+                  )}
 
-                <section aria-labelledby="monitor-connections-heading" className="flex flex-col gap-2.5">
-                  <SectionHeading
-                    id="monitor-connections-heading"
-                    title={t('workbench.monitor.connectionHealth')}
-                  />
-                  <ResponsiveCardGrid
-                    columns={1}
-                    breakpoints={CONNECTION_GRID_BREAKPOINTS}
-                    gap="0.625rem"
-                    gridClassName="items-stretch"
-                  >
-                    <Card className="h-full">
+                  {snapshot && (
+                    <div className="grid items-stretch gap-3 @min-[68rem]:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+                      <Card aria-labelledby="monitor-process-heading" className="h-full">
+                        <CardHeader>
+                          <CardTitle id="monitor-process-heading">
+                            {t('workbench.monitor.appProcess')}
+                          </CardTitle>
+                          <CardDescription>{t('workbench.monitor.appProcessDescription')}</CardDescription>
+                          <CardAction>
+                            <Badge variant="outline">PID {snapshot.app.pid}</Badge>
+                          </CardAction>
+                        </CardHeader>
+                        <CardContent className="flex flex-col gap-3">
+                          <div className="grid gap-3 @min-[38rem]:grid-cols-2">
+                            <ProcessTrend
+                              icon={MemoryStickIcon}
+                              label={t('workbench.monitor.rss')}
+                              value={formatBytes(snapshot.app.rssBytes)}
+                              detail={t('workbench.monitor.memoryTrend')}
+                              data={rssHistory}
+                            />
+                            <ProcessTrend
+                              icon={CpuIcon}
+                              label={t('workbench.monitor.cpu')}
+                              value={`${snapshot.app.cpuPercent.toFixed(1)}%`}
+                              detail={t('workbench.monitor.cpuTrend')}
+                              data={cpuHistory}
+                              tone="warning"
+                            />
+                          </div>
+                          <dl className="grid grid-cols-2 gap-4 rounded-lg bg-muted/35 p-3 @min-[38rem]:grid-cols-3">
+                            <RuntimeStat
+                              label={t('workbench.monitor.vsz')}
+                              value={formatBytes(snapshot.app.vszBytes)}
+                            />
+                            <RuntimeStat
+                              label={t('workbench.monitor.threads')}
+                              value={snapshot.app.threads != null ? String(snapshot.app.threads) : '—'}
+                            />
+                            <RuntimeStat
+                              label={t('workbench.monitor.uptime')}
+                              value={formatUptime(snapshot.app.uptimeSecs)}
+                            />
+                          </dl>
+                        </CardContent>
+                      </Card>
+
+                      <Card aria-labelledby="monitor-system-heading" className="h-full">
+                        <CardHeader>
+                          <CardTitle id="monitor-system-heading">
+                            {t('workbench.monitor.system')}
+                          </CardTitle>
+                          <CardDescription>{t('workbench.monitor.systemDescription')}</CardDescription>
+                          <CardAction>
+                            <Badge variant="outline">
+                              {snapshot.appInfo.platform} / {snapshot.appInfo.arch}
+                            </Badge>
+                          </CardAction>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid gap-3 @min-[42rem]:grid-cols-2">
+                            <ResourceRow
+                              icon={MemoryStickIcon}
+                              label={t('workbench.monitor.memory')}
+                              value={`${formatBytes(snapshot.system.usedMemoryBytes)} / ${formatBytes(snapshot.system.totalMemoryBytes)}`}
+                              percent={snapshot.system.memoryUsagePercent}
+                              tone={usageTone(snapshot.system.memoryUsagePercent)}
+                            />
+                            <ResourceRow
+                              icon={CpuIcon}
+                              label={t('workbench.monitor.cpu')}
+                              value={`${snapshot.system.cpuPercent.toFixed(1)}%`}
+                              percent={snapshot.system.cpuPercent}
+                              tone={usageTone(snapshot.system.cpuPercent)}
+                            />
+                            <ResourceRow
+                              icon={Layers3Icon}
+                              label={t('workbench.monitor.swap')}
+                              value={`${formatBytes(snapshot.system.usedSwapBytes)} / ${formatBytes(snapshot.system.totalSwapBytes)}`}
+                              percent={usageRatio(
+                                snapshot.system.usedSwapBytes,
+                                snapshot.system.totalSwapBytes,
+                              )}
+                              tone={usageTone(usageRatio(
+                                snapshot.system.usedSwapBytes,
+                                snapshot.system.totalSwapBytes,
+                              ))}
+                            />
+                            <ResourceRow
+                              icon={HardDriveIcon}
+                              label={t('workbench.monitor.disk')}
+                              value={`${formatBytes(snapshot.disk.usedBytes)} / ${formatBytes(snapshot.disk.totalBytes)}`}
+                              percent={snapshot.disk.usagePercent}
+                              tone={usageTone(snapshot.disk.usagePercent)}
+                              hint={formatDiskHint(snapshot.disk, snapshot.appInfo.platform)}
+                            />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </section>
+
+                <section aria-labelledby="monitor-connections-heading" className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-0.5">
+                    <h2 id="monitor-connections-heading" className="text-sm font-medium text-foreground">
+                      {t('workbench.monitor.connectionHealth')}
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      {t('workbench.monitor.connectionBreakdown', {
+                        terminal: sessionCounts.connected,
+                        sftp: sftpActiveCount,
+                        issues: connectionIssueCount,
+                      })}
+                    </p>
+                  </div>
+
+                  <div className="grid items-stretch gap-3 @min-[68rem]:grid-cols-2">
+                    <Card aria-labelledby="terminal-health-heading" className="h-full">
                       <CardHeader>
-                        <div className="flex items-center gap-2">
-                          <TerminalIcon className="size-4 text-muted-foreground" aria-hidden />
-                          <CardTitle>{t('workbench.monitor.terminalSessions')}</CardTitle>
-                        </div>
-                        <CardDescription>{t('workbench.monitor.recentDisconnects')}</CardDescription>
+                        <CardTitle id="terminal-health-heading" className="flex items-center gap-2">
+                          <TerminalIcon aria-hidden />
+                          {t('workbench.monitor.terminalSessions')}
+                        </CardTitle>
                       </CardHeader>
-                      <CardContent className="flex flex-1 flex-col gap-3">
-                        <ResponsiveCardGrid
-                          columns={2}
-                          breakpoints={STATUS_GRID_BREAKPOINTS}
-                          gap="0.5rem"
-                        >
+                      <CardContent>
+                        <div className="grid grid-cols-2 gap-2 @min-[42rem]:grid-cols-4 @min-[68rem]:grid-cols-2 @min-[82rem]:grid-cols-4">
                           <StatusCount
                             tone="ok"
                             count={sessionCounts.connected}
@@ -661,104 +646,77 @@ export const MonitorPanel: React.FC = () => {
                             count={sessionCounts.error}
                             label={t('workbench.monitor.error')}
                           />
-                        </ResponsiveCardGrid>
-                        <Separator />
-                        {recentDisconnects.length > 0 ? (
-                          <div className="flex max-h-48 flex-col overflow-auto">
-                            {recentDisconnects.map((event, index) => (
-                              <React.Fragment key={`${event.sessionId}-${event.at}`}>
-                                {index > 0 && <Separator />}
-                                <DisconnectRow event={event} />
-                              </React.Fragment>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="flex min-h-20 flex-1 items-center justify-center text-xs text-muted-foreground">
-                            {t('workbench.monitor.noDisconnects')}
-                          </div>
-                        )}
+                        </div>
                       </CardContent>
                     </Card>
 
-                    <Card className="h-full">
+                    <Card aria-labelledby="sftp-health-heading" className="h-full">
                       <CardHeader>
-                        <div className="flex items-center gap-2">
-                          <NetworkIcon className="size-4 text-muted-foreground" aria-hidden />
-                          <CardTitle>{t('workbench.monitor.sftpConnections')}</CardTitle>
-                        </div>
-                        <CardDescription>
-                          {t('workbench.monitor.sftpDescription')}
-                        </CardDescription>
-                        <CardAction>
-                          <div className="flex items-center gap-1.5">
-                            <Badge variant={sftpActiveCount > 0 ? 'outline' : 'secondary'}>
-                              <span
-                                aria-hidden
-                                className={cn(
-                                  'size-1.5 rounded-full',
-                                  sftpActiveCount > 0 ? 'bg-app-success' : 'bg-muted-foreground',
-                                )}
-                              />
-                              {sftpActiveCount} {t('workbench.monitor.active')}
+                        <CardTitle id="sftp-health-heading" className="flex items-center gap-2">
+                          <NetworkIcon aria-hidden />
+                          {t('workbench.monitor.sftpConnections')}
+                        </CardTitle>
+                        <CardDescription>{t('workbench.monitor.sftpDescription')}</CardDescription>
+                        <CardAction className="flex items-center gap-1.5">
+                          <Badge variant={sftpActiveCount > 0 ? 'outline' : 'secondary'}>
+                            <span
+                              aria-hidden
+                              className={cn(
+                                'size-1.5 rounded-full',
+                                sftpActiveCount > 0 ? 'bg-app-success' : 'bg-muted-foreground',
+                              )}
+                            />
+                            {sftpActiveCount} {t('workbench.monitor.active')}
+                          </Badge>
+                          {sftpErrorCount > 0 && (
+                            <Badge variant="destructive">
+                              {sftpErrorCount} {t('workbench.monitor.error')}
                             </Badge>
-                            {sftpErrorCount > 0 && (
-                              <Badge variant="destructive">
-                                {sftpErrorCount} {t('workbench.monitor.error')}
-                              </Badge>
-                            )}
-                          </div>
+                          )}
                         </CardAction>
                       </CardHeader>
-                      <CardContent className="flex flex-1 flex-col">
+                      <CardContent>
                         {sftpRemotePanes.length > 0 ? (
-                          <div className="flex max-h-64 flex-col overflow-auto">
-                            {sftpRemotePanes.map((pane, index) => {
-                              const hasError = Boolean(pane.error);
-                              return (
-                                <React.Fragment key={pane.id}>
-                                  {index > 0 && <Separator />}
-                                  <div className="flex items-center gap-3 py-2.5">
-                                    <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                                      <ServerIcon className="size-3.5" aria-hidden />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="truncate font-mono text-xs text-foreground">
-                                        {pane.title}
-                                      </div>
-                                      <div className="truncate font-mono text-[11px] text-muted-foreground">
-                                        {pane.path}
-                                      </div>
-                                    </div>
-                                    <Badge variant={hasError ? 'destructive' : 'outline'}>
-                                      <span
-                                        aria-hidden
-                                        className={cn(
-                                          'size-1.5 rounded-full',
-                                          hasError ? 'bg-app-error' : 'bg-app-success',
-                                        )}
-                                      />
-                                      {hasError
-                                        ? t('workbench.monitor.sftpError')
-                                        : t('workbench.monitor.sftpOk')}
-                                    </Badge>
-                                  </div>
-                                </React.Fragment>
-                              );
-                            })}
-                          </div>
+                          <SftpPaneList panes={sftpRemotePanes} />
                         ) : (
-                          <div className="flex min-h-32 flex-1 items-center justify-center text-xs text-muted-foreground">
-                            {t('workbench.monitor.noSftpConnections')}
-                          </div>
+                          <EmptyState
+                            className="min-h-16 rounded-lg bg-muted/30 p-3"
+                            title={t('workbench.monitor.noSftpConnections')}
+                          />
                         )}
                       </CardContent>
                     </Card>
-                  </ResponsiveCardGrid>
-                </section>
 
-              </>
-            )}
-            </section>
+                    <Card aria-labelledby="recent-disconnects-heading" className="@min-[68rem]:col-span-2">
+                      <CardHeader>
+                        <CardTitle id="recent-disconnects-heading">
+                          {t('workbench.monitor.recentDisconnects')}
+                        </CardTitle>
+                        {recentDisconnects.length > 0 && (
+                          <CardAction>
+                            <Badge variant="secondary">{recentDisconnects.length}</Badge>
+                          </CardAction>
+                        )}
+                      </CardHeader>
+                      <CardContent>
+                        {recentDisconnects.length > 0 ? (
+                          <DisconnectList events={recentDisconnects} />
+                        ) : (
+                          <EmptyState
+                            className="min-h-16 rounded-lg bg-muted/30 p-3"
+                            title={t('workbench.monitor.noDisconnects')}
+                          />
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </section>
+              </TabsContent>
+
+              <TabsContent value="remote" className="flex flex-col">
+                <RemoteHealthSection />
+              </TabsContent>
+            </Tabs>
           </WorkbenchPageContent>
         </ScrollArea>
       </WorkbenchPage>

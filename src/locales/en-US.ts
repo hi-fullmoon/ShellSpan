@@ -139,6 +139,7 @@ export default {
 
   'workbench.monitor.title': 'Monitor',
   'workbench.monitor.local': 'Local',
+  'workbench.monitor.remote': 'Remote',
   'workbench.monitor.localTitle': 'Local app and connection monitoring',
   'workbench.monitor.localDescription': 'Shows only the TermBridge process, device resources, and client connections on this computer.',
   'workbench.monitor.updatedAt': 'Updated',
@@ -149,7 +150,7 @@ export default {
   'workbench.monitor.noData': 'No data yet',
   'workbench.monitor.noDataDescription': 'Waiting for system data…',
   'workbench.monitor.overviewTitle': 'Live overview',
-  'workbench.monitor.overviewDescription': 'Key local resource and client connection signals, with issues surfaced first.',
+  'workbench.monitor.overviewDescription': 'TermBridge process trends and local resource pressure in one workspace.',
   'workbench.monitor.overallHealth': 'Overall health',
   'workbench.monitor.appActivity': 'App activity',
   'workbench.monitor.memoryPressure': 'Memory pressure',

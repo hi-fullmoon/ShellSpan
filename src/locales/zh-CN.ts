@@ -139,6 +139,7 @@ export default {
 
   'workbench.monitor.title': '监控',
   'workbench.monitor.local': '本机',
+  'workbench.monitor.remote': '远端',
   'workbench.monitor.localTitle': '本机应用与连接监控',
   'workbench.monitor.localDescription': '仅展示当前设备上的 TermBridge 进程、系统资源和客户端连接状态。',
   'workbench.monitor.updatedAt': '更新于',
@@ -149,7 +150,7 @@ export default {
   'workbench.monitor.noData': '暂无数据',
   'workbench.monitor.noDataDescription': '等待系统数据采集…',
   'workbench.monitor.overviewTitle': '实时概览',
-  'workbench.monitor.overviewDescription': '聚合本机资源与客户端连接的关键指标，异常状态优先显示。',
+  'workbench.monitor.overviewDescription': '在一个工作区查看 TermBridge 进程趋势与本机资源压力。',
   'workbench.monitor.overallHealth': '整体健康',
   'workbench.monitor.appActivity': '应用活动',
   'workbench.monitor.memoryPressure': '内存占用',
