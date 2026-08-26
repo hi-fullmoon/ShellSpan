@@ -145,11 +145,34 @@ describe('TerminalTabBar', () => {
     const tabs = screen.getAllByRole('tab');
     const firstSeparator = tabs[0].querySelector('[data-tab-separator]');
     expect(firstSeparator).toBeInTheDocument();
-    expect(firstSeparator).toHaveClass('right-[-3px]');
+    expect(firstSeparator).toHaveClass('right-[-4px]');
     expect(firstSeparator).not.toHaveClass('translate-x-1/2');
     expect(tabs[1].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[2].querySelector('[data-tab-separator]')).toBeInTheDocument();
     expect(tabs[3].querySelector('[data-tab-separator]')).not.toBeInTheDocument();
+  });
+
+  it('replaces the separator with an aligned insert indicator in the tab gap', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+
+    const { rerender } = render(<TerminalTabBar externalInsertIndex={1} />);
+
+    let tabs = screen.getAllByRole('tab');
+    const separator = tabs[0].querySelector('[data-tab-separator]');
+    const gapIndicator = tabs[1].querySelector('[data-drop-indicator="left"]');
+    expect(separator).not.toBeInTheDocument();
+    expect(gapIndicator).toHaveClass('left-[-3.5px]', '-translate-x-1/2');
+
+    rerender(<TerminalTabBar externalInsertIndex={0} />);
+    tabs = screen.getAllByRole('tab');
+    const leadingIndicator = tabs[0].querySelector('[data-drop-indicator="left"]');
+    expect(leadingIndicator).toHaveClass('left-0', '-translate-x-1/2');
+    expect(leadingIndicator).not.toHaveClass('left-[-3.5px]');
+    expect(tabs[0].querySelector('[data-tab-separator]')).toHaveClass('right-[-4px]');
+
+    rerender(<TerminalTabBar externalInsertIndex={null} />);
+    expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
   });
 
   it('close button asks for confirmation before removing a session', () => {
