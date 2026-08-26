@@ -1,5 +1,8 @@
 use super::*;
 use crate::db::Database;
+use crate::directory_request_registry::{
+    DirectoryRequestRegistry, DIRECTORY_REQUEST_SUPERSEDED_MESSAGE,
+};
 use crate::models::{
     ClosedReasonKind, ConnectionPreflightRequest, ConnectionPreflightResult, CopyLocalPathsRequest,
     CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
@@ -8,9 +11,10 @@ use crate::models::{
     ManagedSession, OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry,
     ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
     RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
-    RemoteFileKind, RemoteFsError, RenameRemotePathRequest, SessionCommand, SessionCreateRequest,
-    SessionIdentity, SessionStatus, SessionSummary, SftpBookmarkRow, TransferBatchResult,
-    TrustHostRequest, UpdateRemotePermissionsRequest, UploadLocalPathsRequest,
+    RemoteFileKind, RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest,
+    SessionCommand, SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary,
+    SftpBookmarkRow, TransferBatchResult, TrustHostRequest, UpdateRemotePermissionsRequest,
+    UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
 use base64::Engine;
@@ -545,7 +549,11 @@ pub(crate) async fn list_remote_directory(
     mut request: RemoteDirectoryRequest,
     pool: State<'_, SftpPool>,
     cache: State<'_, RemoteIdentityCache>,
+    directory_requests: State<'_, DirectoryRequestRegistry>,
 ) -> Result<RemoteDirectoryListing, RemoteFsError> {
+    let superseded = directory_requests
+        .register(&request.request_key, request.request_id)
+        .map_err(|message| RemoteFsError::Other { message })?;
     resolve_keychain_key_for_remote(&credentials, &mut request.connection)
         .map_err(|message| RemoteFsError::Other { message })?;
     let requested_path = request.path.clone().unwrap_or_else(|| ".".to_string());
@@ -558,7 +566,13 @@ pub(crate) async fn list_remote_directory(
     let cache = cache.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        list_remote_directory_blocking(request, Some(&pool), Some(&cache), Some(&known_hosts))
+        list_remote_directory_blocking(
+            request,
+            Some(&pool),
+            Some(&cache),
+            Some(&known_hosts),
+            &superseded,
+        )
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -572,11 +586,30 @@ pub(crate) async fn list_remote_directory(
                 listing.entries.len()
             );
         }
+        Err(RemoteFsError::Other { message })
+            if message.as_str() == DIRECTORY_REQUEST_SUPERSEDED_MESSAGE =>
+        {
+            debug!("Skipped superseded remote directory request path={requested_path}");
+        }
         Err(error) => {
             error!("List remote directory failed path={requested_path}: {error:?}");
         }
     }
     result
+}
+
+#[tauri::command]
+pub(crate) fn supersede_remote_directory_request(
+    directory_requests: State<'_, DirectoryRequestRegistry>,
+    request_key: String,
+    request_id: u64,
+) -> Result<(), String> {
+    // Local and remote loads share one pane generation in the frontend. A
+    // local load has no Rust-side SFTP work of its own, but it still needs to
+    // advance the backend watermark so an older remote request releases the
+    // pooled connection as soon as possible.
+    drop(directory_requests.register(&request_key, request_id)?);
+    Ok(())
 }
 
 #[tauri::command]
@@ -586,14 +619,24 @@ pub(crate) async fn resolve_remote_entry_owners(
     mut request: RemoteEntryOwnersRequest,
     pool: State<'_, SftpPool>,
     cache: State<'_, RemoteIdentityCache>,
+    directory_requests: State<'_, DirectoryRequestRegistry>,
 ) -> Result<RemoteEntryOwners, RemoteFsError> {
+    let superseded = directory_requests
+        .register(&request.request_key, request.request_id)
+        .map_err(|message| RemoteFsError::Other { message })?;
     resolve_keychain_key_for_remote(&credentials, &mut request.connection)
         .map_err(|message| RemoteFsError::Other { message })?;
     let pool = pool.inner().clone();
     let cache = cache.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        resolve_remote_entry_owners_blocking(request, Some(&pool), Some(&cache), Some(&known_hosts))
+        resolve_remote_entry_owners_blocking(
+            request,
+            Some(&pool),
+            Some(&cache),
+            Some(&known_hosts),
+            &superseded,
+        )
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -1097,11 +1140,14 @@ pub(crate) async fn open_remote_file(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: OpenRemoteFileRequest,
     pool: State<'_, SftpPool>,
+    remote_file_reads: State<'_, RemoteFileReadCancellationRegistry>,
 ) -> Result<(), RemoteFsError> {
     resolve_keychain_key_for_remote(&credentials, &mut request.connection)
         .map_err(|message| RemoteFsError::Other { message })?;
+    let operation_id = request.operation_id.clone();
     info!(
-        "Opening remote file path={} {}",
+        "Opening remote file operation_id={} path={} {}",
+        operation_id,
         request.path,
         summarize_remote_connection_request(&request.connection)
     );
@@ -1112,22 +1158,38 @@ pub(crate) async fn open_remote_file(
         .home_dir()
         .ok()
         .map(|home| home.join(".termbridge").join("open-cache"));
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let cancel_flag = remote_file_reads
+        .register(operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let task_cancel_flag = cancel_flag.clone();
+    let task_result = tauri::async_runtime::spawn_blocking(move || {
         open_remote_file_blocking(
             request,
             Some(&pool),
             Some(&known_hosts),
             open_root.as_deref(),
+            task_cancel_flag,
         )
     })
-    .await
-    .map_err(|error| RemoteFsError::Other {
-        message: format!("failed to join open file task: {error}"),
-    })?;
-    if let Err(error) = &result {
-        error!("Open remote file failed: {error:?}");
-    } else {
-        info!("Opened remote file successfully");
+    .await;
+    let _ = remote_file_reads.remove(&operation_id, &cancel_flag);
+    let result = task_result.unwrap_or_else(|error| {
+        Err(RemoteFsError::Other {
+            message: format!("failed to join open file task: {error}"),
+        })
+    });
+    match &result {
+        Err(RemoteFsError::Other { message })
+            if message.as_str() == REMOTE_FILE_READ_CANCELLED_MESSAGE =>
+        {
+            debug!("Cancelled remote file open operation_id={operation_id}");
+        }
+        Err(error) => {
+            error!("Open remote file failed operation_id={operation_id}: {error:?}");
+        }
+        Ok(()) => {
+            info!("Opened remote file successfully operation_id={operation_id}");
+        }
     }
     result
 }
@@ -1158,35 +1220,59 @@ pub(crate) async fn preview_remote_file(
     credentials: State<'_, crate::keychain::CredentialManager>,
     mut request: ReadRemoteFileRequest,
     pool: State<'_, SftpPool>,
+    remote_file_reads: State<'_, RemoteFileReadCancellationRegistry>,
 ) -> Result<ReadRemoteFileResponse, RemoteFsError> {
     resolve_keychain_key_for_remote(&credentials, &mut request.connection)
         .map_err(|message| RemoteFsError::Other { message })?;
+    let operation_id = request.operation_id.clone();
     info!(
-        "Previewing remote file path={} {}",
+        "Previewing remote file operation_id={} path={} {}",
+        operation_id,
         request.path,
         summarize_remote_connection_request(&request.connection)
     );
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        read_remote_file_blocking(request, Some(&pool), Some(&known_hosts))
+    let cancel_flag = remote_file_reads
+        .register(operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let task_cancel_flag = cancel_flag.clone();
+    let task_result = tauri::async_runtime::spawn_blocking(move || {
+        read_remote_file_blocking(request, Some(&pool), Some(&known_hosts), task_cancel_flag)
     })
-    .await
-    .map_err(|error| RemoteFsError::Other {
-        message: format!("failed to join file preview task: {error}"),
-    })?;
+    .await;
+    let _ = remote_file_reads.remove(&operation_id, &cancel_flag);
+    let result = task_result.unwrap_or_else(|error| {
+        Err(RemoteFsError::Other {
+            message: format!("failed to join file preview task: {error}"),
+        })
+    });
     match &result {
         Ok(response) => {
             info!(
-                "Previewed remote file path={} size={} is_text={} truncated={}",
-                response.path, response.size, response.is_text, response.truncated
+                "Previewed remote file operation_id={} path={} size={} is_text={} truncated={}",
+                operation_id, response.path, response.size, response.is_text, response.truncated
             );
         }
+        Err(RemoteFsError::Other { message })
+            if message.as_str() == REMOTE_FILE_READ_CANCELLED_MESSAGE =>
+        {
+            debug!("Cancelled remote file preview operation_id={operation_id}");
+        }
         Err(error) => {
-            error!("Preview remote file failed: {error:?}");
+            error!("Preview remote file failed operation_id={operation_id}: {error:?}");
         }
     }
     result
+}
+
+#[tauri::command]
+pub(crate) async fn cancel_remote_file_read(
+    remote_file_reads: State<'_, RemoteFileReadCancellationRegistry>,
+    operation_id: String,
+) -> Result<(), String> {
+    debug!("Cancelling remote file read operation_id={operation_id}");
+    remote_file_reads.cancel(&operation_id)
 }
 
 #[tauri::command]
