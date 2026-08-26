@@ -152,6 +152,93 @@ describe('transferStore', () => {
     );
   });
 
+  it('does not publish duplicate progress snapshots or change path occupancy', () => {
+    useTransferStore.getState().addOperation(operation);
+    const revision = useTransferStore.getState().pathOccupancyRevision;
+    const listener = vi.fn();
+    const unsubscribe = useTransferStore.subscribe(listener);
+
+    useTransferStore.getState().updateUpload({
+      operationId: operation.operationId,
+      currentPath: operation.currentPath,
+      totalBytes: operation.totalBytes,
+      uploadedBytes: operation.processedBytes,
+      totalSteps: operation.totalSteps,
+      completedSteps: operation.completedSteps,
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(useTransferStore.getState().pathOccupancyRevision).toBe(revision);
+    unsubscribe();
+  });
+
+  it('updates only the matching operation for progress snapshots', () => {
+    useTransferStore.getState().addOperation(operation);
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'upload-2',
+      currentPath: '/tmp/other.png',
+    });
+    const untouched = useTransferStore.getState().operations[0];
+    const revision = useTransferStore.getState().pathOccupancyRevision;
+
+    useTransferStore.getState().updateUpload({
+      operationId: operation.operationId,
+      currentPath: operation.currentPath,
+      totalBytes: 100,
+      uploadedBytes: 40,
+      totalSteps: 1,
+      completedSteps: 0,
+    });
+
+    expect(useTransferStore.getState().operations[0]).toBe(untouched);
+    expect(useTransferStore.getState().operations[1]?.processedBytes).toBe(40);
+    expect(useTransferStore.getState().pathOccupancyRevision).toBe(revision);
+  });
+
+  it('releases path occupancy when final progress completes a transfer', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      connectionId: 'connection-1',
+      paths: ['/remote/archive.zip'],
+      status: 'running',
+    });
+    const revision = useTransferStore.getState().pathOccupancyRevision;
+
+    useTransferStore.getState().updateUpload({
+      operationId: operation.operationId,
+      currentPath: operation.currentPath,
+      totalBytes: 100,
+      uploadedBytes: 100,
+      totalSteps: 1,
+      completedSteps: 1,
+    });
+
+    expect(hasActivePathOperation('connection-1', ['/remote/archive.zip'])).toBe(false);
+    expect(useTransferStore.getState().pathOccupancyRevision).toBe(revision + 1);
+  });
+
+  it('does not clear a running delete when its discovered counters temporarily match', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'delete-1',
+      kind: 'delete',
+      totalSteps: 2,
+      completedSteps: 2,
+      status: 'running',
+    });
+    const revision = useTransferStore.getState().pathOccupancyRevision;
+
+    useTransferStore.getState().clearCompleted();
+
+    expect(useTransferStore.getState().operations).toHaveLength(1);
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      operationId: 'delete-1',
+      status: 'running',
+    });
+    expect(useTransferStore.getState().pathOccupancyRevision).toBe(revision);
+  });
+
   it('detects active operations on the same path and its descendants', () => {
     useTransferStore.getState().addOperation({
       ...operation,
@@ -359,6 +446,29 @@ describe('transferStore', () => {
     useTransferStore.getState().markOperationCompleted(operation.operationId);
     await waiting;
     expect(resolved).toBe(true);
+  });
+
+  it('waitForPathIdle preserves counter-based completion semantics', async () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      connectionId: 'connection-1',
+      paths: ['/remote/archive.zip'],
+      status: 'running',
+    });
+    const waiting = waitForPathIdle([
+      { connectionId: 'connection-1', paths: ['/remote/archive.zip'] },
+    ]);
+
+    useTransferStore.getState().updateUpload({
+      operationId: operation.operationId,
+      currentPath: operation.currentPath,
+      totalBytes: 100,
+      uploadedBytes: 100,
+      totalSteps: 1,
+      completedSteps: 1,
+    });
+
+    await expect(waiting).resolves.toBeUndefined();
   });
 
   it('waitForPathIdle resolves when the blocking operation is cancelled or fails', async () => {

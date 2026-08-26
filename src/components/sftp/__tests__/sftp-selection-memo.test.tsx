@@ -6,7 +6,11 @@ import { useSftpPaneActions, type UseSftpPaneActionsResult } from '@/hooks/useSf
 import { SftpContent } from '../index';
 
 const paneRenderProps = vi.hoisted(() => ({
-  history: [] as Array<{ side: string; selectedPaths: Set<string> }>,
+  history: [] as Array<{
+    side: string;
+    selectedPaths: Set<string>;
+    onSelectedPathsChange: (paths: Set<string>) => void;
+  }>,
 }));
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -44,9 +48,17 @@ vi.mock('@/components/sftp/sftp-dnd-context', () => ({
 }));
 
 vi.mock('@/components/sftp/sftp-pane', () => ({
-  SftpPane: React.forwardRef<HTMLDivElement, { side: string; selectedPaths: Set<string> }>(
+  SftpPane: React.forwardRef<HTMLDivElement, {
+    side: string;
+    selectedPaths: Set<string>;
+    onSelectedPathsChange: (paths: Set<string>) => void;
+  }>(
     (props, _ref) => {
-      paneRenderProps.history.push({ side: props.side, selectedPaths: props.selectedPaths });
+      paneRenderProps.history.push({
+        side: props.side,
+        selectedPaths: props.selectedPaths,
+        onSelectedPathsChange: props.onSelectedPathsChange,
+      });
       return <div data-testid={`sftp-pane-${props.side}`} />;
     },
   ),
@@ -75,6 +87,7 @@ vi.mock('@/hooks/useSftpPaneActions', () => ({
 vi.mock('@/lib/tauri', () => ({
   invokeListLocalDirectory: vi.fn().mockResolvedValue({ path: '/local', entries: [] }),
   invokeListRemoteDirectory: vi.fn().mockResolvedValue({ path: '/remote', entries: [] }),
+  invokeSupersedeRemoteDirectoryRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
 const initialState = useSftpStore.getState();
@@ -110,6 +123,40 @@ describe('SftpContent selection memoization', () => {
       const renders = paneRenderProps.history.filter((entry) => entry.side === side);
       expect(renders.length).toBeGreaterThan(1);
       renders.forEach((entry) => expect(entry.selectedPaths).toBe(renders[0]!.selectedPaths));
+    }
+  });
+
+  it('keeps pane selection callbacks stable when the selected paths change', () => {
+    useSftpStore.getState().addConnection(
+      { sessionId: 'c1', title: 'Test', host: 'h', port: 22, username: 'u' },
+      { host: 'h', port: 22, username: 'u', authMethod: 'password' },
+    );
+    const connection = useSftpStore.getState().connections[0]!;
+    const props = {
+      connection,
+      newConnectionMenuOpen: false,
+      setNewConnectionMenuOpen: vi.fn(),
+      tabContextMenu: null,
+      setTabContextMenu: vi.fn(),
+      openSftpConnection: vi.fn().mockResolvedValue(undefined),
+      verifyHostKey: vi.fn().mockResolvedValue(undefined),
+    } as const;
+    const { rerender } = render(<SftpContent {...props} />);
+    const initialCallbacks = new Map(
+      paneRenderProps.history.map((entry) => [entry.side, entry.onSelectedPathsChange]),
+    );
+    const selectedConnection = {
+      ...connection,
+      localPane: { ...connection.localPane, selectedPaths: ['/local/a.txt'] },
+      remotePane: { ...connection.remotePane, selectedPaths: ['/remote/b.txt'] },
+    };
+
+    rerender(<SftpContent {...props} connection={selectedConnection} />);
+
+    for (const side of ['local', 'remote']) {
+      const renders = paneRenderProps.history.filter((entry) => entry.side === side);
+      const latest = renders[renders.length - 1];
+      expect(latest?.onSelectedPathsChange).toBe(initialCallbacks.get(side));
     }
   });
 });
