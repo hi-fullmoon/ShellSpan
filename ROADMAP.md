@@ -83,6 +83,8 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 
 **状态：planned**
 
+> 详细阶段设计、内核契约、实施顺序与验收矩阵见 `docs/ai-agent-p0-execution-foundation-design.md`。
+
 ### 6.1 目标
 
 建立一个与模型无关的安全执行内核，使 Runbook 与 Agent 共用同一套连接、身份、凭证、超时、取消、输出限制和秘密擦除逻辑。
