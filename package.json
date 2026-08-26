@@ -9,6 +9,8 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "test:scripts": "vitest run scripts/__tests__",
+    "benchmark:terminal": "vitest bench --run --config scripts/perf/vitest.config.ts",
+    "benchmark:terminal:transport": "cargo run --release --manifest-path src-tauri/Cargo.toml --example terminal_transport_baseline --",
     "check:roadmap": "node scripts/check-roadmap-audit.mjs",
     "review:frontend": "pnpm check:roadmap && pnpm test:scripts && pnpm test && pnpm build",
     "test:e2e:ssh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-ssh-e2e.ps1",
