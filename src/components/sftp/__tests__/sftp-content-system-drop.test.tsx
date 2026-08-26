@@ -63,6 +63,7 @@ vi.mock('@/hooks/useSftpPaneActions', () => ({
 vi.mock('@/lib/tauri', () => ({
   invokeListLocalDirectory: vi.fn().mockResolvedValue({ path: '/local', entries: [] }),
   invokeListRemoteDirectory: vi.fn().mockResolvedValue({ path: '/remote', entries: [] }),
+  invokeSupersedeRemoteDirectoryRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
 const initialState = useSftpStore.getState();

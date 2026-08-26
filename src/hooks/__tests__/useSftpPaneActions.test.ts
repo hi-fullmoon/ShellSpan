@@ -13,6 +13,8 @@ const connectionMocks = vi.hoisted(() => ({
   downloadRemotePaths: vi.fn().mockResolvedValue(undefined),
   openRemoteFile: vi.fn().mockResolvedValue(undefined),
   previewRemoteFile: vi.fn(),
+  cancelRemoteFileOpen: vi.fn(),
+  cancelRemoteFilePreview: vi.fn(),
 }));
 
 const localDirectoryMocks = vi.hoisted(() => ({
@@ -39,6 +41,8 @@ vi.mock('@/hooks/useSftpConnection', () => ({
     downloadRemotePaths: connectionMocks.downloadRemotePaths,
     openRemoteFile: connectionMocks.openRemoteFile,
     previewRemoteFile: connectionMocks.previewRemoteFile,
+    cancelRemoteFileOpen: connectionMocks.cancelRemoteFileOpen,
+    cancelRemoteFilePreview: connectionMocks.cancelRemoteFilePreview,
   }),
 }));
 
@@ -153,6 +157,39 @@ describe('useSftpPaneActions', () => {
     expect(typeof result.current.onToggleBatchMode).toBe('function');
   });
 
+  it('does not rerender when transfer progress changes', () => {
+    const connection = addConnection();
+    useTransferStore.getState().addOperation({
+      operationId: 'background-upload',
+      kind: 'upload',
+      currentPath: '/local/archive.zip',
+      totalBytes: 100,
+      processedBytes: 0,
+      totalSteps: 1,
+      completedSteps: 0,
+      status: 'running',
+    });
+    let renderCount = 0;
+    renderHook(() => {
+      renderCount += 1;
+      return useSftpPaneActions(connection, 'remote');
+    });
+    const initialRenderCount = renderCount;
+
+    act(() => {
+      useTransferStore.getState().updateUpload({
+        operationId: 'background-upload',
+        currentPath: '/local/archive.zip',
+        totalBytes: 100,
+        uploadedBytes: 40,
+        totalSteps: 1,
+        completedSteps: 0,
+      });
+    });
+
+    expect(renderCount).toBe(initialRenderCount);
+  });
+
   it('sets create mode when calling onNewFile', () => {
     const connection = addConnection();
     const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
@@ -219,6 +256,7 @@ describe('useSftpPaneActions', () => {
       result.current.closePreview();
     });
     expect(result.current.previewTarget).toBeUndefined();
+    expect(connectionMocks.cancelRemoteFilePreview).toHaveBeenCalledOnce();
 
     await act(async () => {
       resolvePreview(responseFor('/home/slow.txt'));
@@ -226,6 +264,114 @@ describe('useSftpPaneActions', () => {
     });
     expect(result.current.previewTarget).toBeUndefined();
     expect(result.current.previewContent).toBeUndefined();
+  });
+
+  it('cancels and invalidates a pending remote preview when the pane switches local', async () => {
+    const connection = addConnection();
+    const entry = { path: '/home/slow.txt', name: 'slow.txt', kind: 'file' as const, size: 8 };
+    let rejectPreview!: (reason: Error) => void;
+    connectionMocks.previewRemoteFile.mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectPreview = reject; }),
+    );
+    const { result, rerender } = renderHook(
+      ({ currentConnection, localMode }) =>
+        useSftpPaneActions(currentConnection, 'remote', localMode),
+      { initialProps: { currentConnection: connection, localMode: false } },
+    );
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.onPreview(entry);
+    });
+    expect(result.current.previewTarget?.path).toBe('/home/slow.txt');
+
+    rerender({ currentConnection: connection, localMode: true });
+
+    expect(connectionMocks.cancelRemoteFilePreview).toHaveBeenCalledOnce();
+    expect(result.current.previewTarget).toBeUndefined();
+    expect(result.current.previewContent).toBeUndefined();
+
+    await act(async () => {
+      rejectPreview(new Error('remote file read cancelled'));
+      await request;
+    });
+    expect(result.current.previewTarget).toBeUndefined();
+    expect(result.current.previewContent).toBeUndefined();
+    expect(toastMocks.error).not.toHaveBeenCalled();
+
+    connectionMocks.cancelRemoteFilePreview.mockClear();
+    act(() => result.current.closePreview());
+    expect(connectionMocks.cancelRemoteFilePreview).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a pending remote open when the pane switches local', async () => {
+    const connection = addConnection();
+    const entry = { path: '/home/slow.txt', name: 'slow.txt', kind: 'file' as const };
+    let resolveOpen!: () => void;
+    connectionMocks.openRemoteFile.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveOpen = resolve; }),
+    );
+    const { result, rerender } = renderHook(
+      ({ localMode }) => useSftpPaneActions(connection, 'remote', localMode),
+      { initialProps: { localMode: false } },
+    );
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.onOpenWithDefaultEditor(entry);
+    });
+
+    rerender({ localMode: true });
+
+    expect(connectionMocks.cancelRemoteFileOpen).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      resolveOpen();
+      await request;
+    });
+  });
+
+  it('keeps an old remote completion out after same-endpoint credentials change', async () => {
+    const connection = addConnection();
+    const oldEntry = { path: '/home/old.txt', name: 'old.txt', kind: 'file' as const, size: 7 };
+    const newEntry = { path: '/home/new.txt', name: 'new.txt', kind: 'file' as const, size: 7 };
+    let resolveOldPreview!: (value: ReadRemoteFileResponse) => void;
+    connectionMocks.previewRemoteFile
+      .mockImplementationOnce(
+        () => new Promise((resolve) => { resolveOldPreview = resolve; }),
+      )
+      .mockResolvedValueOnce(responseFor('/home/new.txt'));
+    const { result, rerender } = renderHook(
+      ({ currentConnection }) => useSftpPaneActions(currentConnection, 'remote', false),
+      { initialProps: { currentConnection: connection } },
+    );
+
+    let oldRequest!: Promise<void>;
+    act(() => {
+      oldRequest = result.current.onPreview(oldEntry);
+    });
+
+    const changedCredentials: SftpConnection = {
+      ...connection,
+      connection: {
+        ...connection.connection,
+        password: 'rotated-secret',
+      },
+    };
+    rerender({ currentConnection: changedCredentials });
+    expect(connectionMocks.cancelRemoteFilePreview).toHaveBeenCalledOnce();
+    expect(result.current.previewTarget).toBeUndefined();
+
+    await act(() => result.current.onPreview(newEntry));
+    expect(result.current.previewContent?.path).toBe('/home/new.txt');
+
+    await act(async () => {
+      resolveOldPreview(responseFor('/home/old.txt'));
+      await oldRequest;
+    });
+    expect(result.current.previewTarget?.path).toBe('/home/new.txt');
+    expect(result.current.previewContent?.path).toBe('/home/new.txt');
+    expect(toastMocks.error).not.toHaveBeenCalled();
   });
 
   it('opens the explicitly supplied preview path instead of the live selection', async () => {
