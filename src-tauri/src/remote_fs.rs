@@ -21,7 +21,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs,
-    io::{copy, Read, Seek, SeekFrom, Write},
+    io::{self, copy, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -47,6 +47,65 @@ const REMOTE_COPY_TEMP_SUFFIX: &str = ".tb-part";
 /// temp file, so they only re-send what never reached the destination.
 const REMOTE_COPY_MAX_ATTEMPTS: u32 = 3;
 const REMOTE_COPY_RETRY_BACKOFF_BASE_MS: u64 = 500;
+#[cfg(test)]
+const MIN_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
+#[cfg(test)]
+const MAX_TRANSFER_BUFFER_SIZE: usize = 2 * 1024 * 1024;
+const DEFAULT_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
+#[cfg(test)]
+const TEST_TRANSFER_BUFFER_SIZE_ENV: &str = "TERMBRIDGE_SFTP_BENCH_TRANSFER_BUFFER_BYTES";
+
+#[cfg(test)]
+fn validate_transfer_buffer_size(size: usize) -> Result<usize, String> {
+    if (MIN_TRANSFER_BUFFER_SIZE..=MAX_TRANSFER_BUFFER_SIZE).contains(&size) {
+        Ok(size)
+    } else {
+        Err(format!(
+            "transfer buffer size must be between {MIN_TRANSFER_BUFFER_SIZE} and {MAX_TRANSFER_BUFFER_SIZE} bytes"
+        ))
+    }
+}
+
+fn transfer_buffer_size() -> usize {
+    #[cfg(test)]
+    if let Ok(value) = std::env::var(TEST_TRANSFER_BUFFER_SIZE_ENV) {
+        let size = value.parse::<usize>().unwrap_or_else(|error| {
+            panic!("invalid {TEST_TRANSFER_BUFFER_SIZE_ENV} value {value:?}: {error}")
+        });
+        return validate_transfer_buffer_size(size).unwrap_or_else(|message| {
+            panic!("invalid {TEST_TRANSFER_BUFFER_SIZE_ENV} value {value:?}: {message}")
+        });
+    }
+
+    DEFAULT_TRANSFER_BUFFER_SIZE
+}
+
+fn new_transfer_buffer() -> Vec<u8> {
+    vec![0; transfer_buffer_size()]
+}
+
+#[derive(Debug)]
+enum TransferChunkError {
+    Read(io::Error),
+    Write(io::Error),
+}
+
+/// Reads one chunk and writes every byte before returning. `write_all` is
+/// intentional: SFTP and filesystem writers may accept only a prefix even
+/// when the reusable caller buffer is much larger than one protocol packet.
+fn transfer_chunk<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    buffer: &mut [u8],
+) -> Result<usize, TransferChunkError> {
+    let read = reader.read(buffer).map_err(TransferChunkError::Read)?;
+    if read > 0 {
+        writer
+            .write_all(&buffer[..read])
+            .map_err(TransferChunkError::Write)?;
+    }
+    Ok(read)
+}
 
 #[derive(Clone, Copy)]
 enum TransferPhase {
@@ -669,6 +728,7 @@ fn copy_remote_path_inner(
         })?;
     let mut scan_stats = RemoteCopyScanStats::default();
     metrics.start_phase(TransferPhase::Transfer);
+    let mut transfer_buffer = new_transfer_buffer();
     let result = copy_remote_entry_to_path(
         &connected.sftp,
         source_path,
@@ -677,6 +737,7 @@ fn copy_remote_path_inner(
         0,
         &cancel_flag,
         &mut scan_stats,
+        &mut transfer_buffer,
     );
     metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
     result?;
@@ -756,6 +817,7 @@ fn upload_local_paths_inner<E: TransferEventEmitter>(
     let mut existing_names = remote_entry_names(&connected.sftp, destination_directory)?;
     metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
     metrics.start_phase(TransferPhase::Transfer);
+    let mut transfer_buffer = new_transfer_buffer();
 
     // A failing entry must not abort the rest of the batch: every entry is
     // attempted and the failures are reported together at the end. Explicit
@@ -781,6 +843,7 @@ fn upload_local_paths_inner<E: TransferEventEmitter>(
             conflict_policy,
             &mut existing_names,
             &mut progress,
+            &mut transfer_buffer,
         ) {
             Ok(Some(destination_path)) => items.push(TransferItemResult {
                 source_path,
@@ -824,6 +887,7 @@ fn upload_single_local_path<E: TransferEventEmitter>(
     conflict_policy: UploadConflictPolicy,
     existing_names: &mut HashSet<String>,
     progress: &mut UploadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<Option<PathBuf>, RemoteFsError> {
     let file_name = local_path
         .file_name()
@@ -857,6 +921,7 @@ fn upload_single_local_path<E: TransferEventEmitter>(
         &destination_path,
         conflict_policy,
         progress,
+        transfer_buffer,
     )?;
     existing_names.insert(destination_name);
     Ok(Some(destination_path))
@@ -964,6 +1029,7 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
     let mut reserved_names = local_entry_names(destination_directory);
     metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
     metrics.start_phase(TransferPhase::Transfer);
+    let mut transfer_buffer = new_transfer_buffer();
     let mut items: Vec<TransferItemResult> = Vec::new();
     let mut cancel_message: Option<String> = None;
     for (index, remote_path) in request.remote_paths.iter().enumerate() {
@@ -1019,6 +1085,7 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
                 remote_path,
                 &destination_path,
                 &mut progress,
+                &mut transfer_buffer,
             )?;
             if !destination_path.exists() {
                 warn!(
@@ -1201,6 +1268,7 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
     remote_path: &Path,
     local_path: &Path,
     progress: &mut DownloadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     progress
         .ensure_not_cancelled()
@@ -1242,6 +1310,7 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
                     &child_path,
                     &local_path.join(child_name),
                     progress,
+                    transfer_buffer,
                 )?;
             }
             Ok(())
@@ -1249,7 +1318,7 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
         RemoteFileKind::Symlink => {
             // Do not recursively follow symlinks to avoid infinite loops.
             // sftp.open follows the symlink automatically for file targets.
-            match download_remote_file(sftp, remote_path, local_path, progress) {
+            match download_remote_file(sftp, remote_path, local_path, progress, transfer_buffer) {
                 Ok(()) => Ok(()),
                 Err(error) => {
                     // Symlink might point to a directory or be broken, so it cannot
@@ -1278,7 +1347,7 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
                 }
             }
         }
-        _ => download_remote_file(sftp, remote_path, local_path, progress),
+        _ => download_remote_file(sftp, remote_path, local_path, progress, transfer_buffer),
     }
 }
 
@@ -1287,6 +1356,7 @@ fn download_remote_file<E: TransferEventEmitter>(
     remote_path: &Path,
     local_path: &Path,
     progress: &mut DownloadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     progress
         .set_current_path(Some(path_to_string(remote_path)))
@@ -1314,24 +1384,26 @@ fn download_remote_file<E: TransferEventEmitter>(
             message: format!("failed to create local file: {error}"),
         })?;
 
-    let mut buffer = [0u8; 64 * 1024];
     loop {
         progress
             .ensure_not_cancelled()
             .map_err(|message| RemoteFsError::Other { message })?;
-        let read = remote_file
-            .read(&mut buffer)
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to read remote file: {error}"),
-            })?;
+        let read = match transfer_chunk(&mut remote_file, &mut local_file, transfer_buffer) {
+            Ok(read) => read,
+            Err(TransferChunkError::Read(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!("failed to read remote file: {error}"),
+                });
+            }
+            Err(TransferChunkError::Write(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!("failed to write local file: {error}"),
+                });
+            }
+        };
         if read == 0 {
             break;
         }
-        local_file
-            .write_all(&buffer[..read])
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to write local file: {error}"),
-            })?;
         progress
             .advance_bytes(read as u64)
             .map_err(|message| RemoteFsError::Other { message })?;
@@ -1526,6 +1598,7 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
     // Each file task is staged through a temp file and renamed into place on
     // completion (see copy_remote_file_between), so an interrupted copy never
     // leaves a partial file under the real name.
+    let mut transfer_buffer = new_transfer_buffer();
     for task in tasks {
         copy_remote_entry_between(
             source,
@@ -1534,6 +1607,7 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
             &task.destination_path,
             task.allow_overwrite,
             &mut progress,
+            &mut transfer_buffer,
         )?;
     }
 
@@ -1652,6 +1726,7 @@ fn copy_remote_entry_between<E: TransferEventEmitter>(
     destination_path: &Path,
     allow_overwrite: bool,
     progress: &mut RemoteCopyProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     progress
         .ensure_not_cancelled()
@@ -1701,6 +1776,7 @@ fn copy_remote_entry_between<E: TransferEventEmitter>(
                     &remote_join(destination_path, &child_name.to_string_lossy()),
                     allow_overwrite,
                     progress,
+                    transfer_buffer,
                 )?;
             }
             let _ = destination.setstat(
@@ -1742,6 +1818,7 @@ fn copy_remote_entry_between<E: TransferEventEmitter>(
                 &stat,
                 allow_overwrite,
                 progress,
+                transfer_buffer,
             )?;
         }
     }
@@ -1765,6 +1842,7 @@ fn copy_remote_file_between<E: TransferEventEmitter>(
     source_stat: &FileStat,
     allow_overwrite: bool,
     progress: &mut RemoteCopyProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     let temp_path = remote_copy_temp_path(destination_path);
     let source_size = source_stat.size.unwrap_or(0);
@@ -1784,6 +1862,7 @@ fn copy_remote_file_between<E: TransferEventEmitter>(
             source_stat.perm,
             progress,
             &mut credited,
+            transfer_buffer,
         ) {
             Ok(()) => break Ok(()),
             Err(error) => {
@@ -1858,6 +1937,7 @@ fn copy_remote_file_attempt<E: TransferEventEmitter>(
     source_perm: Option<u32>,
     progress: &mut RemoteCopyProgressTracker<E>,
     credited: &mut u64,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     let temp_size = destination.stat(temp_path).ok().and_then(|stat| stat.size);
     let resume_offset = match remote_copy_resume(temp_size, source_size) {
@@ -1872,9 +1952,10 @@ fn copy_remote_file_attempt<E: TransferEventEmitter>(
         // skip the transfer and go straight to the finalize step.
         RemoteCopyResume::AlreadyComplete => source_size,
     };
-    if resume_offset > *credited {
+    let resume_progress = uncredited_remote_copy_bytes(*credited, resume_offset);
+    if resume_progress > 0 {
         progress
-            .advance_bytes(resume_offset - *credited)
+            .advance_bytes(resume_progress)
             .map_err(|message| RemoteFsError::Other { message })?;
         *credited = resume_offset;
     }
@@ -1914,32 +1995,38 @@ fn copy_remote_file_attempt<E: TransferEventEmitter>(
                 message: format!("failed to resume remote destination: {error}"),
             })?;
     }
-    let mut buffer = [0u8; 64 * 1024];
+    let mut attempt_offset = resume_offset;
     loop {
         progress
             .ensure_not_cancelled()
             .map_err(|message| RemoteFsError::Other { message })?;
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to read remote source: {error}"),
-            })?;
+        let read = match transfer_chunk(&mut reader, &mut writer, transfer_buffer) {
+            Ok(read) => read,
+            Err(TransferChunkError::Read(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!("failed to read remote source: {error}"),
+                });
+            }
+            Err(TransferChunkError::Write(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!(
+                        "failed to copy between remote hosts ({} at byte {attempt_offset}): {error}",
+                        destination_path.display(),
+                    ),
+                });
+            }
+        };
         if read == 0 {
             break;
         }
-        writer
-            .write_all(&buffer[..read])
-            .map_err(|error| RemoteFsError::Other {
-                message: format!(
-                    "failed to copy between remote hosts ({} at byte {credited}): {error}",
-                    destination_path.display(),
-                    credited = *credited
-                ),
-            })?;
-        progress
-            .advance_bytes(read as u64)
-            .map_err(|message| RemoteFsError::Other { message })?;
-        *credited += read as u64;
+        attempt_offset += read as u64;
+        let progress_bytes = uncredited_remote_copy_bytes(*credited, attempt_offset);
+        if progress_bytes > 0 {
+            progress
+                .advance_bytes(progress_bytes)
+                .map_err(|message| RemoteFsError::Other { message })?;
+            *credited = attempt_offset;
+        }
     }
     writer.flush().map_err(|error| RemoteFsError::Other {
         message: format!("failed to flush remote destination: {error}"),
@@ -1981,6 +2068,10 @@ fn remote_copy_resume(temp_size: Option<u64>, source_size: u64) -> RemoteCopyRes
         Some(size) if size == source_size => RemoteCopyResume::AlreadyComplete,
         Some(_) => RemoteCopyResume::Restart,
     }
+}
+
+fn uncredited_remote_copy_bytes(credited: u64, completed_offset: u64) -> u64 {
+    completed_offset.saturating_sub(credited)
 }
 
 fn remote_copy_temp_path(destination_path: &Path) -> PathBuf {
@@ -2885,6 +2976,7 @@ fn copy_remote_entry_to_path(
     depth: u32,
     cancel_flag: &Arc<AtomicBool>,
     scan_stats: &mut RemoteCopyScanStats,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     ensure_remote_recursion_depth(depth)?;
     let kind = kind_from_permissions(source_stat.perm);
@@ -2926,6 +3018,7 @@ fn copy_remote_entry_to_path(
                     depth + 1,
                     cancel_flag,
                     scan_stats,
+                    transfer_buffer,
                 )?;
             }
             Ok(())
@@ -2947,6 +3040,7 @@ fn copy_remote_entry_to_path(
             destination_path,
             source_stat.size,
             cancel_flag,
+            transfer_buffer,
         ),
     }
 }
@@ -2957,6 +3051,7 @@ fn copy_remote_file(
     destination_path: &Path,
     expected_size: Option<u64>,
     cancel_flag: &Arc<AtomicBool>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     if let Some(parent) = destination_path.parent() {
         ensure_remote_directory(sftp, parent)?;
@@ -2980,26 +3075,28 @@ fn copy_remote_file(
         .map_err(|error| RemoteFsError::Other {
             message: format!("failed to create remote copy: {error}"),
         })?;
-    let mut buffer = [0u8; 64 * 1024];
     loop {
         if cancel_flag.load(AtomicOrdering::SeqCst) {
             return Err(RemoteFsError::Other {
                 message: "remote copy cancelled".to_string(),
             });
         }
-        let read = source
-            .read(&mut buffer)
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to read remote source file: {error}"),
-            })?;
+        let read = match transfer_chunk(&mut source, &mut destination, transfer_buffer) {
+            Ok(read) => read,
+            Err(TransferChunkError::Read(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!("failed to read remote source file: {error}"),
+                });
+            }
+            Err(TransferChunkError::Write(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!("failed to copy remote file data: {error}"),
+                });
+            }
+        };
         if read == 0 {
             break;
         }
-        destination
-            .write_all(&buffer[..read])
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to copy remote file data: {error}"),
-            })?;
     }
     destination.flush().map_err(|error| RemoteFsError::Other {
         message: format!("failed to flush remote copy: {error}"),
@@ -3190,6 +3287,7 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
     remote_path: &Path,
     conflict_policy: UploadConflictPolicy,
     progress: &mut UploadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     progress
         .ensure_not_cancelled()
@@ -3225,6 +3323,7 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
                 &remote_join(remote_path, &entry.file_name().to_string_lossy()),
                 conflict_policy,
                 progress,
+                transfer_buffer,
             )?;
         }
         return Ok(());
@@ -3250,6 +3349,7 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
             upload_mode,
             conflict_policy,
             progress,
+            transfer_buffer,
         )?;
         progress
             .finish_step()
@@ -3273,6 +3373,7 @@ fn upload_regular_file<E: TransferEventEmitter>(
     upload_mode: i32,
     conflict_policy: UploadConflictPolicy,
     progress: &mut UploadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     // Stage uploads through a hidden temp file and rename only after every byte
     // is written and verified. A cancelled or failed upload never leaves a
@@ -3285,6 +3386,7 @@ fn upload_regular_file<E: TransferEventEmitter>(
         expected_size,
         upload_mode,
         progress,
+        transfer_buffer,
     );
     if let Err(error) = result {
         let _ = sftp.unlink(&temp_path);
@@ -3401,6 +3503,7 @@ fn upload_regular_file_to_temp<E: TransferEventEmitter>(
     expected_size: u64,
     upload_mode: i32,
     progress: &mut UploadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
     let mut local_file = fs::File::open(local_path).map_err(|error| RemoteFsError::Other {
         message: format!("failed to open local file: {error}"),
@@ -3415,24 +3518,26 @@ fn upload_regular_file_to_temp<E: TransferEventEmitter>(
         .map_err(|error| RemoteFsError::Other {
             message: format!("failed to create remote upload temp file: {error}"),
         })?;
-    let mut buffer = [0u8; 64 * 1024];
     loop {
         progress
             .ensure_not_cancelled()
             .map_err(|message| RemoteFsError::Other { message })?;
-        let read = local_file
-            .read(&mut buffer)
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to read local file for upload: {error}"),
-            })?;
+        let read = match transfer_chunk(&mut local_file, &mut remote_file, transfer_buffer) {
+            Ok(read) => read,
+            Err(TransferChunkError::Read(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!("failed to read local file for upload: {error}"),
+                });
+            }
+            Err(TransferChunkError::Write(error)) => {
+                return Err(RemoteFsError::Other {
+                    message: format!("failed to upload local file: {error}"),
+                });
+            }
+        };
         if read == 0 {
             break;
         }
-        remote_file
-            .write_all(&buffer[..read])
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to upload local file: {error}"),
-            })?;
         progress
             .advance_bytes(read as u64)
             .map_err(|message| RemoteFsError::Other { message })?;
@@ -3572,6 +3677,38 @@ fn open_path_with_default_app(path: &Path) -> Result<(), RemoteFsError> {
 mod tests {
     use super::*;
 
+    struct ShortReader<R> {
+        inner: R,
+        max_read: usize,
+    }
+
+    impl<R: Read> Read for ShortReader<R> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let limit = buffer.len().min(self.max_read);
+            self.inner.read(&mut buffer[..limit])
+        }
+    }
+
+    #[derive(Default)]
+    struct ShortWriter {
+        bytes: Vec<u8>,
+        max_write: usize,
+        write_calls: usize,
+    }
+
+    impl Write for ShortWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.write_calls += 1;
+            let count = buffer.len().min(self.max_write);
+            self.bytes.extend_from_slice(&buffer[..count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[derive(Clone, Copy)]
     struct NoopTransferEventEmitter;
 
@@ -3582,6 +3719,91 @@ mod tests {
         {
             Ok(())
         }
+    }
+
+    #[test]
+    fn transfer_buffer_size_accepts_inclusive_boundaries_and_rejects_out_of_range() {
+        assert_eq!(
+            validate_transfer_buffer_size(MIN_TRANSFER_BUFFER_SIZE),
+            Ok(MIN_TRANSFER_BUFFER_SIZE)
+        );
+        assert_eq!(
+            validate_transfer_buffer_size(MAX_TRANSFER_BUFFER_SIZE),
+            Ok(MAX_TRANSFER_BUFFER_SIZE)
+        );
+        assert!(validate_transfer_buffer_size(MIN_TRANSFER_BUFFER_SIZE - 1).is_err());
+        assert!(validate_transfer_buffer_size(MAX_TRANSFER_BUFFER_SIZE + 1).is_err());
+    }
+
+    #[test]
+    fn transfer_chunk_copies_full_reads_and_reports_exact_progress_bytes() {
+        let source = b"0123456789abcdef";
+        let mut reader = io::Cursor::new(source);
+        let mut writer = io::Cursor::new(Vec::new());
+        let mut buffer = vec![0; 8];
+        let buffer_address = buffer.as_ptr();
+        let mut progressed = 0u64;
+
+        loop {
+            let read = transfer_chunk(&mut reader, &mut writer, &mut buffer)
+                .expect("full chunk transfer should succeed");
+            if read == 0 {
+                break;
+            }
+            progressed += read as u64;
+        }
+
+        assert_eq!(writer.into_inner(), source);
+        assert_eq!(progressed, source.len() as u64);
+        assert_eq!(buffer.as_ptr(), buffer_address, "buffer must be reused");
+    }
+
+    #[test]
+    fn transfer_chunk_handles_short_reads_and_short_writes_without_losing_bytes() {
+        let source = b"short reads and writes cross chunk boundaries";
+        let mut reader = ShortReader {
+            inner: io::Cursor::new(source),
+            max_read: 3,
+        };
+        let mut writer = ShortWriter {
+            max_write: 2,
+            ..ShortWriter::default()
+        };
+        let mut buffer = vec![0; 11];
+        let mut progressed = 0u64;
+
+        loop {
+            let read = transfer_chunk(&mut reader, &mut writer, &mut buffer)
+                .expect("short chunk transfer should succeed");
+            if read == 0 {
+                break;
+            }
+            progressed += read as u64;
+        }
+
+        assert_eq!(writer.bytes, source);
+        assert_eq!(progressed, source.len() as u64);
+        assert!(writer.write_calls > source.len().div_ceil(3));
+    }
+
+    #[test]
+    fn remote_copy_progress_does_not_double_count_retried_or_resumed_prefixes() {
+        let mut credited = 0u64;
+        let mut progressed = 0u64;
+
+        // First attempt resumes at 40 and reaches 70. The retry observes a
+        // shorter 55-byte temp file, re-sends the already-credited prefix, then
+        // advances beyond it. Only unique completed offsets count as progress.
+        for completed_offset in [40, 70, 55, 65, 70, 85, 100] {
+            let delta = uncredited_remote_copy_bytes(credited, completed_offset);
+            progressed += delta;
+            if delta > 0 {
+                credited = completed_offset;
+            }
+        }
+
+        assert_eq!(credited, 100);
+        assert_eq!(progressed, 100);
     }
 
     #[test]
@@ -4371,6 +4593,7 @@ mod tests {
         let small_file_count = benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_SMALL_FILE_COUNT", 128);
         let small_file_bytes =
             benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_SMALL_FILE_BYTES", 4 * 1024);
+        let transfer_buffer_bytes = transfer_buffer_size();
         let connection = RemoteConnectionRequest {
             host: host.clone(),
             port,
@@ -4512,7 +4735,9 @@ mod tests {
                         total_bytes,
                         total_files,
                     );
-                    println!("SFTP_BENCHMARK scenario={scenario} iteration={iteration} {record}");
+                    println!(
+                        "SFTP_BENCHMARK scenario={scenario} iteration={iteration} transfer_buffer_bytes={transfer_buffer_bytes} {record}"
+                    );
                 }
             }
         }
