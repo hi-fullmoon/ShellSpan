@@ -81,11 +81,18 @@ describe('SftpNewConnectionMenu', () => {
     expect(
       screen.getByRole('heading', { name: 'sftp.newConnectionMenu.title' }),
     ).toBeInTheDocument();
+    expect(screen.getByText('sftp.newConnectionMenu.description')).toBeInTheDocument();
+    const searchInput = screen.getByPlaceholderText(
+      'sftp.newConnectionMenu.searchPlaceholder',
+    );
     await waitFor(() => {
-      expect(
-        screen.getByPlaceholderText('sftp.newConnectionMenu.searchPlaceholder'),
-      ).toHaveFocus();
+      expect(searchInput).toHaveFocus();
     });
+    expect(searchInput.parentElement).toHaveClass(
+      'h-10',
+      'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
+    );
+    expect(screen.getByRole('button', { name: 'common.close' })).toBeInTheDocument();
   });
 
   it('moves selection with arrow keys and connects with Enter', () => {

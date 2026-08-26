@@ -5,11 +5,24 @@ import { useI18n } from '@/hooks/useI18n';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { ConnectionProfile } from '@/types';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group';
+import { Kbd } from '@/components/ui/kbd';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
 interface SftpNewConnectionMenuProps {
   open: boolean;
@@ -37,7 +50,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
 
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const listRef = useRef<HTMLUListElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const activatingRef = useRef(false);
 
   const activateOnce = useCallback((action: () => void): void => {
@@ -91,11 +104,10 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
   }, [query]);
 
   useEffect(() => {
-    if (selectedIndex < 0 || !listRef.current) return;
-    const selectedItem = listRef.current.children[selectedIndex] as HTMLElement | undefined;
-    if (typeof selectedItem?.scrollIntoView === 'function') {
-      selectedItem.scrollIntoView({ block: 'nearest' });
-    }
+    const selectedItem = listRef.current?.querySelector<HTMLElement>(
+      `[data-command-index="${selectedIndex}"]`,
+    );
+    selectedItem?.scrollIntoView?.({ block: 'nearest' });
   }, [selectedIndex]);
 
   useEffect(() => {
@@ -161,111 +173,138 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <DialogContent
-        className="top-[10vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 gap-0 overflow-hidden rounded-2xl p-0"
-        showCloseButton={false}
-      >
-        <DialogTitle className="sr-only">{t('sftp.newConnectionMenu.title')}</DialogTitle>
-        <div className="border-b border-app-border/50 p-4"><div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-app-text-soft" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('sftp.newConnectionMenu.searchPlaceholder')}
-            className="h-11 rounded-xl pl-10 pr-24 text-sm"
-            autoFocus
-          />
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-app-border bg-app-surface-muted px-2 py-0.5 font-mono text-xs text-app-text-soft">
-            {platform === 'macos' ? '⌘ K' : 'Ctrl K'}
-          </span>
-        </div></div>
+      <DialogContent className="top-[12vh] flex max-h-[76vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="px-5 pb-3 pt-5 pr-12">
+          <DialogTitle>{t('sftp.newConnectionMenu.title')}</DialogTitle>
+          <DialogDescription>{t('sftp.newConnectionMenu.description')}</DialogDescription>
+        </DialogHeader>
 
-        <div className="max-h-[60vh] min-h-0 overflow-y-auto p-2">
-          {hasResults ? (
-            <>
-              {showLocal && <Button type="button" variant="secondary" data-command-index={0} onClick={() => activateOnce(() => onOpenLocal?.())} onMouseEnter={() => setSelectedIndex(0)} className={cn('mb-2 h-auto w-full justify-start gap-3 rounded-xl p-3 text-left', selectedIndex === 0 && 'ring-1 ring-app-primary')}><span className="flex size-9 items-center justify-center rounded-lg bg-app-primary text-app-primary-text"><FolderIcon /></span><span className="flex min-w-0 flex-1 flex-col items-start"><span className="text-sm font-medium">{t('sftp.newConnectionMenu.openLocal')}</span><span className="text-xs text-app-text-soft">{t('sftp.newConnectionMenu.openLocalHint')}</span></span>{selectedIndex === 0 && <span className="text-xs text-app-text-soft">↵</span>}</Button>}
-              {filteredItems.length > 0 && <>
-              <h3 className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-app-text-soft">
-                {renderSectionLabel()}
-              </h3>
-              <ul ref={listRef} className="flex flex-col gap-1">
-                {filteredItems.map(({ profile }, index) => {
-                  const commandIndex = index + (showLocal ? 1 : 0);
-                  const isSelected = commandIndex === selectedIndex;
-                  return (
-                    <li key={profile.id}>
-                      <button
-                        type="button"
-                        aria-label={profile.name}
-                        onClick={() => handleConnect(profile)}
-                        onMouseEnter={() => setSelectedIndex(commandIndex)}
-                        data-command-index={commandIndex}
-                        className={cn(
-                          'flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors',
-                          isSelected
-                            ? 'bg-app-primary/10 text-app-text'
-                            : 'hover:bg-app-surface-muted',
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
-                            isSelected
-                              ? 'bg-app-primary text-app-primary-text'
-                              : 'bg-app-primary/10 text-app-primary',
-                          )}
-                        >
-                          <ServerIcon className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-app-text">
-                            {profile.name}
-                          </p>
-                          <p className="truncate text-xs text-app-text-soft">
-                            {profile.username}@{profile.host}:{profile.port}
-                          </p>
-                        </div>
-                        {isSelected && (
-                          <span className="text-xs text-app-text-soft">↵</span>
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-              </>}
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-2 p-8 text-center">
-              <p className="text-sm text-app-text-soft">
-                {query
-                  ? t('terminal.newTabMenu.noSearchResults')
-                  : t('sftp.newConnectionMenu.noProfiles')}
-              </p>
-              <p className="text-xs text-app-text-soft">
-                {t('sftp.newConnectionMenu.openWorkbenchHint')}
-              </p>
-            </div>
-          )}
+        <div className="px-5 pb-4">
+          <InputGroup className="h-10 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
+            <InputGroupInput
+              type="search"
+              aria-label={t('sftp.newConnectionMenu.searchPlaceholder')}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t('sftp.newConnectionMenu.searchPlaceholder')}
+              autoFocus
+            />
+            <InputGroupAddon align="inline-start"><SearchIcon /></InputGroupAddon>
+            <InputGroupAddon align="inline-end">
+              <Kbd>{platform === 'macos' ? '⌘ K' : 'Ctrl K'}</Kbd>
+            </InputGroupAddon>
+          </InputGroup>
         </div>
 
-        <div className="flex items-center justify-between border-t border-app-border/50 px-4 py-3">
+        <Separator />
+        <ScrollArea className="min-h-32 flex-1">
+          <div ref={listRef} className="flex flex-col gap-2 p-2">
+            {hasResults ? (
+              <>
+                {showLocal && (
+                  <Button
+                    type="button"
+                    variant={selectedIndex === 0 ? 'secondary' : 'ghost'}
+                    data-command-index={0}
+                    onClick={() => activateOnce(() => onOpenLocal?.())}
+                    onMouseEnter={() => setSelectedIndex(0)}
+                    className="h-auto w-full justify-start gap-3 rounded-lg p-3 text-left"
+                  >
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                      <FolderIcon data-icon="inline-start" />
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                      <span className="text-sm font-medium">
+                        {t('sftp.newConnectionMenu.openLocal')}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {t('sftp.newConnectionMenu.openLocalHint')}
+                      </span>
+                    </span>
+                    {selectedIndex === 0 && <Kbd aria-hidden="true">↵</Kbd>}
+                  </Button>
+                )}
+                {filteredItems.length > 0 && (
+                  <section
+                    className="flex flex-col gap-1"
+                    aria-label={renderSectionLabel() ?? undefined}
+                  >
+                    <h3 className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                      {renderSectionLabel()}
+                    </h3>
+                    <ul className="flex flex-col gap-1">
+                      {filteredItems.map(({ profile }, index) => {
+                        const commandIndex = index + (showLocal ? 1 : 0);
+                        const isSelected = commandIndex === selectedIndex;
+                        return (
+                          <li key={profile.id}>
+                            <Button
+                              type="button"
+                              aria-label={profile.name}
+                              variant={isSelected ? 'secondary' : 'ghost'}
+                              onClick={() => handleConnect(profile)}
+                              onMouseEnter={() => setSelectedIndex(commandIndex)}
+                              data-command-index={commandIndex}
+                              className="h-auto w-full justify-start gap-3 rounded-lg p-3 text-left"
+                            >
+                              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                <ServerIcon data-icon="inline-start" />
+                              </span>
+                              <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                                <span className="w-full truncate text-sm font-medium">
+                                  {profile.name}
+                                </span>
+                                <span className="w-full truncate text-xs text-muted-foreground">
+                                  {profile.username}@{profile.host}:{profile.port}
+                                </span>
+                              </span>
+                              {isSelected && <Kbd aria-hidden="true">↵</Kbd>}
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                )}
+              </>
+            ) : (
+              <div className="flex min-h-32 flex-col items-center justify-center gap-1 p-6 text-center">
+                <p className="text-sm font-medium">
+                  {query
+                    ? t('terminal.newTabMenu.noSearchResults')
+                    : t('sftp.newConnectionMenu.noProfiles')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('sftp.newConnectionMenu.openWorkbenchHint')}
+                </p>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+        <Separator />
+
+        <DialogFooter className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3 pt-3">
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={handleOpenWorkbench}
-            className="gap-2 px-2 text-muted-foreground hover:text-app-text"
           >
-            <LayoutGridIcon className="h-4 w-4" />
+            <LayoutGridIcon data-icon="inline-start" />
             {t('terminal.newTabMenu.openWorkbench')}
           </Button>
-          <div className="flex items-center gap-3 text-xs text-app-text-soft">
-            <span>↑↓ / Ctrl N P {t('terminal.newTabMenu.navigate')}</span>
-            <span>↵ {t('sftp.newConnectionMenu.connect')}</span>
-            <span>Esc {t('terminal.newTabMenu.close')}</span>
+          <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
+            <span className="flex items-center gap-1">
+              <Kbd>↑</Kbd><Kbd>↓</Kbd>{t('terminal.newTabMenu.navigate')}
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>↵</Kbd>{t('sftp.newConnectionMenu.connect')}
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>Esc</Kbd>{t('terminal.newTabMenu.close')}
+            </span>
           </div>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
