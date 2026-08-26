@@ -542,7 +542,10 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
         </div>
 
         {/* Navigation row */}
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-surface-muted px-1">
+        <div
+          data-slot="sftp-path-bar"
+          className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-bg px-1"
+        >
           <div className="flex items-center">
             <Button variant="ghost" size="icon" onClick={goBack} disabled={!canGoBack} className="h-6 w-6">
               <ChevronLeftIcon className={cn('h-4 w-4', !canGoBack && 'opacity-30')} />

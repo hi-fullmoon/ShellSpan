@@ -116,9 +116,12 @@ describe('SftpFileList', () => {
     const headerViewport = screen.getByTestId('sftp-file-list-header-viewport');
     const headerCells = headerViewport.querySelectorAll('button');
 
-    expect(headerViewport).not.toHaveClass('bg-app-surface-muted');
+    expect(headerViewport).not.toHaveClass('bg-app-bg');
     expect(headerCells).toHaveLength(6);
-    headerCells.forEach((cell) => expect(cell).toHaveClass('bg-app-surface-muted'));
+    headerCells.forEach((cell) => {
+      expect(cell).toHaveClass('bg-app-bg');
+      expect(cell).not.toHaveClass('bg-app-surface-muted');
+    });
   });
 
   it('cycles sort direction through asc, desc, default on name column', async () => {

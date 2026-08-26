@@ -11,43 +11,36 @@ const Toaster = ({ ...props }: ToasterProps) => {
   const shownRef = useRef<Set<string>>(new Set())
 
   const handleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!(event.target as HTMLElement).closest('[data-sonner-toast]')) return
-    const top = toasts[toasts.length - 1]
-    if (!top) return
-    toast.dismiss(top.id)
-    removeToast(top.id)
+    if (!(event.target instanceof Element)) return
+    const clickedToast = event.target.closest('[data-sonner-toast]')
+    const id = clickedToast?.getAttribute('data-testid')
+    if (!id) return
+    toast.dismiss(id)
+    removeToast(id)
   }
 
   useEffect(() => {
     for (const t of toasts) {
       if (shownRef.current.has(t.id)) continue
       shownRef.current.add(t.id)
+      const options = {
+        id: t.id,
+        testId: t.id,
+        duration: t.duration,
+        onDismiss: () => removeToast(t.id),
+        onAutoClose: () => removeToast(t.id),
+      }
 
       switch (t.variant) {
         case "success":
-          toast.success(t.message, {
-            id: t.id,
-            duration: t.duration,
-            onDismiss: () => removeToast(t.id),
-            onAutoClose: () => removeToast(t.id),
-          })
+          toast.success(t.message, options)
           break
         case "error":
-          toast.error(t.message, {
-            id: t.id,
-            duration: t.duration,
-            onDismiss: () => removeToast(t.id),
-            onAutoClose: () => removeToast(t.id),
-          })
+          toast.error(t.message, options)
           break
         case "info":
         default:
-          toast(t.message, {
-            id: t.id,
-            duration: t.duration,
-            onDismiss: () => removeToast(t.id),
-            onAutoClose: () => removeToast(t.id),
-          })
+          toast(t.message, options)
           break
       }
     }
@@ -58,10 +51,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
       <Sonner
         theme={resolvedTheme as ToasterProps["theme"]}
         className="toaster group"
-        position="top-right"
+        position="top-center"
         gap={8}
-        visibleToasts={1}
-        offset={{ top: 46, right: 8 }}
+        visibleToasts={3}
+        offset={{ top: 52 }}
+        mobileOffset={{ top: 52, right: 12, left: 12 }}
         icons={{
           success: (
             <CircleCheckIcon className="toast-icon-filled size-4 text-[#52c41a]" />
@@ -90,7 +84,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         toastOptions={{
           classNames: {
             toast:
-              'w-auto! min-w-60! max-w-[var(--width)]! gap-2! px-4! py-1.5! text-sm! shadow-[var(--shadow-toast)]!',
+              'w-fit! min-w-48! max-w-[var(--width)]! gap-2! px-4! py-1.5! text-sm! shadow-[var(--shadow-toast)]!',
             icon: 'mt-[3px]! self-start!',
             title: 'font-normal!',
           },
