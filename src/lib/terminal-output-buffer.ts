@@ -6,54 +6,141 @@ interface TerminalOutputBuffer {
   chunks: Uint8Array[];
   head: number;
   byteLength: number;
+  version: number;
+  contextCache?: TerminalOutputContextCache;
+}
+
+export interface TerminalOutputSnapshot {
+  readonly version: number;
+  readonly content: string;
+}
+
+interface TerminalOutputContextCache {
+  version: number;
+  maxLines: number;
+  redactedLines: string[];
+  snapshot: TerminalOutputSnapshot;
+  appendBoundarySafe: boolean;
+  nextChunkIndex: number;
 }
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: false });
 const buffers = new Map<string, TerminalOutputBuffer>();
-const outputListeners = new Set<(sessionId: string) => void>();
+const outputListeners = new Map<string, Set<() => void>>();
+const EMPTY_TERMINAL_OUTPUT_SNAPSHOT: TerminalOutputSnapshot = {
+  version: 0,
+  content: '',
+};
 
 function notifyOutputChanged(sessionId: string): void {
-  for (const listener of outputListeners) listener(sessionId);
+  for (const listener of outputListeners.get(sessionId) ?? []) listener();
 }
 
 export function subscribeTerminalOutput(
-  listener: (sessionId: string) => void,
+  sessionId: string,
+  listener: () => void,
 ): () => void {
-  outputListeners.add(listener);
-  return () => outputListeners.delete(listener);
+  const listeners = outputListeners.get(sessionId) ?? new Set<() => void>();
+  listeners.add(listener);
+  outputListeners.set(sessionId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) outputListeners.delete(sessionId);
+  };
 }
 
 export function appendTerminalOutput(sessionId: string, chunk: string): void {
   if (!chunk) return;
 
   const bytes = encoder.encode(chunk);
-  const buffer = buffers.get(sessionId) ?? { chunks: [], head: 0, byteLength: 0 };
+  const buffer = buffers.get(sessionId) ?? {
+    chunks: [],
+    head: 0,
+    byteLength: 0,
+    version: 0,
+  };
   buffer.chunks.push(bytes);
   buffer.byteLength += bytes.length;
-  trimBufferHead(buffer, MAX_BUFFER_BYTES);
+  const trimmed = trimBufferHead(buffer, MAX_BUFFER_BYTES);
+  buffer.version += 1;
+  // Preserve a safe checkpoint until the next actual reader. Multiple output
+  // chunks can then be normalized/redacted once after the live hook coalesces
+  // their notifications. Ring-buffer trimming invalidates its chunk cursor.
+  if (trimmed) buffer.contextCache = undefined;
   buffers.set(sessionId, buffer);
   notifyOutputChanged(sessionId);
 }
 
 export function clearTerminalOutput(sessionId: string): void {
-  buffers.delete(sessionId);
-  notifyOutputChanged(sessionId);
+  if (buffers.delete(sessionId)) notifyOutputChanged(sessionId);
 }
 
 export function rebindTerminalOutput(oldSessionId: string, newSessionId: string): void {
   const buffer = buffers.get(oldSessionId);
   buffers.delete(oldSessionId);
-  if (buffer !== undefined) buffers.set(newSessionId, buffer);
+  if (buffer !== undefined) {
+    buffer.version += 1;
+    buffer.contextCache = undefined;
+    buffers.set(newSessionId, buffer);
+  }
   notifyOutputChanged(oldSessionId);
   notifyOutputChanged(newSessionId);
 }
 
 export function getRecentTerminalOutput(sessionId: string, maxLines: number): string {
-  const raw = decodeBuffer(buffers.get(sessionId));
-  const normalized = redactTerminalSecrets(renderTerminalText(stripAnsi(raw)));
-  const recent = normalized.split('\n').slice(-Math.max(1, maxLines)).join('\n').trim();
-  return truncateAiContext(recent);
+  return getRecentTerminalOutputSnapshot(sessionId, maxLines).content;
+}
+
+/**
+ * Returns a versioned, already-redacted AI context snapshot. The cached value
+ * is safe to reuse across React renders; raw decoded terminal text is never
+ * retained outside the bounded byte buffer.
+ */
+export function getRecentTerminalOutputSnapshot(
+  sessionId: string,
+  maxLines: number,
+): TerminalOutputSnapshot {
+  const buffer = buffers.get(sessionId);
+  if (!buffer || buffer.byteLength === 0) return EMPTY_TERMINAL_OUTPUT_SNAPSHOT;
+
+  const lineLimit = normalizeLineLimit(maxLines);
+  const cached = buffer.contextCache;
+  if (cached?.version === buffer.version && cached.maxLines === lineLimit) {
+    return cached.snapshot;
+  }
+
+  if (
+    cached?.maxLines === lineLimit
+    && cached.appendBoundarySafe
+    && cached.nextChunkIndex <= buffer.chunks.length
+  ) {
+    const appendedRaw = decodeBufferChunks(buffer, cached.nextChunkIndex);
+    const appendedCache = appendToContextCache(
+      cached,
+      appendedRaw,
+      buffer.version,
+      buffer.chunks.length,
+    );
+    buffer.contextCache = appendedCache;
+    return appendedCache.snapshot;
+  }
+
+  const raw = decodeBuffer(buffer);
+  const normalized = renderTerminalText(stripAnsi(raw));
+  const redactedLines = redactTerminalSecrets(normalized)
+    .split('\n')
+    .slice(-lineLimit);
+  const snapshot = createContextSnapshot(buffer.version, redactedLines);
+  buffer.contextCache = {
+    version: buffer.version,
+    maxLines: lineLimit,
+    redactedLines,
+    snapshot,
+    appendBoundarySafe: isIncrementalAppendBoundarySafe(raw, normalized),
+    nextChunkIndex: buffer.chunks.length,
+  };
+  return snapshot;
 }
 
 export function truncateAiContext(
@@ -83,6 +170,10 @@ export function stripAnsi(value: string): string {
 }
 
 export function renderTerminalText(value: string): string {
+  return renderTerminalLines(value).join('\n');
+}
+
+function renderTerminalLines(value: string): string[] {
   const lines: string[] = [];
   let current: string[] = [];
   let cursor = 0;
@@ -101,13 +192,13 @@ export function renderTerminalText(value: string): string {
     }
   }
   if (current.length > 0) lines.push(current.join('').replace(/[ \t]+$/g, ''));
-  return lines.join('\n');
+  return lines;
 }
 
 export function redactTerminalSecrets(value: string): string {
   return value
     .replace(
-      /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----/gi,
+      /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|$)/gi,
       '[REDACTED PRIVATE KEY]',
     )
     .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
@@ -125,9 +216,11 @@ export function redactTerminalSecrets(value: string): string {
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED JWT]');
 }
 
-function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): void {
+function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): boolean {
   let excess = buffer.byteLength - maxBytes;
+  let trimmed = false;
   while (excess > 0 && buffer.head < buffer.chunks.length) {
+    trimmed = true;
     const current = buffer.chunks[buffer.head];
     if (current.length <= excess) {
       excess -= current.length;
@@ -153,6 +246,7 @@ function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): void {
     buffer.chunks = buffer.chunks.slice(buffer.head);
     buffer.head = 0;
   }
+  return trimmed;
 }
 
 function decodeBuffer(buffer: TerminalOutputBuffer | undefined): string {
@@ -164,4 +258,111 @@ function decodeBuffer(buffer: TerminalOutputBuffer | undefined): string {
     offset += buffer.chunks[index].length;
   }
   return decoder.decode(bytes);
+}
+
+function normalizeLineLimit(maxLines: number): number {
+  if (!Number.isFinite(maxLines)) return 1;
+  return Math.max(1, Math.floor(maxLines));
+}
+
+function createContextSnapshot(
+  version: number,
+  redactedLines: readonly string[],
+): TerminalOutputSnapshot {
+  return {
+    version,
+    content: truncateAiContext(redactedLines.join('\n').trim()),
+  };
+}
+
+function appendToContextCache(
+  cache: TerminalOutputContextCache,
+  appendedRaw: string,
+  version: number,
+  nextChunkIndex: number,
+): TerminalOutputContextCache {
+  const strippedChunk = stripAnsi(appendedRaw);
+  const renderedLines = renderTerminalLines(strippedChunk);
+  const normalizedChunk = renderedLines.join('\n');
+  const redactedLines = renderedLines.length === 0
+    ? cache.redactedLines
+    : [
+        ...cache.redactedLines,
+        ...redactTerminalSecrets(normalizedChunk).split('\n'),
+      ].slice(-cache.maxLines);
+  const snapshot = createContextSnapshot(version, redactedLines);
+  return {
+    version,
+    maxLines: cache.maxLines,
+    redactedLines,
+    snapshot,
+    appendBoundarySafe: isIncrementalAppendBoundarySafe(appendedRaw, normalizedChunk),
+    nextChunkIndex,
+  };
+}
+
+function decodeBufferChunks(buffer: TerminalOutputBuffer, startIndex: number): string {
+  const decoded: string[] = [];
+  for (let index = startIndex; index < buffer.chunks.length; index += 1) {
+    decoded.push(decoder.decode(buffer.chunks[index]));
+  }
+  return decoded.join('');
+}
+
+function isIncrementalAppendBoundarySafe(raw: string, normalized: string): boolean {
+  return raw.endsWith('\n')
+    && !hasIncompleteAnsiSequence(raw)
+    && !hasPendingSensitiveSequence(normalized);
+}
+
+function hasIncompleteAnsiSequence(value: string): boolean {
+  let state: 'ground' | 'escape' | 'csi-params' | 'csi-intermediates' | 'osc' | 'osc-escape' = 'ground';
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (state === 'ground') {
+      if (code === 0x1b) state = 'escape';
+      continue;
+    }
+    if (state === 'escape') {
+      if (character === '[') state = 'csi-params';
+      else if (character === ']') state = 'osc';
+      else state = 'ground';
+      continue;
+    }
+    if (state === 'osc') {
+      if (code === 0x07) state = 'ground';
+      else if (code === 0x1b) state = 'osc-escape';
+      continue;
+    }
+    if (state === 'osc-escape') {
+      if (character === '\\') state = 'ground';
+      else if (code !== 0x1b) state = 'osc';
+      continue;
+    }
+    if (state === 'csi-params') {
+      if (code >= 0x30 && code <= 0x3f) continue;
+      if (code >= 0x20 && code <= 0x2f) {
+        state = 'csi-intermediates';
+        continue;
+      }
+      state = 'ground';
+      continue;
+    }
+    if (code >= 0x20 && code <= 0x2f) continue;
+    state = 'ground';
+  }
+  return state !== 'ground';
+}
+
+function hasPendingSensitiveSequence(value: string): boolean {
+  let privateKeyOpen = false;
+  const privateKeyBoundary = /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----/gi;
+  for (const match of value.matchAll(privateKeyBoundary)) {
+    privateKeyOpen = match[0].toUpperCase().includes('BEGIN');
+  }
+  if (privateKeyOpen) return true;
+
+  return /\bauthorization\s*:\s*(?:(?:bearer|basic)\s*)?$/i.test(value)
+    || /\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|password|passwd|pwd)\s*(?::|=)?\s*["']?$/i.test(value)
+    || /--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|secret|password|passwd)(?:=|\s)*$/i.test(value);
 }
