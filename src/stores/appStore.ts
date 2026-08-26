@@ -20,6 +20,7 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   toggleAiPanel: 'mod+shift+a',
   newTerminalTab: 'mod+k',
   closeTerminalTab: 'mod+w',
+  switchTerminalTab: 'mod+shift+o',
   nextTerminalTab: 'mod+shift+]',
   previousTerminalTab: 'mod+shift+[',
   findTerminal: 'mod+f',

@@ -58,6 +58,25 @@ describe('useAppShortcuts', () => {
     document.removeEventListener('termbridge:new-terminal-tab', listener);
   });
 
+  it('opens the terminal tab switcher with mod+shift+o only in the terminal section', () => {
+    const listener = vi.fn();
+    document.addEventListener('termbridge:switch-terminal-tab', listener);
+    renderHook(() => useAppShortcuts());
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'o', ctrlKey: true, shiftKey: true, bubbles: true,
+    }));
+    expect(listener).not.toHaveBeenCalled();
+
+    useAppStore.setState({ activeSection: 'terminal' });
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'o', ctrlKey: true, shiftKey: true, bubbles: true,
+    }));
+    expect(listener).toHaveBeenCalledOnce();
+
+    document.removeEventListener('termbridge:switch-terminal-tab', listener);
+  });
+
   it('scopes the same chord by section: mod+k toggles terminal vs sftp menus', () => {
     const terminalListener = vi.fn();
     const sftpListener = vi.fn();

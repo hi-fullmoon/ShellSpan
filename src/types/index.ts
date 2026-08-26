@@ -30,6 +30,7 @@ export type ShortcutAction =
   | 'toggleAiPanel'
   | 'newTerminalTab'
   | 'closeTerminalTab'
+  | 'switchTerminalTab'
   | 'nextTerminalTab'
   | 'previousTerminalTab'
   | 'findTerminal'

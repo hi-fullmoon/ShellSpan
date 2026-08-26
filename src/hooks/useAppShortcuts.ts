@@ -73,6 +73,9 @@ export function useAppShortcuts(): void {
         case 'closeTerminalTab':
           document.dispatchEvent(new Event('termbridge:close-terminal-tab'));
           break;
+        case 'switchTerminalTab':
+          document.dispatchEvent(new Event('termbridge:switch-terminal-tab'));
+          break;
         case 'findTerminal':
           document.dispatchEvent(new Event('termbridge:find-terminal'));
           break;
