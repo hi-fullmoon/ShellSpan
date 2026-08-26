@@ -5,7 +5,7 @@ use crate::models::{
     ConnectionPreflightStepStatus, HostKeyCheckResult, HostKeyCheckStatus, JumpHostConfig,
     RemoteConnectionRequest, RemoteFsError, SessionCreateRequest,
 };
-use crate::sftp_pool::{connection_key, ConnectClaim, SftpPool};
+use crate::sftp_pool::{connection_key, ConnectClaim, SftpPool, SFTP_POOL_GET_ABORTED_MESSAGE};
 use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
@@ -53,7 +53,16 @@ pub(crate) fn connect_sftp(
     pool: Option<&SftpPool>,
     known_hosts_path: Option<&Path>,
 ) -> Result<Arc<Mutex<ConnectedSftp>>, RemoteFsError> {
-    connect_sftp_inner(request, pool, known_hosts_path)
+    connect_sftp_with_abort(request, pool, known_hosts_path, None)
+}
+
+pub(crate) fn connect_sftp_with_abort(
+    request: &RemoteConnectionRequest,
+    pool: Option<&SftpPool>,
+    known_hosts_path: Option<&Path>,
+    abort_flag: Option<&AtomicBool>,
+) -> Result<Arc<Mutex<ConnectedSftp>>, RemoteFsError> {
+    connect_sftp_inner(request, pool, known_hosts_path, abort_flag)
         .map_err(RemoteFsError::from_connection_error)
 }
 
@@ -61,6 +70,7 @@ fn connect_sftp_inner(
     request: &RemoteConnectionRequest,
     pool: Option<&SftpPool>,
     known_hosts_path: Option<&Path>,
+    abort_flag: Option<&AtomicBool>,
 ) -> Result<Arc<Mutex<ConnectedSftp>>, ConnectionError> {
     validate_connection_fields(&request.host, &request.username)
         .map_err(|message| ConnectionError::Other { message })?;
@@ -76,26 +86,60 @@ fn connect_sftp_inner(
     );
 
     if let Some(pool) = pool {
-        if let Some(cached) = pool.get(request) {
+        let lookup_cached = || match abort_flag {
+            Some(_) => pool.get_with_abort(request, abort_flag),
+            None => Ok(pool.get(request)),
+        };
+        if let Some(cached) = lookup_cached()? {
             return Ok(cached);
-        }
+        };
+        ensure_sftp_connect_not_aborted(abort_flag)?;
         // Deduplicate concurrent handshakes: one caller leads, the rest wait.
         let key = connection_key(request);
         return match pool.begin_connect(&key) {
             // The guard must stay bound across the handshake: if
             // create_sftp_connection panics, dropping it fails the slot so
             // followers do not wait forever.
-            ConnectClaim::Leader(_guard) => {
-                let result = create_sftp_connection(request, known_hosts_path);
-                pool.finish_connect(&key, result)
+            ConnectClaim::Leader(guard) => {
+                // Close the get-miss/begin-connect race: another leader can
+                // finish after our first lookup but before this claim. Recheck
+                // while our slot prevents any new leader from starting, then
+                // publish that cached connection to followers instead of
+                // performing a redundant handshake. Once leadership is
+                // claimed, complete a genuinely needed handshake even if this
+                // caller becomes stale: a current follower may already depend
+                // on the same reusable result and must not inherit the stale
+                // caller's cancellation.
+                let result = reuse_raced_pool_entry_or_connect(pool.get(request), || {
+                    create_sftp_connection(request, known_hosts_path)
+                });
+                pool.finish_connect(&guard, result)
             }
-            ConnectClaim::Follower(slot) => pool
-                .wait_connect(&key, slot)
-                .map_err(|message| ConnectionError::Other { message }),
+            ConnectClaim::Follower(slot) => pool.wait_connect(&key, slot, abort_flag),
         };
     }
 
+    ensure_sftp_connect_not_aborted(abort_flag)?;
     create_sftp_connection(request, known_hosts_path)
+}
+
+fn reuse_raced_pool_entry_or_connect<T, E>(
+    cached: Option<T>,
+    connect: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    match cached {
+        Some(cached) => Ok(cached),
+        None => connect(),
+    }
+}
+
+fn ensure_sftp_connect_not_aborted(abort_flag: Option<&AtomicBool>) -> Result<(), ConnectionError> {
+    if abort_flag.is_some_and(|flag| flag.load(AtomicOrdering::SeqCst)) {
+        return Err(ConnectionError::Other {
+            message: SFTP_POOL_GET_ABORTED_MESSAGE.to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn create_sftp_connection(
@@ -446,6 +490,7 @@ fn verify_session_host_key(
             HostKeyCheckStatus::Mismatch => Err(ConnectionError::HostKeyMismatch {
                 host: host.to_string(),
                 port,
+                fingerprint: result.fingerprint,
             }),
             _ => Err(ConnectionError::Other {
                 message: result
@@ -1271,6 +1316,36 @@ mod tests {
             expect_shared(connect_sftp(request, Some(pool), None));
         }
         let _ = dummy_call;
+    }
+
+    #[test]
+    fn leader_recheck_reuses_a_connection_that_won_the_initial_miss_race() {
+        let connect_calls = std::cell::Cell::new(0);
+
+        let result = reuse_raced_pool_entry_or_connect(Some("pooled"), || {
+            connect_calls.set(connect_calls.get() + 1);
+            Ok::<_, ()>("new")
+        });
+
+        assert_eq!(result, Ok("pooled"));
+        assert_eq!(
+            connect_calls.get(),
+            0,
+            "race winner triggered another handshake"
+        );
+    }
+
+    #[test]
+    fn leader_recheck_connects_once_when_the_pool_is_still_empty() {
+        let connect_calls = std::cell::Cell::new(0);
+
+        let result = reuse_raced_pool_entry_or_connect(None, || {
+            connect_calls.set(connect_calls.get() + 1);
+            Ok::<_, ()>("new")
+        });
+
+        assert_eq!(result, Ok("new"));
+        assert_eq!(connect_calls.get(), 1);
     }
 
     #[test]
