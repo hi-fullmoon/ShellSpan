@@ -136,11 +136,18 @@ describe('NewSessionDialog', () => {
     expect(
       screen.getByRole('heading', { name: 'terminal.newSession.title' }),
     ).toBeInTheDocument();
+    const searchInput = screen.getByPlaceholderText(
+      'terminal.newSession.searchPlaceholder',
+    );
     await waitFor(() => {
-      expect(
-        screen.getByPlaceholderText('terminal.newSession.searchPlaceholder'),
-      ).toHaveFocus();
+      expect(searchInput).toHaveFocus();
     });
+    expect(searchInput.parentElement).toHaveClass(
+      'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
+    );
+    expect(searchInput.parentElement).not.toHaveClass(
+      'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
+    );
   });
 
   it('navigates with arrow keys and connects on enter', () => {
