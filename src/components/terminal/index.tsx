@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { terminalRegistry } from './registry/terminal-registry';
 import { TerminalControllerLayer } from './terminal-controller-layer';
 import { TerminalTabBar } from './terminal-tab-bar';
+import { TerminalTabSwitcher } from './terminal-tab-switcher';
 import { TerminalPane } from './terminal-pane';
 import { NewSessionDialog } from './new-session-dialog';
 import { TerminalContextMenu } from './terminal-context-menu';
@@ -61,6 +62,7 @@ const Terminal: React.FC = () => {
   const { connect, openLocal } = useConnectSession();
 
   const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
+  const [tabSwitcherOpen, setTabSwitcherOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     session: TerminalSession;
     x: number;
@@ -161,6 +163,14 @@ const Terminal: React.FC = () => {
     const handleNewTabRequest = (): void => setNewSessionDialogOpen((previous) => !previous);
     document.addEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
     return () => document.removeEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
+  }, []);
+
+  useEffect(() => {
+    const handleTabSwitcherRequest = (): void => {
+      if (useTerminalStore.getState().sessions.length > 0) setTabSwitcherOpen(true);
+    };
+    document.addEventListener('termbridge:switch-terminal-tab', handleTabSwitcherRequest);
+    return () => document.removeEventListener('termbridge:switch-terminal-tab', handleTabSwitcherRequest);
   }, []);
 
   // Keep terminal groups in sync when sessions are opened or closed elsewhere.
@@ -445,6 +455,18 @@ const Terminal: React.FC = () => {
     useTerminalStore.getState().setActiveSession(sessionId);
     focusSession(sessionId);
   }, [focusGroup, focusSession]);
+
+  const activateSwitcherTab = useCallback((sessionId: string): void => {
+    const group = split
+      ? getTerminalGroups(split).find((candidate) => candidate.sessionIds.includes(sessionId))
+      : null;
+    if (group) {
+      activateGroupTab(group.id, sessionId);
+      return;
+    }
+    useTerminalStore.getState().setActiveSession(sessionId);
+    focusSession(sessionId);
+  }, [activateGroupTab, focusSession, split]);
 
   // Leader-key pane navigation, dispatched from the xterm key handler in
   // TerminalPane (which already consumed the key, so nothing reaches the pty).
@@ -779,6 +801,13 @@ const Terminal: React.FC = () => {
           onClose={() => setNewSessionDialogOpen(false)}
           onConnect={connect}
           onOpenLocal={openLocal}
+        />
+        <TerminalTabSwitcher
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          open={tabSwitcherOpen}
+          onOpenChange={setTabSwitcherOpen}
+          onSelect={activateSwitcherTab}
         />
       </div>
       <TerminalContextMenu

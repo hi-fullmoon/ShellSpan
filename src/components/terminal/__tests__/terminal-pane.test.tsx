@@ -676,4 +676,26 @@ describe('TerminalPane', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(screen.getByPlaceholderText('terminal.search.placeholder')).toBeInTheDocument();
   });
+
+  it('opens the tab switcher without forwarding its shortcut to the terminal', () => {
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+    const handler = terminal.getCustomKeyEventHandlers()[0];
+    const listener = vi.fn();
+    document.addEventListener('termbridge:switch-terminal-tab', listener);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'o',
+      metaKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(listener).toHaveBeenCalledOnce();
+
+    document.removeEventListener('termbridge:switch-terminal-tab', listener);
+  });
 });
