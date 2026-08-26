@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   invokeCopyLocalPaths,
   invokeCancelRemoteCopy,
@@ -150,6 +151,8 @@ export function useSftpPaneActions(
     downloadRemotePaths,
     openRemoteFile,
     previewRemoteFile,
+    cancelRemoteFileOpen,
+    cancelRemoteFilePreview,
   } = useSftpConnection(connection, side);
   const {
     addOperation,
@@ -158,7 +161,16 @@ export function useSftpPaneActions(
     markOperationFailed,
     markOperationRunning,
     removeOperation,
-  } = useTransferStore();
+  } = useTransferStore(
+    useShallow((state) => ({
+      addOperation: state.addOperation,
+      markOperationCompleted: state.markOperationCompleted,
+      markOperationCancelled: state.markOperationCancelled,
+      markOperationFailed: state.markOperationFailed,
+      markOperationRunning: state.markOperationRunning,
+      removeOperation: state.removeOperation,
+    })),
+  );
   const { error, info, success } = useToast();
   const { t } = useI18n();
 
@@ -177,6 +189,41 @@ export function useSftpPaneActions(
   const [previewTarget, setPreviewTarget] = useState<SftpPreviewTarget | undefined>(undefined);
   const [previewContent, setPreviewContent] = useState<ReadRemoteFileResponse | undefined>(undefined);
   const previewRequestIdRef = useRef(0);
+
+  // Pending remote reads belong to the pane source and exact authentication
+  // generation that started them. Cancel both open and preview work before a
+  // source/credential change; invalidating the preview id also keeps an old
+  // completion from repainting the new pane or surfacing a cancellation toast.
+  useEffect(() => () => {
+    previewRequestIdRef.current += 1;
+    cancelRemoteFileOpen();
+    cancelRemoteFilePreview();
+    setPreviewTarget(undefined);
+    setPreviewContent(undefined);
+  }, [
+    cancelRemoteFileOpen,
+    cancelRemoteFilePreview,
+    connection.id,
+    side,
+    isLocal,
+    remoteConnection.profileId,
+    remoteConnection.host,
+    remoteConnection.port,
+    remoteConnection.username,
+    remoteConnection.authMethod,
+    remoteConnection.password,
+    remoteConnection.keychainKeyId,
+    remoteConnection.privateKeyData,
+    remoteConnection.passphrase,
+    remoteConnection.jumpHost?.host,
+    remoteConnection.jumpHost?.port,
+    remoteConnection.jumpHost?.username,
+    remoteConnection.jumpHost?.authMethod,
+    remoteConnection.jumpHost?.password,
+    remoteConnection.jumpHost?.keychainKeyId,
+    remoteConnection.jumpHost?.privateKeyData,
+    remoteConnection.jumpHost?.passphrase,
+  ]);
 
   const selectedPaths = pane.selectedPaths;
   const selectedEntries = useMemo(
@@ -269,9 +316,10 @@ export function useSftpPaneActions(
 
   const closePreview = useCallback(() => {
     previewRequestIdRef.current += 1;
+    cancelRemoteFilePreview();
     setPreviewTarget(undefined);
     setPreviewContent(undefined);
-  }, []);
+  }, [cancelRemoteFilePreview]);
 
   const onDownload = useCallback(
     async (entry?: FileEntry) => {

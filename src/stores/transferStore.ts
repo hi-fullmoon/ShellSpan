@@ -42,6 +42,7 @@ export interface TransferOperation {
 
 interface TransferState {
   operations: TransferOperation[];
+  pathOccupancyRevision: number;
   addOperation: (operation: TransferOperation) => void;
   updateUpload: (event: UploadProgressEvent) => void;
   updateDownload: (event: DownloadProgressEvent) => void;
@@ -57,8 +58,68 @@ interface TransferState {
   clearCompleted: () => void;
 }
 
+interface TransferProgressUpdate {
+  currentPath?: string;
+  totalBytes?: number;
+  processedBytes?: number;
+  totalSteps: number;
+  completedSteps: number;
+}
+
+interface TransferProgressResult {
+  operations: TransferOperation[];
+  pathOccupancyChanged: boolean;
+}
+
+function updateOperationProgress(
+  operations: TransferOperation[],
+  operationId: string,
+  progress: TransferProgressUpdate,
+): TransferProgressResult {
+  const index = operations.findIndex(
+    (operation) => operation.operationId === operationId,
+  );
+  const operation = operations[index];
+  if (!operation || isStaleProgressEvent(operation)) {
+    return { operations, pathOccupancyChanged: false };
+  }
+
+  const currentPath = progress.currentPath || operation.currentPath;
+  const totalBytes = progress.totalBytes ?? operation.totalBytes;
+  const processedBytes = progress.processedBytes ?? operation.processedBytes;
+  if (
+    currentPath === operation.currentPath &&
+    totalBytes === operation.totalBytes &&
+    processedBytes === operation.processedBytes &&
+    progress.totalSteps === operation.totalSteps &&
+    progress.completedSteps === operation.completedSteps
+  ) {
+    return { operations, pathOccupancyChanged: false };
+  }
+
+  const next = operations.slice();
+  const updatedOperation: TransferOperation = {
+    ...operation,
+    currentPath,
+    totalBytes,
+    processedBytes,
+    totalSteps: progress.totalSteps,
+    completedSteps: progress.completedSteps,
+  };
+  next[index] = updatedOperation;
+  return {
+    operations: next,
+    pathOccupancyChanged:
+      isTransferActive(operation) !== isTransferActive(updatedOperation),
+  };
+}
+
 export const useTransferStore = create<TransferState>()((set) => ({
   operations: [],
+  // Queue consumers subscribe to this revision so ordinary byte/step updates
+  // do not rescan every queued scope. A final counter snapshot still bumps it
+  // when the existing completion rules release path ownership.
+  pathOccupancyRevision: 0,
   addOperation: (operation) => {
     logger.info(`Transfer started: ${operation.kind} (${operation.operationId})`);
     set((state) => ({
@@ -69,51 +130,70 @@ export const useTransferStore = create<TransferState>()((set) => ({
             o.operationId === operation.operationId ? { ...o, ...operation } : o,
           )
         : [operation, ...state.operations],
+      pathOccupancyRevision: state.pathOccupancyRevision + 1,
     }));
   },
   updateUpload: (event) =>
-    set((state) => ({
-      operations: state.operations.map((op) =>
-        op.operationId === event.operationId && !isStaleProgressEvent(op)
-          ? {
-              ...op,
-              currentPath: event.currentPath || op.currentPath,
-              totalBytes: event.totalBytes,
-              processedBytes: event.uploadedBytes,
-              totalSteps: event.totalSteps,
-              completedSteps: event.completedSteps,
-            }
-          : op,
-      ),
-    })),
+    set((state) => {
+      const result = updateOperationProgress(
+        state.operations,
+        event.operationId,
+        {
+          currentPath: event.currentPath,
+          totalBytes: event.totalBytes,
+          processedBytes: event.uploadedBytes,
+          totalSteps: event.totalSteps,
+          completedSteps: event.completedSteps,
+        },
+      );
+      if (result.operations === state.operations) return state;
+      return {
+        operations: result.operations,
+        pathOccupancyRevision: result.pathOccupancyChanged
+          ? state.pathOccupancyRevision + 1
+          : state.pathOccupancyRevision,
+      };
+    }),
   updateDownload: (event) =>
-    set((state) => ({
-      operations: state.operations.map((op) =>
-        op.operationId === event.operationId && !isStaleProgressEvent(op)
-          ? {
-              ...op,
-              currentPath: event.currentPath || op.currentPath,
-              totalBytes: event.totalBytes,
-              processedBytes: event.downloadedBytes,
-              totalSteps: event.totalSteps,
-              completedSteps: event.completedSteps,
-            }
-          : op,
-      ),
-    })),
+    set((state) => {
+      const result = updateOperationProgress(
+        state.operations,
+        event.operationId,
+        {
+          currentPath: event.currentPath,
+          totalBytes: event.totalBytes,
+          processedBytes: event.downloadedBytes,
+          totalSteps: event.totalSteps,
+          completedSteps: event.completedSteps,
+        },
+      );
+      if (result.operations === state.operations) return state;
+      return {
+        operations: result.operations,
+        pathOccupancyRevision: result.pathOccupancyChanged
+          ? state.pathOccupancyRevision + 1
+          : state.pathOccupancyRevision,
+      };
+    }),
   updateDelete: (event) =>
-    set((state) => ({
-      operations: state.operations.map((op) =>
-        op.operationId === event.operationId && !isStaleProgressEvent(op)
-          ? {
-              ...op,
-              currentPath: event.currentPath || op.currentPath,
-              totalSteps: event.totalSteps,
-              completedSteps: event.completedSteps,
-            }
-          : op,
-      ),
-    })),
+    set((state) => {
+      const result = updateOperationProgress(
+        state.operations,
+        event.operationId,
+        {
+          currentPath: event.currentPath,
+          totalSteps: event.totalSteps,
+          completedSteps: event.completedSteps,
+        },
+      );
+      if (result.operations === state.operations) return state;
+      return {
+        operations: result.operations,
+        pathOccupancyRevision: result.pathOccupancyChanged
+          ? state.pathOccupancyRevision + 1
+          : state.pathOccupancyRevision,
+      };
+    }),
   removeOperation: (operationId) => {
     const operation = useTransferStore.getState().operations.find(
       (item) => item.operationId === operationId,
@@ -124,6 +204,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
       operations: state.operations.filter(
         (o) => o.operationId !== operationId,
       ),
+      pathOccupancyRevision: state.pathOccupancyRevision + 1,
     }));
   },
   markOperationRunning: (operationId) =>
@@ -133,6 +214,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
           ? { ...operation, status: 'running', error: undefined, errorCategory: undefined }
           : operation,
       ),
+      pathOccupancyRevision: state.pathOccupancyRevision + 1,
     })),
   markOperationFailed: (operationId, error) => {
     logger.error(`Transfer failed: ${operationId}`, error);
@@ -142,23 +224,30 @@ export const useTransferStore = create<TransferState>()((set) => ({
           ? { ...operation, status: 'failed', error, errorCategory: classifyError(error).category }
           : operation,
       ),
+      pathOccupancyRevision: state.pathOccupancyRevision + 1,
     }));
   },
   updateRemoteCopy: (event) =>
-    set((state) => ({
-      operations: state.operations.map((op) =>
-        op.operationId === event.operationId && !isStaleProgressEvent(op)
-          ? {
-              ...op,
-              currentPath: event.currentPath || op.currentPath,
-              totalBytes: event.totalBytes,
-              processedBytes: event.copiedBytes,
-              totalSteps: event.totalSteps,
-              completedSteps: event.completedSteps,
-            }
-          : op,
-      ),
-    })),
+    set((state) => {
+      const result = updateOperationProgress(
+        state.operations,
+        event.operationId,
+        {
+          currentPath: event.currentPath,
+          totalBytes: event.totalBytes,
+          processedBytes: event.copiedBytes,
+          totalSteps: event.totalSteps,
+          completedSteps: event.completedSteps,
+        },
+      );
+      if (result.operations === state.operations) return state;
+      return {
+        operations: result.operations,
+        pathOccupancyRevision: result.pathOccupancyChanged
+          ? state.pathOccupancyRevision + 1
+          : state.pathOccupancyRevision,
+      };
+    }),
   markOperationCompleted: (operationId) => {
     logger.info(`Transfer completed: ${operationId}`);
     set((state) => ({
@@ -174,6 +263,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
             }
           : operation,
       ),
+      pathOccupancyRevision: state.pathOccupancyRevision + 1,
     }));
   },
   markOperationCancelled: (operationId) => {
@@ -184,6 +274,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
           ? { ...operation, status: 'cancelled', error: undefined, errorCategory: undefined }
           : operation,
       ),
+      pathOccupancyRevision: state.pathOccupancyRevision + 1,
     }));
   },
   retryOperation: async (operationId) => {
@@ -264,11 +355,16 @@ export const useTransferStore = create<TransferState>()((set) => ({
     }
   },
   clearCompleted: () =>
-    set((state) => ({
-      operations: state.operations.filter(
-        (o) => o.totalSteps === 0 || o.completedSteps < o.totalSteps,
-      ),
-    })),
+    set((state) => {
+      const operations = state.operations.filter(
+        (operation) => !isTransferComplete(operation),
+      );
+      if (operations.length === state.operations.length) return state;
+      return {
+        operations,
+        pathOccupancyRevision: state.pathOccupancyRevision + 1,
+      };
+    }),
 }));
 
 export function isTransferComplete(operation: TransferOperation): boolean {
@@ -433,9 +529,13 @@ function drainPathOperations(): void {
 }
 
 // Active transfer state is one of the conditions that can release the head of
-// the path queue. The subscription is module-scoped so callers do not need to
-// keep a React component mounted while they wait.
-useTransferStore.subscribe(drainPathOperations);
+// the path queue. Nonterminal progress snapshots leave the revision unchanged,
+// so they do not trigger a full queued-scope scan.
+useTransferStore.subscribe((state, previousState) => {
+  if (state.pathOccupancyRevision !== previousState.pathOccupancyRevision) {
+    drainPathOperations();
+  }
+});
 
 /**
  * Runs a task while owning all supplied path scopes. Overlapping tasks are
@@ -526,10 +626,15 @@ export function waitForPathIdle(scopes: PathOperationScope[]): Promise<void> {
   const isIdle = () =>
     !scopes.some((scope) =>
       scopeHasActiveOperation(scope, useTransferStore.getState().operations),
-    );
+  );
   if (isIdle()) return Promise.resolve();
   return new Promise((resolve) => {
-    const unsubscribe = useTransferStore.subscribe(() => {
+    const unsubscribe = useTransferStore.subscribe((state, previousState) => {
+      if (
+        state.pathOccupancyRevision === previousState.pathOccupancyRevision
+      ) {
+        return;
+      }
       if (isIdle()) {
         unsubscribe();
         resolve();

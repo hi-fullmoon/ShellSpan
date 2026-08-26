@@ -60,10 +60,7 @@ export function useConnectSession(): {
         openHostKeyPrompt({
           host,
           port,
-          fingerprint:
-            typed.type === 'HostKeyUnknown' && payload.fingerprint
-              ? String(payload.fingerprint)
-              : undefined,
+          fingerprint: payload.fingerprint ? String(payload.fingerprint) : undefined,
           mismatch: typed.type === 'HostKeyMismatch',
           onTrusted: retry,
         });

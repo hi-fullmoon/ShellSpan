@@ -71,6 +71,26 @@ import type {
 } from '@/types/runbook';
 
 const logger = createLogger('ipc');
+const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
+const REMOTE_FILE_READ_CANCELLED_MESSAGE = 'remote file read cancelled';
+
+function isSupersededDirectoryRequest(cmd: string, error: unknown): boolean {
+  if (cmd !== 'list_remote_directory' && cmd !== 'resolve_remote_entry_owners') {
+    return false;
+  }
+  const parsed = parseRemoteFsError(error);
+  return parsed?.type === 'Other'
+    && parsed.payload.message === DIRECTORY_REQUEST_SUPERSEDED_MESSAGE;
+}
+
+function isCancelledRemoteFileRead(cmd: string, error: unknown): boolean {
+  if (cmd !== 'open_remote_file' && cmd !== 'preview_remote_file') {
+    return false;
+  }
+  const parsed = parseRemoteFsError(error);
+  return parsed?.type === 'Other'
+    && parsed.payload.message === REMOTE_FILE_READ_CANCELLED_MESSAGE;
+}
 
 async function invokeLogged<T>(
   cmd: string,
@@ -86,6 +106,14 @@ async function invokeLogged<T>(
     await recordInvocationFinished(history, result);
     return result;
   } catch (error) {
+    if (isSupersededDirectoryRequest(cmd, error)) {
+      logger.debug(`invoke ${cmd} superseded operation_id=${operationId}`);
+      throw error;
+    }
+    if (isCancelledRemoteFileRead(cmd, error)) {
+      logger.debug(`invoke ${cmd} cancelled operation_id=${operationId}`);
+      throw error;
+    }
     logger.error(`invoke ${cmd} failed operation_id=${operationId}`, error);
     await recordInvocationFailed(history, error);
     throw error;
@@ -189,6 +217,13 @@ export async function invokeListRemoteDirectory(
   request: RemoteDirectoryRequest,
 ): Promise<RemoteDirectoryListing> {
   return invokeLogged('list_remote_directory', { request });
+}
+
+export async function invokeSupersedeRemoteDirectoryRequest(
+  requestKey: string,
+  requestId: number,
+): Promise<void> {
+  return invokeLogged('supersede_remote_directory_request', { requestKey, requestId });
 }
 
 export async function invokeResolveRemoteEntryOwners(
@@ -301,6 +336,10 @@ export async function invokePreviewRemoteFile(
   return invokeLogged('preview_remote_file', { request });
 }
 
+export async function invokeCancelRemoteFileRead(operationId: string): Promise<void> {
+  return invokeLogged('cancel_remote_file_read', { operationId });
+}
+
 export async function invokePreviewLocalFile(
   path: string,
 ): Promise<ReadRemoteFileResponse> {
@@ -338,8 +377,14 @@ export async function invokeCancelConnectionPreflight(operationId: string): Prom
   return invokeLogged('cancel_connection_preflight', { operationId });
 }
 
-export async function invokeTrustHost(host: string, port: number): Promise<void> {
-  return invokeLogged('trust_host', { request: { host, port } });
+export async function invokeTrustHost(
+  host: string,
+  port: number,
+  expectedFingerprint: string,
+): Promise<void> {
+  return invokeLogged('trust_host', {
+    request: { host, port, expectedFingerprint },
+  });
 }
 
 export async function invokeListKnownHosts(): Promise<KnownHostEntry[]> {
