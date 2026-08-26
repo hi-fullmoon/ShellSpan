@@ -1,9 +1,8 @@
 use crate::models::{CopyLocalPathsRequest, ReadRemoteFileResponse, UploadConflictPolicy};
 use crate::path_utils::portable_local_path;
 use crate::remote_fs::{
-    decode_preview_text, preview_extension_requires_binary,
-    preview_extension_requires_complete_file, PREVIEW_COMPLETE_FILE_SIZE_LIMIT,
-    PREVIEW_TEXT_PREFIX_SIZE_LIMIT,
+    decode_file_preview_text, preview_extension_requires_complete_file,
+    PREVIEW_COMPLETE_FILE_SIZE_LIMIT, PREVIEW_TEXT_PREFIX_SIZE_LIMIT,
 };
 use base64::Engine;
 use std::collections::HashSet;
@@ -69,11 +68,7 @@ pub(crate) fn read_local_file_blocking(path: String) -> Result<ReadRemoteFileRes
         truncated = true;
     }
 
-    let decoded_text = if preview_extension_requires_binary(&file_name) {
-        None
-    } else {
-        decode_preview_text(&buffer, truncated)
-    };
+    let decoded_text = decode_file_preview_text(&file_name, &buffer, truncated);
     let (content, is_text, content_encoding) = match decoded_text {
         Some(text) => (text, true, "utf8".to_string()),
         None => (
