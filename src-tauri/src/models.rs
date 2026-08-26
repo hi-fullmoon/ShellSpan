@@ -1,13 +1,14 @@
+use crossbeam_channel::Sender as EventSender;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use ssh2::{Session, Sftp};
 use std::{
     cell::Cell,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering as AtomicOrdering},
-        mpsc::Sender,
+        mpsc::Sender as StandardSender,
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -212,6 +213,8 @@ pub(crate) struct RemoteDirectoryRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,
     pub(crate) path: Option<String>,
+    pub(crate) request_key: String,
+    pub(crate) request_id: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,6 +222,8 @@ pub(crate) struct RemoteDirectoryRequest {
 pub(crate) struct RemoteEntryOwnersRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,
+    pub(crate) request_key: String,
+    pub(crate) request_id: u64,
     #[serde(default)]
     pub(crate) owner_ids: Vec<u32>,
     #[serde(default)]
@@ -284,6 +289,7 @@ pub(crate) struct OpenRemoteFileRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,
     pub(crate) path: String,
+    pub(crate) operation_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -301,6 +307,7 @@ pub(crate) struct ReadRemoteFileRequest {
     #[serde(flatten)]
     pub(crate) connection: RemoteConnectionRequest,
     pub(crate) path: String,
+    pub(crate) operation_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -432,6 +439,8 @@ pub(crate) enum CreateSessionError {
     HostKeyMismatch {
         host: String,
         port: u16,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fingerprint: Option<String>,
     },
     Other {
         message: String,
@@ -451,6 +460,8 @@ pub(crate) enum SessionErrorEvent {
         session_id: String,
         host: String,
         port: u16,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fingerprint: Option<String>,
     },
 }
 
@@ -466,6 +477,7 @@ pub(crate) enum ConnectionError {
     HostKeyMismatch {
         host: String,
         port: u16,
+        fingerprint: Option<String>,
     },
     Other {
         message: String,
@@ -480,7 +492,7 @@ impl ConnectionError {
                     "host key for {host}:{port} is not known — trust this host before connecting"
                 )
             }
-            ConnectionError::HostKeyMismatch { host, port } => {
+            ConnectionError::HostKeyMismatch { host, port, .. } => {
                 format!("host key for {host}:{port} does not match the known key — possible man-in-the-middle attack")
             }
             ConnectionError::Other { message } => message.clone(),
@@ -500,12 +512,15 @@ impl ConnectionError {
                 port: *port,
                 fingerprint: fingerprint.clone(),
             },
-            ConnectionError::HostKeyMismatch { host, port } => {
-                CreateSessionError::HostKeyMismatch {
-                    host: host.clone(),
-                    port: *port,
-                }
-            }
+            ConnectionError::HostKeyMismatch {
+                host,
+                port,
+                fingerprint,
+            } => CreateSessionError::HostKeyMismatch {
+                host: host.clone(),
+                port: *port,
+                fingerprint: fingerprint.clone(),
+            },
             ConnectionError::Other { message } => CreateSessionError::Other {
                 message: message.clone(),
             },
@@ -526,6 +541,8 @@ pub(crate) enum RemoteFsError {
     HostKeyMismatch {
         host: String,
         port: u16,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fingerprint: Option<String>,
     },
     Other {
         message: String,
@@ -544,9 +561,15 @@ impl RemoteFsError {
                 port,
                 fingerprint,
             },
-            ConnectionError::HostKeyMismatch { host, port } => {
-                RemoteFsError::HostKeyMismatch { host, port }
-            }
+            ConnectionError::HostKeyMismatch {
+                host,
+                port,
+                fingerprint,
+            } => RemoteFsError::HostKeyMismatch {
+                host,
+                port,
+                fingerprint,
+            },
             ConnectionError::Other { message } => RemoteFsError::Other { message },
         }
     }
@@ -574,10 +597,24 @@ mod create_session_error_tests {
         let error = CreateSessionError::HostKeyMismatch {
             host: "example.com".to_string(),
             port: 22,
+            fingerprint: None,
         };
         assert_eq!(
             serde_json::to_string(&error).unwrap(),
             r#"{"type":"HostKeyMismatch","payload":{"host":"example.com","port":22}}"#
+        );
+    }
+
+    #[test]
+    fn host_key_mismatch_preserves_the_presented_fingerprint() {
+        let error = CreateSessionError::HostKeyMismatch {
+            host: "example.com".to_string(),
+            port: 22,
+            fingerprint: Some("ED25519 SHA256:changed".to_string()),
+        };
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"type":"HostKeyMismatch","payload":{"host":"example.com","port":22,"fingerprint":"ED25519 SHA256:changed"}}"#
         );
     }
 }
@@ -587,6 +624,7 @@ mod create_session_error_tests {
 pub(crate) struct TrustHostRequest {
     pub(crate) host: String,
     pub(crate) port: u16,
+    pub(crate) expected_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -818,18 +856,37 @@ pub(crate) enum SessionCommand {
     Close,
 }
 
+pub(crate) enum SessionCommandSender {
+    Standard(StandardSender<SessionCommand>),
+    Event(EventSender<SessionCommand>),
+}
+
+impl SessionCommandSender {
+    fn send(&self, command: SessionCommand) -> Result<(), ()> {
+        match self {
+            Self::Standard(sender) => sender.send(command).map_err(|_| ()),
+            Self::Event(sender) => sender.send(command).map_err(|_| ()),
+        }
+    }
+}
+
 pub(crate) struct ManagedSession {
-    pub(crate) sender: Sender<SessionCommand>,
+    pub(crate) sender: SessionCommandSender,
     /// Poked after each enqueued command so an event-driven session worker
-    /// wakes from its idle poll immediately. Local sessions poll their command
-    /// channel on a timer instead and leave this empty.
+    /// wakes from its idle socket wait immediately. Local sessions select on
+    /// their command channel directly and leave this empty.
     pub(crate) waker: Option<crate::session::SessionWaker>,
+    /// Local workers block in a channel select rather than on the SSH socket.
+    /// A capacity-one notification coalesces ready/pause/resume changes while
+    /// still waking an idle local worker immediately.
+    pub(crate) output_state_sender: Option<EventSender<()>>,
     pub(crate) status: StatusEvent,
     /// Signals that the frontend has attached its event listeners, so the
     /// session worker may emit output live instead of buffering it.
     pub(crate) output_ready: Arc<AtomicBool>,
     /// Set by the frontend when xterm's parser backlog crosses its high
-    /// watermark. Workers stop reading their PTY until the backlog drains.
+    /// watermark. Remote workers stop reading; local workers stop draining
+    /// their bounded reader queue until the backlog drains.
     pub(crate) output_paused: Arc<AtomicBool>,
 }
 
@@ -927,6 +984,140 @@ cancellation_registry!(PreflightCancellationRegistry, "connection preflight");
 cancellation_registry!(RemoteHealthCancellationRegistry, "remote health snapshot");
 cancellation_registry!(RunbookCancellationRegistry, "runbook step");
 
+pub(crate) const REMOTE_FILE_READ_CANCELLED_MESSAGE: &str = "remote file read cancelled";
+const REMOTE_FILE_READ_CANCELLATION_TOMBSTONE_LIMIT: usize = 1_024;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RemoteFileReadCancellationTombstoneKind {
+    PendingCancel,
+    Completed,
+}
+
+#[derive(Clone, Copy)]
+struct RemoteFileReadCancellationTombstone {
+    kind: RemoteFileReadCancellationTombstoneKind,
+    generation: u64,
+}
+
+#[derive(Default)]
+struct RemoteFileReadCancellationState {
+    active: HashMap<String, Arc<AtomicBool>>,
+    tombstones: HashMap<String, RemoteFileReadCancellationTombstone>,
+    tombstone_order: VecDeque<(String, u64)>,
+    next_generation: u64,
+}
+
+/// Cancellation state for one-shot remote open/preview reads.
+///
+/// Unlike the transfer registries, cancellation can race ahead of command
+/// registration when a preview is closed immediately after it starts. A
+/// bounded pending tombstone carries that cancellation into `register`.
+/// Completed tombstones make late/repeated cancellation idempotent without
+/// turning it into a pending cancellation for an already-finished read.
+#[derive(Default)]
+pub(crate) struct RemoteFileReadCancellationRegistry {
+    state: Mutex<RemoteFileReadCancellationState>,
+}
+
+impl RemoteFileReadCancellationRegistry {
+    fn remember_tombstone(
+        state: &mut RemoteFileReadCancellationState,
+        operation_id: String,
+        kind: RemoteFileReadCancellationTombstoneKind,
+    ) {
+        state.next_generation = state.next_generation.wrapping_add(1).max(1);
+        let generation = state.next_generation;
+        state.tombstones.insert(
+            operation_id.clone(),
+            RemoteFileReadCancellationTombstone { kind, generation },
+        );
+        state.tombstone_order.push_back((operation_id, generation));
+
+        while state.tombstone_order.len() > REMOTE_FILE_READ_CANCELLATION_TOMBSTONE_LIMIT {
+            let Some((old_operation_id, old_generation)) = state.tombstone_order.pop_front() else {
+                break;
+            };
+            if state
+                .tombstones
+                .get(&old_operation_id)
+                .is_some_and(|entry| entry.generation == old_generation)
+            {
+                state.tombstones.remove(&old_operation_id);
+            }
+        }
+    }
+
+    pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "remote file read cancellation registry poisoned".to_string())?;
+        let cancelled_before_registration =
+            state.tombstones.remove(&operation_id).is_some_and(|entry| {
+                entry.kind == RemoteFileReadCancellationTombstoneKind::PendingCancel
+            });
+        let flag = Arc::new(AtomicBool::new(cancelled_before_registration));
+        if let Some(previous) = state.active.insert(operation_id.clone(), flag.clone()) {
+            warn!(
+                "remote file read cancellation registry: duplicate operation_id {operation_id}, cancelling previous registration"
+            );
+            previous.store(true, AtomicOrdering::SeqCst);
+        }
+        Ok(flag)
+    }
+
+    pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "remote file read cancellation registry poisoned".to_string())?;
+        if let Some(flag) = state.active.get(operation_id) {
+            flag.store(true, AtomicOrdering::SeqCst);
+            return Ok(());
+        }
+        if state.tombstones.contains_key(operation_id) {
+            return Ok(());
+        }
+        Self::remember_tombstone(
+            &mut state,
+            operation_id.to_string(),
+            RemoteFileReadCancellationTombstoneKind::PendingCancel,
+        );
+        Ok(())
+    }
+
+    pub(crate) fn remove(
+        &self,
+        operation_id: &str,
+        registered_flag: &Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "remote file read cancellation registry poisoned".to_string())?;
+        let is_current_registration = state
+            .active
+            .get(operation_id)
+            .is_some_and(|active_flag| Arc::ptr_eq(active_flag, registered_flag));
+        if !is_current_registration {
+            return Ok(());
+        }
+        state.active.remove(operation_id);
+        if !state
+            .tombstones
+            .get(operation_id)
+            .is_some_and(|entry| entry.kind == RemoteFileReadCancellationTombstoneKind::Completed)
+        {
+            Self::remember_tombstone(
+                &mut state,
+                operation_id.to_string(),
+                RemoteFileReadCancellationTombstoneKind::Completed,
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default, Clone, Copy)]
 pub(crate) struct DownloadScanStats {
     pub(crate) total_bytes: u64,
@@ -935,8 +1126,8 @@ pub(crate) struct DownloadScanStats {
 
 impl DownloadScanStats {
     pub(crate) fn combine(&mut self, other: DownloadScanStats) {
-        self.total_bytes += other.total_bytes;
-        self.total_steps += other.total_steps;
+        self.total_bytes = self.total_bytes.saturating_add(other.total_bytes);
+        self.total_steps = self.total_steps.saturating_add(other.total_steps);
     }
 }
 
@@ -949,15 +1140,55 @@ pub(crate) struct DownloadProgressTracker {
     downloaded_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
-    last_emitted_at: Cell<Option<Instant>>,
+    emit_state: ProgressEmitState,
 }
 
-/// Minimum interval between byte-progress events. Step boundaries, path
-/// changes, and completion still emit immediately.
+/// Minimum interval between coalesced progress snapshots. The trackers retain
+/// their latest counters/path while the interval is closed, then emit that
+/// latest state on the next eligible update or a forced final/cancel flush.
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 
-fn should_emit_progress(last_emitted_at: Option<Instant>) -> bool {
-    last_emitted_at.is_none_or(|instant| instant.elapsed() >= PROGRESS_EMIT_INTERVAL)
+fn should_emit_progress(last_emitted_at: Option<Instant>, now: Instant, force: bool) -> bool {
+    force
+        || last_emitted_at
+            .is_none_or(|instant| now.saturating_duration_since(instant) >= PROGRESS_EMIT_INTERVAL)
+}
+
+fn crossed_progress_total(previous: u64, current: u64, total: u64) -> bool {
+    total > 0 && previous < total && current >= total
+}
+
+#[derive(Default)]
+struct ProgressEmitState {
+    last_emitted_at: Cell<Option<Instant>>,
+    dirty: Cell<bool>,
+}
+
+impl ProgressEmitState {
+    fn mark_dirty(&self) {
+        self.dirty.set(true);
+    }
+
+    fn should_emit(&self, force: bool) -> bool {
+        self.should_emit_at(Instant::now(), force)
+    }
+
+    fn should_emit_at(&self, now: Instant, force: bool) -> bool {
+        self.dirty.get() && should_emit_progress(self.last_emitted_at.get(), now, force)
+    }
+
+    fn mark_emitted(&self) {
+        self.mark_emitted_at(Instant::now());
+    }
+
+    fn mark_emitted_at(&self, now: Instant) {
+        self.last_emitted_at.set(Some(now));
+        self.dirty.set(false);
+    }
+
+    fn needs_flush(&self) -> bool {
+        self.dirty.get()
+    }
 }
 
 impl DownloadProgressTracker {
@@ -976,40 +1207,54 @@ impl DownloadProgressTracker {
             downloaded_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
-            last_emitted_at: Cell::new(None),
+            emit_state: ProgressEmitState::default(),
         }
     }
 
     pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        let flush = path.is_none();
         self.current_path = path;
-        self.emit()
+        self.emit_state.mark_dirty();
+        self.emit_if_due(flush)
     }
 
     pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
-        self.downloaded_bytes += count;
+        let previous = self.downloaded_bytes;
+        self.downloaded_bytes = self.downloaded_bytes.saturating_add(count);
+        self.emit_state.mark_dirty();
         // Throttled: byte progress emits at most once per
         // PROGRESS_EMIT_INTERVAL, except when the transfer just completed.
-        let completed = self.total_bytes > 0 && self.downloaded_bytes >= self.total_bytes;
-        if completed || should_emit_progress(self.last_emitted_at.get()) {
-            self.emit()?;
-        }
-        Ok(())
+        let completed = crossed_progress_total(previous, self.downloaded_bytes, self.total_bytes);
+        self.emit_if_due(completed)
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
-        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
-        self.emit()
+        let previous = self.completed_steps;
+        self.completed_steps = self.completed_steps.saturating_add(1).min(self.total_steps);
+        self.emit_state.mark_dirty();
+        let completed = crossed_progress_total(previous, self.completed_steps, self.total_steps);
+        self.emit_if_due(completed)
     }
 
     pub(crate) fn ensure_not_cancelled(&self) -> Result<(), String> {
         if self.cancel_flag.load(AtomicOrdering::SeqCst) {
+            if let Err(error) = self.emit() {
+                warn!("failed to flush download progress on cancellation: {error}");
+            }
             return Err("download cancelled".to_string());
         }
         Ok(())
     }
 
+    fn emit_if_due(&self, force: bool) -> Result<(), String> {
+        if self.emit_state.should_emit(force) {
+            self.emit()?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn emit(&self) -> Result<(), String> {
-        self.last_emitted_at.set(Some(Instant::now()));
+        self.emit_state.mark_emitted();
         // A failed progress emit must not abort the transfer; log and continue.
         if let Err(error) = self.app.emit(
             super::DOWNLOAD_PROGRESS_EVENT,
@@ -1028,6 +1273,14 @@ impl DownloadProgressTracker {
     }
 }
 
+impl Drop for DownloadProgressTracker {
+    fn drop(&mut self) {
+        if self.emit_state.needs_flush() {
+            let _ = self.emit();
+        }
+    }
+}
+
 cancellation_registry!(DownloadCancellationRegistry, "download");
 cancellation_registry!(RemoteCopyCancellationRegistry, "remote copy");
 
@@ -1039,8 +1292,8 @@ pub(crate) struct RemoteCopyScanStats {
 
 impl RemoteCopyScanStats {
     pub(crate) fn combine(&mut self, other: RemoteCopyScanStats) {
-        self.total_bytes += other.total_bytes;
-        self.total_steps += other.total_steps;
+        self.total_bytes = self.total_bytes.saturating_add(other.total_bytes);
+        self.total_steps = self.total_steps.saturating_add(other.total_steps);
     }
 }
 
@@ -1053,7 +1306,7 @@ pub(crate) struct RemoteCopyProgressTracker {
     copied_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
-    last_emitted_at: Cell<Option<Instant>>,
+    emit_state: ProgressEmitState,
 }
 
 impl RemoteCopyProgressTracker {
@@ -1072,40 +1325,54 @@ impl RemoteCopyProgressTracker {
             copied_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
-            last_emitted_at: Cell::new(None),
+            emit_state: ProgressEmitState::default(),
         }
     }
 
     pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        let flush = path.is_none();
         self.current_path = path;
-        self.emit()
+        self.emit_state.mark_dirty();
+        self.emit_if_due(flush)
     }
 
     pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
-        self.copied_bytes += count;
+        let previous = self.copied_bytes;
+        self.copied_bytes = self.copied_bytes.saturating_add(count);
+        self.emit_state.mark_dirty();
         // Throttled: byte progress emits at most once per
         // PROGRESS_EMIT_INTERVAL, except when the transfer just completed.
-        let completed = self.total_bytes > 0 && self.copied_bytes >= self.total_bytes;
-        if completed || should_emit_progress(self.last_emitted_at.get()) {
-            self.emit()?;
-        }
-        Ok(())
+        let completed = crossed_progress_total(previous, self.copied_bytes, self.total_bytes);
+        self.emit_if_due(completed)
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
-        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
-        self.emit()
+        let previous = self.completed_steps;
+        self.completed_steps = self.completed_steps.saturating_add(1).min(self.total_steps);
+        self.emit_state.mark_dirty();
+        let completed = crossed_progress_total(previous, self.completed_steps, self.total_steps);
+        self.emit_if_due(completed)
     }
 
     pub(crate) fn ensure_not_cancelled(&self) -> Result<(), String> {
         if self.cancel_flag.load(AtomicOrdering::SeqCst) {
+            if let Err(error) = self.emit() {
+                warn!("failed to flush remote copy progress on cancellation: {error}");
+            }
             return Err("remote copy cancelled".to_string());
         }
         Ok(())
     }
 
+    fn emit_if_due(&self, force: bool) -> Result<(), String> {
+        if self.emit_state.should_emit(force) {
+            self.emit()?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn emit(&self) -> Result<(), String> {
-        self.last_emitted_at.set(Some(Instant::now()));
+        self.emit_state.mark_emitted();
         // A failed progress emit must not abort the transfer; log and continue.
         if let Err(error) = self.app.emit(
             super::REMOTE_COPY_PROGRESS_EVENT,
@@ -1124,6 +1391,14 @@ impl RemoteCopyProgressTracker {
     }
 }
 
+impl Drop for RemoteCopyProgressTracker {
+    fn drop(&mut self) {
+        if self.emit_state.needs_flush() {
+            let _ = self.emit();
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct UploadScanStats {
     pub(crate) total_bytes: u64,
@@ -1132,8 +1407,8 @@ pub(crate) struct UploadScanStats {
 
 impl UploadScanStats {
     pub(crate) fn combine(&mut self, other: UploadScanStats) {
-        self.total_bytes += other.total_bytes;
-        self.total_steps += other.total_steps;
+        self.total_bytes = self.total_bytes.saturating_add(other.total_bytes);
+        self.total_steps = self.total_steps.saturating_add(other.total_steps);
     }
 }
 
@@ -1146,7 +1421,7 @@ pub(crate) struct UploadProgressTracker {
     uploaded_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
-    last_emitted_at: Cell<Option<Instant>>,
+    emit_state: ProgressEmitState,
 }
 
 pub(crate) struct DeleteProgressTracker {
@@ -1156,6 +1431,7 @@ pub(crate) struct DeleteProgressTracker {
     current_path: Option<String>,
     total_steps: u64,
     completed_steps: u64,
+    emit_state: ProgressEmitState,
 }
 
 impl UploadProgressTracker {
@@ -1174,40 +1450,54 @@ impl UploadProgressTracker {
             uploaded_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
-            last_emitted_at: Cell::new(None),
+            emit_state: ProgressEmitState::default(),
         }
     }
 
     pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        let flush = path.is_none();
         self.current_path = path;
-        self.emit()
+        self.emit_state.mark_dirty();
+        self.emit_if_due(flush)
     }
 
     pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
-        self.uploaded_bytes += count;
+        let previous = self.uploaded_bytes;
+        self.uploaded_bytes = self.uploaded_bytes.saturating_add(count);
+        self.emit_state.mark_dirty();
         // Throttled: byte progress emits at most once per
         // PROGRESS_EMIT_INTERVAL, except when the transfer just completed.
-        let completed = self.total_bytes > 0 && self.uploaded_bytes >= self.total_bytes;
-        if completed || should_emit_progress(self.last_emitted_at.get()) {
-            self.emit()?;
-        }
-        Ok(())
+        let completed = crossed_progress_total(previous, self.uploaded_bytes, self.total_bytes);
+        self.emit_if_due(completed)
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
-        self.completed_steps = (self.completed_steps + 1).min(self.total_steps);
-        self.emit()
+        let previous = self.completed_steps;
+        self.completed_steps = self.completed_steps.saturating_add(1).min(self.total_steps);
+        self.emit_state.mark_dirty();
+        let completed = crossed_progress_total(previous, self.completed_steps, self.total_steps);
+        self.emit_if_due(completed)
     }
 
     pub(crate) fn ensure_not_cancelled(&self) -> Result<(), String> {
         if self.cancel_flag.load(AtomicOrdering::SeqCst) {
+            if let Err(error) = self.emit() {
+                warn!("failed to flush upload progress on cancellation: {error}");
+            }
             return Err("upload cancelled".to_string());
         }
         Ok(())
     }
 
+    fn emit_if_due(&self, force: bool) -> Result<(), String> {
+        if self.emit_state.should_emit(force) {
+            self.emit()?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn emit(&self) -> Result<(), String> {
-        self.last_emitted_at.set(Some(Instant::now()));
+        self.emit_state.mark_emitted();
         // A failed progress emit must not abort the transfer; log and continue.
         if let Err(error) = self.app.emit(
             super::UPLOAD_PROGRESS_EVENT,
@@ -1226,6 +1516,14 @@ impl UploadProgressTracker {
     }
 }
 
+impl Drop for UploadProgressTracker {
+    fn drop(&mut self) {
+        if self.emit_state.needs_flush() {
+            let _ = self.emit();
+        }
+    }
+}
+
 impl DeleteProgressTracker {
     pub(crate) fn new(
         app: AppHandle,
@@ -1240,39 +1538,55 @@ impl DeleteProgressTracker {
             current_path: None,
             total_steps,
             completed_steps: 0,
+            emit_state: ProgressEmitState::default(),
         }
     }
 
     pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
+        let flush = path.is_none();
         self.current_path = path;
-        self.emit()
+        self.emit_state.mark_dirty();
+        self.emit_if_due(flush)
     }
 
     pub(crate) fn finish_step(&mut self) -> Result<(), String> {
         // total_steps is 0 until entries are discovered, so only cap when a
         // real total is known.
-        self.completed_steps += 1;
+        self.completed_steps = self.completed_steps.saturating_add(1);
         if self.total_steps > 0 {
             self.completed_steps = self.completed_steps.min(self.total_steps);
         }
-        self.emit()
+        self.emit_state.mark_dirty();
+        self.emit_if_due(false)
     }
 
     // rsync-style growing total: entries are counted as they are discovered
     // during the single-pass walk. No emit here — the next set_current_path /
     // finish_step carries the updated total.
     pub(crate) fn add_steps(&mut self, count: u64) {
-        self.total_steps += count;
+        self.total_steps = self.total_steps.saturating_add(count);
+        self.emit_state.mark_dirty();
     }
 
     pub(crate) fn ensure_not_cancelled(&self) -> Result<(), String> {
         if self.cancel_flag.load(AtomicOrdering::SeqCst) {
+            if let Err(error) = self.emit() {
+                warn!("failed to flush delete progress on cancellation: {error}");
+            }
             return Err("delete cancelled".to_string());
         }
         Ok(())
     }
 
+    fn emit_if_due(&self, force: bool) -> Result<(), String> {
+        if self.emit_state.should_emit(force) {
+            self.emit()?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn emit(&self) -> Result<(), String> {
+        self.emit_state.mark_emitted();
         self.app
             .emit(
                 super::DELETE_PROGRESS_EVENT,
@@ -1284,6 +1598,16 @@ impl DeleteProgressTracker {
                 },
             )
             .map_err(|error| format!("failed to emit delete progress event: {error}"))
+    }
+}
+
+impl Drop for DeleteProgressTracker {
+    fn drop(&mut self) {
+        if self.emit_state.needs_flush() {
+            if let Err(error) = self.emit() {
+                warn!("failed to flush delete progress on drop: {error}");
+            }
+        }
     }
 }
 
@@ -1347,9 +1671,7 @@ impl SessionManager {
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
         managed.output_ready.store(true, AtomicOrdering::Relaxed);
-        if let Some(waker) = managed.waker.as_ref() {
-            waker.wake();
-        }
+        managed.wake_for_output_state_change();
         Ok(())
     }
 
@@ -1362,9 +1684,7 @@ impl SessionManager {
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
         managed.output_paused.store(paused, AtomicOrdering::Relaxed);
-        if let Some(waker) = managed.waker.as_ref() {
-            waker.wake();
-        }
+        managed.wake_for_output_state_change();
         Ok(())
     }
 
@@ -1378,16 +1698,33 @@ impl SessionManager {
     }
 }
 
+impl ManagedSession {
+    fn wake_for_output_state_change(&self) {
+        if let Some(sender) = self.output_state_sender.as_ref() {
+            // The flag itself is authoritative. A full queue already contains
+            // a wakeup, so coalescing this notification cannot lose state.
+            let _ = sender.try_send(());
+        } else if let Some(waker) = self.waker.as_ref() {
+            waker.wake();
+        }
+    }
+}
+
 #[cfg(test)]
 mod session_manager_tests {
-    use super::{ManagedSession, SessionCommand, SessionManager, SessionStatus, StatusEvent};
+    use super::{
+        ManagedSession, SessionCommand, SessionCommandSender, SessionManager, SessionStatus,
+        StatusEvent,
+    };
+    use crossbeam_channel::{bounded, unbounded, Sender as EventSender};
     use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-    use std::sync::{mpsc, Arc};
+    use std::sync::Arc;
 
-    fn managed_session(sender: mpsc::Sender<SessionCommand>) -> ManagedSession {
+    fn managed_session(sender: EventSender<SessionCommand>) -> ManagedSession {
         ManagedSession {
-            sender,
+            sender: SessionCommandSender::Event(sender),
             waker: None,
+            output_state_sender: None,
             status: StatusEvent {
                 session_id: "local-1".to_string(),
                 status: SessionStatus::Connecting,
@@ -1401,7 +1738,7 @@ mod session_manager_tests {
     #[test]
     fn stores_and_updates_latest_session_status() {
         let manager = SessionManager::default();
-        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
         manager
             .insert("local-1".to_string(), managed_session(sender))
             .unwrap();
@@ -1425,7 +1762,7 @@ mod session_manager_tests {
     #[test]
     fn mark_output_ready_flips_the_session_flag() {
         let manager = SessionManager::default();
-        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
         let managed = managed_session(sender);
         let flag = managed.output_ready.clone();
         manager.insert("local-1".to_string(), managed).unwrap();
@@ -1439,7 +1776,7 @@ mod session_manager_tests {
     #[test]
     fn set_output_paused_updates_the_session_flag() {
         let manager = SessionManager::default();
-        let (sender, _receiver) = mpsc::channel::<SessionCommand>();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
         let managed = managed_session(sender);
         let flag = managed.output_paused.clone();
         manager.insert("local-1".to_string(), managed).unwrap();
@@ -1450,13 +1787,33 @@ mod session_manager_tests {
         assert!(!flag.load(AtomicOrdering::Relaxed));
         assert!(manager.set_output_paused("missing", true).is_err());
     }
+
+    #[test]
+    fn local_output_state_changes_coalesce_into_a_bounded_wakeup() {
+        let manager = SessionManager::default();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
+        let (state_sender, state_receiver) = bounded(1);
+        let mut managed = managed_session(sender);
+        managed.output_state_sender = Some(state_sender);
+        manager.insert("local-1".to_string(), managed).unwrap();
+
+        manager.mark_output_ready("local-1").unwrap();
+        manager.set_output_paused("local-1", true).unwrap();
+        manager.set_output_paused("local-1", false).unwrap();
+
+        assert_eq!(state_receiver.len(), 1);
+        state_receiver.recv().unwrap();
+        assert!(state_receiver.try_recv().is_err());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        should_emit_progress, AuthMethod, CancellationRegistry, JumpHostConfig,
-        RemoteConnectionRequest, PROGRESS_EMIT_INTERVAL,
+        crossed_progress_total, should_emit_progress, AuthMethod, CancellationRegistry,
+        JumpHostConfig, ProgressEmitState, RemoteConnectionRequest,
+        RemoteFileReadCancellationRegistry, PROGRESS_EMIT_INTERVAL,
+        REMOTE_FILE_READ_CANCELLATION_TOMBSTONE_LIMIT,
     };
     use std::sync::atomic::Ordering as AtomicOrdering;
     use std::time::{Duration, Instant};
@@ -1513,15 +1870,117 @@ mod tests {
     }
 
     #[test]
-    fn progress_emit_is_throttled_by_interval() {
-        assert!(should_emit_progress(None));
-        assert!(!should_emit_progress(Some(Instant::now())));
-        assert!(!should_emit_progress(Some(
-            Instant::now() - (PROGRESS_EMIT_INTERVAL - Duration::from_millis(10))
-        )));
-        assert!(should_emit_progress(Some(
-            Instant::now() - (PROGRESS_EMIT_INTERVAL + Duration::from_millis(10))
-        )));
+    fn remote_file_read_cancel_before_register_is_observed() {
+        let registry = RemoteFileReadCancellationRegistry::default();
+
+        registry.cancel("preview-1").unwrap();
+        registry.cancel("preview-1").unwrap();
+        let flag = registry.register("preview-1".to_string()).unwrap();
+
+        assert!(flag.load(AtomicOrdering::SeqCst));
+    }
+
+    #[test]
+    fn completed_remote_file_read_cancel_is_idempotent_and_does_not_poison_reuse() {
+        let registry = RemoteFileReadCancellationRegistry::default();
+        let first = registry.register("open-1".to_string()).unwrap();
+        registry.remove("open-1", &first).unwrap();
+
+        registry.cancel("open-1").unwrap();
+        registry.cancel("open-1").unwrap();
+        assert!(!first.load(AtomicOrdering::SeqCst));
+
+        let reused = registry.register("open-1".to_string()).unwrap();
+        assert!(!reused.load(AtomicOrdering::SeqCst));
+        registry.cancel("open-1").unwrap();
+        assert!(reused.load(AtomicOrdering::SeqCst));
+    }
+
+    #[test]
+    fn stale_remote_file_read_completion_does_not_remove_new_registration() {
+        let registry = RemoteFileReadCancellationRegistry::default();
+        let first = registry.register("preview-duplicate".to_string()).unwrap();
+        let second = registry.register("preview-duplicate".to_string()).unwrap();
+
+        assert!(first.load(AtomicOrdering::SeqCst));
+        registry.remove("preview-duplicate", &first).unwrap();
+        registry.cancel("preview-duplicate").unwrap();
+
+        assert!(second.load(AtomicOrdering::SeqCst));
+    }
+
+    #[test]
+    fn remote_file_read_pending_cancellations_are_bounded() {
+        let registry = RemoteFileReadCancellationRegistry::default();
+        for index in 0..=REMOTE_FILE_READ_CANCELLATION_TOMBSTONE_LIMIT {
+            registry.cancel(&format!("preview-{index}")).unwrap();
+        }
+
+        let state = registry.state.lock().unwrap();
+        assert!(state.tombstones.len() <= REMOTE_FILE_READ_CANCELLATION_TOMBSTONE_LIMIT);
+        assert!(state.tombstone_order.len() <= REMOTE_FILE_READ_CANCELLATION_TOMBSTONE_LIMIT);
+    }
+
+    #[test]
+    fn progress_emit_coalesces_a_burst_until_the_interval_reopens() {
+        let state = ProgressEmitState::default();
+        let started_at = Instant::now();
+        let mut emitted = 0;
+
+        for _ in 0..1_000 {
+            state.mark_dirty();
+            if state.should_emit_at(started_at, false) {
+                state.mark_emitted_at(started_at);
+                emitted += 1;
+            }
+        }
+        assert_eq!(emitted, 1, "one interval emitted more than one snapshot");
+
+        state.mark_dirty();
+        assert!(!state.should_emit_at(
+            started_at + PROGRESS_EMIT_INTERVAL - Duration::from_nanos(1),
+            false,
+        ));
+        let next_interval = started_at + PROGRESS_EMIT_INTERVAL;
+        if state.should_emit_at(next_interval, false) {
+            state.mark_emitted_at(next_interval);
+            emitted += 1;
+        }
+        assert_eq!(emitted, 2);
+    }
+
+    #[test]
+    fn progress_completion_forces_only_the_first_total_crossing() {
+        let total = 100;
+        let mut previous = 0;
+        let mut forced = 0;
+
+        for current in [40, 100, 140, u64::MAX] {
+            forced += u32::from(crossed_progress_total(previous, current, total));
+            previous = current;
+        }
+
+        assert_eq!(forced, 1);
+        assert!(!crossed_progress_total(0, 0, 0));
+    }
+
+    #[test]
+    fn progress_emit_force_flushes_inside_interval() {
+        let state = ProgressEmitState::default();
+        let started_at = Instant::now();
+        state.mark_dirty();
+        assert!(should_emit_progress(None, started_at, false));
+        assert!(state.should_emit_at(started_at, false));
+        state.mark_emitted_at(started_at);
+
+        state.mark_dirty();
+        let inside_interval = started_at + Duration::from_millis(1);
+        assert!(!state.should_emit_at(inside_interval, false));
+        assert!(state.needs_flush());
+        assert!(state.should_emit_at(inside_interval, true));
+
+        state.mark_emitted_at(inside_interval);
+        assert!(!state.needs_flush());
     }
 }
 

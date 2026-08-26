@@ -5,6 +5,7 @@ mod ai_sessions;
 mod commands;
 mod connection;
 mod db;
+mod directory_request_registry;
 mod health;
 mod identity_cache;
 mod keychain;
@@ -26,11 +27,13 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
 
 use crate::sftp_pool::SftpPool;
+use directory_request_registry::DirectoryRequestRegistry;
 use models::{
     ClosedEvent, ClosedReasonKind, DeleteCancellationRegistry, PreflightCancellationRegistry,
 };
 use models::{
-    DownloadCancellationRegistry, RemoteCopyCancellationRegistry, RemoteHealthCancellationRegistry,
+    DownloadCancellationRegistry, RemoteCopyCancellationRegistry,
+    RemoteFileReadCancellationRegistry, RemoteHealthCancellationRegistry,
     RunbookCancellationRegistry, SessionErrorEvent, SessionIdentity, SessionManager, SessionStatus,
     StatusEvent, UploadCancellationRegistry,
 };
@@ -231,6 +234,8 @@ pub fn run() {
         .manage(RunbookCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
+        .manage(RemoteFileReadCancellationRegistry::default())
+        .manage(DirectoryRequestRegistry::default())
         .manage(port_forward::PortForwardManager::default())
         .manage(SftpPool::default())
         .manage(RemoteIdentityCache::default())
@@ -256,6 +261,7 @@ pub fn run() {
             commands::request_app_restart,
             commands::request_app_exit,
             commands::list_remote_directory,
+            commands::supersede_remote_directory_request,
             commands::resolve_remote_entry_owners,
             commands::warm_remote_connection,
             commands::create_remote_entry,
@@ -281,6 +287,7 @@ pub fn run() {
             commands::open_remote_file,
             commands::preview_local_file,
             commands::preview_remote_file,
+            commands::cancel_remote_file_read,
             commands::update_remote_permissions,
             commands::check_host_key,
             commands::preflight_connection,
