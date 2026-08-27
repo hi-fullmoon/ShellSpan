@@ -7,6 +7,8 @@ mod ai_sessions;
 mod commands;
 mod connection;
 mod db;
+#[allow(dead_code)]
+mod deployment_runbook;
 mod directory_request_registry;
 mod execution;
 mod health;

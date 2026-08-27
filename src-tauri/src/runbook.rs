@@ -1488,6 +1488,26 @@ mod tests {
     }
 
     #[test]
+    fn preserves_v1_compatibility_and_keeps_v2_out_of_the_execution_parser() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/deployment-runbook/v2/deployment-runbooks.json"
+        ))
+        .expect("parse shared deployment Runbook fixture");
+        let v1_text = fixture["v1Document"].to_string();
+        let v2_text = fixture["cases"][0]["value"].to_string();
+
+        assert_eq!(
+            parse_document(&v1_text)
+                .expect("existing v1 document remains valid")
+                .schema_version,
+            1
+        );
+        assert!(crate::deployment_runbook::parse_deployment_runbook_v2(&v1_text).is_err());
+        assert!(parse_document(&v2_text).is_err());
+        assert!(crate::deployment_runbook::parse_deployment_runbook_v2(&v2_text).is_ok());
+    }
+
+    #[test]
     fn rejects_parse_errors_unknown_fields_and_literal_secrets() {
         assert!(parse_document("not-json").is_err());
         let unknown = valid_text("uname -s", "readOnly", false).replacen(
