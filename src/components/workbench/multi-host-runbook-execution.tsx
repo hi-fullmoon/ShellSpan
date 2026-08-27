@@ -66,6 +66,7 @@ import type {
   OperationHistoryStatus,
 } from '@/types/operation-history';
 import { RunbookDestructiveDialog } from './runbook-destructive-dialog';
+import { RunbookEvidenceOutput } from './runbook-evidence-output';
 
 interface MultiHostRunbookExecutionProps {
   initialTask: MultiHostRunbookTask;
@@ -415,7 +416,9 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
         if (lifecycleGenerationRef.current !== generation) return;
         disposedRef.current = true;
         const current = taskRef.current;
-        const operationIds = activeMultiHostRunbookOperationIds(current);
+        const operationIds = current.cancellationRequested
+          ? []
+          : activeMultiHostRunbookOperationIds(current);
         taskRef.current = requestCancelMultiHostRunbookTask(current);
         preparedProfilesRef.current.clear();
         for (const operationId of operationIds) {
@@ -428,6 +431,7 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
 
   const approveHost = (profileId: string): void => {
     setConfirmingProfileId(undefined);
+    if (!canApproveMultiHostRunbookHost(taskRef.current, profileId)) return;
     const currentHost = taskRef.current.hosts.find((host) => host.target.profileId === profileId);
     if (currentHost) recordHostTransition(taskRef.current, currentHost, 'approved', 'pending');
     const next = approveMultiHostRunbookHost(taskRef.current, profileId);
@@ -443,8 +447,9 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
 
   const cancelHost = async (profileId: string): Promise<void> => {
     const host = taskRef.current.hosts.find((entry) => entry.target.profileId === profileId);
+    if (!host || host.status === 'cancelling' || isMultiHostRunbookHostTerminal(host)) return;
     const operationId = host?.activeOperationId;
-    if (host) recordHostTransition(taskRef.current, host, 'cancelRequested', 'cancelling');
+    recordHostTransition(taskRef.current, host, 'cancelRequested', 'cancelling');
     publish(requestCancelMultiHostRunbookHost(taskRef.current, profileId));
     if (!operationId) return;
     try {
@@ -455,12 +460,15 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
   };
 
   const cancelTask = async (): Promise<void> => {
+    if (taskRef.current.cancellationRequested) return;
     const operationIds = activeMultiHostRunbookOperationIds(taskRef.current);
     for (const host of taskRef.current.hosts.filter((entry) => !isMultiHostRunbookHostTerminal(entry))) {
       recordHostTransition(taskRef.current, host, 'cancelRequested', 'cancelling');
     }
     publish(requestCancelMultiHostRunbookTask(taskRef.current));
-    const results = await Promise.allSettled(operationIds.map(invokeCancelRunbookStep));
+    const results = await Promise.allSettled(
+      operationIds.map((operationId) => invokeCancelRunbookStep(operationId)),
+    );
     if (results.some((entry) => entry.status === 'rejected')) showError(t('runbook.cancelFailed'));
   };
 
@@ -481,12 +489,14 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
   const summary = summarizeMultiHostRunbookTask(task);
   const activeBatch = activeMultiHostRunbookBatch(task);
   const batchCount = multiHostRunbookBatchCount(task);
+  const taskTerminal = isMultiHostRunbookTaskTerminal(task);
+  const taskCancelling = task.cancellationRequested && !taskTerminal;
   const confirmingHost = task.hosts.find((host) => host.target.profileId === confirmingProfileId);
   const confirmingItem = confirmingHost?.run.items.find((item) => item.id === confirmingHost.run.activeItemId);
 
   return (
     <div className="flex flex-col gap-3">
-      <Card>
+      <Card aria-busy={taskCancelling}>
         <CardHeader>
           <CardTitle>{t('runbook.multi.executionTitle')}</CardTitle>
           <CardDescription>
@@ -526,9 +536,17 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
         </CardContent>
         <CardFooter className="justify-between gap-2">
           <span className="text-xs text-muted-foreground">{t('runbook.multi.safetyBoundary')}</span>
-          {!isMultiHostRunbookTaskTerminal(task) && (
-            <Button variant="destructive" size="sm" onClick={() => void cancelTask()}>
-              {t('runbook.multi.cancelAll')}
+          {!taskTerminal && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void cancelTask()}
+              disabled={taskCancelling}
+            >
+              {taskCancelling && <Spinner data-icon="inline-start" />}
+              {t(taskCancelling
+                ? 'runbook.multi.cancellingAll'
+                : 'runbook.multi.cancelAll')}
             </Button>
           )}
         </CardFooter>
@@ -615,10 +633,10 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                           <span>{t('runbook.exitCode')}: {item.evidence.exitCode}</span>
                         )}
                         {item.evidence?.stdout && (
-                          <code className="whitespace-pre-wrap break-words">{item.evidence.stdout}</code>
+                          <RunbookEvidenceOutput>{item.evidence.stdout}</RunbookEvidenceOutput>
                         )}
                         {item.evidence?.stderr && (
-                          <code className="whitespace-pre-wrap break-words">{item.evidence.stderr}</code>
+                          <RunbookEvidenceOutput>{item.evidence.stderr}</RunbookEvidenceOutput>
                         )}
                         {item.error && <span className="text-destructive">{item.error}</span>}
                       </CardContent>
@@ -648,6 +666,12 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                   <Button size="sm" variant="secondary" disabled>
                     <Spinner data-icon="inline-start" />
                     {t('runbook.multi.executingHost')}
+                  </Button>
+                )}
+                {host.status === 'cancelling' && (
+                  <Button size="sm" variant="secondary" disabled>
+                    <Spinner data-icon="inline-start" />
+                    {t('runbook.multi.cancellingHost')}
                   </Button>
                 )}
                 {host.status === 'succeeded' && (

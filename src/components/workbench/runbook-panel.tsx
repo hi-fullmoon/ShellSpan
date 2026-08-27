@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BracesIcon,
   Clock3Icon,
@@ -91,6 +91,7 @@ import type {
 } from '@/types/runbook';
 import { MultiHostRunbookExecution } from './multi-host-runbook-execution';
 import { RunbookDestructiveDialog } from './runbook-destructive-dialog';
+import { RunbookEvidenceOutput } from './runbook-evidence-output';
 import {
   WorkbenchPage,
   WorkbenchPageContent,
@@ -100,6 +101,7 @@ import {
 const RunbookJsonEditor = React.lazy(() => import('./runbook-json-editor'));
 
 type RunbookTargetMode = 'single' | 'tag';
+type RunbookFileAction = 'open' | 'save';
 
 interface RunbookPreviewItem {
   id: string;
@@ -189,10 +191,20 @@ export const RunbookPanel: React.FC = () => {
   const [multiHostTask, setMultiHostTask] = useState<MultiHostRunbookTask>();
   const [operationId, setOperationId] = useState<string>();
   const [preparing, setPreparing] = useState(false);
+  const [cancellingOperationId, setCancellingOperationId] = useState<string>();
+  const [fileAction, setFileAction] = useState<RunbookFileAction>();
   const [confirming, setConfirming] = useState(false);
   const [validationError, setValidationError] = useState<string>();
   const [editorProblemCount, setEditorProblemCount] = useState(0);
   const [aiDraft, setAiDraft] = useState<AiRunbookDraftDetail>();
+  const runRef = useRef<RunbookRun | undefined>(undefined);
+  const executionAttemptRef = useRef<string | undefined>(undefined);
+  const cancellationRequestRef = useRef<string | undefined>(undefined);
+  const fileActionRef = useRef<RunbookFileAction | undefined>(undefined);
+
+  useEffect(() => {
+    runRef.current = run;
+  }, [run]);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === targetProfileId),
@@ -210,6 +222,9 @@ export const RunbookPanel: React.FC = () => {
   const activeItem = run?.items.find((item) => item.id === run.activeItemId);
   const executionLocked = run?.phase === 'running'
     || Boolean(multiHostTask && !isMultiHostRunbookTaskTerminal(multiHostTask));
+  const reviewActionLocked = preparing || Boolean(fileAction);
+  const workspaceLocked = executionLocked || reviewActionLocked;
+  const cancelling = Boolean(operationId && cancellingOperationId === operationId);
   const hasUnvalidatedChanges = sourceText !== validatedText;
   const previewItems = useMemo<RunbookPreviewItem[]>(() => [
     ...document.prechecks.map((item) => ({
@@ -265,19 +280,25 @@ export const RunbookPanel: React.FC = () => {
     });
   };
 
+  const invalidateExecutionAttempt = useCallback((): void => {
+    executionAttemptRef.current = undefined;
+  }, []);
+
   const applyValidatedText = useCallback((text: string, path?: string): void => {
     const parsed = parseRunbookText(text);
     const normalized = serializeRunbook(parsed);
+    invalidateExecutionAttempt();
     setSourceText(normalized);
     setValidatedText(normalized);
     setDocument(parsed);
     setSourcePath(path);
     setVariableValues({});
+    runRef.current = undefined;
     setRun(undefined);
     setMultiHostTask(undefined);
     setValidationError(undefined);
     setEditorProblemCount(0);
-  }, []);
+  }, [invalidateExecutionAttempt]);
 
   useEffect(() => {
     const applyDraft = (detail: AiRunbookDraftDetail): void => {
@@ -298,6 +319,7 @@ export const RunbookPanel: React.FC = () => {
   }, [applyValidatedText]);
 
   const handleValidate = (): void => {
+    if (workspaceLocked || executionAttemptRef.current || fileActionRef.current) return;
     try {
       applyValidatedText(sourceText, sourcePath);
       showSuccess(t('runbook.valid'));
@@ -308,6 +330,9 @@ export const RunbookPanel: React.FC = () => {
   };
 
   const handleOpen = async (): Promise<void> => {
+    if (workspaceLocked || executionAttemptRef.current || fileActionRef.current) return;
+    fileActionRef.current = 'open';
+    setFileAction('open');
     try {
       const file = await invokeOpenRunbookFile();
       if (file) {
@@ -317,10 +342,16 @@ export const RunbookPanel: React.FC = () => {
     } catch (error) {
       setValidationError(getLocalizedRunbookErrorMessage(error, t));
       showError(t('runbook.openFailed'));
+    } finally {
+      fileActionRef.current = undefined;
+      setFileAction(undefined);
     }
   };
 
   const handleSave = async (): Promise<void> => {
+    if (workspaceLocked || executionAttemptRef.current || fileActionRef.current) return;
+    fileActionRef.current = 'save';
+    setFileAction('save');
     try {
       const parsed = parseRunbookText(sourceText);
       const file = await invokeSaveRunbookFile(serializeRunbook(parsed));
@@ -331,10 +362,14 @@ export const RunbookPanel: React.FC = () => {
     } catch (error) {
       setValidationError(getLocalizedRunbookErrorMessage(error, t));
       showError(t('runbook.saveFailed'));
+    } finally {
+      fileActionRef.current = undefined;
+      setFileAction(undefined);
     }
   };
 
   const handleStart = (): void => {
+    if (workspaceLocked || executionAttemptRef.current || fileActionRef.current) return;
     if (targetMode === 'tag') {
       if (!selectedTag) {
         setValidationError(t('runbook.multi.tagRequired'));
@@ -355,6 +390,7 @@ export const RunbookPanel: React.FC = () => {
         setSourceText(task.sourceText);
         setValidatedText(task.sourceText);
         setDocument(parsed);
+        runRef.current = undefined;
         setRun(undefined);
         setMultiHostTask(task);
         setValidationError(undefined);
@@ -380,6 +416,7 @@ export const RunbookPanel: React.FC = () => {
       setDocument(prepared.document);
       setMultiHostTask(undefined);
       const nextRun = startRunbookRun(prepared, createOperationId('runbook-run'));
+      runRef.current = nextRun;
       setRun(nextRun);
       recordRunbookTransition(
         nextRun,
@@ -395,22 +432,41 @@ export const RunbookPanel: React.FC = () => {
 
   const performExecute = async (): Promise<void> => {
     setConfirming(false);
-    if (!run || !activeItem || run.phase !== 'awaitingApproval') return;
+    if (
+      !run
+      || !activeItem
+      || run.phase !== 'awaitingApproval'
+      || executionAttemptRef.current
+    ) return;
     const profile = useProfileStore.getState().getProfile(run.target.profileId);
     if (!profile) {
       const failedOperationId = createOperationId('runbook');
-      setRun(applyRunbookStepResult(
+      const failedRun = applyRunbookStepResult(
         markRunbookItemRunning(run),
         syntheticResult(run, activeItem, failedOperationId, 'failed', t('runbook.targetMissing')),
-      ));
+      );
+      runRef.current = failedRun;
+      setRun(failedRun);
       recordRunbookTransition(run, activeItem, 'failed', 'failed', failedOperationId);
       return;
     }
+    const attemptId = createOperationId('runbook-prepare');
+    const attemptMatches = (current = runRef.current): current is RunbookRun => (
+      executionAttemptRef.current === attemptId
+      && current?.id === run.id
+      && current.sourceDigest === run.sourceDigest
+      && current.activeItemId === activeItem.id
+      && current.phase === 'awaitingApproval'
+    );
+    executionAttemptRef.current = attemptId;
     setPreparing(true);
     let profileWithSavedSecrets: ConnectionProfile | undefined;
+    let nextOperationId: string | undefined;
     try {
       profileWithSavedSecrets = await useProfileStore.getState().ensurePassword(profile);
+      if (!attemptMatches()) return;
       const withPassword = await promptForMissingPassword(profileWithSavedSecrets);
+      if (!attemptMatches()) return;
       if (!withPassword) {
         const cancelledOperationId = createOperationId('runbook');
         const cancelled = syntheticResult(
@@ -420,13 +476,17 @@ export const RunbookPanel: React.FC = () => {
           'cancelled',
           t('runbook.credentialCancelled'),
         );
-        setRun((current) => current
-          ? applyRunbookStepResult(markRunbookItemRunning(current), cancelled)
-          : current);
+        setRun((current) => {
+          if (!attemptMatches(current)) return current;
+          const next = applyRunbookStepResult(markRunbookItemRunning(current), cancelled);
+          runRef.current = next;
+          return next;
+        });
         recordRunbookTransition(run, activeItem, 'completed', 'cancelled', cancelledOperationId);
         return;
       }
       const preparedProfile = await ensureKeychainKeyForProfile(withPassword);
+      if (!attemptMatches()) return;
       if (!preparedProfile) {
         const cancelledOperationId = createOperationId('runbook');
         const cancelled = syntheticResult(
@@ -436,19 +496,28 @@ export const RunbookPanel: React.FC = () => {
           'cancelled',
           t('runbook.credentialCancelled'),
         );
-        setRun((current) => current
-          ? applyRunbookStepResult(markRunbookItemRunning(current), cancelled)
-          : current);
+        setRun((current) => {
+          if (!attemptMatches(current)) return current;
+          const next = applyRunbookStepResult(markRunbookItemRunning(current), cancelled);
+          runRef.current = next;
+          return next;
+        });
         recordRunbookTransition(run, activeItem, 'completed', 'cancelled', cancelledOperationId);
         return;
       }
-      const nextOperationId = createOperationId('runbook');
-      const approvedRun = markRunbookItemRunning(run);
+      const currentRun = runRef.current;
+      if (!attemptMatches(currentRun)) return;
+      nextOperationId = createOperationId('runbook');
+      const approvedRun = markRunbookItemRunning(currentRun);
       if (approvedRun.phase !== 'running') {
+        runRef.current = approvedRun;
         setRun(approvedRun);
         return;
       }
+      cancellationRequestRef.current = undefined;
+      setCancellingOperationId(undefined);
       setOperationId(nextOperationId);
+      runRef.current = approvedRun;
       setRun(approvedRun);
       const plainValues = Object.fromEntries(document.variables
         .filter((variable) => !variable.keychainRef && variableValues[variable.name] !== undefined)
@@ -456,8 +525,8 @@ export const RunbookPanel: React.FC = () => {
       const result = await invokeExecuteRunbookStep(
         {
           operationId: nextOperationId,
-          runId: run.id,
-          sourceDigest: run.sourceDigest,
+          runId: currentRun.id,
+          sourceDigest: currentRun.sourceDigest,
           runbookText: validatedText,
           itemId: activeItem.id,
           itemKind: activeItem.kind,
@@ -465,38 +534,50 @@ export const RunbookPanel: React.FC = () => {
           authorized: true,
           approvedRisk: activeItem.risk,
           variableValues: plainValues,
-          evidenceReferences: run.items.flatMap((item) => item.evidence ? [{
+          evidenceReferences: currentRun.items.flatMap((item) => item.evidence ? [{
             operationId: item.evidence.operationId,
             kind: 'runbookStep' as const,
             observedAt: item.evidence.completedAt,
-            digest: run.sourceDigest,
+            digest: currentRun.sourceDigest,
           }] : []),
           timeoutMs: activeItem.timeoutSeconds * 1000,
           connection: buildRemoteConnectionRequest(preparedProfile),
         },
         { commandPreview: activeItem.commandPreview },
       );
+      setRun((current) => {
+        if (!current || current.id !== currentRun.id) return current;
+        const next = applyRunbookStepResult(current, result);
+        runRef.current = next;
+        return next;
+      });
       if (result.status === 'success') {
         await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
       }
-      setRun((current) => current ? applyRunbookStepResult(current, result) : current);
     } catch (error) {
+      if (!nextOperationId && !attemptMatches()) return;
       const failed = syntheticResult(
         run,
         activeItem,
-        operationId ?? createOperationId('runbook'),
+        nextOperationId ?? createOperationId('runbook'),
         'failed',
         getLocalizedRunbookErrorMessage(error, t),
       );
-      setRun((current) => current
-        ? applyRunbookStepResult(
-            current.phase === 'running' ? current : markRunbookItemRunning(current),
-            failed,
-          )
-        : current);
+      setRun((current) => {
+        if (!current || current.id !== run.id || current.activeItemId !== activeItem.id) return current;
+        const next = applyRunbookStepResult(
+          current.phase === 'running' ? current : markRunbookItemRunning(current),
+          failed,
+        );
+        runRef.current = next;
+        return next;
+      });
     } finally {
+      if (executionAttemptRef.current === attemptId) executionAttemptRef.current = undefined;
       setPreparing(false);
       setOperationId(undefined);
+      cancellationRequestRef.current = undefined;
+      setCancellingOperationId(undefined);
     }
   };
 
@@ -509,42 +590,64 @@ export const RunbookPanel: React.FC = () => {
   };
 
   const handleCancel = async (): Promise<void> => {
-    if (!operationId) return;
+    const currentOperationId = operationId;
+    if (!currentOperationId || cancellationRequestRef.current === currentOperationId) return;
+    cancellationRequestRef.current = currentOperationId;
+    setCancellingOperationId(currentOperationId);
     try {
-      await invokeCancelRunbookStep(operationId);
+      await invokeCancelRunbookStep(currentOperationId);
     } catch {
-      showError(t('runbook.cancelFailed'));
+      if (cancellationRequestRef.current === currentOperationId) {
+        cancellationRequestRef.current = undefined;
+        setCancellingOperationId(undefined);
+        showError(t('runbook.cancelFailed'));
+      }
     }
   };
 
   const handlePause = (): void => {
-    if (!run) return;
+    if (!run || reviewActionLocked || executionAttemptRef.current || fileActionRef.current) return;
+    invalidateExecutionAttempt();
     recordRunbookTransition(run, activeItem, 'paused', 'paused');
-    setRun(pauseRunbook(run));
+    const next = pauseRunbook(run);
+    runRef.current = next;
+    setRun(next);
   };
 
   const handleReject = (): void => {
-    if (!run) return;
+    if (!run || reviewActionLocked || executionAttemptRef.current || fileActionRef.current) return;
+    invalidateExecutionAttempt();
     recordRunbookTransition(run, activeItem, 'rejected', 'rejected');
-    setRun(rejectRunbookItem(run));
+    const next = rejectRunbookItem(run);
+    runRef.current = next;
+    setRun(next);
   };
 
   const handleSkip = (): void => {
-    if (!run) return;
+    if (!run || reviewActionLocked || executionAttemptRef.current || fileActionRef.current) return;
+    invalidateExecutionAttempt();
     recordRunbookTransition(run, activeItem, 'skipped', 'skipped');
-    setRun(skipRunbookItem(run));
+    const next = skipRunbookItem(run);
+    runRef.current = next;
+    setRun(next);
   };
 
   const handleResume = (): void => {
-    if (!run) return;
+    if (!run || reviewActionLocked || executionAttemptRef.current || fileActionRef.current) return;
+    invalidateExecutionAttempt();
     recordRunbookTransition(run, activeItem, 'resumed', 'pending');
-    setRun(resumeRunbook(run));
+    const next = resumeRunbook(run);
+    runRef.current = next;
+    setRun(next);
   };
 
   const handleRetry = (item: RunbookRunItem): void => {
-    if (!run) return;
+    if (!run || reviewActionLocked || executionAttemptRef.current || fileActionRef.current) return;
+    invalidateExecutionAttempt();
     recordRunbookTransition(run, item, 'retryRequested', 'pending');
-    setRun(retryRunbookFrom(run, item.id));
+    const next = retryRunbookFrom(run, item.id);
+    runRef.current = next;
+    setRun(next);
   };
 
   return (
@@ -565,13 +668,15 @@ export const RunbookPanel: React.FC = () => {
         )}
         actions={(
           <>
-            <Button variant="outline" size="sm" onClick={() => void handleOpen()} disabled={executionLocked}>
-              {t('runbook.open')}
+            <Button variant="outline" size="sm" onClick={() => void handleOpen()} disabled={workspaceLocked}>
+              {fileAction === 'open' && <Spinner data-icon="inline-start" />}
+              {t(fileAction === 'open' ? 'runbook.opening' : 'runbook.open')}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => void handleSave()} disabled={executionLocked}>
-              {t('runbook.save')}
+            <Button variant="outline" size="sm" onClick={() => void handleSave()} disabled={workspaceLocked}>
+              {fileAction === 'save' && <Spinner data-icon="inline-start" />}
+              {t(fileAction === 'save' ? 'runbook.saving' : 'runbook.save')}
             </Button>
-            <Button size="sm" onClick={handleValidate} disabled={executionLocked}>
+            <Button size="sm" onClick={handleValidate} disabled={workspaceLocked}>
               {t('runbook.validate')}
             </Button>
           </>
@@ -696,11 +801,13 @@ export const RunbookPanel: React.FC = () => {
                       <RunbookJsonEditor
                         ariaLabel={t('runbook.textTitle')}
                         value={sourceText}
-                        disabled={executionLocked}
+                        disabled={workspaceLocked}
                         onProblemsChange={setEditorProblemCount}
                         onChange={(nextText) => {
+                          invalidateExecutionAttempt();
                           setSourceText(nextText);
                           setValidationError(undefined);
+                          runRef.current = undefined;
                           setRun(undefined);
                           setMultiHostTask(undefined);
                         }}
@@ -786,7 +893,9 @@ export const RunbookPanel: React.FC = () => {
                       onValueChange={(next) => {
                         const selected = next[0] as RunbookTargetMode | undefined;
                         if (selected) {
+                          invalidateExecutionAttempt();
                           setTargetMode(selected);
+                          runRef.current = undefined;
                           setRun(undefined);
                           setMultiHostTask(undefined);
                           setValidationError(undefined);
@@ -797,7 +906,7 @@ export const RunbookPanel: React.FC = () => {
                       spacing={0}
                       className="w-full"
                       aria-label={t('runbook.targetMode')}
-                      disabled={executionLocked}
+                      disabled={workspaceLocked}
                     >
                       <ToggleGroupItem value="single" className="flex-1">
                         {t('runbook.targetMode.single')}
@@ -816,7 +925,7 @@ export const RunbookPanel: React.FC = () => {
                         items={targetProfileItems}
                         value={targetProfileId ?? null}
                         onValueChange={(value) => setTargetProfileId(value ?? undefined)}
-                        disabled={executionLocked}
+                        disabled={workspaceLocked}
                       >
                         <SelectTrigger aria-label={t('runbook.target')}>
                           <SelectValue placeholder={t('runbook.chooseTarget')} />
@@ -841,7 +950,7 @@ export const RunbookPanel: React.FC = () => {
                         <Select
                           value={selectedTag ?? null}
                           onValueChange={(value) => setSelectedTag(value ?? undefined)}
-                          disabled={executionLocked}
+                          disabled={workspaceLocked}
                         >
                           <SelectTrigger
                             aria-label={t('runbook.multi.tag')}
@@ -871,7 +980,7 @@ export const RunbookPanel: React.FC = () => {
                             min={1}
                             max={MULTI_HOST_MAX_CONCURRENCY}
                             value={concurrencyLimit}
-                            disabled={executionLocked}
+                            disabled={workspaceLocked}
                             aria-invalid={concurrencyLimit < 1 || concurrencyLimit > MULTI_HOST_MAX_CONCURRENCY}
                             onChange={(event) => setConcurrencyLimit(Number(event.target.value))}
                           />
@@ -885,7 +994,7 @@ export const RunbookPanel: React.FC = () => {
                             min={1}
                             max={MULTI_HOST_MAX_BATCH_SIZE}
                             value={batchSize}
-                            disabled={executionLocked}
+                            disabled={workspaceLocked}
                             aria-invalid={batchSize < 1 || batchSize > MULTI_HOST_MAX_BATCH_SIZE || concurrencyLimit > batchSize}
                             onChange={(event) => setBatchSize(Number(event.target.value))}
                           />
@@ -914,7 +1023,7 @@ export const RunbookPanel: React.FC = () => {
                               id={`runbook-${variable.name}`}
                               value={variableValues[variable.name] ?? ''}
                               placeholder={variable.default}
-                              disabled={executionLocked}
+                              disabled={workspaceLocked}
                               onChange={(event) => setVariableValues((current) => ({
                                 ...current,
                                 [variable.name]: event.target.value,
@@ -935,7 +1044,7 @@ export const RunbookPanel: React.FC = () => {
                 </div>
                 <Button
                   onClick={handleStart}
-                  disabled={executionLocked || hasUnvalidatedChanges || (targetMode === 'single' ? !selectedProfile : !selectedTag || multiHostTargets.length === 0)}
+                  disabled={workspaceLocked || hasUnvalidatedChanges || (targetMode === 'single' ? !selectedProfile : !selectedTag || multiHostTargets.length === 0)}
                 >
                   {t(targetMode === 'single' ? 'runbook.reviewRun' : 'runbook.multi.startPreflight')}
                 </Button>
@@ -944,7 +1053,10 @@ export const RunbookPanel: React.FC = () => {
           </div>
 
           {run && (
-            <Card data-slot="runbook-execution-review">
+            <Card
+              data-slot="runbook-execution-review"
+              aria-busy={preparing || cancelling}
+            >
               <CardHeader>
                 <CardTitle>{t('runbook.executionReview')}</CardTitle>
                 <CardDescription>
@@ -1017,14 +1129,30 @@ export const RunbookPanel: React.FC = () => {
                       && item.status === 'completed'
                       && isRunbookEvidenceStale(item.evidence, run.evidenceMaxAgeSeconds);
                     return (
-                      <li key={item.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 rounded-lg bg-muted/40 p-3 ring-1 ring-foreground/10">
+                      <li
+                        key={item.id}
+                        data-slot="runbook-run-item"
+                        className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg bg-muted/40 p-3 ring-1 ring-foreground/10"
+                      >
                         <div className="flex size-7 items-center justify-center rounded-full bg-background text-xs font-medium">
                           {index + 1}
                         </div>
                         <div className="flex min-w-0 flex-col gap-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium">{item.description}</span>
-                            <Badge variant={riskVariant(item.risk)}>{t(`runbook.risk.${item.risk}` as LocaleKey)}</Badge>
+                          <div
+                            data-slot="runbook-run-item-header"
+                            className="flex items-start gap-2"
+                          >
+                            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                              <span className="font-medium">{item.description}</span>
+                              <Badge variant={riskVariant(item.risk)}>{t(`runbook.risk.${item.risk}` as LocaleKey)}</Badge>
+                            </div>
+                            <Badge
+                              data-slot="runbook-run-item-status"
+                              className="shrink-0"
+                              variant={stale ? 'destructive' : itemStatusVariant(item.status)}
+                            >
+                              {stale ? t('runbook.evidenceStale') : t(`runbook.status.${item.status}` as LocaleKey)}
+                            </Badge>
                           </div>
                           <code className="break-all text-xs text-muted-foreground">{item.commandPreview}</code>
                           {(item.evidence || item.error) && (
@@ -1043,22 +1171,28 @@ export const RunbookPanel: React.FC = () => {
                               {item.evidence?.exitCode !== undefined && (
                                 <span>{t('runbook.exitCode')}: {item.evidence.exitCode}</span>
                               )}
-                              {item.evidence?.stdout && <code className="whitespace-pre-wrap break-words">{item.evidence.stdout}</code>}
-                              {item.evidence?.stderr && <code className="whitespace-pre-wrap break-words">{item.evidence.stderr}</code>}
+                              {item.evidence?.stdout && (
+                                <RunbookEvidenceOutput>{item.evidence.stdout}</RunbookEvidenceOutput>
+                              )}
+                              {item.evidence?.stderr && (
+                                <RunbookEvidenceOutput>{item.evidence.stderr}</RunbookEvidenceOutput>
+                              )}
                               {item.error && <span className="text-destructive">{item.error}</span>}
                             </div>
                           )}
                           {item.safeToRetry && ['stopped', 'cancelled', 'staleEvidence'].includes(run.phase) && (
                             <div>
-                              <Button size="xs" variant="outline" onClick={() => handleRetry(item)}>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => handleRetry(item)}
+                                disabled={reviewActionLocked}
+                              >
                                 {t('runbook.retryFrom')}
                               </Button>
                             </div>
                           )}
                         </div>
-                        <Badge variant={stale ? 'destructive' : itemStatusVariant(item.status)}>
-                          {stale ? t('runbook.evidenceStale') : t(`runbook.status.${item.status}` as LocaleKey)}
-                        </Badge>
                       </li>
                     );
                   })}
@@ -1069,19 +1203,28 @@ export const RunbookPanel: React.FC = () => {
                   <div className="flex flex-wrap gap-2">
                     {run.phase === 'awaitingApproval' && (
                       <>
-                        <Button size="sm" variant="outline" onClick={handlePause}>{t('runbook.pause')}</Button>
-                        <Button size="sm" variant="outline" onClick={handleReject}>{t('runbook.reject')}</Button>
+                        <Button size="sm" variant="outline" onClick={handlePause} disabled={reviewActionLocked}>
+                          {t('runbook.pause')}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={handleReject} disabled={reviewActionLocked}>
+                          {t('runbook.reject')}
+                        </Button>
                         {activeItem?.kind === 'step' && (
-                          <Button size="sm" variant="outline" onClick={handleSkip}>{t('runbook.skip')}</Button>
+                          <Button size="sm" variant="outline" onClick={handleSkip} disabled={reviewActionLocked}>
+                            {t('runbook.skip')}
+                          </Button>
                         )}
                       </>
                     )}
                     {run.phase === 'paused' && (
-                      <Button size="sm" variant="outline" onClick={handleResume}>{t('runbook.resume')}</Button>
+                      <Button size="sm" variant="outline" onClick={handleResume} disabled={reviewActionLocked}>
+                        {t('runbook.resume')}
+                      </Button>
                     )}
                     {run.phase === 'running' && (
-                      <Button size="sm" variant="outline" onClick={() => void handleCancel()} disabled={!operationId}>
-                        {t('runbook.cancel')}
+                      <Button size="sm" variant="outline" onClick={() => void handleCancel()} disabled={!operationId || cancelling}>
+                        {cancelling && <Spinner data-icon="inline-start" />}
+                        {t(cancelling ? 'runbook.cancelling' : 'runbook.cancel')}
                       </Button>
                     )}
                   </div>
@@ -1090,10 +1233,10 @@ export const RunbookPanel: React.FC = () => {
                       size="sm"
                       variant={activeItem?.risk === 'destructive' ? 'destructive' : 'default'}
                       onClick={handleApprove}
-                      disabled={preparing}
+                      disabled={reviewActionLocked}
                     >
                       {preparing && <Spinner data-icon="inline-start" />}
-                      {t('runbook.approveExecute')}
+                      {t(preparing ? 'runbook.preparing' : 'runbook.approveExecute')}
                     </Button>
                   )}
                 </CardFooter>
