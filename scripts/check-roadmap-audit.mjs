@@ -759,7 +759,7 @@ if (!sameStrings(agentIpcCommands, expectedAgentIpcCommands)) {
 const agentManagerSource = await readFile(resolve(root, 'src-tauri/src/agent/manager.rs'), 'utf8');
 const agentModSource = await readFile(resolve(root, 'src-tauri/src/agent/mod.rs'), 'utf8');
 if (!agentManagerSource.includes('Self::new(Arc::new(BlockedNoopAgentBoundary))')
-  || !agentModSource.includes('#[cfg(test)]\nmod eval;')) {
+  || !/#\[cfg\(test\)\]\r?\nmod eval;/.test(agentModSource)) {
   fail('P1-F must retain the blocked production boundary and test-only eval harness');
 }
 const diagnosticEval = JSON.parse(await readFile(

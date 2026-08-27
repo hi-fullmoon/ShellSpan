@@ -6,6 +6,7 @@ export type OperationHistoryCategory =
   | 'portForward'
   | 'remoteHealth'
   | 'runbook'
+  | 'deployment'
   | 'multiHost';
 
 export type OperationHistoryAction =
@@ -34,6 +35,7 @@ export type OperationHistoryAction =
   | 'stopAllPortForwards'
   | 'collectRemoteHealth'
   | 'executeRunbookStep'
+  | 'executeDeployment'
   | 'executeMultiHostRunbook';
 
 export type OperationHistoryEventKind =

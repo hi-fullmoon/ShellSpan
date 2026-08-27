@@ -1,4 +1,5 @@
 import type { RunbookDocument, RunbookRisk } from '@/types/runbook';
+import type { RemoteConnectionRequest } from '@/types';
 
 export type DeploymentRunbookSchemaVersion = 2;
 export type DeploymentArtifactKind = 'file' | 'archive';
@@ -121,3 +122,174 @@ export interface DeploymentRunbookDocumentV2 {
 }
 
 export type VersionedRunbookDocument = RunbookDocument | DeploymentRunbookDocumentV2;
+
+export interface DeploymentExecutionPolicyV2 {
+  artifactTimeoutSeconds: number;
+  maxArtifactBytes: number;
+  maxExpandedBytes: number;
+  maxArchiveEntries: number;
+  totalTimeoutSeconds: number;
+}
+
+export interface DeploymentFrozenJumpHostIdentityV2 {
+  host: string;
+  port: number;
+  username: string;
+  authMethod: string;
+}
+
+export interface DeploymentFrozenTargetIdentityV2 {
+  profileId: string;
+  host: string;
+  port: number;
+  username: string;
+  authMethod: string;
+  jumpHost?: DeploymentFrozenJumpHostIdentityV2;
+  identityDigest: string;
+}
+
+export type DeploymentExecutionActionKindV2 =
+  | 'inspectRelease'
+  | 'createRelease'
+  | 'stageArtifact'
+  | 'verifyArtifact'
+  | 'activateRelease'
+  | 'serviceAction'
+  | 'httpHealthCheck'
+  | 'serviceHealthCheck';
+
+export interface DeploymentExecutionActionV2 {
+  actionId: string;
+  kind: DeploymentExecutionActionKindV2;
+  target: string;
+  normalizedParameters: string;
+  parametersDigest: string;
+  risk: RunbookRisk;
+  mutating: boolean;
+  timeoutSeconds: number;
+}
+
+export interface DeploymentArtifactDigestBindingV2 {
+  artifactId: string;
+  sha256: string;
+  targetPath: string;
+}
+
+export interface DeploymentExecutionReviewRequestV2 {
+  operationId: string;
+  runbookText: string;
+  profileId: string;
+  connection: RemoteConnectionRequest;
+  policy: DeploymentExecutionPolicyV2;
+}
+
+export interface DeploymentExecutionReviewV2 {
+  schemaVersion: 2;
+  reviewId: string;
+  operationId: string;
+  normalizedRunbookText: string;
+  documentDigest: string;
+  planDigest: string;
+  deploymentId: string;
+  applicationId: string;
+  environment: string;
+  version: string;
+  artifactDigests: DeploymentArtifactDigestBindingV2[];
+  declaredRisk: RunbookRisk;
+  target: DeploymentFrozenTargetIdentityV2;
+  policy: DeploymentExecutionPolicyV2;
+  actions: DeploymentExecutionActionV2[];
+  reviewedAt: number;
+  expiresAt: number;
+}
+
+export interface DeploymentExecutionApprovalV2 {
+  reviewId: string;
+  operationId: string;
+  documentDigest: string;
+  planDigest: string;
+  targetDigest: string;
+  approvedRisk: RunbookRisk;
+  authorized: boolean;
+  destructiveConfirmed: boolean;
+}
+
+export interface DeploymentExecutionRequestV2 {
+  operationId: string;
+  runbookText: string;
+  profileId: string;
+  connection: RemoteConnectionRequest;
+  approval: DeploymentExecutionApprovalV2;
+}
+
+export type DeploymentExecutionPhaseV2 =
+  | 'pending'
+  | 'preparingArtifacts'
+  | 'inspectingTarget'
+  | 'creatingRelease'
+  | 'stagingArtifacts'
+  | 'activatingRelease'
+  | 'applyingServices'
+  | 'verifying'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'timedOut'
+  | 'identityMismatch'
+  | 'unauthorized';
+
+export type DeploymentExecutionActionStatusV2 =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'timedOut'
+  | 'identityMismatch';
+
+export interface DeploymentExecutionActionResultV2 extends DeploymentExecutionActionV2 {
+  childOperationId: string;
+  status: DeploymentExecutionActionStatusV2;
+  startedAt?: number;
+  completedAt?: number;
+  exitCode?: number;
+  output?: string;
+  error?: string;
+}
+
+export interface DeploymentHealthCheckResultV2 {
+  checkId: string;
+  kind: 'http' | 'service';
+  status: 'passed' | 'failed' | 'cancelled' | 'timedOut';
+  attemptsUsed: number;
+  observedStatus?: number;
+  observedState?: string;
+  error?: string;
+}
+
+export interface DeploymentRollbackSnapshotV2 {
+  strategy: 'reactivatePreviousRelease';
+  previousRelease?: string;
+  newRelease: string;
+  activationChanged: boolean;
+  capturedAt?: number;
+}
+
+export interface DeploymentExecutionResultV2 {
+  schemaVersion: 2;
+  operationId: string;
+  reviewId: string;
+  documentDigest: string;
+  planDigest: string;
+  deploymentId: string;
+  version: string;
+  target: DeploymentFrozenTargetIdentityV2;
+  phase: DeploymentExecutionPhaseV2;
+  startedAt: number;
+  completedAt: number;
+  actions: DeploymentExecutionActionResultV2[];
+  healthChecks: DeploymentHealthCheckResultV2[];
+  rollbackSnapshot: DeploymentRollbackSnapshotV2;
+  errorCategory?: string;
+  error?: string;
+}

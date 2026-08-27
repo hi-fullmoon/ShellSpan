@@ -28,7 +28,8 @@ mod ssh;
 mod target;
 
 pub(crate) use cancellation::{
-    ExecutionCancellationError, ExecutionCancellationErrorKind, ExecutionCancellationRegistry,
+    valid_operation_id, ExecutionCancellationError, ExecutionCancellationErrorKind,
+    ExecutionCancellationRegistry,
 };
 pub(crate) use request::{
     ExecutionOutputPolicy, FrozenTargetIdentity, ReviewedSshCommand, ReviewedSshExecutionRequest,
@@ -36,3 +37,4 @@ pub(crate) use request::{
 };
 pub(crate) use result::{ExecutionErrorCategory, ExecutionStatus, ReviewedSshExecutionResult};
 pub(crate) use ssh::{execute_reviewed_ssh_command, start_ssh_exec_channel};
+pub(crate) use target::revalidate_frozen_target_identity;

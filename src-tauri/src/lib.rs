@@ -7,6 +7,7 @@ mod ai_sessions;
 mod commands;
 mod connection;
 mod db;
+mod deployment_execution;
 #[allow(dead_code)]
 mod deployment_runbook;
 mod directory_request_registry;
@@ -237,6 +238,7 @@ pub fn run() {
         .manage(PreflightCancellationRegistry::default())
         .manage(RemoteHealthCancellationRegistry::default())
         .manage(execution::ExecutionCancellationRegistry::default())
+        .manage(deployment_execution::DeploymentExecutionRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
         .manage(RemoteFileReadCancellationRegistry::default())
@@ -356,6 +358,9 @@ pub fn run() {
             remote_health::cancel_remote_health_snapshot,
             runbook::execute_runbook_step,
             runbook::cancel_runbook_step,
+            deployment_execution::review_deployment_execution,
+            deployment_execution::execute_deployment,
+            deployment_execution::cancel_deployment,
             runbook::open_runbook_file,
             runbook::save_runbook_file,
         ]);

@@ -24,6 +24,9 @@ import {
   invokeAgentSendMessage,
   invokeAgentStart,
   invokeCancelRunbookStep,
+  invokeCancelDeployment,
+  invokeExecuteDeployment,
+  invokeReviewDeploymentExecution,
   invokeCancelRemoteFileRead,
   invokeExecuteRunbookStep,
   invokeStoreKeyCredential,
@@ -40,6 +43,12 @@ import type {
   RunbookStepExecutionRequest,
   RunbookStepExecutionResult,
 } from '@/types/runbook';
+import type {
+  DeploymentExecutionRequestV2,
+  DeploymentExecutionResultV2,
+  DeploymentExecutionReviewRequestV2,
+  DeploymentExecutionReviewV2,
+} from '@/types/deployment-runbook';
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -395,5 +404,111 @@ describe('runbook execution IPC contract', () => {
     expect(invokeMock).toHaveBeenCalledWith('cancel_runbook_step', {
       operationId: request.operationId,
     });
+  });
+});
+
+describe('Deployment Runbook v2 narrow IPC contract', () => {
+  const reviewRequest: DeploymentExecutionReviewRequestV2 = {
+    operationId: 'deployment:ipc',
+    runbookText: '{"schemaVersion":2}',
+    profileId: 'profile-1',
+    connection: {
+      host: 'server.example.com',
+      port: 22,
+      username: 'operator',
+      authMethod: 'password',
+      password: 'secret',
+    },
+    policy: {
+      artifactTimeoutSeconds: 30,
+      maxArtifactBytes: 10_485_760,
+      maxExpandedBytes: 52_428_800,
+      maxArchiveEntries: 1_000,
+      totalTimeoutSeconds: 600,
+    },
+  };
+  const review: DeploymentExecutionReviewV2 = {
+    schemaVersion: 2,
+    reviewId: 'deployment-review:ipc',
+    operationId: reviewRequest.operationId,
+    normalizedRunbookText: '{}\n',
+    documentDigest: 'sha256-v1:document',
+    planDigest: 'sha256-v1:plan',
+    deploymentId: 'release-1',
+    applicationId: 'app',
+    environment: 'production',
+    version: '1.0.0',
+    artifactDigests: [],
+    declaredRisk: 'stateChange',
+    target: {
+      profileId: reviewRequest.profileId,
+      host: reviewRequest.connection.host,
+      port: reviewRequest.connection.port,
+      username: reviewRequest.connection.username,
+      authMethod: reviewRequest.connection.authMethod,
+      identityDigest: 'sha256-v1:target',
+    },
+    policy: reviewRequest.policy,
+    actions: [],
+    reviewedAt: 1,
+    expiresAt: 2,
+  };
+  const request: DeploymentExecutionRequestV2 = {
+    operationId: review.operationId,
+    runbookText: reviewRequest.runbookText,
+    profileId: reviewRequest.profileId,
+    connection: reviewRequest.connection,
+    approval: {
+      reviewId: review.reviewId,
+      operationId: review.operationId,
+      documentDigest: review.documentDigest,
+      planDigest: review.planDigest,
+      targetDigest: review.target.identityDigest,
+      approvedRisk: review.declaredRisk,
+      authorized: true,
+      destructiveConfirmed: false,
+    },
+  };
+  const result: DeploymentExecutionResultV2 = {
+    schemaVersion: 2,
+    operationId: review.operationId,
+    reviewId: review.reviewId,
+    documentDigest: review.documentDigest,
+    planDigest: review.planDigest,
+    deploymentId: review.deploymentId,
+    version: review.version,
+    target: review.target,
+    phase: 'succeeded',
+    startedAt: 1,
+    completedAt: 2,
+    actions: [],
+    healthChecks: [],
+    rollbackSnapshot: {
+      strategy: 'reactivatePreviousRelease',
+      newRelease: '/srv/app/releases/release-1',
+      activationChanged: true,
+    },
+  };
+
+  it('uses only review, execute, and operation-id cancellation envelopes', async () => {
+    invokeMock.mockResolvedValueOnce(review).mockResolvedValueOnce(result).mockResolvedValueOnce(undefined);
+
+    await expect(invokeReviewDeploymentExecution(reviewRequest)).resolves.toBe(review);
+    await expect(invokeExecuteDeployment(request, review)).resolves.toBe(result);
+    await invokeCancelDeployment(request.operationId);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'review_deployment_execution', { request: reviewRequest });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'execute_deployment', { request });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'cancel_deployment', {
+      operationId: request.operationId,
+    });
+  });
+
+  it('fails closed when the backend returns a late or cross-target result', async () => {
+    invokeMock.mockResolvedValueOnce({
+      ...result,
+      target: { ...result.target, identityDigest: 'sha256-v1:late-target' },
+    });
+    await expect(invokeExecuteDeployment(request, review)).rejects.toThrow(/identity does not match/);
   });
 });

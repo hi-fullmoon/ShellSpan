@@ -226,7 +226,7 @@ impl CancellationHandle {
     }
 }
 
-pub(super) fn valid_operation_id(value: &str) -> bool {
+pub(crate) fn valid_operation_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_OPERATION_ID_BYTES
         && value.is_ascii()
