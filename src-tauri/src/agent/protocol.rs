@@ -98,6 +98,35 @@ pub(crate) struct AgentStartRequestV1 {
     pub(crate) requested_budgets: Option<AgentBudgetRequestV1>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentGetSnapshotRequestV1 {
+    pub(crate) schema_version: AgentSchemaVersionV1,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) run_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentActionRequestV1 {
+    pub(crate) schema_version: AgentSchemaVersionV1,
+    pub(crate) run_id: String,
+    pub(crate) client_action_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentSendMessageRequestV1 {
+    pub(crate) schema_version: AgentSchemaVersionV1,
+    pub(crate) run_id: String,
+    pub(crate) client_action_id: String,
+    pub(crate) message: String,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AgentPlanItemStatusV1 {
@@ -538,6 +567,46 @@ fn validate_agent_start_request_v1(
     Ok(())
 }
 
+pub(crate) fn validate_agent_start_request_contract_v1(
+    request: &AgentStartRequestV1,
+) -> Result<(), AgentProtocolDecodeError> {
+    validate_agent_start_request_v1(request)
+}
+
+pub(crate) fn validate_agent_get_snapshot_request_v1(
+    request: &AgentGetSnapshotRequestV1,
+) -> Result<(), AgentProtocolDecodeError> {
+    if request
+        .run_id
+        .as_deref()
+        .is_some_and(|run_id| !valid_identifier(run_id))
+    {
+        return Err(invalid_contract("Agent snapshot run ID is invalid"));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_agent_action_request_v1(
+    request: &AgentActionRequestV1,
+) -> Result<(), AgentProtocolDecodeError> {
+    if !valid_identifier(&request.run_id) || !valid_identifier(&request.client_action_id) {
+        return Err(invalid_contract("Agent action metadata is invalid"));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_agent_send_message_request_v1(
+    request: &AgentSendMessageRequestV1,
+) -> Result<(), AgentProtocolDecodeError> {
+    if !valid_identifier(&request.run_id)
+        || !valid_identifier(&request.client_action_id)
+        || !bounded_text(&request.message, 8 * 1024)
+    {
+        return Err(invalid_contract("Agent message request is invalid"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AgentProviderKindV1 {
@@ -825,6 +894,66 @@ pub(crate) struct AgentRunSnapshotV1 {
     pub(crate) error: Option<AgentPublicErrorV1>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentStartResultV1 {
+    pub(crate) schema_version: AgentSchemaVersionV1,
+    pub(crate) run_id: String,
+    pub(crate) accepted_at: u64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentActionKindV1 {
+    Pause,
+    Resume,
+    Stop,
+    SendMessage,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentActionResultV1 {
+    pub(crate) schema_version: AgentSchemaVersionV1,
+    pub(crate) run_id: String,
+    pub(crate) client_action_id: String,
+    pub(crate) action: AgentActionKindV1,
+    pub(crate) accepted_at: u64,
+    pub(crate) resulting_sequence: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentActiveRunSummaryV1 {
+    pub(crate) run_id: String,
+    pub(crate) state: AgentRunStateV1,
+    pub(crate) goal: String,
+    pub(crate) profile_id: String,
+    pub(crate) started_at: u64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentCommandErrorCategoryV1 {
+    InvalidRequest,
+    AgentBusy,
+    RunNotFound,
+    IdempotencyConflict,
+    InvalidState,
+    P1Blocked,
+    Internal,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentCommandErrorV1 {
+    pub(crate) schema_version: AgentSchemaVersionV1,
+    pub(crate) category: AgentCommandErrorCategoryV1,
+    pub(crate) message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) active_run: Option<AgentActiveRunSummaryV1>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -932,6 +1061,51 @@ mod tests {
             "terminalContext": null
         });
         assert!(decode_agent_start_request_v1(&explicit_null.to_string()).is_err());
+    }
+
+    #[test]
+    fn lifecycle_ipc_requests_are_versioned_and_unknown_field_closed() {
+        let action = serde_json::json!({
+            "schemaVersion": 1,
+            "runId": "run-1",
+            "clientActionId": "action-1"
+        });
+        let decoded = serde_json::from_value::<AgentActionRequestV1>(action.clone())
+            .expect("valid action request");
+        assert!(validate_agent_action_request_v1(&decoded).is_ok());
+
+        let mut unknown = action.clone();
+        unknown["command"] = serde_json::json!("uptime");
+        assert!(serde_json::from_value::<AgentActionRequestV1>(unknown).is_err());
+
+        let mut unknown_version = action;
+        unknown_version["schemaVersion"] = serde_json::json!(2);
+        assert!(serde_json::from_value::<AgentActionRequestV1>(unknown_version).is_err());
+
+        let active = serde_json::json!({ "schemaVersion": 1 });
+        let decoded = serde_json::from_value::<AgentGetSnapshotRequestV1>(active)
+            .expect("active snapshot request");
+        assert!(validate_agent_get_snapshot_request_v1(&decoded).is_ok());
+        assert!(
+            serde_json::from_value::<AgentGetSnapshotRequestV1>(serde_json::json!({
+                "schemaVersion": 1,
+                "runId": null
+            }))
+            .is_err()
+        );
+
+        let message = serde_json::from_value::<AgentSendMessageRequestV1>(serde_json::json!({
+            "schemaVersion": 1,
+            "runId": "run-1",
+            "clientActionId": "action-2",
+            "message": "Keep the observation bounded."
+        }))
+        .expect("valid message request");
+        assert!(validate_agent_send_message_request_v1(&message).is_ok());
+
+        let mut empty_message = message;
+        empty_message.message.clear();
+        assert!(validate_agent_send_message_request_v1(&empty_message).is_err());
     }
 
     #[test]

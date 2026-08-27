@@ -1021,9 +1021,9 @@ Reducer 规则：
 - TypeScript 产物位于 `src/types/agent.ts` 与 `src/lib/agent-{protocol,state,budgets}.ts`；动态类型不扩展旧静态 `DiagnosticAgentPlan`。
 - `protocol/agent/v1/agent-decision.schema.json` 固定四个互斥 decision 变体；`tests/fixtures/agent-protocol/v1/` 的 decision、budget 和 state fixtures 由 Rust/Vitest 同时消费。
 - 双端对所有 run/tool 状态组合进行等价表测试，并对每个终态与每个迟到状态的组合验证不可覆盖；unknown field、version、enum、额外 action、tool/arguments 错配、越界预算和非空 `changes` 均有失败关闭用例。
-- P0 仍为 `implemented（verification pending external）`，所以未创建真实 `shell.execReadOnly` adapter、AgentManager、模型入口或 Tauri execution command；P1-A 未开始。
+- P0 仍为 `implemented（verification pending external）`；P1-0 提交没有创建真实 `shell.execReadOnly` adapter、AgentManager、模型入口或 Tauri execution command，后续 P1-A 只新增下述控制面。
 
-### P1-A：AgentManager、journal 与 snapshot（2–3 天）
+### P1-A：AgentManager、journal 与 snapshot（2–3 天，implemented 2026-08-27）
 
 产物：
 
@@ -1038,6 +1038,15 @@ Reducer 规则：
 - fake orchestrator 下 Panel 重挂可恢复。
 - gap、duplicate、late event 测试通过。
 - 应用退出产生 cancel。
+
+实施记录：
+
+- `src-tauri/src/agent/{manager,events,ipc}.rs` 建立进程内权威 registry、后端单调 sequence journal、snapshot 与六个窄 IPC；registry 允许保留终态 run，但全局最多一个非终态 run。
+- `clientRequestId` 和 `clientActionId` 以完整请求关联缓存；完全相同的重放返回原结果且不重发事件，同一 ID 搭配不同输入返回稳定 idempotency conflict。
+- Pause/Resume/Stop 只实现控制面基础转换；fake boundary 可延迟到安全边界后 settle，重复或终态后的迟到 settle 不追加事件、不能覆盖终态。应用 `ExitRequested` 会在进程退出前把活动 run 收敛为 `cancelled`。
+- `src/lib/agent-events.ts` 只实现 sequence cursor：duplicate/更小 sequence 忽略，gap 时缓冲并要求 snapshot resync，安装权威 `lastSequence` 后只连续应用更大的事件，终态后拒绝迟到事件；没有新增 UI workspace。
+- 生产使用 blocked no-op boundary，`agent_start` 返回 `p1Blocked` 且不创建 run；fake boundary 只在 Rust 测试中提供冻结的非秘密 fixture binding。没有 provider/model loop、tool registry/policy/evidence、execution adapter、raw SSH、真实 SSH fixture 或 `write_session` 路径。
+- P0 仍为 `implemented（verification pending external）`，P1 总体继续 `blocked`；P1-B 未开始。
 
 ### P1-B：ModelAdapter 与 fake Agent loop（3–4 天）
 

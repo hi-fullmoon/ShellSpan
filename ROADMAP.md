@@ -208,15 +208,23 @@ P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过
 - 已新增 Rust/TypeScript v1 协议类型、严格 `AgentDecision` decoder、checked-in JSON schema、公开错误分类、显式 run/tool 转换表和硬上限预算策略。
 - `protocol/agent/v1/` 与 `tests/fixtures/agent-protocol/v1/` 是双端共同消费的 schema/fixture；unknown field、unknown version、unknown enum、tool/arguments 错配和 P1 非空 `changes` 均失败关闭。
 - Rust 与 TypeScript 都对所有状态笛卡尔积核对共享转换表，并系统性证明 `completed`、`failed`、`cancelled`、`blocked`、`timedOut` 和 `denied` 等终态不能被迟到结果覆盖。
-- 本工作包保持纯逻辑边界：没有 `AgentManager`、真实 SSH adapter、模型调用入口、Agent Tauri command 或 `write_session` 旁路。P1 仍因 P0 verification gate 保持 `blocked`，下一工作包 P1-A 尚未开始。
+- P1-0 提交保持纯逻辑边界：当时没有 `AgentManager`、真实 SSH adapter、模型调用入口、Agent Tauri command 或 `write_session` 旁路；后续 P1-A 只新增下述控制面。
 
-#### P1-A：AgentManager 与运行注册表
+#### P1-A：AgentManager 与运行注册表（implemented）
 
-- 新增 `src-tauri/src/agent/` 模块。
+- 在 P1-0 的 `src-tauri/src/agent/` 协议模块上新增 manager、journal 与 IPC 控制面。
 - `AgentManager` 成为运行状态的权威来源，前端 Zustand 仅为事件投影。
 - MVP 同一 profile 同时只允许一个 executing Agent；不同 profile 的并发先限制为全局 1，稳定后再提高。
 - Panel 关闭不取消运行；用户显式 Stop 或应用退出才触发取消。
 - 前端重新挂载时通过 snapshot 恢复当前状态。
+
+实际结果（2026-08-27）：
+
+- Rust 进程内 `AgentManager` 是 run、幂等 request/action、journal sequence 与 snapshot 的唯一权威来源；registry 保留终态历史且全局最多一个非终态 run。
+- 仅注册 `agent_start`、`agent_get_snapshot`、`agent_pause`、`agent_resume`、`agent_stop`、`agent_send_message` 六个窄 IPC；没有 generic execute/tool command，也没有 execution adapter、raw SSH 或 `write_session` Agent 路径。
+- `clientRequestId` / `clientActionId` 重放返回原结果，同一 ID 搭配不同输入失败关闭；事件 sequence 只由后端 journal 单调分配，snapshot 携带 `lastSequence`。
+- fake control boundary 覆盖 Panel 重挂、gap/duplicate/late event、延迟 Pause/Stop 与应用退出 cancel；生产 no-op boundary 稳定返回 `p1Blocked`，不创建 run。
+- P1 总体仍为 `blocked`：P0 尚未 verified，P1-B 及后续 model loop、provider、tool/policy/evidence、真实 SSH 和 UI workspace 均未开始。
 
 建议模块：
 
