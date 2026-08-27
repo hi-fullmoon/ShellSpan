@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useProfileStore } from '@/stores/profileStore';
 import { dispatchAgentRunbookDraft } from '@/lib/diagnostic-agent';
 import { RUNBOOK_EXAMPLE } from '@/lib/runbook';
+import * as tauri from '@/lib/tauri';
 import { RunbookPanel } from '../runbook-panel';
 
 vi.mock('../runbook-json-editor', () => ({
@@ -37,6 +38,7 @@ vi.mock('@/hooks/useToast', () => ({
 
 describe('RunbookPanel', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     act(() => {
       useProfileStore.setState({ profiles: [] });
     });
@@ -141,6 +143,93 @@ describe('RunbookPanel', () => {
     expect(screen.getByText('runbook.aiDraftTitle')).toBeInTheDocument();
     expect(screen.getAllByText(/Reload nginx safely/)).not.toHaveLength(0);
     expect(screen.getAllByText(/operator@prod-1.example.test/)).not.toHaveLength(0);
+    expect(screen.getByRole('combobox', { name: 'runbook.target' }))
+      .toHaveTextContent('prod-1 · operator@prod-1.example.test:22');
+    expect(screen.getByRole('combobox', { name: 'runbook.target' }))
+      .not.toHaveTextContent('profile-1');
     expect(screen.getByRole('button', { name: 'runbook.reviewRun' })).toBeEnabled();
+  });
+
+  it('removes the execution footer when a run stops without available actions', () => {
+    act(() => {
+      useProfileStore.setState({
+        profiles: [{
+          id: 'profile-1',
+          name: 'prod-1',
+          host: 'prod-1.example.test',
+          port: 22,
+          username: 'operator',
+          authMethod: 'password',
+          tags: ['production'],
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+      });
+      dispatchAgentRunbookDraft({
+        sourceText: RUNBOOK_EXAMPLE,
+        profileId: 'profile-1',
+        contextLabel: 'operator@prod-1.example.test',
+        contextObservedAt: 1_000,
+        objective: 'Reload nginx safely',
+        target: 'The bound production host only',
+      });
+    });
+    const { container } = render(<RunbookPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'runbook.reviewRun' }));
+    const executionReview = container.querySelector('[data-slot="runbook-execution-review"]');
+    expect(executionReview).toBeInTheDocument();
+    expect(executionReview?.querySelector('[data-slot="card-footer"]')).toBeInTheDocument();
+    const resolvedVariables = executionReview?.querySelector('[data-slot="runbook-resolved-variables"]');
+    const resolvedVariable = resolvedVariables?.querySelector('[data-slot="runbook-resolved-variable"]');
+    expect(resolvedVariables).toBeInTheDocument();
+    expect(resolvedVariable).toHaveClass('flex', 'items-center', 'gap-3', 'border', 'bg-card');
+    expect(resolvedVariable).not.toHaveClass('grid-cols-[8rem_1fr]', 'bg-muted/60');
+
+    fireEvent.click(within(executionReview as HTMLElement).getByRole('button', { name: 'runbook.reject' }));
+
+    expect(executionReview?.querySelector('[data-slot="card-footer"]')).not.toBeInTheDocument();
+  });
+
+  it('uses a neutral cancel action while an approved command is running', async () => {
+    vi.spyOn(tauri, 'invokeExecuteRunbookStep').mockImplementation(() => new Promise(() => {}));
+    act(() => {
+      useProfileStore.setState({
+        profiles: [{
+          id: 'profile-1',
+          name: 'prod-1',
+          host: 'prod-1.example.test',
+          port: 22,
+          username: 'operator',
+          authMethod: 'password',
+          password: 'test-password',
+          tags: ['production'],
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+      });
+      dispatchAgentRunbookDraft({
+        sourceText: RUNBOOK_EXAMPLE,
+        profileId: 'profile-1',
+        contextLabel: 'operator@prod-1.example.test',
+        contextObservedAt: 1_000,
+        objective: 'Reload nginx safely',
+        target: 'The bound production host only',
+      });
+    });
+    const { container } = render(<RunbookPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'runbook.reviewRun' }));
+    const executionReview = container.querySelector('[data-slot="runbook-execution-review"]');
+    expect(executionReview).toBeInTheDocument();
+
+    fireEvent.click(within(executionReview as HTMLElement).getByRole('button', { name: 'runbook.approveExecute' }));
+
+    await waitFor(() => {
+      const cancelButton = within(executionReview as HTMLElement)
+        .getByRole('button', { name: 'runbook.cancel' });
+      expect(cancelButton).toHaveClass('border');
+      expect(cancelButton).not.toHaveClass('bg-destructive');
+    });
   });
 });
