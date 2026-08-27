@@ -61,6 +61,7 @@ interface RenderOptions {
   currentPath?: string;
   filterQuery?: string;
   side?: 'local' | 'remote';
+  localMode?: boolean;
   batchMode?: boolean;
   selectedPaths?: ReadonlySet<string>;
   onSelect?: (paths: Set<string>) => void;
@@ -74,6 +75,7 @@ function renderFileList(options: RenderOptions = {}) {
     currentPath,
     filterQuery = '',
     side = 'local',
+    localMode,
     batchMode = false,
     selectedPaths = new Set(),
     onSelect = vi.fn(),
@@ -85,6 +87,7 @@ function renderFileList(options: RenderOptions = {}) {
     <SftpFileList
       entries={entries}
       side={side}
+      localMode={localMode}
       selectedPaths={selectedPaths}
       filterQuery={filterQuery}
       batchMode={batchMode}
@@ -171,6 +174,16 @@ describe('SftpFileList', () => {
 
     fireEvent.click(screen.getByText('sftp.columns.size'));
     expect(screen.getAllByTestId('sftp-parent-row')[0]).toHaveTextContent('..');
+  });
+
+  it('does not treat a remote double-slash path in the left pane as a local UNC root', () => {
+    renderFileList({
+      side: 'local',
+      localMode: false,
+      currentPath: '//server/share',
+    });
+
+    expect(screen.getAllByTestId('sftp-parent-row')[0]).toBeInTheDocument();
   });
 
   it('filters entries but keeps parent row', () => {

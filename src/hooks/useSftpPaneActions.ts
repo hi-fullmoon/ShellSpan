@@ -11,7 +11,7 @@ import {
   invokePasteLocalPaths,
 } from '@/lib/tauri';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
-import { parentPortablePath } from '@/lib/path-utils';
+import { parentPortablePath, parentPosixPath } from '@/lib/path-utils';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useToast } from '@/hooks/useToast';
 import { useI18n } from '@/hooks/useI18n';
@@ -88,8 +88,8 @@ export interface UseSftpPaneActionsResult {
   handlePermissions: (permissions: number) => Promise<void>;
 }
 
-export function parentDirectoryPath(path: string): string {
-  return parentPortablePath(path);
+export function parentDirectoryPath(path: string, isLocal = true): string {
+  return isLocal ? parentPortablePath(path) : parentPosixPath(path);
 }
 
 function remoteDestinationPath(directory: string, sourcePath: string): string {
@@ -506,7 +506,7 @@ export function useSftpPaneActions(
     async (entry?: FileEntry) => {
       const target = entry ?? selectedEntries[0];
       if (!target) return;
-      const dir = target.kind === 'directory' ? target.path : parentDirectoryPath(target.path);
+      const dir = target.kind === 'directory' ? target.path : parentDirectoryPath(target.path, isLocal);
       try {
         await writeClipboardText(dir);
         success('Copied directory path');
@@ -515,7 +515,7 @@ export function useSftpPaneActions(
         error(t('sftp.feedback.copyDirectoryFailed'));
       }
     },
-    [selectedEntries, error, success, t],
+    [selectedEntries, error, isLocal, success, t],
   );
 
   const onCopyCurrentDirectoryPath = useCallback(async () => {
