@@ -198,6 +198,10 @@ export const RunbookPanel: React.FC = () => {
     () => profiles.find((profile) => profile.id === targetProfileId),
     [profiles, targetProfileId],
   );
+  const targetProfileItems = useMemo(() => profiles.map((profile) => ({
+    label: `${profile.name} · ${profile.username}@${profile.host}:${profile.port}`,
+    value: profile.id,
+  })), [profiles]);
   const availableTags = useMemo(() => listMultiHostRunbookTags(profiles), [profiles]);
   const multiHostTargets = useMemo(
     () => selectedTag ? selectMultiHostProfilesByTag(profiles, selectedTag) : [],
@@ -809,6 +813,7 @@ export const RunbookPanel: React.FC = () => {
                     <Field>
                       <FieldLabel>{t('runbook.target')}</FieldLabel>
                       <Select
+                        items={targetProfileItems}
                         value={targetProfileId ?? null}
                         onValueChange={(value) => setTargetProfileId(value ?? undefined)}
                         disabled={executionLocked}
@@ -819,9 +824,9 @@ export const RunbookPanel: React.FC = () => {
                         <SelectContent>
                           <SelectGroup>
                             <SelectLabel>{t('runbook.profiles')}</SelectLabel>
-                            {profiles.map((profile) => (
-                              <SelectItem key={profile.id} value={profile.id}>
-                                {profile.name} · {profile.username}@{profile.host}:{profile.port}
+                            {targetProfileItems.map((profile) => (
+                              <SelectItem key={profile.value} value={profile.value}>
+                                {profile.label}
                               </SelectItem>
                             ))}
                           </SelectGroup>
@@ -953,16 +958,30 @@ export const RunbookPanel: React.FC = () => {
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 {Object.keys(run.resolvedVariables).length > 0 && (
-                  <div className="flex flex-col gap-2">
-                    <span className="text-xs font-medium text-muted-foreground">{t('runbook.resolvedVariables')}</span>
-                    <div className="grid grid-cols-1 gap-2 @min-[42rem]:grid-cols-2">
+                  <div data-slot="runbook-resolved-variables" className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <BracesIcon className="size-4 text-muted-foreground" aria-hidden />
+                      <span className="text-sm font-medium">{t('runbook.resolvedVariables')}</span>
+                      <Badge variant="outline" size="sm">
+                        {Object.keys(run.resolvedVariables).length}
+                      </Badge>
+                    </div>
+                    <dl className="grid grid-cols-1 gap-2 @min-[42rem]:grid-cols-2">
                       {Object.entries(run.resolvedVariables).map(([name, value]) => (
-                        <div key={name} className="grid grid-cols-[8rem_1fr] gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs">
-                          <span>{name}</span>
-                          <code className="break-all">{value}</code>
+                        <div
+                          key={name}
+                          data-slot="runbook-resolved-variable"
+                          className="flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2.5"
+                        >
+                          <dt className="shrink-0">
+                            <Badge variant="secondary" size="sm">{name}</Badge>
+                          </dt>
+                          <dd className="min-w-0">
+                            <code className="break-all text-sm">{value}</code>
+                          </dd>
                         </div>
                       ))}
-                    </div>
+                    </dl>
                   </div>
                 )}
 
@@ -1024,8 +1043,8 @@ export const RunbookPanel: React.FC = () => {
                               {item.evidence?.exitCode !== undefined && (
                                 <span>{t('runbook.exitCode')}: {item.evidence.exitCode}</span>
                               )}
-                              {item.evidence?.stdout && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stdout}</code>}
-                              {item.evidence?.stderr && <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stderr}</code>}
+                              {item.evidence?.stdout && <code className="whitespace-pre-wrap break-words">{item.evidence.stdout}</code>}
+                              {item.evidence?.stderr && <code className="whitespace-pre-wrap break-words">{item.evidence.stderr}</code>}
                               {item.error && <span className="text-destructive">{item.error}</span>}
                             </div>
                           )}
@@ -1045,38 +1064,40 @@ export const RunbookPanel: React.FC = () => {
                   })}
                 </ol>
               </CardContent>
-              <CardFooter className="flex-col gap-2 @min-[36rem]:flex-row @min-[36rem]:justify-between">
-                <div className="flex flex-wrap gap-2">
+              {['awaitingApproval', 'paused', 'running'].includes(run.phase) && (
+                <CardFooter className="flex-col gap-2 @min-[36rem]:flex-row @min-[36rem]:justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    {run.phase === 'awaitingApproval' && (
+                      <>
+                        <Button size="sm" variant="outline" onClick={handlePause}>{t('runbook.pause')}</Button>
+                        <Button size="sm" variant="outline" onClick={handleReject}>{t('runbook.reject')}</Button>
+                        {activeItem?.kind === 'step' && (
+                          <Button size="sm" variant="outline" onClick={handleSkip}>{t('runbook.skip')}</Button>
+                        )}
+                      </>
+                    )}
+                    {run.phase === 'paused' && (
+                      <Button size="sm" variant="outline" onClick={handleResume}>{t('runbook.resume')}</Button>
+                    )}
+                    {run.phase === 'running' && (
+                      <Button size="sm" variant="outline" onClick={() => void handleCancel()} disabled={!operationId}>
+                        {t('runbook.cancel')}
+                      </Button>
+                    )}
+                  </div>
                   {run.phase === 'awaitingApproval' && (
-                    <>
-                      <Button size="sm" variant="outline" onClick={handlePause}>{t('runbook.pause')}</Button>
-                      <Button size="sm" variant="outline" onClick={handleReject}>{t('runbook.reject')}</Button>
-                      {activeItem?.kind === 'step' && (
-                        <Button size="sm" variant="outline" onClick={handleSkip}>{t('runbook.skip')}</Button>
-                      )}
-                    </>
-                  )}
-                  {run.phase === 'paused' && (
-                    <Button size="sm" variant="outline" onClick={handleResume}>{t('runbook.resume')}</Button>
-                  )}
-                  {run.phase === 'running' && (
-                    <Button size="sm" variant="destructive" onClick={() => void handleCancel()} disabled={!operationId}>
-                      {t('runbook.cancel')}
+                    <Button
+                      size="sm"
+                      variant={activeItem?.risk === 'destructive' ? 'destructive' : 'default'}
+                      onClick={handleApprove}
+                      disabled={preparing}
+                    >
+                      {preparing && <Spinner data-icon="inline-start" />}
+                      {t('runbook.approveExecute')}
                     </Button>
                   )}
-                </div>
-                {run.phase === 'awaitingApproval' && (
-                  <Button
-                    size="sm"
-                    variant={activeItem?.risk === 'destructive' ? 'destructive' : 'default'}
-                    onClick={handleApprove}
-                    disabled={preparing}
-                  >
-                    {preparing && <Spinner data-icon="inline-start" />}
-                    {t('runbook.approveExecute')}
-                  </Button>
-                )}
-              </CardFooter>
+                </CardFooter>
+              )}
             </Card>
           )}
 

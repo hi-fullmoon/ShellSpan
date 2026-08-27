@@ -615,10 +615,10 @@ export const MultiHostRunbookExecution: React.FC<MultiHostRunbookExecutionProps>
                           <span>{t('runbook.exitCode')}: {item.evidence.exitCode}</span>
                         )}
                         {item.evidence?.stdout && (
-                          <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stdout}</code>
+                          <code className="whitespace-pre-wrap break-words">{item.evidence.stdout}</code>
                         )}
                         {item.evidence?.stderr && (
-                          <code className="max-h-32 overflow-auto whitespace-pre-wrap">{item.evidence.stderr}</code>
+                          <code className="whitespace-pre-wrap break-words">{item.evidence.stderr}</code>
                         )}
                         {item.error && <span className="text-destructive">{item.error}</span>}
                       </CardContent>

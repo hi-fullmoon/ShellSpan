@@ -139,7 +139,10 @@ describe('MultiHostRunbookExecution', () => {
     const secondCard = screen.getByText('host-2').closest('[data-slot="card"]');
     expect(firstCard).not.toBeNull();
     expect(secondCard).not.toBeNull();
-    expect(within(firstCard as HTMLElement).getByText('alpha-step')).toBeInTheDocument();
+    const firstEvidenceOutput = within(firstCard as HTMLElement).getByText('alpha-step');
+    expect(firstEvidenceOutput).toBeInTheDocument();
+    expect(firstEvidenceOutput).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(firstEvidenceOutput).not.toHaveClass('max-h-32', 'overflow-auto');
     expect(within(firstCard as HTMLElement).queryByText('bravo-step')).not.toBeInTheDocument();
     expect(within(secondCard as HTMLElement).getByText('bravo-step')).toBeInTheDocument();
     expect(within(secondCard as HTMLElement).queryByText('alpha-step')).not.toBeInTheDocument();
