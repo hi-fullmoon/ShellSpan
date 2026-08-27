@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentRun } from '@/types/ai';
+import type { StaticDiagnosticRun } from '@/types/ai';
 import { AgentRunView } from '../agent-run-view';
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -12,7 +12,7 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
-const plan: NonNullable<AgentRun['plan']> = {
+const plan: NonNullable<StaticDiagnosticRun['plan']> = {
   objective: 'Reload nginx safely',
   target: 'The bound production host only',
   assumptions: ['nginx is managed by systemd'],
@@ -63,7 +63,7 @@ const plan: NonNullable<AgentRun['plan']> = {
   ],
 };
 
-const run: AgentRun = {
+const run: StaticDiagnosticRun = {
   id: 'run-1',
   requestId: 'request-1',
   goal: 'diagnose nginx',
@@ -83,7 +83,7 @@ const run: AgentRun = {
   })),
 };
 
-function renderView(value: AgentRun | undefined, overrides?: {
+function renderView(value: StaticDiagnosticRun | undefined, overrides?: {
   onCancel?: () => void;
   onRetry?: () => void;
   onReviewRunbook?: () => void;

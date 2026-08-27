@@ -46,12 +46,12 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 ### 3.2 主要缺口
 
 - 当前 Agent 一次性生成完整计划，不能根据真实执行结果动态选择下一步。
-- Agent 状态只存在前端单一 `run`，后端不是运行生命周期的权威来源。
+- P1-A 已建立后端权威 run registry，P1-E 已建立 snapshot-authoritative 前端投影；生产 dynamic start 仍因 P0/P1-D 门禁而 blocked。
 - AI provider 层只处理文本或结构化计划，没有统一的 provider-neutral 工具调用结果。
 - Runbook 已切换到 crate-private reviewed SSH 执行内核，但 Agent adapter、policy 和 approval 尚未实现，也未注册通用执行 Tauri command。
 - reviewed operation deadline 可先返回稳定终态，但 DNS、TCP、SSH handshake/auth 仍使用连接层阻塞超时；应用崩溃也不会恢复内存中的执行状态。
 - 当前风险模型偏向静态 Runbook，缺少适用于动态 Agent 的多维风险、审批摘要、防重放和策略版本。
-- 没有 Agent 事件序列、快照恢复、运行预算、连续失败限制和后置验证义务。
+- P1-A/P1-E 已具备 Agent 事件序列、快照恢复、运行预算和连续失败投影；真实 SSH adapter 与后置真实 fixture 仍未准入。
 - 没有专用 Agent PTY、终端租约、用户接管或交互式密码边界。
 
 ## 4. 不可破坏的安全约束
@@ -224,7 +224,7 @@ P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过
 - 仅注册 `agent_start`、`agent_get_snapshot`、`agent_pause`、`agent_resume`、`agent_stop`、`agent_send_message` 六个窄 IPC；没有 generic execute/tool command，也没有 execution adapter、raw SSH 或 `write_session` Agent 路径。
 - `clientRequestId` / `clientActionId` 重放返回原结果，同一 ID 搭配不同输入失败关闭；事件 sequence 只由后端 journal 单调分配，snapshot 携带 `lastSequence`。
 - fake control boundary 覆盖 Panel 重挂、gap/duplicate/late event、延迟 Pause/Stop 与应用退出 cancel；生产 no-op boundary 稳定返回 `p1Blocked`，不创建 run。
-- P1 总体仍为 `blocked`：P0 尚未 verified；P1-C 已在本地 registry + fake executor 边界内实现，P1-D 的真实 SSH adapter/fixture 与 P1-E UI workspace 均未开始。
+- P1 总体仍为 `blocked`：P0 尚未 verified；P1-C 已在本地 registry + fake executor 边界内实现，P1-E UI workspace 已实现，但 P1-D 的真实 SSH adapter/fixture 在独立核验中因缺少当前 SHA 的 Windows runner 实跑证据而失败关闭、没有提交。
 
 建议模块：
 
@@ -295,9 +295,9 @@ src-tauri/src/agent/
 - 只有 P0 在 Roadmap/audit 变为 `verified` 后，才允许把 `shell.execReadOnly` 接到 `execute_reviewed_ssh_command`。
 - adapter 必须继续执行 target revalidation、operation cancellation、timeout/output policy 和 secret redaction，且不得新增 generic execute IPC。
 - direct/jump-host fixture 覆盖只读成功、non-zero、timeout、cancel、output cap 和 target drift。
-- 当前 P0 仍为 `implemented（verification pending external）`，因此本工作包未开始。
+- 当前 P0 仍为 `implemented（verification pending external）`。独立 P1-D 准入核验确认当前 SHA 缺少 Windows runner 真实结果，已按门禁失败关闭；本工作包没有开始、没有 adapter 或提交。
 
-### 7.3 P1-E：Agent Workspace UI（planned；未开始）
+### 7.3 P1-E：Agent Workspace UI（implemented；生产 dynamic start 继续 blocked）
 
 #### 拆分 AI Panel
 
@@ -340,6 +340,16 @@ src/components/ai/agent/
 - `Stop now`：取消模型请求和正在执行的工具。
 - UI 必须解释远程后台进程不一定能因 channel 关闭而终止；自动模式本身禁止后台化命令。
 - 停止后所有尚未执行的 tool proposal 和 pending tool call 失效。
+
+#### 实际结果（2026-08-27）
+
+- `src/components/ai/agent/` 已按建议拆出 Workspace、Header、Timeline、Plan、Tool Card、Evidence、Report 和 Composer，并复用现有 shadcn/Base UI primitives、chat primitives、设计 token、Spinner 与 sonner。
+- `src/stores/agentStore.ts` 已成为 versioned event + authoritative snapshot 投影：严格 decode，sequence 连续检查，gap resync，duplicate/late terminal 忽略，冻结 goal/target/provider/policy 与终态不可回退。Panel 先订阅再 snapshot，unmount/remount 不取消后端 run。
+- `src/lib/tauri.ts` 只增加 `agent_start/get_snapshot/pause/resume/stop/send_message` 六个既有窄 IPC 的 typed wrapper；没有 generic execute/tool IPC，也没有 raw SSH、PTY 或 `write_session` Agent 路径。
+- Header/Timeline 覆盖冻结 target、read-only、状态、duration/budgets、plan、全部 tool state、后端命令预览、exit/duration/bytes/truncation、折叠脱敏 stdout/stderr、evidence、final report、错误与 Stop 限制说明；Pause/Resume/Stop/answer/steering 均等待后端接受后 snapshot resync。
+- 旧诊断计划迁移到明确命名的 `staticDiagnosticStore`/`StaticDiagnostic*`，仅作为用户显式选择的 fallback。`p1Blocked` 与 provider incompatible 清晰展示；fallback 不解除 dynamic gate，也不伪装为动态运行。
+- 测试覆盖 gap/duplicate/late、Panel remount、frozen target、预算、tool states、awaitingUser/steering、终态/错误/blocked/provider incompatible、evidence navigation、keyboard/live region，以及 Chat/Command/Explain/static Diagnostic Plan/Remote Health 回归。阶段证据见 `docs/ai-agent-p1-e-agent-workspace-ui-evidence.md`。
+- P1-D 未实现；生产 `AgentManager::default()` 仍为 `BlockedNoopAgentBoundary`。P1 总体继续 `blocked`，本阶段未开始 P1-F。
 
 ### 7.4 P1-F：Eval、文档与发布门禁（planned；未开始）
 

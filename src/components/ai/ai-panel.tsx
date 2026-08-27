@@ -50,7 +50,6 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
-  InputGroupText,
   InputGroupTextarea,
 } from '@/components/ui/input-group';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -58,6 +57,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Bubble, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
 import { AgentRunView } from './agent-run-view';
+import { AgentWorkspace } from './agent/agent-workspace';
 import { useI18n } from '@/hooks/useI18n';
 import {
   invokeCancelAiRequest,
@@ -80,6 +80,7 @@ import {
 } from '@/lib/diagnostic-agent';
 import {
   getRecentTerminalOutput,
+  MAX_AI_CONTEXT_BYTES,
   redactTerminalSecrets,
   renderTerminalText,
   stripAnsi,
@@ -89,6 +90,7 @@ import {
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiStore } from '@/stores/aiStore';
+import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -107,6 +109,8 @@ import type {
 } from '@/types/ai';
 import type { Locale } from '@/types';
 import type { LocaleKey } from '@/locales';
+import type { AgentTerminalContextV1 } from '@/types/agent';
+import { isAgentRunTerminalStateV1 } from '@/lib/agent-state';
 
 const AI_STREAM_EVENT = 'ai-stream';
 const AI_PANEL_DEFAULT_WIDTH = 400;
@@ -317,7 +321,7 @@ export function cancelActiveAiRequests(
   cancelBackend: CancelAiRequest = invokeCancelAiRequest,
 ): string[] {
   const ai = useAiStore.getState();
-  const agent = useAgentStore.getState();
+  const agent = useStaticDiagnosticStore.getState();
   const requestIds = new Set<string>();
 
   if (ai.activeRequestId) {
@@ -340,7 +344,7 @@ export function cancelActiveAiRequests(
 export function stopActiveAgentRun(
   cancelBackend: CancelAiRequest = invokeCancelAiRequest,
 ): string | undefined {
-  const agent = useAgentStore.getState();
+  const agent = useStaticDiagnosticStore.getState();
   const run = agent.run;
   if (!run) return undefined;
   const requestId = run.phase === 'planning'
@@ -471,6 +475,7 @@ interface DiagnosticAgentContextSnapshot {
   conversationId?: string;
   profileId?: string;
   contextSource: 'terminal' | 'remoteHealth';
+  truncated?: boolean;
 }
 
 function diagnosticAgentContextForSession(
@@ -492,12 +497,17 @@ function diagnosticAgentContextForSession(
       ? `Selected terminal content:\n${selection}`
       : `Recent terminal output:\n${output || '(no recent output)'}`,
   ].join('\n');
+  const truncatedContent = truncateAiContext(content);
   return {
     sessionId: session.sessionId,
     conversationId: session.conversationId,
     profileId: session.profileId,
     contextSource: 'terminal',
-    context: { label, content: truncateAiContext(content) },
+    context: { label, content: truncatedContent },
+    truncated: truncatedContent !== content || Boolean(
+      rawSelection
+      && new TextEncoder().encode(rawSelection).byteLength > MAX_AI_CONTEXT_BYTES,
+    ),
   };
 }
 
@@ -532,7 +542,12 @@ export const AiPanel: React.FC = () => {
   const error = useAiStore((state) => state.error);
   const errorRequestId = useAiStore((state) => state.errorRequestId);
   const clearConversation = useAiStore((state) => state.clearConversation);
-  const agentRun = useAgentStore((state) => state.run);
+  const staticAgentRun = useStaticDiagnosticStore((state) => state.run);
+  const dynamicAgentRun = useAgentStore((state) => state.activeRunId
+    ? state.runsById[state.activeRunId]
+    : undefined);
+  const dynamicAgentStartPending = useAgentStore((state) => state.startPending);
+  const dynamicAgentStartError = useAgentStore((state) => state.startError);
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
@@ -670,7 +685,7 @@ export const AiPanel: React.FC = () => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     const batcher = createAiStreamDeltaBatcher((requestId, text) => {
-      const agent = useAgentStore.getState();
+      const agent = useStaticDiagnosticStore.getState();
       if (agent.run?.requestId === requestId) {
         agent.appendDelta(requestId, text);
         return;
@@ -681,7 +696,7 @@ export const AiPanel: React.FC = () => {
     streamDeltaBatcherRef.current = batcher;
     void listen<AiStreamEvent>(AI_STREAM_EVENT, (event) => {
       const payload = event.payload;
-      const agent = useAgentStore.getState();
+      const agent = useStaticDiagnosticStore.getState();
       if (agent.run?.requestId === payload.requestId) {
         if (agent.run.phase !== 'planning') return;
         if (payload.type === 'textDelta') {
@@ -796,7 +811,7 @@ export const AiPanel: React.FC = () => {
     }
   }, [contextEnabled]);
 
-  const runDiagnosticAgent = useCallback(async (
+  const runStaticDiagnosticPlan = useCallback(async (
     text: string,
     providedSnapshot?: DiagnosticAgentContextSnapshot,
   ): Promise<void> => {
@@ -811,7 +826,7 @@ export const AiPanel: React.FC = () => {
       navigateToAiSettings();
       return;
     }
-    const started = useAgentStore.getState().beginRun(
+    const started = useStaticDiagnosticStore.getState().beginRun(
       requestId,
       goal,
       snapshot.sessionId,
@@ -837,7 +852,7 @@ export const AiPanel: React.FC = () => {
         },
       });
     } catch (reason) {
-      useAgentStore.getState().failRun(
+      useStaticDiagnosticStore.getState().failRun(
         requestId,
         reason instanceof Error ? reason.message : String(reason),
       );
@@ -860,7 +875,7 @@ export const AiPanel: React.FC = () => {
       setContextEnabled(true);
       setTask('diagnosticAgent');
       setOpen(true);
-      void runDiagnosticAgent(detail.goal, {
+      void runStaticDiagnosticPlan(detail.goal, {
         ...detail,
         conversationId: terminal.conversationId,
         contextSource: 'remoteHealth',
@@ -871,15 +886,15 @@ export const AiPanel: React.FC = () => {
       'termbridge:start-health-diagnosis',
       handleHealthDiagnosis,
     );
-  }, [runDiagnosticAgent, setOpen]);
+  }, [runStaticDiagnosticPlan, setOpen]);
 
   const handleContextEnabledChange = useCallback((enabled: boolean): void => {
-    if (!enabled && agentRun) {
-      streamDeltaBatcherRef.current?.flush(agentRun.requestId);
+    if (!enabled && staticAgentRun) {
+      streamDeltaBatcherRef.current?.flush(staticAgentRun.requestId);
       stopActiveAgentRun();
     }
     setContextEnabled(enabled);
-  }, [agentRun]);
+  }, [staticAgentRun]);
 
   const handleExplain = (): void => {
     const snapshot = currentTerminalContext();
@@ -908,36 +923,36 @@ export const AiPanel: React.FC = () => {
   };
 
   const handleStopAgentRun = (): void => {
-    const requestId = useAgentStore.getState().run?.requestId;
+    const requestId = useStaticDiagnosticStore.getState().run?.requestId;
     if (requestId) streamDeltaBatcherRef.current?.flush(requestId);
     stopActiveAgentRun();
   };
 
   const handleRetryAgentRun = (): void => {
     if (!contextEnabled) return;
-    const run = useAgentStore.getState().run;
+    const run = useStaticDiagnosticStore.getState().run;
     if (!run || !['cancelled', 'error'].includes(run.phase)) return;
     const terminalState = useTerminalStore.getState();
     const terminal = run.conversationId
       ? terminalState.sessions.find((session) => session.conversationId === run.conversationId)
       : terminalState.sessions.find((session) => session.sessionId === run.sessionId);
     if (!terminal) {
-      useAgentStore.getState().failRun(run.requestId, t('ai.agent.retryTargetUnavailable'));
+      useStaticDiagnosticStore.getState().failRun(run.requestId, t('ai.agent.retryTargetUnavailable'));
       return;
     }
     const snapshot = diagnosticAgentContextForSession(terminal.sessionId);
     if (!snapshot) {
-      useAgentStore.getState().failRun(run.requestId, t('ai.agent.retryTargetUnavailable'));
+      useStaticDiagnosticStore.getState().failRun(run.requestId, t('ai.agent.retryTargetUnavailable'));
       return;
     }
     useTerminalStore.getState().setActiveSession(terminal.sessionId);
     useAppStore.getState().setActiveSection('terminal');
     setSelectedConversationId(null);
-    void runDiagnosticAgent(run.goal, snapshot);
+    void runStaticDiagnosticPlan(run.goal, snapshot);
   };
 
   const handleReviewAgentRunbook = (): void => {
-    const run = useAgentStore.getState().run;
+    const run = useStaticDiagnosticStore.getState().run;
     if (!run?.plan || !['awaitingReview', 'handedOff'].includes(run.phase)) return;
     try {
       dispatchAgentRunbookDraft({
@@ -948,13 +963,13 @@ export const AiPanel: React.FC = () => {
         objective: run.plan.objective,
         target: run.plan.target,
       });
-      useAgentStore.getState().markHandedOff();
+      useStaticDiagnosticStore.getState().markHandedOff();
       const app = useAppStore.getState();
       app.setActiveSection('workbench');
       app.setActiveWorkbenchTab('runbooks');
       setOpen(false);
     } catch (reason) {
-      useAgentStore.getState().failRun(
+      useStaticDiagnosticStore.getState().failRun(
         run.requestId,
         reason instanceof Error ? reason.message : String(reason),
       );
@@ -1079,20 +1094,25 @@ export const AiPanel: React.FC = () => {
     && activeSection === 'terminal'
     && Boolean(contextSnapshot.context);
   const agentContext = contextEnabled ? currentDiagnosticAgentContext() : undefined;
-  const agentPlanning = agentRun?.phase === 'planning';
-  const busy = phase === 'streaming' || agentPlanning;
+  const staticAgentPlanning = staticAgentRun?.phase === 'planning';
+  const dynamicAgentActive = Boolean(
+    dynamicAgentRun && !isAgentRunTerminalStateV1(dynamicAgentRun.state),
+  );
+  const busy = phase === 'streaming'
+    || staticAgentPlanning
+    || dynamicAgentActive
+    || dynamicAgentStartPending;
   const composerSubmitDisabled = busy
     || viewingHistory
     || conversationLoading
-    || (task !== 'diagnosticAgent' && conversationLoadFailed)
+    || conversationLoadFailed
     || !draft.trim()
-    || !model.trim()
-    || (task === 'diagnosticAgent' && (!contextEnabled || !agentContext?.context));
+    || !model.trim();
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
   const compactModeControls = shouldCompactAiModeControls(panelWidth, locale);
   const currentLane = conversationLane(task === 'generateCommand' ? 'generateCommand' : 'chat');
   const hasCurrentConversation = task === 'diagnosticAgent'
-    ? Boolean(agentRun)
+    ? Boolean(staticAgentRun || dynamicAgentRun || dynamicAgentStartError)
     : visibleMessages.length > 0;
   const failedRequestMessage = errorRequestId
     ? messages.find((message) => (
@@ -1129,6 +1149,77 @@ export const AiPanel: React.FC = () => {
       : contextSnapshot.context
         ? t('ai.context.sourceRecentOutput')
         : t('ai.context.sourceNoOutput');
+  const dynamicTerminalContext: AgentTerminalContextV1 | undefined = agentContext
+    ? {
+        sessionId: agentContext.sessionId,
+        capturedAt: Date.now(),
+        label: agentContext.context.label,
+        redactedText: agentContext.context.content,
+        truncated: Boolean(agentContext.truncated),
+      }
+    : undefined;
+  const providerCompatible = defaultProvider?.structuredOutput === 'jsonSchema';
+  const modeControl = (
+    <ToggleGroup
+      value={[task]}
+      onValueChange={(values) => {
+        const value = values[0] as AiTaskKind | undefined;
+        if (value) setTask(value);
+      }}
+      variant="tag"
+      size="xs"
+      spacing={1}
+      className="min-w-0"
+      aria-label={t('ai.mode')}
+      disabled={busy || viewingHistory}
+    >
+      <Tooltip>
+        <TooltipTrigger render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}>
+          <MessageCircleIcon
+            data-icon={compactModeControls ? undefined : 'inline-start'}
+            className={cn(!compactModeControls && '-translate-y-px')}
+          />
+          {!compactModeControls && t('ai.mode.chat')}
+        </TooltipTrigger>
+        <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
+        >
+          <SquareTerminalIcon
+            data-icon={compactModeControls ? undefined : 'inline-start'}
+            className={cn(!compactModeControls && '-translate-y-px')}
+          />
+          {!compactModeControls && t('ai.mode.command')}
+        </TooltipTrigger>
+        <TooltipContent>{t('ai.mode.command')}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={(
+            <ToggleGroupItem
+              value="diagnosticAgent"
+              aria-label={t('ai.mode.agent')}
+              disabled={viewingHistory}
+            />
+          )}
+        >
+          <BrainCircuitIcon
+            data-icon={compactModeControls ? undefined : 'inline-start'}
+            className={cn(!compactModeControls && '-translate-y-px')}
+          />
+          {!compactModeControls && t('ai.mode.agent')}
+        </TooltipTrigger>
+        <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
+      </Tooltip>
+    </ToggleGroup>
+  );
+  const configureAction = !model.trim() ? (
+    <Button variant="link" size="xs" className="mt-1 px-0" onClick={openSettings}>
+      {t('ai.configure')}
+    </Button>
+  ) : undefined;
 
   const panelContent = (
       <aside
@@ -1352,7 +1443,10 @@ export const AiPanel: React.FC = () => {
                     variant="destructive"
                     size="sm"
                     onClick={() => {
-                      if (task === 'diagnosticAgent') useAgentStore.getState().clear();
+                      if (task === 'diagnosticAgent') {
+                        useStaticDiagnosticStore.getState().clear();
+                        useAgentStore.getState().dismissActiveRun();
+                      }
                       else {
                         clearConversation(visibleConversationId, currentLane);
                         const conversation = conversations.find((item) => (
@@ -1510,11 +1604,36 @@ export const AiPanel: React.FC = () => {
         )}
 
         {task === 'diagnosticAgent' ? (
-          <AgentRunView
-            run={agentRun}
-            onCancel={handleStopAgentRun}
-            onRetry={handleRetryAgentRun}
-            onReviewRunbook={handleReviewAgentRunbook}
+          <AgentWorkspace
+            profileId={activeProfile?.id}
+            providerId={model.trim() ? defaultProvider?.id : undefined}
+            providerCompatible={providerCompatible}
+            currentProfileId={activeProfile?.id}
+            terminalContext={dynamicTerminalContext}
+            draft={draft}
+            onDraftChange={setDraft}
+            staticFallbackActive={Boolean(staticAgentRun)}
+            staticFallbackBusy={staticAgentPlanning}
+            staticFallback={(
+              <AgentRunView
+                run={staticAgentRun}
+                onCancel={handleStopAgentRun}
+                onRetry={handleRetryAgentRun}
+                onReviewRunbook={handleReviewAgentRunbook}
+              />
+            )}
+            canUseStaticFallback={Boolean(
+              contextEnabled && agentContext?.context && model.trim(),
+            )}
+            onStaticFallback={(goal) => void runStaticDiagnosticPlan(goal)}
+            onClearStaticFallback={() => useStaticDiagnosticStore.getState().clear()}
+            modeControl={modeControl}
+            footerAction={configureAction}
+            contextHint={!contextEnabled
+              ? t('ai.agent.requiresContext')
+              : !agentContext
+                ? t('ai.agent.requiresTerminal')
+                : undefined}
           />
         ) : conversationLoading && visibleMessages.length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -1692,141 +1811,68 @@ export const AiPanel: React.FC = () => {
           </Alert>
         )}
 
-        <span className="sr-only" aria-live="polite" aria-atomic="true">
-          {statusAnnouncement}
-        </span>
+        {task !== 'diagnosticAgent' && (
+          <span className="sr-only" aria-live="polite" aria-atomic="true">
+            {statusAnnouncement}
+          </span>
+        )}
 
-        <div className="shrink-0 p-3 pt-2">
-          <InputGroup className="min-h-24 rounded-2xl bg-card shadow-xs has-[[data-slot=input-group-control]:focus-visible]:ring-1">
-            <InputGroupTextarea
-              ref={composerRef}
-              value={draft}
-              disabled={viewingHistory}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (shouldSubmitAiDraft(
-                  event.key,
-                  event.shiftKey,
-                  event.nativeEvent.isComposing,
-                  event.keyCode,
-                )) {
-                  event.preventDefault();
-                  if (composerSubmitDisabled) return;
-                  if (task === 'diagnosticAgent') void runDiagnosticAgent(draft);
-                  else void send(task, draft);
-                }
-              }}
-              placeholder={task === 'diagnosticAgent'
-                ? t('ai.agent.placeholder')
-                : task === 'generateCommand'
+        {task !== 'diagnosticAgent' && (
+          <div className="shrink-0 p-3 pt-2">
+            <InputGroup className="min-h-24 rounded-2xl bg-card shadow-xs has-[[data-slot=input-group-control]:focus-visible]:ring-1">
+              <InputGroupTextarea
+                ref={composerRef}
+                value={draft}
+                disabled={viewingHistory}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (shouldSubmitAiDraft(
+                    event.key,
+                    event.shiftKey,
+                    event.nativeEvent.isComposing,
+                    event.keyCode,
+                  )) {
+                    event.preventDefault();
+                    if (composerSubmitDisabled) return;
+                    void send(task, draft);
+                  }
+                }}
+                placeholder={task === 'generateCommand'
                   ? t('ai.commandPlaceholder')
                   : t('ai.placeholder')}
-              className="min-h-14 max-h-48 px-3.5 pt-3 pb-1 leading-5"
-            />
-            <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
-              {task === 'diagnosticAgent' && (!contextEnabled || !agentContext?.context) && (
-                <InputGroupText
-                  className="min-w-0 px-1 text-xs leading-4 text-muted-foreground/80"
-                  aria-live="polite"
-                >
-                  <SquareTerminalIcon />
-                  <span>
-                    {!contextEnabled
-                      ? t('ai.agent.requiresContext')
-                      : t('ai.agent.requiresTerminal')}
-                  </span>
-                </InputGroupText>
-              )}
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                <ToggleGroup
-                  value={[task]}
-                  onValueChange={(values) => {
-                    const value = values[0] as AiTaskKind | undefined;
-                    if (value) setTask(value);
-                  }}
-                  variant="tag"
-                  size="xs"
-                  spacing={1}
-                  className="min-w-0"
-                  aria-label={t('ai.mode')}
-                  disabled={busy || viewingHistory}
-                >
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}
+                className="min-h-14 max-h-48 px-3.5 pt-3 pb-1 leading-5"
+              />
+              <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  {modeControl}
+                  {busy ? (
+                    <InputGroupButton
+                      variant="default"
+                      size="icon-sm"
+                      className="shrink-0 rounded-full"
+                      onClick={handleCancel}
+                      aria-label={t('ai.stop')}
                     >
-                      <MessageCircleIcon
-                        data-icon={compactModeControls ? undefined : 'inline-start'}
-                        className={cn(!compactModeControls && '-translate-y-px')}
-                      />
-                      {!compactModeControls && t('ai.mode.chat')}
-                    </TooltipTrigger>
-                    <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
+                      <SquareIcon />
+                    </InputGroupButton>
+                  ) : (
+                    <InputGroupButton
+                      variant="default"
+                      size="icon-sm"
+                      className="shrink-0 rounded-full"
+                      onClick={() => void send(task, draft)}
+                      disabled={composerSubmitDisabled}
+                      aria-label={t('ai.send')}
                     >
-                      <SquareTerminalIcon
-                        data-icon={compactModeControls ? undefined : 'inline-start'}
-                        className={cn(!compactModeControls && '-translate-y-px')}
-                      />
-                      {!compactModeControls && t('ai.mode.command')}
-                    </TooltipTrigger>
-                    <TooltipContent>{t('ai.mode.command')}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={(
-                        <ToggleGroupItem
-                          value="diagnosticAgent"
-                          aria-label={t('ai.mode.agent')}
-                          disabled={viewingHistory}
-                        />
-                      )}
-                    >
-                      <BrainCircuitIcon
-                        data-icon={compactModeControls ? undefined : 'inline-start'}
-                        className={cn(!compactModeControls && '-translate-y-px')}
-                      />
-                      {!compactModeControls && t('ai.mode.agent')}
-                    </TooltipTrigger>
-                    <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
-                  </Tooltip>
-                </ToggleGroup>
-                {busy ? (
-                  <InputGroupButton
-                    variant="default"
-                    size="icon-sm"
-                    className="shrink-0 rounded-full"
-                    onClick={handleCancel}
-                    aria-label={t('ai.stop')}
-                  >
-                    <SquareIcon />
-                  </InputGroupButton>
-                ) : (
-                  <InputGroupButton
-                    variant="default"
-                    size="icon-sm"
-                    className="shrink-0 rounded-full"
-                    onClick={() => task === 'diagnosticAgent'
-                      ? void runDiagnosticAgent(draft)
-                      : void send(task, draft)}
-                    disabled={composerSubmitDisabled}
-                    aria-label={t('ai.send')}
-                  >
-                    <ArrowUpIcon />
-                  </InputGroupButton>
-                )}
-              </div>
-            </InputGroupAddon>
-          </InputGroup>
-          {!model.trim() && (
-            <Button variant="link" size="xs" className="mt-1 px-0" onClick={openSettings}>
-              {t('ai.configure')}
-            </Button>
-          )}
-        </div>
+                      <ArrowUpIcon />
+                    </InputGroupButton>
+                  )}
+                </div>
+              </InputGroupAddon>
+            </InputGroup>
+            {configureAction}
+          </div>
+        )}
       </aside>
   );
 
