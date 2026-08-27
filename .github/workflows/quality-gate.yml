@@ -49,6 +49,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run frontend tests
+        run: pnpm test
+      - name: Build frontend
+        run: pnpm build
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
@@ -87,11 +100,16 @@ jobs:
         run: docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml up --build --detach --wait
       - name: Run SSH/SFTP end-to-end test
         env:
+          TERMBRIDGE_E2E_SSH_FIXTURE: "1"
           TERMBRIDGE_E2E_SSH_HOST: 127.0.0.1
           TERMBRIDGE_E2E_SSH_PORT: "22222"
           TERMBRIDGE_E2E_SSH_USERNAME: termbridge
           TERMBRIDGE_E2E_SSH_PASSWORD: termbridge-e2e
-        run: cargo test --manifest-path src-tauri/Cargo.toml isolated_ssh_sftp_end_to_end -- --ignored --nocapture
+          TERMBRIDGE_E2E_SSH_JUMP_HOST: 127.0.0.1
+          TERMBRIDGE_E2E_SSH_JUMP_PORT: "22223"
+          TERMBRIDGE_E2E_SSH_JUMP_TARGET_HOST: ssh
+          TERMBRIDGE_E2E_SSH_JUMP_TARGET_PORT: "22"
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked isolated_ssh_sftp_end_to_end -- --ignored --nocapture --test-threads=1
       - name: Stop isolated SSH service
         if: always()
         run: docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml down --volumes --remove-orphans

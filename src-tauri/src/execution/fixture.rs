@@ -24,6 +24,10 @@ const FIXTURE_HOST_ENV: &str = "TERMBRIDGE_E2E_SSH_HOST";
 const FIXTURE_PORT_ENV: &str = "TERMBRIDGE_E2E_SSH_PORT";
 const FIXTURE_USERNAME_ENV: &str = "TERMBRIDGE_E2E_SSH_USERNAME";
 const FIXTURE_PASSWORD_ENV: &str = "TERMBRIDGE_E2E_SSH_PASSWORD";
+const FIXTURE_JUMP_HOST_ENV: &str = "TERMBRIDGE_E2E_SSH_JUMP_HOST";
+const FIXTURE_JUMP_PORT_ENV: &str = "TERMBRIDGE_E2E_SSH_JUMP_PORT";
+const FIXTURE_JUMP_TARGET_HOST_ENV: &str = "TERMBRIDGE_E2E_SSH_JUMP_TARGET_HOST";
+const FIXTURE_JUMP_TARGET_PORT_ENV: &str = "TERMBRIDGE_E2E_SSH_JUMP_TARGET_PORT";
 const FIXTURE_PROFILE_ID: &str = "fixture-reviewed-execution";
 const FIXTURE_SECRET: &str = "TERMBRIDGE_SECRET_ABCDEF";
 
@@ -33,18 +37,8 @@ pub(crate) fn isolated_ssh_connection() -> RemoteConnectionRequest {
         "1",
         "{FIXTURE_OPT_IN_ENV} must be exactly 1"
     );
-    let host = required_fixture_env(FIXTURE_HOST_ENV);
-    let address = host
-        .parse::<IpAddr>()
-        .unwrap_or_else(|_| panic!("{FIXTURE_HOST_ENV} must be an explicit loopback IP address"));
-    assert!(
-        address.is_loopback(),
-        "{FIXTURE_HOST_ENV} must identify the isolated loopback fixture"
-    );
-    let port = required_fixture_env(FIXTURE_PORT_ENV)
-        .parse::<u16>()
-        .unwrap_or_else(|_| panic!("{FIXTURE_PORT_ENV} must be a valid non-zero TCP port"));
-    assert_ne!(port, 0, "{FIXTURE_PORT_ENV} must be non-zero");
+    let host = required_loopback_fixture_host(FIXTURE_HOST_ENV);
+    let port = required_fixture_port(FIXTURE_PORT_ENV);
 
     RemoteConnectionRequest {
         host,
@@ -57,6 +51,26 @@ pub(crate) fn isolated_ssh_connection() -> RemoteConnectionRequest {
         passphrase: None,
         jump_host: None,
     }
+}
+
+fn required_loopback_fixture_host(name: &str) -> String {
+    let host = required_fixture_env(name);
+    let address = host
+        .parse::<IpAddr>()
+        .unwrap_or_else(|_| panic!("{name} must be an explicit loopback IP address"));
+    assert!(
+        address.is_loopback(),
+        "{name} must identify the isolated loopback fixture"
+    );
+    host
+}
+
+fn required_fixture_port(name: &str) -> u16 {
+    let port = required_fixture_env(name)
+        .parse::<u16>()
+        .unwrap_or_else(|_| panic!("{name} must be a valid non-zero TCP port"));
+    assert_ne!(port, 0, "{name} must be non-zero");
+    port
 }
 
 fn required_fixture_env(name: &str) -> String {
@@ -177,32 +191,41 @@ impl ReviewedExecutionFixture {
         Self::new(connection, known_hosts_directory, known_hosts_path)
     }
 
-    fn jump_to_same_isolated_sshd() -> Self {
-        let direct = isolated_ssh_connection();
+    fn jump_to_isolated_sshd() -> Self {
+        let direct_target = isolated_ssh_connection();
+        let jump_host = required_loopback_fixture_host(FIXTURE_JUMP_HOST_ENV);
+        let jump_port = required_fixture_port(FIXTURE_JUMP_PORT_ENV);
+        let target_host = required_fixture_env(FIXTURE_JUMP_TARGET_HOST_ENV);
+        assert!(
+            !target_host.trim().is_empty(),
+            "{FIXTURE_JUMP_TARGET_HOST_ENV} must be non-empty"
+        );
+        let target_port = required_fixture_port(FIXTURE_JUMP_TARGET_PORT_ENV);
         let connection = RemoteConnectionRequest {
-            // The jump container resolves this loopback endpoint to its own
-            // sshd. The same real host key is trusted under both identities.
-            host: "127.0.0.1".to_string(),
-            port: 22,
-            username: direct.username.clone(),
-            auth_method: direct.auth_method,
-            password: direct.password.clone(),
+            // The jump container resolves this endpoint on the isolated Docker
+            // network. Its host key is obtained independently through the
+            // target's published loopback fixture endpoint below.
+            host: target_host,
+            port: target_port,
+            username: direct_target.username.clone(),
+            auth_method: direct_target.auth_method,
+            password: direct_target.password.clone(),
             keychain_key_id: None,
             private_key_data: None,
             passphrase: None,
             jump_host: Some(JumpHostConfig {
-                host: direct.host,
-                port: direct.port,
-                username: direct.username,
-                auth_method: direct.auth_method,
-                password: direct.password,
+                host: jump_host,
+                port: jump_port,
+                username: direct_target.username.clone(),
+                auth_method: direct_target.auth_method,
+                password: direct_target.password.clone(),
                 keychain_key_id: None,
                 private_key_data: None,
                 passphrase: None,
             }),
         };
         let (known_hosts_directory, known_hosts_path) =
-            trusted_known_hosts_for_same_sshd_jump(&connection);
+            trusted_known_hosts_for_jump(&connection, &direct_target);
         Self::new(connection, known_hosts_directory, known_hosts_path)
     }
 
@@ -291,32 +314,52 @@ fn known_hosts_endpoint(host: &str, port: u16) -> String {
     }
 }
 
-fn trusted_known_hosts_for_same_sshd_jump(
+fn trusted_known_hosts_for_jump(
     connection: &RemoteConnectionRequest,
+    direct_target: &RemoteConnectionRequest,
 ) -> (tempfile::TempDir, PathBuf) {
     let jump = connection
         .jump_host
         .as_ref()
-        .expect("same-sshd jump fixture requires a jump host");
+        .expect("dual-sshd jump fixture requires a jump host");
     let directory = tempfile::tempdir().expect("create jump fixture known-hosts directory");
     let path = directory.path().join("known_hosts");
-    let handshake = crate::connection::open_session_for_host_key(&jump.host, jump.port)
+    let jump_handshake = crate::connection::open_session_for_host_key(&jump.host, jump.port)
         .expect("read isolated jump fixture host key");
-    let (key, key_type) = handshake
+    let (jump_key, jump_key_type) = jump_handshake
         .host_key()
         .expect("isolated jump fixture exposes a host key");
-    let key_format = known_host_key_format(key_type);
-    let mut known_hosts = handshake
+    let target_handshake =
+        crate::connection::open_session_for_host_key(&direct_target.host, direct_target.port)
+            .expect("read isolated target fixture host key");
+    let (target_key, target_key_type) = target_handshake
+        .host_key()
+        .expect("isolated target fixture exposes a host key");
+    assert_ne!(
+        jump_key, target_key,
+        "dual-sshd fixture must exercise distinct jump and target host keys"
+    );
+    let mut known_hosts = jump_handshake
         .known_hosts()
         .expect("initialize jump fixture known hosts");
-    for endpoint in [
-        known_hosts_endpoint(&jump.host, jump.port),
-        known_hosts_endpoint(&connection.host, connection.port),
-    ] {
-        known_hosts
-            .add(&endpoint, key, &endpoint, key_format)
-            .expect("trust exact isolated jump fixture identity");
-    }
+    let jump_endpoint = known_hosts_endpoint(&jump.host, jump.port);
+    known_hosts
+        .add(
+            &jump_endpoint,
+            jump_key,
+            &jump_endpoint,
+            known_host_key_format(jump_key_type),
+        )
+        .expect("trust exact isolated jump fixture identity");
+    let target_endpoint = known_hosts_endpoint(&connection.host, connection.port);
+    known_hosts
+        .add(
+            &target_endpoint,
+            target_key,
+            &target_endpoint,
+            known_host_key_format(target_key_type),
+        )
+        .expect("trust exact isolated target fixture identity");
     known_hosts
         .write_file(&path, KnownHostFileKind::OpenSSH)
         .expect("persist isolated jump fixture identities");
@@ -617,9 +660,9 @@ fn frozen_profile_drift_never_opens_target_or_jump_tcp_connection() {
 }
 
 #[test]
-#[ignore = "manual evidence: existing direct-tcpip bridge may time out during target handshake"]
-fn manual_isolated_reviewed_execution_jump_host_success_path() {
-    let fixture = ReviewedExecutionFixture::jump_to_same_isolated_sshd();
+#[ignore = "requires explicit isolated dual-sshd Docker fixture environment"]
+fn isolated_ssh_sftp_end_to_end_reviewed_execution_jump_host_success_path() {
+    let fixture = ReviewedExecutionFixture::jump_to_isolated_sshd();
     let result = fixture.execute(fixture.request(
         "fixture:reviewed-jump-uname",
         FixedFixtureCommand::Uname,

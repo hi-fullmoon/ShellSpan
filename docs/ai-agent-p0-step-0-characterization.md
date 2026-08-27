@@ -104,6 +104,8 @@ operation history 只保留安全元数据，不保留 `runbookText`、变量值
 
 ## 证据缺口与限制
 
+> 2026-08-27 收尾追踪：下面是步骤 0 当时的准确基线。步骤 5 已用单线程 nonblocking direct-tcpip bridge pump 和不同 host key 的双 sshd fixture关闭 jump-host 成功路径；连接/认证仍未被 operation deadline 立即中断，原 deadline 限制继续成立。最终证据见 `docs/ai-agent-p0-step-4-fixture-acceptance.md` 与 P0 设计第 18 节。
+
 - SSH characterization 位于当前 `open_runbook_session + execute_channel + redact` 生产 seam，而不是带真实 Tauri `AppHandle`、SQLite profile 和 OS keychain 的完整 command integration test。profile binding、source digest、exact risk 和 keychain interpolation 继续由现有纯函数/组件测试覆盖，但尚无一个测试把所有这些层与真实 SSH 串在一起。
 - jump-host 的稳定最低层测试冻结了 target identity 不被 jump identity 替换、operation result 不序列化 jump 配置，以及 target/jump secrets 都进入 redaction needles。曾在本机 Docker 环境分别尝试“同一 sshd 回连”和“两容器独立 sshd”两种真实 jump fixture，target SSH handshake 均在现有 `connect_through_jump_host` bridge 上等待 15 秒后超时，因此本阶段没有 jump execution 成功证据，也没有提交伪造的成功用例。判断该超时是 fixture/平台限制还是生产 bridge 缺陷需要后续独立诊断；步骤 0 不改变生产连接代码。
 - keychain secret reference 的真实 OS keychain 读取不适合作为跨平台常规测试 fixture；本阶段冻结 preview 语义和最终 redaction seam，没有伪造原生 keychain 通过证据。

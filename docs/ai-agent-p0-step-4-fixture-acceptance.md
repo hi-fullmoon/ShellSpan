@@ -4,14 +4,14 @@
 >
 > 验收日期：2026-08-27
 >
-> 范围：只执行 `ai-agent-p0-execution-foundation-design.md` 的步骤 4。本文不实施步骤 5，不更新 `ROADMAP.md` 的 P0 状态，也不清理或重写连接架构。
+> 原始范围：只执行 `ai-agent-p0-execution-foundation-design.md` 的步骤 4。步骤 5 在本文末尾追加了 jump-host 根因闭环与最终重跑证据；原始失败记录保留用于审计。
 
 ## Harness 边界
 
 新增 harness 位于 `src-tauri/src/execution/fixture.rs`，只通过 `#[cfg(test)]` 编译，调用 crate-private `execute_reviewed_ssh_command`。它具有以下限制：
 
 - 没有 `#[tauri::command]`，也没有加入 `tauri::generate_handler!`。
-- 必须显式设置 `TERMBRIDGE_E2E_SSH_FIXTURE=1` 以及 host、port、username、password 四个 fixture 环境变量；不提供生产主机、端口或凭证默认值。
+- 必须显式设置 `TERMBRIDGE_E2E_SSH_FIXTURE=1`、direct target、jump endpoint、jump 内可解析的 target endpoint、username 和 password fixture 环境变量；不提供生产主机、端口或凭证默认值。
 - host 必须是显式 loopback IP，避免 ignored test 被误指向生产主机。
 - 命令来自 test-only 固定枚举，不接受运行时任意命令。
 - known hosts 由隔离 sshd 的真实握手生成；测试执行仍走生产 host-key 检查、profile 身份复核和密码认证，没有绕过身份校验。
@@ -29,7 +29,7 @@ rg -n 'execute_reviewed_ssh_command|tauri::command' \
 
 ## Fixture 启动与主验收命令
 
-环境为 macOS、Docker Server 29.7.2、`tests/ssh-e2e` 的 Alpine 3.22/OpenSSH sshd，端口只发布到 `127.0.0.1:22222`。
+环境为 macOS、Docker Server 29.7.2、`tests/ssh-e2e` 的两个 Alpine 3.22/OpenSSH sshd，端口只发布到 `127.0.0.1:22222`（target）与 `127.0.0.1:22223`（jump）。
 
 ```bash
 docker compose --project-name termbridge-p0-step4 \
@@ -40,14 +40,19 @@ TERMBRIDGE_E2E_SSH_HOST=127.0.0.1 \
 TERMBRIDGE_E2E_SSH_PORT=22222 \
 TERMBRIDGE_E2E_SSH_USERNAME=termbridge \
 TERMBRIDGE_E2E_SSH_PASSWORD=termbridge-e2e \
+TERMBRIDGE_E2E_SSH_JUMP_HOST=127.0.0.1 \
+TERMBRIDGE_E2E_SSH_JUMP_PORT=22223 \
+TERMBRIDGE_E2E_SSH_JUMP_TARGET_HOST=ssh \
+TERMBRIDGE_E2E_SSH_JUMP_TARGET_PORT=22 \
 cargo test --manifest-path src-tauri/Cargo.toml \
-  isolated_ssh_sftp_end_to_end -- --ignored --nocapture --test-threads=1
+  --locked isolated_ssh_sftp_end_to_end \
+  -- --ignored --nocapture --test-threads=1
 
 docker compose --project-name termbridge-p0-step4 \
   --file tests/ssh-e2e/compose.yml down --volumes --remove-orphans
 ```
 
-结果：`14 passed; 0 failed`，容器、network 与 volumes 随后删除。14 项包含 4 个新增 generic fixture 验收，以及既有 connection、port forward、remote health、Runbook 和 multi-host Runbook fixture 回归。
+步骤 5 最终重跑结果：`15 passed; 0 failed`，容器、network 与 volumes 随后删除。15 项包含 5 个 generic fixture（含双 sshd jump-host），以及既有 connection、port forward、remote health、Runbook 和 multi-host Runbook fixture 回归。
 
 ## 逐场景证据
 
@@ -99,9 +104,9 @@ docker compose --project-name termbridge-p0-step4 \
 - `execution::ssh::tests::panic_payload_and_failure_messages_use_the_redaction_boundary` 覆盖错误路径：worker panic payload 被丢弃，包含 secret 的 transport failure message 在 generic result 中变为 `[REDACTED]`；
 - `execution::output::tests::redaction_runs_after_cross_chunk_and_truncated_reassembly` 继续固定任意 collector push chunk 与 front/tail 重组后的擦除顺序。
 
-## Jump-host 尝试与未关闭缺口
+## Jump-host 原始失败与步骤 5 闭环
 
-单独保留 ignored 的成功期望测试 `manual_isolated_reviewed_execution_jump_host_success_path`。它使用同一隔离 sshd：外层通过发布的 loopback 端口连接 jump，内层 direct-tcpip 指向 jump 容器自身的 `127.0.0.1:22`；known-hosts 文件包含从真实 fixture 握手取得的同一 host key，并分别绑定 jump 和 target 的精确 endpoint。
+步骤 4 曾保留 ignored 成功期望测试 `manual_isolated_reviewed_execution_jump_host_success_path`。它使用同一隔离 sshd：外层通过发布的 loopback 端口连接 jump，内层 direct-tcpip 指向 jump 容器自身的 `127.0.0.1:22`；known-hosts 文件包含从真实 fixture 握手取得的同一 host key，并分别绑定 jump 和 target 的精确 endpoint。
 
 复现命令：
 
@@ -124,29 +129,32 @@ errorCategory=ConnectionFailed
 ssh handshake failed: [Session(-9)] Timed out waiting on socket
 ```
 
-sshd 日志证明外层 jump password authentication 已 accepted；内层 target handshake 没有完成。该结果与步骤 0 记录的现有 `connect_through_jump_host` bridge timeout 一致。本阶段没有重写 bridge、没有放宽 known hosts、没有伪报 jump-host success。它仍是后续需授权诊断的连接架构风险。
+sshd 日志证明外层 jump password authentication 已 accepted；内层 target handshake 没有完成。该结果与步骤 0 记录的现有 `connect_through_jump_host` bridge timeout 一致，步骤 4 当时正确保留为阻断。
+
+步骤 5 依据该复现定位到 `bridge_channel_tcp`：两个线程在同一个 blocking libssh2 session 上分别 read/write，channel→TCP 阻塞读可能持有 session 串行锁，TCP→channel 因而无法转发内层客户端的 SSH 握手字节。修复把 direct-tcpip bridge session 与本地 bridge socket 切为 nonblocking，在一个 bridge worker 内用两个固定 64 KiB 缓冲区依次推进 TCP→channel 和 channel→TCP，对 WouldBlock/TimedOut 使用 10 ms 退避；这既避免同一 libssh2 session 的跨线程竞争，也保持有界 backpressure。host-key、profile、凭证和身份摘要边界均未改变。
+
+fixture 随后改为两个独立 sshd。jump 与 target 各自生成不同 host key；测试分别通过其发布的 loopback endpoint取得真实 key，再把 key 绑定到执行时的精确 jump endpoint 与 Docker 内 target endpoint。`isolated_ssh_sftp_end_to_end_reviewed_execution_jump_host_success_path` 现随完整 ignored fixture 运行并验证 `Completed + exitCode 0 + Linux stdout`。
+
+步骤 5 最终实现的定点稳定性复验连续运行 10 次：`10/10 passed`，单次约 0.36–0.42 秒；随后完整 15 项 fixture 也通过。该证据关闭了原 15 秒内层 handshake timeout 阻断。
 
 ## 回归门禁
 
-本阶段最终执行结果：
+P0 收尾最终执行结果：
 
 | 命令 | 结果 |
 | --- | --- |
-| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | 通过 |
-| `cargo build --manifest-path src-tauri/Cargo.toml` | 通过 |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | 通过，338 passed / 16 ignored |
-| 显式 Docker SSH fixture 命令 | 通过，14 passed / 0 failed |
-| `pnpm exec vitest run src --reporter=dot` | 通过，139 files / 1140 tests |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | 通过 |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings` | 通过；`keychain.rs` 与 `menu.rs` 两个既有 `needless_return` 已做等价最小清理 |
+| `cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked` | 通过，338 passed / 16 ignored |
+| 显式双 sshd Docker SSH/SFTP fixture | 通过，15 passed / 0 failed |
+| `pnpm check:roadmap` | 通过；产品路线图与 P0 八项均使用显式 source 精确映射 |
+| `pnpm test:scripts` | 通过，4 files / 39 tests |
+| `pnpm test` | 通过，143 files / 1179 tests |
 | `pnpm build` | 通过；仅有既有 large chunk warning |
-| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | 未全绿：命中 `keychain.rs:91`、`menu.rs:153` 两个既有 `needless_return` |
-| 同一 clippy 命令额外允许既有 `clippy::needless-return` | 通过，证明本阶段新增代码没有其他 warning |
-| `pnpm check:roadmap` | 既有失败：`explore-portability-targets roadmapItem` 已不是 `ROADMAP.md` 的 exact item |
-| `pnpm test:scripts` / 未排除 scripts 的 `pnpm test` | 因同一个既有 roadmap audit 前置失败，18 个负向断言提前失败；其余分别 17/1157 tests 通过 |
-
-`keychain.rs`、`menu.rs`、`ROADMAP.md`、`docs/roadmap-audit.json`、roadmap audit 脚本与测试相对指定基线均无本阶段改动。因此上述 clippy 与 roadmap audit 是基线问题，不在步骤 4 越权修复。
+| Windows CI | 配置已检查：`windows-2025`、Node/pnpm 前端 test/build、pinned Rust、fmt/strict clippy/all-targets locked tests；当前提交未实际运行，保持 `pending-external` |
 
 ## 阶段结论
 
-步骤 4 要求的 direct SSH generic kernel、Runbook compatibility、取消/超时、目标漂移、秘密擦除、hard limit 和无效 UTF-8 证据已补齐。jump-host 成功路径仍有可复现 handshake timeout，明确保留为风险而不是通过项。
+步骤 4 要求的 direct SSH generic kernel、Runbook compatibility、取消/超时、目标漂移、秘密擦除、hard limit 和无效 UTF-8 证据已补齐。步骤 5 又以最小 nonblocking bridge 修复和双 sshd fixture 关闭了 jump-host 成功路径阻断。
 
-步骤 5 尚未开始：没有执行旧代码清理、架构文档收尾、连接 deadline 扩展或 `ROADMAP.md` P0 状态更新。
+最终 P0 状态与全门禁见 `docs/ai-agent-p0-execution-foundation-design.md` 第 18 节。连接/认证阶段 deadline 和 Windows 当前提交证据仍是显式限制；不因本机 jump fixture 成功而自动把 P0 标记为 verified。

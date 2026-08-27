@@ -88,7 +88,7 @@ impl CredentialBackend for NativeKeychainBackend {
         {
             macos_keychain::set_generic_password_with_current_app_access(service, key, value)?;
             debug!("Stored credential in OS keychain service={service} key={key}");
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(target_os = "macos"))]

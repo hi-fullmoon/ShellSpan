@@ -1,9 +1,8 @@
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const auditPath = resolve(root, process.env.TERMBRIDGE_ROADMAP_AUDIT_PATH ?? 'docs/roadmap-audit.json');
-const roadmapPath = resolve(root, 'ROADMAP.md');
 const allowedPhases = new Set(['NOW', 'NEXT', 'LATER', 'EXPLORE']);
 const allowedStatuses = new Set(['planned', 'in-progress', 'verified', 'blocked', 'deferred', 'researching']);
 const requiredPhases = ['NOW', 'NEXT', 'LATER', 'EXPLORE'];
@@ -46,17 +45,33 @@ const rustWorkflowPaths = [
   '.github/workflows/cache-warm.yml',
   '.github/workflows/release.yml',
 ];
+const allowedP0Statuses = new Set(['implemented', 'blocked', 'verified']);
+const allowedP0CriterionStatuses = new Set(['verified', 'pending-external', 'blocked']);
 
 function fail(message) {
   throw new Error(`roadmap audit: ${message}`);
 }
 
 async function assertEvidenceExists(item, path) {
+  const absolute = repositoryPath(item, path);
+  await access(absolute).catch(() => fail(`${item.id} evidence does not exist: ${path}`));
+}
+
+function repositoryPath(item, path) {
+  if (typeof path !== 'string' || path.trim() === '') {
+    fail(`${item.id} path must be a non-empty repository-relative string`);
+  }
   const absolute = resolve(root, path);
   if (absolute !== root && !absolute.startsWith(`${root}\\`) && !absolute.startsWith(`${root}/`)) {
     fail(`${item.id} evidence escapes the repository: ${path}`);
   }
-  await access(absolute).catch(() => fail(`${item.id} evidence does not exist: ${path}`));
+  return absolute;
+}
+
+async function readRepositorySource(item, path) {
+  const absolute = repositoryPath(item, path);
+  return readFile(absolute, 'utf8')
+    .catch(() => fail(`${item.id} does not exist: ${path}`));
 }
 
 function parseRoadmap(markdown) {
@@ -111,11 +126,43 @@ function sameStrings(actual, expected) {
     && actual.every((value, index) => value === expected[index]);
 }
 
-const [rawAudit, roadmap] = await Promise.all([
-  readFile(auditPath, 'utf8'),
-  readFile(roadmapPath, 'utf8'),
-]);
+function parseP0ExitCriteria(markdown) {
+  const start = markdown.indexOf('## 18. P0 退出门槛');
+  const end = markdown.indexOf('## 19. P1 准入条件', start);
+  if (start < 0 || end < 0) fail('P0 design is missing sections 18 or 19');
+  return markdown
+    .slice(start, end)
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\d+\. (.+)$/)?.[1])
+    .filter(Boolean);
+}
+
+function phaseStatus(markdown, phase, sectionHeading) {
+  const tableMatch = markdown.match(new RegExp(`^\\| ${phase} [^|]+\\| ([^|]+) \\|`, 'm'));
+  if (!tableMatch) fail(`agent ROADMAP is missing the ${phase} phase table row`);
+  const sectionStart = markdown.indexOf(sectionHeading);
+  if (sectionStart < 0) fail(`agent ROADMAP is missing ${sectionHeading}`);
+  const nextSection = markdown.indexOf('\n## ', sectionStart + sectionHeading.length);
+  const section = markdown.slice(sectionStart, nextSection < 0 ? undefined : nextSection);
+  const sectionMatch = section.match(/^\*\*状态：([^（*]+)(?:（[^\n]*）)?\*\*$/m);
+  if (!sectionMatch) fail(`agent ROADMAP ${phase} section is missing its status`);
+  return {
+    table: tableMatch[1].trim(),
+    section: sectionMatch[1].trim(),
+  };
+}
+
+const rawAudit = await readFile(auditPath, 'utf8');
 const audit = JSON.parse(rawAudit);
+const sourceLabel = { id: 'roadmapSource' };
+const roadmapSource = audit.roadmapSource;
+const agentRoadmapSource = audit.agentRoadmapSource;
+const p0DesignSource = audit.p0DesignSource;
+const [roadmap, agentRoadmap, p0Design] = await Promise.all([
+  readRepositorySource(sourceLabel, roadmapSource),
+  readRepositorySource({ id: 'agentRoadmapSource' }, agentRoadmapSource),
+  readRepositorySource({ id: 'p0DesignSource' }, p0DesignSource),
+]);
 const parsedRoadmap = parseRoadmap(roadmap);
 const roadmapItems = new Set(
   roadmap
@@ -131,6 +178,87 @@ if (!audit.roadmapMapping || typeof audit.roadmapMapping !== 'object' || Array.i
 }
 if (!audit.phaseExitCriteria || typeof audit.phaseExitCriteria !== 'object' || Array.isArray(audit.phaseExitCriteria)) {
   fail('phaseExitCriteria must map every phase exit condition');
+}
+
+const p0Audit = audit.p0ExecutionFoundation;
+if (!p0Audit || typeof p0Audit !== 'object' || Array.isArray(p0Audit)) {
+  fail('p0ExecutionFoundation is missing');
+}
+if (p0Audit.phase !== 'P0') fail('p0ExecutionFoundation phase must be P0');
+if (!allowedP0Statuses.has(p0Audit.status)) {
+  fail(`p0ExecutionFoundation has invalid status ${p0Audit.status}`);
+}
+if (typeof p0Audit.finding !== 'string' || p0Audit.finding.trim() === '') {
+  fail('p0ExecutionFoundation is missing finding');
+}
+const designExitCriteria = parseP0ExitCriteria(p0Design);
+if (!Array.isArray(p0Audit.exitCriteria)
+  || !sameStrings(p0Audit.exitCriteria.map((criterion) => criterion?.roadmapItem), designExitCriteria)) {
+  fail('p0ExecutionFoundation exitCriteria is not an exact ordered P0 design mapping');
+}
+for (const [index, criterion] of p0Audit.exitCriteria.entries()) {
+  const label = { id: `P0 exit criterion ${index + 1}` };
+  if (!allowedP0CriterionStatuses.has(criterion.status)) {
+    fail(`${label.id} has invalid status ${criterion.status}`);
+  }
+  if (typeof criterion.finding !== 'string' || criterion.finding.trim() === '') {
+    fail(`${label.id} is missing finding`);
+  }
+  if (!Array.isArray(criterion.evidence) || criterion.evidence.length === 0
+    || !Array.isArray(criterion.tests) || criterion.tests.length === 0) {
+    fail(`${label.id} needs evidence and test paths`);
+  }
+  await Promise.all([...criterion.evidence, ...criterion.tests]
+    .map((path) => assertEvidenceExists(label, path)));
+}
+if (!Array.isArray(p0Audit.limitations) || p0Audit.limitations.length < 3
+  || p0Audit.limitations.some((limitation) => typeof limitation !== 'string' || limitation.trim() === '')) {
+  fail('p0ExecutionFoundation must record at least three concrete limitations');
+}
+const requiredPlatformEvidence = ['macos', 'isolatedLinuxSsh', 'windows'];
+if (!p0Audit.platformEvidence || typeof p0Audit.platformEvidence !== 'object'
+  || Array.isArray(p0Audit.platformEvidence)) {
+  fail('p0ExecutionFoundation platformEvidence is missing');
+}
+for (const platform of requiredPlatformEvidence) {
+  const evidence = p0Audit.platformEvidence[platform];
+  if (!evidence || !['verified', 'pending-external'].includes(evidence.status)
+    || typeof evidence.finding !== 'string' || evidence.finding.trim() === '') {
+    fail(`p0ExecutionFoundation platformEvidence.${platform} is invalid`);
+  }
+}
+const unexpectedPlatforms = Object.keys(p0Audit.platformEvidence)
+  .filter((platform) => !requiredPlatformEvidence.includes(platform));
+if (unexpectedPlatforms.length > 0) {
+  fail(`p0ExecutionFoundation platformEvidence has unknown entries: ${unexpectedPlatforms.join(', ')}`);
+}
+if (!p0Audit.p1Admission || !['blocked', 'eligible'].includes(p0Audit.p1Admission.status)
+  || typeof p0Audit.p1Admission.finding !== 'string'
+  || p0Audit.p1Admission.finding.trim() === '') {
+  fail('p0ExecutionFoundation p1Admission is invalid');
+}
+const p0Statuses = phaseStatus(agentRoadmap, 'P0', '## 6. P0 — 执行基础');
+if (p0Statuses.table !== p0Audit.status || p0Statuses.section !== p0Audit.status) {
+  fail(`P0 status mismatch: audit=${p0Audit.status}, table=${p0Statuses.table}, section=${p0Statuses.section}`);
+}
+const p1Statuses = phaseStatus(agentRoadmap, 'P1', '## 7. P1 — 只读动态 Agent');
+if (p0Audit.p1Admission.status === 'blocked'
+  && (p1Statuses.table !== 'blocked' || p1Statuses.section !== 'blocked')) {
+  fail('P1 must remain blocked in the agent ROADMAP while P0 admission is blocked');
+}
+const everyP0CriterionVerified = p0Audit.exitCriteria
+  .every((criterion) => criterion.status === 'verified');
+const everyPlatformVerified = requiredPlatformEvidence
+  .every((platform) => p0Audit.platformEvidence[platform].status === 'verified');
+if (p0Audit.status === 'verified'
+  && (!everyP0CriterionVerified || !everyPlatformVerified || p0Audit.p1Admission.status !== 'eligible')) {
+  fail('P0 cannot be verified before every exit criterion/platform is verified and P1 admission is eligible');
+}
+if (p0Audit.status !== 'verified' && p0Audit.p1Admission.status !== 'blocked') {
+  fail('P1 admission must stay blocked until P0 is verified');
+}
+if (p0Audit.status === 'implemented' && everyP0CriterionVerified && everyPlatformVerified) {
+  fail('implemented P0 must identify an unresolved exit or platform gate');
 }
 
 const reviewedAt = new Date(`${audit.reviewedAt}T00:00:00Z`);
@@ -441,6 +569,58 @@ const unexpectedClosures = Object.keys(audit.securityClosure)
   .filter((closureName) => !requiredSecurityClosures.includes(closureName));
 if (unexpectedClosures.length > 0) fail(`securityClosure has unknown entries: ${unexpectedClosures.join(', ')}`);
 
+const p0ExecutionPaths = [
+  'src-tauri/src/execution/mod.rs',
+  'src-tauri/src/execution/request.rs',
+  'src-tauri/src/execution/result.rs',
+  'src-tauri/src/execution/target.rs',
+  'src-tauri/src/execution/ssh.rs',
+  'src-tauri/src/execution/cancellation.rs',
+  'src-tauri/src/execution/output.rs',
+  'src-tauri/src/execution/redaction.rs',
+];
+const [executionModSource, executionSshSource, runbookSource, appLibSource] = await Promise.all([
+  readFile(resolve(root, 'src-tauri/src/execution/mod.rs'), 'utf8'),
+  readFile(resolve(root, 'src-tauri/src/execution/ssh.rs'), 'utf8'),
+  readFile(resolve(root, 'src-tauri/src/runbook.rs'), 'utf8'),
+  readFile(resolve(root, 'src-tauri/src/lib.rs'), 'utf8'),
+]);
+const rustSourcePaths = (await readdir(resolve(root, 'src-tauri/src'), { recursive: true }))
+  .filter((path) => path.endsWith('.rs'));
+const rawExecCallSites = [];
+for (const path of rustSourcePaths) {
+  const source = await readFile(resolve(root, 'src-tauri/src', path), 'utf8');
+  const matches = source.match(/\.exec\s*\(/g) ?? [];
+  const portablePath = path.replaceAll('\\', '/');
+  rawExecCallSites.push(...matches.map(() => portablePath));
+}
+if (rawExecCallSites.length !== 1
+  || rawExecCallSites[0] !== 'execution/ssh.rs'
+  || (executionSshSource.match(/\.exec\s*\(/g) ?? []).length !== 1) {
+  fail(`the Rust source tree must have exactly one raw SSH exec call in execution/ssh.rs; found: ${rawExecCallSites.join(', ')}`);
+}
+if (/open_runbook_session|\bexecute_channel\b|\bExecutionOutcome\b/.test(runbookSource)) {
+  fail('runbook.rs must not retain a second SSH session/channel execution implementation');
+}
+const executionSources = await Promise.all(
+  p0ExecutionPaths.map((path) => readFile(resolve(root, path), 'utf8')),
+);
+if (executionSources.some((source) => /\bRunbook(?:Document|ItemKind|ExpectedResult|Risk)\b|crate::runbook/.test(source))) {
+  fail('generic execution kernel must not depend on Runbook types');
+}
+if (executionSources.some((source) => /#\[tauri::command\]/.test(source))
+  || appLibSource.includes('execute_reviewed_ssh_command,')) {
+  fail('generic reviewed execution must not be registered as a Tauri command');
+}
+if (executionSources.some((source) => /\bwrite_session\b|request_pty|\.shell\s*\(/.test(source))
+  || /\bwrite_session\b/.test(runbookSource)) {
+  fail('reviewed execution and Runbook adapters must not write to the interactive PTY');
+}
+if (!executionModSource.includes('must not be used by a P1 Agent tool')
+  || !executionModSource.includes('application crash')) {
+  fail('execution module docs must retain Agent bypass and crash-recovery limits');
+}
+
 const knownHostsSources = await Promise.all([
   'src-tauri/src/commands.rs',
   'src-tauri/src/remote_fs.rs',
@@ -505,4 +685,6 @@ for (const phase of requiredPhases) {
 const totals = Object.fromEntries(
   [...allowedStatuses].map((status) => [status, audit.items.filter((item) => item.status === status).length]),
 );
-console.log(`Roadmap audit valid: ${audit.items.length} workstreams (${JSON.stringify(totals)})`);
+console.log(
+  `Roadmap audit valid: ${audit.items.length} product workstreams (${JSON.stringify(totals)}); P0=${p0Audit.status}; P1 admission=${p0Audit.p1Admission.status}`,
+);

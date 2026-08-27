@@ -48,6 +48,46 @@ describe('roadmap audit', () => {
     );
   });
 
+  it('requires an explicit existing product roadmap audit source', () => {
+    withChangedAudit(
+      (audit) => { audit.roadmapSource = 'docs/missing-product-roadmap.md'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('roadmapSource does not exist');
+      },
+    );
+  });
+
+  it('maps every P0 exit criterion exactly and in order', () => {
+    withChangedAudit(
+      (audit) => { audit.p0ExecutionFoundation.exitCriteria.pop(); },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('exitCriteria is not an exact ordered P0 design mapping');
+      },
+    );
+  });
+
+  it('does not let the P0 audit status get ahead of the agent roadmap', () => {
+    withChangedAudit(
+      (audit) => { audit.p0ExecutionFoundation.status = 'verified'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('P0 status mismatch');
+      },
+    );
+  });
+
+  it('keeps P1 admission blocked until P0 is verified', () => {
+    withChangedAudit(
+      (audit) => { audit.p0ExecutionFoundation.p1Admission.status = 'eligible'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('P1 admission must stay blocked until P0 is verified');
+      },
+    );
+  });
+
   it('rejects a committed workstream that is merely in progress', () => {
     withChangedAudit(
       (audit) => { audit.items.find((item) => item.id === 'now-quality-gates').status = 'in-progress'; },

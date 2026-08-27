@@ -1,9 +1,11 @@
 # AI Agent P0：执行基础设计
 
-> 状态：planned
+> 状态：implemented（verification pending external）
 > 路线图阶段：P0 — 执行基础
-> 基线版本：TermBridge v2.0.53
+> 设计基线：TermBridge v2.0.53
+> 实施基线 HEAD：`5ccd6442dcdb424982f147153cc849277a547482`
 > 设计日期：2026-08-26
+> 收尾审计：2026-08-27
 > 预计周期：1–2 周
 > 关联路线图：`ROADMAP.md`
 
@@ -73,6 +75,16 @@ P0 通过先抽取唯一执行内核，消除以上分叉风险。
 - 通用执行结果缺少 captured bytes、total bytes、truncated 和目标摘要字段。
 - `RunbookCancellationRegistry` 不能直接作为未来其他工具的通用取消边界。
 - 现有结果 `expectedMatched` 属于 Runbook 业务判断，不应进入底层 SSH kernel。
+
+### 3.1 实施结果
+
+步骤 0–5 已完成实现与本地验收：Runbook adapter 只调用 crate-private reviewed kernel，旧 Runbook SSH/session/channel 执行实现已删除；冻结目标、operation cancellation、结构化结果、有界输出、hard limit、UTF-8、redaction 和 test-only fixture 均位于 `src-tauri/src/execution/`。generic kernel 不依赖 Runbook 类型，也没有注册为 Tauri command。
+
+生产 crate 的 `Channel::exec` 传输原语集中在 `execution/ssh.rs` 一处。Remote FS owner/group lookup 与 Remote Health snapshot 是既有固定用途内部能力，只复用 raw channel-start primitive，不构成 Agent 任意执行入口；未来 P1 不得调用 raw primitive 绕过 reviewed kernel。
+
+步骤 4 的 jump-host 阻断已定位为同一 blocking libssh2 session 上双向 bridge copy 的锁饥饿：channel→TCP 的阻塞读会阻止 TCP→channel 写入内层 SSH 握手字节。修复把 direct-tcpip bridge session 与本地 bridge socket 切为 nonblocking，并在单一 bridge worker 中用两个固定大小缓冲区交替转发，对 WouldBlock/TimedOut 做有退避的重试，避免同一 session 的跨线程读写竞争。使用不同 host key 的双 sshd fixture 已通过外层认证、target known-host 校验、内层认证和 `uname -a` Exec。
+
+P0 仍不能标记 `verified`：本收尾在当前 macOS 环境完成了本地 Rust/前端/双 sshd 门禁，但没有当前提交的 Windows runner 实跑结果。根据第 18 节第 5 条，状态保持 `implemented（verification pending external）`，P1 为 `blocked`。
 
 ## 4. P0 范围
 
@@ -573,10 +585,11 @@ Harness 必须：
 
 ### 步骤 5：清理与文档
 
-- 删除 Runbook 内重复 SSH 执行代码。
-- 更新模块注释与架构文档。
-- 记录尚未纳入 deadline 的连接阶段限制。
-- 更新 `ROADMAP.md` 中 P0 状态与实际证据。
+- [x] 确认 Runbook 内重复 SSH/session/channel 执行代码已删除，并集中生产 `Channel::exec` 原语。
+- [x] 更新 execution 模块注释、架构文档和 Exec/PTY ADR。
+- [x] 记录阻塞 DNS/TCP/handshake/auth 尚不能被 operation deadline 立即中断的限制。
+- [x] 记录后台化远程进程与进程内 registry 的崩溃恢复限制。
+- [x] 更新 `ROADMAP.md`、roadmap audit、实际测试证据和 P1 准入结论。
 
 ## 15. 测试矩阵
 
@@ -727,9 +740,24 @@ P0 只有同时满足以下条件才可标记 `verified`：
 7. Exec/PTY ADR 已合入，明确 P1 不得通过 `write_session` 绕过内核。
 8. Roadmap 更新实际完成证据、遗留限制和下一阶段准入结论。
 
+### 18.1 最终审计（2026-08-27）
+
+| # | 结论 | 证据 |
+| ---: | --- | --- |
+| 1 | 通过 | Runbook 生产链为 `execute_runbook_step → execute_reviewed_ssh_command → execute_ssh_channel`；生产 crate 的 raw `Channel::exec` 调用集中在 `execution/ssh.rs`。 |
+| 2 | 通过 | `runbook.rs` 对旧 `open_runbook_session`、`execute_channel`、`ExecutionOutcome` 和直接 `channel.exec` 均为零；历史抽取链为 `7e437a7` 与 `f1dd562`。 |
+| 3 | 通过（本地证据） | Runbook adapter 保留 source digest、exact risk、expected match、返回契约和 operation-history 映射；Rust/前端全量测试通过。 |
+| 4 | 通过 | Rust 单元与 Docker fixture 覆盖正常、exit 7、cancel、timeout、truncation、hard limit、target/jump drift、secret redaction、无效 UTF-8 和 late result。 |
+| 5 | 未通过：`pending-external` | 当前 macOS 常规门禁和本机 Linux 双 sshd Docker fixture通过，Windows workflow 配置已审查但当前提交尚无 Windows runner 实跑结果。 |
+| 6 | 通过 | execution 无 `#[tauri::command]`；invoke handler 只有现有 Runbook adapter，没有 generic execute/shell command。 |
+| 7 | 通过 | `docs/adr/agent-execution-channel.md` 明确 Exec/PTY 职责、P1 禁止 `write_session` 绕过、后台进程、deadline 和崩溃限制。 |
+| 8 | 通过 | 本文、`ROADMAP.md`、`docs/roadmap-audit.json` 和步骤 4 fixture 记录均已更新实际证据、限制与 P1 阻断结论。 |
+
+总评：7/8 退出门槛已闭合；第 5 条等待当前提交的 Windows 托管门禁。因此 P0 是 `implemented`，不是 `verified`。
+
 ## 19. P1 准入条件
 
-只有 P0 verified 后，P1 才能开始接入模型与只读 Agent loop。P1 的入口条件是：
+只有 P0 verified 后，P1 才能开始接入模型与只读 Agent loop。当前准入状态为 `blocked`，没有开始 P1。P1 的入口条件是：
 
 - 能从 Rust 内部稳定构造和执行 generic reviewed request。
 - target identity 可跨多个工具调用复用。
@@ -738,4 +766,4 @@ P0 只有同时满足以下条件才可标记 `verified`：
 - 输出截断不会让调用方误判为完整证据。
 - Runbook 已证明共享内核没有削弱现有审批与秘密边界。
 
-如果这些条件未满足，P1 只能继续做 provider-neutral schema 和 UI 原型，不能开放真实 `shell.exec`。
+如果这些条件未满足，P1 只能继续文档级 schema/UI 设计，不能开放真实 `shell.exec`，不能新增 generic execution Tauri command，也不能通过 `write_session` 把模型输出注入交互 PTY。解除当前阻断至少需要：当前提交的 Windows Rust/前端门禁通过、审计台账第 5 条更新为 `verified`，再由独立收尾提交把 P0 状态改为 `verified`。

@@ -263,8 +263,7 @@ fn exec_read_only(session: &Session, command: &'static str) -> Result<String, St
     let mut channel = session
         .channel_session()
         .map_err(|error| format!("failed to open remote command channel: {error}"))?;
-    channel
-        .exec(command)
+    crate::execution::start_ssh_exec_channel(&mut channel, command)
         .map_err(|error| format!("failed to start remote read-only command: {error}"))?;
     let stdout = read_limited(&mut channel, MAX_REMOTE_OUTPUT_BYTES)?;
     let stderr = read_limited(&mut channel.stderr(), MAX_REMOTE_ERROR_BYTES)?;

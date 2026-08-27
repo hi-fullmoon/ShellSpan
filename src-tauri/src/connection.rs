@@ -10,6 +10,7 @@ use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
 use std::{
+    io::{Read, Write},
     net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     path::Path,
     sync::{
@@ -24,6 +25,7 @@ const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
 const SSH_SESSION_IO_TIMEOUT_MS: u32 = 15_000;
 const SSH_TRANSFER_IO_TIMEOUT_MS: u32 = 120_000;
+const JUMP_BRIDGE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 pub(crate) const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 
 pub(crate) struct TransferTimeoutGuard<'a> {
@@ -626,6 +628,13 @@ fn open_jump_bridge(
             message: format!("failed to open direct-tcpip through jump host: {e}"),
         })?;
 
+    // libssh2 serializes operations for a Session. In blocking mode the
+    // channel -> TCP reader can hold that session while waiting for the target
+    // server, preventing the TCP -> channel writer from forwarding the target
+    // client's initial SSH handshake bytes. Keep the bridge channel
+    // nonblocking so both directions can make progress on the shared session.
+    jump_session.set_blocking(false);
+
     // Accept and bridge concurrently with the client connect below.
     let bridge_handle = thread::spawn(move || {
         match accept_bridge_with_timeout(&listener, Duration::from_secs(15)) {
@@ -676,72 +685,97 @@ fn accept_bridge_with_timeout(
 }
 
 fn bridge_channel_tcp(mut channel: ssh2::Channel, mut tcp: TcpStream) -> Result<(), String> {
-    let mut tcp_clone = tcp
-        .try_clone()
-        .map_err(|e| format!("failed to clone bridge TCP stream: {e}"))?;
+    tcp.set_nonblocking(true)
+        .map_err(|error| format!("failed to set bridge TCP stream nonblocking: {error}"))?;
 
-    let mut channel_clone = channel.stream(0);
+    // A Session owns one libssh2 transport and serializes every channel call.
+    // Pump both directions on one thread so a blocking read can never hold the
+    // session lock while the peer's SSH banner is waiting to be written. The
+    // fixed buffers also keep backpressure bounded for long-lived sessions.
+    let mut tcp_to_channel = [0u8; 64 * 1024];
+    let mut tcp_to_channel_start = 0;
+    let mut tcp_to_channel_end = 0;
+    let mut channel_to_tcp = [0u8; 64 * 1024];
+    let mut channel_to_tcp_start = 0;
+    let mut channel_to_tcp_end = 0;
+    let mut closing = false;
 
-    let t1 = thread::spawn(move || {
-        if let Err(error) = bridge_copy(&mut tcp_clone, &mut channel_clone) {
-            warn!("Jump host bridge copy (tcp -> channel) failed: {error}");
+    loop {
+        let mut progressed = false;
+
+        if !closing && tcp_to_channel_start == tcp_to_channel_end {
+            tcp_to_channel_start = 0;
+            tcp_to_channel_end = 0;
+            match tcp.read(&mut tcp_to_channel) {
+                Ok(0) => closing = true,
+                Ok(count) => {
+                    tcp_to_channel_end = count;
+                    progressed = true;
+                }
+                Err(error) if is_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("bridge TCP read failed: {error}")),
+            }
         }
-    });
 
-    let t2 = thread::spawn(move || {
-        if let Err(error) = bridge_copy(&mut channel, &mut tcp) {
-            warn!("Jump host bridge copy (channel -> tcp) failed: {error}");
+        if tcp_to_channel_start < tcp_to_channel_end {
+            match channel.write(&tcp_to_channel[tcp_to_channel_start..tcp_to_channel_end]) {
+                Ok(0) => return Err("bridge channel write returned zero bytes".to_string()),
+                Ok(count) => {
+                    tcp_to_channel_start += count;
+                    progressed = true;
+                }
+                Err(error) if is_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("bridge channel write failed: {error}")),
+            }
         }
-    });
 
-    let _ = t1.join();
-    let _ = t2.join();
-    Ok(())
+        if !closing && channel_to_tcp_start == channel_to_tcp_end {
+            channel_to_tcp_start = 0;
+            channel_to_tcp_end = 0;
+            match channel.read(&mut channel_to_tcp) {
+                Ok(0) => closing = true,
+                Ok(count) => {
+                    channel_to_tcp_end = count;
+                    progressed = true;
+                }
+                Err(error) if is_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("bridge channel read failed: {error}")),
+            }
+        }
+
+        if channel_to_tcp_start < channel_to_tcp_end {
+            match tcp.write(&channel_to_tcp[channel_to_tcp_start..channel_to_tcp_end]) {
+                Ok(0) => return Err("bridge TCP write returned zero bytes".to_string()),
+                Ok(count) => {
+                    channel_to_tcp_start += count;
+                    progressed = true;
+                }
+                Err(error) if is_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("bridge TCP write failed: {error}")),
+            }
+        }
+
+        if closing
+            && tcp_to_channel_start == tcp_to_channel_end
+            && channel_to_tcp_start == channel_to_tcp_end
+        {
+            return Ok(());
+        }
+
+        if !progressed {
+            thread::sleep(JUMP_BRIDGE_RETRY_INTERVAL);
+        }
+    }
 }
 
-// The jump session runs with a blocking I/O timeout (SSH_SESSION_IO_TIMEOUT_MS),
-// so a bridged channel read/write that stays idle longer than the timeout
-// surfaces as ErrorKind::TimedOut instead of blocking forever. That timeout is
-// expected while the target session is idle (e.g. SFTP request/response with no
-// traffic), so it must not tear down the bridge — retry it and only stop on a
-// real EOF or unrecoverable error.
+// Both sides of the jump bridge are nonblocking. WouldBlock is expected while
+// either side is idle. TimedOut remains retryable for compatibility with any
+// stream implementation that retains a socket timeout.
 fn is_bridge_retryable(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
     )
-}
-
-fn bridge_copy<R, W>(reader: &mut R, writer: &mut W) -> std::io::Result<()>
-where
-    R: std::io::Read,
-    W: std::io::Write,
-{
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        let read = match reader.read(&mut buffer) {
-            Ok(0) => return Ok(()),
-            Ok(read) => read,
-            Err(error) if is_bridge_retryable(&error) => continue,
-            Err(error) => return Err(error),
-        };
-
-        let mut written = 0;
-        while written < read {
-            match writer.write(&buffer[written..read]) {
-                Ok(0) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::WriteZero,
-                        "bridge write returned zero bytes",
-                    ));
-                }
-                Ok(count) => written += count,
-                Err(error) if is_bridge_retryable(&error) => continue,
-                Err(error) => return Err(error),
-            }
-        }
-        writer.flush()?;
-    }
 }
 
 fn authenticate(
