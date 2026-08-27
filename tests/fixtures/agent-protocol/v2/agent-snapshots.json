@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 2,
+  "cases": [
+    {
+      "name": "v2 snapshot projects risk approval change and verification",
+      "valid": true,
+      "value": {
+        "schemaVersion": 2,
+        "runId": "run-2",
+        "lastSequence": 24,
+        "state": "awaitingApproval",
+        "target": {
+          "profileId": "profile-1",
+          "profileLabel": "Production",
+          "host": "host.example",
+          "port": 22,
+          "username": "operator",
+          "authMethod": "key",
+          "targetDigest": "sha256-target"
+        },
+        "provider": {
+          "providerId": "openai",
+          "kind": "openAi",
+          "baseUrl": "https://api.openai.com/v1",
+          "model": "strict-model",
+          "capabilities": {
+            "streaming": true,
+            "strictJsonSchema": true,
+            "nativeToolCalling": true,
+            "usageReporting": true,
+            "responseContinuation": true
+          }
+        },
+        "policy": {
+          "mode": "balanced",
+          "policyVersion": "policy-v2",
+          "toolRegistryVersion": "registry-v2",
+          "allowedTools": [
+            "host.inspect",
+            "shell.execReadOnly",
+            "service.inspect",
+            "service.validateConfig",
+            "service.control"
+          ],
+          "controlledMutationAllowed": true
+        },
+        "budgets": {
+          "schemaVersion": 2,
+          "policy": {
+            "maxRunSeconds": 600,
+            "maxModelTurns": 12,
+            "maxToolCalls": 10,
+            "toolTimeoutSeconds": 30,
+            "maxConsecutiveInvalidDecisions": 2,
+            "maxConsecutiveToolFailures": 3,
+            "maxPendingPlanItems": 8,
+            "maxSteeringQueueItems": 16,
+            "maxUserMessageBytes": 8192,
+            "stdoutCaptureBytes": 65536,
+            "stderrCaptureBytes": 16384,
+            "totalReadHardLimitBytes": 8388608,
+            "maxMutationProposals": 3,
+            "maxApprovedMutations": 2,
+            "maxPendingApprovals": 1,
+            "maxVerificationAttemptsPerChange": 2,
+            "maxVerificationRuntimeSeconds": 60
+          },
+          "usage": {
+            "elapsedMillis": 5000,
+            "modelTurnsUsed": 4,
+            "toolCallsUsed": 4,
+            "consecutiveInvalidDecisions": 0,
+            "consecutiveToolFailures": 0,
+            "steeringQueueItems": 0,
+            "mutationProposalsUsed": 2,
+            "approvedMutationsUsed": 1,
+            "pendingApprovals": 1
+          }
+        },
+        "goal": "Inspect and, after exact approval, start nginx.",
+        "plan": [
+          { "id": "inspect", "title": "Inspect nginx", "status": "completed" },
+          { "id": "approve", "title": "Await approval", "status": "active" }
+        ],
+        "toolCalls": [
+          {
+            "toolCallId": "tool-2",
+            "state": "awaitingApproval",
+            "tool": "service.control",
+            "arguments": {
+              "manager": "systemd",
+              "unit": "nginx.service",
+              "action": "start",
+              "timeoutSeconds": 30,
+              "verificationHints": { "expectedListenerPorts": [80] }
+            },
+            "rationale": "The service is loaded and inactive.",
+            "purpose": "Start nginx once after approval.",
+            "expectedImpact": "nginx may begin accepting connections.",
+            "rollbackGuidance": "Stopping requires a new approved action.",
+            "successCriteria": "nginx becomes active and listens on port 80.",
+            "preconditionEvidenceIds": ["evidence-service-2"],
+            "retrySafety": "verifyBeforeRetry",
+            "proposedAt": 2000,
+            "commandPreview": "systemctl start nginx.service",
+            "evidenceIds": []
+          }
+        ],
+        "evidence": [
+          {
+            "evidenceId": "evidence-service-2",
+            "runId": "run-2",
+            "targetDigest": "sha256-target",
+            "source": "service.inspect",
+            "toolCallId": "tool-inspect-2",
+            "observedAt": 1900,
+            "summary": "nginx.service is loaded and inactive.",
+            "exitCode": 0,
+            "truncated": false,
+            "observationDigest": "sha256-observation"
+          }
+        ],
+        "queuedSteeringCount": 0,
+        "pendingApproval": {
+          "approvalId": "approval-2",
+          "runId": "run-2",
+          "toolCallId": "tool-2",
+          "toolName": "service.control",
+          "resource": {
+            "kind": "systemdService",
+            "identity": "systemd:nginx.service",
+            "targetDigest": "sha256-target"
+          },
+          "riskAssessmentId": "risk-2",
+          "commandPreview": "systemctl start nginx.service",
+          "preconditionEvidenceIds": ["evidence-service-2"],
+          "verificationPlanDigest": "sha256-plan",
+          "timeoutSeconds": 30,
+          "issuedAt": 2000,
+          "expiresAt": 302000,
+          "confirmationMode": "single",
+          "state": "pending"
+        },
+        "riskAssessments": [
+          {
+            "riskAssessmentId": "risk-2",
+            "severity": "medium",
+            "confidence": "known",
+            "dimensions": {
+              "read": false,
+              "write": true,
+              "delete": false,
+              "privilegeElevation": false,
+              "serviceInterruption": false,
+              "networkChange": false,
+              "credentialAccess": false,
+              "externalNetwork": false,
+              "multiHost": false
+            },
+            "findings": [
+              { "code": "serviceStateChange", "message": "The action changes service state." }
+            ],
+            "affectedResources": [
+              {
+                "kind": "systemdService",
+                "identity": "systemd:nginx.service",
+                "targetDigest": "sha256-target"
+              }
+            ],
+            "verdict": "requiresApproval",
+            "policyVersion": "policy-v2",
+            "assessmentDigest": "sha256-risk"
+          }
+        ],
+        "changes": [
+          {
+            "changeId": "change-1",
+            "toolCallId": "tool-1",
+            "approvalId": "approval-1",
+            "resource": {
+              "kind": "systemdService",
+              "identity": "systemd:httpd.service",
+              "targetDigest": "sha256-target"
+            },
+            "action": "start",
+            "status": "verified",
+            "executionEvidenceIds": ["evidence-execution-1"],
+            "verificationEvidenceIds": ["evidence-verify-1"],
+            "operationId": "operation-1",
+            "recordedAt": 1500
+          }
+        ],
+        "verificationObligations": [
+          {
+            "verificationObligationId": "verification-1",
+            "changeId": "change-1",
+            "toolCallId": "tool-1",
+            "state": "satisfied",
+            "verificationPlanDigest": "sha256-plan-1",
+            "evidenceIds": ["evidence-verify-1"],
+            "startedAt": 1400,
+            "completedAt": 1450
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown top level field",
+      "valid": false,
+      "deriveFrom": 0,
+      "patch": { "executor": "ssh" }
+    },
+    {
+      "name": "unknown version",
+      "valid": false,
+      "deriveFrom": 0,
+      "patch": { "schemaVersion": 3 }
+    },
+    {
+      "name": "unknown tool",
+      "valid": false,
+      "deriveFrom": 0,
+      "patch": { "toolCalls.0.tool": "shell.exec" }
+    },
+    {
+      "name": "nested unknown approval field",
+      "valid": false,
+      "deriveFrom": 0,
+      "patch": { "pendingApproval.consumeToken": "forged" }
+    },
+    {
+      "name": "terminal approval cannot remain pending",
+      "valid": false,
+      "deriveFrom": 0,
+      "patch": { "pendingApproval.state": "consumed" }
+    }
+  ]
+}

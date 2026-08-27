@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 2,
+  "cases": [
+    {
+      "name": "all gates admitted",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "writable"
+      },
+      "admitted": true
+    },
+    {
+      "name": "P0 implemented is not verified",
+      "input": {
+        "p0Status": "implemented",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "p2Blocked",
+      "reason": "p0NotVerified"
+    },
+    {
+      "name": "P1 blocked",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "blocked",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "p2Blocked",
+      "reason": "p1NotVerified"
+    },
+    {
+      "name": "feature disabled",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": false,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "p2Blocked",
+      "reason": "featureDisabled"
+    },
+    {
+      "name": "provider incompatible",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": false,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "p2Blocked",
+      "reason": "providerIncompatible"
+    },
+    {
+      "name": "unsupported target",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "unsupported",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "p2Blocked",
+      "reason": "targetUnsupported"
+    },
+    {
+      "name": "unknown target capability",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "unknown",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "p2Blocked",
+      "reason": "targetCapabilityUnknown"
+    },
+    {
+      "name": "controlled mutation denied",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "denied",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "policyUnavailable",
+      "reason": "controlledMutationDenied"
+    },
+    {
+      "name": "controlled mutation policy unavailable",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "unavailable",
+        "operationHistory": "writable"
+      },
+      "admitted": false,
+      "category": "policyUnavailable",
+      "reason": "controlledMutationPolicyUnavailable"
+    },
+    {
+      "name": "operation history read only",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "readOnly"
+      },
+      "admitted": false,
+      "category": "policyUnavailable",
+      "reason": "operationHistoryNotWritable"
+    },
+    {
+      "name": "operation history unavailable",
+      "input": {
+        "p0Status": "verified",
+        "p1Status": "verified",
+        "featureEnabled": true,
+        "providerStrictSchemaCompatible": true,
+        "targetCapability": "posixSystemd",
+        "controlledMutationPolicy": "allowed",
+        "operationHistory": "unavailable"
+      },
+      "admitted": false,
+      "category": "policyUnavailable",
+      "reason": "operationHistoryNotWritable"
+    }
+  ]
+}

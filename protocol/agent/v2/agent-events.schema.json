@@ -1,0 +1,610 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termbridge.app/protocol/agent/v2/agent-events.schema.json",
+  "title": "TermBridge AgentEventV2",
+  "description": "Strict type-correlated P2 Agent journal events with backend-assigned sequences.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "run.created" },
+        "payload": { "$ref": "#/$defs/runCreatedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "run.stateChanged" },
+        "payload": { "$ref": "#/$defs/runStateChangedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "plan.updated" },
+        "payload": { "$ref": "#/$defs/planUpdatedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "model.started" },
+        "payload": { "$ref": "#/$defs/modelTurnPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "model.completed" },
+        "payload": { "$ref": "#/$defs/modelTurnPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "tool.proposed" },
+        "payload": { "$ref": "#/$defs/toolProposedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "tool.stateChanged" },
+        "payload": { "$ref": "#/$defs/toolStateChangedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "evidence.created" },
+        "payload": { "$ref": "#/$defs/evidenceCreatedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "budget.updated" },
+        "payload": { "$ref": "#/$defs/budgetUpdatedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "user.messageAccepted" },
+        "payload": { "$ref": "#/$defs/userMessageAcceptedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "run.reportCreated" },
+        "payload": { "$ref": "#/$defs/reportCreatedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "run.warning" },
+        "payload": { "$ref": "#/$defs/warningPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "run.terminal" },
+        "payload": { "$ref": "#/$defs/runTerminalPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "risk.evaluated" },
+        "payload": { "$ref": "#/$defs/riskEvaluatedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "approval.requested" },
+        "payload": { "$ref": "#/$defs/approvalRequestedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "approval.confirmationRequired" },
+        "payload": { "$ref": "#/$defs/approvalConfirmationRequiredPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "approval.resolved" },
+        "payload": { "$ref": "#/$defs/approvalResolvedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "approval.expired" },
+        "payload": { "$ref": "#/$defs/approvalExpiredPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "approval.revoked" },
+        "payload": { "$ref": "#/$defs/approvalRevokedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "change.executionStarted" },
+        "payload": { "$ref": "#/$defs/changePayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "change.executionCompleted" },
+        "payload": { "$ref": "#/$defs/changePayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "verification.started" },
+        "payload": { "$ref": "#/$defs/verificationStartedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "verification.completed" },
+        "payload": { "$ref": "#/$defs/verificationCompletedPayload" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "sequence", "occurredAt", "type", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "type": { "const": "change.recorded" },
+        "payload": { "$ref": "#/$defs/changePayload" }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "timestamp": { "type": "integer", "minimum": 0 },
+    "runState": {
+      "enum": [
+        "created",
+        "collectingContext",
+        "thinking",
+        "validatingTool",
+        "evaluatingRisk",
+        "awaitingApproval",
+        "executingTool",
+        "executingChange",
+        "verifyingChange",
+        "observing",
+        "awaitingUser",
+        "pausing",
+        "paused",
+        "cancelling",
+        "completed",
+        "failed",
+        "cancelled",
+        "blocked"
+      ]
+    },
+    "runNonTerminalState": {
+      "enum": [
+        "created",
+        "collectingContext",
+        "thinking",
+        "validatingTool",
+        "evaluatingRisk",
+        "awaitingApproval",
+        "executingTool",
+        "executingChange",
+        "verifyingChange",
+        "observing",
+        "awaitingUser",
+        "pausing",
+        "paused",
+        "cancelling"
+      ]
+    },
+    "toolState": {
+      "enum": [
+        "proposed",
+        "validating",
+        "policyEvaluated",
+        "awaitingApproval",
+        "approved",
+        "rejected",
+        "expired",
+        "revoked",
+        "executing",
+        "awaitingVerification",
+        "verifying",
+        "completed",
+        "partial",
+        "failed",
+        "timedOut",
+        "cancelled",
+        "unknownEffect",
+        "denied"
+      ]
+    },
+    "toolNonTerminalState": {
+      "enum": [
+        "proposed",
+        "validating",
+        "policyEvaluated",
+        "awaitingApproval",
+        "approved",
+        "executing",
+        "awaitingVerification",
+        "verifying"
+      ]
+    },
+    "runCreatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": { "state": { "const": "created" } }
+    },
+    "runStateChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previousState", "state"],
+      "properties": {
+        "previousState": { "$ref": "#/$defs/runNonTerminalState" },
+        "state": { "$ref": "#/$defs/runState" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" }
+      }
+    },
+    "planUpdatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan"],
+      "properties": {
+        "plan": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "agent-snapshot.schema.json#/$defs/planItem" }
+        }
+      }
+    },
+    "modelTurnPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelTurn"],
+      "properties": { "modelTurn": { "type": "integer", "minimum": 1, "maximum": 20 } }
+    },
+    "toolProposedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolCall"],
+      "properties": {
+        "toolCall": {
+          "allOf": [
+            { "$ref": "agent-snapshot.schema.json#/$defs/toolCall" },
+            {
+              "type": "object",
+              "properties": { "state": { "const": "proposed" } }
+            }
+          ]
+        }
+      }
+    },
+    "toolStateChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolCallId", "previousState", "state"],
+      "properties": {
+        "toolCallId": { "$ref": "#/$defs/identifier" },
+        "previousState": { "$ref": "#/$defs/toolNonTerminalState" },
+        "state": { "$ref": "#/$defs/toolState" }
+      }
+    },
+    "evidenceCreatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence"],
+      "properties": { "evidence": { "$ref": "agent-snapshot.schema.json#/$defs/evidence" } }
+    },
+    "budgetUpdatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["budgets"],
+      "properties": { "budgets": { "$ref": "agent-snapshot.schema.json#/$defs/budgetSnapshot" } }
+    },
+    "userMessageAcceptedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientActionId", "messageKind"],
+      "properties": {
+        "clientActionId": { "$ref": "#/$defs/identifier" },
+        "messageKind": { "enum": ["answer", "steering"] }
+      }
+    },
+    "reportCreatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["report"],
+      "properties": { "report": { "$ref": "agent-snapshot.schema.json#/$defs/finalReport" } }
+    },
+    "warningPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" }
+      }
+    },
+    "runTerminalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["completed", "failed", "cancelled", "blocked"] },
+        "error": { "$ref": "agent-snapshot.schema.json#/$defs/publicError" }
+      }
+    },
+    "riskEvaluatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolCallId", "riskAssessment"],
+      "properties": {
+        "toolCallId": { "$ref": "#/$defs/identifier" },
+        "riskAssessment": { "$ref": "agent-snapshot.schema.json#/$defs/riskAssessment" }
+      }
+    },
+    "approvalRequestedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval"],
+      "properties": {
+        "approval": {
+          "allOf": [
+            { "$ref": "agent-snapshot.schema.json#/$defs/approval" },
+            {
+              "type": "object",
+              "properties": { "state": { "const": "pending" } }
+            }
+          ]
+        }
+      }
+    },
+    "approvalConfirmationRequiredPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "challengeId", "expiresAt"],
+      "properties": {
+        "approvalId": { "$ref": "#/$defs/identifier" },
+        "challengeId": { "$ref": "#/$defs/identifier" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "approvalResolvedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "state"],
+      "properties": {
+        "approvalId": { "$ref": "#/$defs/identifier" },
+        "state": { "enum": ["approved", "rejected"] }
+      }
+    },
+    "approvalExpiredPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId"],
+      "properties": { "approvalId": { "$ref": "#/$defs/identifier" } }
+    },
+    "approvalRevokedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "reason"],
+      "properties": {
+        "approvalId": { "$ref": "#/$defs/identifier" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" }
+      }
+    },
+    "changePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change"],
+      "properties": { "change": { "$ref": "agent-snapshot.schema.json#/$defs/changeSnapshot" } }
+    },
+    "verificationStartedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification"],
+      "properties": {
+        "verification": {
+          "allOf": [
+            { "$ref": "agent-snapshot.schema.json#/$defs/verification" },
+            {
+              "type": "object",
+              "properties": { "state": { "const": "running" } }
+            }
+          ]
+        }
+      }
+    },
+    "verificationCompletedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification"],
+      "properties": {
+        "verification": {
+          "allOf": [
+            { "$ref": "agent-snapshot.schema.json#/$defs/verification" },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "enum": ["satisfied", "failed", "inconclusive", "timedOut", "cancelled"]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
