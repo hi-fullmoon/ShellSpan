@@ -12,7 +12,7 @@ import {
 } from './sftp-file-list-header';
 import { SftpParentRow } from './sftp-parent-row';
 import { SftpFileListRow } from './sftp-file-list-row';
-import { isPortableRootPath } from '@/lib/path-utils';
+import { isPortableRootPath, isPosixRootPath } from '@/lib/path-utils';
 
 const EMPTY_SELECTED_ENTRIES: FileEntry[] = [];
 
@@ -31,8 +31,8 @@ export interface SftpFileListProps {
   onParentDirectory?: () => void;
 }
 
-function isRootPath(currentPath?: string): boolean {
-  return isPortableRootPath(currentPath);
+function isRootPath(currentPath: string | undefined, isLocal: boolean): boolean {
+  return isLocal ? isPortableRootPath(currentPath) : isPosixRootPath(currentPath);
 }
 
 function compareEntries(
@@ -76,7 +76,7 @@ function compareEntries(
 export const SftpFileList: React.FC<SftpFileListProps> = ({
   entries,
   side,
-  localMode = false,
+  localMode,
   selectedPaths,
   filterQuery,
   batchMode,
@@ -88,7 +88,8 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   onParentDirectory,
 }) => {
   const { t } = useI18n();
-  const presentationSide: SftpSide = localMode ? 'local' : side;
+  const isLocal = localMode ?? side === 'local';
+  const presentationSide: SftpSide = isLocal ? 'local' : 'remote';
   const parentRef = useRef<HTMLDivElement>(null);
   const headerViewportRef = useRef<HTMLDivElement>(null);
   const [sortColumn, setSortColumn] = useState<SftpFileListSortColumn>('name');
@@ -124,7 +125,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     return [...filteredEntries].sort((a, b) => compareEntries(a, b, sortColumn, sortDirection));
   }, [filteredEntries, sortColumn, sortDirection]);
 
-  const showParent = useMemo(() => !isRootPath(currentPath), [currentPath]);
+  const showParent = useMemo(() => !isRootPath(currentPath, isLocal), [currentPath, isLocal]);
   const displayCount = showParent ? sortedEntries.length + 1 : sortedEntries.length;
 
   const virtualizer = useVirtualizer({

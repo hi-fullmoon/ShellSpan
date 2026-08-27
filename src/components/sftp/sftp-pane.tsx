@@ -16,7 +16,7 @@ import { getSftpPaneConnectionKey, type SftpConnection, type SftpSide } from '@/
 import { type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './utils';
 import type { SftpDndPayload } from './sftp-dnd-context';
-import { parentPortablePath } from '@/lib/path-utils';
+import { parentPortablePath, parentPosixPath } from '@/lib/path-utils';
 import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
 import { useAppStore } from '@/stores/appStore';
 
@@ -242,8 +242,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, [navigateTo, updateHistory]);
 
     const handleParentDirectory = useCallback((): void => {
-      navigateTo(parentPortablePath(path));
-    }, [path, navigateTo]);
+      navigateTo(isLocal ? parentPortablePath(path) : parentPosixPath(path));
+    }, [isLocal, path, navigateTo]);
 
     const handleDoubleClick = useCallback(
       (entry: FileEntry): void => {
@@ -555,7 +555,12 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </Button>
           </div>
 
-          <PathBreadcrumb path={path} onNavigate={navigateTo} normalizeInputPath={isLocal} className="flex-1" />
+          <PathBreadcrumb
+            path={path}
+            pathKind={isLocal ? 'local' : 'remote'}
+            onNavigate={navigateTo}
+            className="flex-1"
+          />
         </div>
 
         {/* File list */}
