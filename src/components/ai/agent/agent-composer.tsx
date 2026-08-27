@@ -61,7 +61,9 @@ export function AgentComposer({
           value={value}
           disabled={disabled || terminal}
           aria-label={placeholder}
-          aria-describedby="dynamic-agent-composer-hint"
+          aria-describedby={contextHint
+            ? 'dynamic-agent-composer-context dynamic-agent-composer-hint'
+            : 'dynamic-agent-composer-hint'}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (!shouldSubmit(event)) return;
@@ -71,20 +73,24 @@ export function AgentComposer({
           placeholder={placeholder}
           className="min-h-14 max-h-48 px-3.5 pt-3 pb-1 leading-5"
         />
-        <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
-          {contextHint && (
-            <InputGroupText
-              className="min-w-0 px-1 text-xs leading-4 text-muted-foreground/80"
-              aria-live="polite"
-            >
-              <span>{contextHint}</span>
-            </InputGroupText>
-          )}
-          <InputGroupText id="dynamic-agent-composer-hint" className="min-w-0 px-1 text-xs leading-4">
+        <InputGroupAddon align="block-end" className="px-2 pb-2 pt-1">
+          <span id="dynamic-agent-composer-hint" className="sr-only">
             {t('ai.dynamicAgent.composer.hint')}
-          </InputGroupText>
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            {modeControl ?? <span />}
+          </span>
+          <div className="flex w-full min-w-0 items-center gap-2">
+            {modeControl}
+            {contextHint ? (
+              <InputGroupText
+                id="dynamic-agent-composer-context"
+                className="min-w-0 flex-1 px-1 text-xs font-normal text-muted-foreground/60"
+                title={contextHint}
+                aria-live="polite"
+              >
+                <span className="min-w-0 truncate">{contextHint}</span>
+              </InputGroupText>
+            ) : (
+              <span className="flex-1" />
+            )}
             {terminal ? (
               <InputGroupButton
                 variant="secondary"

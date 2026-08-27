@@ -1149,7 +1149,7 @@ describe('AI composer status', () => {
     }
   });
 
-  it('keeps the missing-terminal guidance inside the composer', async () => {
+  it('keeps guidance in the compact composer toolbar', async () => {
     await act(async () => {
       await initI18n('zh-CN');
     });
@@ -1166,6 +1166,8 @@ describe('AI composer status', () => {
       'aria-live',
       'polite',
     );
+    expect(guidance.closest('[data-slot="input-group-addon"]')).not.toBeNull();
+    expect(screen.getByText('Enter 发送 · Shift+Enter 换行')).toHaveClass('sr-only');
 
     unmount();
     useAiStore.getState().setOpen(false);
