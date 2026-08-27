@@ -1,3 +1,4 @@
+use super::cancellation::valid_operation_id;
 use super::result::ExecutionErrorCategory;
 use crate::models::{JumpHostConfig, RemoteConnectionRequest};
 use serde::Serialize;
@@ -414,14 +415,7 @@ impl ReviewedSshExecutionRequest {
 
     pub(crate) fn known_secret_values(&self) -> Vec<String> {
         let mut secrets = self.command.redaction_values.clone();
-        add_secret(&mut secrets, self.connection.password.as_deref());
-        add_secret(&mut secrets, self.connection.private_key_data.as_deref());
-        add_secret(&mut secrets, self.connection.passphrase.as_deref());
-        if let Some(jump) = &self.connection.jump_host {
-            add_secret(&mut secrets, jump.password.as_deref());
-            add_secret(&mut secrets, jump.private_key_data.as_deref());
-            add_secret(&mut secrets, jump.passphrase.as_deref());
-        }
+        secrets.extend(known_connection_secret_values(&self.connection));
         secrets.retain(|secret| !secret.is_empty());
         secrets.sort_unstable_by(|left, right| {
             right.len().cmp(&left.len()).then_with(|| left.cmp(right))
@@ -482,19 +476,23 @@ fn validate_auth_method(
     Ok(())
 }
 
-fn valid_operation_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_OPERATION_ID_BYTES
-        && value.is_ascii()
-        && value.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-')
-        })
-}
-
 fn add_secret(secrets: &mut Vec<String>, value: Option<&str>) {
     if let Some(value) = value.filter(|value| !value.is_empty()) {
         secrets.push(value.to_string());
     }
+}
+
+pub(crate) fn known_connection_secret_values(connection: &RemoteConnectionRequest) -> Vec<String> {
+    let mut secrets = Vec::new();
+    add_secret(&mut secrets, connection.password.as_deref());
+    add_secret(&mut secrets, connection.private_key_data.as_deref());
+    add_secret(&mut secrets, connection.passphrase.as_deref());
+    if let Some(jump) = &connection.jump_host {
+        add_secret(&mut secrets, jump.password.as_deref());
+        add_secret(&mut secrets, jump.private_key_data.as_deref());
+        add_secret(&mut secrets, jump.passphrase.as_deref());
+    }
+    secrets
 }
 
 #[cfg(test)]

@@ -1,17 +1,19 @@
-use crate::connection::{
-    connect_tcp_stream, connect_through_jump_host, open_authenticated_session,
+use crate::execution::{
+    await_ssh_execution_worker, known_connection_secret_values, redact_known_secrets,
+    spawn_ssh_execution_worker, ExecutionCancellationRegistry, ExecutionErrorCategory,
+    ExecutionOutputPolicy, SshChannelExecutionOutcome, DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES,
 };
 use crate::keychain::{CredentialManager, ProfileSecretKind};
-use crate::models::{RemoteConnectionRequest, RunbookCancellationRegistry};
+use crate::models::RemoteConnectionRequest;
 use serde::{Deserialize, Serialize};
-use ssh2::Session;
 use std::collections::{HashMap, HashSet};
-use std::io::{ErrorKind, Read};
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, State};
+
+#[cfg(test)]
+use crate::execution::{execute_ssh_channel, CancellationHandle};
+#[cfg(test)]
+use ssh2::Session;
 
 const MAX_RUNBOOK_BYTES: usize = 512 * 1024;
 const MAX_COMMAND_BYTES: usize = 8 * 1024;
@@ -19,7 +21,6 @@ const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_ERROR_BYTES: usize = 8 * 1024;
 const MIN_TIMEOUT_MS: u64 = 1_000;
 const MAX_TIMEOUT_MS: u64 = 300_000;
-const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -169,11 +170,6 @@ struct SelectedAction<'a> {
     expected: &'a RunbookExpectedResult,
     timeout_seconds: u64,
     risk: RunbookRisk,
-}
-
-struct RunbookSshSession {
-    target: Session,
-    _jump: Option<Session>,
 }
 
 struct PreparedCommand {
@@ -853,153 +849,79 @@ fn interpolate(
     })
 }
 
-fn open_runbook_session(
-    request: &RemoteConnectionRequest,
-    known_hosts_path: &Path,
-) -> Result<RunbookSshSession, String> {
-    if let Some(jump) = &request.jump_host {
-        let (jump, target) = connect_through_jump_host(
-            jump,
-            &request.host,
-            request.port,
-            &request.username,
-            request.auth_method,
-            request.password.as_deref(),
-            request.private_key_data.as_deref(),
-            request.passphrase.as_deref(),
-            Some(known_hosts_path),
-        )
-        .map_err(|error| error.message())?;
-        return Ok(RunbookSshSession {
-            target,
-            _jump: Some(jump),
-        });
-    }
-    let tcp = connect_tcp_stream(&request.host, request.port)?;
-    let target = open_authenticated_session(
-        tcp,
-        &request.username,
-        request.auth_method,
-        request.password.as_deref(),
-        request.private_key_data.as_deref(),
-        request.passphrase.as_deref(),
-        &request.host,
-        request.port,
-        Some(known_hosts_path),
+fn runbook_output_policy() -> ExecutionOutputPolicy {
+    ExecutionOutputPolicy::new(
+        MAX_OUTPUT_BYTES,
+        MAX_ERROR_BYTES,
+        DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES,
     )
-    .map_err(|error| error.message())?;
-    Ok(RunbookSshSession {
-        target,
-        _jump: None,
-    })
+    .expect("Runbook compatibility output policy stays within backend hard limits")
 }
 
-fn read_available(
-    reader: &mut impl Read,
-    output: &mut Vec<u8>,
-    limit: usize,
-) -> Result<(), String> {
-    let mut buffer = [0_u8; 4_096];
-    loop {
-        match reader.read(&mut buffer) {
-            Ok(0) => return Ok(()),
-            Ok(count) => {
-                if output.len().saturating_add(count) > limit {
-                    return Err("runbook command output exceeded the safety limit".to_string());
-                }
-                output.extend_from_slice(&buffer[..count]);
+fn adapt_runbook_channel_outcome(
+    outcome: SshChannelExecutionOutcome,
+    expected: &RunbookExpectedResult,
+) -> ExecutionOutcome {
+    match outcome {
+        SshChannelExecutionOutcome::Completed { exit_code, output } => {
+            if output.stdout.truncated || output.stderr.truncated {
+                return ExecutionOutcome::Failed(
+                    "runbook command output exceeded the safety limit".to_string(),
+                );
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
-            Err(error) => return Err(format!("failed to read runbook command output: {error}")),
+            let stdout = output.stdout.text;
+            let stderr = output.stderr.text;
+            let expected_matched = exit_code == expected.exit_code
+                && expected
+                    .stdout_contains
+                    .iter()
+                    .all(|needle| stdout.contains(needle));
+            ExecutionOutcome::Finished {
+                exit_code,
+                expected_matched,
+                stdout,
+                stderr,
+            }
+        }
+        SshChannelExecutionOutcome::Cancelled => ExecutionOutcome::Cancelled,
+        SshChannelExecutionOutcome::TimedOut => ExecutionOutcome::TimedOut,
+        SshChannelExecutionOutcome::Failed(failure) => {
+            let message = if failure.category == ExecutionErrorCategory::OutputLimitExceeded {
+                "runbook command output exceeded the safety limit".to_string()
+            } else {
+                failure
+                    .message
+                    .replace("reviewed SSH execution", "runbook execution")
+                    .replace("reviewed SSH command", "runbook command")
+            };
+            ExecutionOutcome::Failed(message)
         }
     }
 }
 
-fn execute_channel(
+#[cfg(test)]
+fn execute_runbook_channel_compat(
     session: &Session,
     command: &str,
     expected: &RunbookExpectedResult,
-    cancel_flag: &AtomicBool,
+    cancellation: &CancellationHandle,
     deadline: Instant,
 ) -> ExecutionOutcome {
-    if cancel_flag.load(Ordering::SeqCst) {
-        return ExecutionOutcome::Cancelled;
-    }
-    if Instant::now() >= deadline {
-        return ExecutionOutcome::TimedOut;
-    }
-    let mut channel = match session.channel_session() {
-        Ok(channel) => channel,
-        Err(error) => {
-            return ExecutionOutcome::Failed(format!(
-                "failed to open runbook command channel: {error}"
-            ))
-        }
-    };
-    if let Err(error) = channel.exec(command) {
-        return ExecutionOutcome::Failed(format!("failed to start runbook command: {error}"));
-    }
-    session.set_blocking(false);
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    loop {
-        if cancel_flag.load(Ordering::SeqCst) {
-            let _ = channel.close();
-            return ExecutionOutcome::Cancelled;
-        }
-        if Instant::now() >= deadline {
-            let _ = channel.close();
-            return ExecutionOutcome::TimedOut;
-        }
-        if let Err(error) = read_available(&mut channel, &mut stdout, MAX_OUTPUT_BYTES) {
-            let _ = channel.close();
-            return ExecutionOutcome::Failed(error);
-        }
-        if let Err(error) = read_available(&mut channel.stderr(), &mut stderr, MAX_ERROR_BYTES) {
-            let _ = channel.close();
-            return ExecutionOutcome::Failed(error);
-        }
-        if channel.eof() {
-            break;
-        }
-        std::thread::sleep(WORKER_POLL_INTERVAL);
-    }
-    session.set_blocking(true);
-    if let Err(error) = channel.wait_close() {
-        return ExecutionOutcome::Failed(format!(
-            "failed to close runbook command channel: {error}"
-        ));
-    }
-    let exit_code = match channel.exit_status() {
-        Ok(status) => status,
-        Err(error) => {
-            return ExecutionOutcome::Failed(format!(
-                "failed to read runbook command status: {error}"
-            ))
-        }
-    };
-    let stdout = String::from_utf8_lossy(&stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&stderr).into_owned();
-    let expected_matched = exit_code == expected.exit_code
-        && expected
-            .stdout_contains
-            .iter()
-            .all(|needle| stdout.contains(needle));
-    ExecutionOutcome::Finished {
-        exit_code,
-        expected_matched,
-        stdout,
-        stderr,
-    }
+    adapt_runbook_channel_outcome(
+        execute_ssh_channel(
+            session,
+            command,
+            runbook_output_policy(),
+            &[],
+            cancellation,
+            deadline,
+        ),
+        expected,
+    )
 }
 
-fn redact(mut value: String, secrets: &[String]) -> String {
-    for secret in secrets {
-        if !secret.is_empty() {
-            value = value.replace(secret, "[REDACTED]");
-        }
-    }
-    value
+fn redact(value: String, secrets: &[String]) -> String {
+    redact_known_secrets(&value, secrets)
 }
 
 fn result(
@@ -1043,37 +965,12 @@ fn result(
     }
 }
 
-fn connection_secrets(connection: &RemoteConnectionRequest) -> Vec<String> {
-    let mut values = [
-        connection.password.as_ref(),
-        connection.private_key_data.as_ref(),
-        connection.passphrase.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    .cloned()
-    .collect::<Vec<_>>();
-    if let Some(jump) = connection.jump_host.as_ref() {
-        values.extend(
-            [
-                jump.password.as_ref(),
-                jump.private_key_data.as_ref(),
-                jump.passphrase.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            .cloned(),
-        );
-    }
-    values
-}
-
 #[tauri::command]
 pub(crate) fn execute_runbook_step(
     app: AppHandle,
     credentials: State<'_, CredentialManager>,
     database: State<'_, crate::db::Database>,
-    cancellations: State<'_, RunbookCancellationRegistry>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
     mut request: RunbookStepExecutionRequest,
 ) -> Result<RunbookStepExecutionResult, String> {
     let document = parse_document(&request.runbook_text)?;
@@ -1128,54 +1025,27 @@ pub(crate) fn execute_runbook_step(
     crate::validate_connection_fields(&request.connection.host, &request.connection.username)?;
     crate::commands::resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
     let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
-    let cancel_flag = cancellations.register(request.operation_id.clone())?;
+    let cancellation = cancellations
+        .register(request.operation_id.clone())
+        .map_err(|error| error.runbook_message())?;
     let mut secrets = prepared.secrets;
-    secrets.extend(connection_secrets(&request.connection));
-    let worker_connection = request.connection.clone();
-    let worker_command = prepared.command;
+    secrets.extend(known_connection_secret_values(&request.connection));
     let worker_expected = action.expected.clone();
-    let worker_cancel_flag = cancel_flag.clone();
     let deadline = Instant::now() + Duration::from_millis(request.timeout_ms);
-    let (sender, receiver) = mpsc::sync_channel(1);
-    std::thread::spawn(move || {
-        let outcome = if worker_cancel_flag.load(Ordering::SeqCst) {
-            ExecutionOutcome::Cancelled
-        } else {
-            match open_runbook_session(&worker_connection, &known_hosts_path) {
-                Ok(session) => execute_channel(
-                    &session.target,
-                    &worker_command,
-                    &worker_expected,
-                    &worker_cancel_flag,
-                    deadline,
-                ),
-                Err(error) => ExecutionOutcome::Failed(error),
-            }
-        };
-        let _ = sender.send(outcome);
-    });
-    let outcome = loop {
-        if cancel_flag.load(Ordering::SeqCst) {
-            break ExecutionOutcome::Cancelled;
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            cancel_flag.store(true, Ordering::SeqCst);
-            break ExecutionOutcome::TimedOut;
-        }
-        match receiver
-            .recv_timeout(WORKER_POLL_INTERVAL.min(deadline.saturating_duration_since(now)))
-        {
-            Ok(outcome) => break outcome,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                break ExecutionOutcome::Failed(
-                    "runbook execution worker stopped unexpectedly".to_string(),
-                )
-            }
-        }
-    };
-    let _ = cancellations.remove(&request.operation_id);
+    let receiver = spawn_ssh_execution_worker(
+        request.connection.clone(),
+        known_hosts_path,
+        prepared.command,
+        runbook_output_policy(),
+        Vec::new(),
+        cancellation.clone(),
+        deadline,
+    );
+    let outcome = adapt_runbook_channel_outcome(
+        await_ssh_execution_worker(&receiver, &cancellation, deadline),
+        &worker_expected,
+    );
+    cancellation.remove_registration();
     Ok(match outcome {
         ExecutionOutcome::Finished {
             exit_code,
@@ -1251,10 +1121,12 @@ pub(crate) fn execute_runbook_step(
 
 #[tauri::command]
 pub(crate) fn cancel_runbook_step(
-    cancellations: State<'_, RunbookCancellationRegistry>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
     operation_id: String,
 ) -> Result<(), String> {
-    cancellations.cancel(&operation_id)
+    cancellations
+        .cancel(&operation_id)
+        .map_err(|error| error.runbook_message())
 }
 
 #[tauri::command]
@@ -1321,9 +1193,10 @@ pub(crate) async fn save_runbook_file(text: String) -> Result<Option<RunbookFile
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::{
+        open_ssh_execution_session, BoundedOutputCollector, SshExecutionSession,
+    };
     use crate::models::{AuthMethod, JumpHostConfig};
-    use std::io::Cursor;
-    use std::sync::Arc;
 
     fn valid_text(command: &str, risk: &str, keychain: bool) -> String {
         let variables = if keychain {
@@ -1396,12 +1269,18 @@ mod tests {
 
     fn open_isolated_session(
         connection: &RemoteConnectionRequest,
-    ) -> (tempfile::TempDir, RunbookSshSession) {
+    ) -> (tempfile::TempDir, SshExecutionSession) {
         let (known_hosts_temp, known_hosts_path) =
             crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
-        let session = open_runbook_session(connection, &known_hosts_path)
+        let session = open_ssh_execution_session(connection, &known_hosts_path)
             .expect("authenticate isolated SSH with the trusted host key");
         (known_hosts_temp, session)
+    }
+
+    fn execution_handle(operation_id: &str) -> (ExecutionCancellationRegistry, CancellationHandle) {
+        let registry = ExecutionCancellationRegistry::default();
+        let handle = registry.register(operation_id).unwrap();
+        (registry, handle)
     }
 
     #[test]
@@ -1607,54 +1486,80 @@ mod tests {
     #[test]
     fn cancellation_and_timeout_are_observed_before_channel_open() {
         let session = Session::new().expect("create disconnected SSH session");
-        let cancelled = execute_channel(
+        let (cancel_registry, cancel_handle) = execution_handle("runbook:pre-cancel");
+        cancel_registry.cancel("runbook:pre-cancel").unwrap();
+        let cancelled = execute_runbook_channel_compat(
             &session,
             "uname -s",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: Vec::new(),
             },
-            &AtomicBool::new(true),
+            &cancel_handle,
             Instant::now() + Duration::from_secs(1),
         );
         assert!(matches!(cancelled, ExecutionOutcome::Cancelled));
 
-        let timed_out = execute_channel(
+        let (_timeout_registry, timeout_handle) = execution_handle("runbook:pre-timeout");
+        let timed_out = execute_runbook_channel_compat(
             &session,
             "uname -s",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: Vec::new(),
             },
-            &AtomicBool::new(false),
+            &timeout_handle,
             Instant::now(),
         );
         assert!(matches!(timed_out, ExecutionOutcome::TimedOut));
 
-        let cancelled_wins = execute_channel(
+        let (race_registry, race_handle) = execution_handle("runbook:cancel-timeout-race");
+        race_registry.cancel("runbook:cancel-timeout-race").unwrap();
+        let cancelled_wins = execute_runbook_channel_compat(
             &session,
             "uname -s",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: Vec::new(),
             },
-            &AtomicBool::new(true),
+            &race_handle,
             Instant::now(),
         );
         assert!(matches!(cancelled_wins, ExecutionOutcome::Cancelled));
     }
 
     #[test]
+    fn compatibility_wrapper_keeps_legacy_channel_error_wording() {
+        let session = Session::new().expect("create disconnected SSH session");
+        let (_registry, cancellation) = execution_handle("runbook:channel-error");
+        let outcome = execute_runbook_channel_compat(
+            &session,
+            "uname -s",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: Vec::new(),
+            },
+            &cancellation,
+            Instant::now() + Duration::from_secs(1),
+        );
+        assert!(matches!(
+            outcome,
+            ExecutionOutcome::Failed(ref error)
+                if error.starts_with("failed to open runbook command channel:")
+        ));
+    }
+
+    #[test]
     fn cancellation_command_sets_registered_flag_and_cleanup_removes_it() {
-        let cancellations = RunbookCancellationRegistry::default();
-        let flag = cancellations
+        let cancellations = ExecutionCancellationRegistry::default();
+        let handle = cancellations
             .register("runbook:cancel-characterization".to_string())
             .expect("register runbook cancellation");
 
         cancellations
             .cancel("runbook:cancel-characterization")
             .expect("cancel registered runbook operation");
-        assert!(flag.load(Ordering::SeqCst));
+        assert!(handle.is_cancelled());
 
         cancellations
             .remove("runbook:cancel-characterization")
@@ -1662,28 +1567,52 @@ mod tests {
         assert_eq!(
             cancellations
                 .cancel("runbook:cancel-characterization")
-                .expect_err("removed operation is no longer cancellable"),
+                .expect_err("removed operation is no longer cancellable")
+                .runbook_message(),
             "runbook step operation runbook:cancel-characterization not found"
         );
     }
 
     #[test]
     fn oversized_output_fails_at_the_existing_stream_limits() {
-        for limit in [MAX_OUTPUT_BYTES, MAX_ERROR_BYTES] {
-            let mut at_limit = Vec::new();
-            read_available(&mut Cursor::new(vec![b'x'; limit]), &mut at_limit, limit)
-                .expect("the exact capture limit is accepted");
-            assert_eq!(at_limit.len(), limit);
+        let expected = RunbookExpectedResult {
+            exit_code: 0,
+            stdout_contains: Vec::new(),
+        };
+        for (stdout, limit) in [(true, MAX_OUTPUT_BYTES), (false, MAX_ERROR_BYTES)] {
+            let mut exact = BoundedOutputCollector::new(runbook_output_policy()).unwrap();
+            if stdout {
+                exact.push_stdout(&vec![b'x'; limit]).unwrap();
+            } else {
+                exact.push_stderr(&vec![b'x'; limit]).unwrap();
+            }
+            let exact = adapt_runbook_channel_outcome(
+                SshChannelExecutionOutcome::Completed {
+                    exit_code: 0,
+                    output: exact.finish(&[]).unwrap(),
+                },
+                &expected,
+            );
+            assert!(matches!(exact, ExecutionOutcome::Finished { .. }));
 
-            let mut oversized = Vec::new();
-            let error = read_available(
-                &mut Cursor::new(vec![b'x'; limit + 1]),
-                &mut oversized,
-                limit,
-            )
-            .expect_err("one byte over the limit fails");
-            assert_eq!(error, "runbook command output exceeded the safety limit");
-            assert!(oversized.len() <= limit);
+            let mut oversized = BoundedOutputCollector::new(runbook_output_policy()).unwrap();
+            if stdout {
+                oversized.push_stdout(&vec![b'x'; limit + 1]).unwrap();
+            } else {
+                oversized.push_stderr(&vec![b'x'; limit + 1]).unwrap();
+            }
+            let oversized = adapt_runbook_channel_outcome(
+                SshChannelExecutionOutcome::Completed {
+                    exit_code: 0,
+                    output: oversized.finish(&[]).unwrap(),
+                },
+                &expected,
+            );
+            assert!(matches!(
+                oversized,
+                ExecutionOutcome::Failed(ref error)
+                    if error == "runbook command output exceeded the safety limit"
+            ));
         }
     }
 
@@ -1702,7 +1631,7 @@ mod tests {
             private_key_data: Some("jump-private-key".to_string()),
             passphrase: Some("jump-passphrase".to_string()),
         });
-        let secrets = connection_secrets(&connection);
+        let secrets = known_connection_secret_values(&connection);
         let raw = format!(
             "{} {} {} {} {} {}",
             connection.password.as_deref().unwrap(),
@@ -1750,11 +1679,12 @@ mod tests {
             exit_code: 0,
             stdout_contains: vec!["TERMBRIDGE_RUNBOOK_OK".to_string()],
         };
-        let outcome = execute_channel(
+        let (_registry, cancellation) = execution_handle("runbook:fixture-success");
+        let outcome = execute_runbook_channel_compat(
             &target.target,
             "printf TERMBRIDGE_RUNBOOK_OK",
             &expected,
-            &AtomicBool::new(false),
+            &cancellation,
             Instant::now() + Duration::from_secs(10),
         );
         match outcome {
@@ -1778,14 +1708,15 @@ mod tests {
     fn isolated_ssh_sftp_end_to_end_runbook_nonzero_exit_and_expected_mismatch() {
         let connection = isolated_connection();
         let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let nonzero = execute_channel(
+        let (_registry, cancellation) = execution_handle("runbook:fixture-nonzero");
+        let nonzero = execute_runbook_channel_compat(
             &target.target,
             "sh -c 'printf TERMBRIDGE_NONZERO; printf TERMBRIDGE_STDERR >&2; exit 7'",
             &RunbookExpectedResult {
                 exit_code: 7,
                 stdout_contains: vec!["TERMBRIDGE_NONZERO".to_string()],
             },
-            &AtomicBool::new(false),
+            &cancellation,
             Instant::now() + Duration::from_secs(10),
         );
         assert!(matches!(
@@ -1799,14 +1730,15 @@ mod tests {
         ));
 
         let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let mismatch = execute_channel(
+        let (_registry, cancellation) = execution_handle("runbook:fixture-mismatch");
+        let mismatch = execute_runbook_channel_compat(
             &target.target,
             "printf TERMBRIDGE_ACTUAL",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: vec!["TERMBRIDGE_REVIEWED_EXPECTATION".to_string()],
             },
-            &AtomicBool::new(false),
+            &cancellation,
             Instant::now() + Duration::from_secs(10),
         );
         assert!(matches!(
@@ -1825,20 +1757,20 @@ mod tests {
     fn isolated_ssh_sftp_end_to_end_runbook_cancel_and_timeout() {
         let connection = isolated_connection();
         let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        let cancel_worker = Arc::clone(&cancel_flag);
+        let (cancel_registry, cancellation) = execution_handle("runbook:fixture-cancel");
+        let cancel_worker = cancel_registry.clone();
         let canceller = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
-            cancel_worker.store(true, Ordering::SeqCst);
+            cancel_worker.cancel("runbook:fixture-cancel").unwrap();
         });
-        let cancelled = execute_channel(
+        let cancelled = execute_runbook_channel_compat(
             &target.target,
             "sleep 5",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: Vec::new(),
             },
-            &cancel_flag,
+            &cancellation,
             Instant::now() + Duration::from_secs(10),
         );
         canceller
@@ -1847,14 +1779,15 @@ mod tests {
         assert!(matches!(cancelled, ExecutionOutcome::Cancelled));
 
         let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let timed_out = execute_channel(
+        let (_registry, cancellation) = execution_handle("runbook:fixture-timeout");
+        let timed_out = execute_runbook_channel_compat(
             &target.target,
             "sleep 5",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: Vec::new(),
             },
-            &AtomicBool::new(false),
+            &cancellation,
             Instant::now() + Duration::from_millis(150),
         );
         assert!(matches!(timed_out, ExecutionOutcome::TimedOut));
@@ -1865,14 +1798,15 @@ mod tests {
     fn isolated_ssh_sftp_end_to_end_runbook_oversized_output_fails() {
         let connection = isolated_connection();
         let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let outcome = execute_channel(
+        let (_registry, cancellation) = execution_handle("runbook:fixture-oversized");
+        let outcome = execute_runbook_channel_compat(
             &target.target,
             "head -c 65537 /dev/zero",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: Vec::new(),
             },
-            &AtomicBool::new(false),
+            &cancellation,
             Instant::now() + Duration::from_secs(10),
         );
         assert!(matches!(
@@ -1888,14 +1822,15 @@ mod tests {
         const SECRET: &str = "TERMBRIDGE_REDACT_ME";
         let connection = isolated_connection();
         let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let outcome = execute_channel(
+        let (_registry, cancellation) = execution_handle("runbook:fixture-secret");
+        let outcome = execute_runbook_channel_compat(
             &target.target,
             "sh -c 'printf TERMBRIDGE_REDACT_ME; printf TERMBRIDGE_REDACT_ME >&2'",
             &RunbookExpectedResult {
                 exit_code: 0,
                 stdout_contains: vec![SECRET.to_string()],
             },
-            &AtomicBool::new(false),
+            &cancellation,
             Instant::now() + Duration::from_secs(10),
         );
         let ExecutionOutcome::Finished {
@@ -1927,17 +1862,20 @@ mod tests {
             let worker_connection = connection.clone();
             let worker_known_hosts_path = known_hosts_path.clone();
             std::thread::spawn(move || {
-                let session = open_runbook_session(&worker_connection, &worker_known_hosts_path)
-                    .expect("authenticate isolated multi-host SSH with the trusted host key");
+                let session =
+                    open_ssh_execution_session(&worker_connection, &worker_known_hosts_path)
+                        .expect("authenticate isolated multi-host SSH with the trusted host key");
                 let expected = RunbookExpectedResult {
                     exit_code: 0,
                     stdout_contains: vec![marker.to_string()],
                 };
-                match execute_channel(
+                let (_registry, cancellation) =
+                    execution_handle(&format!("runbook:fixture-{marker}"));
+                match execute_runbook_channel_compat(
                     &session.target,
                     &format!("printf {marker}"),
                     &expected,
-                    &AtomicBool::new(false),
+                    &cancellation,
                     Instant::now() + Duration::from_secs(10),
                 ) {
                     ExecutionOutcome::Finished {
