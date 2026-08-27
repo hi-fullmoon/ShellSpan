@@ -3,6 +3,56 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.54](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.54) - 2026-08-27
+
+
+### Bug Fixes
+
+- **tab-bars:** align tab separator and gap spacing
+- **terminal:** fit and refresh before focusing a restored terminal
+- **sftp:** tighten connection lifecycle and directory listing cache
+
+### Build System
+
+- patch sonner to drop ReactDOM.flushSync
+
+### Chore
+
+- simplify terminal transport baseline example
+
+### Documentation
+
+- add AI Agent P0 execution foundation design
+- **sftp:** record performance roadmap
+- **sftp:** record performance roadmap
+- rewrite roadmap around AI Agent execution phases
+
+### Features
+
+- **app:** add configurable app-wide shortcut bindings
+- **terminal:** add tab switcher dialog and shortcut
+- **sftp:** add transfer performance baseline
+- **sftp:** align drop indicator in tab gap during drag
+- **remote-fs:** decode legacy DOC text via rwml
+- **terminal:** mirror drag indicator changes in terminal tab bar
+- **sftp:** preview archives, office, and tabular remote files
+- **sftp:** preview markdown, csv, zip, and legacy doc
+- **ui:** refine toast stack layout and sftp header styling
+- **ai-settings:** surface key persistence status in the store and UI
+- **workbench:** update runbook JSON editor
+
+### Performance
+
+- **sftp:** reuse transfer buffers
+
+### Refactoring
+
+- **workbench:** keep remote-health cancel next to collect
+- **monitor-panel:** merge local and remote health views into one page
+- **sftp:** polish new connection menu dialog and selection
+- **terminal:** polish new session dialog and extend coverage
+- **workbench:** stack monitor panel cards vertically
+
 ## [v2.0.53](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.53) - 2026-08-26
 
 
