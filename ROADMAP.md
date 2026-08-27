@@ -74,7 +74,7 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 | 阶段 | 状态 | 时间参考 | 主要产物 | 阶段出口 |
 | --- | --- | --- | --- | --- |
 | P0 执行基础 | implemented | 1–2 周 | 共享执行内核、目标冻结、取消、输出边界与 Exec/PTY ADR | 本地实现/夹具已闭合；等待当前提交 Windows 门禁后才能 verified |
-| P1 只读动态 Agent | blocked | 2–3 周 | Agent 协议、后端 Agent loop、只读工具、事件时间线、Pause/Stop | P0 verified 前不得开始真实 shell.exec 接入 |
+| P1 只读动态 Agent | blocked | 2–3 周 | Agent 协议、后端 Agent loop、只读工具、事件时间线、Pause/Stop | P0 verified 前不得开始真实 shell.execReadOnly 接入 |
 | P2 受控修改 MVP | planned | 2–3 周 | 风险引擎、精确审批、后置验证、审计与安全重试 | 服务启动/配置变更只能在批准后执行并验证 |
 | P3 语义工具与交互 | planned | 2–4 周 | SFTP 工具、原子文件修改、本地执行、专用 Agent PTY | 文件修改可预览/回滚，交互任务可安全接管 |
 | P4 扩展与产品化 | planned | 独立评估 | 多主机、策略模板、历史知识、团队能力 | 单主机模型稳定后再通过专项准入 |
@@ -180,7 +180,7 @@ uname -a
 
 本地实现与 macOS 门禁、双 sshd Docker fixture、前端全量测试、构建和 roadmap audit 已完成。当前提交尚无 Windows runner 实跑结果，因此 P0 保持 `implemented` 而不是 `verified`。第 18 节八项逐条证据见 `docs/ai-agent-p0-execution-foundation-design.md` 与 `docs/roadmap-audit.json`。
 
-P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过并把 P0 更新为 `verified` 前，不得接入真实 `shell.exec`，也不得通过既有 `write_session` 向交互 PTY 注入模型输出。
+P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过并把 P0 更新为 `verified` 前，不得接入真实 `shell.execReadOnly`，也不得通过既有 `write_session` 向交互 PTY 注入模型输出。
 
 ---
 
@@ -188,18 +188,27 @@ P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过
 
 **状态：blocked（P0 verification gate）**
 
+> 第二阶段的协议、状态机、工具策略、界面结构、实施工作包与验收矩阵见 `docs/ai-agent-p1-readonly-dynamic-agent-design.md`。设计已可评审；真实 `shell.execReadOnly` 接入仍须等待 P0 变为 `verified`。
+
 ### 7.1 目标
 
 让 Agent 在一个冻结的远程主机上自主执行多轮、有界、只读诊断，并基于真实输出调整计划，用户可以查看、暂停、停止和补充要求。
 
 ### 7.2 后端工作包
 
-#### P1-0：Agent 协议与预算（尚未开始）
+#### P1-0：Agent 协议与预算（implemented）
 
 - 定义 `AgentStartRequest`、`AgentTargetBinding`、`AgentPolicySnapshot`。
 - 定义 provider-neutral `AgentDecision`、`AgentToolCall`、`ToolExecutionResult`、`AgentEvidence` 和版本化 `AgentEvent`。
 - 定义 Run/Tool Call 状态机、run/tool cancellation、最大运行时间、模型轮次、工具调用数、单步输出与连续失败预算。
-- P0 verified 前只保留文档设计，不新增真实 tool adapter、Tauri execution command 或模型执行入口。
+- P0 verified 前可以实现协议、状态机、fake model/tool 与纯逻辑测试，但不新增真实 SSH tool adapter、通用 Tauri execution command 或模型执行入口。
+
+实际结果（2026-08-27）：
+
+- 已新增 Rust/TypeScript v1 协议类型、严格 `AgentDecision` decoder、checked-in JSON schema、公开错误分类、显式 run/tool 转换表和硬上限预算策略。
+- `protocol/agent/v1/` 与 `tests/fixtures/agent-protocol/v1/` 是双端共同消费的 schema/fixture；unknown field、unknown version、unknown enum、tool/arguments 错配和 P1 非空 `changes` 均失败关闭。
+- Rust 与 TypeScript 都对所有状态笛卡尔积核对共享转换表，并系统性证明 `completed`、`failed`、`cancelled`、`blocked`、`timedOut` 和 `denied` 等终态不能被迟到结果覆盖。
+- 本工作包保持纯逻辑边界：没有 `AgentManager`、真实 SSH adapter、模型调用入口、Agent Tauri command 或 `write_session` 旁路。P1 仍因 P0 verification gate 保持 `blocked`，下一工作包 P1-A 尚未开始。
 
 #### P1-A：AgentManager 与运行注册表
 
@@ -217,13 +226,17 @@ src-tauri/src/agent/
 ├── manager.rs
 ├── orchestrator.rs
 ├── protocol.rs
+├── state.rs
+├── budgets.rs
 ├── context.rs
 ├── model.rs
-├── journal.rs
+├── evidence.rs
+├── events.rs
+├── redaction.rs
+├── policy.rs
 └── tools/
     ├── mod.rs
     ├── host.rs
-    ├── terminal.rs
     └── shell.rs
 ```
 
@@ -240,7 +253,7 @@ src-tauri/src/agent/
 
 - OpenAI Responses、OpenAI Compatible Chat 和 Ollama 统一返回 `AgentDecision`。
 - 记录 provider capability：streaming、strict JSON schema、native tool call、usage、previous response。
-- 支持原生 tool calling 时保留 call ID；不支持时使用严格 JSON decision fallback。
+- P1 统一使用严格 JSON decision；原生 tool calling 只有在后续能无差异转换为同一协议时才可作为传输优化。
 - 普通文本模型不默认开放 Agent 模式。
 - Provider 返回的工具名和参数仍需本地严格解析，不能直接执行。
 - 上下文中明确标注终端输出、日志和文件内容为 untrusted data。
@@ -249,17 +262,18 @@ src-tauri/src/agent/
 
 首批只暴露：
 
-- `host.inspect`：固定实现，收集 OS、发行版、架构、shell、home 和能力，不接收模型命令。
-- `terminal.snapshot`：读取前端已脱敏的选择或最近输出，带 observation time 与会话身份。
-- `shell.exec`：只允许本地策略确认为有界只读的命令。
+- `host.inspect`：固定实现，收集 OS、发行版、架构、身份、uptime 和诊断能力，不接收模型命令。
+- `shell.execReadOnly`：只接收 `program + args + timeout`，由本地 program-specific allowlist 和参数 parser 确认为有界只读后渲染命令。
+
+终端快照是运行开始时冻结的可选初始 evidence，不是模型可反复读取当前交互终端的动态工具。
 
 规则：
 
 - 目标由后端注入，模型不能提供 profile/host/username。
-- `shell.exec` 必须声明 purpose、timeout 和 success criteria。
-- 对 `journalctl`、Docker logs、kubectl logs 等强制行数或 tail 上限。
+- `shell.execReadOnly` 必须声明 purpose、timeout 和 success criteria。
+- 对 `journalctl` 和可选 Docker logs 强制行数或 tail 上限；kubectl 等更宽工具不进入 P1 首批 allowlist。
 - 禁止 follow/watch、后台任务、重定向、command substitution 和未知控制结构。
-- MVP 允许的 pipeline 必须经过 AST 分析，且每个子命令都为只读；若 AST 尚未完成，则先不开放 pipeline。
+- P1 不开放 shell `-c`、pipeline 或任意命令文本；未知 program、flag、subcommand 和 positional argument 一律拒绝。
 
 #### P1-E：上下文管理
 
@@ -285,7 +299,7 @@ src/components/ai/agent/
 ├── agent-plan.tsx
 ├── agent-timeline.tsx
 ├── agent-tool-card.tsx
-├── agent-approval-card.tsx
+├── agent-evidence.tsx
 ├── agent-report.tsx
 └── agent-composer.tsx
 ```
@@ -309,14 +323,14 @@ src/components/ai/agent/
 
 #### P1-I：Pause 与 Stop
 
-- `Pause`：当前步骤完成后不再启动下一步。
+- `Pause`：thinking 时取消并丢弃当前模型决策，工具运行时则在当前只读步骤完成后不再启动下一步。
 - `Stop now`：取消模型请求和正在执行的工具。
 - UI 必须解释远程后台进程不一定能因 channel 关闭而终止；自动模式本身禁止后台化命令。
-- 停止后所有未使用审批和 pending tool call 失效。
+- 停止后所有尚未执行的 tool proposal 和 pending tool call 失效。
 
 ### 7.4 测试要求
 
-- Fake model 按顺序返回 `host.inspect → shell.exec → shell.exec → final`，Agent 能完成循环。
+- Fake model 按顺序返回 `host.inspect → shell.execReadOnly → shell.execReadOnly → final`，Agent 能完成循环。
 - 第二个命令根据第一个命令输出动态变化，证明不是静态计划重放。
 - Prompt injection 出现在终端输出中时，不能变成工具调用授权。
 - 用户 steering 后，下一模型回合包含新约束。
@@ -346,6 +360,7 @@ Agent 应能够：
 - 未经授权副作用次数为 0。
 - Stop、超时、网络断开、Provider 错误和无效 schema 都有明确终态。
 - Agent UI 可从事件快照恢复，不依赖组件一直挂载。
+- 最终报告的已验证结论只引用本次 run、同一冻结 target 的 evidence，且 P1 `changes` 永远为空。
 
 ---
 
@@ -600,59 +615,51 @@ interface AgentStartRequest {
   clientRequestId: string;
   providerId: string;
   goal: string;
-  target: {
-    kind: 'remote';
-    profileId: string;
-    sessionId?: string;
-    expectedHost: string;
-    expectedPort: number;
-    expectedUsername: string;
-  };
-  policy: {
-    mode: 'strict' | 'balanced';
-    maxTurns: number;
-    maxToolCalls: number;
-    maxRuntimeMs: number;
-  };
-  context?: {
+  profileId: string;
+  terminalContext?: {
+    sessionId: string;
     label: string;
-    redactedContent: string;
-    observedAt: number;
-    cwdHint?: string;
+    redactedText: string;
+    capturedAt: number;
+    truncated: boolean;
   };
+  requestedBudgets?: Partial<AgentBudgetRequest>;
 }
 ```
+
+前端只提交 profile/provider ID；host、port、username、认证、policy、tools 和硬预算由后端读取并冻结，不能由前端声明。
 
 ### 11.2 AgentDecision
 
 ```ts
 type AgentDecision =
   | {
-      type: 'toolCall';
-      callId: string;
-      tool: 'host.inspect' | 'terminal.snapshot' | 'shell.exec';
+      schemaVersion: 1;
+      kind: 'toolCall';
+      rationale: string;
+      plan: AgentPlanUpdate;
+      tool: 'host.inspect' | 'shell.execReadOnly';
       purpose: string;
-      arguments: Record<string, unknown>;
-      successCriteria: {
-        exitCode?: number;
-        stdoutContains?: string[];
-      };
+      arguments: HostInspectArgs | ShellExecReadOnlyArgs;
+      successCriteria: string;
     }
   | {
-      type: 'askUser';
+      schemaVersion: 1;
+      kind: 'askUser';
+      rationale: string;
+      plan: AgentPlanUpdate;
       question: string;
-      reason: string;
     }
   | {
-      type: 'final';
-      outcome: 'success' | 'partial' | 'blocked' | 'failed';
-      summary: string;
-      evidenceIds: string[];
-      changes: string[];
-      warnings: string[];
-      suggestedNextActions: string[];
+      schemaVersion: 1;
+      kind: 'final';
+      rationale: string;
+      plan: AgentPlanUpdate;
+      report: AgentFinalReport;
     };
 ```
+
+一个模型回合只返回一个 decision。call ID、operation ID 和 evidence ID 由后端分配；P1 使用严格 JSON decision，provider 原生 tool calling 不能改变本地协议或策略。
 
 ### 11.3 AgentEvent
 
@@ -663,25 +670,24 @@ interface AgentEvent {
   sequence: number;
   occurredAt: number;
   type:
-    | 'runCreated'
-    | 'statusChanged'
-    | 'planUpdated'
-    | 'modelStarted'
-    | 'toolProposed'
-    | 'policyEvaluated'
-    | 'approvalRequested'
-    | 'approvalResolved'
-    | 'toolStarted'
-    | 'toolOutputDelta'
-    | 'toolCompleted'
-    | 'userMessageReceived'
-    | 'runCompleted'
-    | 'runFailed';
+    | 'run.created'
+    | 'run.stateChanged'
+    | 'plan.updated'
+    | 'model.started'
+    | 'model.completed'
+    | 'tool.proposed'
+    | 'tool.stateChanged'
+    | 'evidence.created'
+    | 'budget.updated'
+    | 'user.messageAccepted'
+    | 'run.reportCreated'
+    | 'run.warning'
+    | 'run.terminal';
   payload: unknown;
 }
 ```
 
-这些示例是路线图级契约，正式实现前必须转为 Rust 与 TypeScript 双端的精确 schema，并为 unknown field、版本升级和大小上限补充测试。
+P1 核心不发送原始 output delta；只在工具结束并完成同源脱敏后发送有界 observation。P2 审批事件在 P2 协议版本中追加，不能提前混入 P1 状态机。这些示例是路线图级契约，正式实现前必须转为 Rust 与 TypeScript 双端的精确 schema，并为 unknown field、版本升级和大小上限补充测试。
 
 ## 12. 跨阶段测试与评估
 

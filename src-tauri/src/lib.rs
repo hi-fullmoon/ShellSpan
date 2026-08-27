@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
+#[allow(dead_code)]
+mod agent;
 mod ai;
 mod ai_sessions;
 mod commands;
