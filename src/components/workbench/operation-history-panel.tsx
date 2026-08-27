@@ -371,7 +371,7 @@ export const OperationHistoryPanel: React.FC = () => {
                 description={t('operationHistory.emptyDescription')}
               />
             ) : (
-              <div className="flex flex-col gap-3 pb-2">
+              <div className="flex shrink-0 flex-col gap-3 pb-2">
                 <p className="text-xs text-muted-foreground">
                   {t('operationHistory.resultCount', { shown: tasks.length, total: totalTasks })}
                 </p>
