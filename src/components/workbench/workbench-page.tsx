@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/input-group';
 
 export const WORKBENCH_SEARCH_WIDTH_CLASS =
-  'flex-1 @min-[42rem]:w-72 @min-[42rem]:flex-none';
+  'w-72 max-w-full flex-none';
 
 type WorkbenchSearchClearProps =
   | { onClear?: never; clearLabel?: never }
@@ -92,10 +92,10 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
     )}
     {...props}
   >
-    <div className="flex flex-col gap-3 @min-[42rem]:flex-row @min-[42rem]:items-center @min-[42rem]:justify-between">
+    <div className="flex flex-col gap-3 @min-[64rem]:flex-row @min-[64rem]:items-center @min-[64rem]:justify-between">
       <div
         data-slot="workbench-page-header-copy"
-        className="flex min-w-0 items-center gap-3 @min-[42rem]:flex-1"
+        className="flex min-w-0 items-center gap-3 @min-[64rem]:flex-1"
       >
         <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon className="size-4" aria-hidden />
@@ -113,7 +113,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
       {actions && (
         <div
           data-slot="workbench-page-header-actions"
-          className="flex min-w-0 flex-wrap items-center gap-2 @min-[42rem]:shrink-0 @min-[42rem]:flex-nowrap @min-[42rem]:justify-end"
+          className="flex min-w-0 flex-wrap items-center gap-2 @min-[64rem]:shrink-0 @min-[64rem]:flex-nowrap @min-[64rem]:justify-end"
         >
           {actions}
         </div>

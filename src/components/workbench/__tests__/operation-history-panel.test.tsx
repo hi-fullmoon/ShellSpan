@@ -104,12 +104,14 @@ describe('OperationHistoryPanel', () => {
     });
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
-      'flex-1',
-      '@min-[42rem]:w-72',
-      '@min-[42rem]:flex-none',
+      'min-w-52',
+      'w-72',
+      'max-w-full',
+      'flex-none',
     );
     expect(await screen.findByText('operationHistory.action.executeRunbookStep')).toBeInTheDocument();
     const table = screen.getByRole('table', { name: 'operationHistory.title' });
+    expect(table.parentElement?.parentElement).toHaveClass('shrink-0');
     expect(within(table).getByRole('columnheader', { name: 'operationHistory.action' })).toBeInTheDocument();
     expect(within(table).getAllByRole('row')).toHaveLength(2);
     expect(screen.getByText((content) => content.includes('operator@example.test:22'))).toBeInTheDocument();
