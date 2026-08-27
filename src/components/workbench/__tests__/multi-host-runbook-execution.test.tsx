@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionProfile } from '@/types';
 import type { MultiHostRunbookDispatch, MultiHostRunbookTask } from '@/types/multi-host-runbook';
@@ -127,7 +127,8 @@ function partialTask(): MultiHostRunbookTask {
 
 describe('MultiHostRunbookExecution', () => {
   beforeEach(() => {
-    tauriMocks.cancel.mockClear();
+    tauriMocks.cancel.mockReset();
+    tauriMocks.cancel.mockResolvedValue(undefined);
   });
 
   it('renders partial success and keeps evidence inside its host card', () => {
@@ -141,11 +142,51 @@ describe('MultiHostRunbookExecution', () => {
     expect(secondCard).not.toBeNull();
     const firstEvidenceOutput = within(firstCard as HTMLElement).getByText('alpha-step');
     expect(firstEvidenceOutput).toBeInTheDocument();
-    expect(firstEvidenceOutput).toHaveClass('whitespace-pre-wrap', 'break-words');
-    expect(firstEvidenceOutput).not.toHaveClass('max-h-32', 'overflow-auto');
+    expect(firstEvidenceOutput).toHaveClass(
+      'max-h-40',
+      'overflow-auto',
+      'whitespace-pre-wrap',
+      'break-words',
+    );
     expect(within(firstCard as HTMLElement).queryByText('bravo-step')).not.toBeInTheDocument();
     expect(within(secondCard as HTMLElement).getByText('bravo-step')).toBeInTheDocument();
     expect(within(secondCard as HTMLElement).queryByText('alpha-step')).not.toBeInTheDocument();
+  });
+
+  it('shows single-flight cancellation feedback for the whole task and active host', async () => {
+    const activeTask = createMultiHostRunbookTask({
+      id: 'cancelling-ui-task',
+      sourceText: TEXT,
+      variableValues: {},
+      profiles: [profiles[0]],
+      selectedTag: 'production',
+      concurrencyLimit: 1,
+      batchSize: 1,
+      now: 1,
+      createRunId: () => 'run:cancelling',
+    });
+    const planned = planMultiHostRunbookDispatches(activeTask, () => 'operation:cancelling', 1);
+    let resolveCancel: () => void = () => undefined;
+    tauriMocks.cancel.mockImplementation(() => new Promise<void>((resolve) => {
+      resolveCancel = resolve;
+    }));
+    render(
+      <MultiHostRunbookExecution initialTask={planned.task} profiles={profiles} onTaskChange={vi.fn()} />,
+    );
+
+    const cancelAll = screen.getByRole('button', { name: 'runbook.multi.cancelAll' });
+    fireEvent.click(cancelAll);
+    fireEvent.click(cancelAll);
+
+    const cancellingAll = await screen.findByRole('button', { name: 'runbook.multi.cancellingAll' });
+    expect(tauriMocks.cancel).toHaveBeenCalledTimes(1);
+    expect(tauriMocks.cancel).toHaveBeenCalledWith('operation:cancelling');
+    expect(cancellingAll).toBeDisabled();
+    expect(cancellingAll.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
+    expect(screen.getByRole('button', { name: 'runbook.multi.cancellingHost' })).toBeDisabled();
+
+    await act(async () => resolveCancel());
+    expect(screen.getByRole('button', { name: 'runbook.multi.cancellingAll' })).toBeDisabled();
   });
 
   it('cancels only active per-host operation IDs when the panel unmounts', async () => {
