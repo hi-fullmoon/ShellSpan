@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "defaults",
+      "valid": true,
+      "request": {},
+      "expected": {
+        "maxRunSeconds": 600,
+        "maxModelTurns": 12,
+        "maxToolCalls": 10,
+        "toolTimeoutSeconds": 15,
+        "maxConsecutiveInvalidDecisions": 2,
+        "maxConsecutiveToolFailures": 2,
+        "maxPendingPlanItems": 6,
+        "maxSteeringQueueItems": 8,
+        "maxUserMessageBytes": 4096,
+        "stdoutCaptureBytes": 65536,
+        "stderrCaptureBytes": 16384,
+        "totalReadHardLimitBytes": 8388608
+      }
+    },
+    {
+      "name": "hard limits",
+      "valid": true,
+      "request": {
+        "maxRunSeconds": 900,
+        "maxModelTurns": 20,
+        "maxToolCalls": 15,
+        "toolTimeoutSeconds": 60,
+        "maxConsecutiveInvalidDecisions": 2,
+        "maxConsecutiveToolFailures": 3,
+        "maxPendingPlanItems": 8,
+        "maxSteeringQueueItems": 16,
+        "maxUserMessageBytes": 8192,
+        "stdoutCaptureBytes": 262144,
+        "stderrCaptureBytes": 65536,
+        "totalReadHardLimitBytes": 16777216
+      },
+      "expected": {
+        "maxRunSeconds": 900,
+        "maxModelTurns": 20,
+        "maxToolCalls": 15,
+        "toolTimeoutSeconds": 60,
+        "maxConsecutiveInvalidDecisions": 2,
+        "maxConsecutiveToolFailures": 3,
+        "maxPendingPlanItems": 8,
+        "maxSteeringQueueItems": 16,
+        "maxUserMessageBytes": 8192,
+        "stdoutCaptureBytes": 262144,
+        "stderrCaptureBytes": 65536,
+        "totalReadHardLimitBytes": 16777216
+      }
+    },
+    {
+      "name": "zero disables optional queues and tool proposals",
+      "valid": true,
+      "request": {
+        "maxToolCalls": 0,
+        "maxPendingPlanItems": 0,
+        "maxSteeringQueueItems": 0,
+        "stdoutCaptureBytes": 0,
+        "stderrCaptureBytes": 0
+      },
+      "expected": {
+        "maxRunSeconds": 600,
+        "maxModelTurns": 12,
+        "maxToolCalls": 0,
+        "toolTimeoutSeconds": 15,
+        "maxConsecutiveInvalidDecisions": 2,
+        "maxConsecutiveToolFailures": 2,
+        "maxPendingPlanItems": 0,
+        "maxSteeringQueueItems": 0,
+        "maxUserMessageBytes": 4096,
+        "stdoutCaptureBytes": 0,
+        "stderrCaptureBytes": 0,
+        "totalReadHardLimitBytes": 8388608
+      }
+    },
+    {
+      "name": "unknown field",
+      "valid": false,
+      "request": { "unlimited": true }
+    },
+    {
+      "name": "model turns above hard limit",
+      "valid": false,
+      "request": { "maxModelTurns": 21 }
+    },
+    {
+      "name": "zero runtime",
+      "valid": false,
+      "request": { "maxRunSeconds": 0 }
+    },
+    {
+      "name": "fractional timeout",
+      "valid": false,
+      "request": { "toolTimeoutSeconds": 1.5 }
+    },
+    {
+      "name": "null optional budget",
+      "valid": false,
+      "request": { "maxToolCalls": null }
+    },
+    {
+      "name": "invalid decision limit",
+      "valid": false,
+      "request": { "maxConsecutiveInvalidDecisions": 3 }
+    }
+  ]
+}
