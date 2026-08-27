@@ -1,0 +1,347 @@
+{
+  "schemaVersion": 2,
+  "cases": [
+    {
+      "name": "host inspect remains available in v2",
+      "valid": true,
+      "expectedKind": "toolCall",
+      "expectedTool": "host.inspect",
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Establish the host capabilities.",
+        "plan": { "items": [] },
+        "tool": "host.inspect",
+        "arguments": { "include": ["os", "capabilities"] },
+        "purpose": "Confirm the bounded diagnostic environment.",
+        "successCriteria": "Host capabilities are observed."
+      }
+    },
+    {
+      "name": "shell read only remains available in v2",
+      "valid": true,
+      "expectedKind": "toolCall",
+      "expectedTool": "shell.execReadOnly",
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Inspect the current load.",
+        "plan": { "items": [] },
+        "tool": "shell.execReadOnly",
+        "arguments": { "program": "uptime", "args": [], "timeoutSeconds": 15 },
+        "purpose": "Observe load without changing state.",
+        "successCriteria": "A bounded uptime result is available."
+      }
+    },
+    {
+      "name": "service inspect",
+      "valid": true,
+      "expectedKind": "toolCall",
+      "expectedTool": "service.inspect",
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Inspect nginx state before proposing a change.",
+        "plan": { "items": [] },
+        "tool": "service.inspect",
+        "arguments": {
+          "manager": "systemd",
+          "unit": "nginx.service",
+          "include": ["loadState", "activeState", "subState", "result"]
+        },
+        "purpose": "Collect bounded service-state evidence.",
+        "successCriteria": "The unit load and active states are observed."
+      }
+    },
+    {
+      "name": "service validate config",
+      "valid": true,
+      "expectedKind": "toolCall",
+      "expectedTool": "service.validateConfig",
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Validate nginx configuration before a service action.",
+        "plan": { "items": [] },
+        "tool": "service.validateConfig",
+        "arguments": { "validator": "nginx" },
+        "purpose": "Collect a fixed config-validity observation.",
+        "successCriteria": "The registered validator completes."
+      }
+    },
+    {
+      "name": "service control start",
+      "valid": true,
+      "expectedKind": "toolCall",
+      "expectedTool": "service.control",
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "The service is loaded, configured, and inactive.",
+        "plan": { "items": [] },
+        "tool": "service.control",
+        "arguments": {
+          "manager": "systemd",
+          "unit": "nginx.service",
+          "action": "start",
+          "timeoutSeconds": 30,
+          "verificationHints": { "expectedListenerPorts": [80, 443] }
+        },
+        "purpose": "Start the requested service once after approval.",
+        "expectedImpact": "The nginx service may begin accepting connections.",
+        "rollbackGuidance": "Stopping the service would be a new separately approved action.",
+        "successCriteria": "The service becomes active and expected listeners are observed.",
+        "preconditionEvidenceIds": ["evidence-config-1", "evidence-service-1"],
+        "retrySafety": "verifyBeforeRetry"
+      }
+    },
+    {
+      "name": "ask user",
+      "valid": true,
+      "expectedKind": "askUser",
+      "value": {
+        "schemaVersion": 2,
+        "kind": "askUser",
+        "rationale": "The requested service is ambiguous.",
+        "plan": { "items": [] },
+        "question": "Which systemd service should I inspect?"
+      }
+    },
+    {
+      "name": "final report with verified change",
+      "valid": true,
+      "expectedKind": "final",
+      "value": {
+        "schemaVersion": 2,
+        "kind": "final",
+        "rationale": "The approved change and its verification are terminal.",
+        "plan": { "items": [] },
+        "report": {
+          "outcome": "resolved",
+          "summary": "The approved nginx start was verified.",
+          "findings": [
+            {
+              "title": "nginx is active",
+              "detail": "Postcondition evidence reports an active service.",
+              "confidence": "verified",
+              "evidenceIds": ["evidence-verify-1"]
+            }
+          ],
+          "changes": [
+            {
+              "changeId": "change-1",
+              "toolCallId": "tool-1",
+              "approvalId": "approval-1",
+              "resource": {
+                "kind": "systemdService",
+                "identity": "systemd:nginx.service",
+                "targetDigest": "sha256-target"
+              },
+              "action": "start",
+              "status": "verified",
+              "executionEvidenceIds": ["evidence-execution-1"],
+              "verificationEvidenceIds": ["evidence-verify-1"]
+            }
+          ],
+          "warnings": [],
+          "nextActions": []
+        }
+      }
+    },
+    {
+      "name": "unknown top level field",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "askUser",
+        "rationale": "Need scope.",
+        "plan": { "items": [] },
+        "question": "Which service?",
+        "autoApprove": true
+      }
+    },
+    {
+      "name": "unknown version",
+      "valid": false,
+      "value": {
+        "schemaVersion": 3,
+        "kind": "askUser",
+        "rationale": "Need scope.",
+        "plan": { "items": [] },
+        "question": "Which service?"
+      }
+    },
+    {
+      "name": "unknown tool",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Run arbitrary shell.",
+        "plan": { "items": [] },
+        "tool": "shell.exec",
+        "arguments": { "command": "systemctl restart nginx" },
+        "purpose": "Bypass semantic tools.",
+        "successCriteria": "The command exits."
+      }
+    },
+    {
+      "name": "tool and arguments mismatch",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Mismatch arguments.",
+        "plan": { "items": [] },
+        "tool": "service.inspect",
+        "arguments": { "validator": "nginx" },
+        "purpose": "Attempt mismatched dispatch.",
+        "successCriteria": "It must be rejected."
+      }
+    },
+    {
+      "name": "service control shell injection unit",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Inject a second action.",
+        "plan": { "items": [] },
+        "tool": "service.control",
+        "arguments": {
+          "manager": "systemd",
+          "unit": "nginx.service;rm.service",
+          "action": "start"
+        },
+        "purpose": "Attempt command injection.",
+        "expectedImpact": "Unknown.",
+        "rollbackGuidance": "None.",
+        "successCriteria": "It must be rejected.",
+        "preconditionEvidenceIds": ["evidence-1"],
+        "retrySafety": "never"
+      }
+    },
+    {
+      "name": "unknown service control action",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Enable a service.",
+        "plan": { "items": [] },
+        "tool": "service.control",
+        "arguments": {
+          "manager": "systemd",
+          "unit": "nginx.service",
+          "action": "enable"
+        },
+        "purpose": "Enable the service.",
+        "expectedImpact": "Persistent startup behavior changes.",
+        "rollbackGuidance": "Disable it.",
+        "successCriteria": "It becomes enabled.",
+        "preconditionEvidenceIds": ["evidence-1"],
+        "retrySafety": "never"
+      }
+    },
+    {
+      "name": "stop rejects expected listener",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Stop nginx.",
+        "plan": { "items": [] },
+        "tool": "service.control",
+        "arguments": {
+          "manager": "systemd",
+          "unit": "nginx.service",
+          "action": "stop",
+          "verificationHints": { "expectedListenerPorts": [80] }
+        },
+        "purpose": "Stop the service.",
+        "expectedImpact": "Connections will be interrupted.",
+        "rollbackGuidance": "Starting is a new approved action.",
+        "successCriteria": "The service is inactive.",
+        "preconditionEvidenceIds": ["evidence-1"],
+        "retrySafety": "never"
+      }
+    },
+    {
+      "name": "service control requires precondition evidence",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Start nginx without evidence.",
+        "plan": { "items": [] },
+        "tool": "service.control",
+        "arguments": {
+          "manager": "systemd",
+          "unit": "nginx.service",
+          "action": "start"
+        },
+        "purpose": "Start the service.",
+        "expectedImpact": "The service starts.",
+        "rollbackGuidance": "Stopping is a new approved action.",
+        "successCriteria": "The service is active.",
+        "preconditionEvidenceIds": [],
+        "retrySafety": "never"
+      }
+    },
+    {
+      "name": "template service instances remain outside the P2 allowlist",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "toolCall",
+        "rationale": "Attempt to control a template instance.",
+        "plan": { "items": [] },
+        "tool": "service.control",
+        "arguments": {
+          "manager": "systemd",
+          "unit": "worker@tenant.service",
+          "action": "start"
+        },
+        "purpose": "Start a template instance.",
+        "expectedImpact": "The instance changes state.",
+        "rollbackGuidance": "Stopping would require a new approval.",
+        "successCriteria": "The instance becomes active.",
+        "preconditionEvidenceIds": ["evidence-1"],
+        "retrySafety": "never"
+      }
+    },
+    {
+      "name": "verified change requires postcondition evidence",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "kind": "final",
+        "rationale": "Claim verification without evidence.",
+        "plan": { "items": [] },
+        "report": {
+          "outcome": "resolved",
+          "summary": "Claimed success.",
+          "findings": [],
+          "changes": [
+            {
+              "changeId": "change-1",
+              "toolCallId": "tool-1",
+              "approvalId": "approval-1",
+              "resource": {
+                "kind": "systemdService",
+                "identity": "systemd:nginx.service",
+                "targetDigest": "sha256-target"
+              },
+              "action": "start",
+              "status": "verified",
+              "executionEvidenceIds": ["evidence-execution-1"],
+              "verificationEvidenceIds": []
+            }
+          ],
+          "warnings": [],
+          "nextActions": []
+        }
+      }
+    }
+  ]
+}
