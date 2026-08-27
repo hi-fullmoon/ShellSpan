@@ -69,13 +69,22 @@ function prepared() {
   return prepareRunbook(RUNBOOK_EXAMPLE, { SERVICE: "nginx'; reboot" }, target);
 }
 
+function completeActiveItem(run: RunbookRun, now: number): RunbookRun {
+  const active = running(run);
+  return applyRunbookStepResult(active.run, result(active.run, active.item, 'success', now), now);
+}
+
 describe('runbook text contract', () => {
   it('parses the versioned document and shell-quotes resolved variables in the review', () => {
     const value = prepared();
     expect(value.document.schemaVersion).toBe(1);
     expect(value.document.steps[0].rollback).toContain('previous validated configuration');
-    expect(value.items.map((item) => item.risk)).toEqual(['readOnly', 'stateChange']);
+    expect(value.items.map((item) => item.risk)).toEqual([
+      'readOnly', 'readOnly', 'stateChange', 'readOnly',
+    ]);
     expect(value.items[0].commandPreview).toBe("systemctl status 'nginx'\"'\"'; reboot'");
+    expect(value.items[1].commandPreview).toBe('sudo nginx -t');
+    expect(value.items[3].commandPreview).toBe("systemctl is-active 'nginx'\"'\"'; reboot'");
     expect(value.resolvedVariables).toEqual({ SERVICE: "nginx'; reboot" });
   });
 
@@ -113,6 +122,16 @@ describe('runbook text contract', () => {
         unsafePrecheck,
       ))).toThrow();
     }
+    for (const unsafeSudoCommand of [
+      'sudo nginx -T',
+      'sudo nginx -s reload',
+      'sudo systemctl status nginx',
+    ]) {
+      expect(() => parseRunbookText(RUNBOOK_EXAMPLE.replace(
+        'sudo nginx -t',
+        unsafeSudoCommand,
+      ))).toThrow();
+    }
   });
 
   it('supports an evidence-only diagnostic Runbook', () => {
@@ -121,8 +140,8 @@ describe('runbook text contract', () => {
     const text = JSON.stringify(document);
     expect(parseRunbookText(text).steps).toEqual([]);
     let run = startRunbookRun(prepareRunbook(text, { SERVICE: 'nginx' }, target), 'evidence-only', 1_000);
-    const precheck = running(run);
-    run = applyRunbookStepResult(precheck.run, result(precheck.run, precheck.item), 1_100);
+    run = completeActiveItem(run, 1_100);
+    run = completeActiveItem(run, 1_200);
     expect(run.phase).toBe('completed');
   });
 
@@ -148,10 +167,13 @@ describe('runbook text contract', () => {
 describe('runbook execution state machine', () => {
   it('runs one approved item at a time and supports pause, resume, and skip', () => {
     let run = startRunbookRun(prepared(), 'run-1', 1_000);
-    expect(run.items.map((item) => item.status)).toEqual(['awaitingApproval', 'queued']);
+    expect(run.items.map((item) => item.status)).toEqual([
+      'awaitingApproval', 'queued', 'queued', 'queued',
+    ]);
 
-    const precheck = running(run);
-    run = applyRunbookStepResult(precheck.run, result(precheck.run, precheck.item), 1_100);
+    run = completeActiveItem(run, 1_100);
+    expect(run.activeItemId).toBe('validate-nginx-config');
+    run = completeActiveItem(run, 1_200);
     expect(run.activeItemId).toBe('reload-service');
 
     run = pauseRunbook(run);
@@ -159,8 +181,11 @@ describe('runbook execution state machine', () => {
     run = resumeRunbook(run, 1_200);
     expect(run.phase).toBe('awaitingApproval');
     run = skipRunbookItem(run, 1_200);
+    expect(run.activeItemId).toBe('verify-service-active');
+    run = completeActiveItem(run, 1_300);
     expect(run.phase).toBe('completed');
-    expect(run.items[1].status).toBe('skipped');
+    expect(run.items.find((item) => item.id === 'reload-service')?.status).toBe('skipped');
+    expect(run.items.find((item) => item.id === 'verify-service-active')?.status).toBe('completed');
   });
 
   it('stops on rejection, failure, cancellation, and timeout', () => {
@@ -185,32 +210,34 @@ describe('runbook execution state machine', () => {
     expect(retried.activeItemId).toBe('service-status');
 
     const unsafePrepared = prepared();
-    unsafePrepared.items[1].safeToRetry = false;
+    const reloadItem = unsafePrepared.items.find((item) => item.id === 'reload-service');
+    if (!reloadItem) throw new Error('missing reload item');
+    reloadItem.safeToRetry = false;
     let unsafeRun = startRunbookRun(unsafePrepared, 'run-4', 1_000);
-    const check = running(unsafeRun);
-    unsafeRun = applyRunbookStepResult(check.run, result(check.run, check.item), 1_100);
+    unsafeRun = completeActiveItem(unsafeRun, 1_100);
+    unsafeRun = completeActiveItem(unsafeRun, 1_200);
     const action = running(unsafeRun);
-    unsafeRun = applyRunbookStepResult(action.run, result(action.run, action.item, 'failed'), 1_200);
+    unsafeRun = applyRunbookStepResult(action.run, result(action.run, action.item, 'failed'), 1_300);
     expect(retryRunbookFrom(unsafeRun, 'reload-service', 1_300)).toBe(unsafeRun);
   });
 
   it('refuses resume when prerequisite evidence became stale', () => {
     let run = startRunbookRun(prepared(), 'run-5', 1_000);
-    const active = running(run);
-    run = applyRunbookStepResult(active.run, result(active.run, active.item, 'success', 1_100), 1_100);
+    run = completeActiveItem(run, 1_100);
+    run = completeActiveItem(run, 1_200);
     run = pauseRunbook(run);
-    run = resumeRunbook(run, 301_101);
+    run = resumeRunbook(run, 301_201);
     expect(run.phase).toBe('staleEvidence');
     expect(run.error).toContain('stale');
   });
 
   it('rechecks evidence freshness at the approval boundary', () => {
     let run = startRunbookRun(prepared(), 'run-approval-stale', 1_000);
-    const active = running(run);
-    run = applyRunbookStepResult(active.run, result(active.run, active.item, 'success', 1_100), 1_100);
-    const refused = markRunbookItemRunning(run, 301_101);
+    run = completeActiveItem(run, 1_100);
+    run = completeActiveItem(run, 1_200);
+    const refused = markRunbookItemRunning(run, 301_201);
     expect(refused.phase).toBe('staleEvidence');
-    expect(refused.items[1].status).toBe('awaitingApproval');
+    expect(refused.items.find((item) => item.id === 'reload-service')?.status).toBe('awaitingApproval');
   });
 
   it('fails closed on result identity mismatch', () => {
