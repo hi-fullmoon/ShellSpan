@@ -41,5 +41,6 @@ describe('Button', () => {
 
     const spinner = container.querySelector('svg.animate-spin');
     expect(spinner).not.toHaveClass('text-muted-foreground');
+    expect(spinner).toHaveAttribute('data-icon', 'inline-start');
   });
 });
