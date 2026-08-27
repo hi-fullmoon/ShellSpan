@@ -6,6 +6,7 @@ $projectName = 'termbridge-e2e'
 
 try {
   docker compose --project-name $projectName --file $composeFile up --build --detach --wait
+  $env:TERMBRIDGE_E2E_SSH_FIXTURE = '1'
   $env:TERMBRIDGE_E2E_SSH_HOST = '127.0.0.1'
   $env:TERMBRIDGE_E2E_SSH_PORT = '22222'
   $env:TERMBRIDGE_E2E_SSH_USERNAME = 'termbridge'

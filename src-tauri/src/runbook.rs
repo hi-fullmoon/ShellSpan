@@ -1286,26 +1286,22 @@ mod tests {
         }
     }
 
-    fn isolated_connection() -> RemoteConnectionRequest {
+    fn test_connection() -> RemoteConnectionRequest {
         RemoteConnectionRequest {
-            host: std::env::var("TERMBRIDGE_E2E_SSH_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".to_string()),
-            port: std::env::var("TERMBRIDGE_E2E_SSH_PORT")
-                .ok()
-                .and_then(|value| value.parse::<u16>().ok())
-                .unwrap_or(22222),
-            username: std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-                .unwrap_or_else(|_| "termbridge".to_string()),
+            host: "127.0.0.1".to_string(),
+            port: 22222,
+            username: "termbridge".to_string(),
             auth_method: AuthMethod::Password,
-            password: Some(
-                std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-                    .unwrap_or_else(|_| "termbridge-e2e".to_string()),
-            ),
+            password: Some("termbridge-test-only".to_string()),
             keychain_key_id: None,
             private_key_data: None,
             passphrase: None,
             jump_host: None,
         }
+    }
+
+    fn isolated_connection() -> RemoteConnectionRequest {
+        crate::execution::fixture::isolated_ssh_connection()
     }
 
     fn profile_for_connection(
@@ -1674,7 +1670,7 @@ mod tests {
 
     #[test]
     fn unauthorized_adapter_result_keeps_exact_risk_and_does_not_enter_the_kernel() {
-        let connection = isolated_connection();
+        let connection = test_connection();
         let (_database_temp, database) = adapter_database("profile-1", &connection);
         let mut request = execution_request(
             "runbook:adapter-unauthorized",
@@ -1706,7 +1702,7 @@ mod tests {
 
     #[test]
     fn adapter_freezes_then_revalidates_the_profile_before_network_access() {
-        let connection = isolated_connection();
+        let connection = test_connection();
         let (_database_temp, database) = adapter_database("profile-1", &connection);
         let database_during_dispatch = database.clone();
         let changed_connection = connection.clone();
@@ -1745,7 +1741,7 @@ mod tests {
     fn generic_completed_results_keep_runbook_expected_matching_and_identity() {
         let request = execution_request(
             "runbook:adapter-nonzero",
-            isolated_connection(),
+            test_connection(),
             "uname -s",
             RunbookRisk::ReadOnly,
             7,
@@ -1793,7 +1789,7 @@ mod tests {
     fn generic_terminal_states_map_to_the_existing_runbook_contract() {
         let request = execution_request(
             "runbook:adapter-terminals",
-            isolated_connection(),
+            test_connection(),
             "uname -s",
             RunbookRisk::ReadOnly,
             0,
@@ -1861,7 +1857,7 @@ mod tests {
 
     #[test]
     fn duplicate_operation_registration_keeps_the_existing_command_error() {
-        let connection = isolated_connection();
+        let connection = test_connection();
         let (_database_temp, database) = adapter_database("profile-1", &connection);
         let cancellations = ExecutionCancellationRegistry::default();
         let _existing = cancellations
@@ -1893,7 +1889,7 @@ mod tests {
     fn oversized_output_fails_at_the_existing_stream_limits() {
         let request = execution_request(
             "runbook:adapter-truncation",
-            isolated_connection(),
+            test_connection(),
             "uname -s",
             RunbookRisk::ReadOnly,
             0,

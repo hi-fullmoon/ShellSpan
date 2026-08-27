@@ -6,6 +6,8 @@
 //! production caller.
 
 mod cancellation;
+#[cfg(test)]
+pub(crate) mod fixture;
 mod output;
 mod redaction;
 mod request;
