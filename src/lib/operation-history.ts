@@ -40,11 +40,22 @@ interface InvocationHistoryContext {
   approved: boolean;
   commandPreview?: string;
   itemCount?: number;
+  deploymentIdentity?: DeploymentHistoryIdentity;
+}
+
+interface DeploymentHistoryIdentity {
+  reviewId: string;
+  documentDigest: string;
+  planDigest: string;
+  deploymentId: string;
+  version: string;
+  targetDigest: string;
 }
 
 export interface OperationHistoryInvocationMetadata {
   taskId?: string;
   commandPreview?: string;
+  deploymentIdentity?: DeploymentHistoryIdentity;
 }
 
 interface InvocationHistoryDescriptor {
@@ -271,6 +282,23 @@ function descriptorFor(
       };
     case 'cancel_runbook_step':
       return { ...common, category: 'runbook', action: 'executeRunbookStep', risk: 'readOnly', taskId: operationId, cancelRequest: true };
+    case 'execute_deployment': {
+      const approval = objectValue(request.approval);
+      const targetDigest = stringValue(approval?.targetDigest);
+      return {
+        ...common,
+        category: 'deployment',
+        action: 'executeDeployment',
+        risk: (stringValue(approval?.approvedRisk) as OperationHistoryRisk | undefined) ?? 'stateChange',
+        taskId: operationId,
+        approved: approval?.authorized === true,
+        targets: targetDigest
+          ? common.targets.map((target) => ({ ...target, identityFingerprint: targetDigest }))
+          : common.targets,
+      };
+    }
+    case 'cancel_deployment':
+      return { ...common, category: 'deployment', action: 'executeDeployment', risk: 'stateChange', taskId: operationId, cancelRequest: true };
     default:
       return undefined;
   }
@@ -362,6 +390,7 @@ export async function recordInvocationStarted(
     approved: descriptor.approved ?? false,
     commandPreview: reviewedCommand,
     itemCount: descriptor.itemCount,
+    deploymentIdentity: metadata?.deploymentIdentity,
   };
   if (context.cancelRequest) {
     await recordOperationHistoryEvent(newEvent(context, 'cancelRequested', 'cancelling'));
@@ -387,6 +416,24 @@ function statusFromResult(
   if (context.cancelRequest) return 'cancelling';
   const record = objectValue(result);
   const rawStatus = stringValue(record?.status);
+  const deploymentPhase = stringValue(record?.phase);
+  if (context.category === 'deployment') {
+    const target = objectValue(record?.target);
+    const expected = context.deploymentIdentity;
+    if (
+      stringValue(record?.operationId) !== context.operationId
+      || (expected?.reviewId && stringValue(record?.reviewId) !== expected.reviewId)
+      || (expected?.documentDigest && stringValue(record?.documentDigest) !== expected.documentDigest)
+      || (expected?.planDigest && stringValue(record?.planDigest) !== expected.planDigest)
+      || (expected?.deploymentId && stringValue(record?.deploymentId) !== expected.deploymentId)
+      || (expected?.version && stringValue(record?.version) !== expected.version)
+      || (expected?.targetDigest && stringValue(target?.identityDigest) !== expected.targetDigest)
+      || (context.targets[0]?.profileId && stringValue(target?.profileId) !== context.targets[0].profileId)
+      || (context.targets[0]?.host && stringValue(target?.host) !== context.targets[0].host)
+      || (context.targets[0]?.port && numberValue(target?.port) !== context.targets[0].port)
+      || (context.targets[0]?.username && stringValue(target?.username) !== context.targets[0].username)
+    ) return 'identityMismatch';
+  }
   if (context.category === 'runbook') {
     const source = objectValue(record?.source);
     if (
@@ -431,6 +478,7 @@ function statusFromResult(
     attention: 'partialSuccess',
     partialSuccess: 'partialSuccess',
   };
+  if (deploymentPhase && statusMap[deploymentPhase]) return statusMap[deploymentPhase];
   if (rawStatus && statusMap[rawStatus]) return statusMap[rawStatus];
   if (Array.isArray(record?.items)) {
     const statuses = record.items.map((item) => stringValue(objectValue(item)?.status));
@@ -445,6 +493,17 @@ function statusFromResult(
 
 function targetsFromResult(context: InvocationHistoryContext, result: unknown): OperationHistoryTarget[] {
   const record = objectValue(result);
+  if (context.category === 'deployment') {
+    const frozen = objectValue(record?.target);
+    const target = remoteTarget(frozen);
+    if (target) {
+      return [{
+        ...target,
+        identityFingerprint: stringValue(frozen?.identityDigest)
+          ?? context.targets[0]?.identityFingerprint,
+      }];
+    }
+  }
   const source = objectValue(record?.source);
   const target = remoteTarget(source ?? record);
   if (target) {

@@ -5,9 +5,9 @@ use crate::models::AuthMethod;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct TargetRevalidationError {
-    pub(super) category: ExecutionErrorCategory,
-    pub(super) message: String,
+pub(crate) struct TargetRevalidationError {
+    pub(crate) category: ExecutionErrorCategory,
+    pub(crate) message: String,
 }
 
 #[derive(Deserialize)]
@@ -25,16 +25,23 @@ pub(super) fn revalidate_frozen_target(
     database: &Database,
     request: &ReviewedSshExecutionRequest,
 ) -> Result<(), TargetRevalidationError> {
-    request
-        .target
-        .validate_connection(&request.connection)
+    revalidate_frozen_target_identity(database, &request.target, &request.connection)
+}
+
+pub(crate) fn revalidate_frozen_target_identity(
+    database: &Database,
+    target: &FrozenTargetIdentity,
+    connection: &crate::models::RemoteConnectionRequest,
+) -> Result<(), TargetRevalidationError> {
+    target
+        .validate_connection(connection)
         .map_err(|error| TargetRevalidationError {
             category: error.category,
             message: error.message.to_string(),
         })?;
 
     let profile = database
-        .get_profile(&request.target.profile_id)
+        .get_profile(&target.profile_id)
         .map_err(|_| TargetRevalidationError {
             category: ExecutionErrorCategory::WorkerStopped,
             message: "failed to reload the reviewed target profile".to_string(),
@@ -80,7 +87,7 @@ pub(super) fn revalidate_frozen_target(
         message: error.message.to_string(),
     })?;
 
-    if current != request.target {
+    if &current != target {
         return Err(TargetRevalidationError {
             category: ExecutionErrorCategory::TargetMismatch,
             message: "stored profile identity does not match the frozen target".to_string(),

@@ -92,87 +92,87 @@ pub(crate) enum DeploymentTargetBindingV2 {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentIdentityV2 {
-    id: String,
-    application_id: String,
-    environment: String,
-    version: String,
+    pub(crate) id: String,
+    pub(crate) application_id: String,
+    pub(crate) environment: String,
+    pub(crate) version: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentArtifactUnpackV2 {
-    format: DeploymentArchiveFormatV2,
-    destination_path: String,
-    strip_components: u8,
+    pub(crate) format: DeploymentArchiveFormatV2,
+    pub(crate) destination_path: String,
+    pub(crate) strip_components: u8,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentArtifactV2 {
-    id: String,
-    description: String,
-    kind: DeploymentArtifactKindV2,
-    source_uri: String,
-    sha256: String,
-    target_path: String,
+    pub(crate) id: String,
+    pub(crate) description: String,
+    pub(crate) kind: DeploymentArtifactKindV2,
+    pub(crate) source_uri: String,
+    pub(crate) sha256: String,
+    pub(crate) target_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    size_bytes: Option<u64>,
+    pub(crate) size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    credential_ref: Option<String>,
+    pub(crate) credential_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    unpack: Option<DeploymentArtifactUnpackV2>,
+    pub(crate) unpack: Option<DeploymentArtifactUnpackV2>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentReleaseV2 {
-    root_directory: String,
-    releases_directory: String,
-    release_directory: String,
-    active_symlink: String,
-    activation_strategy: DeploymentActivationStrategyV2,
+    pub(crate) root_directory: String,
+    pub(crate) releases_directory: String,
+    pub(crate) release_directory: String,
+    pub(crate) active_symlink: String,
+    pub(crate) activation_strategy: DeploymentActivationStrategyV2,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentServiceV2 {
-    id: String,
-    manager: DeploymentServiceManagerV2,
-    unit: String,
+    pub(crate) id: String,
+    pub(crate) manager: DeploymentServiceManagerV2,
+    pub(crate) unit: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentServiceActionV2 {
-    id: String,
-    service_id: String,
-    action: DeploymentServiceActionKindV2,
-    risk: RunbookRisk,
-    timeout_seconds: u64,
+    pub(crate) id: String,
+    pub(crate) service_id: String,
+    pub(crate) action: DeploymentServiceActionKindV2,
+    pub(crate) risk: RunbookRisk,
+    pub(crate) timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentHealthCheckV2 {
-    id: String,
-    kind: DeploymentHealthCheckKindV2,
+    pub(crate) id: String,
+    pub(crate) kind: DeploymentHealthCheckKindV2,
     #[serde(skip_serializing_if = "Option::is_none")]
-    url: Option<String>,
+    pub(crate) url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    expected_status: Option<u16>,
+    pub(crate) expected_status: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    service_id: Option<String>,
+    pub(crate) service_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    expected_state: Option<DeploymentExpectedServiceStateV2>,
-    timeout_seconds: u64,
-    attempts: u8,
-    interval_seconds: u64,
+    pub(crate) expected_state: Option<DeploymentExpectedServiceStateV2>,
+    pub(crate) timeout_seconds: u64,
+    pub(crate) attempts: u8,
+    pub(crate) interval_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentVerificationV2 {
-    checks: Vec<DeploymentHealthCheckV2>,
+    pub(crate) checks: Vec<DeploymentHealthCheckV2>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -186,8 +186,8 @@ pub(crate) struct DeploymentRollbackV2 {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentSecretReferenceV2 {
-    id: String,
-    keychain_ref: String,
+    pub(crate) id: String,
+    pub(crate) keychain_ref: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -202,28 +202,28 @@ pub(crate) struct DeploymentApprovalPolicyV2 {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentSecurityV2 {
-    declared_risk: RunbookRisk,
-    allow_privilege_escalation: bool,
-    approval: DeploymentApprovalPolicyV2,
-    secret_refs: Vec<DeploymentSecretReferenceV2>,
+    pub(crate) declared_risk: RunbookRisk,
+    pub(crate) allow_privilege_escalation: bool,
+    pub(crate) approval: DeploymentApprovalPolicyV2,
+    pub(crate) secret_refs: Vec<DeploymentSecretReferenceV2>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentRunbookDocumentV2 {
-    schema_version: u8,
-    kind: DeploymentRunbookKindV2,
-    id: String,
-    name: String,
-    description: String,
-    deployment: DeploymentIdentityV2,
-    artifacts: Vec<DeploymentArtifactV2>,
-    release: DeploymentReleaseV2,
-    services: Vec<DeploymentServiceV2>,
-    service_actions: Vec<DeploymentServiceActionV2>,
-    verification: DeploymentVerificationV2,
-    rollback: DeploymentRollbackV2,
-    security: DeploymentSecurityV2,
+    pub(crate) schema_version: u8,
+    pub(crate) kind: DeploymentRunbookKindV2,
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) deployment: DeploymentIdentityV2,
+    pub(crate) artifacts: Vec<DeploymentArtifactV2>,
+    pub(crate) release: DeploymentReleaseV2,
+    pub(crate) services: Vec<DeploymentServiceV2>,
+    pub(crate) service_actions: Vec<DeploymentServiceActionV2>,
+    pub(crate) verification: DeploymentVerificationV2,
+    pub(crate) rollback: DeploymentRollbackV2,
+    pub(crate) security: DeploymentSecurityV2,
 }
 
 fn valid_id(value: &str) -> bool {

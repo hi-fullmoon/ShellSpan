@@ -84,6 +84,13 @@ import type {
   RunbookStepExecutionRequest,
   RunbookStepExecutionResult,
 } from '@/types/runbook';
+import type {
+  DeploymentExecutionRequestV2,
+  DeploymentExecutionResultV2,
+  DeploymentExecutionReviewRequestV2,
+  DeploymentExecutionReviewV2,
+} from '@/types/deployment-runbook';
+import { requireDeploymentExecutionResultIdentity } from '@/lib/deployment-execution';
 
 const logger = createLogger('ipc');
 const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
@@ -926,6 +933,33 @@ export async function invokeExecuteRunbookStep(
 
 export async function invokeCancelRunbookStep(operationId: string): Promise<void> {
   return invokeLogged('cancel_runbook_step', { operationId });
+}
+
+export async function invokeReviewDeploymentExecution(
+  request: DeploymentExecutionReviewRequestV2,
+): Promise<DeploymentExecutionReviewV2> {
+  return invokeLogged<DeploymentExecutionReviewV2>('review_deployment_execution', { request });
+}
+
+export async function invokeExecuteDeployment(
+  request: DeploymentExecutionRequestV2,
+  review: DeploymentExecutionReviewV2,
+): Promise<DeploymentExecutionResultV2> {
+  const result = await invokeLogged<DeploymentExecutionResultV2>('execute_deployment', { request }, {
+    deploymentIdentity: {
+      reviewId: review.reviewId,
+      documentDigest: review.documentDigest,
+      planDigest: review.planDigest,
+      deploymentId: review.deploymentId,
+      version: review.version,
+      targetDigest: review.target.identityDigest,
+    },
+  });
+  return requireDeploymentExecutionResultIdentity(review, result);
+}
+
+export async function invokeCancelDeployment(operationId: string): Promise<void> {
+  return invokeLogged('cancel_deployment', { operationId });
 }
 
 export async function invokeOpenRunbookFile(): Promise<RunbookFile | null> {

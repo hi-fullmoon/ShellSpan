@@ -1,6 +1,6 @@
 # Multi-host Runbook safety contract
 
-> Scope: this scheduler currently accepts executable Runbook `schemaVersion: 1` only. Deployment Runbook v2 phase 1 is a validation-only contract and is not dispatched to single-host or multi-host execution. A later deployment scheduler must explicitly preserve all target-freezing, batching, per-host circuit, evidence, and approval invariants below.
+> Scope: this scheduler currently accepts executable Runbook `schemaVersion: 1` only. Deployment Runbook v2 phase 2 has a separate reviewed single-host executor and is not dispatched through this multi-host scheduler. A later deployment scheduler must explicitly preserve all target-freezing, batching, per-host circuit, evidence, and approval invariants below.
 
 TermBridge multi-host tasks are a local scheduler layered over the existing one-step Runbook SSH boundary. The scheduler does not introduce a shared shell, shared terminal, background agent, or new credential store. Every dispatched command still passes through `execute_runbook_step`, which validates the reviewed source digest, database profile binding, exact risk approval, bounded timeout, known host, keychain references, output limits, and redaction.
 

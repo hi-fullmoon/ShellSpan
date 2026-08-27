@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "policy": {
+    "artifactTimeoutSeconds": 30,
+    "maxArtifactBytes": 10485760,
+    "maxExpandedBytes": 52428800,
+    "maxArchiveEntries": 1000,
+    "totalTimeoutSeconds": 600
+  },
+  "approvalMutations": [
+    "operationId",
+    "documentDigest",
+    "planDigest",
+    "targetDigest",
+    "approvedRisk",
+    "authorized",
+    "destructiveConfirmed"
+  ],
+  "terminalPhases": [
+    "succeeded",
+    "failed",
+    "cancelled",
+    "timedOut",
+    "identityMismatch",
+    "unauthorized"
+  ]
+}
