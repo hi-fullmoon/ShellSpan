@@ -415,15 +415,24 @@ Agent 应能够：
 - P1 v1 保持冻结，只读工具与空 `changes` 语义不变；Rust/TypeScript 共享兼容性 fixture 证明 v1 继续拒绝 mutation 与非空 `changes`。
 - P2 已增加 `schemaVersion: 2` Rust/TypeScript types，以及严格、独立的 decision/event/snapshot schema；未知字段、版本、工具和 tool/arguments 错配均失败关闭。
 - 已增加 run/tool/approval/verification 四类状态机与共享 fixture，并对所有终态和全部可能迟到状态做笛卡尔积拒绝测试。
-- 本工作包没有注册 IPC、真实 adapter、approval registry、风险引擎或修改 executor；P2-A 至 P2-F 仍未实现。
+- P2-0 提交没有注册 IPC、真实 adapter、approval registry、风险引擎或修改 executor；当前 P2-A 状态见下，P2-B 至 P2-F 仍未实现。
 
-#### P2-A：结构化 evidence 与多维风险
+#### P2-A：结构化 evidence 与多维风险（implemented；生产准入继续 blocked）
 
 - 后端从固定只读工具解析 systemd service resource 与 structured claims。
 - precondition evidence 必须属于当前 run、target、resource，successful 且未过期。
 - 风险记录 read/write/delete/privilege/service interruption/network/credential/external/multi-host 维度。
 - verdict 为 autoReadOnly、requiresApproval、requiresDoubleConfirmation 或 deny。
 - 模型风险字段不能覆盖本地结果；unknown、destructive、critical 和提权一律 deny。
+
+实际结果（2026-08-27）：
+
+- Rust 后端新增 canonical `AgentResourceRefV2` 派生边界、固定 systemd/config/listener parser、structured evidence/capability ledger；模型和前端不能写入 resource、claims、observedAt、successful 或 digest。
+- ledger 与 precondition validator 系统性校验 same-run、same-target、same-resource、successful、完整 observation、无冲突 claims 和 immutable evidence-set digest；status/config/listener/target-capability 默认 freshness 分别为 120/120/60/300 秒，任一配置硬上限为 300 秒。
+- start/reload/restart/stop 前置矩阵已落地；stop 额外要求冻结用户目标明确请求停止，validator 与 canonical resource 由本地 capability 绑定。
+- 本地 RiskEngine 覆盖完整维度与 service-control 矩阵；unknown/destructive/privilege/credential/external-download-execute/network/shell/multi-host/ambiguous-resource 全部 critical deny，restart/stop 及可能中断的 reload 要求二次确认。模型宣称 readOnly/low 只记录为 ignored finding，不能降低本地结果。
+- Strict/Balanced effective policy 由 application/profile/request/tool minimum 取最严格值；两种模式都不允许 mutation auto-approval。Rust/TypeScript 共同消费 `risk-evidence-preconditions.json`，前端只严格投影后端结果，不实现第二套风险或前置条件决策。
+- 本工作包仍未注册 v2 manager/IPC、approval registry、真实 service/SSH executor、verification executor、audit writer 或 UI；`CURRENT_P2_ADMISSION_BASELINE` 继续先因 P0/P1 未 verified 失败关闭。
 
 #### P2-B：Approval control plane
 
