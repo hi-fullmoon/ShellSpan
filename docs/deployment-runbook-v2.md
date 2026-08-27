@@ -182,13 +182,23 @@ The narrow non-UI IPC surface is `review_deployment_rollout`, `start_deployment_
 
 Deployment schema v3 adds rollout review, rollout, batch, target, and batch-approval-consumption tables. On restart, running child deployment operations are sealed by phase 3; running rollout targets become `interrupted + recoveryRequired`, untouched targets stay `notStarted`, and the rollout becomes `recoveryRequired` with an open circuit. Nothing resumes automatically. Recovery requires a fresh review with the same document, policy, deployment policy, target identity, order, environment, and batch digests. Succeeded targets carry their original operation and receive neither a new child review nor a new connection/execution slot.
 
-## Phase 4 limits and later phases
+## Phase 5 user workflow and release acceptance
+
+Phase 5 adds a dedicated **Deployments** workbench page and two built-in systemd web-service templates. The structured form covers deployment identity, artifact digest/source, release roots, systemd action, HTTP health, explicit targets, immutable rollout order, and canary/rolling policy. Import/export stays v2-only. A read-only normalized JSON dialog is available for advanced review but has no execution action.
+
+The UI calls the phase 2–4 IPC surface directly. It stores only the secret-free document, profile IDs, policy, backend reviews, and results. Profile credentials are assembled transiently through the existing password/keychain prompts for each review or exact batch and are never placed in localStorage or rendered. Backend review freezes every document/target/order/policy control; editing explicitly discards the review. Review expiry and local target drift disable approval before IPC, while the backend remains authoritative and revalidates both.
+
+Single-host, canary, next-batch, and rollback confirmations show the exact environment, version, risk, target or batch membership, and a one-shot confirmation sentence. Rollout detail renders authoritative batch health, per-host status/evidence, circuit reason, partial success, and recovery state. Restart recovery loads the durable review, preserves successful hosts, and requests a fresh recovery review. Rollback suggestions remain data only and open the existing separate rollback review/approval flow per source operation.
+
+User instructions and recovery/rollback procedures are in [`deployment-workflow.md`](deployment-workflow.md). The fixture-driven UI acceptance and final gate checklist are in [`deployment-release-acceptance.md`](deployment-release-acceptance.md).
+
+## Current limits
 
 - Active cancellation flags remain process-memory only; durable state records the interruption but cannot prove a blocking remote process stopped. No operation is resumed automatically.
-- The existing operation-history projection records deployment and rollback invocation identity, and the deployment database stores detailed semantic checkpoints. Phase 3 adds no dedicated deployment editor or live progress UI.
+- The existing operation-history projection records deployment and rollback invocation identity, and the deployment database stores detailed semantic checkpoints. The phase 5 UI reads those checkpoints but does not persist credentials or invent synthetic success.
 - Cancellation is checked between artifact/archive/SFTP chunks and between semantic actions. A currently blocking connection/SFTP library call may observe cancellation only when that call or its connection timeout returns.
 - No automatic rollback, recursive rollback, cleanup execution, or background garbage collection. Cleanup remains a reviewed, non-executable disposition.
 - Multi-host coordination is limited to explicit local canary/rolling batches. There is no dynamic discovery, tag membership, traffic switching, load-balancer integration, or remote orchestrator.
 - No Docker Compose, Kubernetes, database migration, hooks, scripts, environment injection, or arbitrary Shell escape hatch.
 
-Phase 5 may add a dedicated deployment UI and templates around these APIs. It must not weaken target/approval binding, add unattended rollback, or reinterpret `recoveryRequired` as permission to replay.
+The phase 5 UI does not weaken target/approval binding, add unattended rollback, or reinterpret `recoveryRequired` as permission to replay.

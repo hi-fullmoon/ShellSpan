@@ -68,6 +68,10 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       label: t('runbook.title'),
     },
     {
+      key: 'deployments',
+      label: t('deployment.title'),
+    },
+    {
       key: 'history',
       label: t('operationHistory.title'),
     },
