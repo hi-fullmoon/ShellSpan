@@ -146,7 +146,12 @@ fn valid_service_unit(unit: &str) -> bool {
         && unit.len() <= MAX_SERVICE_UNIT_BYTES
         && unit.ends_with(".service")
         && unit.len() > ".service".len()
+        && unit
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
         && !unit.contains("..")
+        && !unit.contains('@')
         && unit
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
@@ -345,7 +350,7 @@ pub(crate) struct ServiceInspectArgsV2 {
     pub(crate) include: Vec<ServiceInspectFieldV2>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ServiceValidatorV2 {
     Nginx,
@@ -365,7 +370,7 @@ pub(crate) enum ServiceManagerV2 {
     Systemd,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ServiceControlActionV2 {
     Start,

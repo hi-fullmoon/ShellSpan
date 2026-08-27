@@ -1,6 +1,6 @@
 # AI Agent P2：受控修改 Agent 设计
 
-> 设计状态：P2-0 implemented locally；P2-A～P2-F planned（真实修改接入受 P1 verification gate 阻断）
+> 设计状态：P2-0/P2-A implemented locally；P2-B～P2-F planned（真实修改接入受 P1 verification gate 阻断）
 > 路线图阶段：P2 — 受控修改 MVP
 > 设计基线 HEAD：`b0dc16ccc2e2a3b5660ce743f63de67c1c8e91f7`
 > 设计日期：2026-08-27
@@ -110,7 +110,18 @@ P2-0 已按本设计完成纯协议与状态机落地：
 - Rust/TypeScript 已分别定义 v2 decision、event、snapshot、run/tool/approval/verification 状态，并消费同一组严格 fixture。
 - `protocol/agent/v2/` 的三个 schema 与双端 decoder 都拒绝未知字段、版本、工具、事件类型与 tool/arguments 错配。
 - v1/v2 兼容性 fixture 明确证明 v1 仍拒绝 mutation 和非空 `changes`；四类状态机对所有终态与全部迟到状态组合均拒绝覆盖。
-- 本实现没有增加真实 executor、修改 IPC、approval registry、风险引擎、operation-history writer 或服务命令 renderer；这些仍属于 P2-A～P2-F，且受 P0/P1 verified 门禁约束。
+- P2-0 提交没有增加真实 executor、修改 IPC、approval registry、风险引擎、operation-history writer 或服务命令 renderer；当前 P2-A 状态见下一节，P2-B～P2-F 仍受 P0/P1 verified 门禁约束。
+
+### 3.5 P2-A 实现基线
+
+P2-A 已完成纯逻辑 evidence/risk 边界：
+
+- 后端从冻结 target 与 canonical `.service` unit 派生 `AgentResourceRefV2`，alias/template/path/shell/scope 扩展均不能形成 resource。
+- 固定 parser、structured evidence/capability ledger、freshness 与 action precondition validator 已实现；same-run/same-target/same-resource、successful、完整 observation、冲突 claims、validator binding 和 digest drift 全部失败关闭。
+- status/config/listener/target-capability 默认 freshness 为 120/120/60/300 秒，全部受 300 秒后端硬上限约束。
+- 本地多维 RiskEngine 与 Strict/Balanced effective resolver 已实现；service-control 风险矩阵、模型低报忽略以及 P2 deny corpus 由 Rust/TypeScript 共享 fixture 覆盖。
+- 前端只新增严格安全结果投影和共享 fixture 测试，不包含 P2 UI 或任何安全决策 authority。
+- P2-A 没有增加 approval registry/IPC、service renderer/executor、SSH adapter、verification executor、audit writer 或 UI；P0/P1 未 verified 时生产 mutation 继续失败关闭。
 
 ## 4. 范围
 
@@ -1160,7 +1171,7 @@ stdout/stderr 继续默认折叠，只显示脱敏有界内容。
 - 所有终态不可被迟到事件覆盖。
 - 本工作包不接真实 executor。
 
-### P2-A：结构化 evidence 与风险引擎（3 天）
+### P2-A：结构化 evidence 与风险引擎（implemented locally；生产准入继续 blocked）
 
 产物：
 
@@ -1176,6 +1187,12 @@ stdout/stderr 继续默认折叠，只显示脱敏有界内容。
 - 模型低报不降低本地风险。
 - unknown/destructive/privilege escalation 全部 deny。
 - same-run/same-target/same-resource/freshness 系统性测试。
+
+实际结果：
+
+- 后端权威 resource、structured claims/capability ledger、四类 freshness、四种 service action precondition、多维 RiskEngine 与 effective policy resolver 已落地。
+- 共享 `risk-evidence-preconditions.json` 同时驱动 Rust 行为矩阵与 TypeScript 权威投影测试；unknown field、混合 claim class、target drift 和 policy weakening 在前端投影层同样失败关闭。
+- P2-0/v1 协议、状态机、空 changes 和 blocked production boundary 保持不变；P2-B～P2-F 仍未实现。
 
 ### P2-B：Approval control plane（3–4 天）
 
