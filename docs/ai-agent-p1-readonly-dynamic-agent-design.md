@@ -1071,9 +1071,9 @@ Reducer 规则：
 - `src-tauri/src/agent/context.rs` 分离 stable contract 与 dynamic untrusted context：固定目标/只读边界/tool proposal contract/预算不随 observation 累积，动态部分仅携带 plan、最近四条有界 observation、旧 observation index、最近 tool error、pending question 与 steering。
 - `src-tauri/src/agent/orchestrator.rs` 复用 P1-0 状态机和预算账本，实现可测试的单决策循环。steering 通过 request generation 加 cancellation 双重失效 in-flight decision；Pause 在 thinking 取消请求、在 fake tool 后提交 observation 再暂停；Stop 取消 model/fake tool 且禁止下一回合或迟到终态覆盖。
 - fake model/tool 测试覆盖 `host.inspect → ps → final` 的两类 tool variant；并证明 `uptime` 的 `load=9.2` observation 选择第二个 `ps` tool call，而 `load=0.2` 分支直接 final。另覆盖 tool denied 后只读替代、askUser/answer、一次 repair 后 schema failure、provider timeout、thinking/tool Pause、tool Stop、budget exhaustion 和终态幂等。
-- P1-B 组件没有接入 `AgentManager::default()`；生产 `agent_start` 继续由 blocked no-op boundary 返回 `p1Blocked`。本阶段没有 tool registry/真实 policy/evidence ledger/redactor、P0 adapter、raw SSH、`write_session` 或 UI workspace；P1-C 未开始，P1 总体仍受 P0 verification gate 阻断。
+- P1-B 组件没有接入 `AgentManager::default()`；生产 `agent_start` 继续由 blocked no-op boundary 返回 `p1Blocked`。在 P1-B 提交时没有 tool registry/真实 policy/evidence ledger/redactor、P0 adapter、raw SSH、`write_session` 或 UI workspace；后续 P1-C 只补充下述本地纯逻辑边界，P1 总体仍受 P0 verification gate 阻断。
 
-### P1-C：Tool registry、policy 与 evidence（3–4 天）
+### P1-C：Tool registry、policy 与 evidence（3–4 天，implemented 2026-08-27）
 
 产物：
 
@@ -1089,6 +1089,17 @@ Reducer 规则：
 - injection corpus 不能产生 reviewed command。
 - 同源 redaction 测试证明 UI/model/evidence 内容一致。
 - 仍可使用 fake executor，不受 P0 外部门禁阻塞。
+
+实施记录：
+
+- `src-tauri/src/agent/tools/{mod,host,shell}.rs` 建立编译期静态 registry；同一 `ToolDefinition` 表生成 provider context 中的严格 argument schema 并选择 dispatch executor，policy/registry version 不一致时失败关闭。`host.inspect` 只把受限 enum field 转为固定 probe plan；`shell.execReadOnly` 只把本地 policy 通过的规范化参数交给唯一 POSIX renderer。
+- `src-tauri/src/agent/policy.rs` 为 13 个首批 program（Docker 默认 capability-gated 关闭）分别实现独立 parser，而不是用通用 shell regex 充当授权。systemctl status 不读取 journal、show 只输出安全 properties；journalctl 和 Docker logs 强制 1..500 行，Docker stats 强制 no-stream，所有 follow/watch、修改型 subcommand、任意 position/flag 溢出均拒绝。
+- 结构预检拒绝 Unicode/ASCII control、newline、`;`/pipe/`&&`/重定向、command/process substitution、glob、environment assignment、后台化、提权/修改程序以及 SSH key/history、`/proc/*/environ`、credential store 和 cloud metadata 读取结构。安全 corpus 的 denial 不创建 `ApprovedPosixCommandV1` 且 fake executor 调用数保持 0。
+- `src-tauri/src/agent/redaction.rs` 在 chunk/UTF-8 重组后执行通用 secret-pattern 与额外 literal redaction；`src-tauri/src/agent/evidence.rs` 再对同一 immutable redacted observation 做 Agent 有界压缩和 digest，并以同一 source object 派生 model、UI、event 和 evidence content。
+- evidence ledger 在写入时校验 run ID、frozen target digest、source/tool-call 关系和单 tool-call 唯一 ownership。final report validator 只接受本 ledger 的 evidence；verified 必须引用至少一条成功 observation，likely 不能无 evidence，报告不得包含 redactor 可识别 secret，P1 `changes` 由零长度协议类型与 validator 双重保持为空。
+- `src-tauri/src/agent/orchestrator.rs` 已在测试边界接入本地 registry + scripted fake executor，证明固定 `host.inspect → redacted evidence → verified final` 完整路径。生产 manager/wiring 未构造 registry、orchestrator 或 model adapter，`BlockedNoopAgentBoundary` 与 `p1Blocked` 保持不变。
+- 自动化覆盖每个 allowlisted program/flag/subcommand 的 allow case、各修改/无界 family 的 deny case、完整 injection corpus、cross-chunk/Unicode/URL/connection-string/private-key/token redaction、同源内容一致、其他 run/target/duplicate ownership 拒绝、失败 evidence 不能支撑 verified、likely/uncertain 规则和非空 `changes` decode 拒绝。阶段证据见 `docs/ai-agent-p1-c-tool-policy-evidence.md`。
+- P1-C 没有 `execute_reviewed_ssh_command`、raw SSH、真实 SSH fixture、PTY/`write_session`、generic execution IPC 或 UI workspace。P0 仍是 `implemented（verification pending external）`，P1 总体继续 `blocked`，P1-D 不得开始。
 
 ### P1-D：P0 adapter 与真实 SSH fixture（2–3 天，受门禁控制）
 

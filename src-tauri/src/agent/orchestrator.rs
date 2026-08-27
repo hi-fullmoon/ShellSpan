@@ -3,13 +3,16 @@ use super::context::{
     AgentContextBuilderV1, AgentContextObservationStatusV1, AgentContextObservationV1,
     AgentDynamicContextV1, AgentStableContextV1,
 };
+use super::evidence::{AgentEvidenceCandidateV1, AgentEvidenceLedgerV1, AgentObservationContentV1};
 use super::model::{
     AgentDecisionModelV1, AgentModelErrorKindV1, AgentModelErrorV1, AgentModelRequestV1,
 };
 use super::protocol::{
-    AgentDecisionV1, AgentFinalReportV1, AgentPlanItemV1, AgentPublicErrorCategoryV1,
-    AgentPublicErrorV1, AgentSchemaVersionV1, HostInspectArgsV1, ShellExecReadOnlyArgsV1,
+    AgentDecisionV1, AgentEvidenceSourceV1, AgentEvidenceV1, AgentFinalReportV1, AgentPlanItemV1,
+    AgentPublicErrorCategoryV1, AgentPublicErrorV1, AgentSchemaVersionV1, HostInspectArgsV1,
+    ShellExecReadOnlyArgsV1,
 };
+use super::redaction::AgentGenericRedactorV1;
 use super::state::AgentRunStateV1;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -67,14 +70,16 @@ pub(crate) struct AgentToolOutputV1 {
     pub(crate) summary: String,
     pub(crate) stdout_excerpt: String,
     pub(crate) stderr_excerpt: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) truncated: bool,
 }
 
 pub(crate) type AgentToolFutureV1<'a> =
     Pin<Box<dyn Future<Output = AgentToolOutputV1> + Send + 'a>>;
 
-/// P1-B deliberately defines only a fakeable validation/execution seam. There
-/// is no production registry, allowlist, renderer, evidence ledger, redactor,
-/// SSH adapter, or Tauri dispatch behind this trait; those remain P1-C/P1-D.
+/// The orchestrator consumes one validated/executed observation at a time.
+/// P1-C supplies a compile-time registry plus fake executor implementation;
+/// P1-D remains responsible for any separately gated SSH adapter.
 pub(crate) trait AgentToolDriverV1: Send + Sync {
     fn validate(&self, request: &AgentToolRequestV1) -> AgentToolValidationV1;
 
@@ -123,6 +128,7 @@ pub(crate) struct AgentOrchestratorSnapshotV1 {
     pub(crate) plan: Vec<AgentPlanItemV1>,
     pub(crate) tool_calls: Vec<AgentToolCallRecordV1>,
     pub(crate) observations: Vec<AgentContextObservationV1>,
+    pub(crate) evidence: Vec<AgentEvidenceV1>,
     pub(crate) pending_question: Option<String>,
     pub(crate) report: Option<AgentFinalReportV1>,
     pub(crate) error: Option<AgentPublicErrorV1>,
@@ -313,6 +319,8 @@ where
     budgets: AgentBudgetLedgerV1,
     dynamic_context: AgentDynamicContextV1,
     tool_calls: Vec<AgentToolCallRecordV1>,
+    evidence_ledger: AgentEvidenceLedgerV1,
+    redactor: AgentGenericRedactorV1,
     report: Option<AgentFinalReportV1>,
     error: Option<AgentPublicErrorV1>,
     discarded_model_decisions: u16,
@@ -326,6 +334,10 @@ where
     pub(crate) fn new(config: AgentOrchestratorConfigV1, model: M, tools: T) -> Self {
         let control = AgentRunControlV1::new(config.budget_policy);
         let budgets = AgentBudgetLedgerV1::new(config.budget_policy);
+        let evidence_ledger = AgentEvidenceLedgerV1::new(
+            config.run_id.clone(),
+            config.stable_context.target.target_digest.clone(),
+        );
         Self {
             config,
             model,
@@ -337,6 +349,8 @@ where
             budgets,
             dynamic_context: AgentDynamicContextV1::default(),
             tool_calls: Vec::new(),
+            evidence_ledger,
+            redactor: AgentGenericRedactorV1::default(),
             report: None,
             error: None,
             discarded_model_decisions: 0,
@@ -354,6 +368,7 @@ where
             plan: self.dynamic_context.plan.clone(),
             tool_calls: self.tool_calls.clone(),
             observations: self.dynamic_context.observations.clone(),
+            evidence: self.evidence_ledger.evidence(),
             pending_question: self.dynamic_context.pending_question.clone(),
             report: self.report.clone(),
             error: self.error.clone(),
@@ -524,6 +539,17 @@ where
                 AgentOrchestratorStepV1::AwaitingUser
             }
             AgentDecisionV1::Final(value) => {
+                if self
+                    .evidence_ledger
+                    .validate_final_report(&value.report, &self.redactor)
+                    .is_err()
+                {
+                    self.fail_v1(
+                        AgentPublicErrorCategoryV1::ProviderProtocol,
+                        "The Agent final report failed same-run evidence validation.",
+                    );
+                    return AgentOrchestratorStepV1::Terminal;
+                }
                 self.report = Some(value.report);
                 self.transition_v1(AgentRunStateV1::Completed);
                 AgentOrchestratorStepV1::Terminal
@@ -567,7 +593,18 @@ where
         match self.tools.validate(&request) {
             AgentToolValidationV1::Denied(denial) => {
                 let observation_id = self.next_observation_id_v1();
-                self.dynamic_context.recent_tool_error = Some(denial.reason.clone());
+                let content = AgentObservationContentV1::from_tool_output(
+                    &AgentToolOutputV1 {
+                        status: AgentToolOutputStatusV1::Failed,
+                        summary: denial.reason,
+                        stdout_excerpt: String::new(),
+                        stderr_excerpt: String::new(),
+                        exit_code: None,
+                        truncated: false,
+                    },
+                    &self.redactor,
+                );
+                self.dynamic_context.recent_tool_error = Some(content.summary.clone());
                 self.dynamic_context
                     .observations
                     .push(AgentContextObservationV1 {
@@ -575,8 +612,7 @@ where
                         tool_call_id: request.tool_call_id.clone(),
                         tool: request.input.name().to_string(),
                         status: AgentContextObservationStatusV1::Denied,
-                        summary: denial.reason,
-                        output_excerpt: String::new(),
+                        content,
                     });
                 self.tool_calls.push(AgentToolCallRecordV1 {
                     request,
@@ -666,7 +702,6 @@ where
         }
 
         self.transition_v1(AgentRunStateV1::Observing);
-        let observation_id = self.next_observation_id_v1();
         let (context_status, record_status, failed) = match output.status {
             AgentToolOutputStatusV1::Completed => (
                 AgentContextObservationStatusV1::Completed,
@@ -685,24 +720,46 @@ where
             ),
             AgentToolOutputStatusV1::Cancelled => unreachable!(),
         };
-        let output_excerpt = bounded_fake_output_v1(&output.stdout_excerpt, &output.stderr_excerpt);
+        let content = AgentObservationContentV1::from_tool_output(&output, &self.redactor);
+        let source = match &request.input {
+            AgentToolInputV1::HostInspect(_) => AgentEvidenceSourceV1::HostInspect,
+            AgentToolInputV1::ShellExecReadOnly(_) => AgentEvidenceSourceV1::ShellExecReadOnly,
+        };
+        let fanout = match self.evidence_ledger.record(AgentEvidenceCandidateV1 {
+            run_id: &self.config.run_id,
+            target_digest: &self.config.stable_context.target.target_digest,
+            source,
+            tool_call_id: Some(&request.tool_call_id),
+            output_status: output.status,
+            content,
+        }) {
+            Ok(fanout) => fanout,
+            Err(_) => {
+                self.fail_v1(
+                    AgentPublicErrorCategoryV1::Internal,
+                    "The Agent evidence ledger rejected the observation binding.",
+                );
+                return AgentOrchestratorStepV1::Terminal;
+            }
+        };
+        let evidence_id = fanout.evidence.evidence_id.clone();
+        let redacted_summary = fanout.model_content().summary.clone();
         self.dynamic_context
             .observations
             .push(AgentContextObservationV1 {
-                observation_id: observation_id.clone(),
+                observation_id: evidence_id.clone(),
                 tool_call_id: request.tool_call_id.clone(),
                 tool: request.input.name().to_string(),
                 status: context_status,
-                summary: output.summary.clone(),
-                output_excerpt,
+                content: (*fanout.model_content()).clone(),
             });
         self.tool_calls.push(AgentToolCallRecordV1 {
             request,
             status: record_status,
-            observation_id: Some(observation_id),
+            observation_id: Some(evidence_id),
         });
         if failed {
-            self.dynamic_context.recent_tool_error = Some(output.summary);
+            self.dynamic_context.recent_tool_error = Some(redacted_summary);
             if self.budgets.record_tool_failure().is_err() {
                 self.fail_v1(
                     AgentPublicErrorCategoryV1::ToolFailed,
@@ -865,26 +922,20 @@ fn public_error_v1(category: AgentPublicErrorCategoryV1, message: &str) -> Agent
     }
 }
 
-fn bounded_fake_output_v1(stdout: &str, stderr: &str) -> String {
-    const MAX_FAKE_OUTPUT_CHARACTERS: usize = 8 * 1024;
-    let combined = match (stdout.is_empty(), stderr.is_empty()) {
-        (false, false) => format!("stdout:\n{stdout}\nstderr:\n{stderr}"),
-        (false, true) => stdout.to_string(),
-        (true, false) => stderr.to_string(),
-        (true, true) => String::new(),
-    };
-    combined.chars().take(MAX_FAKE_OUTPUT_CHARACTERS).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::model::{
         AgentModelContextV1, AgentModelFutureV1, AgentModelTurnResultV1, AgentModelUsageV1,
     };
+    use crate::agent::policy::{AgentReadOnlyPolicyV1, AGENT_READ_ONLY_POLICY_VERSION_V1};
     use crate::agent::protocol::{
         decode_agent_decision_v1, AgentPolicyModeV1, AgentPolicySnapshotV1, AgentProviderBindingV1,
         AgentProviderCapabilitiesV1, AgentProviderKindV1, AgentTargetBindingV1, AgentToolNameV1,
+    };
+    use crate::agent::tools::test_support::FakeAgentReadOnlyExecutorV1;
+    use crate::agent::tools::{
+        AgentToolRegistryV1, ApprovedToolInvocationV1, AGENT_TOOL_REGISTRY_VERSION_V1,
     };
     use serde_json::json;
     use std::collections::{HashMap, VecDeque};
@@ -1092,6 +1143,8 @@ mod tests {
                             summary: "cancelled by fake control".to_string(),
                             stdout_excerpt: String::new(),
                             stderr_excerpt: String::new(),
+                            exit_code: None,
+                            truncated: false,
                         }
                     }
                 }
@@ -1133,8 +1186,8 @@ mod tests {
                 },
                 policy: AgentPolicySnapshotV1 {
                     mode: AgentPolicyModeV1::ReadOnly,
-                    policy_version: "p1-b-fake-only".to_string(),
-                    tool_registry_version: "fake-only".to_string(),
+                    policy_version: AGENT_READ_ONLY_POLICY_VERSION_V1.to_string(),
+                    tool_registry_version: AGENT_TOOL_REGISTRY_VERSION_V1.to_string(),
                     allowed_tools: vec![
                         AgentToolNameV1::HostInspect,
                         AgentToolNameV1::ShellExecReadOnly,
@@ -1209,6 +1262,33 @@ mod tests {
         .to_string()
     }
 
+    fn verified_final_decision_v1(evidence_id: &str) -> String {
+        json!({
+            "schemaVersion": 1,
+            "kind": "final",
+            "rationale": "The locally reviewed observation is sufficient.",
+            "plan": { "items": [{
+                "id": "inspect",
+                "title": "Inspect the fake host",
+                "status": "completed"
+            }] },
+            "report": {
+                "outcome": "diagnosed",
+                "summary": "The fixed host observation completed.",
+                "findings": [{
+                    "title": "Host identity was observed",
+                    "detail": "The fixed host inspection returned successfully.",
+                    "confidence": "verified",
+                    "evidenceIds": [evidence_id]
+                }],
+                "changes": [],
+                "warnings": [],
+                "nextActions": []
+            }
+        })
+        .to_string()
+    }
+
     fn ask_user_decision_v1(question: &str) -> String {
         json!({
             "schemaVersion": 1,
@@ -1226,6 +1306,8 @@ mod tests {
             summary: summary.to_string(),
             stdout_excerpt: stdout.to_string(),
             stderr_excerpt: String::new(),
+            exit_code: Some(0),
+            truncated: false,
         }
     }
 
@@ -1297,6 +1379,64 @@ mod tests {
             AgentRunStateV1::Completed
         );
         assert_eq!(low_executed.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn local_registry_fake_executor_creates_one_redacted_evidence_source_for_final_validation(
+    ) {
+        let model = FakeModelV1::new(vec![
+            FakeModelActionV1::Decision(host_inspect_decision_v1()),
+            FakeModelActionV1::Decision(verified_final_decision_v1("fake-run-evidence-1")),
+        ]);
+        let executor = FakeAgentReadOnlyExecutorV1::new(vec![AgentToolOutputV1 {
+            status: AgentToolOutputStatusV1::Completed,
+            summary: "identity password=hunter2".to_string(),
+            stdout_excerpt: "os=Linux token=abcdefghijklmnop".to_string(),
+            stderr_excerpt: String::new(),
+            exit_code: Some(0),
+            truncated: false,
+        }]);
+        let invocations = executor.invocations();
+        let mut config = config_v1(AgentBudgetPolicyV1::default());
+        config.stable_context.policy = AgentPolicySnapshotV1 {
+            mode: AgentPolicyModeV1::ReadOnly,
+            policy_version: AGENT_READ_ONLY_POLICY_VERSION_V1.to_string(),
+            tool_registry_version: AGENT_TOOL_REGISTRY_VERSION_V1.to_string(),
+            allowed_tools: vec![
+                AgentToolNameV1::HostInspect,
+                AgentToolNameV1::ShellExecReadOnly,
+            ],
+        };
+        let registry = AgentToolRegistryV1::new(
+            config.stable_context.policy.clone(),
+            AgentReadOnlyPolicyV1::default(),
+            executor,
+        );
+        let mut orchestrator = AgentOrchestratorV1::new(config, model, registry);
+        let snapshot = orchestrator.run_to_boundary().await;
+        assert_eq!(snapshot.state, AgentRunStateV1::Completed);
+        assert_eq!(snapshot.evidence.len(), 1);
+        assert_eq!(snapshot.evidence[0].evidence_id, "fake-run-evidence-1");
+        let content = &snapshot.observations[0].content;
+        assert_eq!(content.summary, snapshot.evidence[0].summary);
+        assert_eq!(
+            content.stdout_excerpt,
+            snapshot.evidence[0].stdout_excerpt.as_deref().unwrap()
+        );
+        assert_eq!(
+            content.observation_digest,
+            snapshot.evidence[0].observation_digest
+        );
+        let serialized =
+            serde_json::to_string(&(&snapshot.observations, &snapshot.evidence, &snapshot.report))
+                .unwrap();
+        assert!(!serialized.contains("hunter2"));
+        assert!(!serialized.contains("abcdefghijklmnop"));
+        let calls = invocations.lock().unwrap();
+        assert!(matches!(
+            calls.as_slice(),
+            [ApprovedToolInvocationV1::HostInspect(_)]
+        ));
     }
 
     #[tokio::test]
