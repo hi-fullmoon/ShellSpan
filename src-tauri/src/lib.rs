@@ -6,6 +6,7 @@ mod commands;
 mod connection;
 mod db;
 mod directory_request_registry;
+mod execution;
 mod health;
 mod identity_cache;
 mod keychain;
