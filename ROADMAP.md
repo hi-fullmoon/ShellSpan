@@ -45,10 +45,10 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 
 ### 3.2 主要缺口
 
-- 当前 Agent 一次性生成完整计划，不能根据真实执行结果动态选择下一步。
-- P1-A 已建立后端权威 run registry，P1-E 已建立 snapshot-authoritative 前端投影；生产 dynamic start 仍因 P0/P1-D 门禁而 blocked。
-- AI provider 层只处理文本或结构化计划，没有统一的 provider-neutral 工具调用结果。
-- Runbook 已切换到 crate-private reviewed SSH 执行内核，但 Agent adapter、policy 和 approval 尚未实现，也未注册通用执行 Tauri command。
+- 旧静态诊断计划仍作为 fallback；P1 已实现 observation-driven fake Agent loop，但生产 dynamic start 仍因 P0/P1-D 门禁而 blocked。
+- P1-A 已建立后端权威 run registry，P1-E 已建立 snapshot-authoritative 前端投影。
+- AI provider 已统一到 provider-neutral strict `AgentDecision`；真实 tool observation 仍缺 P1-D SSH adapter。
+- Runbook 已切换到 crate-private reviewed SSH 执行内核，P1 只读 policy/evidence 已实现；Agent SSH adapter 与 P2 approval 尚未实现，也未注册通用执行 Tauri command。
 - reviewed operation deadline 可先返回稳定终态，但 DNS、TCP、SSH handshake/auth 仍使用连接层阻塞超时；应用崩溃也不会恢复内存中的执行状态。
 - 当前风险模型偏向静态 Runbook，缺少适用于动态 Agent 的多维风险、审批摘要、防重放和策略版本。
 - P1-A/P1-E 已具备 Agent 事件序列、快照恢复、运行预算和连续失败投影；真实 SSH adapter 与后置真实 fixture 仍未准入。
@@ -75,7 +75,7 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 | --- | --- | --- | --- | --- |
 | P0 执行基础 | implemented | 1–2 周 | 共享执行内核、目标冻结、取消、输出边界与 Exec/PTY ADR | 本地实现/夹具已闭合；等待当前提交 Windows 门禁后才能 verified |
 | P1 只读动态 Agent | blocked | 2–3 周 | Agent 协议、后端 Agent loop、只读工具、事件时间线、Pause/Stop | P0 verified 前不得开始真实 shell.execReadOnly 接入 |
-| P2 受控修改 MVP | planned | 2–3 周 | 风险引擎、精确审批、后置验证、审计与安全重试 | 服务启动/配置变更只能在批准后执行并验证 |
+| P2 受控修改 MVP | blocked | 2–3 周 | v2 协议、结构化风险、一次性审批、语义服务工具、后置验证与审计 | P1 verified 后才允许接入真实修改执行 |
 | P3 语义工具与交互 | planned | 2–4 周 | SFTP 工具、原子文件修改、本地执行、专用 Agent PTY | 文件修改可预览/回滚，交互任务可安全接管 |
 | P4 扩展与产品化 | planned | 独立评估 | 多主机、策略模板、历史知识、团队能力 | 单主机模型稳定后再通过专项准入 |
 
@@ -397,134 +397,94 @@ Agent 应能够：
 
 ## 8. P2 — 受控修改 MVP
 
-**状态：planned**
+**状态：blocked（P1 verification gate；设计完成待评审）**
+
+> 第三阶段的 v2 协议、结构化风险、精确审批、服务工具、verification obligation、界面、测试与退出矩阵见 `docs/ai-agent-p2-controlled-mutation-agent-design.md`。P0/P1 verified 前不得接入真实修改 executor。
 
 ### 8.1 目标
 
-允许 Agent 提议并执行状态修改，但每次修改必须通过本地风险判定、精确审批、目标复核和后置验证。
+允许 Agent 提议少量、结构化的远端状态修改；每次修改必须由后端判定风险、绑定新鲜前置证据、获得用户对精确动作的一次性批准，并在执行后自动完成只读验证。
 
-### 8.2 风险与策略工作包
+首个修改能力收窄为 systemd 服务控制。P2 不开放任意 shell、sudo、文件修改、包管理、网络策略、删除或多主机修改；批准不是未知命令的 sanitizer。
 
-#### P2-A：多维风险模型
+### 8.2 工作包
 
-在 `readOnly/stateChange/destructive` 之外记录：
+#### P2-0：准入、v2 协议与状态机（设计完成，待实现）
 
-- read
-- write
-- delete
-- privilegeElevation
-- serviceInterruption
-- networkChange
-- credentialAccess
-- externalNetwork
-- multiHost
+- P1 v1 保持冻结，只读工具与空 `changes` 语义不变。
+- P2 新增 `schemaVersion: 2`、strict decision/event/snapshot schema。
+- 新增 evaluatingRisk、awaitingApproval、executingChange、verifyingChange 及 approval/verification 状态机。
+- P0/P1 未 verified 时只允许纯协议、fake driver 和 UI 工作，不接真实修改 executor。
 
-每次评估输出：
+#### P2-A：结构化 evidence 与多维风险
 
-- severity：low / medium / high / critical
-- confidence：known / heuristic / unknown
-- findings
-- affected resources
-- requires approval
-- requires double confirmation
-- denied
+- 后端从固定只读工具解析 systemd service resource 与 structured claims。
+- precondition evidence 必须属于当前 run、target、resource，successful 且未过期。
+- 风险记录 read/write/delete/privilege/service interruption/network/credential/external/multi-host 维度。
+- verdict 为 autoReadOnly、requiresApproval、requiresDoubleConfirmation 或 deny。
+- 模型风险字段不能覆盖本地结果；unknown、destructive、critical 和提权一律 deny。
 
-模型风险字段不能覆盖本地结果。
+#### P2-B：Approval control plane
 
-#### P2-B：Shell 结构分析
+- approval 绑定 run/tool、规范化参数 digest、target、resource、risk、policy/tool registry、前置 evidence、command preview、timeout、expiry 和 verification plan。
+- approval 只能消费一次；重放、过期、目标/证据/参数/策略变化和 Stop/steering 全部使其失效。
+- medium 修改使用 Approve once；restart/stop 等 high 修改使用后端 challenge 的二阶段确认。
+- 只新增 `agent_resolve_approval` 和 `agent_confirm_approval`；前端不回传 command、risk、digest 或 evidence payload。
 
-- 引入可靠的 shell AST 解析或受限命令结构，不再只依赖正则。
-- 分析 pipeline、重定向、subshell、command substitution、heredoc、后台任务、sudo、xargs 和编码执行。
-- POSIX shell 与 PowerShell 风险解析分离，不使用同一规则误判。
-- shell 类型未知时只开放最小只读 allowlist。
-- `curl | sh`、下载后执行、base64 decode 后执行、反向 shell、fork bomb、设备写入和广泛删除默认拒绝。
-- unknown 不能自动批准。
+#### P2-C：语义服务工具、执行与验证（受准入门禁）
 
-#### P2-C：策略模式
+- 首批工具：`service.inspect`、`service.validateConfig`、`service.control`。
+- `service.control` 只接受 systemd unit 与 start/reload/restart/stop 枚举，不接受 shell 文本。
+- 使用冻结 profile 的现有 username，不 sudo；权限不足返回明确失败。
+- approval/audit prewrite 后才由唯一 adapter 构造 `ReviewedSshCommand` 并调用 P0 kernel。
+- 每次执行都创建后端 verification obligation；固定检查 service state、result 和需要时的监听端口。
+- exit 0 但 verification 失败时结果为 partial/unverified，不能显示 verified success。
 
-首版提供：
+#### P2-D：后端审计与 crash 语义
 
-- Strict：所有工具调用都需批准。
-- Balanced：有界只读自动；写入、服务变更、权限、外部副作用需批准。
+- 增加 Agent operation category/action 与 approval/change/verification companion metadata。
+- effecting backend 直接写 operation history，不能依赖前端记录。
+- execution-started 持久预写失败时不执行。
+- crash 不恢复为可消费 approval；执行效果不确定时记录 unknownEffect 并先只读验证。
+- history/export 不保存原始输出、终端输入、文件内容或秘密。
 
-暂不提供全局 Full Auto。
+#### P2-E：Approval/Change Workspace UI
 
-策略在运行开始时快照化；运行中放宽权限必须是显式用户动作并记录事件。生产标签可强制 Strict，但标签策略进入后续产品化阶段前先保持本地设置。
+- Timeline 延续现有 `MessageScroller`；风险、审批、change 和 verification 使用完整 `Card`。
+- Approval Card 显示 target、resource、exact preview、影响、风险命中、前置证据、expiry 和验证计划。
+- high action 用 `AlertDialog` + `Field/Checkbox` 完成二次确认；destructive/critical 只显示 deny。
+- 审批卡不能编辑 command/arguments；修改意图必须 Reject + steering 后产生新 tool call。
+- 使用现有 `Alert`、`Badge`、`Collapsible`、`Spinner`、`InputGroup` 和 sonner。
 
-### 8.3 审批工作包
+#### P2-F：Eval、演示与发布门禁
 
-#### P2-D：精确审批
+- 固定 approval replay、expiry、target/evidence/policy drift 和 forged digest corpus。
+- 覆盖 config invalid、service active、批准 start、取消 restart、权限不足、unknownEffect 和 verification failure。
+- direct/jump SSH fixture 与 Windows/macOS 当前 SHA 门禁必须有真实证据。
+- 三个硬指标：未审批 mutation=0、replay success=0、verified-without-post-evidence=0。
 
-审批请求绑定：
+### 8.3 策略模式
 
-- approval ID
-- run ID
-- tool call ID
-- tool name
-- normalized arguments digest
-- target identity digest
-- approved risk
-- policy version
-- command preview
-- cwd
-- timeout
-- expiration time
+- Strict：所有只读与修改调用逐次批准；high 修改二次确认。
+- Balanced：P1 有界只读自动；所有修改逐次批准；high 修改二次确认。
+- 不提供修改自动批准或 Full Auto。
+- effective policy 由应用/profile 强制策略与用户请求取最严格结果，并在 run 开始时冻结。
 
-后端执行前复核全部字段。审批只能使用一次，拒绝、过期、Stop、目标变化和参数变化都会使其失效。
+### 8.4 测试要求
 
-#### P2-E：审批 UI
-
-审批卡显示：
-
-- 完整命令或结构化操作。
-- profile 名称、host、port、username。
-- cwd 与环境限制。
-- 风险命中项与影响资源。
-- 预计影响、回滚建议、超时和执行后验证。
-- `Reject`、`Approve once`、`Stop run`。
-
-destructive 使用二次 `AlertDialog`。如果用户编辑命令，必须产生新 tool call 和新审批，不能复用旧 approval。
-
-“本次运行允许类似只读调用”只能适用于相同 tool、目标和低风险参数模式，运行结束自动失效。
-
-### 8.4 修改与验证工作包
-
-#### P2-F：状态修改工具执行
-
-- `shell.exec` 在审批后允许 state change。
-- 每个修改 tool call 必须包含 impact、rollback、success criteria 和 retry safety。
-- 执行前必须引用本次运行产生且未过期的只读 evidence。
-- 执行后强制产生 verification obligation，Agent 必须运行只读后置检查。
-- 没有后置证据时，运行最多显示 `partial/uncertain`，不能显示 verified success。
-
-#### P2-G：重试与恢复
-
-- 只读瞬时错误可自动重试一次。
-- 修改操作只有在本地策略确认幂等、重新收集前置证据且审批仍有效时才可重试。
-- destructive 不自动重试。
-- 用户拒绝后，模型可以提出只读替代方案或询问用户，但不能反复生成语义等价命令绕过拒绝。
-- 检测连续策略拒绝；超过上限后进入 awaiting user。
-
-#### P2-H：操作历史
-
-- 增加 Agent run、tool proposed、approval、rejection、execution result、cancel、timeout、verification 和 final outcome 事件。
-- 操作历史仍不保存 stdout/stderr、终端输入、文件内容、环境、密码、token 或私钥。
-- 保存脱敏命令预览、目标、风险、状态、exit code、evidence reference 和稳定错误类别。
-- 审批与结果身份不一致时记录 identityMismatch，不能把未信任结果写成成功。
-
-### 8.5 测试要求
-
-- 模型把危险命令声明为 readOnly 时，本地必须提升或拒绝。
-- command digest、target digest、policy version 任一不匹配时审批失效。
-- 审批重放、过期审批和迟到审批失败。
-- 用户拒绝后，语义等价命令不能通过换空格、alias 或 shell 包装绕过。
+- v1 继续拒绝 mutation 和非空 `changes`。
+- 模型把危险动作声明为 readOnly 时，本地提升或拒绝。
+- approval 任一 binding 不匹配时 executor invocation 为 0。
+- concurrent double click 只能消费一次。
+- high action 单次 IPC 不能 approved。
 - state change 缺少 prior evidence 时拒绝。
-- state change 缺少 postcondition evidence 时不能 completed success。
-- 修改成功、验证失败时结果为 partial/failed，不得包装为成功。
-- destructive 二次确认取消后不执行。
-- 操作历史导出不包含原始输出和秘密。
+- execution success 缺少 post evidence 时不能 verified。
+- unknownEffect 后不自动重试。
+- audit prewrite 失败时不执行。
+- Stop、steering、expiry 和 app exit 撤销 pending approval。
+- operation history 导出不包含原始输出和秘密。
 
-### 8.6 演示验收
+### 8.5 演示验收
 
 目标：
 
@@ -532,20 +492,28 @@ destructive 使用二次 `AlertDialog`。如果用户编辑命令，必须产生
 
 预期流程：
 
-1. 运行只读配置检查和服务状态检查。
-2. 发现服务未运行。
-3. 展示启动服务审批卡。
-4. 未批准前不执行任何启动命令。
-5. 批准后执行一次精确命令。
-6. 再次运行只读状态与端口验证。
-7. 最终报告引用配置检查、启动结果和后置验证 evidence。
+1. 运行 `service.validateConfig` 和 `service.inspect`，生成结构化前置证据。
+2. 发现配置有效且服务未运行。
+3. 展示 `service.control(start nginx.service)` 的精确审批卡。
+4. 未批准前 executor invocation 为 0。
+5. 批准后持久预写 audit，并执行一次固定命令。
+6. 后端自动验证 service state 和监听端口。
+7. 最终 change 引用 approval、execution evidence 和 verification evidence。
+8. 操作历史展示完整生命周期但没有原始输出或秘密。
 
-### 8.7 P2 退出条件
+restart/stop 等 high action 必须再经过后端 challenge 驱动的 `AlertDialog` 二次确认；任一阶段取消都不执行。
 
-- 未审批修改次数为 0。
-- approval replay、identity mismatch 和风险低报回归测试全部通过。
-- 所有成功的状态修改都有后置证据。
-- 用户能够拒绝、停止和查看完整影响范围。
+### 8.6 P2 退出条件
+
+- P0/P1 已 verified，v1 只读回归保持全绿。
+- v2 协议、状态机、risk、structured evidence 和 approval control plane 通过双端 fixture。
+- mutation 只通过编译期 semantic registry，不存在任意 shell 修改入口。
+- approval/audit prewrite 之前不会调用 P0 kernel。
+- 每个已执行 change 都有 verification obligation 终态。
+- retry/unknownEffect/Stop/crash 不产生自动重复修改。
+- 用户可以拒绝、停止、查看完整影响和二次确认高影响动作。
+- 未审批修改次数、approval replay 成功次数、无后置证据的 verified change 均为 0。
+- macOS/Windows、Rust/前端、direct/jump fixture、security corpus 和演示通过。
 - P0–P2 形成可通过 feature flag 发布的 Agent MVP。
 
 ---
@@ -720,6 +688,10 @@ interface AgentEvent {
 
 P1 核心不发送原始 output delta；只在工具结束并完成同源脱敏后发送有界 observation。P2 审批事件在 P2 协议版本中追加，不能提前混入 P1 状态机。这些示例是路线图级契约，正式实现前必须转为 Rust 与 TypeScript 双端的精确 schema，并为 unknown field、版本升级和大小上限补充测试。
 
+### 11.4 P2 版本边界
+
+P2 不修改 v1 decision union、只读 policy 或空 `changes` 语义。受控修改使用 `schemaVersion: 2`，新增 `service.inspect`、`service.validateConfig`、`service.control`、approval/risk/change/verification snapshot 与事件，以及 `agent_resolve_approval`、`agent_confirm_approval` 两个窄 IPC。详细 exact binding 与状态机见 `docs/ai-agent-p2-controlled-mutation-agent-design.md`。
+
 ## 12. 跨阶段测试与评估
 
 ### 12.1 必须维护的任务集
@@ -734,7 +706,7 @@ P1 核心不发送原始 output delta；只在工具结束并完成同源脱敏�
 6. Docker 容器频繁重启。
 7. 日志错误定位。
 8. nginx 配置检查。
-9. 修改配置并验证。
+9. 服务状态修改并验证。
 10. 修改失败后的回滚建议。
 11. 用户中途改变约束。
 12. 用户拒绝修改。
@@ -810,7 +782,7 @@ P1 核心不发送原始 output delta；只在工具结束并完成同源脱敏�
 
 - P0 执行内核与 Agent TypeScript/Rust schema。
 - P1 ModelAdapter 与前端组件拆分。
-- P2 Shell 风险 fixture 与审批 UI 原型。
+- P2 结构化风险、approval fixture 与审批 UI 原型。
 
 不能提前的工作：
 
