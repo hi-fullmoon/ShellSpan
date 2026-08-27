@@ -38,9 +38,9 @@ import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
 import type {
-  AgentRun,
-  AgentRunPhase,
-  AgentRunStep,
+  StaticDiagnosticRun,
+  StaticDiagnosticRunPhase,
+  StaticDiagnosticRunStep,
   DiagnosticAgentPlanStep,
 } from '@/types/ai';
 import { MessageScroller } from './chat-primitives';
@@ -48,7 +48,7 @@ import { MessageScroller } from './chat-primitives';
 type BadgeVariant = 'default' | 'outline' | 'secondary' | 'destructive';
 type StageState = 'complete' | 'active' | 'pending' | 'failed';
 
-function phaseVariant(phase: AgentRunPhase): BadgeVariant {
+function phaseVariant(phase: StaticDiagnosticRunPhase): BadgeVariant {
   if (phase === 'error') return 'destructive';
   if (phase === 'awaitingReview' || phase === 'handedOff') return 'default';
   return 'secondary';
@@ -67,7 +67,7 @@ function stageVariant(state: StageState): BadgeVariant {
   return 'outline';
 }
 
-function runStages(run: AgentRun): [StageState, StageState, StageState] {
+function runStages(run: StaticDiagnosticRun): [StageState, StageState, StageState] {
   const interrupted = run.phase === 'error' || run.phase === 'cancelled';
   const planReady = Boolean(run.plan);
   return [
@@ -81,7 +81,7 @@ function runStages(run: AgentRun): [StageState, StageState, StageState] {
   ];
 }
 
-function StepStatusIcon({ status }: { status: AgentRunStep['status'] }): React.ReactNode {
+function StepStatusIcon({ status }: { status: StaticDiagnosticRunStep['status'] }): React.ReactNode {
   if (status === 'running') return <Spinner data-icon="inline-start" />;
   if (status === 'completed') return <CheckCircle2Icon data-icon="inline-start" />;
   if (status === 'informational') return <InfoIcon data-icon="inline-start" />;
@@ -151,7 +151,7 @@ const AgentEmptyState: React.FC = () => {
   );
 };
 
-const DiagnosticStageRail: React.FC<{ run: AgentRun }> = ({ run }) => {
+const DiagnosticStageRail: React.FC<{ run: StaticDiagnosticRun }> = ({ run }) => {
   const { t } = useI18n();
   const states = runStages(run);
   const stages = [
@@ -183,7 +183,7 @@ const DiagnosticStageRail: React.FC<{ run: AgentRun }> = ({ run }) => {
 };
 
 const PlanningActivity: React.FC<{
-  run: AgentRun;
+  run: StaticDiagnosticRun;
   onCancel: () => void;
   onRetry: () => void;
 }> = ({ run, onCancel, onRetry }) => {
@@ -258,7 +258,7 @@ const PlanningActivity: React.FC<{
   );
 };
 
-const EvidenceCard: React.FC<{ run: AgentRun }> = ({ run }) => {
+const EvidenceCard: React.FC<{ run: StaticDiagnosticRun }> = ({ run }) => {
   const { t } = useI18n();
   const plan = run.plan;
   if (!plan) return null;
@@ -328,7 +328,7 @@ const EvidenceCard: React.FC<{ run: AgentRun }> = ({ run }) => {
 };
 
 const PlanStep: React.FC<{
-  step: AgentRunStep;
+  step: StaticDiagnosticRunStep;
   index: number;
 }> = ({ step, index }) => {
   const { t } = useI18n();
@@ -386,7 +386,7 @@ const PlanStep: React.FC<{
   );
 };
 
-const PlanPathCard: React.FC<{ run: AgentRun }> = ({ run }) => {
+const PlanPathCard: React.FC<{ run: StaticDiagnosticRun }> = ({ run }) => {
   const { t } = useI18n();
   const commandSteps = run.steps.filter((step) => step.kind === 'command');
 
@@ -411,7 +411,7 @@ const PlanPathCard: React.FC<{ run: AgentRun }> = ({ run }) => {
   );
 };
 
-const PlanOverviewCard: React.FC<{ run: AgentRun }> = ({ run }) => {
+const PlanOverviewCard: React.FC<{ run: StaticDiagnosticRun }> = ({ run }) => {
   const { t } = useI18n();
   const plan = run.plan;
   if (!plan) return null;
@@ -454,7 +454,7 @@ const PlanOverviewCard: React.FC<{ run: AgentRun }> = ({ run }) => {
 };
 
 export const AgentRunView: React.FC<{
-  run?: AgentRun;
+  run?: StaticDiagnosticRun;
   onCancel: () => void;
   onRetry: () => void;
   onReviewRunbook: () => void;

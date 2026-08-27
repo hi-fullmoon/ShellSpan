@@ -997,7 +997,7 @@ Reducer 规则：
 
 ## 21. 实施工作包
 
-### P1-0：协议、状态机与预算（2–3 天）
+### P1-0：协议、状态机与预算（2–3 天，implemented 2026-08-27）
 
 产物：
 
@@ -1015,7 +1015,15 @@ Reducer 规则：
 - 状态机 property tests 无非法终态覆盖。
 - 此工作包不接真实 SSH。
 
-### P1-A：AgentManager、journal 与 snapshot（2–3 天）
+实施记录：
+
+- Rust 产物位于 `src-tauri/src/agent/{protocol,state,budgets}.rs`；模块只包含类型、decoder、转换校验和预算账本，没有注册 IPC 或连接执行层。
+- TypeScript 产物位于 `src/types/agent.ts` 与 `src/lib/agent-{protocol,state,budgets}.ts`；动态类型不扩展旧静态 `DiagnosticAgentPlan`。
+- `protocol/agent/v1/agent-decision.schema.json` 固定四个互斥 decision 变体；`tests/fixtures/agent-protocol/v1/` 的 decision、budget 和 state fixtures 由 Rust/Vitest 同时消费。
+- 双端对所有 run/tool 状态组合进行等价表测试，并对每个终态与每个迟到状态的组合验证不可覆盖；unknown field、version、enum、额外 action、tool/arguments 错配、越界预算和非空 `changes` 均有失败关闭用例。
+- P0 仍为 `implemented（verification pending external）`；P1-0 提交没有创建真实 `shell.execReadOnly` adapter、AgentManager、模型入口或 Tauri execution command，后续 P1-A 只新增下述控制面。
+
+### P1-A：AgentManager、journal 与 snapshot（2–3 天，implemented 2026-08-27）
 
 产物：
 
@@ -1031,7 +1039,16 @@ Reducer 规则：
 - gap、duplicate、late event 测试通过。
 - 应用退出产生 cancel。
 
-### P1-B：ModelAdapter 与 fake Agent loop（3–4 天）
+实施记录：
+
+- `src-tauri/src/agent/{manager,events,ipc}.rs` 建立进程内权威 registry、后端单调 sequence journal、snapshot 与六个窄 IPC；registry 允许保留终态 run，但全局最多一个非终态 run。
+- `clientRequestId` 和 `clientActionId` 以完整请求关联缓存；完全相同的重放返回原结果且不重发事件，同一 ID 搭配不同输入返回稳定 idempotency conflict。
+- Pause/Resume/Stop 只实现控制面基础转换；fake boundary 可延迟到安全边界后 settle，重复或终态后的迟到 settle 不追加事件、不能覆盖终态。应用 `ExitRequested` 会在进程退出前把活动 run 收敛为 `cancelled`。
+- `src/lib/agent-events.ts` 只实现 sequence cursor：duplicate/更小 sequence 忽略，gap 时缓冲并要求 snapshot resync，安装权威 `lastSequence` 后只连续应用更大的事件，终态后拒绝迟到事件；没有新增 UI workspace。
+- P1-A 提交的生产路径使用 blocked no-op boundary，`agent_start` 返回 `p1Blocked` 且不创建 run；fake boundary 只在 Rust 测试中提供冻结的非秘密 fixture binding。当时没有 provider/model loop、tool registry/policy/evidence、execution adapter、raw SSH、真实 SSH fixture 或 `write_session` 路径。
+- P1-B 后续按下述记录补充纯逻辑/fake 组件，但没有改变 P1-A 的生产 blocked boundary；P0 仍为 `implemented（verification pending external）`，P1 总体继续 `blocked`。
+
+### P1-B：ModelAdapter 与 fake Agent loop（3–4 天，implemented 2026-08-27）
 
 产物：
 
@@ -1046,7 +1063,17 @@ Reducer 规则：
 - steering 能使 in-flight decision 失效。
 - schema failure、provider timeout 和 budget exhaustion 有稳定终态。
 
-### P1-C：Tool registry、policy 与 evidence（3–4 天）
+实施记录：
+
+- `src-tauri/src/agent/model.rs` 将 OpenAI Responses、OpenAI Compatible Chat 与 Ollama 统一为一次请求一个严格 `AgentDecisionV1`；三类请求共享 checked-in v1 schema，禁用 native tool call 传输，响应 envelope 有 128 KiB 硬上限，请求发送和响应读取均受 cancellation token 控制。
+- capability snapshot 冻结 provider ID/kind/base URL/model 及 streaming、strict JSON schema、native tool calling、usage reporting、response continuation；Compatible/Ollama 不是 `jsonSchema` 模式时失败为 `providerIncompatible`。快照、请求 body、repair prompt 和公开错误均不包含 API key 或 raw provider response。
+- schema decoder 失败只允许一次通用 repair，repair 不回显失败原文且再次消耗模型回合预算；第二次失败稳定进入 `failed(providerProtocol)`。timeout/unavailable、cancel 与 provider envelope failure 使用互斥公开分类。
+- `src-tauri/src/agent/context.rs` 分离 stable contract 与 dynamic untrusted context：固定目标/只读边界/tool proposal contract/预算不随 observation 累积，动态部分仅携带 plan、最近四条有界 observation、旧 observation index、最近 tool error、pending question 与 steering。
+- `src-tauri/src/agent/orchestrator.rs` 复用 P1-0 状态机和预算账本，实现可测试的单决策循环。steering 通过 request generation 加 cancellation 双重失效 in-flight decision；Pause 在 thinking 取消请求、在 fake tool 后提交 observation 再暂停；Stop 取消 model/fake tool 且禁止下一回合或迟到终态覆盖。
+- fake model/tool 测试覆盖 `host.inspect → ps → final` 的两类 tool variant；并证明 `uptime` 的 `load=9.2` observation 选择第二个 `ps` tool call，而 `load=0.2` 分支直接 final。另覆盖 tool denied 后只读替代、askUser/answer、一次 repair 后 schema failure、provider timeout、thinking/tool Pause、tool Stop、budget exhaustion 和终态幂等。
+- P1-B 组件没有接入 `AgentManager::default()`；生产 `agent_start` 继续由 blocked no-op boundary 返回 `p1Blocked`。在 P1-B 提交时没有 tool registry/真实 policy/evidence ledger/redactor、P0 adapter、raw SSH、`write_session` 或 UI workspace；后续 P1-C 只补充下述本地纯逻辑边界，P1 总体仍受 P0 verification gate 阻断。
+
+### P1-C：Tool registry、policy 与 evidence（3–4 天，implemented 2026-08-27）
 
 产物：
 
@@ -1062,6 +1089,17 @@ Reducer 规则：
 - injection corpus 不能产生 reviewed command。
 - 同源 redaction 测试证明 UI/model/evidence 内容一致。
 - 仍可使用 fake executor，不受 P0 外部门禁阻塞。
+
+实施记录：
+
+- `src-tauri/src/agent/tools/{mod,host,shell}.rs` 建立编译期静态 registry；同一 `ToolDefinition` 表生成 provider context 中的严格 argument schema 并选择 dispatch executor，policy/registry version 不一致时失败关闭。`host.inspect` 只把受限 enum field 转为固定 probe plan；`shell.execReadOnly` 只把本地 policy 通过的规范化参数交给唯一 POSIX renderer。
+- `src-tauri/src/agent/policy.rs` 为 13 个首批 program（Docker 默认 capability-gated 关闭）分别实现独立 parser，而不是用通用 shell regex 充当授权。systemctl status 不读取 journal、show 只输出安全 properties；journalctl 和 Docker logs 强制 1..500 行，Docker stats 强制 no-stream，所有 follow/watch、修改型 subcommand、任意 position/flag 溢出均拒绝。
+- 结构预检拒绝 Unicode/ASCII control、newline、`;`/pipe/`&&`/重定向、command/process substitution、glob、environment assignment、后台化、提权/修改程序以及 SSH key/history、`/proc/*/environ`、credential store 和 cloud metadata 读取结构。安全 corpus 的 denial 不创建 `ApprovedPosixCommandV1` 且 fake executor 调用数保持 0。
+- `src-tauri/src/agent/redaction.rs` 在 chunk/UTF-8 重组后执行通用 secret-pattern 与额外 literal redaction；`src-tauri/src/agent/evidence.rs` 再对同一 immutable redacted observation 做 Agent 有界压缩和 digest，并以同一 source object 派生 model、UI、event 和 evidence content。
+- evidence ledger 在写入时校验 run ID、frozen target digest、source/tool-call 关系和单 tool-call 唯一 ownership。final report validator 只接受本 ledger 的 evidence；verified 必须引用至少一条成功 observation，likely 不能无 evidence，报告不得包含 redactor 可识别 secret，P1 `changes` 由零长度协议类型与 validator 双重保持为空。
+- `src-tauri/src/agent/orchestrator.rs` 已在测试边界接入本地 registry + scripted fake executor，证明固定 `host.inspect → redacted evidence → verified final` 完整路径。生产 manager/wiring 未构造 registry、orchestrator 或 model adapter，`BlockedNoopAgentBoundary` 与 `p1Blocked` 保持不变。
+- 自动化覆盖每个 allowlisted program/flag/subcommand 的 allow case、各修改/无界 family 的 deny case、完整 injection corpus、cross-chunk/Unicode/URL/connection-string/private-key/token redaction、同源内容一致、其他 run/target/duplicate ownership 拒绝、失败 evidence 不能支撑 verified、likely/uncertain 规则和非空 `changes` decode 拒绝。阶段证据见 `docs/ai-agent-p1-c-tool-policy-evidence.md`。
+- P1-C 没有 `execute_reviewed_ssh_command`、raw SSH、真实 SSH fixture、PTY/`write_session`、generic execution IPC 或 UI workspace。P0 仍是 `implemented（verification pending external）`，P1 总体继续 `blocked`，P1-D 不得开始。
 
 ### P1-D：P0 adapter 与真实 SSH fixture（2–3 天，受门禁控制）
 
@@ -1095,7 +1133,18 @@ Reducer 规则：
 - sequence resync、Panel 重挂、终态和错误路径有组件测试。
 - Chat、Command、Explain、静态 Diagnostic Plan 无回归。
 
-### P1-F：Eval、文档与发布门禁（2 天）
+实施记录（2026-08-27）：
+
+- 新增 `src/components/ai/agent/`，由 `agent-workspace.tsx` 组合 Header、Timeline、Plan、Tool Card、Evidence、Report 与 Composer；继续复用项目现有 `MessageScroller`、`Message`、`Bubble`、`Marker`、`Card`、`Badge`、`Alert`、`Collapsible`、`InputGroup`、`Spinner` 和 `sonner`，没有引入平行 primitive 或硬编码视觉体系。
+- `src/stores/agentStore.ts` 改为 `runsById + activeRunId + lastSequenceByRunId` 的 snapshot-authoritative 投影。事件必须通过 v1 strict decoder 和 sequence cursor；连续新事件与 gap 只触发 snapshot resync，不从 `unknown payload` 猜状态；duplicate 不推进，终态后的 late event 不覆盖，冻结 goal/target/provider/policy 或终态回退均失败关闭。
+- Workspace mount 顺序固定为先订阅 `agent-event`，再按已知 run ID（或当前 active run）读取 `agent_get_snapshot`；Panel unmount 只解除 listener、不取消 run，remount 从后端 snapshot 恢复。所有 start/action/result/error/snapshot envelope 在前端再次严格解码。
+- Header 显示冻结 target、只读 policy、状态、运行时长和 model/tool 预算；Timeline 展示 goal、steering、计划、所有 tool state、后端 command preview、退出码/耗时/read 与 captured bytes/truncation、默认折叠的脱敏 stdout/stderr、evidence 和 final report。报告 evidence ID 可键盘聚焦并导航到对应 evidence。
+- Pause/Resume/Stop/answer/steering 只调用 P1-A 的六个窄 lifecycle IPC；没有新增 generic execute IPC、tool execute IPC、raw SSH、PTY 或 `write_session` 路径。Composer 支持 Enter 发送、Shift+Enter 换行、IME composing guard、awaitingUser/paused/terminal placeholder 和 polite live region。
+- 旧一次性 Diagnostic Plan 已明确更名为 `StaticDiagnostic*` 类型并迁移到 `staticDiagnosticStore.ts`。生产 dynamic start 保持调用后端 gate；`p1Blocked` 与 `providerIncompatible` 有显式 UI，并提供需要用户点击的 static diagnostic fallback，不把 fallback 冒充真实 dynamic run。
+- 组件与 store 自动化覆盖 start/busy/blocked/provider incompatible、gap/duplicate/late、mount/remount snapshot、frozen target、预算、全部 tool states、awaitingUser/steering、Pause/Resume/Stop、终态/错误、evidence navigation、keyboard/live region；既有 Chat、Command、Explain、静态 Diagnostic Plan 与 Remote Health 诊断回归保持通过。阶段证据见 `docs/ai-agent-p1-e-agent-workspace-ui-evidence.md`。
+- P1-D 在独立核验中因当前 SHA 缺少 Windows runner 真实结果而按门禁失败关闭，没有实现或提交 adapter。P1-E 不假设 adapter 存在；生产 `AgentManager::default()` 仍绑定 `BlockedNoopAgentBoundary`，dynamic start 继续返回 `p1Blocked`。P1 总体继续 `blocked`，本阶段不开始 P1-F。
+
+### P1-F：Eval、文档与发布门禁（2 天，implemented 2026-08-27）
 
 产物：
 
@@ -1108,6 +1157,15 @@ Reducer 规则：
 
 - P1 退出条件逐项有自动化或人工演示证据。
 - 未经授权副作用为 0。
+
+实施记录：
+
+- `tests/fixtures/agent-evals/v1/diagnostic-scenarios.json` 固定 CPU、磁盘、内存、服务、端口、可选容器和信息不足七类任务；`src-tauri/src/agent/eval.rs` 是 `cfg(test)` harness，组合 strict fake model、编译期 registry、生产 read-only policy、orchestrator/evidence ledger 与 scripted fake executor，不连接 SSH、不执行本地进程。
+- 每个诊断场景连续运行两次并比较规范化终态、预算、调用序列、evidence run/target/exit 绑定、finding 引用、outcome、askUser 和 `changes`；fixture 同时冻结 strict-schema provider compatibility、fake token accounting、harness 延迟上限及具名控制面证据。CPU、内存、服务、端口与容器场景的后续 decision 必须在 model context 中看到指定前序 observation 才能产生。
+- `tests/fixtures/agent-evals/v1/adversarial-corpus.json` 固定 21 项 shell/prompt injection、后台化、重定向、提权、修改型、敏感读取、Docker unbounded proposal 和不可信 observation 指令。恶意 proposal 到达 fake executor 的次数为 0，报告非空 `changes` 次数为 0。
+- Workspace 启动前双语提示与 `docs/ai-agent-readonly-user-guide.md` 明确只读范围、独立 Exec、输出隐私、Pause/Resume/Stop、应用退出/崩溃不恢复和 detached process 限制。
+- `docs/roadmap-audit.json` 对本节 12 项退出条件做精确有序映射；roadmap/security gate 校验七类 eval、安全 corpus 0 副作用、六个窄 IPC、生产 blocked boundary、无 P1-D adapter/PTY/process 旁路和用户说明。
+- P1-D 独立准入结论不变：当前 SHA 缺 Windows runner 真实证据且 P0 未 verified，没有 adapter/direct/jump-host Agent fixture 或真实演示。P1-F 完成后 P1 仍为 `blocked`，阶段证据见 `docs/ai-agent-p1-f-eval-release-gate-evidence.md`。
 
 ## 22. 测试策略
 
@@ -1256,4 +1314,3 @@ P1 verified 只证明“Agent 能安全观察”，不自动授权修改。P2 �
 - 安全重试与 rollback 语义。
 
 任何“顺便让只读 Agent 重启服务”的需求都应进入 P2 设计，不得扩展 P1 allowlist 绕过审批阶段。
-

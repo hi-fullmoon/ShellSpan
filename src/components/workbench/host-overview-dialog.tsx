@@ -26,7 +26,7 @@ import {
 import { Dialog } from '@/components/ui/dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { buildHostOverview } from '@/lib/host-overview';
-import { useAgentStore } from '@/stores/agentStore';
+import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
 import { useMonitorStore } from '@/stores/monitorStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -76,7 +76,7 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
     [pathOccupancyRevision],
   );
   const disconnectEvents = useMonitorStore((state) => state.disconnectEvents);
-  const agentRun = useAgentStore((state) => state.run);
+  const agentRun = useStaticDiagnosticStore((state) => state.run);
   const portForwards = usePortForwardStore((state) => state.runtimes);
   const snapshot = useMemo(() => profile
     ? buildHostOverview(

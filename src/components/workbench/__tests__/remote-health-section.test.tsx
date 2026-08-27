@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RemoteHealthSection } from '../remote-health-section';
 import { useProfileStore } from '@/stores/profileStore';
 import { useRemoteHealthStore } from '@/stores/remoteHealthStore';
-import { useAgentStore } from '@/stores/agentStore';
+import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type {
   ConnectionProfile,
@@ -41,7 +41,7 @@ const profile: ConnectionProfile = {
 
 beforeEach(() => {
   mocks.connect.mockReset();
-  useAgentStore.getState().clear();
+  useStaticDiagnosticStore.getState().clear();
   useProfileStore.setState({ profiles: [profile], initialized: true });
   useRemoteHealthStore.setState({ entries: {}, selectedProfileId: profile.id });
   useTerminalStore.setState({ sessions: [], activeSessionId: null });

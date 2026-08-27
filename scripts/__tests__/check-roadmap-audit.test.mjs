@@ -88,6 +88,46 @@ describe('roadmap audit', () => {
     );
   });
 
+  it('maps every P1 exit criterion exactly and in order', () => {
+    withChangedAudit(
+      (audit) => { audit.p1ReadonlyDynamicAgent.exitCriteria.pop(); },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('exitCriteria is not an exact ordered P1 design mapping');
+      },
+    );
+  });
+
+  it('does not let P1 become verified while P0 and P1-D remain blocked', () => {
+    withChangedAudit(
+      (audit) => { audit.p1ReadonlyDynamicAgent.status = 'verified'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('P1 status mismatch');
+      },
+    );
+  });
+
+  it('requires the P1 security corpus to record zero unauthorized side effects', () => {
+    withChangedAudit(
+      (audit) => { audit.p1ReadonlyDynamicAgent.releaseGate.unauthorizedSideEffects = 1; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('exactly zero unauthorized side effects');
+      },
+    );
+  });
+
+  it('keeps real Agent SSH adapter evidence blocked at this commit', () => {
+    withChangedAudit(
+      (audit) => { audit.p1ReadonlyDynamicAgent.releaseGate.realSshAdapterEvidence = 'verified'; },
+      (result) => {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('cannot be verified without a reviewed-kernel adapter');
+      },
+    );
+  });
+
   it('rejects a committed workstream that is merely in progress', () => {
     withChangedAudit(
       (audit) => { audit.items.find((item) => item.id === 'now-quality-gates').status = 'in-progress'; },

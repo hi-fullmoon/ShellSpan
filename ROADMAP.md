@@ -46,12 +46,12 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 ### 3.2 主要缺口
 
 - 当前 Agent 一次性生成完整计划，不能根据真实执行结果动态选择下一步。
-- Agent 状态只存在前端单一 `run`，后端不是运行生命周期的权威来源。
+- P1-A 已建立后端权威 run registry，P1-E 已建立 snapshot-authoritative 前端投影；生产 dynamic start 仍因 P0/P1-D 门禁而 blocked。
 - AI provider 层只处理文本或结构化计划，没有统一的 provider-neutral 工具调用结果。
 - Runbook 已切换到 crate-private reviewed SSH 执行内核，但 Agent adapter、policy 和 approval 尚未实现，也未注册通用执行 Tauri command。
 - reviewed operation deadline 可先返回稳定终态，但 DNS、TCP、SSH handshake/auth 仍使用连接层阻塞超时；应用崩溃也不会恢复内存中的执行状态。
 - 当前风险模型偏向静态 Runbook，缺少适用于动态 Agent 的多维风险、审批摘要、防重放和策略版本。
-- 没有 Agent 事件序列、快照恢复、运行预算、连续失败限制和后置验证义务。
+- P1-A/P1-E 已具备 Agent 事件序列、快照恢复、运行预算和连续失败投影；真实 SSH adapter 与后置真实 fixture 仍未准入。
 - 没有专用 Agent PTY、终端租约、用户接管或交互式密码边界。
 
 ## 4. 不可破坏的安全约束
@@ -196,20 +196,35 @@ P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过
 
 ### 7.2 后端工作包
 
-#### P1-0：Agent 协议与预算（设计完成，待实现）
+#### P1-0：Agent 协议与预算（implemented）
 
 - 定义 `AgentStartRequest`、`AgentTargetBinding`、`AgentPolicySnapshot`。
 - 定义 provider-neutral `AgentDecision`、`AgentToolCall`、`ToolExecutionResult`、`AgentEvidence` 和版本化 `AgentEvent`。
 - 定义 Run/Tool Call 状态机、run/tool cancellation、最大运行时间、模型轮次、工具调用数、单步输出与连续失败预算。
 - P0 verified 前可以实现协议、状态机、fake model/tool 与纯逻辑测试，但不新增真实 SSH tool adapter、通用 Tauri execution command 或模型执行入口。
 
-#### P1-A：AgentManager 与运行注册表
+实际结果（2026-08-27）：
 
-- 新增 `src-tauri/src/agent/` 模块。
+- 已新增 Rust/TypeScript v1 协议类型、严格 `AgentDecision` decoder、checked-in JSON schema、公开错误分类、显式 run/tool 转换表和硬上限预算策略。
+- `protocol/agent/v1/` 与 `tests/fixtures/agent-protocol/v1/` 是双端共同消费的 schema/fixture；unknown field、unknown version、unknown enum、tool/arguments 错配和 P1 非空 `changes` 均失败关闭。
+- Rust 与 TypeScript 都对所有状态笛卡尔积核对共享转换表，并系统性证明 `completed`、`failed`、`cancelled`、`blocked`、`timedOut` 和 `denied` 等终态不能被迟到结果覆盖。
+- P1-0 提交保持纯逻辑边界：当时没有 `AgentManager`、真实 SSH adapter、模型调用入口、Agent Tauri command 或 `write_session` 旁路；后续 P1-A 只新增下述控制面。
+
+#### P1-A：AgentManager 与运行注册表（implemented）
+
+- 在 P1-0 的 `src-tauri/src/agent/` 协议模块上新增 manager、journal 与 IPC 控制面。
 - `AgentManager` 成为运行状态的权威来源，前端 Zustand 仅为事件投影。
 - MVP 同一 profile 同时只允许一个 executing Agent；不同 profile 的并发先限制为全局 1，稳定后再提高。
 - Panel 关闭不取消运行；用户显式 Stop 或应用退出才触发取消。
 - 前端重新挂载时通过 snapshot 恢复当前状态。
+
+实际结果（2026-08-27）：
+
+- Rust 进程内 `AgentManager` 是 run、幂等 request/action、journal sequence 与 snapshot 的唯一权威来源；registry 保留终态历史且全局最多一个非终态 run。
+- 仅注册 `agent_start`、`agent_get_snapshot`、`agent_pause`、`agent_resume`、`agent_stop`、`agent_send_message` 六个窄 IPC；没有 generic execute/tool command，也没有 execution adapter、raw SSH 或 `write_session` Agent 路径。
+- `clientRequestId` / `clientActionId` 重放返回原结果，同一 ID 搭配不同输入失败关闭；事件 sequence 只由后端 journal 单调分配，snapshot 携带 `lastSequence`。
+- fake control boundary 覆盖 Panel 重挂、gap/duplicate/late event、延迟 Pause/Stop 与应用退出 cancel；生产 no-op boundary 稳定返回 `p1Blocked`，不创建 run。
+- P1 总体仍为 `blocked`：P0 尚未 verified；P1-C 已在本地 registry + fake executor 边界内实现，P1-E UI workspace 已实现，但 P1-D 的真实 SSH adapter/fixture 在独立核验中因缺少当前 SHA 的 Windows runner 实跑证据而失败关闭、没有提交。
 
 建议模块：
 
@@ -233,25 +248,19 @@ src-tauri/src/agent/
     └── shell.rs
 ```
 
-#### P1-B：动态 Agent loop
+#### P1-B：ModelAdapter 与 fake Agent loop（implemented）
 
-- 每个模型回合最多产生一个 tool call，或产生 `askUser/final`。
-- 每次工具完成后把结构化结果作为 observation 回传模型。
-- 模型可以更新计划，但不能删除已发生的事实或修改历史证据。
-- `final` 必须包含 outcome、summary、evidence IDs、changes、warnings 和 next actions。
-- 没有有效 evidence 的关键结论标记为推测，不能显示为已验证事实。
-- 连续两次生成无效 schema 后停止并显示 provider 兼容错误。
+- OpenAI Responses、OpenAI Compatible Chat 和 Ollama 使用同一 checked-in strict JSON schema，一次 provider request 只返回一个 `AgentDecision`；native tool calling 不进入 P1-B 正确性路径。
+- capability snapshot 冻结 provider kind/base URL/model 与 streaming、strict JSON schema、native tool calling、usage、response continuation；Compatible/Ollama 非 `jsonSchema` 配置失败关闭。
+- strict decoder 失败最多一次通用 repair，repair 计入模型回合预算且不回显 raw provider response；发送和有界 response body 读取均支持 request cancellation。
+- stable context 固定用户目标、冻结目标、只读边界、tool proposal contract 和预算；dynamic untrusted context 仅保留 plan、最近 observation、压缩旧 index、最近错误、问题与 steering。
+- 可测试 orchestrator 每次只应用一个 decision；fake tool validation/execution seam 不包含真实 registry、policy、renderer、evidence、redactor 或 SSH adapter。
+- fake 多轮测试证明：首个 `uptime` observation 为 `load=9.2` 时第二个 tool call 选择 `ps`，为 `load=0.2` 时直接 final，因此不是静态计划重放。
+- 另一条完整 fake 路径执行 `host.inspect → shell.execReadOnly(ps) → final`，覆盖两个 decision tool variant；它仍只经过 fake driver。
+- steering 通过 request generation 与 cancellation 双重使 in-flight decision 失效；Pause/Resume、Stop、askUser/answer、schema failure、provider timeout、tool denied 后替代、budget exhaustion 和迟到终态均有确定测试结果。
+- 生产 `AgentManager::default()` 仍绑定 blocked no-op boundary，`agent_start` 继续返回 `p1Blocked`；P1-B 没有形成真实可执行入口。
 
-#### P1-C：ModelAdapter
-
-- OpenAI Responses、OpenAI Compatible Chat 和 Ollama 统一返回 `AgentDecision`。
-- 记录 provider capability：streaming、strict JSON schema、native tool call、usage、previous response。
-- P1 统一使用严格 JSON decision；原生 tool calling 只有在后续能无差异转换为同一协议时才可作为传输优化。
-- 普通文本模型不默认开放 Agent 模式。
-- Provider 返回的工具名和参数仍需本地严格解析，不能直接执行。
-- 上下文中明确标注终端输出、日志和文件内容为 untrusted data。
-
-#### P1-D：只读工具
+#### P1-C：Tool registry、policy 与 evidence（implemented）
 
 首批只暴露：
 
@@ -268,18 +277,29 @@ src-tauri/src/agent/
 - 禁止 follow/watch、后台任务、重定向、command substitution 和未知控制结构。
 - P1 不开放 shell `-c`、pipeline 或任意命令文本；未知 program、flag、subcommand 和 positional argument 一律拒绝。
 
-#### P1-E：上下文管理
+本工作包还负责 program-specific validator、POSIX renderer、evidence ownership/final report validator、同源 redaction，以及把 P1-B 的 fake observation seam 替换为真实但仍不接 SSH 的本地 tool registry。P1-B 只完成通用有界 context framing；evidence ID、来源、时间、target、digest 和 redaction 语义不得提前在 fake loop 中冒充完成。
 
-- 稳定上下文保存目标、用户目标、权限策略、工具定义和成功标准。
-- 动态上下文只保留当前计划、最近证据、未解决问题和用户最新指令。
-- 旧 observation 压缩成摘要，保留 evidence ID、来源、时间、目标和 digest。
-- 不重复发送完整终端历史。
-- 终端上下文只用于提示，不能授权修改。
-- 独立 Exec 不继承当前终端 cwd 时，UI 和模型上下文必须明确说明。
+实际结果（2026-08-27）：
 
-### 7.3 前端工作包
+- `src-tauri/src/agent/tools/` 使用编译期静态 `ToolDefinition` 表同时生成 model definitions 和执行 dispatch；`host.inspect` 只映射 enum fields 到固定 probe plan，不能接受 command/path/environment/target。
+- `src-tauri/src/agent/policy.rs` 为 `uname`、`hostname`、`whoami`、`id`、`date`、`uptime`、`df`、`free`、`ps`、`ss`、`systemctl`、`journalctl` 和 capability-gated Docker 分别实现 parser；未知 program/flag/subcommand/position、控制符、shell 控制/重定向/substitution/glob、后台/提权/修改型与敏感读取结构全部失败关闭。
+- policy 强制 systemctl `--no-pager`、status `--lines=0`、show 安全 properties，journalctl `--lines 1..500`，Docker stats `--no-stream`、logs `--tail 1..500` 与安全 format；Docker 默认关闭，只有冻结且专项测试过的 capability 才可启用。
+- `tools/shell.rs` 是唯一 POSIX word quote/command renderer；只有 program-specific policy 成功后才生成 `ApprovedPosixCommandV1`。P1-C executor seam 只有 scripted fake，未调用 P0 kernel、raw SSH、PTY、`write_session` 或本地 process。
+- `src-tauri/src/agent/redaction.rs` 在完整 chunk 重组后统一遮蔽 key/value、Bearer/Basic、高置信 AWS/GitHub/JWT/OpenAI token、private key、URL userinfo、query/connection-string secret 和额外 literal；digest 在脱敏与 Agent 有界压缩后计算。
+- `src-tauri/src/agent/evidence.rs` 以同一 immutable redacted content 派生 model/UI/event/evidence，ledger 校验 run、target、source、tool-call 唯一 ownership；final validator 拒绝未知/其他 run/其他 target evidence、无成功 evidence 的 verified finding、无 evidence 的 likely finding、可识别 secret 和任何非空 P1 `changes`。
+- orchestrator 的 P1-C 定点路径已接本地 registry + fake executor，能执行固定 `host.inspect`、创建后端 evidence ID、把同一脱敏 observation 放入 model context/evidence，并只在 final report 引用通过后完成。生产 `AgentManager::default()` 仍绑定 `BlockedNoopAgentBoundary`，`agent_start` 继续返回 `p1Blocked`。
+- 阶段证据见 `docs/ai-agent-p1-c-tool-policy-evidence.md`；P0 仍为 `implemented（verification pending external）`，所以 P1 总体继续 `blocked`，不得开始 P1-D 真实接入。
 
-#### P1-F：拆分 AI Panel
+#### P1-D：P0 adapter 与真实 SSH fixture（planned；受门禁阻断）
+
+- 只有 P0 在 Roadmap/audit 变为 `verified` 后，才允许把 `shell.execReadOnly` 接到 `execute_reviewed_ssh_command`。
+- adapter 必须继续执行 target revalidation、operation cancellation、timeout/output policy 和 secret redaction，且不得新增 generic execute IPC。
+- direct/jump-host fixture 覆盖只读成功、non-zero、timeout、cancel、output cap 和 target drift。
+- 当前 P0 仍为 `implemented（verification pending external）`。独立 P1-D 准入核验确认当前 SHA 缺少 Windows runner 真实结果，已按门禁失败关闭；本工作包没有开始、没有 adapter 或提交。
+
+### 7.3 P1-E：Agent Workspace UI（implemented；生产 dynamic start 继续 blocked）
+
+#### 拆分 AI Panel
 
 - 将当前 `src/components/ai/ai-panel.tsx` 拆出 Agent 容器与事件订阅逻辑。
 - 保持 Chat、Command、Diagnostic Plan 的现有行为和测试不回退。
@@ -297,7 +317,7 @@ src/components/ai/agent/
 └── agent-composer.tsx
 ```
 
-#### P1-G：事件投影 Store
+#### 事件投影 Store
 
 - `agentStore` 从单一 `run?` 改成 `runsById + activeRunId + lastSequenceByRunId`。
 - Store 只应用 sequence 连续且符合状态机的事件。
@@ -305,7 +325,7 @@ src/components/ai/agent/
 - 运行终态不可被迟到事件覆盖。
 - 运行与 AI conversation 建立关联，但不能因为 conversation 切换而改变 target。
 
-#### P1-H：只读运行界面
+#### 只读运行界面
 
 - Header 显示冻结主机、权限模式、状态、运行时长、工具次数和 Stop/Pause。
 - Timeline 显示计划、工具目的、命令、状态、退出码、持续时间和输出截断。
@@ -314,14 +334,24 @@ src/components/ai/agent/
 - 不展示隐藏 chain-of-thought，只显示简短动作理由和证据摘要。
 - 使用现有 `MessageScroller`、`Card`、`Badge`、`Alert`、`Collapsible`、`Marker`、`InputGroup` 和 `sonner`。
 
-#### P1-I：Pause 与 Stop
+#### Pause 与 Stop
 
 - `Pause`：thinking 时取消并丢弃当前模型决策，工具运行时则在当前只读步骤完成后不再启动下一步。
 - `Stop now`：取消模型请求和正在执行的工具。
 - UI 必须解释远程后台进程不一定能因 channel 关闭而终止；自动模式本身禁止后台化命令。
 - 停止后所有尚未执行的 tool proposal 和 pending tool call 失效。
 
-### 7.4 测试要求
+#### 实际结果（2026-08-27）
+
+- `src/components/ai/agent/` 已按建议拆出 Workspace、Header、Timeline、Plan、Tool Card、Evidence、Report 和 Composer，并复用现有 shadcn/Base UI primitives、chat primitives、设计 token、Spinner 与 sonner。
+- `src/stores/agentStore.ts` 已成为 versioned event + authoritative snapshot 投影：严格 decode，sequence 连续检查，gap resync，duplicate/late terminal 忽略，冻结 goal/target/provider/policy 与终态不可回退。Panel 先订阅再 snapshot，unmount/remount 不取消后端 run。
+- `src/lib/tauri.ts` 只增加 `agent_start/get_snapshot/pause/resume/stop/send_message` 六个既有窄 IPC 的 typed wrapper；没有 generic execute/tool IPC，也没有 raw SSH、PTY 或 `write_session` Agent 路径。
+- Header/Timeline 覆盖冻结 target、read-only、状态、duration/budgets、plan、全部 tool state、后端命令预览、exit/duration/bytes/truncation、折叠脱敏 stdout/stderr、evidence、final report、错误与 Stop 限制说明；Pause/Resume/Stop/answer/steering 均等待后端接受后 snapshot resync。
+- 旧诊断计划迁移到明确命名的 `staticDiagnosticStore`/`StaticDiagnostic*`，仅作为用户显式选择的 fallback。`p1Blocked` 与 provider incompatible 清晰展示；fallback 不解除 dynamic gate，也不伪装为动态运行。
+- 测试覆盖 gap/duplicate/late、Panel remount、frozen target、预算、tool states、awaitingUser/steering、终态/错误/blocked/provider incompatible、evidence navigation、keyboard/live region，以及 Chat/Command/Explain/static Diagnostic Plan/Remote Health 回归。阶段证据见 `docs/ai-agent-p1-e-agent-workspace-ui-evidence.md`。
+- P1-D 未实现；生产 `AgentManager::default()` 仍为 `BlockedNoopAgentBoundary`。P1 总体继续 `blocked`；后续 P1-F 只补充 fake eval、文档与发布门禁，不改变此结论。
+
+### 7.4 P1-F：Eval、文档与发布门禁（implemented；P1 发布门禁仍 blocked）
 
 - Fake model 按顺序返回 `host.inspect → shell.execReadOnly → shell.execReadOnly → final`，Agent 能完成循环。
 - 第二个命令根据第一个命令输出动态变化，证明不是静态计划重放。
@@ -331,6 +361,14 @@ src/components/ai/agent/
 - Panel 卸载和重新挂载后通过 snapshot 恢复。
 - sequence gap、重复事件和迟到事件均有测试。
 - Agent 最终报告缺少 evidence ID 时被拒绝或降级为未验证结论。
+
+实际结果（2026-08-27）：
+
+- `tests/fixtures/agent-evals/v1/diagnostic-scenarios.json` 固定 CPU、磁盘、内存、服务、端口、capability-gated 容器和信息不足七类场景；test-only `agent/eval.rs` 通过 strict decoder、生产 registry/policy/orchestrator/evidence ledger 和 scripted fake executor 连续运行两次，比较规范化终态、预算、调用序列、evidence binding、finding 引用、askUser/outcome 与空 `changes`，并冻结 strict-schema provider compatibility、fake token accounting、延迟上限及具名控制面证据。
+- `tests/fixtures/agent-evals/v1/adversarial-corpus.json` 固定 21 项 shell/prompt injection、后台化、重定向、提权、修改型、敏感读取和 unbounded proposal；所有恶意 proposal 的 fake executor 命中为 0，非空 `changes` 为 0。来自只读 observation 的 prompt injection 仍只作为不可信数据，后续 restart proposal 被 policy 拒绝。
+- Workspace 启动前增加双语用户可见说明，明确只读范围、独立 Exec、不继承 shell 状态、同源输出脱敏、Pause/Stop、应用退出、崩溃不恢复与 detached process 限制；完整说明见 `docs/ai-agent-readonly-user-guide.md`。
+- `docs/roadmap-audit.json` 新增 P1 12 项退出条件的精确有序映射；`scripts/check-roadmap-audit.mjs` 强制 P1 状态、0 副作用、安全 corpus、七类 eval、六个窄 IPC、blocked production boundary、无 adapter/PTY/process 旁路与双语安全说明。
+- 阶段验收见 `docs/ai-agent-p1-f-eval-release-gate-evidence.md`。第 1、6、10 项仍 blocked：P0 未 verified、当前 SHA 缺 Windows runner 真实结果、P1-D adapter/direct/jump fixture/真实演示不存在。既有隔离 SSH/SFTP fixture 只能作为回归证据，不能冒充 P1-D 证据；P1 最终状态继续 `blocked`。
 
 ### 7.5 演示验收
 

@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
+#[allow(dead_code)]
+mod agent;
 mod ai;
 mod ai_sessions;
 mod commands;
@@ -227,6 +229,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
         .manage(ai::AiRequestRegistry::default())
+        .manage(agent::manager::AgentManager::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
@@ -241,6 +244,12 @@ pub fn run() {
         .manage(RemoteIdentityCache::default())
         .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
+            agent::ipc::agent_start,
+            agent::ipc::agent_get_snapshot,
+            agent::ipc::agent_pause,
+            agent::ipc::agent_resume,
+            agent::ipc::agent_stop,
+            agent::ipc::agent_send_message,
             ai::ai_list_models,
             ai::ai_start_request,
             ai::ai_cancel_request,
@@ -349,9 +358,14 @@ pub fn run() {
             runbook::save_runbook_file,
         ]);
 
-    menu::configure_builder(builder)
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = menu::configure_builder(builder)
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            agent::ipc::cancel_active_for_app_exit(app_handle);
+        }
+    });
 }
 
 #[cfg(test)]
