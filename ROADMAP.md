@@ -224,7 +224,7 @@ P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过
 - 仅注册 `agent_start`、`agent_get_snapshot`、`agent_pause`、`agent_resume`、`agent_stop`、`agent_send_message` 六个窄 IPC；没有 generic execute/tool command，也没有 execution adapter、raw SSH 或 `write_session` Agent 路径。
 - `clientRequestId` / `clientActionId` 重放返回原结果，同一 ID 搭配不同输入失败关闭；事件 sequence 只由后端 journal 单调分配，snapshot 携带 `lastSequence`。
 - fake control boundary 覆盖 Panel 重挂、gap/duplicate/late event、延迟 Pause/Stop 与应用退出 cancel；生产 no-op boundary 稳定返回 `p1Blocked`，不创建 run。
-- P1 总体仍为 `blocked`：P0 尚未 verified；P1-B 已在纯逻辑/fake 边界内实现，P1-C 及后续真实 tool/policy/evidence、SSH adapter 和 UI workspace 均未开始。
+- P1 总体仍为 `blocked`：P0 尚未 verified；P1-C 已在本地 registry + fake executor 边界内实现，P1-D 的真实 SSH adapter/fixture 与 P1-E UI workspace 均未开始。
 
 建议模块：
 
@@ -260,7 +260,7 @@ src-tauri/src/agent/
 - steering 通过 request generation 与 cancellation 双重使 in-flight decision 失效；Pause/Resume、Stop、askUser/answer、schema failure、provider timeout、tool denied 后替代、budget exhaustion 和迟到终态均有确定测试结果。
 - 生产 `AgentManager::default()` 仍绑定 blocked no-op boundary，`agent_start` 继续返回 `p1Blocked`；P1-B 没有形成真实可执行入口。
 
-#### P1-C：Tool registry、policy 与 evidence（planned；未开始）
+#### P1-C：Tool registry、policy 与 evidence（implemented）
 
 首批只暴露：
 
@@ -278,6 +278,17 @@ src-tauri/src/agent/
 - P1 不开放 shell `-c`、pipeline 或任意命令文本；未知 program、flag、subcommand 和 positional argument 一律拒绝。
 
 本工作包还负责 program-specific validator、POSIX renderer、evidence ownership/final report validator、同源 redaction，以及把 P1-B 的 fake observation seam 替换为真实但仍不接 SSH 的本地 tool registry。P1-B 只完成通用有界 context framing；evidence ID、来源、时间、target、digest 和 redaction 语义不得提前在 fake loop 中冒充完成。
+
+实际结果（2026-08-27）：
+
+- `src-tauri/src/agent/tools/` 使用编译期静态 `ToolDefinition` 表同时生成 model definitions 和执行 dispatch；`host.inspect` 只映射 enum fields 到固定 probe plan，不能接受 command/path/environment/target。
+- `src-tauri/src/agent/policy.rs` 为 `uname`、`hostname`、`whoami`、`id`、`date`、`uptime`、`df`、`free`、`ps`、`ss`、`systemctl`、`journalctl` 和 capability-gated Docker 分别实现 parser；未知 program/flag/subcommand/position、控制符、shell 控制/重定向/substitution/glob、后台/提权/修改型与敏感读取结构全部失败关闭。
+- policy 强制 systemctl `--no-pager`、status `--lines=0`、show 安全 properties，journalctl `--lines 1..500`，Docker stats `--no-stream`、logs `--tail 1..500` 与安全 format；Docker 默认关闭，只有冻结且专项测试过的 capability 才可启用。
+- `tools/shell.rs` 是唯一 POSIX word quote/command renderer；只有 program-specific policy 成功后才生成 `ApprovedPosixCommandV1`。P1-C executor seam 只有 scripted fake，未调用 P0 kernel、raw SSH、PTY、`write_session` 或本地 process。
+- `src-tauri/src/agent/redaction.rs` 在完整 chunk 重组后统一遮蔽 key/value、Bearer/Basic、高置信 AWS/GitHub/JWT/OpenAI token、private key、URL userinfo、query/connection-string secret 和额外 literal；digest 在脱敏与 Agent 有界压缩后计算。
+- `src-tauri/src/agent/evidence.rs` 以同一 immutable redacted content 派生 model/UI/event/evidence，ledger 校验 run、target、source、tool-call 唯一 ownership；final validator 拒绝未知/其他 run/其他 target evidence、无成功 evidence 的 verified finding、无 evidence 的 likely finding、可识别 secret 和任何非空 P1 `changes`。
+- orchestrator 的 P1-C 定点路径已接本地 registry + fake executor，能执行固定 `host.inspect`、创建后端 evidence ID、把同一脱敏 observation 放入 model context/evidence，并只在 final report 引用通过后完成。生产 `AgentManager::default()` 仍绑定 `BlockedNoopAgentBoundary`，`agent_start` 继续返回 `p1Blocked`。
+- 阶段证据见 `docs/ai-agent-p1-c-tool-policy-evidence.md`；P0 仍为 `implemented（verification pending external）`，所以 P1 总体继续 `blocked`，不得开始 P1-D 真实接入。
 
 #### P1-D：P0 adapter 与真实 SSH fixture（planned；受门禁阻断）
 
