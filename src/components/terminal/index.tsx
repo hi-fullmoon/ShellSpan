@@ -99,6 +99,7 @@ const Terminal: React.FC = () => {
     [sessions],
   );
   const splitEnabled = split !== null;
+  const terminalVisible = activeSection === 'terminal';
 
   const focusGroup = useCallback((slot: TerminalGroupSlot): void => {
     focusedGroupRef.current = slot;
@@ -625,7 +626,11 @@ const Terminal: React.FC = () => {
   }, [activeSessionId, createOrArrangeSplit, split]);
 
   const renderTerminalPane = (session: TerminalSession | null, isActive: boolean): React.ReactNode => (
-    <TerminalPane activeSession={session} isActive={isActive} />
+    <TerminalPane
+      activeSession={session}
+      isActive={isActive}
+      isVisible={terminalVisible}
+    />
   );
 
   const renderGroup = (slot: TerminalGroupSlot): React.ReactNode => {
