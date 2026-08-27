@@ -1,0 +1,458 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termbridge.app/protocol/agent/v2/agent-decision.schema.json",
+  "title": "TermBridge AgentDecisionV2",
+  "description": "Exactly one provider-neutral P2 controlled-mutation Agent decision.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "kind",
+        "rationale",
+        "plan",
+        "tool",
+        "arguments",
+        "purpose",
+        "successCriteria"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "kind": { "const": "toolCall" },
+        "rationale": { "$ref": "#/$defs/rationale" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "tool": { "const": "host.inspect" },
+        "arguments": { "$ref": "#/$defs/hostInspectArguments" },
+        "purpose": { "$ref": "#/$defs/toolText" },
+        "successCriteria": { "$ref": "#/$defs/toolText" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "kind",
+        "rationale",
+        "plan",
+        "tool",
+        "arguments",
+        "purpose",
+        "successCriteria"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "kind": { "const": "toolCall" },
+        "rationale": { "$ref": "#/$defs/rationale" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "tool": { "const": "shell.execReadOnly" },
+        "arguments": { "$ref": "#/$defs/shellExecReadOnlyArguments" },
+        "purpose": { "$ref": "#/$defs/toolText" },
+        "successCriteria": { "$ref": "#/$defs/toolText" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "kind",
+        "rationale",
+        "plan",
+        "tool",
+        "arguments",
+        "purpose",
+        "successCriteria"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "kind": { "const": "toolCall" },
+        "rationale": { "$ref": "#/$defs/rationale" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "tool": { "const": "service.inspect" },
+        "arguments": { "$ref": "#/$defs/serviceInspectArguments" },
+        "purpose": { "$ref": "#/$defs/toolText" },
+        "successCriteria": { "$ref": "#/$defs/toolText" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "kind",
+        "rationale",
+        "plan",
+        "tool",
+        "arguments",
+        "purpose",
+        "successCriteria"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "kind": { "const": "toolCall" },
+        "rationale": { "$ref": "#/$defs/rationale" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "tool": { "const": "service.validateConfig" },
+        "arguments": { "$ref": "#/$defs/serviceValidateConfigArguments" },
+        "purpose": { "$ref": "#/$defs/toolText" },
+        "successCriteria": { "$ref": "#/$defs/toolText" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "kind",
+        "rationale",
+        "plan",
+        "tool",
+        "arguments",
+        "purpose",
+        "expectedImpact",
+        "rollbackGuidance",
+        "successCriteria",
+        "preconditionEvidenceIds",
+        "retrySafety"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "kind": { "const": "toolCall" },
+        "rationale": { "$ref": "#/$defs/rationale" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "tool": { "const": "service.control" },
+        "arguments": { "$ref": "#/$defs/serviceControlArguments" },
+        "purpose": { "$ref": "#/$defs/toolText" },
+        "expectedImpact": { "$ref": "#/$defs/toolText" },
+        "rollbackGuidance": { "$ref": "#/$defs/toolText" },
+        "successCriteria": { "$ref": "#/$defs/toolText" },
+        "preconditionEvidenceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "retrySafety": { "enum": ["never", "verifyBeforeRetry"] }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "rationale", "plan", "question"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "kind": { "const": "askUser" },
+        "rationale": { "$ref": "#/$defs/rationale" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "rationale", "plan", "report"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "kind": { "const": "final" },
+        "rationale": { "$ref": "#/$defs/rationale" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "report": { "$ref": "#/$defs/finalReport" }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "\\S"
+    },
+    "toolText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "\\S"
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/planItem" }
+        }
+      }
+    },
+    "planItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "status": { "enum": ["pending", "active", "completed", "skipped"] }
+      }
+    },
+    "hostInspectArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include"],
+      "properties": {
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["os", "kernel", "architecture", "identity", "uptime", "capabilities"]
+          }
+        }
+      }
+    },
+    "shellExecReadOnlyArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["program", "args"],
+      "properties": {
+        "program": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+          }
+        },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 60 }
+      }
+    },
+    "serviceUnit": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 128,
+      "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]*\\.service$"
+    },
+    "serviceInspectArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manager", "unit", "include"],
+      "properties": {
+        "manager": { "const": "systemd" },
+        "unit": { "$ref": "#/$defs/serviceUnit" },
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "enum": ["loadState", "activeState", "subState", "mainPid", "result"] }
+        }
+      }
+    },
+    "serviceValidateConfigArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validator"],
+      "properties": { "validator": { "enum": ["nginx", "apache", "sshd"] } }
+    },
+    "verificationHints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expectedListenerPorts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        }
+      }
+    },
+    "serviceControlArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manager", "unit", "action"],
+      "properties": {
+        "manager": { "const": "systemd" },
+        "unit": { "$ref": "#/$defs/serviceUnit" },
+        "action": { "enum": ["start", "reload", "restart", "stop"] },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 60 },
+        "verificationHints": { "$ref": "#/$defs/verificationHints" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "action": { "const": "stop" } },
+            "required": ["action"]
+          },
+          "then": {
+            "not": {
+              "properties": {
+                "verificationHints": {
+                  "type": "object",
+                  "required": ["expectedListenerPorts"],
+                  "properties": {
+                    "expectedListenerPorts": { "type": "array" }
+                  }
+                }
+              },
+              "required": ["verificationHints"]
+            }
+          }
+        }
+      ]
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "identity", "targetDigest"],
+      "properties": {
+        "kind": { "const": "systemdService" },
+        "identity": {
+          "type": "string",
+          "minLength": 17,
+          "maxLength": 136,
+          "pattern": "^systemd:(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]*\\.service$"
+        },
+        "targetDigest": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "detail", "confidence", "evidenceIds"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 4000, "pattern": "\\S" },
+        "confidence": { "enum": ["verified", "likely", "uncertain"] },
+        "evidenceIds": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "confidence": { "const": "verified" } },
+            "required": ["confidence"]
+          },
+          "then": {
+            "properties": { "evidenceIds": { "type": "array", "minItems": 1 } }
+          }
+        }
+      ]
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changeId",
+        "toolCallId",
+        "approvalId",
+        "resource",
+        "action",
+        "status",
+        "executionEvidenceIds",
+        "verificationEvidenceIds"
+      ],
+      "properties": {
+        "changeId": { "$ref": "#/$defs/identifier" },
+        "toolCallId": { "$ref": "#/$defs/identifier" },
+        "approvalId": { "$ref": "#/$defs/identifier" },
+        "resource": { "$ref": "#/$defs/resource" },
+        "action": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "\\S" },
+        "status": {
+          "enum": [
+            "verified",
+            "unverified",
+            "failedNoEffect",
+            "executionSucceededVerificationFailed",
+            "partialUnexpectedEffect",
+            "unknownEffect"
+          ]
+        },
+        "executionEvidenceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "verificationEvidenceIds": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "verified" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "verificationEvidenceIds": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "nextAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "requiresChange"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" },
+        "requiresChange": { "type": "boolean" }
+      }
+    },
+    "finalReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "summary", "findings", "changes", "warnings", "nextActions"],
+      "properties": {
+        "outcome": { "enum": ["resolved", "diagnosed", "partial", "failed", "blocked", "inconclusive"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4000, "pattern": "\\S" },
+        "findings": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/finding" } },
+        "changes": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/change" } },
+        "warnings": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" }
+        },
+        "nextActions": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/nextAction" } }
+      }
+    }
+  }
+}
