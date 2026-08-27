@@ -9,6 +9,11 @@ import {
   isAgentToolCallStateV1,
 } from '@/lib/agent-state';
 import type {
+  AgentActionKindV1,
+  AgentActionResultV1,
+  AgentActiveRunSummaryV1,
+  AgentCommandErrorCategoryV1,
+  AgentCommandErrorV1,
   AgentDecisionV1,
   AgentEventTypeV1,
   AgentEventV1,
@@ -31,6 +36,7 @@ import type {
   AgentReportOutcomeV1,
   AgentRunSnapshotV1,
   AgentStartRequestV1,
+  AgentStartResultV1,
   AgentTargetBindingV1,
   AgentTerminalContextV1,
   AgentToolCallSnapshotV1,
@@ -721,5 +727,116 @@ export function decodeAgentRunSnapshotV1(value: unknown): AgentRunSnapshotV1 {
     queuedSteeringCount: integerValue(snapshot.queuedSteeringCount, 'Agent run snapshot.queuedSteeringCount', 0, 16),
     ...optionalOwn(report, 'report'),
     ...optionalOwn(error, 'error'),
+  };
+}
+
+const COMMAND_ERROR_CATEGORIES = [
+  'invalidRequest',
+  'agentBusy',
+  'runNotFound',
+  'idempotencyConflict',
+  'invalidState',
+  'p1Blocked',
+  'internal',
+] as const satisfies readonly AgentCommandErrorCategoryV1[];
+
+const ACTION_KINDS = [
+  'pause',
+  'resume',
+  'stop',
+  'sendMessage',
+] as const satisfies readonly AgentActionKindV1[];
+
+function decodeActiveRunSummaryV1(value: unknown): AgentActiveRunSummaryV1 {
+  const summary = objectValue(value, 'Agent active run summary');
+  exactKeys(
+    summary,
+    ['runId', 'state', 'goal', 'profileId', 'startedAt'],
+    'Agent active run summary',
+  );
+  if (!isAgentRunStateV1(summary.state)) {
+    fail('Agent active run summary.state contains an unknown enum value');
+  }
+  return {
+    runId: identifierValue(summary.runId, 'Agent active run summary.runId'),
+    state: summary.state,
+    goal: textValue(summary.goal, 'Agent active run summary.goal', MAX_GOAL_CHARACTERS),
+    profileId: identifierValue(summary.profileId, 'Agent active run summary.profileId'),
+    startedAt: integerValue(summary.startedAt, 'Agent active run summary.startedAt'),
+  };
+}
+
+export function decodeAgentStartResultV1(value: unknown): AgentStartResultV1 {
+  const result = objectValue(value, 'Agent start result');
+  exactKeys(result, ['schemaVersion', 'runId', 'acceptedAt'], 'Agent start result');
+  return {
+    schemaVersion: versionV1(result.schemaVersion, 'Agent start result.schemaVersion'),
+    runId: identifierValue(result.runId, 'Agent start result.runId'),
+    acceptedAt: integerValue(result.acceptedAt, 'Agent start result.acceptedAt'),
+  };
+}
+
+export function decodeAgentActionResultV1(value: unknown): AgentActionResultV1 {
+  const result = objectValue(value, 'Agent action result');
+  exactKeys(
+    result,
+    ['schemaVersion', 'runId', 'clientActionId', 'action', 'acceptedAt', 'resultingSequence'],
+    'Agent action result',
+  );
+  return {
+    schemaVersion: versionV1(result.schemaVersion, 'Agent action result.schemaVersion'),
+    runId: identifierValue(result.runId, 'Agent action result.runId'),
+    clientActionId: identifierValue(result.clientActionId, 'Agent action result.clientActionId'),
+    action: enumValue<AgentActionKindV1>(result.action, ACTION_KINDS, 'Agent action result.action'),
+    acceptedAt: integerValue(result.acceptedAt, 'Agent action result.acceptedAt'),
+    resultingSequence: integerValue(
+      result.resultingSequence,
+      'Agent action result.resultingSequence',
+    ),
+  };
+}
+
+export function decodeAgentCommandErrorV1(value: unknown): AgentCommandErrorV1 {
+  const error = objectValue(value, 'Agent command error');
+  exactKeys(
+    error,
+    ['schemaVersion', 'category', 'message', 'activeRun'],
+    'Agent command error',
+  );
+  const activeRun = error.activeRun === undefined
+    ? undefined
+    : decodeActiveRunSummaryV1(error.activeRun);
+  return {
+    schemaVersion: versionV1(error.schemaVersion, 'Agent command error.schemaVersion'),
+    category: enumValue<AgentCommandErrorCategoryV1>(
+      error.category,
+      COMMAND_ERROR_CATEGORIES,
+      'Agent command error.category',
+    ),
+    message: textValue(error.message, 'Agent command error.message', 2_000),
+    ...optionalOwn(activeRun, 'activeRun'),
+  };
+}
+
+export function parseAgentCommandErrorV1(value: unknown): AgentCommandErrorV1 {
+  const candidates: unknown[] = [value];
+  if (value instanceof Error) candidates.push(value.message);
+  if (value && typeof value === 'object' && 'message' in value) {
+    candidates.push((value as { message?: unknown }).message);
+  }
+  for (const candidate of candidates) {
+    try {
+      const decoded = typeof candidate === 'string'
+        ? JSON.parse(candidate) as unknown
+        : candidate;
+      return decodeAgentCommandErrorV1(decoded);
+    } catch {
+      // Continue without echoing an untrusted transport or provider body.
+    }
+  }
+  return {
+    schemaVersion: 1,
+    category: 'internal',
+    message: 'The Agent command failed before a versioned error was returned.',
   };
 }

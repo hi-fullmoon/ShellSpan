@@ -83,14 +83,18 @@ export interface AiSessionFile {
   messages: AiChatMessage[];
 }
 
-export type AgentRunPhase =
+/**
+ * Legacy one-shot diagnostic-plan state. Dynamic P1 runs use the versioned
+ * contracts in `src/types/agent.ts` and are projected from backend snapshots.
+ */
+export type StaticDiagnosticRunPhase =
   | 'planning'
   | 'awaitingReview'
   | 'handedOff'
   | 'cancelled'
   | 'error';
 
-export type AgentStepStatus =
+export type StaticDiagnosticStepStatus =
   | 'running'
   | 'completed'
   | 'informational'
@@ -130,7 +134,7 @@ export interface DiagnosticAgentPlan {
   steps: DiagnosticAgentPlanStep[];
 }
 
-export interface AgentRunStep {
+export interface StaticDiagnosticRunStep {
   id: string;
   kind: 'tool' | 'analysis' | 'command';
   title: string;
@@ -143,10 +147,10 @@ export interface AgentRunStep {
   expected?: DiagnosticAgentPlanStep['expected'];
   timeoutSeconds?: number;
   safeToRetry?: boolean;
-  status: AgentStepStatus;
+  status: StaticDiagnosticStepStatus;
 }
 
-export interface AgentRun {
+export interface StaticDiagnosticRun {
   id: string;
   requestId: string;
   goal: string;
@@ -156,10 +160,10 @@ export interface AgentRun {
   contextLabel: string;
   contextSource?: 'terminal' | 'remoteHealth';
   contextObservedAt: number;
-  phase: AgentRunPhase;
+  phase: StaticDiagnosticRunPhase;
   summary?: string;
   plan?: DiagnosticAgentPlan;
   responseText: string;
-  steps: AgentRunStep[];
+  steps: StaticDiagnosticRunStep[];
   error?: string;
 }

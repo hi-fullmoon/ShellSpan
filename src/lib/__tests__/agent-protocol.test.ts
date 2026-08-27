@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import decisionFixture from '../../../tests/fixtures/agent-protocol/v1/agent-decisions.json';
 import {
   AGENT_DECISION_SCHEMA_V1,
+  decodeAgentActionResultV1,
+  decodeAgentCommandErrorV1,
   decodeAgentDecisionV1,
   decodeAgentEventV1,
   decodeAgentRunSnapshotV1,
+  decodeAgentStartResultV1,
   decodeAgentStartRequestV1,
   MAX_AGENT_DECISION_BYTES_V1,
+  parseAgentCommandErrorV1,
 } from '@/lib/agent-protocol';
 import { AGENT_BUDGET_DEFAULTS_V1 } from '@/lib/agent-budgets';
 
@@ -60,6 +64,35 @@ describe('Agent protocol v1 decision decoder', () => {
 });
 
 describe('Agent protocol v1 IPC envelopes', () => {
+  it('strictly decodes start/action results and structured command errors', () => {
+    const start = { schemaVersion: 1, runId: 'run-1', acceptedAt: 1_000 };
+    const action = {
+      schemaVersion: 1,
+      runId: 'run-1',
+      clientActionId: 'action-1',
+      action: 'pause',
+      acceptedAt: 1_100,
+      resultingSequence: 2,
+    };
+    const blocked = {
+      schemaVersion: 1,
+      category: 'p1Blocked',
+      message: 'P1 dynamic start remains blocked.',
+    };
+
+    expect(decodeAgentStartResultV1(start)).toEqual(start);
+    expect(decodeAgentActionResultV1(action)).toEqual(action);
+    expect(decodeAgentCommandErrorV1(blocked)).toEqual(blocked);
+    expect(parseAgentCommandErrorV1(JSON.stringify(blocked))).toEqual(blocked);
+    expect(() => decodeAgentStartResultV1({ ...start, raw: 'secret' })).toThrow(/unknown field/);
+    expect(() => decodeAgentActionResultV1({ ...action, action: 'execute' })).toThrow(/enum/);
+    expect(parseAgentCommandErrorV1('provider body: api_key=secret')).toEqual({
+      schemaVersion: 1,
+      category: 'internal',
+      message: 'The Agent command failed before a versioned error was returned.',
+    });
+  });
+
   it('decodes only the narrow start request and rejects target or policy injection', () => {
     const valid = {
       schemaVersion: 1,

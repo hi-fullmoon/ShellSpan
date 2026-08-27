@@ -1133,6 +1133,17 @@ Reducer 规则：
 - sequence resync、Panel 重挂、终态和错误路径有组件测试。
 - Chat、Command、Explain、静态 Diagnostic Plan 无回归。
 
+实施记录（2026-08-27）：
+
+- 新增 `src/components/ai/agent/`，由 `agent-workspace.tsx` 组合 Header、Timeline、Plan、Tool Card、Evidence、Report 与 Composer；继续复用项目现有 `MessageScroller`、`Message`、`Bubble`、`Marker`、`Card`、`Badge`、`Alert`、`Collapsible`、`InputGroup`、`Spinner` 和 `sonner`，没有引入平行 primitive 或硬编码视觉体系。
+- `src/stores/agentStore.ts` 改为 `runsById + activeRunId + lastSequenceByRunId` 的 snapshot-authoritative 投影。事件必须通过 v1 strict decoder 和 sequence cursor；连续新事件与 gap 只触发 snapshot resync，不从 `unknown payload` 猜状态；duplicate 不推进，终态后的 late event 不覆盖，冻结 goal/target/provider/policy 或终态回退均失败关闭。
+- Workspace mount 顺序固定为先订阅 `agent-event`，再按已知 run ID（或当前 active run）读取 `agent_get_snapshot`；Panel unmount 只解除 listener、不取消 run，remount 从后端 snapshot 恢复。所有 start/action/result/error/snapshot envelope 在前端再次严格解码。
+- Header 显示冻结 target、只读 policy、状态、运行时长和 model/tool 预算；Timeline 展示 goal、steering、计划、所有 tool state、后端 command preview、退出码/耗时/read 与 captured bytes/truncation、默认折叠的脱敏 stdout/stderr、evidence 和 final report。报告 evidence ID 可键盘聚焦并导航到对应 evidence。
+- Pause/Resume/Stop/answer/steering 只调用 P1-A 的六个窄 lifecycle IPC；没有新增 generic execute IPC、tool execute IPC、raw SSH、PTY 或 `write_session` 路径。Composer 支持 Enter 发送、Shift+Enter 换行、IME composing guard、awaitingUser/paused/terminal placeholder 和 polite live region。
+- 旧一次性 Diagnostic Plan 已明确更名为 `StaticDiagnostic*` 类型并迁移到 `staticDiagnosticStore.ts`。生产 dynamic start 保持调用后端 gate；`p1Blocked` 与 `providerIncompatible` 有显式 UI，并提供需要用户点击的 static diagnostic fallback，不把 fallback 冒充真实 dynamic run。
+- 组件与 store 自动化覆盖 start/busy/blocked/provider incompatible、gap/duplicate/late、mount/remount snapshot、frozen target、预算、全部 tool states、awaitingUser/steering、Pause/Resume/Stop、终态/错误、evidence navigation、keyboard/live region；既有 Chat、Command、Explain、静态 Diagnostic Plan 与 Remote Health 诊断回归保持通过。阶段证据见 `docs/ai-agent-p1-e-agent-workspace-ui-evidence.md`。
+- P1-D 在独立核验中因当前 SHA 缺少 Windows runner 真实结果而按门禁失败关闭，没有实现或提交 adapter。P1-E 不假设 adapter 存在；生产 `AgentManager::default()` 仍绑定 `BlockedNoopAgentBoundary`，dynamic start 继续返回 `p1Blocked`。P1 总体继续 `blocked`，本阶段不开始 P1-F。
+
 ### P1-F：Eval、文档与发布门禁（2 天）
 
 产物：
