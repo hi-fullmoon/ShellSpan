@@ -1,13 +1,13 @@
-export interface PortablePathSegment {
+export interface PathSegment {
   name: string;
   path: string;
 }
 
-export interface ParsedPortablePath {
+export interface ParsedPath {
   normalized: string;
   rootLabel: string;
   rootPath: string;
-  segments: PortablePathSegment[];
+  segments: PathSegment[];
 }
 
 /**
@@ -26,7 +26,7 @@ export function normalizePortablePath(path: string): string {
   return normalized;
 }
 
-export function parsePortablePath(path: string): ParsedPortablePath {
+export function parsePortablePath(path: string): ParsedPath {
   const normalized = normalizePortablePath(path);
   const driveMatch = normalized.match(/^([A-Za-z]:)(?:\/|$)/);
   const uncMatch = normalized.match(/^\/\/([^/]+)\/([^/]+)(?:\/|$)/);
@@ -54,12 +54,47 @@ export function parsePortablePath(path: string): ParsedPortablePath {
   return { normalized, rootLabel, rootPath, segments };
 }
 
+/**
+ * Splits a remote POSIX path without applying local Windows path rules.
+ *
+ * In particular, a backslash is a valid POSIX filename character and a
+ * leading double slash is not a UNC share. Segment targets are sliced from
+ * the original path so breadcrumb navigation does not silently rewrite either
+ * form.
+ */
+export function parsePosixPath(path: string): ParsedPath {
+  const segments = Array.from(path.matchAll(/[^/]+/g), (match) => {
+    const end = (match.index ?? 0) + match[0].length;
+    return {
+      name: match[0],
+      path: path.slice(0, end),
+    };
+  });
+
+  return {
+    normalized: path,
+    rootLabel: '/',
+    rootPath: '/',
+    segments,
+  };
+}
+
 export function parentPortablePath(path: string): string {
   const parsed = parsePortablePath(path);
   if (parsed.segments.length <= 1) return parsed.rootPath;
   return parsed.segments[parsed.segments.length - 2].path;
 }
 
+export function parentPosixPath(path: string): string {
+  const parsed = parsePosixPath(path);
+  if (parsed.segments.length <= 1) return parsed.rootPath;
+  return parsed.segments[parsed.segments.length - 2].path;
+}
+
 export function isPortableRootPath(path?: string): boolean {
   return !path || parsePortablePath(path).segments.length === 0;
+}
+
+export function isPosixRootPath(path?: string): boolean {
+  return !path || parsePosixPath(path).segments.length === 0;
 }

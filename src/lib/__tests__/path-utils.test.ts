@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isPosixRootPath,
   isPortableRootPath,
   normalizePortablePath,
+  parentPosixPath,
   parentPortablePath,
+  parsePosixPath,
   parsePortablePath,
 } from '../path-utils';
 
@@ -37,5 +40,35 @@ describe('portable path utilities', () => {
     expect(parentPortablePath('/Users')).toBe('/');
     expect(isPortableRootPath('C:/')).toBe(true);
     expect(isPortableRootPath('//server/share/')).toBe(true);
+  });
+
+  it('preserves remote POSIX backslashes in segment names and targets', () => {
+    expect(parsePosixPath('/home/name\\with\\slashes/child')).toMatchObject({
+      rootPath: '/',
+      segments: [
+        { name: 'home', path: '/home' },
+        { name: 'name\\with\\slashes', path: '/home/name\\with\\slashes' },
+        {
+          name: 'child',
+          path: '/home/name\\with\\slashes/child',
+        },
+      ],
+    });
+    expect(parentPosixPath('/home/name\\with\\slashes/child')).toBe(
+      '/home/name\\with\\slashes',
+    );
+  });
+
+  it('does not reinterpret a leading double slash as a remote UNC root', () => {
+    expect(parsePosixPath('//server/share')).toMatchObject({
+      rootLabel: '/',
+      rootPath: '/',
+      segments: [
+        { name: 'server', path: '//server' },
+        { name: 'share', path: '//server/share' },
+      ],
+    });
+    expect(parentPosixPath('//server/share')).toBe('//server');
+    expect(isPosixRootPath('//server/share/')).toBe(false);
   });
 });
