@@ -1045,10 +1045,10 @@ Reducer 规则：
 - `clientRequestId` 和 `clientActionId` 以完整请求关联缓存；完全相同的重放返回原结果且不重发事件，同一 ID 搭配不同输入返回稳定 idempotency conflict。
 - Pause/Resume/Stop 只实现控制面基础转换；fake boundary 可延迟到安全边界后 settle，重复或终态后的迟到 settle 不追加事件、不能覆盖终态。应用 `ExitRequested` 会在进程退出前把活动 run 收敛为 `cancelled`。
 - `src/lib/agent-events.ts` 只实现 sequence cursor：duplicate/更小 sequence 忽略，gap 时缓冲并要求 snapshot resync，安装权威 `lastSequence` 后只连续应用更大的事件，终态后拒绝迟到事件；没有新增 UI workspace。
-- 生产使用 blocked no-op boundary，`agent_start` 返回 `p1Blocked` 且不创建 run；fake boundary 只在 Rust 测试中提供冻结的非秘密 fixture binding。没有 provider/model loop、tool registry/policy/evidence、execution adapter、raw SSH、真实 SSH fixture 或 `write_session` 路径。
-- P0 仍为 `implemented（verification pending external）`，P1 总体继续 `blocked`；P1-B 未开始。
+- P1-A 提交的生产路径使用 blocked no-op boundary，`agent_start` 返回 `p1Blocked` 且不创建 run；fake boundary 只在 Rust 测试中提供冻结的非秘密 fixture binding。当时没有 provider/model loop、tool registry/policy/evidence、execution adapter、raw SSH、真实 SSH fixture 或 `write_session` 路径。
+- P1-B 后续按下述记录补充纯逻辑/fake 组件，但没有改变 P1-A 的生产 blocked boundary；P0 仍为 `implemented（verification pending external）`，P1 总体继续 `blocked`。
 
-### P1-B：ModelAdapter 与 fake Agent loop（3–4 天）
+### P1-B：ModelAdapter 与 fake Agent loop（3–4 天，implemented 2026-08-27）
 
 产物：
 
@@ -1062,6 +1062,16 @@ Reducer 规则：
 - 第二个 fake tool call 由第一个 observation 决定。
 - steering 能使 in-flight decision 失效。
 - schema failure、provider timeout 和 budget exhaustion 有稳定终态。
+
+实施记录：
+
+- `src-tauri/src/agent/model.rs` 将 OpenAI Responses、OpenAI Compatible Chat 与 Ollama 统一为一次请求一个严格 `AgentDecisionV1`；三类请求共享 checked-in v1 schema，禁用 native tool call 传输，响应 envelope 有 128 KiB 硬上限，请求发送和响应读取均受 cancellation token 控制。
+- capability snapshot 冻结 provider ID/kind/base URL/model 及 streaming、strict JSON schema、native tool calling、usage reporting、response continuation；Compatible/Ollama 不是 `jsonSchema` 模式时失败为 `providerIncompatible`。快照、请求 body、repair prompt 和公开错误均不包含 API key 或 raw provider response。
+- schema decoder 失败只允许一次通用 repair，repair 不回显失败原文且再次消耗模型回合预算；第二次失败稳定进入 `failed(providerProtocol)`。timeout/unavailable、cancel 与 provider envelope failure 使用互斥公开分类。
+- `src-tauri/src/agent/context.rs` 分离 stable contract 与 dynamic untrusted context：固定目标/只读边界/tool proposal contract/预算不随 observation 累积，动态部分仅携带 plan、最近四条有界 observation、旧 observation index、最近 tool error、pending question 与 steering。
+- `src-tauri/src/agent/orchestrator.rs` 复用 P1-0 状态机和预算账本，实现可测试的单决策循环。steering 通过 request generation 加 cancellation 双重失效 in-flight decision；Pause 在 thinking 取消请求、在 fake tool 后提交 observation 再暂停；Stop 取消 model/fake tool 且禁止下一回合或迟到终态覆盖。
+- fake model/tool 测试覆盖 `host.inspect → ps → final` 的两类 tool variant；并证明 `uptime` 的 `load=9.2` observation 选择第二个 `ps` tool call，而 `load=0.2` 分支直接 final。另覆盖 tool denied 后只读替代、askUser/answer、一次 repair 后 schema failure、provider timeout、thinking/tool Pause、tool Stop、budget exhaustion 和终态幂等。
+- P1-B 组件没有接入 `AgentManager::default()`；生产 `agent_start` 继续由 blocked no-op boundary 返回 `p1Blocked`。本阶段没有 tool registry/真实 policy/evidence ledger/redactor、P0 adapter、raw SSH、`write_session` 或 UI workspace；P1-C 未开始，P1 总体仍受 P0 verification gate 阻断。
 
 ### P1-C：Tool registry、policy 与 evidence（3–4 天）
 
