@@ -1,7 +1,7 @@
 use super::cancellation::valid_operation_id;
 use super::result::ExecutionErrorCategory;
 use crate::models::{JumpHostConfig, RemoteConnectionRequest};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::time::Duration;
@@ -45,7 +45,7 @@ impl ExecutionValidationError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FrozenJumpHostIdentity {
     pub(crate) host: String,
@@ -101,7 +101,7 @@ impl FrozenJumpHostIdentity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FrozenTargetIdentity {
     pub(crate) profile_id: String,

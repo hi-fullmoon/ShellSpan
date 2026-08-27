@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "stage": 3,
+  "rollbackBoundary": {
+    "reviewInputFields": [
+      "operationId",
+      "sourceOperationId",
+      "profileId",
+      "connection",
+      "totalTimeoutSeconds"
+    ],
+    "forbiddenCallerFields": [
+      "runbookText",
+      "currentRelease",
+      "previousRelease",
+      "path",
+      "command",
+      "serviceActions",
+      "healthChecks"
+    ],
+    "approvalBindings": [
+      "reviewId",
+      "operationId",
+      "sourceOperationId",
+      "documentDigest",
+      "planDigest",
+      "targetDigest",
+      "currentRelease",
+      "previousRelease",
+      "approvedRisk",
+      "authorized",
+      "destructiveConfirmed"
+    ]
+  },
+  "recovery": {
+    "inFlightTerminalPhase": "interrupted",
+    "recoveryRequired": true,
+    "automaticReplay": false,
+    "lateCheckpointPolicy": "rejectExecutionTokenMismatchOrTerminal"
+  },
+  "cleanup": {
+    "automaticDeletion": false,
+    "requiresVerifiedRelease": true,
+    "protectedReferences": [
+      "current",
+      "rollbackTarget",
+      "activeOperation",
+      "recoveryRequiredTarget",
+      "pendingReview"
+    ]
+  }
+}

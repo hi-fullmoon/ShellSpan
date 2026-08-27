@@ -8,6 +8,7 @@ mod commands;
 mod connection;
 mod db;
 mod deployment_execution;
+mod deployment_persistence;
 #[allow(dead_code)]
 mod deployment_runbook;
 mod directory_request_registry;
@@ -24,6 +25,7 @@ mod path_utils;
 mod port_forward;
 mod remote_fs;
 mod remote_health;
+mod rollback_execution;
 mod runbook;
 mod session;
 mod sftp_pool;
@@ -210,6 +212,12 @@ pub fn run() {
             }
             let termbridge_dir = app.path().home_dir()?.join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
+            let recovered = deployment_persistence::recover_interrupted_operations(&database)?;
+            if recovered > 0 {
+                log::warn!(
+                    "Marked {recovered} deployment operation(s) interrupted after application restart"
+                );
+            }
             let credentials = keychain::CredentialManager::new();
             if let Err(error) = ai::migrate_keychain_api_keys(&credentials, &database) {
                 log::warn!("Failed to migrate AI API keys from the system keychain: {error}");
@@ -239,6 +247,7 @@ pub fn run() {
         .manage(RemoteHealthCancellationRegistry::default())
         .manage(execution::ExecutionCancellationRegistry::default())
         .manage(deployment_execution::DeploymentExecutionRegistry::default())
+        .manage(rollback_execution::RollbackExecutionRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
         .manage(RemoteFileReadCancellationRegistry::default())
@@ -361,6 +370,13 @@ pub fn run() {
             deployment_execution::review_deployment_execution,
             deployment_execution::execute_deployment,
             deployment_execution::cancel_deployment,
+            rollback_execution::review_rollback_execution,
+            rollback_execution::execute_rollback,
+            rollback_execution::cancel_rollback,
+            deployment_persistence::list_deployment_operations,
+            deployment_persistence::get_deployment_operation,
+            deployment_persistence::list_deployment_release_cleanup_candidates,
+            deployment_persistence::review_deployment_release_cleanup,
             runbook::open_runbook_file,
             runbook::save_runbook_file,
         ]);

@@ -36,6 +36,7 @@ export type OperationHistoryAction =
   | 'collectRemoteHealth'
   | 'executeRunbookStep'
   | 'executeDeployment'
+  | 'executeDeploymentRollback'
   | 'executeMultiHostRunbook';
 
 export type OperationHistoryEventKind =

@@ -1583,6 +1583,8 @@ export default {
   'operationHistory.action.stopAllPortForwards': '停止全部端口转发',
   'operationHistory.action.collectRemoteHealth': '采集远程健康快照',
   'operationHistory.action.executeRunbookStep': '执行 Runbook 步骤',
+  'operationHistory.action.executeDeployment': '执行部署',
+  'operationHistory.action.executeDeploymentRollback': '执行部署回滚',
   'operationHistory.action.executeMultiHostRunbook': '执行多主机 Runbook',
   'operationHistory.error.authentication': '认证失败',
   'operationHistory.error.timeout': '超时',

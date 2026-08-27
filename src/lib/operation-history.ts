@@ -299,6 +299,23 @@ function descriptorFor(
     }
     case 'cancel_deployment':
       return { ...common, category: 'deployment', action: 'executeDeployment', risk: 'stateChange', taskId: operationId, cancelRequest: true };
+    case 'execute_rollback': {
+      const approval = objectValue(request.approval);
+      const targetDigest = stringValue(approval?.targetDigest);
+      return {
+        ...common,
+        category: 'deployment',
+        action: 'executeDeploymentRollback',
+        risk: (stringValue(approval?.approvedRisk) as OperationHistoryRisk | undefined) ?? 'stateChange',
+        taskId: operationId,
+        approved: approval?.authorized === true,
+        targets: targetDigest
+          ? common.targets.map((target) => ({ ...target, identityFingerprint: targetDigest }))
+          : common.targets,
+      };
+    }
+    case 'cancel_rollback':
+      return { ...common, category: 'deployment', action: 'executeDeploymentRollback', risk: 'stateChange', taskId: operationId, cancelRequest: true };
     default:
       return undefined;
   }

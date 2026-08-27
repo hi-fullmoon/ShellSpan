@@ -25,8 +25,11 @@ import {
   invokeAgentStart,
   invokeCancelRunbookStep,
   invokeCancelDeployment,
+  invokeCancelRollback,
   invokeExecuteDeployment,
+  invokeExecuteRollback,
   invokeReviewDeploymentExecution,
+  invokeReviewRollbackExecution,
   invokeCancelRemoteFileRead,
   invokeExecuteRunbookStep,
   invokeStoreKeyCredential,
@@ -48,6 +51,10 @@ import type {
   DeploymentExecutionResultV2,
   DeploymentExecutionReviewRequestV2,
   DeploymentExecutionReviewV2,
+  RollbackExecutionRequestV2,
+  RollbackExecutionResultV2,
+  RollbackExecutionReviewRequestV2,
+  RollbackExecutionReviewV2,
 } from '@/types/deployment-runbook';
 
 beforeEach(() => {
@@ -486,6 +493,8 @@ describe('Deployment Runbook v2 narrow IPC contract', () => {
     rollbackSnapshot: {
       strategy: 'reactivatePreviousRelease',
       newRelease: '/srv/app/releases/release-1',
+      releasesDirectory: '/srv/app/releases',
+      activeSymlink: '/srv/app/current',
       activationChanged: true,
     },
   };
@@ -510,5 +519,117 @@ describe('Deployment Runbook v2 narrow IPC contract', () => {
       target: { ...result.target, identityDigest: 'sha256-v1:late-target' },
     });
     await expect(invokeExecuteDeployment(request, review)).rejects.toThrow(/identity does not match/);
+  });
+});
+
+describe('Deployment Runbook v2 separate rollback IPC contract', () => {
+  const reviewRequest: RollbackExecutionReviewRequestV2 = {
+    operationId: 'rollback:ipc',
+    sourceOperationId: 'deployment:source',
+    profileId: 'profile-1',
+    connection: {
+      host: 'server.example.com',
+      port: 22,
+      username: 'operator',
+      authMethod: 'password',
+      password: 'secret',
+    },
+    totalTimeoutSeconds: 600,
+  };
+  const review: RollbackExecutionReviewV2 = {
+    schemaVersion: 2,
+    reviewId: 'rollback-review:ipc',
+    operationId: reviewRequest.operationId,
+    sourceOperationId: reviewRequest.sourceOperationId,
+    sourceReviewId: 'deployment-review:source',
+    sourcePhase: 'succeeded',
+    documentDigest: 'sha256-v1:document',
+    planDigest: 'sha256-v1:rollback-plan',
+    deploymentId: 'release-2',
+    applicationId: 'app',
+    environment: 'production',
+    version: '2.0.0',
+    currentRelease: '/srv/app/releases/release-2',
+    previousRelease: '/srv/app/releases/release-1',
+    releasesDirectory: '/srv/app/releases',
+    activeSymlink: '/srv/app/current',
+    snapshotCapturedAt: 1,
+    declaredRisk: 'stateChange',
+    target: {
+      profileId: reviewRequest.profileId,
+      host: reviewRequest.connection.host,
+      port: reviewRequest.connection.port,
+      username: reviewRequest.connection.username,
+      authMethod: reviewRequest.connection.authMethod,
+      identityDigest: 'sha256-v1:target',
+    },
+    totalTimeoutSeconds: reviewRequest.totalTimeoutSeconds,
+    actions: [],
+    reviewedAt: 1,
+    expiresAt: 2,
+  };
+  const request: RollbackExecutionRequestV2 = {
+    operationId: review.operationId,
+    profileId: reviewRequest.profileId,
+    connection: reviewRequest.connection,
+    approval: {
+      reviewId: review.reviewId,
+      operationId: review.operationId,
+      sourceOperationId: review.sourceOperationId,
+      documentDigest: review.documentDigest,
+      planDigest: review.planDigest,
+      targetDigest: review.target.identityDigest,
+      currentRelease: review.currentRelease,
+      previousRelease: review.previousRelease,
+      approvedRisk: review.declaredRisk,
+      authorized: true,
+      destructiveConfirmed: false,
+    },
+  };
+  const result: RollbackExecutionResultV2 = {
+    schemaVersion: 2,
+    operationId: review.operationId,
+    reviewId: review.reviewId,
+    sourceOperationId: review.sourceOperationId,
+    documentDigest: review.documentDigest,
+    planDigest: review.planDigest,
+    deploymentId: review.deploymentId,
+    version: review.version,
+    target: review.target,
+    phase: 'succeeded',
+    startedAt: 1,
+    completedAt: 2,
+    actions: [],
+    healthEvidence: [],
+    reactivation: {
+      currentRelease: review.currentRelease,
+      previousRelease: review.previousRelease,
+      releasesDirectory: review.releasesDirectory,
+      activeSymlink: review.activeSymlink,
+      activationChanged: true,
+      changedAt: 2,
+    },
+  };
+
+  it('does not accept caller-provided document, path, command, or action fields', async () => {
+    invokeMock.mockResolvedValueOnce(review).mockResolvedValueOnce(result).mockResolvedValueOnce(undefined);
+
+    await expect(invokeReviewRollbackExecution(reviewRequest)).resolves.toBe(review);
+    await expect(invokeExecuteRollback(request, review)).resolves.toBe(result);
+    await invokeCancelRollback(request.operationId);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'review_rollback_execution', { request: reviewRequest });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'execute_rollback', { request });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'cancel_rollback', {
+      operationId: request.operationId,
+    });
+  });
+
+  it('rejects a late cross-release rollback result', async () => {
+    invokeMock.mockResolvedValueOnce({
+      ...result,
+      reactivation: { ...result.reactivation, currentRelease: '/srv/app/releases/release-3' },
+    });
+    await expect(invokeExecuteRollback(request, review)).rejects.toThrow(/separate review/);
   });
 });
