@@ -1321,7 +1321,9 @@ pub(crate) async fn save_runbook_file(text: String) -> Result<Option<RunbookFile
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::AuthMethod;
+    use crate::models::{AuthMethod, JumpHostConfig};
+    use std::io::Cursor;
+    use std::sync::Arc;
 
     fn valid_text(command: &str, risk: &str, keychain: bool) -> String {
         let variables = if keychain {
@@ -1368,6 +1370,38 @@ mod tests {
                 jump_host: None,
             },
         }
+    }
+
+    fn isolated_connection() -> RemoteConnectionRequest {
+        RemoteConnectionRequest {
+            host: std::env::var("TERMBRIDGE_E2E_SSH_HOST")
+                .unwrap_or_else(|_| "127.0.0.1".to_string()),
+            port: std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+                .unwrap_or(22222),
+            username: std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
+                .unwrap_or_else(|_| "termbridge".to_string()),
+            auth_method: AuthMethod::Password,
+            password: Some(
+                std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
+                    .unwrap_or_else(|_| "termbridge-e2e".to_string()),
+            ),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        }
+    }
+
+    fn open_isolated_session(
+        connection: &RemoteConnectionRequest,
+    ) -> (tempfile::TempDir, RunbookSshSession) {
+        let (known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let session = open_runbook_session(connection, &known_hosts_path)
+            .expect("authenticate isolated SSH with the trusted host key");
+        (known_hosts_temp, session)
     }
 
     #[test]
@@ -1474,7 +1508,17 @@ mod tests {
 
     #[test]
     fn unauthorized_result_keeps_target_and_evidence_identity() {
-        let request = request(valid_text("uname -s", "readOnly", false), false);
+        let mut request = request(valid_text("uname -s", "readOnly", false), false);
+        request.connection.jump_host = Some(JumpHostConfig {
+            host: "jump.example.test".to_string(),
+            port: 2222,
+            username: "jump-operator".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("jump-password".to_string()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+        });
         let document = parse_document(&request.runbook_text).unwrap();
         let action = selected_action(&document, "check", RunbookItemKind::Precheck).unwrap();
         let value = result(
@@ -1492,45 +1536,216 @@ mod tests {
         );
         assert_eq!(value.profile_id, "profile-1");
         assert_eq!(value.source.host, "example.test");
+        assert_eq!(value.source.port, 22);
+        assert_eq!(value.source.username, "operator");
         assert_eq!(value.status, RunbookStepExecutionStatus::Unauthorized);
+        let serialized = serde_json::to_string(&value).expect("serialize jump-host result");
+        assert!(!serialized.contains("jump.example.test"));
+        assert!(!serialized.contains("jump-password"));
     }
 
     #[test]
-    fn cancellation_is_observed_before_connection_or_execution() {
-        let flag = AtomicBool::new(true);
-        let session_deadline = Instant::now() + Duration::from_secs(1);
+    fn external_execution_result_serialization_contract_is_frozen() {
+        let value = RunbookStepExecutionResult {
+            operation_id: "runbook:characterization".to_string(),
+            run_id: "runbook-run:characterization".to_string(),
+            runbook_id: "test-runbook".to_string(),
+            source_digest: "fnv1a-12345678".to_string(),
+            item_id: "check".to_string(),
+            item_kind: RunbookItemKind::Precheck,
+            profile_id: "profile-1".to_string(),
+            status: RunbookStepExecutionStatus::Success,
+            risk: RunbookRisk::ReadOnly,
+            command_preview: "uname -s".to_string(),
+            started_at: 1_000,
+            completed_at: 1_250,
+            source: RunbookExecutionSource {
+                kind: "sshRunbook",
+                profile_id: "profile-1".to_string(),
+                host: "example.test".to_string(),
+                port: 22,
+                username: "operator".to_string(),
+            },
+            exit_code: Some(0),
+            expected_matched: true,
+            stdout: Some("Linux\n".to_string()),
+            stderr: None,
+            error: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(value).expect("serialize execution result"),
+            serde_json::json!({
+                "operationId": "runbook:characterization",
+                "runId": "runbook-run:characterization",
+                "runbookId": "test-runbook",
+                "sourceDigest": "fnv1a-12345678",
+                "itemId": "check",
+                "itemKind": "precheck",
+                "profileId": "profile-1",
+                "status": "success",
+                "risk": "readOnly",
+                "commandPreview": "uname -s",
+                "startedAt": 1_000,
+                "completedAt": 1_250,
+                "source": {
+                    "kind": "sshRunbook",
+                    "profileId": "profile-1",
+                    "host": "example.test",
+                    "port": 22,
+                    "username": "operator"
+                },
+                "exitCode": 0,
+                "expectedMatched": true,
+                "stdout": "Linux\n",
+                "stderr": null,
+                "error": null
+            })
+        );
+    }
+
+    #[test]
+    fn cancellation_and_timeout_are_observed_before_channel_open() {
+        let session = Session::new().expect("create disconnected SSH session");
+        let cancelled = execute_channel(
+            &session,
+            "uname -s",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: Vec::new(),
+            },
+            &AtomicBool::new(true),
+            Instant::now() + Duration::from_secs(1),
+        );
+        assert!(matches!(cancelled, ExecutionOutcome::Cancelled));
+
+        let timed_out = execute_channel(
+            &session,
+            "uname -s",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: Vec::new(),
+            },
+            &AtomicBool::new(false),
+            Instant::now(),
+        );
+        assert!(matches!(timed_out, ExecutionOutcome::TimedOut));
+
+        let cancelled_wins = execute_channel(
+            &session,
+            "uname -s",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: Vec::new(),
+            },
+            &AtomicBool::new(true),
+            Instant::now(),
+        );
+        assert!(matches!(cancelled_wins, ExecutionOutcome::Cancelled));
+    }
+
+    #[test]
+    fn cancellation_command_sets_registered_flag_and_cleanup_removes_it() {
+        let cancellations = RunbookCancellationRegistry::default();
+        let flag = cancellations
+            .register("runbook:cancel-characterization".to_string())
+            .expect("register runbook cancellation");
+
+        cancellations
+            .cancel("runbook:cancel-characterization")
+            .expect("cancel registered runbook operation");
         assert!(flag.load(Ordering::SeqCst));
-        assert!(session_deadline > Instant::now());
+
+        cancellations
+            .remove("runbook:cancel-characterization")
+            .expect("remove completed runbook operation");
+        assert_eq!(
+            cancellations
+                .cancel("runbook:cancel-characterization")
+                .expect_err("removed operation is no longer cancellable"),
+            "runbook step operation runbook:cancel-characterization not found"
+        );
+    }
+
+    #[test]
+    fn oversized_output_fails_at_the_existing_stream_limits() {
+        for limit in [MAX_OUTPUT_BYTES, MAX_ERROR_BYTES] {
+            let mut at_limit = Vec::new();
+            read_available(&mut Cursor::new(vec![b'x'; limit]), &mut at_limit, limit)
+                .expect("the exact capture limit is accepted");
+            assert_eq!(at_limit.len(), limit);
+
+            let mut oversized = Vec::new();
+            let error = read_available(
+                &mut Cursor::new(vec![b'x'; limit + 1]),
+                &mut oversized,
+                limit,
+            )
+            .expect_err("one byte over the limit fails");
+            assert_eq!(error, "runbook command output exceeded the safety limit");
+            assert!(oversized.len() <= limit);
+        }
+    }
+
+    #[test]
+    fn secret_redaction_includes_target_and_jump_host_credentials() {
+        let mut connection = request(valid_text("uname -s", "readOnly", false), true).connection;
+        connection.private_key_data = Some("target-private-key".to_string());
+        connection.passphrase = Some("target-passphrase".to_string());
+        connection.jump_host = Some(JumpHostConfig {
+            host: "jump.example.test".to_string(),
+            port: 22,
+            username: "jump-operator".to_string(),
+            auth_method: AuthMethod::Password,
+            password: Some("jump-password".to_string()),
+            keychain_key_id: None,
+            private_key_data: Some("jump-private-key".to_string()),
+            passphrase: Some("jump-passphrase".to_string()),
+        });
+        let secrets = connection_secrets(&connection);
+        let raw = format!(
+            "{} {} {} {} {} {}",
+            connection.password.as_deref().unwrap(),
+            connection.private_key_data.as_deref().unwrap(),
+            connection.passphrase.as_deref().unwrap(),
+            connection
+                .jump_host
+                .as_ref()
+                .unwrap()
+                .password
+                .as_deref()
+                .unwrap(),
+            connection
+                .jump_host
+                .as_ref()
+                .unwrap()
+                .private_key_data
+                .as_deref()
+                .unwrap(),
+            connection
+                .jump_host
+                .as_ref()
+                .unwrap()
+                .passphrase
+                .as_deref()
+                .unwrap(),
+        );
+        let redacted = redact(raw, &secrets);
+
+        assert_eq!(
+            redacted,
+            "[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED]"
+        );
+        for secret in secrets {
+            assert!(!redacted.contains(&secret));
+        }
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_runbook_step() {
-        let host =
-            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
-            .ok()
-            .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or(22222);
-        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-            .unwrap_or_else(|_| "termbridge".to_string());
-        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-            .unwrap_or_else(|_| "termbridge-e2e".to_string());
-        let connection = RemoteConnectionRequest {
-            host,
-            port,
-            username,
-            auth_method: AuthMethod::Password,
-            password: Some(password),
-            keychain_key_id: None,
-            private_key_data: None,
-            passphrase: None,
-            jump_host: None,
-        };
-        let (_known_hosts_temp, known_hosts_path) =
-            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
-        let target = open_runbook_session(&connection, &known_hosts_path)
-            .expect("authenticate isolated SSH with the trusted host key");
+        let connection = isolated_connection();
+        let (_known_hosts_temp, target) = open_isolated_session(&connection);
         let expected = RunbookExpectedResult {
             exit_code: 0,
             stdout_contains: vec!["TERMBRIDGE_RUNBOOK_OK".to_string()],
@@ -1542,37 +1757,170 @@ mod tests {
             &AtomicBool::new(false),
             Instant::now() + Duration::from_secs(10),
         );
-        assert!(matches!(
-            outcome,
+        match outcome {
             ExecutionOutcome::Finished {
-                expected_matched: true,
-                ..
+                exit_code,
+                expected_matched,
+                stdout,
+                stderr,
+            } => {
+                assert_eq!(exit_code, 0);
+                assert!(expected_matched);
+                assert_eq!(stdout, "TERMBRIDGE_RUNBOOK_OK");
+                assert!(stderr.is_empty());
             }
+            _ => panic!("isolated success command did not finish"),
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_end_to_end_runbook_nonzero_exit_and_expected_mismatch() {
+        let connection = isolated_connection();
+        let (_known_hosts_temp, target) = open_isolated_session(&connection);
+        let nonzero = execute_channel(
+            &target.target,
+            "sh -c 'printf TERMBRIDGE_NONZERO; printf TERMBRIDGE_STDERR >&2; exit 7'",
+            &RunbookExpectedResult {
+                exit_code: 7,
+                stdout_contains: vec!["TERMBRIDGE_NONZERO".to_string()],
+            },
+            &AtomicBool::new(false),
+            Instant::now() + Duration::from_secs(10),
+        );
+        assert!(matches!(
+            nonzero,
+            ExecutionOutcome::Finished {
+                exit_code: 7,
+                expected_matched: true,
+                ref stdout,
+                ref stderr,
+            } if stdout == "TERMBRIDGE_NONZERO" && stderr == "TERMBRIDGE_STDERR"
+        ));
+
+        let (_known_hosts_temp, target) = open_isolated_session(&connection);
+        let mismatch = execute_channel(
+            &target.target,
+            "printf TERMBRIDGE_ACTUAL",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: vec!["TERMBRIDGE_REVIEWED_EXPECTATION".to_string()],
+            },
+            &AtomicBool::new(false),
+            Instant::now() + Duration::from_secs(10),
+        );
+        assert!(matches!(
+            mismatch,
+            ExecutionOutcome::Finished {
+                exit_code: 0,
+                expected_matched: false,
+                ref stdout,
+                ..
+            } if stdout == "TERMBRIDGE_ACTUAL"
         ));
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
-    fn isolated_ssh_sftp_end_to_end_multi_host_runbook_output_isolation() {
-        let connection = RemoteConnectionRequest {
-            host: std::env::var("TERMBRIDGE_E2E_SSH_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".to_string()),
-            port: std::env::var("TERMBRIDGE_E2E_SSH_PORT")
-                .ok()
-                .and_then(|value| value.parse::<u16>().ok())
-                .unwrap_or(22222),
-            username: std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-                .unwrap_or_else(|_| "termbridge".to_string()),
-            auth_method: AuthMethod::Password,
-            password: Some(
-                std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-                    .unwrap_or_else(|_| "termbridge-e2e".to_string()),
-            ),
-            keychain_key_id: None,
-            private_key_data: None,
-            passphrase: None,
-            jump_host: None,
+    fn isolated_ssh_sftp_end_to_end_runbook_cancel_and_timeout() {
+        let connection = isolated_connection();
+        let (_known_hosts_temp, target) = open_isolated_session(&connection);
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_worker = Arc::clone(&cancel_flag);
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            cancel_worker.store(true, Ordering::SeqCst);
+        });
+        let cancelled = execute_channel(
+            &target.target,
+            "sleep 5",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: Vec::new(),
+            },
+            &cancel_flag,
+            Instant::now() + Duration::from_secs(10),
+        );
+        canceller
+            .join()
+            .expect("join isolated cancellation trigger");
+        assert!(matches!(cancelled, ExecutionOutcome::Cancelled));
+
+        let (_known_hosts_temp, target) = open_isolated_session(&connection);
+        let timed_out = execute_channel(
+            &target.target,
+            "sleep 5",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: Vec::new(),
+            },
+            &AtomicBool::new(false),
+            Instant::now() + Duration::from_millis(150),
+        );
+        assert!(matches!(timed_out, ExecutionOutcome::TimedOut));
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_end_to_end_runbook_oversized_output_fails() {
+        let connection = isolated_connection();
+        let (_known_hosts_temp, target) = open_isolated_session(&connection);
+        let outcome = execute_channel(
+            &target.target,
+            "head -c 65537 /dev/zero",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: Vec::new(),
+            },
+            &AtomicBool::new(false),
+            Instant::now() + Duration::from_secs(10),
+        );
+        assert!(matches!(
+            outcome,
+            ExecutionOutcome::Failed(ref error)
+                if error == "runbook command output exceeded the safety limit"
+        ));
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_end_to_end_runbook_secret_output_is_redacted() {
+        const SECRET: &str = "TERMBRIDGE_REDACT_ME";
+        let connection = isolated_connection();
+        let (_known_hosts_temp, target) = open_isolated_session(&connection);
+        let outcome = execute_channel(
+            &target.target,
+            "sh -c 'printf TERMBRIDGE_REDACT_ME; printf TERMBRIDGE_REDACT_ME >&2'",
+            &RunbookExpectedResult {
+                exit_code: 0,
+                stdout_contains: vec![SECRET.to_string()],
+            },
+            &AtomicBool::new(false),
+            Instant::now() + Duration::from_secs(10),
+        );
+        let ExecutionOutcome::Finished {
+            expected_matched,
+            stdout,
+            stderr,
+            ..
+        } = outcome
+        else {
+            panic!("isolated secret echo command did not finish");
         };
+        assert!(expected_matched);
+
+        let secrets = vec![SECRET.to_string()];
+        let stdout = redact(stdout, &secrets);
+        let stderr = redact(stderr, &secrets);
+        assert_eq!(stdout, "[REDACTED]");
+        assert_eq!(stderr, "[REDACTED]");
+        assert!(!stdout.contains(SECRET) && !stderr.contains(SECRET));
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_end_to_end_multi_host_runbook_output_isolation() {
+        let connection = isolated_connection();
         let (_known_hosts_temp, known_hosts_path) =
             crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
         let handles = ["TERMBRIDGE_HOST_ALPHA", "TERMBRIDGE_HOST_BRAVO"].map(|marker| {

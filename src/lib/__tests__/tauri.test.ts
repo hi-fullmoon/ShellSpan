@@ -19,7 +19,9 @@ vi.mock('@/lib/logger', () => ({
 import {
   buildRemoteConnectionRequest,
   buildSessionCreateRequest,
+  invokeCancelRunbookStep,
   invokeCancelRemoteFileRead,
+  invokeExecuteRunbookStep,
   invokeStoreKeyCredential,
   invokeListKeyCredentials,
   invokeListRemoteDirectory,
@@ -29,6 +31,10 @@ import {
   invokeTrustHost,
 } from '@/lib/tauri';
 import type { ConnectionProfile } from '@/types';
+import type {
+  RunbookStepExecutionRequest,
+  RunbookStepExecutionResult,
+} from '@/types/runbook';
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -246,6 +252,84 @@ describe('connection request serialization', () => {
         authMethod: 'password',
         password: 'secret',
       },
+    });
+  });
+});
+
+describe('runbook execution IPC contract', () => {
+  const request: RunbookStepExecutionRequest = {
+    operationId: 'runbook:step-1',
+    runId: 'runbook-run:1',
+    sourceDigest: 'fnv1a-12345678',
+    runbookText: '{"schemaVersion":1}',
+    itemId: 'check',
+    itemKind: 'precheck',
+    profileId: 'profile-1',
+    authorized: true,
+    approvedRisk: 'readOnly',
+    variableValues: { SERVICE: 'nginx' },
+    evidenceReferences: [{ operationId: 'preflight-1', kind: 'connectionPreflight' }],
+    timeoutMs: 10_000,
+    connection: {
+      host: 'server.example.com',
+      port: 22,
+      username: 'operator',
+      authMethod: 'password',
+      password: 'target-password',
+      jumpHost: {
+        host: 'jump.example.com',
+        port: 2222,
+        username: 'jump-operator',
+        authMethod: 'password',
+        password: 'jump-password',
+      },
+    },
+  };
+
+  it('passes the reviewed request under the native request envelope and returns the result unchanged', async () => {
+    const result: RunbookStepExecutionResult = {
+      operationId: request.operationId,
+      runId: request.runId,
+      runbookId: 'baseline-runbook',
+      sourceDigest: request.sourceDigest,
+      itemId: request.itemId,
+      itemKind: request.itemKind,
+      profileId: request.profileId,
+      status: 'success',
+      risk: 'readOnly',
+      commandPreview: 'uname -s',
+      startedAt: 1_000,
+      completedAt: 1_250,
+      source: {
+        kind: 'sshRunbook',
+        profileId: request.profileId,
+        host: request.connection.host,
+        port: request.connection.port,
+        username: request.connection.username,
+      },
+      exitCode: 0,
+      expectedMatched: true,
+      stdout: 'Linux\n',
+    };
+    invokeMock.mockResolvedValueOnce(result);
+
+    await expect(invokeExecuteRunbookStep(request, {
+      taskId: request.runId,
+      commandPreview: result.commandPreview,
+    })).resolves.toBe(result);
+
+    expect(invokeMock).toHaveBeenCalledOnce();
+    expect(invokeMock).toHaveBeenCalledWith('execute_runbook_step', { request });
+  });
+
+  it('sends cancellation as the existing operation-id-only command', async () => {
+    invokeMock.mockResolvedValueOnce(undefined);
+
+    await invokeCancelRunbookStep(request.operationId);
+
+    expect(invokeMock).toHaveBeenCalledOnce();
+    expect(invokeMock).toHaveBeenCalledWith('cancel_runbook_step', {
+      operationId: request.operationId,
     });
   });
 });

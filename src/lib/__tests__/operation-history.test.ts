@@ -1,10 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
+}));
+
 import {
   groupOperationHistory,
   operationHistoryTestApi,
+  recordInvocationFinished,
   recordInvocationStarted,
 } from '@/lib/operation-history';
 import type { OperationHistoryEvent } from '@/types/operation-history';
+
+afterEach(() => {
+  invokeMock.mockReset();
+  delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+});
 
 describe('operation history IPC boundary', () => {
   it('excludes interactive terminal input and retains only safe transfer metadata', async () => {
@@ -136,6 +149,133 @@ describe('operation history IPC boundary', () => {
       },
     }, 'fallback', { commandPreview: keychainPreview });
     expect(keychainContext?.commandPreview).toBe(keychainPreview);
+  });
+
+  it('records the frozen runbook start, approval, completion, and cancellation event sequences', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    invokeMock.mockResolvedValue(undefined);
+
+    const commandPreview = "curl --password '<keychain://profile/password>' example.test";
+    const context = await recordInvocationStarted('execute_runbook_step', {
+      request: {
+        operationId: 'step-events-1',
+        runId: 'run-events-1',
+        profileId: 'p1',
+        itemId: 'authenticated-check',
+        approvedRisk: 'stateChange',
+        authorized: true,
+        runbookText: 'raw runbook must not be retained',
+        variableValues: { PASSWORD: 'top-secret' },
+        connection: {
+          profileId: 'p1',
+          host: 'a.test',
+          port: 22,
+          username: 'alice',
+          password: 'top-secret',
+        },
+      },
+    }, 'fallback', { commandPreview });
+    await recordInvocationFinished(context, {
+      operationId: 'step-events-1',
+      runId: 'run-events-1',
+      profileId: 'p1',
+      status: 'success',
+      risk: 'stateChange',
+      commandPreview,
+      completedAt: 1_250,
+      exitCode: 7,
+      stdout: 'raw output must not be retained',
+      source: { host: 'a.test', port: 22, username: 'alice' },
+    });
+
+    const executionEvents = invokeMock.mock.calls.map(([, args]) => args.request);
+    expect(executionEvents.map((event) => [event.eventKind, event.status])).toEqual([
+      ['started', 'running'],
+      ['approved', 'running'],
+      ['completed', 'succeeded'],
+    ]);
+    expect(executionEvents[0]).toMatchObject({
+      taskId: 'run-events-1',
+      operationId: 'step-events-1',
+      category: 'runbook',
+      action: 'executeRunbookStep',
+      risk: 'stateChange',
+      subjectId: 'authenticated-check',
+      commandPreview,
+      targets: [{
+        kind: 'remote',
+        profileId: 'p1',
+        host: 'a.test',
+        port: 22,
+        username: 'alice',
+      }],
+    });
+    expect(executionEvents[1].evidence).toEqual([
+      expect.objectContaining({ operationId: 'step-events-1', kind: 'approval' }),
+    ]);
+    expect(executionEvents[2]).toMatchObject({
+      occurredAt: 1_250,
+      exitCode: 7,
+      commandPreview,
+    });
+    const serializedEvents = JSON.stringify(executionEvents);
+    expect(serializedEvents).not.toContain('top-secret');
+    expect(serializedEvents).not.toContain('raw runbook must not be retained');
+    expect(serializedEvents).not.toContain('raw output must not be retained');
+
+    invokeMock.mockClear();
+    const cancellation = await recordInvocationStarted('cancel_runbook_step', {
+      operationId: 'step-events-1',
+    }, 'fallback');
+    await recordInvocationFinished(cancellation, undefined);
+
+    const cancellationEvents = invokeMock.mock.calls.map(([, args]) => args.request);
+    expect(cancellationEvents.map((event) => [event.eventKind, event.status])).toEqual([
+      ['cancelRequested', 'cancelling'],
+      ['completed', 'cancelling'],
+    ]);
+    expect(cancellationEvents[0]).toMatchObject({
+      taskId: 'step-events-1',
+      operationId: 'step-events-1',
+      category: 'runbook',
+      action: 'executeRunbookStep',
+      risk: 'readOnly',
+    });
+  });
+
+  it('maps every current runbook terminal result status into operation history', async () => {
+    const context = await recordInvocationStarted('execute_runbook_step', {
+      request: {
+        operationId: 'step-status-1',
+        runId: 'run-status-1',
+        profileId: 'p1',
+        itemId: 'check',
+        approvedRisk: 'readOnly',
+        authorized: true,
+        connection: { profileId: 'p1', host: 'a.test', port: 22, username: 'alice' },
+      },
+    }, 'fallback');
+    const result = {
+      operationId: 'step-status-1',
+      runId: 'run-status-1',
+      profileId: 'p1',
+      risk: 'readOnly',
+      source: { host: 'a.test', port: 22, username: 'alice' },
+    };
+
+    expect(operationHistoryTestApi.statusFromResult(context!, { ...result, status: 'success' }))
+      .toBe('succeeded');
+    expect(operationHistoryTestApi.statusFromResult(context!, { ...result, status: 'failed' }))
+      .toBe('failed');
+    expect(operationHistoryTestApi.statusFromResult(context!, { ...result, status: 'cancelled' }))
+      .toBe('cancelled');
+    expect(operationHistoryTestApi.statusFromResult(context!, { ...result, status: 'timedOut' }))
+      .toBe('timedOut');
+    expect(operationHistoryTestApi.statusFromResult(context!, { ...result, status: 'unauthorized' }))
+      .toBe('unauthorized');
   });
 
   it('makes cancellation, timeout, stale evidence, and target changes first-class errors', () => {
