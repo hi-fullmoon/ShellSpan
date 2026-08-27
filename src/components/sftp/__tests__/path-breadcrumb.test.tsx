@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { PathBreadcrumb } from '../path-breadcrumb';
 
@@ -73,8 +74,8 @@ describe('PathBreadcrumb', () => {
     const { container } = render(
       <PathBreadcrumb
         path="C:/Users/tester"
+        pathKind="local"
         onNavigate={onNavigate}
-        normalizeInputPath
       />,
     );
 
@@ -98,6 +99,34 @@ describe('PathBreadcrumb', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     expect(onNavigate).toHaveBeenCalledWith('/home/name\\with\\slashes');
+  });
+
+  it('preserves backslashes when rendering and navigating remote segments', () => {
+    const onNavigate = vi.fn();
+    render(
+      <PathBreadcrumb
+        path={'/home/name\\with\\slashes/child'}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const segment = screen.getByRole('button', { name: 'name\\with\\slashes' });
+    expect(screen.queryByRole('button', { name: 'with' })).not.toBeInTheDocument();
+    fireEvent.click(segment);
+
+    expect(onNavigate).toHaveBeenCalledWith('/home/name\\with\\slashes');
+  });
+
+  it('keeps double-click editing on the breadcrumb background', async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<PathBreadcrumb path="/home/user" onNavigate={onNavigate} />);
+
+    await user.dblClick(screen.getByRole('button', { name: 'home' }));
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith('/home');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
   it('matches the input line height to the displayed breadcrumb text', () => {
@@ -142,7 +171,7 @@ describe('PathBreadcrumb', () => {
     expect(screen.queryByRole('button', { name: 'a' })).not.toBeInTheDocument();
   });
 
-  it('shows collapsed path segments on hover and lets users navigate to them', async () => {
+  it('opens collapsed path segments as a menu and navigates to them', async () => {
     const onNavigate = vi.fn();
     const { container } = render(<PathBreadcrumb path="/a/b/c/d" onNavigate={onNavigate} />);
     const div = container.firstChild as HTMLDivElement;
@@ -156,12 +185,12 @@ describe('PathBreadcrumb', () => {
     });
 
     const ellipsis = screen.getByRole('button', { name: 'sftp.breadcrumb.showHiddenSegments' });
-    fireEvent.mouseEnter(ellipsis);
+    fireEvent.click(ellipsis);
 
-    const hiddenSegment = await screen.findByRole('button', { name: 'b' });
+    const hiddenSegment = await screen.findByRole('menuitem', { name: 'b' });
     expect(hiddenSegment).not.toHaveAttribute('title');
-    expect(screen.getByRole('button', { name: 'a' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'c' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'a' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'c' })).toBeInTheDocument();
 
     fireEvent.click(hiddenSegment);
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/a/b'));
