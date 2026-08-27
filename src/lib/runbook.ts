@@ -231,11 +231,18 @@ function validateDeclaredRisk(command: string, declared: RunbookRisk, field: str
         { field: `${field}.command` },
       );
     }
-    const program = normalized.trim().split(/\s+/, 1)[0];
+    const parts = normalized.trim().split(/\s+/);
+    const program = parts[0];
+    if (program === 'sudo') {
+      if (parts.length !== 3 || parts[1] !== 'nginx' || parts[2] !== '-t') {
+        fail('readOnlyCommand', `${field}.command is not an approved readOnly sudo command`, { field: `${field}.command` });
+      }
+      return;
+    }
     if (!READ_ONLY_PROGRAMS.has(program)) {
       fail('readOnlyCommand', `${field}.command is not in the readOnly command set`, { field: `${field}.command` });
     }
-    validateReadOnlyArguments(program, normalized.trim().split(/\s+/).slice(1), field);
+    validateReadOnlyArguments(program, parts.slice(1), field);
   }
 }
 
@@ -660,8 +667,15 @@ export const RUNBOOK_EXAMPLE = `{
   "prechecks": [
     {
       "id": "service-status",
-      "description": "Confirm the service currently exists.",
+      "description": "Confirm the nginx service is currently running.",
       "command": "systemctl status {{SERVICE}}",
+      "expected": { "exitCode": 0 },
+      "timeoutSeconds": 15
+    },
+    {
+      "id": "validate-nginx-config",
+      "description": "Validate nginx configuration syntax and referenced files.",
+      "command": "sudo nginx -t",
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 15
     }
@@ -669,13 +683,23 @@ export const RUNBOOK_EXAMPLE = `{
   "steps": [
     {
       "id": "reload-service",
-      "description": "Reload the validated service configuration.",
+      "description": "Reload the validated nginx configuration only if a reviewed change is still pending.",
       "command": "sudo systemctl reload {{SERVICE}}",
       "risk": "stateChange",
       "impact": "Reloads the selected service without stopping it.",
       "rollback": "If the reload fails, keep the current process running and restore the previous validated configuration before retrying.",
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 30,
+      "safeToRetry": true
+    },
+    {
+      "id": "verify-service-active",
+      "description": "Confirm nginx remains active after the reload.",
+      "command": "systemctl is-active {{SERVICE}}",
+      "risk": "readOnly",
+      "impact": "Collects the post-reload service state without changing it.",
+      "expected": { "exitCode": 0, "stdoutContains": ["active"] },
+      "timeoutSeconds": 15,
       "safeToRetry": true
     }
   ]
@@ -698,8 +722,15 @@ export const RUNBOOK_EXAMPLE_ZH_CN = `{
   "prechecks": [
     {
       "id": "service-status",
-      "description": "确认目标服务当前存在。",
+      "description": "确认 nginx 服务当前正在运行。",
       "command": "systemctl status {{SERVICE}}",
+      "expected": { "exitCode": 0 },
+      "timeoutSeconds": 15
+    },
+    {
+      "id": "validate-nginx-config",
+      "description": "验证 nginx 配置语法及其引用文件。",
+      "command": "sudo nginx -t",
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 15
     }
@@ -707,13 +738,23 @@ export const RUNBOOK_EXAMPLE_ZH_CN = `{
   "steps": [
     {
       "id": "reload-service",
-      "description": "重载已验证的服务配置。",
+      "description": "确认仍有配置变更待生效后，重载已验证的 nginx 配置。",
       "command": "sudo systemctl reload {{SERVICE}}",
       "risk": "stateChange",
       "impact": "重载所选服务，不停止当前进程。",
       "rollback": "若重载失败，保持当前进程运行；重试前恢复上一份已验证的配置。",
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 30,
+      "safeToRetry": true
+    },
+    {
+      "id": "verify-service-active",
+      "description": "确认重载后 nginx 仍处于活动状态。",
+      "command": "systemctl is-active {{SERVICE}}",
+      "risk": "readOnly",
+      "impact": "只读采集重载后的服务状态，不修改系统。",
+      "expected": { "exitCode": 0, "stdoutContains": ["active"] },
+      "timeoutSeconds": 15,
       "safeToRetry": true
     }
   ]
