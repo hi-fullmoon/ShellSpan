@@ -6,6 +6,40 @@
   "agentRoadmapSource": "ROADMAP.md",
   "p0DesignSource": "docs/ai-agent-p0-execution-foundation-design.md",
   "p1DesignSource": "docs/ai-agent-p1-readonly-dynamic-agent-design.md",
+  "deploymentRolloutPhase4": {
+    "status": "implemented",
+    "finding": "显式有序 profile IDs、canaryRolling、逐批人工审批、健康/失败阈值熔断、单主机执行器复用、持久化重启封存与新 review 恢复已实现；Windows GNU Rust 编译门禁在 openssl-sys 选择 MSWin32 Perl 时按已知环境限制失败，未提交 workaround，因此不标记 verified。",
+    "securityInvariants": [
+      "拒绝 tag/动态发现、重复 profile/主机、顺序漂移、空批次和跨环境目标。",
+      "rollout/review/plan/batch 与逐目标 single-host review/plan/target identity 全量绑定。",
+      "协调器不生成 Shell/SFTP、不共享或持久化凭证、不自动或递归回滚。",
+      "重启仅封存 running 主机；notStarted 不执行，rollout 进入 recoveryRequired 且不自动续跑。",
+      "恢复必须新 review，并保持文档、策略、批次摘要、目标顺序/身份；succeeded 主机不能重复部署。"
+    ],
+    "evidence": [
+      "protocol/runbook/v2/deployment-rollout.schema.json",
+      "src/types/deployment-rollout.ts",
+      "src/lib/deployment-rollout.ts",
+      "src/lib/tauri.ts",
+      "src-tauri/src/deployment_rollout.rs",
+      "src-tauri/src/deployment_execution.rs",
+      "src-tauri/src/db.rs",
+      "docs/deployment-runbook-v2.md",
+      "docs/adr/deployment-rollout-coordination.md"
+    ],
+    "tests": [
+      "tests/fixtures/deployment-runbook/v2/multi-host-rollout.json",
+      "src/lib/__tests__/deployment-rollout.test.ts",
+      "src/lib/__tests__/tauri.test.ts",
+      "src-tauri/src/deployment_rollout.rs"
+    ],
+    "deferred": [
+      "traffic routing and load-balancer integration",
+      "dynamic discovery or tag-derived deployment targets",
+      "unattended or recursive rollback",
+      "dedicated deployment UI and templates"
+    ]
+  },
   "p0ExecutionFoundation": {
     "phase": "P0",
     "status": "implemented",

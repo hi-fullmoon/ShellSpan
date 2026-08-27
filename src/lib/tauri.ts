@@ -102,6 +102,19 @@ import type {
 } from '@/types/deployment-runbook';
 import { requireDeploymentExecutionResultIdentity } from '@/lib/deployment-execution';
 import { requireRollbackExecutionResultIdentity } from '@/lib/rollback-execution';
+import type {
+  DeploymentRolloutApproveBatchRequestV2,
+  DeploymentRolloutBatchExecutionResultV2,
+  DeploymentRolloutCancelRequestV2,
+  DeploymentRolloutDetailV2,
+  DeploymentRolloutListRequestV2,
+  DeploymentRolloutRecoverRequestV2,
+  DeploymentRolloutReviewRequestV2,
+  DeploymentRolloutReviewV2,
+  DeploymentRolloutStartRequestV2,
+  DeploymentRolloutSummaryV2,
+} from '@/types/deployment-rollout';
+import { requireDeploymentRolloutBatchResultIdentity } from '@/lib/deployment-rollout';
 
 const logger = createLogger('ipc');
 const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
@@ -1032,6 +1045,62 @@ export async function invokeReviewDeploymentReleaseCleanup(
     'review_deployment_release_cleanup',
     { request },
   );
+}
+
+export async function invokeReviewDeploymentRollout(
+  request: DeploymentRolloutReviewRequestV2,
+): Promise<DeploymentRolloutReviewV2> {
+  return invokeLogged<DeploymentRolloutReviewV2>('review_deployment_rollout', { request });
+}
+
+export async function invokeStartDeploymentRollout(
+  request: DeploymentRolloutStartRequestV2,
+  review: DeploymentRolloutReviewV2,
+): Promise<DeploymentRolloutBatchExecutionResultV2> {
+  const result = await invokeLogged<DeploymentRolloutBatchExecutionResultV2>(
+    'start_deployment_rollout',
+    { request },
+  );
+  return requireDeploymentRolloutBatchResultIdentity(review, result);
+}
+
+export async function invokeApproveNextDeploymentRolloutBatch(
+  request: DeploymentRolloutApproveBatchRequestV2,
+  review: DeploymentRolloutReviewV2,
+): Promise<DeploymentRolloutBatchExecutionResultV2> {
+  const result = await invokeLogged<DeploymentRolloutBatchExecutionResultV2>(
+    'approve_next_deployment_rollout_batch',
+    { request },
+  );
+  return requireDeploymentRolloutBatchResultIdentity(review, result);
+}
+
+export async function invokeCancelDeploymentRollout(
+  request: DeploymentRolloutCancelRequestV2,
+): Promise<void> {
+  return invokeLogged('cancel_deployment_rollout', { request });
+}
+
+export async function invokeListDeploymentRollouts(
+  request: DeploymentRolloutListRequestV2 = {},
+): Promise<DeploymentRolloutSummaryV2[]> {
+  return invokeLogged<DeploymentRolloutSummaryV2[]>('list_deployment_rollouts', { request });
+}
+
+export async function invokeGetDeploymentRollout(
+  rolloutId: string,
+): Promise<DeploymentRolloutDetailV2 | undefined> {
+  const result = await invokeLogged<DeploymentRolloutDetailV2 | null>(
+    'get_deployment_rollout',
+    { rolloutId },
+  );
+  return result ?? undefined;
+}
+
+export async function invokeRecoverDeploymentRollout(
+  request: DeploymentRolloutRecoverRequestV2,
+): Promise<DeploymentRolloutReviewV2> {
+  return invokeLogged<DeploymentRolloutReviewV2>('recover_deployment_rollout', { request });
 }
 
 export async function invokeOpenRunbookFile(): Promise<RunbookFile | null> {

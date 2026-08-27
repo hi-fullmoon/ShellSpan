@@ -26,10 +26,17 @@ import {
   invokeCancelRunbookStep,
   invokeCancelDeployment,
   invokeCancelRollback,
+  invokeCancelDeploymentRollout,
+  invokeApproveNextDeploymentRolloutBatch,
   invokeExecuteDeployment,
   invokeExecuteRollback,
   invokeReviewDeploymentExecution,
   invokeReviewRollbackExecution,
+  invokeGetDeploymentRollout,
+  invokeListDeploymentRollouts,
+  invokeRecoverDeploymentRollout,
+  invokeReviewDeploymentRollout,
+  invokeStartDeploymentRollout,
   invokeCancelRemoteFileRead,
   invokeExecuteRunbookStep,
   invokeStoreKeyCredential,
@@ -56,6 +63,10 @@ import type {
   RollbackExecutionReviewRequestV2,
   RollbackExecutionReviewV2,
 } from '@/types/deployment-runbook';
+import type {
+  DeploymentRolloutBatchExecutionResultV2,
+  DeploymentRolloutReviewV2,
+} from '@/types/deployment-rollout';
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -631,5 +642,80 @@ describe('Deployment Runbook v2 separate rollback IPC contract', () => {
       reactivation: { ...result.reactivation, currentRelease: '/srv/app/releases/release-3' },
     });
     await expect(invokeExecuteRollback(request, review)).rejects.toThrow(/separate review/);
+  });
+});
+
+describe('Deployment rollout v2 narrow IPC contract', () => {
+  const rolloutReview = {
+    schemaVersion: 2,
+    rolloutId: 'rollout:ipc',
+    reviewId: 'deployment-rollout-review:ipc',
+    planDigest: 'sha256-v1:rollout-plan',
+    batches: [{
+      batchIndex: 0,
+      batchDigest: 'sha256-v1:batch-0',
+      targetIndexes: [0],
+      profileIds: ['profile-0'],
+    }],
+    targets: [{ targetIndex: 0, operationId: 'deployment:target-0' }],
+  } as unknown as DeploymentRolloutReviewV2;
+  const batchResult = {
+    schemaVersion: 2,
+    rolloutId: rolloutReview.rolloutId,
+    rolloutReviewId: rolloutReview.reviewId,
+    rolloutPlanDigest: rolloutReview.planDigest,
+    batchIndex: 0,
+    batchDigest: rolloutReview.batches[0]!.batchDigest,
+    phase: 'awaitingBatchApproval',
+    circuitOpen: false,
+    targetResults: [],
+    detail: {
+      rolloutId: rolloutReview.rolloutId,
+      reviewId: rolloutReview.reviewId,
+      planDigest: rolloutReview.planDigest,
+    },
+  } as unknown as DeploymentRolloutBatchExecutionResultV2;
+
+  it('uses only review/start/approve/cancel/list/get/recover envelopes', async () => {
+    const reviewRequest = { rolloutId: rolloutReview.rolloutId } as never;
+    const batchRequest = { rolloutId: rolloutReview.rolloutId } as never;
+    const cancelRequest = {
+      rolloutId: rolloutReview.rolloutId,
+      reviewId: rolloutReview.reviewId,
+      planDigest: rolloutReview.planDigest,
+    };
+    const recoverRequest = { sourceReviewId: rolloutReview.reviewId } as never;
+    invokeMock
+      .mockResolvedValueOnce(rolloutReview)
+      .mockResolvedValueOnce(batchResult)
+      .mockResolvedValueOnce(batchResult)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(batchResult.detail)
+      .mockResolvedValueOnce(rolloutReview);
+
+    await invokeReviewDeploymentRollout(reviewRequest);
+    await invokeStartDeploymentRollout(batchRequest, rolloutReview);
+    await invokeApproveNextDeploymentRolloutBatch(batchRequest, rolloutReview);
+    await invokeCancelDeploymentRollout(cancelRequest);
+    await invokeListDeploymentRollouts();
+    await invokeGetDeploymentRollout(rolloutReview.rolloutId);
+    await invokeRecoverDeploymentRollout(recoverRequest);
+
+    expect(invokeMock.mock.calls.map(([command]) => command).slice(-7)).toEqual([
+      'review_deployment_rollout',
+      'start_deployment_rollout',
+      'approve_next_deployment_rollout_batch',
+      'cancel_deployment_rollout',
+      'list_deployment_rollouts',
+      'get_deployment_rollout',
+      'recover_deployment_rollout',
+    ]);
+  });
+
+  it('rejects a late cross-batch result before exposing it to callers', async () => {
+    invokeMock.mockResolvedValueOnce({ ...batchResult, batchDigest: 'sha256-v1:late' });
+    await expect(invokeStartDeploymentRollout({} as never, rolloutReview))
+      .rejects.toThrow(/result identity/);
   });
 });

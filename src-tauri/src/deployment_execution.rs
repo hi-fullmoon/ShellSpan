@@ -140,11 +140,11 @@ impl DeploymentExecutionPolicyV2 {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentExecutionReviewRequestV2 {
-    operation_id: String,
-    runbook_text: String,
-    profile_id: String,
-    connection: RemoteConnectionRequest,
-    policy: DeploymentExecutionPolicyV2,
+    pub(crate) operation_id: String,
+    pub(crate) runbook_text: String,
+    pub(crate) profile_id: String,
+    pub(crate) connection: RemoteConnectionRequest,
+    pub(crate) policy: DeploymentExecutionPolicyV2,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -193,24 +193,24 @@ pub(crate) struct DeploymentExecutionReviewV2 {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentExecutionApprovalV2 {
-    review_id: String,
-    operation_id: String,
-    document_digest: String,
-    plan_digest: String,
-    target_digest: String,
-    approved_risk: RunbookRisk,
-    authorized: bool,
-    destructive_confirmed: bool,
+    pub(crate) review_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) document_digest: String,
+    pub(crate) plan_digest: String,
+    pub(crate) target_digest: String,
+    pub(crate) approved_risk: RunbookRisk,
+    pub(crate) authorized: bool,
+    pub(crate) destructive_confirmed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentExecutionRequestV2 {
-    operation_id: String,
-    runbook_text: String,
-    profile_id: String,
-    connection: RemoteConnectionRequest,
-    approval: DeploymentExecutionApprovalV2,
+    pub(crate) operation_id: String,
+    pub(crate) runbook_text: String,
+    pub(crate) profile_id: String,
+    pub(crate) connection: RemoteConnectionRequest,
+    pub(crate) approval: DeploymentExecutionApprovalV2,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -379,6 +379,10 @@ impl DeploymentExecutionRegistry {
             .ok_or_else(|| "deployment execution was not found".to_string())?;
         flag.store(true, Ordering::SeqCst);
         Ok(())
+    }
+
+    pub(crate) fn cancel_operation(&self, operation_id: &str) -> Result<(), String> {
+        self.cancel(operation_id)
     }
 }
 
@@ -636,9 +640,8 @@ fn review_material(
     ))
 }
 
-#[tauri::command]
-pub(crate) fn review_deployment_execution(
-    database: State<'_, crate::db::Database>,
+pub(crate) fn review_deployment_execution_for_request(
+    database: &crate::db::Database,
     request: DeploymentExecutionReviewRequestV2,
 ) -> Result<DeploymentExecutionReviewV2, String> {
     let (
@@ -691,6 +694,14 @@ pub(crate) fn review_deployment_execution(
         &[(document.release.release_directory.as_str(), "newRelease")],
     )?;
     Ok(review)
+}
+
+#[tauri::command]
+pub(crate) fn review_deployment_execution(
+    database: State<'_, crate::db::Database>,
+    request: DeploymentExecutionReviewRequestV2,
+) -> Result<DeploymentExecutionReviewV2, String> {
+    review_deployment_execution_for_request(&database, request)
 }
 
 struct DeploymentStateMachine {
@@ -2545,14 +2556,14 @@ fn execute_consumed_review(
     machine.result
 }
 
-#[tauri::command]
-pub(crate) fn execute_deployment(
-    app: AppHandle,
-    database: State<'_, crate::db::Database>,
-    credentials: State<'_, CredentialManager>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    registry: State<'_, DeploymentExecutionRegistry>,
-    pool: State<'_, SftpPool>,
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_deployment_for_request(
+    app: &AppHandle,
+    database: &crate::db::Database,
+    credentials: &CredentialManager,
+    cancellations: &ExecutionCancellationRegistry,
+    registry: &DeploymentExecutionRegistry,
+    pool: &SftpPool,
     request: DeploymentExecutionRequestV2,
 ) -> Result<DeploymentExecutionResultV2, String> {
     if !valid_operation_id(&request.operation_id) {
@@ -2572,11 +2583,11 @@ pub(crate) fn execute_deployment(
         cancelled: Arc::clone(&cancelled),
     };
     let result = execute_consumed_review(
-        &app,
-        &database,
-        &credentials,
-        &cancellations,
-        &pool,
+        app,
+        database,
+        credentials,
+        cancellations,
+        pool,
         &consumed.review,
         &request,
         &cancelled,
@@ -2591,6 +2602,27 @@ pub(crate) fn execute_deployment(
         &result,
     )?;
     Ok(result)
+}
+
+#[tauri::command]
+pub(crate) fn execute_deployment(
+    app: AppHandle,
+    database: State<'_, crate::db::Database>,
+    credentials: State<'_, CredentialManager>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
+    registry: State<'_, DeploymentExecutionRegistry>,
+    pool: State<'_, SftpPool>,
+    request: DeploymentExecutionRequestV2,
+) -> Result<DeploymentExecutionResultV2, String> {
+    execute_deployment_for_request(
+        &app,
+        &database,
+        &credentials,
+        &cancellations,
+        &registry,
+        &pool,
+        request,
+    )
 }
 
 #[tauri::command]

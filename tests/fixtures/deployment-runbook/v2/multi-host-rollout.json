@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "profileIds": ["prod-a", "prod-b", "prod-c", "prod-d", "prod-e"],
+  "targets": [
+    { "profileId": "prod-a", "environment": "production", "host": "prod-a.example.test", "port": 22, "username": "deploy", "authMethod": "key" },
+    { "profileId": "prod-b", "environment": "production", "host": "prod-b.example.test", "port": 22, "username": "deploy", "authMethod": "key" },
+    { "profileId": "prod-c", "environment": "production", "host": "prod-c.example.test", "port": 22, "username": "deploy", "authMethod": "key" },
+    { "profileId": "prod-d", "environment": "production", "host": "prod-d.example.test", "port": 22, "username": "deploy", "authMethod": "key" },
+    { "profileId": "prod-e", "environment": "production", "host": "prod-e.example.test", "port": 22, "username": "deploy", "authMethod": "key" }
+  ],
+  "policy": {
+    "strategy": "canaryRolling",
+    "canary": { "mode": "percentage", "value": 20 },
+    "batchSize": 2,
+    "maxParallel": 2,
+    "requireBatchApproval": true,
+    "minHealthyPercent": 50,
+    "maxFailuresPerBatch": 1,
+    "stopPolicy": "pause",
+    "rollbackSuggestion": "successfulTargets"
+  }
+}
