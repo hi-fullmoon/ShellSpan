@@ -402,6 +402,12 @@ fn validate_read_only_command(command: &str) -> Result<(), String> {
     let parts = command.split_whitespace().collect::<Vec<_>>();
     let program = parts.first().copied().unwrap_or_default();
     let args = &parts[1..];
+    if program == "sudo" {
+        if args != ["nginx", "-t"] {
+            return Err("readOnly sudo command is not approved".to_string());
+        }
+        return Ok(());
+    }
     if ![
         "cat",
         "date",
@@ -1512,6 +1518,9 @@ mod tests {
     #[test]
     fn rejects_understated_risk_and_unsafe_prechecks() {
         assert!(parse_document(&valid_text("rm -rf /srv/cache", "stateChange", false)).is_err());
+        let nginx_config_test =
+            valid_text("uname -s", "readOnly", false).replacen("uname -s", "sudo nginx -t", 1);
+        assert!(parse_document(&nginx_config_test).is_ok());
         let unsafe_precheck =
             valid_text("uname -s", "readOnly", false).replacen("uname -s", "rm -rf /tmp/value", 1);
         assert!(parse_document(&unsafe_precheck).is_err());
@@ -1522,6 +1531,9 @@ mod tests {
             "journalctl --rotate -n 10",
             "tail -f /var/log/messages",
             "ss -K dst 127.0.0.1",
+            "sudo nginx -T",
+            "sudo nginx -s reload",
+            "sudo systemctl status nginx",
         ] {
             let text =
                 valid_text("uname -s", "readOnly", false).replacen("uname -s", unsafe_command, 1);

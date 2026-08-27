@@ -33,8 +33,15 @@ The Runbook workspace uses an offline Monaco JSON editor backed by the same v1 s
   "prechecks": [
     {
       "id": "service-status",
-      "description": "Confirm the service exists.",
+      "description": "Confirm the nginx service is running.",
       "command": "systemctl status {{SERVICE}}",
+      "expected": { "exitCode": 0 },
+      "timeoutSeconds": 15
+    },
+    {
+      "id": "validate-nginx-config",
+      "description": "Validate nginx configuration syntax and referenced files.",
+      "command": "sudo nginx -t",
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 15
     }
@@ -42,7 +49,7 @@ The Runbook workspace uses an offline Monaco JSON editor backed by the same v1 s
   "steps": [
     {
       "id": "reload-service",
-      "description": "Reload the service.",
+      "description": "Reload the validated nginx configuration only if a reviewed change is still pending.",
       "command": "sudo systemctl reload {{SERVICE}}",
       "risk": "stateChange",
       "impact": "Reloads the selected unit without stopping it.",
@@ -50,10 +57,22 @@ The Runbook workspace uses an offline Monaco JSON editor backed by the same v1 s
       "expected": { "exitCode": 0 },
       "timeoutSeconds": 30,
       "safeToRetry": true
+    },
+    {
+      "id": "verify-service-active",
+      "description": "Confirm nginx remains active after the reload.",
+      "command": "systemctl is-active {{SERVICE}}",
+      "risk": "readOnly",
+      "impact": "Collects the post-reload service state without changing it.",
+      "expected": { "exitCode": 0, "stdoutContains": ["active"] },
+      "timeoutSeconds": 15,
+      "safeToRetry": true
     }
   ]
 }
 ```
+
+The service-status evidence includes recent unit events on systemd hosts. Review it before approving the reload: if it shows that the intended configuration was already reloaded and no newer reviewed change is pending, reject or skip the redundant action.
 
 `expected.exitCode` is required. `expected.stdoutContains` may contain up to 20 literal evidence fragments; all must match. `rollback` is required for `stateChange` and `destructive` steps. A diagnostic evidence-only Runbook may use an empty `steps` array, but still requires at least one bounded precheck. A precheck failure, expected-result mismatch, cancellation, timeout, approval refusal, connection error, or step failure stops the run without advancing.
 
