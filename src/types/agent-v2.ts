@@ -215,6 +215,98 @@ export interface AgentResourceRefV2 {
   targetDigest: string;
 }
 
+export interface AgentStructuredServiceClaimsV2 {
+  loadState?: string;
+  activeState?: string;
+  subState?: string;
+  configValid?: boolean;
+  listeningPorts?: number[];
+}
+
+export interface AgentStructuredEvidenceV2 {
+  evidenceId: string;
+  runId: string;
+  targetDigest: string;
+  resource: AgentResourceRefV2;
+  observedAt: number;
+  successful: boolean;
+  claims: AgentStructuredServiceClaimsV2;
+  observationDigest: string;
+}
+
+export type AgentTargetCapabilityV2 = 'posixSystemd' | 'unsupported' | 'unknown';
+
+export interface AgentServiceCapabilityEvidenceV2 {
+  evidenceId: string;
+  runId: string;
+  targetDigest: string;
+  resource: AgentResourceRefV2;
+  observedAt: number;
+  successful: boolean;
+  targetCapability: AgentTargetCapabilityV2;
+  supportedActions: ServiceControlActionV2[];
+  validator?: ServiceValidateConfigArgsV2['validator'];
+  reloadMayInterrupt: boolean;
+  capabilityDigest: string;
+}
+
+export interface AgentEvidenceFreshnessPolicyV2 {
+  serviceStatusSeconds: number;
+  configValidationSeconds: number;
+  listenerSeconds: number;
+  targetCapabilitySeconds: number;
+}
+
+export interface AgentEffectivePolicyV2 {
+  mode: AgentPolicyModeV2;
+  policyVersion: string;
+  readOnlyRequiresApproval: boolean;
+  mutationRequiresApproval: true;
+  highImpactRequiresDoubleConfirmation: true;
+}
+
+export type AgentPreconditionErrorCategoryV2 = 'staleEvidence' | 'preconditionFailed';
+
+export type AgentPreconditionFailureReasonV2 =
+  | 'runMismatch'
+  | 'targetMismatch'
+  | 'resourceMismatch'
+  | 'capabilityMissing'
+  | 'capabilityUnsupported'
+  | 'capabilityStale'
+  | 'actionUnsupported'
+  | 'evidenceMissing'
+  | 'evidenceUnknown'
+  | 'evidenceFailed'
+  | 'evidenceStale'
+  | 'evidenceDigestChanged'
+  | 'conflictingClaims'
+  | 'statusEvidenceRequired'
+  | 'configEvidenceRequired'
+  | 'configValidatorMismatch'
+  | 'unitNotLoaded'
+  | 'unitAlreadyActive'
+  | 'unitNotActive'
+  | 'unitNotActiveOrFailed'
+  | 'configInvalid'
+  | 'stopIntentMissing';
+
+export interface AgentPreconditionErrorV2 {
+  category: AgentPreconditionErrorCategoryV2;
+  reason: AgentPreconditionFailureReasonV2;
+}
+
+export interface AgentPreconditionValidationV2 {
+  runId: string;
+  targetDigest: string;
+  resource: AgentResourceRefV2;
+  action: ServiceControlActionV2;
+  capabilityEvidenceId: string;
+  evidenceIds: string[];
+  evidenceSetDigest: string;
+  validatedAt: number;
+}
+
 export type AgentChangeStatusV2 =
   | 'verified'
   | 'unverified'
@@ -676,7 +768,7 @@ export interface AgentP2AdmissionInputV2 {
   p1Status: AgentFoundationStatusV2;
   featureEnabled: boolean;
   providerStrictSchemaCompatible: boolean;
-  targetCapability: 'posixSystemd' | 'unsupported' | 'unknown';
+  targetCapability: AgentTargetCapabilityV2;
   controlledMutationPolicy: 'allowed' | 'denied' | 'unavailable';
   operationHistory: 'writable' | 'readOnly' | 'unavailable';
 }

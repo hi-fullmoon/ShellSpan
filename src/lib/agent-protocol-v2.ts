@@ -351,6 +351,10 @@ function decodeResourceV2(value: unknown, field: string): AgentResourceRefV2 {
   };
 }
 
+export function decodeAgentResourceRefV2(value: unknown): AgentResourceRefV2 {
+  return decodeResourceV2(value, 'resource');
+}
+
 function decodeEvidenceIds(value: unknown, field: string, min = 0): string[] {
   return arrayValue(value, field, 32, min).map((id, index) => (
     identifierValue(id, `${field}[${index}]`)
@@ -1041,6 +1045,10 @@ function decodeRiskV2(value: unknown, field: string): AgentRiskAssessmentV2 {
     policyVersion: identifierValue(risk.policyVersion, `${field}.policyVersion`),
     assessmentDigest: textValue(risk.assessmentDigest, `${field}.assessmentDigest`, 200),
   };
+}
+
+export function decodeAgentRiskAssessmentV2(value: unknown): AgentRiskAssessmentV2 {
+  return decodeRiskV2(value, 'riskAssessment');
 }
 
 function decodeApprovalV2(value: unknown, field = 'pendingApproval'): AgentApprovalSnapshotV2 {
