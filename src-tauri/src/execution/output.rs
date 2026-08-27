@@ -145,10 +145,12 @@ impl BoundedOutputCollector {
         self.push(bytes, false)
     }
 
+    #[cfg(test)]
     pub(crate) fn total_bytes_read(&self) -> u64 {
         self.total_bytes_read
     }
 
+    #[cfg(test)]
     pub(crate) fn hard_limit_exceeded(&self) -> bool {
         self.hard_limit_exceeded
     }

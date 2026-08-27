@@ -512,9 +512,6 @@ fn generic_result_from_outcome(
 }
 
 /// Complete crate-private entry for a reviewed SSH request.
-///
-/// Step 2 exposes this to Rust callers only. The Runbook request/result adapter
-/// is intentionally left for step 3.
 pub(crate) fn execute_reviewed_ssh_command(
     database: &Database,
     credentials: &CredentialManager,

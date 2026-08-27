@@ -187,8 +187,15 @@ describe('operation history IPC boundary', () => {
       commandPreview,
       completedAt: 1_250,
       exitCode: 7,
+      expectedMatched: true,
       stdout: 'raw output must not be retained',
-      source: { host: 'a.test', port: 22, username: 'alice' },
+      source: {
+        kind: 'sshRunbook',
+        profileId: 'p1',
+        host: 'a.test',
+        port: 22,
+        username: 'alice',
+      },
     });
 
     const executionEvents = invokeMock.mock.calls.map(([, args]) => args.request);

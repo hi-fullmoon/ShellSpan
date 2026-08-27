@@ -245,6 +245,29 @@ describe('multi-host Runbook target selection and scheduling', () => {
 });
 
 describe('multi-host Runbook safety and recovery', () => {
+  it('keeps a nonzero exit successful when the Runbook adapter matched reviewed expectations', () => {
+    const expectedNonzero = RUNBOOK.replace(
+      '"expected":{"exitCode":0}',
+      '"expected":{"exitCode":7}',
+    );
+    const scheduled = plan(createTask([profile(1)], 1, 1, expectedNonzero));
+    const adapted = result(scheduled.dispatches[0], 'success', 'expected-nonzero');
+    adapted.exitCode = 7;
+    adapted.expectedMatched = true;
+
+    const task = applyMultiHostRunbookResult(
+      scheduled.task,
+      'profile-1',
+      adapted,
+      1_100,
+    );
+    expect(task.hosts[0]).toMatchObject({ status: 'awaitingApproval', circuitOpen: false });
+    expect(task.hosts[0].run.items[0].evidence).toMatchObject({
+      exitCode: 7,
+      stdout: 'expected-nonzero',
+    });
+  });
+
   it('keeps cancellation and timeout scoped to the exact host operation', () => {
     const profiles = [profile(1), profile(2)];
     const scheduled = plan(createTask(profiles));
