@@ -3548,7 +3548,7 @@ fn run_remote_exec(
         superseded,
         timeout,
         "failed to execute remote lookup command",
-        || channel.exec(command),
+        || crate::execution::start_ssh_exec_channel(&mut channel, command),
     )?;
 
     let mut stderr_stream = channel.stderr();

@@ -24,6 +24,7 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 
 - `planned`：已定义，尚未开始。
 - `in-progress`：正在实现或验证。
+- `implemented`：实现和本地证据已完成，但仍有当前提交的外部平台门禁未闭合，不能视为 `verified`。
 - `blocked`：存在未满足的技术、安全或产品前置条件。
 - `verified`：实现、失败路径、自动化测试和验收场景均已完成。
 - `deferred`：明确不进入当前阶段。
@@ -47,7 +48,8 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 - 当前 Agent 一次性生成完整计划，不能根据真实执行结果动态选择下一步。
 - Agent 状态只存在前端单一 `run`，后端不是运行生命周期的权威来源。
 - AI provider 层只处理文本或结构化计划，没有统一的 provider-neutral 工具调用结果。
-- Runbook 执行入口是 Tauri command 形态，尚未抽成 Agent 与 Runbook 可共同调用的内部执行内核。
+- Runbook 已切换到 crate-private reviewed SSH 执行内核，但 Agent adapter、policy 和 approval 尚未实现，也未注册通用执行 Tauri command。
+- reviewed operation deadline 可先返回稳定终态，但 DNS、TCP、SSH handshake/auth 仍使用连接层阻塞超时；应用崩溃也不会恢复内存中的执行状态。
 - 当前风险模型偏向静态 Runbook，缺少适用于动态 Agent 的多维风险、审批摘要、防重放和策略版本。
 - 没有 Agent 事件序列、快照恢复、运行预算、连续失败限制和后置验证义务。
 - 没有专用 Agent PTY、终端租约、用户接管或交互式密码边界。
@@ -71,8 +73,8 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 
 | 阶段 | 状态 | 时间参考 | 主要产物 | 阶段出口 |
 | --- | --- | --- | --- | --- |
-| P0 执行基础 | planned | 1–2 周 | 共享执行内核、Agent 协议、目标冻结、取消与输出边界 | 不接模型也能安全执行一条受审阅命令 |
-| P1 只读动态 Agent | planned | 2–3 周 | 后端 Agent loop、只读工具、事件时间线、Pause/Stop | CPU 高排查任务可自主完成且无副作用 |
+| P0 执行基础 | implemented | 1–2 周 | 共享执行内核、目标冻结、取消、输出边界与 Exec/PTY ADR | 本地实现/夹具已闭合；等待当前提交 Windows 门禁后才能 verified |
+| P1 只读动态 Agent | blocked | 2–3 周 | Agent 协议、后端 Agent loop、只读工具、事件时间线、Pause/Stop | P0 verified 前不得开始真实 shell.exec 接入 |
 | P2 受控修改 MVP | planned | 2–3 周 | 风险引擎、精确审批、后置验证、审计与安全重试 | 服务启动/配置变更只能在批准后执行并验证 |
 | P3 语义工具与交互 | planned | 2–4 周 | SFTP 工具、原子文件修改、本地执行、专用 Agent PTY | 文件修改可预览/回滚，交互任务可安全接管 |
 | P4 扩展与产品化 | planned | 独立评估 | 多主机、策略模板、历史知识、团队能力 | 单主机模型稳定后再通过专项准入 |
@@ -81,7 +83,7 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 
 ## 6. P0 — 执行基础
 
-**状态：planned**
+**状态：implemented（verification pending external）**
 
 > 详细阶段设计、内核契约、实施顺序与验收矩阵见 `docs/ai-agent-p0-execution-foundation-design.md`。
 
@@ -93,70 +95,60 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 
 #### P0-A：记录关键架构决策
 
-- 新增 ADR：Agent 默认使用独立 SSH Exec，而不是直接写入当前交互 PTY。
+- 已合入 ADR：Agent 默认使用独立 SSH Exec，而不是直接写入当前交互 PTY。
 - 明确独立 Exec 不继承当前终端的 `cd`、alias、shell function、虚拟环境和临时环境变量。
 - 明确专用 Agent PTY 是后续补充能力，不能作为状态修改成功的唯一证据。
 - 明确 Runbook 与 Agent 必须共享执行内核，不能分别实现风险复核或凭证解析。
 - 明确 MVP 只支持单一远程 profile，不支持标签或多主机目标。
 
-建议产物：
+产物：
 
 - `docs/adr/agent-execution-channel.md`
-- `docs/adr/agent-approval-boundary.md`
 
 #### P0-B：抽取共享执行内核
 
-- 从 `src-tauri/src/runbook.rs` 抽取内部 `ReviewedCommandExecutor`。
+- 从 `src-tauri/src/runbook.rs` 抽取 `src-tauri/src/execution/` crate-private 内核。
 - 输入必须包含冻结目标、已验证命令、风险、超时、输出限制、取消 token 和 operation ID。
 - 输出统一包含 stdout、stderr、exit code、开始/结束时间、截断标记、目标身份和结构化错误。
 - 保留现有 known-host、jump-host、keychain、密码提示和 profile 绑定行为。
 - Tauri `execute_runbook_step` 改为调用共享内核，确保现有 Runbook 行为不变。
 - 增加输出 hard cap；达到保留上限后继续 drain，避免远端阻塞，但不继续保存或发送全部输出。
-- 自动模式拒绝后台化命令；文档说明关闭 SSH channel 不保证终止已 daemonize 的远程进程。
+- P0 不引入自动模式；ADR 要求 P1 policy 拒绝后台化命令，并说明关闭 SSH channel 不保证终止已 daemonize 的远程进程。
 
 建议模块：
 
 ```text
 src-tauri/src/execution/
 ├── mod.rs
-├── command.rs
+├── request.rs
+├── result.rs
 ├── target.rs
+├── ssh.rs
 ├── cancellation.rs
 ├── output.rs
 └── redaction.rs
 ```
 
-#### P0-C：定义 Agent 协议
+#### P0-C：冻结目标身份
 
-- 定义 `AgentStartRequest`、`AgentTargetBinding`、`AgentPolicySnapshot`。
-- 定义 provider-neutral `AgentDecision`：`toolCall`、`askUser`、`final`。
-- 定义 `AgentToolCall`、`ToolExecutionResult`、`AgentEvidence`。
-- 定义 `AgentEvent`，所有事件带 `runId`、单调递增 `sequence` 和 `occurredAt`。
-- 定义 Run 与 Tool Call 状态机，禁止任意状态跳转。
-- JSON/Rust/TypeScript 字段使用同一 camelCase 契约，并拒绝未知字段。
-- 版本化协议，例如 `schemaVersion: 1`，为将来升级保留显式迁移入口。
+- reviewed request 记录 profile ID、host、port、username、auth method、jump-host 非秘密身份和版本化摘要。
+- 每次执行前重新读取 profile；profile 删除、目标/jump 变化或身份摘要错配均在网络连接前失败关闭。
+- 当前活动标签不参与目标选择；generic result 返回同一冻结目标身份。
 
-#### P0-D：冻结目标身份
+#### P0-D：取消与输出边界
 
-- Agent 启动时记录 profile ID、host、port、username、auth method 和可用身份摘要。
-- 每次执行前重新读取 profile，并校验冻结身份没有变化。
-- 当前活动标签、当前 AI 对话和执行目标分离；UI 切换不能改变 Agent target。
-- profile 被删除、主机被修改或凭证引用失效时，运行进入 `blocked/failed`，不得自动绑定新 profile。
-- 执行结果必须返回相同的 run ID、tool call ID、profile、host、port 和 username。
+- operation-level registry 拒绝重复 operation ID，取消、超时和迟到结果只有一个终态。
+- stdout/stderr 分离、有界 front/tail 保留、UTF-8 lossy decode、capture truncation 与 combined hard limit 由 Rust 执行。
+- 已知 Runbook/连接秘密在通用结果、错误和 worker panic 路径返回前擦除。
 
-#### P0-E：取消与预算
+### 6.3 实际实现与限制
 
-- 新增 Agent cancellation registry，模型请求和工具执行共享 run-level cancellation token。
-- 支持 tool-level cancellation，避免停止一个工具时误取消不相关运行。
-- 定义硬性预算：最大运行时间、模型轮次、工具调用数、单步超时、单步输出、连续失败数。
-- 所有预算由后端执行，前端设置只能在后端上限内收紧，不能扩大硬限制。
-- 迟到的模型结果和工具结果只能记录为 late/stale，不能改变终态。
-
-### 6.3 前端工作包
-
-- 在 `src/types` 中建立版本化 Agent 协议类型。
-- 在 `src/lib/tauri.ts` 增加执行内核的测试桥接或 Agent 预备接口。
-- 暂不改造 Agent UI，只提供开发诊断日志或测试 harness。
+- Runbook adapter 是 reviewed kernel 当前唯一生产调用方；generic kernel 没有 `#[tauri::command]` 或前端 invoke bridge。
+- Runbook 旧 `open session + channel.exec` 实现已删除；生产 crate 的 SSH `Channel::exec` 传输原语集中在 `execution/ssh.rs`，Remote FS/Health 仅复用该原语执行既有固定用途探测。
+- 双 sshd fixture 已验证 jump-host 的 outer/target 独立 host key、认证、direct-tcpip bridge 与内层 Exec 成功路径。
+- 当前 operation deadline 不会立即中断正在进行的阻塞 DNS/TCP/SSH handshake/auth；worker 会在连接返回后再次观察终态，禁止迟到启动命令。
+- channel 关闭不保证终止 `nohup`、daemonized 或已转交其他服务的远程进程；P1 自动策略必须拒绝后台化结构。
+- cancellation registry 只在内存中；应用崩溃后不恢复 operation，也不能证明脱离 channel 的远程进程已停止。
 
 ### 6.4 测试要求
 
@@ -186,17 +178,28 @@ uname -a
 - 身份错配、超时、取消、输出限制和秘密擦除均有 Rust 自动化测试。
 - 完成 ADR，明确 PTY 与 Exec 的职责边界。
 
+本地实现与 macOS 门禁、双 sshd Docker fixture、前端全量测试、构建和 roadmap audit 已完成。当前提交尚无 Windows runner 实跑结果，因此 P0 保持 `implemented` 而不是 `verified`。第 18 节八项逐条证据见 `docs/ai-agent-p0-execution-foundation-design.md` 与 `docs/roadmap-audit.json`。
+
+P1 准入结论：`blocked`。在当前提交的 Windows Rust/前端门禁通过并把 P0 更新为 `verified` 前，不得接入真实 `shell.exec`，也不得通过既有 `write_session` 向交互 PTY 注入模型输出。
+
 ---
 
 ## 7. P1 — 只读动态 Agent
 
-**状态：planned**
+**状态：blocked（P0 verification gate）**
 
 ### 7.1 目标
 
 让 Agent 在一个冻结的远程主机上自主执行多轮、有界、只读诊断，并基于真实输出调整计划，用户可以查看、暂停、停止和补充要求。
 
 ### 7.2 后端工作包
+
+#### P1-0：Agent 协议与预算（尚未开始）
+
+- 定义 `AgentStartRequest`、`AgentTargetBinding`、`AgentPolicySnapshot`。
+- 定义 provider-neutral `AgentDecision`、`AgentToolCall`、`ToolExecutionResult`、`AgentEvidence` 和版本化 `AgentEvent`。
+- 定义 Run/Tool Call 状态机、run/tool cancellation、最大运行时间、模型轮次、工具调用数、单步输出与连续失败预算。
+- P0 verified 前只保留文档设计，不新增真实 tool adapter、Tauri execution command 或模型执行入口。
 
 #### P1-A：AgentManager 与运行注册表
 

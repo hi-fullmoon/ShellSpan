@@ -23,6 +23,18 @@ use std::time::{Duration, Instant};
 
 pub(crate) const SSH_EXECUTION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
+/// Starts an SSH exec channel without supplying policy or authorization.
+///
+/// The reviewed executor below and the crate's pre-existing fixed-purpose
+/// Remote FS/Health probes are the only production callers. Agent tools must
+/// call [`execute_reviewed_ssh_command`] instead of this transport primitive.
+pub(crate) fn start_ssh_exec_channel(
+    channel: &mut ssh2::Channel,
+    command: &str,
+) -> Result<(), ssh2::Error> {
+    channel.exec(command)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SshExecutionFailure {
     pub(crate) category: ExecutionErrorCategory,
@@ -238,7 +250,7 @@ pub(crate) fn execute_ssh_channel(
             })
         }
     };
-    if let Err(error) = channel.exec(command) {
+    if let Err(error) = start_ssh_exec_channel(&mut channel, command) {
         return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
             category: ExecutionErrorCategory::CommandStartFailed,
             message: format!("failed to start reviewed SSH command: {error}"),

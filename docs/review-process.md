@@ -1,6 +1,8 @@
 # TermBridge 审核机制
 
-本机制把 `ROADMAP.md` 的承诺转换为合并前可执行的证据。路线图是产品方向，`docs/roadmap-audit.json` 是唯一状态台账；没有测试证据的条目不得标记为 `verified`。`roadmapMapping` 必须按原顺序逐字覆盖 NOW、NEXT、LATER 的每个工作项，`phaseExitCriteria` 必须逐字覆盖每个阶段退出条件；增删或近似改写任一侧都会让门禁失败。
+本机制把路线图承诺转换为合并前可执行的证据。`ROADMAP.md` 是当前 AI Agent P0–P4 实施路线图；原 NOW/NEXT/LATER/EXPLORE 产品路线图保存在 `docs/product-roadmap.md`，继续作为既有产品审计的显式 source。`docs/roadmap-audit.json` 是两者共同的唯一状态台账；没有测试证据的条目不得标记为 `verified`。
+
+`roadmapSource`、`agentRoadmapSource` 和 `p0DesignSource` 必须显式指向仓库内文件。`roadmapMapping` 按原顺序逐字覆盖产品路线图 NOW、NEXT、LATER 的每个工作项，`phaseExitCriteria` 逐字覆盖其阶段退出条件；`p0ExecutionFoundation.exitCriteria` 则逐字覆盖 P0 设计第 18 节八条门槛，并与 Agent Roadmap 的 P0/P1 状态同步。增删、近似改写或默默切换任一 source 都会让门禁失败。
 
 ## 每次变更
 
@@ -21,12 +23,15 @@
 
 - `planned`：边界和测试策略已记录，尚未开始。
 - `in-progress`：已有实现证据，但退出条件尚未全部满足。
+- `implemented`：仅用于当前 Agent 阶段；实现和本地门禁完成，但当前提交仍缺必需外部平台证据，不能标记为 `verified`。
 - `verified`：失败/恢复路径已实现，自动化测试存在且全量门禁通过，并填写 `verifiedAt` 与 `tests`。
 - `blocked`：存在明确外部阻断，记录原因和解除条件。
 - `deferred`：复盘后有意移出当前阶段，不得伪装成完成。
 - `researching`：仅用于 EXPLORE；已有候选边界和发现证据，但正式准入条件尚未全部满足，不构成产品承诺。
 
 NOW、NEXT、LATER 是已经承诺的范围，审计不接受 `planned`、`in-progress`、`blocked`、`deferred` 或 `researching`；若实现或证据尚未完成，必须先完成最小安全实现与测试，不能只修改状态。阶段退出条件可使用 `pending-external` 表示必须等待当前提交进入托管平台检查的事实，例如尚未运行的 macOS/Windows CI；这种状态明确表示阶段尚未通过，不能被工作流定义或历史运行替代。LATER 的“已通过”声明要求其全部退出条件保持 `verified`。
+
+Agent P0 允许 `implemented`、`blocked` 或 `verified`，但 `verified` 要求第 18 节八项和 macOS、Windows、隔离 Linux SSH 三类平台证据全部为 `verified`，同时 P1 admission 才能变为 `eligible`。任一门槛为 `pending-external`/`blocked` 时，P1 必须在 `ROADMAP.md` 与审计台账同时保持 `blocked`；workflow 配置、静态阅读或历史提交结果不能冒充当前提交的平台实跑证据。
 
 `securityClosure` 固定检查 Known Hosts 失败关闭、AI API Key 本机配置存储和终端恢复契约三个边界。除证据路径必须存在外，脚本还扫描生产代码：禁止把 Known Hosts 路径解析错误用 `.ok()` 降级；要求 AI provider 配置保留 `apiKey`；要求升级迁移先把钥匙串值写入数据库再删除旧副本，并要求终端恢复前后端都执行版本与上限校验。
 

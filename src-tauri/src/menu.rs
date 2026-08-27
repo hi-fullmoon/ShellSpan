@@ -150,7 +150,6 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
             Ok(()) => info!("Update check event delivered to frontend"),
             Err(error) => error!("failed to handle check-update menu event: {error}"),
         }
-        return;
     }
 
     #[cfg(not(target_os = "macos"))]

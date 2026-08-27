@@ -982,11 +982,11 @@ mod tests {
             .target
             .channel_session()
             .expect("open remote test command");
-        command
-            .exec(&format!(
-                "printf 'remote-forward-request' | nc 127.0.0.1 {REMOTE_PORT}"
-            ))
-            .expect("connect to remote forwarded listener");
+        crate::execution::start_ssh_exec_channel(
+            &mut command,
+            &format!("printf 'remote-forward-request' | nc 127.0.0.1 {REMOTE_PORT}"),
+        )
+        .expect("connect to remote forwarded listener");
         let mut response = String::new();
         command
             .read_to_string(&mut response)
