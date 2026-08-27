@@ -1,6 +1,6 @@
 # Multi-host Runbook safety contract
 
-> Scope: this scheduler currently accepts executable Runbook `schemaVersion: 1` only. Deployment Runbook v2 phase 2 has a separate reviewed single-host executor and is not dispatched through this multi-host scheduler. A later deployment scheduler must explicitly preserve all target-freezing, batching, per-host circuit, evidence, and approval invariants below.
+> Scope: this scheduler continues to accept executable Runbook `schemaVersion: 1` only. Deployment Runbook v2 phase 4 now has a separate explicit-target canary/rolling coordinator and is never dispatched through this tag-based scheduler. The two contracts, statuses, approvals, persistence records, and retry/recovery rules are intentionally not interchangeable.
 
 TermBridge multi-host tasks are a local scheduler layered over the existing one-step Runbook SSH boundary. The scheduler does not introduce a shared shell, shared terminal, background agent, or new credential store. Every dispatched command still passes through `execute_runbook_step`, which validates the reviewed source digest, database profile binding, exact risk approval, bounded timeout, known host, keychain references, output limits, and redaction.
 
@@ -34,6 +34,8 @@ TermBridge multi-host tasks are a local scheduler layered over the existing one-
 - A safe retry preserves already completed modification steps, clears untrusted/failed later evidence, reruns all read-only prechecks, increments that host's attempt, and stays in its original batch. It must receive fresh per-host approval again before modification continues.
 
 ## Verification evidence
+
+Deployment rollout evidence is separate: `src/lib/__tests__/deployment-rollout.test.ts`, `src-tauri/src/deployment_rollout.rs`, `tests/fixtures/deployment-runbook/v2/multi-host-rollout.json`, and `docs/adr/deployment-rollout-coordination.md`. The v2 coordinator accepts no tag and calls only the single-host deployment executor.
 
 - `src/lib/__tests__/multi-host-runbook.test.ts` covers tag selection and empty targets, configuration bounds, concurrency, batch barriers, per-host circuit breakers, cancellation, timeout, partial success, safe failed-host retry, stale evidence, result identity mismatch, cloned variables, and output/exit-code isolation.
 - `src/components/workbench/__tests__/runbook-panel.test.tsx` covers the shadcn target-mode and tagged scheduling controls.

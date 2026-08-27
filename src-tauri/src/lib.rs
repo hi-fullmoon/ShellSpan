@@ -9,6 +9,7 @@ mod connection;
 mod db;
 mod deployment_execution;
 mod deployment_persistence;
+mod deployment_rollout;
 #[allow(dead_code)]
 mod deployment_runbook;
 mod directory_request_registry;
@@ -218,6 +219,12 @@ pub fn run() {
                     "Marked {recovered} deployment operation(s) interrupted after application restart"
                 );
             }
+            let recovered_rollouts = deployment_rollout::recover_interrupted_rollouts(&database)?;
+            if recovered_rollouts > 0 {
+                log::warn!(
+                    "Marked {recovered_rollouts} deployment rollout(s) recoveryRequired after application restart"
+                );
+            }
             let credentials = keychain::CredentialManager::new();
             if let Err(error) = ai::migrate_keychain_api_keys(&credentials, &database) {
                 log::warn!("Failed to migrate AI API keys from the system keychain: {error}");
@@ -247,6 +254,7 @@ pub fn run() {
         .manage(RemoteHealthCancellationRegistry::default())
         .manage(execution::ExecutionCancellationRegistry::default())
         .manage(deployment_execution::DeploymentExecutionRegistry::default())
+        .manage(deployment_rollout::DeploymentRolloutRegistry::default())
         .manage(rollback_execution::RollbackExecutionRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
@@ -377,6 +385,13 @@ pub fn run() {
             deployment_persistence::get_deployment_operation,
             deployment_persistence::list_deployment_release_cleanup_candidates,
             deployment_persistence::review_deployment_release_cleanup,
+            deployment_rollout::review_deployment_rollout,
+            deployment_rollout::start_deployment_rollout,
+            deployment_rollout::approve_next_deployment_rollout_batch,
+            deployment_rollout::cancel_deployment_rollout,
+            deployment_rollout::list_deployment_rollouts,
+            deployment_rollout::get_deployment_rollout,
+            deployment_rollout::recover_deployment_rollout,
             runbook::open_runbook_file,
             runbook::save_runbook_file,
         ]);

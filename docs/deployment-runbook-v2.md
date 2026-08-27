@@ -168,13 +168,27 @@ The JSON Schema provides editor-facing structural diagnostics. TypeScript and Ru
 
 Shared fixtures in `tests/fixtures/deployment-runbook/v2/` cover the valid document, unknown top-level and nested fields, invalid artifacts and paths, missing verification, incomplete rollback, risk understatement, literal secrets, dangling secret references, the v1 compatibility boundary, bounded phase 2 execution, and phase 3 rollback/recovery/cleanup protections.
 
-## Phase 3 limits and later phases
+## Phase 4 multi-host canary and rolling coordination
+
+Phase 4 adds a separate rollout contract; it does not make the v1 tag scheduler accept deployment documents. `review_deployment_rollout` accepts only an explicit ordered `profileIds` list and an exactly aligned target/connection list. Rust reloads every profile and freezes profile ID, host, port, username, authentication method, and jump-host identity through the phase 2 review boundary. Duplicate profiles, duplicate host/port/username tuples, reordered targets, unknown fields, empty batches, mixed target/Runbook environments, dynamic discovery, and tag-derived membership fail before rollout state is created.
+
+The only strategy is `canaryRolling`. Canary size is one explicit count or percentage; the remaining immutable order is sliced by `batchSize`. `maxParallel` is bounded by the batch size, every batch requires a manual approval, and every approval binds rollout ID, rollout review, rollout plan digest, batch index/digest, plus the independent phase 2 approval for every unfinished target. Batch membership, order, health requirement, failure maximum, target identities, and child plans are included in the rollout digest. Execution never reorders or substitutes a target.
+
+The coordinator never renders Shell or performs SFTP. Each host calls the crate-private phase 2 deployment executor with a distinct review, approval consumption, operation ID, connection object, cancellation flag, result identity, and phase 3 operation record. Connections and credentials are passed only to that call and are never written to rollout tables. Parallel work runs in waves no larger than `maxParallel`.
+
+Canary failure, health or failure threshold breach, target/plan drift, expired or mismatched approval, recovery ambiguity, and late/cross-batch result identity open the rollout circuit and prevent another batch. Successful hosts are not rolled back. When policy requests it, the detail API derives a set of successful source operation IDs marked `requiresSeparateApproval: true`; callers must use the existing phase 3 rollback review separately for each target. The coordinator never invokes rollback itself.
+
+The narrow non-UI IPC surface is `review_deployment_rollout`, `start_deployment_rollout`, `approve_next_deployment_rollout_batch`, `cancel_deployment_rollout`, `list_deployment_rollouts`, `get_deployment_rollout`, and `recover_deployment_rollout`. TypeScript helpers construct exact batch approvals and reject backend results unless rollout/review/plan/batch/target identities all match.
+
+Deployment schema v3 adds rollout review, rollout, batch, target, and batch-approval-consumption tables. On restart, running child deployment operations are sealed by phase 3; running rollout targets become `interrupted + recoveryRequired`, untouched targets stay `notStarted`, and the rollout becomes `recoveryRequired` with an open circuit. Nothing resumes automatically. Recovery requires a fresh review with the same document, policy, deployment policy, target identity, order, environment, and batch digests. Succeeded targets carry their original operation and receive neither a new child review nor a new connection/execution slot.
+
+## Phase 4 limits and later phases
 
 - Active cancellation flags remain process-memory only; durable state records the interruption but cannot prove a blocking remote process stopped. No operation is resumed automatically.
 - The existing operation-history projection records deployment and rollback invocation identity, and the deployment database stores detailed semantic checkpoints. Phase 3 adds no dedicated deployment editor or live progress UI.
 - Cancellation is checked between artifact/archive/SFTP chunks and between semantic actions. A currently blocking connection/SFTP library call may observe cancellation only when that call or its connection timeout returns.
 - No automatic rollback, recursive rollback, cleanup execution, or background garbage collection. Cleanup remains a reviewed, non-executable disposition.
-- No multi-host scheduling, batch/canary policy, traffic switching, or cross-host coordination.
+- Multi-host coordination is limited to explicit local canary/rolling batches. There is no dynamic discovery, tag membership, traffic switching, load-balancer integration, or remote orchestrator.
 - No Docker Compose, Kubernetes, database migration, hooks, scripts, environment injection, or arbitrary Shell escape hatch.
 
-Phase 4 may build multi-host batch/canary coordination only on these single-host durable boundaries. It must not share approvals across targets or reinterpret `recoveryRequired` as permission to replay.
+Phase 5 may add a dedicated deployment UI and templates around these APIs. It must not weaken target/approval binding, add unattended rollback, or reinterpret `recoveryRequired` as permission to replay.

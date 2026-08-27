@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const CURRENT_SCHEMA_VERSION: i32 = 5;
-const CURRENT_DEPLOYMENT_SCHEMA_VERSION: i32 = 2;
+const CURRENT_DEPLOYMENT_SCHEMA_VERSION: i32 = 3;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -333,6 +333,108 @@ INSERT INTO deployment_schema_version (version) VALUES (2);
 COMMIT;
 ";
 
+// Phase 4 rollout state is additive and keeps target execution details in the
+// existing single-host deployment tables. These coordination tables contain
+// frozen identities and scrubbed semantic results only, never connections or
+// credentials.
+const DEPLOYMENT_SCHEMA_V3: &str = "
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS deployment_rollout_reviews (
+    review_id TEXT PRIMARY KEY,
+    rollout_id TEXT NOT NULL,
+    recovery_of_review_id TEXT,
+    document_digest TEXT NOT NULL,
+    plan_digest TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    review_json TEXT NOT NULL CHECK(json_valid(review_json)),
+    state TEXT NOT NULL CHECK(state IN ('pending', 'consumed', 'expired')),
+    reviewed_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    consumed_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deployment_rollout_review_pending
+    ON deployment_rollout_reviews(rollout_id, review_id);
+CREATE INDEX IF NOT EXISTS idx_deployment_rollout_reviews_state
+    ON deployment_rollout_reviews(state, expires_at);
+CREATE TABLE IF NOT EXISTS deployment_rollouts (
+    rollout_id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL,
+    plan_digest TEXT NOT NULL,
+    document_digest TEXT NOT NULL,
+    deployment_id TEXT NOT NULL,
+    application_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    version TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    current_batch_index INTEGER,
+    circuit_open INTEGER NOT NULL CHECK(circuit_open IN (0, 1)),
+    circuit_reason TEXT,
+    recovery_required INTEGER NOT NULL CHECK(recovery_required IN (0, 1)),
+    cancellation_requested INTEGER NOT NULL CHECK(cancellation_requested IN (0, 1)),
+    detail_json TEXT NOT NULL CHECK(json_valid(detail_json)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (review_id) REFERENCES deployment_rollout_reviews(review_id)
+);
+CREATE INDEX IF NOT EXISTS idx_deployment_rollouts_time
+    ON deployment_rollouts(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_deployment_rollouts_recovery
+    ON deployment_rollouts(recovery_required, updated_at DESC);
+CREATE TABLE IF NOT EXISTS deployment_rollout_batches (
+    rollout_id TEXT NOT NULL,
+    batch_index INTEGER NOT NULL,
+    batch_digest TEXT NOT NULL,
+    batch_kind TEXT NOT NULL CHECK(batch_kind IN ('canary', 'rolling')),
+    status TEXT NOT NULL,
+    target_count INTEGER NOT NULL,
+    required_healthy INTEGER NOT NULL,
+    maximum_failures INTEGER NOT NULL,
+    healthy_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    approval_review_id TEXT,
+    approval_consumed_at INTEGER,
+    started_at INTEGER,
+    completed_at INTEGER,
+    PRIMARY KEY (rollout_id, batch_index),
+    FOREIGN KEY (rollout_id) REFERENCES deployment_rollouts(rollout_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS deployment_rollout_targets (
+    rollout_id TEXT NOT NULL,
+    target_index INTEGER NOT NULL,
+    batch_index INTEGER NOT NULL,
+    profile_id TEXT NOT NULL,
+    target_digest TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    deployment_review_id TEXT,
+    status TEXT NOT NULL,
+    recovery_required INTEGER NOT NULL CHECK(recovery_required IN (0, 1)),
+    result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)),
+    error_category TEXT,
+    error TEXT,
+    started_at INTEGER,
+    completed_at INTEGER,
+    PRIMARY KEY (rollout_id, target_index),
+    UNIQUE (rollout_id, profile_id),
+    UNIQUE (rollout_id, operation_id),
+    FOREIGN KEY (rollout_id) REFERENCES deployment_rollouts(rollout_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_deployment_rollout_targets_batch
+    ON deployment_rollout_targets(rollout_id, batch_index, status);
+CREATE TABLE IF NOT EXISTS deployment_rollout_approval_consumptions (
+    rollout_review_id TEXT NOT NULL,
+    rollout_id TEXT NOT NULL,
+    batch_index INTEGER NOT NULL,
+    batch_digest TEXT NOT NULL,
+    approval_digest TEXT NOT NULL,
+    consumed_at INTEGER NOT NULL,
+    PRIMARY KEY (rollout_review_id, batch_index),
+    FOREIGN KEY (rollout_review_id) REFERENCES deployment_rollout_reviews(review_id),
+    FOREIGN KEY (rollout_id) REFERENCES deployment_rollouts(rollout_id) ON DELETE CASCADE
+);
+INSERT INTO deployment_schema_version (version) VALUES (3);
+COMMIT;
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -421,6 +523,10 @@ impl Database {
         if deployment_current < 2 {
             conn.execute_batch(DEPLOYMENT_SCHEMA_V2)
                 .map_err(|e| format!("deployment migration v2 failed: {e}"))?;
+        }
+        if deployment_current < 3 {
+            conn.execute_batch(DEPLOYMENT_SCHEMA_V3)
+                .map_err(|e| format!("deployment migration v3 failed: {e}"))?;
         }
 
         Ok(())
