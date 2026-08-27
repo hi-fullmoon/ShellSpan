@@ -35,13 +35,14 @@ function renderControllerHook(
   host: HTMLDivElement,
   activeSessionId: string | null,
   shouldFocus = true,
+  shouldAttach = true,
 ) {
   return renderHook(
-    ({ sid, focus }: { sid: string | null; focus: boolean }) => {
+    ({ sid, focus, attach }: { sid: string | null; focus: boolean; attach: boolean }) => {
       const paneRef = useRef<HTMLDivElement | null>(host);
-      return useActiveController(paneRef, sid, focus);
+      return useActiveController(paneRef, sid, focus, attach);
     },
-    { initialProps: { sid: activeSessionId, focus: shouldFocus } },
+    { initialProps: { sid: activeSessionId, focus: shouldFocus, attach: shouldAttach } },
   );
 }
 
@@ -78,13 +79,30 @@ describe('useActiveController', () => {
     expect(host.firstChild).toBe(controller.container);
   });
 
+  it('defers opening the controller until the terminal section is visible', () => {
+    const host = setupPane();
+    const controller = createController('s1');
+    const open = vi.spyOn(controller.terminal, 'open');
+    const { rerender } = renderControllerHook(host, 's1', false, false);
+
+    expect(host.firstChild).toBeNull();
+    expect(controller.host).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+
+    rerender({ sid: 's1', focus: false, attach: true });
+
+    expect(host.firstChild).toBe(controller.container);
+    expect(controller.host).toBe(host);
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
   it('detaches previous controller on active-id change', () => {
     const host = setupPane();
     const c1 = createController('s1');
     const c2 = createController('s2');
     const { rerender } = renderControllerHook(host, 's1');
     expect(host.firstChild).toBe(c1.container);
-    rerender({ sid: 's2', focus: true });
+    rerender({ sid: 's2', focus: true, attach: true });
     expect(c1.host).toBeNull();
     expect(host.firstChild).toBe(c2.container);
   });
@@ -146,7 +164,7 @@ describe('useActiveController', () => {
     createController('s1');
     const { result, rerender } = renderControllerHook(host, 's1');
     const first = result.current;
-    rerender({ sid: 's1', focus: true });
+    rerender({ sid: 's1', focus: true, attach: true });
     expect(result.current.searchNext).toBe(first.searchNext);
     expect(result.current.searchPrevious).toBe(first.searchPrevious);
     expect(result.current.clearSearch).toBe(first.clearSearch);

@@ -66,9 +66,14 @@ const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
 export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
   isActive?: boolean;
+  isVisible?: boolean;
 }
 
-export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isActive = true }) => {
+export const TerminalPane: React.FC<TerminalPaneProps> = ({
+  activeSession,
+  isActive = true,
+  isVisible = true,
+}) => {
   const paneRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const { error: showError } = useToast();
@@ -88,6 +93,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ activeSession, isAct
     paneRef,
     activeSessionId,
     isActive,
+    isVisible,
   );
 
   const controller = useSyncExternalStore(terminalRegistry.subscribe, () =>
