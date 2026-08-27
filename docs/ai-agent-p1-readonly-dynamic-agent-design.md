@@ -1144,7 +1144,7 @@ Reducer 规则：
 - 组件与 store 自动化覆盖 start/busy/blocked/provider incompatible、gap/duplicate/late、mount/remount snapshot、frozen target、预算、全部 tool states、awaitingUser/steering、Pause/Resume/Stop、终态/错误、evidence navigation、keyboard/live region；既有 Chat、Command、Explain、静态 Diagnostic Plan 与 Remote Health 诊断回归保持通过。阶段证据见 `docs/ai-agent-p1-e-agent-workspace-ui-evidence.md`。
 - P1-D 在独立核验中因当前 SHA 缺少 Windows runner 真实结果而按门禁失败关闭，没有实现或提交 adapter。P1-E 不假设 adapter 存在；生产 `AgentManager::default()` 仍绑定 `BlockedNoopAgentBoundary`，dynamic start 继续返回 `p1Blocked`。P1 总体继续 `blocked`，本阶段不开始 P1-F。
 
-### P1-F：Eval、文档与发布门禁（2 天）
+### P1-F：Eval、文档与发布门禁（2 天，implemented 2026-08-27）
 
 产物：
 
@@ -1157,6 +1157,15 @@ Reducer 规则：
 
 - P1 退出条件逐项有自动化或人工演示证据。
 - 未经授权副作用为 0。
+
+实施记录：
+
+- `tests/fixtures/agent-evals/v1/diagnostic-scenarios.json` 固定 CPU、磁盘、内存、服务、端口、可选容器和信息不足七类任务；`src-tauri/src/agent/eval.rs` 是 `cfg(test)` harness，组合 strict fake model、编译期 registry、生产 read-only policy、orchestrator/evidence ledger 与 scripted fake executor，不连接 SSH、不执行本地进程。
+- 每个诊断场景连续运行两次并比较规范化终态、预算、调用序列、evidence run/target/exit 绑定、finding 引用、outcome、askUser 和 `changes`；fixture 同时冻结 strict-schema provider compatibility、fake token accounting、harness 延迟上限及具名控制面证据。CPU、内存、服务、端口与容器场景的后续 decision 必须在 model context 中看到指定前序 observation 才能产生。
+- `tests/fixtures/agent-evals/v1/adversarial-corpus.json` 固定 21 项 shell/prompt injection、后台化、重定向、提权、修改型、敏感读取、Docker unbounded proposal 和不可信 observation 指令。恶意 proposal 到达 fake executor 的次数为 0，报告非空 `changes` 次数为 0。
+- Workspace 启动前双语提示与 `docs/ai-agent-readonly-user-guide.md` 明确只读范围、独立 Exec、输出隐私、Pause/Resume/Stop、应用退出/崩溃不恢复和 detached process 限制。
+- `docs/roadmap-audit.json` 对本节 12 项退出条件做精确有序映射；roadmap/security gate 校验七类 eval、安全 corpus 0 副作用、六个窄 IPC、生产 blocked boundary、无 P1-D adapter/PTY/process 旁路和用户说明。
+- P1-D 独立准入结论不变：当前 SHA 缺 Windows runner 真实证据且 P0 未 verified，没有 adapter/direct/jump-host Agent fixture 或真实演示。P1-F 完成后 P1 仍为 `blocked`，阶段证据见 `docs/ai-agent-p1-f-eval-release-gate-evidence.md`。
 
 ## 22. 测试策略
 
