@@ -3,6 +3,54 @@
 All notable changes to TermBridge are documented in this file.
 
 
+## [v2.0.55](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.55) - 2026-08-27
+
+
+### Bug Fixes
+
+- **terminal:** defer xterm open until section is visible
+
+### Chore
+
+- close P0 execution foundation audit
+- update remaining files
+
+### Documentation
+
+- **agent:** add P2 controlled mutation design and update roadmap
+- outline P1 readonly dynamic agent design
+
+### Features
+
+- **execution:** add reviewed SSH pure contracts
+- **workbench:** add single-flight cancellation and workspace locking
+- **sftp:** align file list and pane with updated path utilities
+- **runbook:** approve sudo nginx -t as read-only command
+- **agent:** establish P1 protocol contracts
+- **workbench:** extract RunbookEvidenceOutput component
+- **agent:** implement P1-A control plane
+- **agent:** implement P1-B fake decision loop
+- **agent:** implement P1-C tool policy evidence
+- **agent:** implement P1-E workspace UI
+- **agent:** integrate P1 readonly dynamic agent
+- **workbench:** polish runbook panel and evidence rendering
+- **workbench:** refresh page shell and operation history panel
+
+### Refactoring
+
+- **runbook:** adopt reviewed SSH execution kernel
+- **ai:** compact agent composer hint into toolbar row
+- **sftp:** extract breadcrumb layout helpers
+- **execution:** extract reviewed SSH kernel
+- **ui:** forward extra SVG props through Spinner
+
+### Testing
+
+- **workbench:** align workbench tests with updated components
+- **agent:** complete P1-F release gates
+- **runbook:** freeze execution behavior
+- **execution:** verify reviewed SSH fixture boundary
+
 ## [v2.0.54](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.54) - 2026-08-27
 
 
