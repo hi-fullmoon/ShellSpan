@@ -89,7 +89,7 @@ describe('ConnectionList', () => {
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
-  it('caps the desktop search field width while keeping it flexible on smaller layouts', () => {
+  it('keeps the shared search field at a fixed width', () => {
     render(
       <ConnectionList
         profiles={[]}
@@ -111,9 +111,10 @@ describe('ConnectionList', () => {
     });
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
-      'flex-1',
-      '@min-[42rem]:w-72',
-      '@min-[42rem]:flex-none',
+      'min-w-0',
+      'w-72',
+      'max-w-full',
+      'flex-none',
     );
   });
 

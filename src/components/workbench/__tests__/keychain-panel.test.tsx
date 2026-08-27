@@ -77,9 +77,10 @@ describe('KeychainPanel', () => {
     });
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
-      'flex-1',
-      '@min-[42rem]:w-72',
-      '@min-[42rem]:flex-none',
+      'min-w-0',
+      'w-72',
+      'max-w-full',
+      'flex-none',
     );
   });
 
