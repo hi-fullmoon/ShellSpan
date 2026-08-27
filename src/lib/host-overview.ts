@@ -1,7 +1,7 @@
 import type { SftpConnection } from '@/stores/sftpStore';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { TransferOperation } from '@/stores/transferStore';
-import type { AgentRun } from '@/types/ai';
+import type { StaticDiagnosticRun } from '@/types/ai';
 import type {
   ConnectionProfile,
   DisconnectEvent,
@@ -16,7 +16,7 @@ export interface HostOverviewSnapshot {
   sftpRemotePanes: number;
   activeTransfers: number;
   failedTransfers: number;
-  diagnosticPhase?: AgentRun['phase'];
+  diagnosticPhase?: StaticDiagnosticRun['phase'];
   latestDisconnect?: DisconnectEvent;
   latestError?: string;
   activePortForwards: number;
@@ -33,7 +33,7 @@ export function buildHostOverview(
   transfers: TransferOperation[],
   disconnectEvents: DisconnectEvent[],
   portForwards: PortForwardRuntime[],
-  agentRun?: AgentRun,
+  agentRun?: StaticDiagnosticRun,
 ): HostOverviewSnapshot {
   const hostSessions = sessions.filter((session) => session.profileId === profile.id);
   const terminals: Record<SessionStatus, number> = {

@@ -5,6 +5,7 @@
   "roadmapSource": "docs/product-roadmap.md",
   "agentRoadmapSource": "ROADMAP.md",
   "p0DesignSource": "docs/ai-agent-p0-execution-foundation-design.md",
+  "p1DesignSource": "docs/ai-agent-p1-readonly-dynamic-agent-design.md",
   "p0ExecutionFoundation": {
     "phase": "P0",
     "status": "implemented",
@@ -91,6 +92,111 @@
       "status": "blocked",
       "finding": "只有当前提交 Windows 门禁通过并把 P0 八项全部更新为 verified 后，才允许开始真实 shell.exec；不得用 generic Tauri command 或 write_session 绕过。"
     }
+  },
+  "p1ReadonlyDynamicAgent": {
+    "phase": "P1",
+    "status": "blocked",
+    "finding": "P1-0/A/B/C/E/F 的协议、权威控制面、fake loop、只读 registry/policy/evidence、Workspace UI 与确定性 eval/发布门禁已实现；P1-D 因 P0 未 verified 且当前提交缺少 Windows runner 真实证据而未准入，所以 P1 继续 blocked。",
+    "exitCriteria": [
+      {
+        "roadmapItem": "P0 已在 Roadmap/audit 中为 `verified`，Windows 与 macOS 当前提交门禁均有真实证据。",
+        "status": "blocked",
+        "finding": "P0 仍为 implemented/pending external；macOS 本地门禁有证据，但当前提交没有 Windows runner 真实结果。",
+        "evidence": ["ROADMAP.md", "docs/ai-agent-p0-execution-foundation-design.md", "docs/roadmap-audit.json", ".github/workflows/quality-gate.yml"],
+        "tests": ["scripts/check-roadmap-audit.mjs", "scripts/__tests__/check-roadmap-audit.test.mjs"]
+      },
+      {
+        "roadmapItem": "AgentManager 是权威状态来源，Panel 重挂可 snapshot 恢复。",
+        "status": "verified",
+        "finding": "Rust manager 持有 run/journal/snapshot 权威状态；前端先订阅再 snapshot，gap resync、duplicate、late 与 remount 均有自动化覆盖。",
+        "evidence": ["src-tauri/src/agent/manager.rs", "src-tauri/src/agent/events.rs", "src/stores/agentStore.ts", "src/components/ai/agent/agent-workspace.tsx"],
+        "tests": ["src-tauri/src/agent/manager.rs", "src/lib/__tests__/agent-events.test.ts", "src/stores/__tests__/agentProjectionStore.test.ts", "src/components/ai/agent/__tests__/agent-workspace.test.tsx"]
+      },
+      {
+        "roadmapItem": "fake model 证明 observation-driven 动态 loop，而非静态计划重放。",
+        "status": "verified",
+        "finding": "P1-B 高/低 load 分支证明第二决策随 observation 改变；P1-F CPU fixture 还要求 context 出现前一 observation 才能提出后续 uptime/ps。",
+        "evidence": ["src-tauri/src/agent/orchestrator.rs", "src-tauri/src/agent/eval.rs", "tests/fixtures/agent-evals/v1/diagnostic-scenarios.json"],
+        "tests": ["src-tauri/src/agent/orchestrator.rs", "src-tauri/src/agent/eval.rs"]
+      },
+      {
+        "roadmapItem": "OpenAI Responses、至少一种 OpenAI Compatible 和 Ollama 的 capability/decision 路径通过兼容测试；不兼容时安全降级。",
+        "status": "verified",
+        "finding": "三类 provider 共享 checked-in schema 和 strict envelope decoder；Compatible/Ollama 非 jsonSchema 失败关闭，Workspace 提供显式静态计划降级。",
+        "evidence": ["src-tauri/src/agent/model.rs", "protocol/agent/v1/agent-decision.schema.json", "src/components/ai/agent/agent-workspace.tsx", "src/stores/staticDiagnosticStore.ts"],
+        "tests": ["src-tauri/src/agent/model.rs", "src/components/ai/agent/__tests__/agent-workspace.test.tsx", "src/components/ai/__tests__/ai-panel.test.ts"]
+      },
+      {
+        "roadmapItem": "`host.inspect` 和 `shell.execReadOnly` 只经过编译期 registry 和本地 policy。",
+        "status": "verified",
+        "finding": "模型定义与 dispatch 共用静态 ToolDefinition 表；host.inspect 只映射固定 probes，shell 参数由 program-specific policy 校验后才产生强类型 invocation。",
+        "evidence": ["src-tauri/src/agent/tools/mod.rs", "src-tauri/src/agent/tools/host.rs", "src-tauri/src/agent/tools/shell.rs", "src-tauri/src/agent/policy.rs"],
+        "tests": ["src-tauri/src/agent/tools/mod.rs", "src-tauri/src/agent/policy.rs", "src-tauri/src/agent/eval.rs"]
+      },
+      {
+        "roadmapItem": "真实 SSH adapter 只调用 P0 reviewed kernel，不存在 generic command IPC、raw SSH 旁路或 PTY 注入。",
+        "status": "blocked",
+        "finding": "独立 P1-D 准入已失败关闭，当前提交根本不存在 Agent SSH adapter；静态门禁证明只有六个 lifecycle IPC，Agent 源码无 reviewed-kernel 调用、raw SSH、write_session、PTY 或本地 process 路径。缺失 adapter 不能作为真实 adapter 已验证。",
+        "evidence": ["src-tauri/src/agent/mod.rs", "src-tauri/src/agent/ipc.rs", "src-tauri/src/agent/manager.rs", "docs/ai-agent-p1-f-eval-release-gate-evidence.md"],
+        "tests": ["scripts/check-roadmap-audit.mjs", "scripts/__tests__/check-roadmap-audit.test.mjs", "src-tauri/src/agent/manager.rs"]
+      },
+      {
+        "roadmapItem": "allow/deny、prompt injection、shell injection、secret redaction 和 evidence ownership 测试全绿。",
+        "status": "verified",
+        "finding": "program-specific allow/deny、21 项 adversarial corpus（含不可信 observation prompt injection）、跨 chunk secret redaction、同源 fanout 与 run/target/tool ownership 均由 Rust 自动化覆盖。",
+        "evidence": ["tests/fixtures/agent-evals/v1/adversarial-corpus.json", "src-tauri/src/agent/policy.rs", "src-tauri/src/agent/redaction.rs", "src-tauri/src/agent/evidence.rs", "src-tauri/src/agent/eval.rs"],
+        "tests": ["src-tauri/src/agent/policy.rs", "src-tauri/src/agent/redaction.rs", "src-tauri/src/agent/evidence.rs", "src-tauri/src/agent/eval.rs"]
+      },
+      {
+        "roadmapItem": "Pause、Resume、Stop、steering、timeout、provider error 和 budget exhaustion 都有确定终态。",
+        "status": "verified",
+        "finding": "orchestrator 与 manager 自动化覆盖 thinking/tool Pause、Resume、model/tool Stop、in-flight steering 失效、provider timeout/protocol error、tool timeout/failure 与预算耗尽；终态重复推进保持不变。",
+        "evidence": ["src-tauri/src/agent/orchestrator.rs", "src-tauri/src/agent/manager.rs", "src-tauri/src/agent/state.rs", "src-tauri/src/agent/budgets.rs"],
+        "tests": ["src-tauri/src/agent/orchestrator.rs", "src-tauri/src/agent/manager.rs", "src-tauri/src/agent/state.rs", "src-tauri/src/agent/budgets.rs"]
+      },
+      {
+        "roadmapItem": "最终报告关键结论引用有效 evidence，P1 `changes` 永远为空。",
+        "status": "verified",
+        "finding": "ledger/final validator 拒绝 foreign/failed evidence 冒充 verified；7 类 eval 的每个 verified finding 都引用同 run、同 target 的成功 evidence，协议零长度数组与 harness 共同证明 changes 为空。",
+        "evidence": ["src-tauri/src/agent/evidence.rs", "src-tauri/src/agent/protocol.rs", "src-tauri/src/agent/eval.rs", "tests/fixtures/agent-evals/v1/diagnostic-scenarios.json"],
+        "tests": ["src-tauri/src/agent/evidence.rs", "src-tauri/src/agent/eval.rs", "src/lib/__tests__/agent-protocol.test.ts"]
+      },
+      {
+        "roadmapItem": "macOS/Windows 常规门禁、Rust/前端全量测试、direct/jump-host fixture 和演示验收通过。",
+        "status": "blocked",
+        "finding": "本地 macOS Rust/前端/scripts/build/roadmap/security 门禁可执行，既有隔离 direct/jump SSH/SFTP fixture 可作 P0 回归；但当前提交没有 Windows runner 真实结果，也没有 P1-D Agent adapter 的 direct/jump fixture 或真实演示，因此失败关闭。",
+        "evidence": [".github/workflows/quality-gate.yml", "tests/ssh-e2e/compose.yml", "docs/ai-agent-p0-step-4-fixture-acceptance.md", "docs/ai-agent-p1-f-eval-release-gate-evidence.md"],
+        "tests": ["src-tauri/src/execution/fixture.rs", "src-tauri/src/agent/eval.rs", "src/components/ai/agent/__tests__/agent-workspace.test.tsx"]
+      },
+      {
+        "roadmapItem": "固定安全 corpus 的未经授权副作用次数为 0。",
+        "status": "verified",
+        "finding": "21 项版本化 corpus 全部被本地 policy 拒绝；除 prompt-injection 用例的一次已批准 uptime 前置观察外，fake executor 不接收 invocation，恶意 proposal 的 executor 命中与报告 changes 均为 0。",
+        "evidence": ["tests/fixtures/agent-evals/v1/adversarial-corpus.json", "src-tauri/src/agent/eval.rs", "docs/ai-agent-p1-f-eval-release-gate-evidence.md"],
+        "tests": ["src-tauri/src/agent/eval.rs", "src-tauri/src/agent/policy.rs"]
+      },
+      {
+        "roadmapItem": "用户文档明确独立 Exec、只读范围、输出隐私、Pause/Stop 和崩溃限制。",
+        "status": "verified",
+        "finding": "双语 Workspace 启动前安全提示与用户指南共同说明固定只读范围、独立 Exec、不继承 shell 上下文、同源脱敏、Pause/Stop、应用退出/崩溃和 detached process 限制。",
+        "evidence": ["docs/ai-agent-readonly-user-guide.md", "src/components/ai/agent/agent-workspace.tsx", "src/locales/zh-CN.ts", "src/locales/en-US.ts", "docs/adr/agent-execution-channel.md"],
+        "tests": ["src/components/ai/agent/__tests__/agent-workspace.test.tsx", "src/components/ai/agent/__tests__/agent-tool-card.test.tsx"]
+      }
+    ],
+    "releaseGate": {
+      "status": "blocked",
+      "securityCorpusStatus": "verified",
+      "unauthorizedSideEffects": 0,
+      "realSshAdapterEvidence": "blocked",
+      "finding": "固定 fake eval 与本地安全门禁已闭合，但 P0/Windows/P1-D/真实 Agent SSH 演示证据未闭合；不得发布为 verified dynamic Agent。"
+    },
+    "limitations": [
+      "生产 AgentManager 继续绑定 BlockedNoopAgentBoundary，dynamic start 返回 p1Blocked，不创建 run。",
+      "当前提交没有 shell.execReadOnly 到 P0 reviewed kernel 的真实 adapter，也没有 Agent direct/jump-host SSH fixture 证据。",
+      "当前提交没有 Windows runner 实跑证据；workflow 配置不能替代真实平台结果。",
+      "P1-F fake eval 不连接 SSH、不执行本地进程；既有隔离 SSH/SFTP fixture 只能证明 P0/现有功能无回归，不能证明 P1-D adapter。",
+      "Pause 只阻止后续动作；Stop/应用退出无法证明任意已脱离 SSH channel 的远端进程停止，崩溃后也不恢复 run。"
+    ]
   },
   "roadmapMapping": {
     "NOW": [

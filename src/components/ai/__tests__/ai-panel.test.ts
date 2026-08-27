@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { createElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '@/locales';
-import { useAgentStore } from '@/stores/agentStore';
+import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
 import { useAiStore } from '@/stores/aiStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -152,7 +152,7 @@ describe('terminal conversation binding', () => {
 
   it('starts snapshot diagnosis on the exact connected profile with snapshot context', async () => {
     await initI18n('en-US');
-    useAgentStore.getState().clear();
+    useStaticDiagnosticStore.getState().clear();
     useAppStore.getState().setActiveSection('terminal');
     useTerminalStore.setState({
       sessions: [{
@@ -184,17 +184,17 @@ describe('terminal conversation binding', () => {
         }));
       });
 
-      await waitFor(() => expect(useAgentStore.getState().run).toMatchObject({
+      await waitFor(() => expect(useStaticDiagnosticStore.getState().run).toMatchObject({
         profileId: 'profile-health',
         sessionId: 'health-session',
         contextSource: 'remoteHealth',
         contextLabel: 'root@prod · remote health',
       }));
-      expect(useAgentStore.getState().run?.steps[0]?.title)
+      expect(useStaticDiagnosticStore.getState().run?.steps[0]?.title)
         .toBe('remoteHealth.getSnapshotContext');
     } finally {
       unmount();
-      useAgentStore.getState().clear();
+      useStaticDiagnosticStore.getState().clear();
       useAiStore.getState().setOpen(false);
     }
   });
@@ -203,7 +203,7 @@ describe('terminal conversation binding', () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
     await initI18n('en-US');
-    useAgentStore.getState().clear();
+    useStaticDiagnosticStore.getState().clear();
     useAiStore.getState().clear();
     useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
     useTerminalStore.setState({
@@ -233,7 +233,7 @@ describe('terminal conversation binding', () => {
       ],
       activeSessionId: 'session-b',
     });
-    useAgentStore.getState().beginRun(
+    useStaticDiagnosticStore.getState().beginRun(
       'failed-on-a',
       'Diagnose server A',
       'session-a',
@@ -243,7 +243,7 @@ describe('terminal conversation binding', () => {
       1_234,
       'conversation-a',
     );
-    useAgentStore.getState().failRun('failed-on-a', 'Provider failed');
+    useStaticDiagnosticStore.getState().failRun('failed-on-a', 'Provider failed');
     useAiStore.getState().setOpen(true);
 
     const { unmount } = render(createElement(AiPanel));
@@ -251,17 +251,17 @@ describe('terminal conversation binding', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Diagnostic Agent' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
 
-      await waitFor(() => expect(useAgentStore.getState().run).toMatchObject({
+      await waitFor(() => expect(useStaticDiagnosticStore.getState().run).toMatchObject({
         phase: 'planning',
         sessionId: 'session-a',
         conversationId: 'conversation-a',
         profileId: 'profile-a',
       }));
       expect(useTerminalStore.getState().activeSessionId).toBe('session-a');
-      expect(useAgentStore.getState().run?.requestId).not.toBe('failed-on-a');
+      expect(useStaticDiagnosticStore.getState().run?.requestId).not.toBe('failed-on-a');
     } finally {
       unmount();
-      useAgentStore.getState().clear();
+      useStaticDiagnosticStore.getState().clear();
       useAiStore.getState().clear();
       useAiStore.getState().setOpen(false);
       useAppStore.setState(previousApp, true);
@@ -968,7 +968,7 @@ describe('AI panel compact and context behavior', () => {
     try {
       fireEvent.click(screen.getByRole('button', { name: '诊断 Agent' }));
       act(() => {
-        useAgentStore.getState().beginRun(
+        useStaticDiagnosticStore.getState().beginRun(
           'agent-context-request',
           'Diagnose the server',
           'agent-session',
@@ -978,7 +978,7 @@ describe('AI panel compact and context behavior', () => {
 
       fireEvent.click(await screen.findByRole('button', { name: /当前终端已附加/ }));
 
-      expect(useAgentStore.getState().run?.phase).toBe('cancelled');
+      expect(useStaticDiagnosticStore.getState().run?.phase).toBe('cancelled');
       const enableContext = await screen.findByRole('button', {
         name: '单击可重新附加此上下文。',
       });
@@ -986,7 +986,7 @@ describe('AI panel compact and context behavior', () => {
       expect(enableContext).not.toHaveClass('bg-background');
     } finally {
       unmount();
-      useAgentStore.getState().clear();
+      useStaticDiagnosticStore.getState().clear();
       useTerminalStore.setState({ sessions: [], activeSessionId: null });
       useAppStore.getState().setActiveSection('workbench');
       useAiStore.getState().setOpen(false);
@@ -1175,7 +1175,7 @@ describe('AI composer status', () => {
 describe('cancelActiveAiRequests', () => {
   beforeEach(() => {
     useAiStore.getState().clear();
-    useAgentStore.getState().clear();
+    useStaticDiagnosticStore.getState().clear();
   });
 
   it('immediately clears the loading state and cancels every backend request', () => {
@@ -1185,7 +1185,7 @@ describe('cancelActiveAiRequests', () => {
       userContent: 'hello',
       providerId: 'provider-1',
     });
-    useAgentStore.getState().beginRun(
+    useStaticDiagnosticStore.getState().beginRun(
       'agent-request',
       'diagnose',
       'session-1',
@@ -1205,14 +1205,14 @@ describe('cancelActiveAiRequests', () => {
     expect(useAiStore.getState().messages.some((message) => (
       message.requestId === 'chat-request' && message.status === 'streaming'
     ))).toBe(false);
-    expect(useAgentStore.getState().run?.phase).toBe('cancelled');
+    expect(useStaticDiagnosticStore.getState().run?.phase).toBe('cancelled');
     expect(cancelBackend).toHaveBeenCalledTimes(2);
     expect(cancelBackend).toHaveBeenCalledWith('chat-request');
     expect(cancelBackend).toHaveBeenCalledWith('agent-request');
   });
 
   it('cancels an active diagnostic request when its run is stopped', () => {
-    useAgentStore.getState().beginRun(
+    useStaticDiagnosticStore.getState().beginRun(
       'agent-stop-request',
       'diagnose',
       'session-1',
@@ -1221,7 +1221,7 @@ describe('cancelActiveAiRequests', () => {
     const cancelBackend = vi.fn().mockResolvedValue(undefined);
 
     expect(stopActiveAgentRun(cancelBackend)).toBe('agent-stop-request');
-    expect(useAgentStore.getState().run?.phase).toBe('cancelled');
+    expect(useStaticDiagnosticStore.getState().run?.phase).toBe('cancelled');
     expect(cancelBackend).toHaveBeenCalledWith('agent-stop-request');
   });
 });

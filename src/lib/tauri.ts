@@ -64,6 +64,21 @@ import type {
   AiSessionMeta,
   AiStartRequest,
 } from '@/types/ai';
+import {
+  decodeAgentActionResultV1,
+  decodeAgentRunSnapshotV1,
+  decodeAgentStartResultV1,
+} from '@/lib/agent-protocol';
+import type {
+  AgentActionRequestV1,
+  AgentActionResultV1,
+  AgentEventV1,
+  AgentGetSnapshotRequestV1,
+  AgentRunSnapshotV1,
+  AgentSendMessageRequestV1,
+  AgentStartRequestV1,
+  AgentStartResultV1,
+} from '@/types/agent';
 import type {
   RunbookFile,
   RunbookStepExecutionRequest,
@@ -136,6 +151,26 @@ function invokeTerminalHotPath<T>(
   args: Record<string, unknown>,
 ): Promise<T> {
   return invoke<T>(cmd, args);
+}
+
+type AgentControlCommand =
+  | 'agent_start'
+  | 'agent_get_snapshot'
+  | 'agent_pause'
+  | 'agent_resume'
+  | 'agent_stop'
+  | 'agent_send_message';
+
+/**
+ * Agent requests stay out of generic operation history because the start
+ * envelope may contain a redacted terminal snapshot. The backend Agent journal
+ * remains the authority for run/action audit state.
+ */
+function invokeAgentControl<T>(
+  command: AgentControlCommand,
+  request: object,
+): Promise<T> {
+  return invoke<T>(command, { request });
 }
 
 export function parseRemoteFsError(error: unknown): RemoteFsError | null {
@@ -225,6 +260,55 @@ export async function invokeStartAiRequest(request: AiStartRequest): Promise<voi
 
 export async function invokeCancelAiRequest(requestId: string): Promise<void> {
   return invokeLogged('ai_cancel_request', { requestId });
+}
+
+export async function invokeAgentStart(
+  request: AgentStartRequestV1,
+): Promise<AgentStartResultV1> {
+  return decodeAgentStartResultV1(await invokeAgentControl('agent_start', request));
+}
+
+export async function invokeAgentGetSnapshot(
+  request: AgentGetSnapshotRequestV1,
+): Promise<AgentRunSnapshotV1> {
+  return decodeAgentRunSnapshotV1(await invokeAgentControl('agent_get_snapshot', request));
+}
+
+async function invokeAgentAction(
+  command: 'agent_pause' | 'agent_resume' | 'agent_stop',
+  request: AgentActionRequestV1,
+): Promise<AgentActionResultV1> {
+  return decodeAgentActionResultV1(await invokeAgentControl(command, request));
+}
+
+export function invokeAgentPause(
+  request: AgentActionRequestV1,
+): Promise<AgentActionResultV1> {
+  return invokeAgentAction('agent_pause', request);
+}
+
+export function invokeAgentResume(
+  request: AgentActionRequestV1,
+): Promise<AgentActionResultV1> {
+  return invokeAgentAction('agent_resume', request);
+}
+
+export function invokeAgentStop(
+  request: AgentActionRequestV1,
+): Promise<AgentActionResultV1> {
+  return invokeAgentAction('agent_stop', request);
+}
+
+export async function invokeAgentSendMessage(
+  request: AgentSendMessageRequestV1,
+): Promise<AgentActionResultV1> {
+  return decodeAgentActionResultV1(await invokeAgentControl('agent_send_message', request));
+}
+
+export async function listenToAgentEvents(
+  callback: (event: AgentEventV1 | unknown) => void,
+): Promise<UnlistenFn> {
+  return listen<unknown>('agent-event', (event) => callback(event.payload));
 }
 
 export async function invokeOpenUrl(url: string): Promise<void> {

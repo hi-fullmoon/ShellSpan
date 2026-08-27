@@ -38,6 +38,7 @@ keyring-core = "1"
 sysinfo = "0.39"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+regex = "1"
 tokio = { version = "1", features = ["macros", "rt"] }
 tokio-util = "0.7"
 url = "2"

@@ -19,6 +19,10 @@ vi.mock('@/lib/logger', () => ({
 import {
   buildRemoteConnectionRequest,
   buildSessionCreateRequest,
+  invokeAgentGetSnapshot,
+  invokeAgentPause,
+  invokeAgentSendMessage,
+  invokeAgentStart,
   invokeCancelRunbookStep,
   invokeCancelRemoteFileRead,
   invokeExecuteRunbookStep,
@@ -30,6 +34,7 @@ import {
   invokePreviewRemoteFile,
   invokeTrustHost,
 } from '@/lib/tauri';
+import { makeAgentActionResult, makeAgentSnapshot } from '@/test/agent-fixtures';
 import type { ConnectionProfile } from '@/types';
 import type {
   RunbookStepExecutionRequest,
@@ -39,6 +44,65 @@ import type {
 beforeEach(() => {
   invokeMock.mockReset();
   loggerErrorMock.mockReset();
+});
+
+describe('Agent v1 narrow IPC contract', () => {
+  it('uses only the six typed Agent command envelopes and strictly decodes results', async () => {
+    const startRequest = {
+      schemaVersion: 1 as const,
+      clientRequestId: 'request-1',
+      goal: 'Inspect disk pressure.',
+      profileId: 'profile-1',
+      providerId: 'provider-1',
+    };
+    const actionRequest = {
+      schemaVersion: 1 as const,
+      runId: 'run-1',
+      clientActionId: 'action-1',
+    };
+    const messageRequest = { ...actionRequest, message: 'Also inspect inode pressure.' };
+    const startResult = { schemaVersion: 1, runId: 'run-1', acceptedAt: 1_000 };
+    invokeMock
+      .mockResolvedValueOnce(startResult)
+      .mockResolvedValueOnce(makeAgentSnapshot())
+      .mockResolvedValueOnce(makeAgentActionResult('pause'))
+      .mockResolvedValueOnce(makeAgentActionResult('sendMessage'));
+
+    await expect(invokeAgentStart(startRequest)).resolves.toEqual(startResult);
+    await expect(invokeAgentGetSnapshot({ schemaVersion: 1, runId: 'run-1' }))
+      .resolves.toEqual(makeAgentSnapshot());
+    await expect(invokeAgentPause(actionRequest)).resolves.toMatchObject({ action: 'pause' });
+    await expect(invokeAgentSendMessage(messageRequest))
+      .resolves.toMatchObject({ action: 'sendMessage' });
+
+    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual([
+      'agent_start',
+      'agent_get_snapshot',
+      'agent_pause',
+      'agent_send_message',
+    ]);
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'agent_start', { request: startRequest });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'agent_send_message', {
+      request: messageRequest,
+    });
+  });
+
+  it('rejects expanded backend result envelopes', async () => {
+    invokeMock.mockResolvedValueOnce({
+      schemaVersion: 1,
+      runId: 'run-1',
+      acceptedAt: 1_000,
+      rawOutput: 'must not cross IPC',
+    });
+
+    await expect(invokeAgentStart({
+      schemaVersion: 1,
+      clientRequestId: 'request-1',
+      goal: 'Inspect only.',
+      profileId: 'profile-1',
+      providerId: 'provider-1',
+    })).rejects.toThrow(/unknown field/);
+  });
 });
 
 describe('remote directory supersession', () => {

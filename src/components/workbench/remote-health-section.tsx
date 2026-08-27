@@ -55,7 +55,7 @@ import { findConnectedTerminalSession } from '@/lib/host-quick-actions';
 import { formatClockTime, formatUptime } from '@/lib/monitor';
 import { cn, formatBytes } from '@/lib/utils';
 import { useAiStore } from '@/stores/aiStore';
-import { useAgentStore } from '@/stores/agentStore';
+import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useRemoteHealthStore, type RemoteHealthEntry } from '@/stores/remoteHealthStore';
@@ -218,7 +218,7 @@ export function RemoteHealthSection(): React.JSX.Element {
 
   const diagnose = async (profile: ConnectionProfile): Promise<void> => {
     if (!capturedResult) return;
-    const activeRun = useAgentStore.getState().run;
+    const activeRun = useStaticDiagnosticStore.getState().run;
     if (activeRun?.phase === 'planning') {
       useToastStore.getState().addToast(t('remoteHealth.diagnosisBusy'), 'info');
       return;

@@ -20,7 +20,7 @@ const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV3";
 const MAX_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AiProviderKind {
     Ollama,
@@ -28,7 +28,7 @@ pub(crate) enum AiProviderKind {
     OpenAiCompatible,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AiStructuredOutputMode {
     JsonSchema,
@@ -993,7 +993,7 @@ fn validate_request(request: &AiStartRequest) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_provider_config(
+pub(crate) fn validate_provider_config(
     provider: &AiProviderConfig,
     require_model: bool,
 ) -> Result<(), String> {
@@ -1041,7 +1041,7 @@ fn is_loopback_host(host: Option<&str>) -> bool {
     matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
 }
 
-fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> {
+pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> {
     validate_provider_config(provider, false)?;
     let mut url = Url::parse(provider.base_url.trim())
         .map_err(|_| "failed to build AI provider endpoint".to_string())?;
@@ -1069,7 +1069,7 @@ fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> 
     Ok(url)
 }
 
-fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option<String>, String> {
+pub(crate) fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option<String>, String> {
     let api_key = provider
         .api_key
         .as_deref()
@@ -1091,7 +1091,7 @@ fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option<String>, S
     }
 }
 
-fn build_client() -> Result<Client, String> {
+pub(crate) fn build_client() -> Result<Client, String> {
     Client::builder()
         .user_agent(concat!("TermBridge/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
