@@ -89,6 +89,21 @@ export interface AgentStartRequestV1 {
   requestedBudgets?: AgentBudgetRequestV1;
 }
 
+export interface AgentGetSnapshotRequestV1 {
+  schemaVersion: AgentSchemaVersionV1;
+  runId?: string;
+}
+
+export interface AgentActionRequestV1 {
+  schemaVersion: AgentSchemaVersionV1;
+  runId: string;
+  clientActionId: string;
+}
+
+export interface AgentSendMessageRequestV1 extends AgentActionRequestV1 {
+  message: string;
+}
+
 export type AgentPlanItemStatusV1 = 'pending' | 'active' | 'completed' | 'skipped';
 
 export interface AgentPlanItemV1 {
@@ -346,4 +361,45 @@ export interface AgentRunSnapshotV1 {
   queuedSteeringCount: number;
   report?: AgentFinalReportV1;
   error?: AgentPublicErrorV1;
+}
+
+export interface AgentStartResultV1 {
+  schemaVersion: AgentSchemaVersionV1;
+  runId: string;
+  acceptedAt: number;
+}
+
+export type AgentActionKindV1 = 'pause' | 'resume' | 'stop' | 'sendMessage';
+
+export interface AgentActionResultV1 {
+  schemaVersion: AgentSchemaVersionV1;
+  runId: string;
+  clientActionId: string;
+  action: AgentActionKindV1;
+  acceptedAt: number;
+  resultingSequence: number;
+}
+
+export interface AgentActiveRunSummaryV1 {
+  runId: string;
+  state: AgentRunStateV1;
+  goal: string;
+  profileId: string;
+  startedAt: number;
+}
+
+export type AgentCommandErrorCategoryV1 =
+  | 'invalidRequest'
+  | 'agentBusy'
+  | 'runNotFound'
+  | 'idempotencyConflict'
+  | 'invalidState'
+  | 'p1Blocked'
+  | 'internal';
+
+export interface AgentCommandErrorV1 {
+  schemaVersion: AgentSchemaVersionV1;
+  category: AgentCommandErrorCategoryV1;
+  message: string;
+  activeRun?: AgentActiveRunSummaryV1;
 }
