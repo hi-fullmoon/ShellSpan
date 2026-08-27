@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const CURRENT_SCHEMA_VERSION: i32 = 5;
+const CURRENT_DEPLOYMENT_SCHEMA_VERSION: i32 = 2;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -189,6 +190,149 @@ INSERT INTO schema_version (version) VALUES (5);
 COMMIT;
 ";
 
+// Deployment persistence intentionally uses a separate, additive schema
+// namespace.  The primary schema remains at v5 so a phase-2 binary can open a
+// database after a phase-3 binary has used it; the older binary simply ignores
+// these tables.  No existing table or column is changed by this migration.
+const DEPLOYMENT_SCHEMA_V1: &str = "
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS deployment_schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS deployment_reviews (
+    review_id TEXT PRIMARY KEY,
+    operation_id TEXT NOT NULL UNIQUE,
+    operation_kind TEXT NOT NULL CHECK(operation_kind IN ('deployment', 'rollback', 'cleanup')),
+    source_operation_id TEXT,
+    document_digest TEXT NOT NULL,
+    plan_digest TEXT NOT NULL,
+    target_digest TEXT NOT NULL,
+    deployment_id TEXT NOT NULL,
+    application_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    version TEXT NOT NULL,
+    review_json TEXT NOT NULL CHECK(json_valid(review_json)),
+    state TEXT NOT NULL CHECK(state IN ('pending', 'consumed', 'expired')),
+    reviewed_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    consumed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_deployment_reviews_operation
+    ON deployment_reviews(operation_id);
+CREATE INDEX IF NOT EXISTS idx_deployment_reviews_source
+    ON deployment_reviews(source_operation_id, state);
+CREATE TABLE IF NOT EXISTS deployment_operations (
+    operation_id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL UNIQUE,
+    operation_kind TEXT NOT NULL CHECK(operation_kind IN ('deployment', 'rollback', 'cleanup')),
+    source_operation_id TEXT,
+    execution_token TEXT NOT NULL,
+    document_digest TEXT NOT NULL,
+    plan_digest TEXT NOT NULL,
+    target_digest TEXT NOT NULL,
+    deployment_id TEXT NOT NULL,
+    application_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    version TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    terminal INTEGER NOT NULL CHECK(terminal IN (0, 1)),
+    recovery_required INTEGER NOT NULL DEFAULT 0 CHECK(recovery_required IN (0, 1)),
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    error_category TEXT,
+    error TEXT,
+    result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (review_id) REFERENCES deployment_reviews(review_id)
+);
+CREATE INDEX IF NOT EXISTS idx_deployment_operations_time
+    ON deployment_operations(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_deployment_operations_target
+    ON deployment_operations(target_digest, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_deployment_operations_recovery
+    ON deployment_operations(recovery_required, terminal, started_at DESC);
+CREATE TABLE IF NOT EXISTS deployment_action_results (
+    operation_id TEXT NOT NULL,
+    action_index INTEGER NOT NULL,
+    action_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    action_json TEXT NOT NULL CHECK(json_valid(action_json)),
+    started_at INTEGER,
+    completed_at INTEGER,
+    PRIMARY KEY (operation_id, action_index),
+    FOREIGN KEY (operation_id) REFERENCES deployment_operations(operation_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS deployment_health_evidence (
+    operation_id TEXT NOT NULL,
+    check_index INTEGER NOT NULL,
+    check_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json)),
+    recorded_at INTEGER NOT NULL,
+    PRIMARY KEY (operation_id, check_index),
+    FOREIGN KEY (operation_id) REFERENCES deployment_operations(operation_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS deployment_rollback_snapshots (
+    operation_id TEXT PRIMARY KEY,
+    strategy TEXT NOT NULL CHECK(strategy = 'reactivatePreviousRelease'),
+    previous_release TEXT,
+    new_release TEXT NOT NULL,
+    releases_directory TEXT NOT NULL,
+    active_symlink TEXT NOT NULL,
+    activation_changed INTEGER NOT NULL CHECK(activation_changed IN (0, 1)),
+    captured_at INTEGER,
+    rollback_consumed_at INTEGER,
+    FOREIGN KEY (operation_id) REFERENCES deployment_operations(operation_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS deployment_approval_consumptions (
+    review_id TEXT PRIMARY KEY,
+    operation_id TEXT NOT NULL UNIQUE,
+    operation_kind TEXT NOT NULL,
+    approval_digest TEXT NOT NULL,
+    consumed_at INTEGER NOT NULL,
+    FOREIGN KEY (review_id) REFERENCES deployment_reviews(review_id),
+    FOREIGN KEY (operation_id) REFERENCES deployment_operations(operation_id)
+);
+CREATE TABLE IF NOT EXISTS deployment_release_records (
+    target_digest TEXT NOT NULL,
+    release_path TEXT NOT NULL,
+    releases_directory TEXT NOT NULL,
+    active_symlink TEXT NOT NULL,
+    deployment_id TEXT NOT NULL,
+    application_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    version TEXT NOT NULL,
+    source_operation_id TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0 CHECK(verified IN (0, 1)),
+    is_current INTEGER NOT NULL DEFAULT 0 CHECK(is_current IN (0, 1)),
+    last_verified_at INTEGER,
+    deleted_at INTEGER,
+    PRIMARY KEY (target_digest, release_path)
+);
+CREATE INDEX IF NOT EXISTS idx_deployment_releases_candidate
+    ON deployment_release_records(target_digest, verified, is_current, deleted_at);
+CREATE TABLE IF NOT EXISTS deployment_review_release_refs (
+    review_id TEXT NOT NULL,
+    release_path TEXT NOT NULL,
+    reference_kind TEXT NOT NULL CHECK(reference_kind IN ('current', 'newRelease', 'rollbackTarget', 'cleanupTarget')),
+    PRIMARY KEY (review_id, release_path, reference_kind),
+    FOREIGN KEY (review_id) REFERENCES deployment_reviews(review_id) ON DELETE CASCADE
+);
+INSERT OR IGNORE INTO deployment_schema_version (version) VALUES (1);
+COMMIT;
+";
+
+const DEPLOYMENT_SCHEMA_V2: &str = "
+BEGIN IMMEDIATE;
+ALTER TABLE deployment_rollback_snapshots ADD COLUMN rollback_reserved_by TEXT;
+CREATE INDEX IF NOT EXISTS idx_deployment_rollback_reservation
+    ON deployment_rollback_snapshots(rollback_reserved_by, rollback_consumed_at);
+INSERT INTO deployment_schema_version (version) VALUES (2);
+COMMIT;
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -258,6 +402,27 @@ impl Database {
                 .map_err(|e| format!("migration v5 failed: {e}"))?;
         }
 
+        let deployment_current: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM deployment_schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if deployment_current > CURRENT_DEPLOYMENT_SCHEMA_VERSION {
+            return Err(format!(
+                "deployment schema version {deployment_current} is newer than this build ({CURRENT_DEPLOYMENT_SCHEMA_VERSION})"
+            ));
+        }
+        if deployment_current < 1 {
+            conn.execute_batch(DEPLOYMENT_SCHEMA_V1)
+                .map_err(|e| format!("deployment migration v1 failed: {e}"))?;
+        }
+        if deployment_current < 2 {
+            conn.execute_batch(DEPLOYMENT_SCHEMA_V2)
+                .map_err(|e| format!("deployment migration v2 failed: {e}"))?;
+        }
+
         Ok(())
     }
 
@@ -270,6 +435,24 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         operation(&conn)
+    }
+
+    pub(crate) fn with_transaction<T>(
+        &self,
+        operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|e| format!("failed to start database transaction: {e}"))?;
+        let value = operation(&transaction)?;
+        transaction
+            .commit()
+            .map_err(|e| format!("failed to commit database transaction: {e}"))?;
+        Ok(value)
     }
 
     // --- Profiles ---
@@ -941,6 +1124,23 @@ mod tests {
             .unwrap();
         conn.execute("SELECT 1 FROM operation_history_events LIMIT 0", [])
             .unwrap();
+        conn.execute("SELECT 1 FROM deployment_reviews LIMIT 0", [])
+            .unwrap();
+        conn.execute("SELECT 1 FROM deployment_operations LIMIT 0", [])
+            .unwrap();
+        conn.execute("SELECT 1 FROM deployment_action_results LIMIT 0", [])
+            .unwrap();
+        conn.execute("SELECT 1 FROM deployment_health_evidence LIMIT 0", [])
+            .unwrap();
+        conn.execute("SELECT 1 FROM deployment_rollback_snapshots LIMIT 0", [])
+            .unwrap();
+        let has_rollback_reservation: bool = conn
+            .prepare("PRAGMA table_info(deployment_rollback_snapshots)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .any(|name| name.as_deref() == Ok("rollback_reserved_by"));
+        assert!(has_rollback_reservation);
         let has_secret_value_column: bool = conn
             .prepare("PRAGMA table_info(key_credentials)")
             .unwrap()
@@ -955,6 +1155,38 @@ mod tests {
             .unwrap()
             .any(|name| name.as_deref() == Ok("organization_json"));
         assert!(has_organization_column);
+    }
+
+    #[test]
+    fn deployment_migration_is_additive_and_phase_two_rollback_compatible() {
+        let db = test_db();
+        let conn = db.conn.lock().unwrap();
+        let primary_version: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let deployment_version: i32 = conn
+            .query_row(
+                "SELECT MAX(version) FROM deployment_schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            primary_version, 5,
+            "phase-2 builds reject primary versions above v5"
+        );
+        assert_eq!(deployment_version, CURRENT_DEPLOYMENT_SCHEMA_VERSION);
+        let changed_existing_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name IN ('profiles', 'operation_history_events')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(changed_existing_tables, 2);
     }
 
     #[test]

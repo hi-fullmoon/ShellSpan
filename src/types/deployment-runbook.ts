@@ -271,6 +271,8 @@ export interface DeploymentRollbackSnapshotV2 {
   strategy: 'reactivatePreviousRelease';
   previousRelease?: string;
   newRelease: string;
+  releasesDirectory: string;
+  activeSymlink: string;
   activationChanged: boolean;
   capturedAt?: number;
 }
@@ -292,4 +294,226 @@ export interface DeploymentExecutionResultV2 {
   rollbackSnapshot: DeploymentRollbackSnapshotV2;
   errorCategory?: string;
   error?: string;
+}
+
+export type RollbackExecutionActionKindV2 =
+  | 'inspectReactivation'
+  | 'reactivatePreviousRelease'
+  | 'serviceAction'
+  | 'httpHealthCheck'
+  | 'serviceHealthCheck';
+
+export interface RollbackExecutionActionV2 {
+  actionId: string;
+  kind: RollbackExecutionActionKindV2;
+  target: string;
+  normalizedParameters: string;
+  parametersDigest: string;
+  risk: RunbookRisk;
+  mutating: boolean;
+  timeoutSeconds: number;
+}
+
+export interface RollbackExecutionReviewRequestV2 {
+  operationId: string;
+  sourceOperationId: string;
+  profileId: string;
+  connection: RemoteConnectionRequest;
+  totalTimeoutSeconds: number;
+}
+
+export interface RollbackExecutionReviewV2 {
+  schemaVersion: 2;
+  reviewId: string;
+  operationId: string;
+  sourceOperationId: string;
+  sourceReviewId: string;
+  sourcePhase: string;
+  documentDigest: string;
+  planDigest: string;
+  deploymentId: string;
+  applicationId: string;
+  environment: string;
+  version: string;
+  currentRelease: string;
+  previousRelease: string;
+  releasesDirectory: string;
+  activeSymlink: string;
+  snapshotCapturedAt: number;
+  declaredRisk: RunbookRisk;
+  target: DeploymentFrozenTargetIdentityV2;
+  totalTimeoutSeconds: number;
+  actions: RollbackExecutionActionV2[];
+  reviewedAt: number;
+  expiresAt: number;
+}
+
+export interface RollbackExecutionApprovalV2 {
+  reviewId: string;
+  operationId: string;
+  sourceOperationId: string;
+  documentDigest: string;
+  planDigest: string;
+  targetDigest: string;
+  currentRelease: string;
+  previousRelease: string;
+  approvedRisk: RunbookRisk;
+  authorized: boolean;
+  destructiveConfirmed: boolean;
+}
+
+export interface RollbackExecutionRequestV2 {
+  operationId: string;
+  profileId: string;
+  connection: RemoteConnectionRequest;
+  approval: RollbackExecutionApprovalV2;
+}
+
+export type RollbackExecutionPhaseV2 =
+  | 'pending'
+  | 'inspectingTarget'
+  | 'reactivatingPreviousRelease'
+  | 'applyingServices'
+  | 'verifying'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'timedOut'
+  | 'identityMismatch'
+  | 'unauthorized';
+
+export interface RollbackExecutionActionResultV2 extends RollbackExecutionActionV2 {
+  childOperationId: string;
+  status: DeploymentExecutionActionStatusV2;
+  startedAt?: number;
+  completedAt?: number;
+  exitCode?: number;
+  output?: string;
+  error?: string;
+}
+
+export interface RollbackHealthEvidenceV2 {
+  checkId: string;
+  kind: 'http' | 'service';
+  status: 'passed' | 'failed' | 'cancelled' | 'timedOut';
+  attemptsUsed: number;
+  observedStatus?: number;
+  observedState?: string;
+  error?: string;
+}
+
+export interface RollbackReactivationResultV2 {
+  currentRelease: string;
+  previousRelease: string;
+  releasesDirectory: string;
+  activeSymlink: string;
+  activationChanged: boolean;
+  changedAt?: number;
+}
+
+export interface RollbackExecutionResultV2 {
+  schemaVersion: 2;
+  operationId: string;
+  reviewId: string;
+  sourceOperationId: string;
+  documentDigest: string;
+  planDigest: string;
+  deploymentId: string;
+  version: string;
+  target: DeploymentFrozenTargetIdentityV2;
+  phase: RollbackExecutionPhaseV2;
+  startedAt: number;
+  completedAt: number;
+  actions: RollbackExecutionActionResultV2[];
+  healthEvidence: RollbackHealthEvidenceV2[];
+  reactivation: RollbackReactivationResultV2;
+  errorCategory?: string;
+  error?: string;
+}
+
+export interface DeploymentOperationListRequestV2 {
+  operationKind?: 'deployment' | 'rollback' | 'cleanup';
+  targetDigest?: string;
+  recoveryRequired?: boolean;
+  limit?: number;
+}
+
+export interface DeploymentOperationSummaryV2 {
+  operationId: string;
+  reviewId: string;
+  operationKind: 'deployment' | 'rollback' | 'cleanup';
+  sourceOperationId?: string;
+  documentDigest: string;
+  planDigest: string;
+  targetDigest: string;
+  deploymentId: string;
+  applicationId: string;
+  environment: string;
+  version: string;
+  phase: DeploymentExecutionPhaseV2 | RollbackExecutionPhaseV2 | 'interrupted';
+  terminal: boolean;
+  recoveryRequired: boolean;
+  startedAt: number;
+  completedAt?: number;
+  errorCategory?: string;
+  error?: string;
+}
+
+export interface DeploymentOperationDetailV2 extends DeploymentOperationSummaryV2 {
+  review: DeploymentExecutionReviewV2 | RollbackExecutionReviewV2 | DeploymentReleaseCleanupReviewV2 | Record<string, unknown>;
+  result?: DeploymentExecutionResultV2 | RollbackExecutionResultV2 | Record<string, unknown>;
+  actions: Array<Record<string, unknown>>;
+  healthEvidence: Array<Record<string, unknown>>;
+}
+
+export interface DeploymentReleaseCleanupCandidateV2 {
+  candidateId: string;
+  targetDigest: string;
+  releasePath: string;
+  releasesDirectory: string;
+  activeSymlink: string;
+  deploymentId: string;
+  applicationId: string;
+  environment: string;
+  version: string;
+  sourceOperationId: string;
+  lastVerifiedAt: number;
+}
+
+export interface DeploymentReleaseCleanupReviewRequestV2 {
+  operationId: string;
+  candidateId: string;
+  profileId: string;
+  connection: RemoteConnectionRequest;
+}
+
+export interface DeploymentReleaseCleanupReviewV2 {
+  schemaVersion: 2;
+  reviewId: string;
+  operationId: string;
+  candidateId: string;
+  sourceOperationId: string;
+  deploymentId: string;
+  applicationId: string;
+  environment: string;
+  version: string;
+  releasePath: string;
+  releasesDirectory: string;
+  activeSymlink: string;
+  target: DeploymentFrozenTargetIdentityV2;
+  declaredRisk: 'destructive';
+  documentDigest: string;
+  planDigest: string;
+  action: {
+    actionId: 'cleanup-action-0';
+    kind: 'removeRelease';
+    target: string;
+    normalizedParameters: string;
+    parametersDigest: string;
+    risk: 'destructive';
+    mutating: true;
+  };
+  executableInPhase: false;
+  reviewedAt: number;
+  expiresAt: number;
 }

@@ -89,8 +89,19 @@ import type {
   DeploymentExecutionResultV2,
   DeploymentExecutionReviewRequestV2,
   DeploymentExecutionReviewV2,
+  DeploymentOperationDetailV2,
+  DeploymentOperationListRequestV2,
+  DeploymentOperationSummaryV2,
+  DeploymentReleaseCleanupCandidateV2,
+  DeploymentReleaseCleanupReviewRequestV2,
+  DeploymentReleaseCleanupReviewV2,
+  RollbackExecutionRequestV2,
+  RollbackExecutionResultV2,
+  RollbackExecutionReviewRequestV2,
+  RollbackExecutionReviewV2,
 } from '@/types/deployment-runbook';
 import { requireDeploymentExecutionResultIdentity } from '@/lib/deployment-execution';
+import { requireRollbackExecutionResultIdentity } from '@/lib/rollback-execution';
 
 const logger = createLogger('ipc');
 const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
@@ -960,6 +971,67 @@ export async function invokeExecuteDeployment(
 
 export async function invokeCancelDeployment(operationId: string): Promise<void> {
   return invokeLogged('cancel_deployment', { operationId });
+}
+
+export async function invokeReviewRollbackExecution(
+  request: RollbackExecutionReviewRequestV2,
+): Promise<RollbackExecutionReviewV2> {
+  return invokeLogged<RollbackExecutionReviewV2>('review_rollback_execution', { request });
+}
+
+export async function invokeExecuteRollback(
+  request: RollbackExecutionRequestV2,
+  review: RollbackExecutionReviewV2,
+): Promise<RollbackExecutionResultV2> {
+  const result = await invokeLogged<RollbackExecutionResultV2>('execute_rollback', { request }, {
+    deploymentIdentity: {
+      reviewId: review.reviewId,
+      documentDigest: review.documentDigest,
+      planDigest: review.planDigest,
+      deploymentId: review.deploymentId,
+      version: review.version,
+      targetDigest: review.target.identityDigest,
+    },
+  });
+  return requireRollbackExecutionResultIdentity(review, result);
+}
+
+export async function invokeCancelRollback(operationId: string): Promise<void> {
+  return invokeLogged('cancel_rollback', { operationId });
+}
+
+export async function invokeListDeploymentOperations(
+  request: DeploymentOperationListRequestV2 = {},
+): Promise<DeploymentOperationSummaryV2[]> {
+  return invokeLogged<DeploymentOperationSummaryV2[]>('list_deployment_operations', { request });
+}
+
+export async function invokeGetDeploymentOperation(
+  operationId: string,
+): Promise<DeploymentOperationDetailV2 | undefined> {
+  const result = await invokeLogged<DeploymentOperationDetailV2 | null>(
+    'get_deployment_operation',
+    { operationId },
+  );
+  return result ?? undefined;
+}
+
+export async function invokeListDeploymentReleaseCleanupCandidates(
+  targetDigest?: string,
+): Promise<DeploymentReleaseCleanupCandidateV2[]> {
+  return invokeLogged<DeploymentReleaseCleanupCandidateV2[]>(
+    'list_deployment_release_cleanup_candidates',
+    { targetDigest },
+  );
+}
+
+export async function invokeReviewDeploymentReleaseCleanup(
+  request: DeploymentReleaseCleanupReviewRequestV2,
+): Promise<DeploymentReleaseCleanupReviewV2> {
+  return invokeLogged<DeploymentReleaseCleanupReviewV2>(
+    'review_deployment_release_cleanup',
+    { request },
+  );
 }
 
 export async function invokeOpenRunbookFile(): Promise<RunbookFile | null> {

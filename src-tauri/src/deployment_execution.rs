@@ -5,6 +5,9 @@
 //! It does not accept commands, remote paths outside the validated document,
 //! or arbitrary SFTP operations from the frontend.
 
+use crate::deployment_persistence::{
+    checkpoint_operation, consume_review, store_review, DeploymentOperationKind, ReviewIdentity,
+};
 use crate::deployment_runbook::{
     parse_deployment_runbook_v2, serialize_deployment_runbook_v2, DeploymentArchiveFormatV2,
     DeploymentArtifactKindV2, DeploymentHealthCheckKindV2, DeploymentRunbookDocumentV2,
@@ -102,11 +105,11 @@ pub(crate) enum DeploymentExecutionActionKindV2 {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentExecutionPolicyV2 {
-    artifact_timeout_seconds: u64,
-    max_artifact_bytes: u64,
-    max_expanded_bytes: u64,
-    max_archive_entries: u32,
-    total_timeout_seconds: u64,
+    pub(crate) artifact_timeout_seconds: u64,
+    pub(crate) max_artifact_bytes: u64,
+    pub(crate) max_expanded_bytes: u64,
+    pub(crate) max_archive_entries: u32,
+    pub(crate) total_timeout_seconds: u64,
 }
 
 impl DeploymentExecutionPolicyV2 {
@@ -144,7 +147,7 @@ pub(crate) struct DeploymentExecutionReviewRequestV2 {
     policy: DeploymentExecutionPolicyV2,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeploymentArtifactDigestBindingV2 {
     artifact_id: String,
@@ -152,7 +155,7 @@ pub(crate) struct DeploymentArtifactDigestBindingV2 {
     target_path: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeploymentExecutionActionV2 {
     action_id: String,
@@ -165,29 +168,29 @@ pub(crate) struct DeploymentExecutionActionV2 {
     timeout_seconds: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeploymentExecutionReviewV2 {
-    schema_version: u8,
-    review_id: String,
-    operation_id: String,
-    normalized_runbook_text: String,
-    document_digest: String,
-    plan_digest: String,
-    deployment_id: String,
-    application_id: String,
-    environment: String,
-    version: String,
-    artifact_digests: Vec<DeploymentArtifactDigestBindingV2>,
-    declared_risk: RunbookRisk,
-    target: FrozenTargetIdentity,
-    policy: DeploymentExecutionPolicyV2,
-    actions: Vec<DeploymentExecutionActionV2>,
-    reviewed_at: i64,
-    expires_at: i64,
+    pub(crate) schema_version: u8,
+    pub(crate) review_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) normalized_runbook_text: String,
+    pub(crate) document_digest: String,
+    pub(crate) plan_digest: String,
+    pub(crate) deployment_id: String,
+    pub(crate) application_id: String,
+    pub(crate) environment: String,
+    pub(crate) version: String,
+    pub(crate) artifact_digests: Vec<DeploymentArtifactDigestBindingV2>,
+    pub(crate) declared_risk: RunbookRisk,
+    pub(crate) target: FrozenTargetIdentity,
+    pub(crate) policy: DeploymentExecutionPolicyV2,
+    pub(crate) actions: Vec<DeploymentExecutionActionV2>,
+    pub(crate) reviewed_at: i64,
+    pub(crate) expires_at: i64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentExecutionApprovalV2 {
     review_id: String,
@@ -296,6 +299,8 @@ pub(crate) struct DeploymentRollbackSnapshotV2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     previous_release: Option<String>,
     new_release: String,
+    releases_directory: String,
+    active_symlink: String,
     activation_changed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     captured_at: Option<i64>,
@@ -324,16 +329,8 @@ pub(crate) struct DeploymentExecutionResultV2 {
     error: Option<String>,
 }
 
-#[derive(Clone)]
-struct ReviewRecord {
-    review: DeploymentExecutionReviewV2,
-}
-
 #[derive(Default)]
 struct DeploymentRegistryState {
-    reviews: HashMap<String, ReviewRecord>,
-    reserved_operations: HashMap<String, String>,
-    used_operations: HashSet<String>,
     active: HashMap<String, Arc<AtomicBool>>,
 }
 
@@ -343,66 +340,19 @@ pub(crate) struct DeploymentExecutionRegistry {
 }
 
 impl DeploymentExecutionRegistry {
-    fn issue(&self, review: DeploymentExecutionReviewV2) -> Result<(), String> {
+    fn start(&self, operation_id: &str) -> Result<Arc<AtomicBool>, String> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| "deployment execution registry is unavailable".to_string())?;
-        let now = now_ms();
-        let expired = state
-            .reviews
-            .iter()
-            .filter(|(_, record)| record.review.expires_at <= now)
-            .map(|(id, record)| (id.clone(), record.review.operation_id.clone()))
-            .collect::<Vec<_>>();
-        for (review_id, operation_id) in expired {
-            state.reviews.remove(&review_id);
-            state.reserved_operations.remove(&operation_id);
+        if state.active.contains_key(operation_id) {
+            return Err("deployment operation is already active".into());
         }
-        if state.used_operations.contains(&review.operation_id)
-            || state.active.contains_key(&review.operation_id)
-            || state.reserved_operations.contains_key(&review.operation_id)
-        {
-            return Err("deployment operation identity is already reviewed or used".into());
-        }
-        state
-            .reserved_operations
-            .insert(review.operation_id.clone(), review.review_id.clone());
-        state
-            .reviews
-            .insert(review.review_id.clone(), ReviewRecord { review });
-        Ok(())
-    }
-
-    fn consume(
-        &self,
-        review_id: &str,
-        operation_id: &str,
-    ) -> Result<(ReviewRecord, Arc<AtomicBool>), String> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "deployment execution registry is unavailable".to_string())?;
-        let record = state
-            .reviews
-            .remove(review_id)
-            .ok_or_else(|| "deployment review was not found or was already consumed".to_string())?;
-        state
-            .reserved_operations
-            .remove(&record.review.operation_id);
-        if record.review.operation_id != operation_id
-            || state.used_operations.contains(operation_id)
-            || state.active.contains_key(operation_id)
-        {
-            state.used_operations.insert(operation_id.to_string());
-            return Err("deployment review does not bind this one-shot operation identity".into());
-        }
-        state.used_operations.insert(operation_id.to_string());
         let cancelled = Arc::new(AtomicBool::new(false));
         state
             .active
             .insert(operation_id.to_string(), Arc::clone(&cancelled));
-        Ok((record, cancelled))
+        Ok(cancelled)
     }
 
     fn finish(&self, operation_id: &str, expected: &Arc<AtomicBool>) {
@@ -689,7 +639,6 @@ fn review_material(
 #[tauri::command]
 pub(crate) fn review_deployment_execution(
     database: State<'_, crate::db::Database>,
-    registry: State<'_, DeploymentExecutionRegistry>,
     request: DeploymentExecutionReviewRequestV2,
 ) -> Result<DeploymentExecutionReviewV2, String> {
     let (
@@ -721,7 +670,26 @@ pub(crate) fn review_deployment_execution(
         reviewed_at,
         expires_at: reviewed_at + REVIEW_TTL_MS,
     };
-    registry.issue(review.clone())?;
+    store_review(
+        &database,
+        &ReviewIdentity {
+            review_id: &review.review_id,
+            operation_id: &review.operation_id,
+            kind: DeploymentOperationKind::Deployment,
+            source_operation_id: None,
+            document_digest: &review.document_digest,
+            plan_digest: &review.plan_digest,
+            target_digest: &review.target.identity_digest,
+            deployment_id: &review.deployment_id,
+            application_id: &review.application_id,
+            environment: &review.environment,
+            version: &review.version,
+            reviewed_at: review.reviewed_at,
+            expires_at: review.expires_at,
+        },
+        &review,
+        &[(document.release.release_directory.as_str(), "newRelease")],
+    )?;
     Ok(review)
 }
 
@@ -766,6 +734,8 @@ impl DeploymentStateMachine {
                     strategy: "reactivatePreviousRelease",
                     previous_release: None,
                     new_release: document.release.release_directory.clone(),
+                    releases_directory: document.release.releases_directory.clone(),
+                    active_symlink: document.release.active_symlink.clone(),
                     activation_changed: false,
                     captured_at: None,
                 },
@@ -867,6 +837,36 @@ impl DeploymentStateMachine {
         self.transition(DeploymentExecutionPhaseV2::Succeeded)?;
         self.result.completed_at = now_ms();
         Ok(())
+    }
+
+    fn persist(&self, database: &crate::db::Database, execution_token: &str) -> Result<(), String> {
+        checkpoint_operation(
+            database,
+            &self.result.operation_id,
+            execution_token,
+            phase_name(self.result.phase),
+            self.result.phase.terminal(),
+            &self.result,
+        )
+    }
+}
+
+fn phase_name(phase: DeploymentExecutionPhaseV2) -> &'static str {
+    match phase {
+        DeploymentExecutionPhaseV2::Pending => "pending",
+        DeploymentExecutionPhaseV2::PreparingArtifacts => "preparingArtifacts",
+        DeploymentExecutionPhaseV2::InspectingTarget => "inspectingTarget",
+        DeploymentExecutionPhaseV2::CreatingRelease => "creatingRelease",
+        DeploymentExecutionPhaseV2::StagingArtifacts => "stagingArtifacts",
+        DeploymentExecutionPhaseV2::ActivatingRelease => "activatingRelease",
+        DeploymentExecutionPhaseV2::ApplyingServices => "applyingServices",
+        DeploymentExecutionPhaseV2::Verifying => "verifying",
+        DeploymentExecutionPhaseV2::Succeeded => "succeeded",
+        DeploymentExecutionPhaseV2::Failed => "failed",
+        DeploymentExecutionPhaseV2::Cancelled => "cancelled",
+        DeploymentExecutionPhaseV2::TimedOut => "timedOut",
+        DeploymentExecutionPhaseV2::IdentityMismatch => "identityMismatch",
+        DeploymentExecutionPhaseV2::Unauthorized => "unauthorized",
     }
 }
 
@@ -1613,24 +1613,29 @@ fn run_reviewed_action(
     cancelled: &Arc<AtomicBool>,
     deadline: Instant,
     attempt: Option<u8>,
+    execution_token: &str,
 ) -> Result<ReviewedSshExecutionResult, String> {
     ensure_not_cancelled(cancelled, deadline)?;
     let remaining = deadline.saturating_duration_since(Instant::now());
     if remaining < Duration::from_secs(1) {
         return Err("deployment execution exceeded its reviewed timeout".into());
     }
-    let action = machine
-        .result
-        .actions
-        .get_mut(index)
-        .ok_or_else(|| "deployment action plan index is invalid".to_string())?;
-    action.status = DeploymentExecutionActionStatusV2::Running;
-    action.started_at = Some(now_ms());
-    let child_operation_id = attempt.map_or_else(
-        || action.child_operation_id.clone(),
-        |attempt| format!("{}:attempt-{attempt}", action.child_operation_id),
-    );
-    let timeout = Duration::from_secs(action.action.timeout_seconds).min(remaining);
+    let (child_operation_id, timeout) = {
+        let action = machine
+            .result
+            .actions
+            .get_mut(index)
+            .ok_or_else(|| "deployment action plan index is invalid".to_string())?;
+        action.status = DeploymentExecutionActionStatusV2::Running;
+        action.started_at = Some(now_ms());
+        let child_operation_id = attempt.map_or_else(
+            || action.child_operation_id.clone(),
+            |attempt| format!("{}:attempt-{attempt}", action.child_operation_id),
+        );
+        let timeout = Duration::from_secs(action.action.timeout_seconds).min(remaining);
+        (child_operation_id, timeout)
+    };
+    machine.persist(database, execution_token)?;
     let reviewed = ReviewedSshExecutionRequest {
         operation_id: child_operation_id.clone(),
         target: target.clone(),
@@ -1664,48 +1669,53 @@ fn run_reviewed_action(
     watcher_done.store(true, Ordering::SeqCst);
     let _ = watcher.join();
 
-    let action = &mut machine.result.actions[index];
-    action.completed_at = Some(now_ms());
-    action.exit_code = result.exit_code;
-    if !result.stdout.trim().is_empty() {
-        action.output = Some(result.stdout.trim().to_string());
-    }
-    if !reviewed_result_identity_matches(&child_operation_id, target, &result) {
-        action.status = DeploymentExecutionActionStatusV2::IdentityMismatch;
-        action.error =
-            Some("deployment action returned a mismatched operation or target identity".into());
-        return Err(action.error.clone().expect("identity error"));
-    }
-    match result.status {
-        ExecutionStatus::Completed if result.exit_code == Some(0) => {
-            action.status = DeploymentExecutionActionStatusV2::Succeeded;
-            Ok(result)
+    let outcome = {
+        let action = &mut machine.result.actions[index];
+        action.completed_at = Some(now_ms());
+        action.exit_code = result.exit_code;
+        if !result.stdout.trim().is_empty() {
+            action.output = Some(result.stdout.trim().to_string());
         }
-        ExecutionStatus::Cancelled => {
-            action.status = DeploymentExecutionActionStatusV2::Cancelled;
-            action.error = Some("deployment action was cancelled".into());
-            Err(action.error.clone().expect("cancel error"))
+        if !reviewed_result_identity_matches(&child_operation_id, target, &result) {
+            action.status = DeploymentExecutionActionStatusV2::IdentityMismatch;
+            action.error =
+                Some("deployment action returned a mismatched operation or target identity".into());
+            Err(action.error.clone().expect("identity error"))
+        } else {
+            match result.status {
+                ExecutionStatus::Completed if result.exit_code == Some(0) => {
+                    action.status = DeploymentExecutionActionStatusV2::Succeeded;
+                    Ok(())
+                }
+                ExecutionStatus::Cancelled => {
+                    action.status = DeploymentExecutionActionStatusV2::Cancelled;
+                    action.error = Some("deployment action was cancelled".into());
+                    Err(action.error.clone().expect("cancel error"))
+                }
+                ExecutionStatus::TimedOut => {
+                    action.status = DeploymentExecutionActionStatusV2::TimedOut;
+                    action.error = Some("deployment action timed out".into());
+                    Err(action.error.clone().expect("timeout error"))
+                }
+                _ => {
+                    action.status = DeploymentExecutionActionStatusV2::Failed;
+                    let error = result.error.clone().unwrap_or_else(|| {
+                        format!(
+                            "deployment action failed with exit code {:?}",
+                            result.exit_code
+                        )
+                    });
+                    action.error = Some(error.clone());
+                    Err(format!(
+                        "{}: {error}",
+                        execution_category_name(result.error_category)
+                    ))
+                }
+            }
         }
-        ExecutionStatus::TimedOut => {
-            action.status = DeploymentExecutionActionStatusV2::TimedOut;
-            action.error = Some("deployment action timed out".into());
-            Err(action.error.clone().expect("timeout error"))
-        }
-        _ => {
-            action.status = DeploymentExecutionActionStatusV2::Failed;
-            let error = result.error.clone().unwrap_or_else(|| {
-                format!(
-                    "deployment action failed with exit code {:?}",
-                    result.exit_code
-                )
-            });
-            action.error = Some(error.clone());
-            Err(format!(
-                "{}: {error}",
-                execution_category_name(result.error_category)
-            ))
-        }
-    }
+    };
+    machine.persist(database, execution_token)?;
+    outcome.map(|()| result)
 }
 
 fn remote_kind(stat: &ssh2::FileStat) -> Option<u32> {
@@ -2030,6 +2040,8 @@ fn fail_machine(
 fn mark_direct_action_started(
     machine: &mut DeploymentStateMachine,
     index: usize,
+    database: &crate::db::Database,
+    execution_token: &str,
 ) -> Result<(), String> {
     let action = machine
         .result
@@ -2038,14 +2050,16 @@ fn mark_direct_action_started(
         .ok_or_else(|| "deployment direct action index is invalid".to_string())?;
     action.status = DeploymentExecutionActionStatusV2::Running;
     action.started_at = Some(now_ms());
-    Ok(())
+    machine.persist(database, execution_token)
 }
 
 fn mark_direct_action_finished(
     machine: &mut DeploymentStateMachine,
     index: usize,
     outcome: &Result<(), String>,
-) {
+    database: &crate::db::Database,
+    execution_token: &str,
+) -> Result<(), String> {
     let action = &mut machine.result.actions[index];
     action.completed_at = Some(now_ms());
     match outcome {
@@ -2067,6 +2081,7 @@ fn mark_direct_action_finished(
             action.error = Some(error.clone());
         }
     }
+    machine.persist(database, execution_token)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2079,6 +2094,7 @@ fn execute_consumed_review(
     review: &DeploymentExecutionReviewV2,
     request: &DeploymentExecutionRequestV2,
     cancelled: &Arc<AtomicBool>,
+    execution_token: &str,
 ) -> DeploymentExecutionResultV2 {
     let expected_document = parse_deployment_runbook_v2(&review.normalized_runbook_text)
         .expect("issued deployment review stores a validated canonical document");
@@ -2183,6 +2199,7 @@ fn execute_consumed_review(
         cancelled,
         deadline,
         None,
+        execution_token,
     );
     let inspect = match inspect {
         Ok(result) => result,
@@ -2230,6 +2247,7 @@ fn execute_consumed_review(
         cancelled,
         deadline,
         None,
+        execution_token,
     ) {
         fail_machine(&mut machine, cancelled, deadline, error);
         return machine.result;
@@ -2241,7 +2259,9 @@ fn execute_consumed_review(
     }
     for (artifact_index, artifact) in prepared.artifacts.iter().enumerate() {
         let stage_index = 2 + artifact_index * 2;
-        if let Err(error) = mark_direct_action_started(&mut machine, stage_index) {
+        if let Err(error) =
+            mark_direct_action_started(&mut machine, stage_index, database, execution_token)
+        {
             fail_machine(&mut machine, cancelled, deadline, error);
             return machine.result;
         }
@@ -2262,7 +2282,16 @@ fn execute_consumed_review(
                     ),
             ),
         );
-        mark_direct_action_finished(&mut machine, stage_index, &stage);
+        if let Err(error) = mark_direct_action_finished(
+            &mut machine,
+            stage_index,
+            &stage,
+            database,
+            execution_token,
+        ) {
+            fail_machine(&mut machine, cancelled, deadline, error);
+            return machine.result;
+        }
         if let Err(error) = stage {
             fail_machine(&mut machine, cancelled, deadline, error);
             return machine.result;
@@ -2286,6 +2315,7 @@ fn execute_consumed_review(
             cancelled,
             deadline,
             None,
+            execution_token,
         );
         let verify = match verify {
             Ok(result) => result,
@@ -2332,11 +2362,16 @@ fn execute_consumed_review(
         cancelled,
         deadline,
         None,
+        execution_token,
     ) {
         fail_machine(&mut machine, cancelled, deadline, error);
         return machine.result;
     }
     machine.result.rollback_snapshot.activation_changed = true;
+    if let Err(error) = machine.persist(database, execution_token) {
+        fail_machine(&mut machine, cancelled, deadline, error);
+        return machine.result;
+    }
 
     let service_start = activation_index + 1;
     if document.service_actions.is_empty() {
@@ -2369,6 +2404,7 @@ fn execute_consumed_review(
                 cancelled,
                 deadline,
                 None,
+                execution_token,
             ) {
                 fail_machine(&mut machine, cancelled, deadline, error);
                 return machine.result;
@@ -2433,6 +2469,7 @@ fn execute_consumed_review(
                 cancelled,
                 deadline,
                 Some(attempt),
+                execution_token,
             ) {
                 Ok(result) => match check.kind {
                     DeploymentHealthCheckKindV2::Http => {
@@ -2521,23 +2558,39 @@ pub(crate) fn execute_deployment(
     if !valid_operation_id(&request.operation_id) {
         return Err("deployment operation identity is invalid".into());
     }
-    let (record, cancelled) =
-        registry.consume(&request.approval.review_id, &request.operation_id)?;
+    let consumed = consume_review::<DeploymentExecutionReviewV2, _>(
+        &database,
+        DeploymentOperationKind::Deployment,
+        &request.approval.review_id,
+        &request.operation_id,
+        &request.approval,
+    )?;
+    let cancelled = registry.start(&request.operation_id)?;
     let _guard = ActiveExecutionGuard {
         registry: &registry,
         operation_id: &request.operation_id,
         cancelled: Arc::clone(&cancelled),
     };
-    Ok(execute_consumed_review(
+    let result = execute_consumed_review(
         &app,
         &database,
         &credentials,
         &cancellations,
         &pool,
-        &record.review,
+        &consumed.review,
         &request,
         &cancelled,
-    ))
+        &consumed.execution_token,
+    );
+    checkpoint_operation(
+        &database,
+        &request.operation_id,
+        &consumed.execution_token,
+        phase_name(result.phase),
+        true,
+        &result,
+    )?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2681,7 +2734,7 @@ mod tests {
     }
 
     #[test]
-    fn approval_is_exact_and_review_registry_is_one_shot() {
+    fn approval_is_exact_and_active_registry_is_operation_scoped() {
         let review = review();
         let matching = DeploymentExecutionApprovalV2 {
             review_id: review.review_id.clone(),
@@ -2703,13 +2756,8 @@ mod tests {
         ));
 
         let registry = DeploymentExecutionRegistry::default();
-        registry.issue(review.clone()).unwrap();
-        let (_record, flag) = registry
-            .consume(&review.review_id, &review.operation_id)
-            .unwrap();
-        assert!(registry
-            .consume(&review.review_id, &review.operation_id)
-            .is_err());
+        let flag = registry.start(&review.operation_id).unwrap();
+        assert!(registry.start(&review.operation_id).is_err());
         registry.cancel(&review.operation_id).unwrap();
         assert!(flag.load(Ordering::SeqCst));
         registry.finish(&review.operation_id, &flag);

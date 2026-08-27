@@ -178,9 +178,9 @@ pub(crate) struct DeploymentVerificationV2 {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeploymentRollbackV2 {
-    strategy: DeploymentRollbackStrategyV2,
-    service_actions: Vec<DeploymentServiceActionV2>,
-    verification_check_ids: Vec<String>,
+    pub(crate) strategy: DeploymentRollbackStrategyV2,
+    pub(crate) service_actions: Vec<DeploymentServiceActionV2>,
+    pub(crate) verification_check_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -1,8 +1,8 @@
 # Deployment Runbook v2 contract
 
-> Status: phase 2 of 5 — reviewed single-host semantic execution.
+> Status: phase 3 of 5 — durable single-host execution and separately reviewed rollback.
 >
-> This phase can execute one reviewed deployment on one frozen SSH target. It still does **not** execute rollback, schedule multiple hosts, expose generic Shell/SFTP, or migrate v1 documents.
+> This phase can execute one reviewed deployment or one separately reviewed rollback on one frozen SSH target, persist their audit state, and fail closed after restart. It still does **not** schedule multiple hosts, expose generic Shell/SFTP, provide deployment-specific UI, or migrate v1 documents.
 
 Deployment Runbook v2 is a semantic, reviewable description of deploying an already-built artifact to an SSH target. It is deliberately separate from the executable command-oriented Runbook v1 contract. The checked-in machine-readable schema is [`protocol/runbook/v2/deployment-runbook.schema.json`](../protocol/runbook/v2/deployment-runbook.schema.json), and a complete document is in [`docs/examples/deployment-runbook-v2.runbook.json`](examples/deployment-runbook-v2.runbook.json).
 
@@ -85,7 +85,7 @@ rootDirectory
 - At least one bounded health check is required. HTTP checks accept no headers, credentials, query strings, or fragments; secret-bearing checks must be added later as a separately reviewed capability.
 - Rollback action IDs must be distinct from forward action IDs. Rollback service actions must cover exactly the services changed by the forward plan.
 - `rollback.verificationCheckIds` must reference every declared health check exactly once. A partial or unverifiable rollback is rejected.
-- `reactivatePreviousRelease` remains declarative. Phase 2 records the previous release and whether activation changed, but does not reactivate it. Phase 3 must fail closed if the captured target is absent, is no longer an approved release, or cannot be reactivated atomically. Rollback requires a new, separate approval and is never automatic.
+- `reactivatePreviousRelease` is executable only through phase 3's separate rollback boundary. The rollback review accepts a source operation ID, not paths or actions, and derives current/previous release identities, service actions, health checks, risk, target, and document/plan digests from a persisted activation snapshot. Missing, consumed, inconsistent, or unsafe snapshots fail closed. Rollback requires a new approval and is never automatic or recursive.
 
 ### Security and approval metadata
 
@@ -102,11 +102,11 @@ The approval object is fixed in v2:
 }
 ```
 
-These values are policy requirements, not proof that approval has happened. `review_deployment_execution` reparses and normalizes the document in Rust, freezes the profile/host/port/username/auth/jump identity, and returns the canonical document digest, deployment identity/version, artifact digests, derived risk, bounded policy, and exact semantic action plan. The resulting plan digest and target digest are copied into an explicit approval. `execute_deployment` consumes that backend-held review once, rejects expiry/replay or any approval/document/target mismatch, reparses the submitted document again, and revalidates the current profile before network access.
+These values are policy requirements, not proof that approval has happened. `review_deployment_execution` reparses and normalizes the document in Rust, freezes the profile/host/port/username/auth/jump identity, and returns the canonical document digest, deployment identity/version, artifact digests, derived risk, bounded policy, and exact semantic action plan. The resulting plan digest and target digest are copied into an explicit approval. `execute_deployment` consumes the persisted review once in the same SQLite transaction that creates the operation and approval-consumption record, rejects expiry/replay or any approval/document/target mismatch, reparses the submitted document again, and revalidates the current profile before network access.
 
 Literal secrets are prohibited throughout metadata and URIs. Artifact `credentialRef` names an entry in `security.secretRefs`; that entry maps the document-local ID to an opaque value such as `keychain://deployment/artifact-download`. For HTTPS preparation the Rust boundary resolves the mapped deployment-keychain account and sends it only as a bearer credential; redirects, URL credentials, query tokens, fragments, response error bodies, and newline-bearing values fail closed. The temporary keychain string buffer is zeroized after building the request header, and secrets are never returned. Connection authentication continues to use the existing reviewed SSH credential boundary. The phase does not add credential creation UI or plaintext fallback.
 
-## Phase 2 single-host execution
+## Phase 2/3 single-host deployment execution
 
 The frontend boundary is deliberately small: request a review, construct an approval from that review, execute it once, or cancel that operation. The backend state machine is:
 
@@ -122,7 +122,31 @@ Each reviewed action binds an action ID, semantic kind, target, canonical parame
 
 Artifact preparation happens locally before remote mutation. `file://` and non-redirecting HTTPS sources are streamed into a private temporary directory with cancellation, timeout, byte limits, and SHA-256 verification. Tar, tar.gz, and zip extraction rejects absolute/traversing paths, links, special entries, excess files, and excess expanded bytes. SFTP then creates only reviewed release-relative parents, rejects existing symlinks or non-directory ancestors, uploads through an exclusive temporary name with bounded chunks, verifies size, and renames into place. The release directory must not already exist. The active link is replaced with a same-directory temporary symlink and atomic rename after a final safety inspection.
 
-Health checks are declarative: HTTP checks compare an exact status code and service checks compare the expected systemd state. Attempts, intervals, per-action timeouts, total timeout, captured output, and total bytes read are bounded. A failed check stops the deployment and returns structured action, health, error, and rollback-snapshot data; phase 2 never performs an implicit rollback.
+Health checks are declarative: HTTP checks compare an exact status code and service checks compare the expected systemd state. Attempts, intervals, per-action timeouts, total timeout, captured output, and total bytes read are bounded. A failed check stops the deployment and returns structured action, health, error, and rollback-snapshot data; no failure path performs an implicit rollback. Phase 3 checkpoints reviewed actions and health evidence before advancing, and persists the activation change immediately after the atomic link swap.
+
+## Phase 3 rollback boundary
+
+Rollback exposes three commands that are intentionally distinct from deployment:
+
+- `review_rollback_execution` accepts only a new operation ID, a persisted source deployment operation ID, the exact profile/connection used to revalidate the frozen target, and a bounded total timeout. It accepts no Runbook text, release path, command, service action, or health check.
+- `execute_rollback` consumes that rollback review once. Its approval binds the source operation, document/plan/target digests, current and previous release paths, risk, authorization, and destructive confirmation.
+- `cancel_rollback` can cancel only the matching active rollback operation. Forward deployment cancellation cannot cancel rollback and vice versa.
+
+At execution time the backend reloads the source snapshot and canonical Runbook, proves the snapshot is still unconsumed, revalidates the profile identity, and recomputes the entire semantic plan. A fixed read-only script then requires `activeSymlink` to resolve to the reviewed new release and requires both release directories to be real directories rather than symlinks. The mutating script repeats those checks and performs a same-directory temporary-symlink plus `mv -Tf` activation. Only the Runbook's rollback `systemd start|restart|reload` actions run, followed by exactly the declared rollback verification checks.
+
+If activation, a service action, or a health check fails, execution stops and preserves every durable partial action and reactivation result. It never launches another rollback. Snapshot use is exclusive: failure before activation releases the reservation for a new review, activation consumes the snapshot even if a later service or health check fails, and restart recovery permits only a newly reviewed takeover that first reinspects remote state.
+
+## Persistence and crash recovery
+
+Phase 3 stores canonical, secret-free review material and execution state in an additive `deployment_schema_version` namespace. The primary application schema remains v5: phase-2 binaries can open the database and ignore the new tables. Deployment schema v1 creates separate tables for reviews, operations, action results, health evidence, rollback snapshots, approval consumptions, release records, and review-to-release references; additive v2 adds exclusive rollback-snapshot reservations. Review consumption, snapshot reservation, operation creation, and approval consumption commit in one transaction.
+
+Connection requests, passwords, passphrases, private-key data, resolved keychain values, stdout, and stderr are never persisted by this subsystem. The canonical Runbook may retain opaque `keychain://deployment/...` references, never resolved values. Persisted action rows omit output and store bounded semantic status/evidence only.
+
+On startup, every non-terminal deployment or rollback operation is atomically sealed as `interrupted`, `terminal=true`, and `recoveryRequired=true`. It is not replayed. Its execution token is invalidated, so a late worker result cannot overwrite recovery or any terminal state. Read-only `list_deployment_operations` and `get_deployment_operation` return authoritative operation/review/action/health state. Recovery requires a fresh deployment review, or—when an activation snapshot was durably captured—a fresh rollback review.
+
+## Release retention and cleanup semantics
+
+`list_deployment_release_cleanup_candidates` is conservative. A release appears only when it was health-verified, is not current, is not an unconsumed rollback target, has no pending review or active operation reference, and its target has no active or recovery-required operation. `review_deployment_release_cleanup` revalidates the candidate and frozen profile and freezes one destructive `removeRelease` semantic action by candidate ID. Phase 3 deliberately reports `executableInPhase: false`: it does not delete the release, run background garbage collection, or expose a generic removal command.
 
 ## v1 compatibility and migration
 
@@ -142,15 +166,15 @@ Both implementations enforce the same 512 KiB document bound, trim human-readabl
 
 The JSON Schema provides editor-facing structural diagnostics. TypeScript and Rust validators remain authoritative for semantic invariants that JSON Schema does not express cleanly: path ancestry, deployment-ID/release binding, cross-object references, complete rollback coverage, URI credential isolation, duplicate IDs/targets, and derived risk.
 
-Shared fixtures in `tests/fixtures/deployment-runbook/v2/` cover the valid document, unknown top-level and nested fields, invalid artifacts and paths, missing verification, incomplete rollback, risk understatement, literal secrets, dangling secret references, the v1 compatibility boundary, and the bounded phase 2 execution contract.
+Shared fixtures in `tests/fixtures/deployment-runbook/v2/` cover the valid document, unknown top-level and nested fields, invalid artifacts and paths, missing verification, incomplete rollback, risk understatement, literal secrets, dangling secret references, the v1 compatibility boundary, bounded phase 2 execution, and phase 3 rollback/recovery/cleanup protections.
 
-## Phase 2 limits and later phases
+## Phase 3 limits and later phases
 
-- Reviews, replay guards, active cancellation flags, and execution state are process-memory only. Application restart/crash recovery and durable execution resumption are deferred.
-- The existing operation-history projection records the deployment operation and terminal identity, but phase 2 adds no dedicated deployment editor or live progress UI.
+- Active cancellation flags remain process-memory only; durable state records the interruption but cannot prove a blocking remote process stopped. No operation is resumed automatically.
+- The existing operation-history projection records deployment and rollback invocation identity, and the deployment database stores detailed semantic checkpoints. Phase 3 adds no dedicated deployment editor or live progress UI.
 - Cancellation is checked between artifact/archive/SFTP chunks and between semantic actions. A currently blocking connection/SFTP library call may observe cancellation only when that call or its connection timeout returns.
-- No rollback execution, automatic rollback, release retention/cleanup, or garbage collection. Phase 2 preserves only the previous release and activation snapshot required by phase 3.
+- No automatic rollback, recursive rollback, cleanup execution, or background garbage collection. Cleanup remains a reviewed, non-executable disposition.
 - No multi-host scheduling, batch/canary policy, traffic switching, or cross-host coordination.
 - No Docker Compose, Kubernetes, database migration, hooks, scripts, environment injection, or arbitrary Shell escape hatch.
 
-Phase 3 must consume the preserved rollback snapshot through a new, separately reviewed rollback plan. It must not reuse the forward approval or add automatic rollback as a shortcut.
+Phase 4 may build multi-host batch/canary coordination only on these single-host durable boundaries. It must not share approvals across targets or reinterpret `recoveryRequired` as permission to replay.

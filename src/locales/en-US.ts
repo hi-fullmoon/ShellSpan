@@ -1585,6 +1585,8 @@ export default {
   'operationHistory.action.stopAllPortForwards': 'Stop all port forwards',
   'operationHistory.action.collectRemoteHealth': 'Collect remote health snapshot',
   'operationHistory.action.executeRunbookStep': 'Execute runbook step',
+  'operationHistory.action.executeDeployment': 'Execute deployment',
+  'operationHistory.action.executeDeploymentRollback': 'Execute deployment rollback',
   'operationHistory.action.executeMultiHostRunbook': 'Execute multi-host runbook',
   'operationHistory.error.authentication': 'Authentication failed',
   'operationHistory.error.timeout': 'Timeout',

@@ -66,6 +66,8 @@ const result: DeploymentExecutionResultV2 = {
     strategy: 'reactivatePreviousRelease',
     previousRelease: '/srv/acme/releases/previous',
     newRelease: '/srv/acme/releases/current-release',
+    releasesDirectory: '/srv/acme/releases',
+    activeSymlink: '/srv/acme/current',
     activationChanged: true,
     capturedAt: 2_500,
   },
