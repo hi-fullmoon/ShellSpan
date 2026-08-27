@@ -34,9 +34,8 @@ use models::{
 };
 use models::{
     DownloadCancellationRegistry, RemoteCopyCancellationRegistry,
-    RemoteFileReadCancellationRegistry, RemoteHealthCancellationRegistry,
-    RunbookCancellationRegistry, SessionErrorEvent, SessionIdentity, SessionManager, SessionStatus,
-    StatusEvent, UploadCancellationRegistry,
+    RemoteFileReadCancellationRegistry, RemoteHealthCancellationRegistry, SessionErrorEvent,
+    SessionIdentity, SessionManager, SessionStatus, StatusEvent, UploadCancellationRegistry,
 };
 
 pub(crate) use connection::{
@@ -232,7 +231,7 @@ pub fn run() {
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
         .manage(RemoteHealthCancellationRegistry::default())
-        .manage(RunbookCancellationRegistry::default())
+        .manage(execution::ExecutionCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
         .manage(RemoteFileReadCancellationRegistry::default())
