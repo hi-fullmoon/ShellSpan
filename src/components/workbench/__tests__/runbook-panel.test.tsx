@@ -74,10 +74,10 @@ describe('RunbookPanel', () => {
     const setup = container.querySelector('[data-slot="runbook-setup"]');
     expect(panel).toHaveClass('@container', 'min-w-0');
     expect(header).toBeInTheDocument();
-    expect(headerCopy).toHaveClass('@min-[42rem]:flex-1');
-    expect(headerCopy).not.toHaveClass('@min-[42rem]:shrink-0');
-    expect(headerActions).toHaveClass('@min-[42rem]:shrink-0', '@min-[42rem]:flex-nowrap');
-    expect(headerActions).not.toHaveClass('@min-[42rem]:flex-1');
+    expect(headerCopy).toHaveClass('@min-[64rem]:flex-1');
+    expect(headerCopy).not.toHaveClass('@min-[64rem]:shrink-0');
+    expect(headerActions).toHaveClass('@min-[64rem]:shrink-0', '@min-[64rem]:flex-nowrap');
+    expect(headerActions).not.toHaveClass('@min-[64rem]:flex-1');
     expect(scroller).toHaveClass('min-h-0', 'flex-1');
     expect(content).toHaveClass('@container');
     expect(overview).toBeInTheDocument();
