@@ -47,6 +47,8 @@ const rustWorkflowPaths = [
 ];
 const allowedP0Statuses = new Set(['implemented', 'blocked', 'verified']);
 const allowedP0CriterionStatuses = new Set(['verified', 'pending-external', 'blocked']);
+const allowedP1Statuses = new Set(['blocked', 'verified']);
+const allowedP1CriterionStatuses = new Set(['verified', 'pending-external', 'blocked']);
 
 function fail(message) {
   throw new Error(`roadmap audit: ${message}`);
@@ -137,6 +139,17 @@ function parseP0ExitCriteria(markdown) {
     .filter(Boolean);
 }
 
+function parseP1ExitCriteria(markdown) {
+  const start = markdown.indexOf('## 25. P1 退出条件');
+  const end = markdown.indexOf('## 26. P2 准入', start);
+  if (start < 0 || end < 0) fail('P1 design is missing sections 25 or 26');
+  return markdown
+    .slice(start, end)
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\d+\. (.+)$/)?.[1])
+    .filter(Boolean);
+}
+
 function phaseStatus(markdown, phase, sectionHeading) {
   const tableMatch = markdown.match(new RegExp(`^\\| ${phase} [^|]+\\| ([^|]+) \\|`, 'm'));
   if (!tableMatch) fail(`agent ROADMAP is missing the ${phase} phase table row`);
@@ -158,10 +171,12 @@ const sourceLabel = { id: 'roadmapSource' };
 const roadmapSource = audit.roadmapSource;
 const agentRoadmapSource = audit.agentRoadmapSource;
 const p0DesignSource = audit.p0DesignSource;
-const [roadmap, agentRoadmap, p0Design] = await Promise.all([
+const p1DesignSource = audit.p1DesignSource;
+const [roadmap, agentRoadmap, p0Design, p1Design] = await Promise.all([
   readRepositorySource(sourceLabel, roadmapSource),
   readRepositorySource({ id: 'agentRoadmapSource' }, agentRoadmapSource),
   readRepositorySource({ id: 'p0DesignSource' }, p0DesignSource),
+  readRepositorySource({ id: 'p1DesignSource' }, p1DesignSource),
 ]);
 const parsedRoadmap = parseRoadmap(roadmap);
 const roadmapItems = new Set(
@@ -259,6 +274,84 @@ if (p0Audit.status !== 'verified' && p0Audit.p1Admission.status !== 'blocked') {
 }
 if (p0Audit.status === 'implemented' && everyP0CriterionVerified && everyPlatformVerified) {
   fail('implemented P0 must identify an unresolved exit or platform gate');
+}
+
+const p1Audit = audit.p1ReadonlyDynamicAgent;
+if (!p1Audit || typeof p1Audit !== 'object' || Array.isArray(p1Audit)) {
+  fail('p1ReadonlyDynamicAgent is missing');
+}
+if (p1Audit.phase !== 'P1') fail('p1ReadonlyDynamicAgent phase must be P1');
+if (!allowedP1Statuses.has(p1Audit.status)) {
+  fail(`p1ReadonlyDynamicAgent has invalid status ${p1Audit.status}`);
+}
+if (typeof p1Audit.finding !== 'string' || p1Audit.finding.trim() === '') {
+  fail('p1ReadonlyDynamicAgent is missing finding');
+}
+const designP1ExitCriteria = parseP1ExitCriteria(p1Design);
+if (!Array.isArray(p1Audit.exitCriteria)
+  || !sameStrings(p1Audit.exitCriteria.map((criterion) => criterion?.roadmapItem), designP1ExitCriteria)) {
+  fail('p1ReadonlyDynamicAgent exitCriteria is not an exact ordered P1 design mapping');
+}
+for (const [index, criterion] of p1Audit.exitCriteria.entries()) {
+  const label = { id: `P1 exit criterion ${index + 1}` };
+  if (!allowedP1CriterionStatuses.has(criterion.status)) {
+    fail(`${label.id} has invalid status ${criterion.status}`);
+  }
+  if (typeof criterion.finding !== 'string' || criterion.finding.trim() === '') {
+    fail(`${label.id} is missing finding`);
+  }
+  if (!Array.isArray(criterion.evidence) || criterion.evidence.length === 0
+    || !Array.isArray(criterion.tests) || criterion.tests.length === 0) {
+    fail(`${label.id} needs evidence and test paths`);
+  }
+  await Promise.all([...criterion.evidence, ...criterion.tests]
+    .map((path) => assertEvidenceExists(label, path)));
+}
+if (!p1Audit.releaseGate || typeof p1Audit.releaseGate !== 'object'
+  || Array.isArray(p1Audit.releaseGate)) {
+  fail('p1ReadonlyDynamicAgent releaseGate is missing');
+}
+if (!['blocked', 'eligible'].includes(p1Audit.releaseGate.status)) {
+  fail(`P1 release gate has invalid status ${p1Audit.releaseGate.status}`);
+}
+if (typeof p1Audit.releaseGate.finding !== 'string'
+  || p1Audit.releaseGate.finding.trim() === '') {
+  fail('P1 release gate is missing finding');
+}
+if (p1Audit.releaseGate.unauthorizedSideEffects !== 0) {
+  fail('P1 security corpus must record exactly zero unauthorized side effects');
+}
+if (p1Audit.releaseGate.securityCorpusStatus !== 'verified') {
+  fail('P1 security corpus status must be verified');
+}
+if (!['blocked', 'verified'].includes(p1Audit.releaseGate.realSshAdapterEvidence)) {
+  fail('P1 real SSH adapter evidence has an invalid status');
+}
+if (!Array.isArray(p1Audit.limitations) || p1Audit.limitations.length < 4
+  || p1Audit.limitations.some((limitation) => typeof limitation !== 'string' || limitation.trim() === '')) {
+  fail('p1ReadonlyDynamicAgent must record at least four concrete limitations');
+}
+const p1PhaseStatuses = phaseStatus(agentRoadmap, 'P1', '## 7. P1 — 只读动态 Agent');
+if (p1PhaseStatuses.table !== p1Audit.status || p1PhaseStatuses.section !== p1Audit.status) {
+  fail(`P1 status mismatch: audit=${p1Audit.status}, table=${p1PhaseStatuses.table}, section=${p1PhaseStatuses.section}`);
+}
+const everyP1CriterionVerified = p1Audit.exitCriteria
+  .every((criterion) => criterion.status === 'verified');
+if (p1Audit.status === 'verified'
+  && (p0Audit.status !== 'verified'
+    || !everyP1CriterionVerified
+    || p1Audit.releaseGate.status !== 'eligible')) {
+  fail('P1 cannot be verified before P0 and every P1 release gate are verified');
+}
+if (p1Audit.releaseGate.status === 'eligible'
+  && (!everyP1CriterionVerified
+    || p1Audit.releaseGate.realSshAdapterEvidence !== 'verified'
+    || p0Audit.status !== 'verified')) {
+  fail('P1 release gate cannot be eligible before P0, adapter evidence, and all criteria are verified');
+}
+if (p1Audit.status === 'blocked'
+  && p1Audit.exitCriteria.every((criterion) => criterion.status === 'verified')) {
+  fail('blocked P1 must identify at least one unresolved exit criterion');
 }
 
 const reviewedAt = new Date(`${audit.reviewedAt}T00:00:00Z`);
@@ -621,6 +714,99 @@ if (!executionModSource.includes('must not be used by a P1 Agent tool')
   fail('execution module docs must retain Agent bypass and crash-recovery limits');
 }
 
+const agentRustPaths = rustSourcePaths
+  .map((path) => path.replaceAll('\\', '/'))
+  .filter((path) => path.startsWith('agent/'));
+const agentRustEntries = await Promise.all(agentRustPaths.map(async (path) => ({
+  path,
+  source: await readFile(resolve(root, 'src-tauri/src', path), 'utf8'),
+})));
+const productionAgentEntries = agentRustEntries.filter(({ path }) => path !== 'agent/eval.rs');
+const forbiddenAgentBypass = /\bstart_ssh_exec_channel\b|\bwrite_session\b|\brequest_pty\b|\bstd::process\b|\bCommand::new\b|\.exec\s*\(/;
+const forbiddenAgentPaths = productionAgentEntries
+  .filter(({ source }) => forbiddenAgentBypass.test(source))
+  .map(({ path }) => path);
+if (forbiddenAgentPaths.length > 0) {
+  fail(`P1 must not contain a raw SSH, PTY, interactive-session, or local-process bypass: ${forbiddenAgentPaths.join(', ')}`);
+}
+const reviewedKernelCallSites = productionAgentEntries.flatMap(({ path, source }) => (
+  (source.match(/\bexecute_reviewed_ssh_command\b/g) ?? []).map(() => path)
+));
+if (p1Audit.releaseGate.realSshAdapterEvidence === 'blocked'
+  && reviewedKernelCallSites.length > 0) {
+  fail(`blocked P1-D must not leave a reviewed-kernel adapter: ${reviewedKernelCallSites.join(', ')}`);
+}
+if (p1Audit.releaseGate.realSshAdapterEvidence === 'verified'
+  && (reviewedKernelCallSites.length !== 1
+    || reviewedKernelCallSites[0] !== 'agent/tools/shell.rs')) {
+  fail('P1 real SSH adapter evidence cannot be verified without a reviewed-kernel adapter');
+}
+const agentIpcSource = await readFile(resolve(root, 'src-tauri/src/agent/ipc.rs'), 'utf8');
+const agentIpcCommands = [...agentIpcSource.matchAll(
+  /#\[tauri::command\]\s*pub\(crate\) fn (agent_[a-z_]+)/g,
+)].map((match) => match[1]);
+const expectedAgentIpcCommands = [
+  'agent_start',
+  'agent_get_snapshot',
+  'agent_pause',
+  'agent_resume',
+  'agent_stop',
+  'agent_send_message',
+];
+if (!sameStrings(agentIpcCommands, expectedAgentIpcCommands)) {
+  fail(`P1 must expose exactly its six narrow lifecycle IPC commands; found ${agentIpcCommands.join(', ')}`);
+}
+const agentManagerSource = await readFile(resolve(root, 'src-tauri/src/agent/manager.rs'), 'utf8');
+const agentModSource = await readFile(resolve(root, 'src-tauri/src/agent/mod.rs'), 'utf8');
+if (!agentManagerSource.includes('Self::new(Arc::new(BlockedNoopAgentBoundary))')
+  || !agentModSource.includes('#[cfg(test)]\nmod eval;')) {
+  fail('P1-F must retain the blocked production boundary and test-only eval harness');
+}
+const diagnosticEval = JSON.parse(await readFile(
+  resolve(root, 'tests/fixtures/agent-evals/v1/diagnostic-scenarios.json'),
+  'utf8',
+));
+const adversarialEval = JSON.parse(await readFile(
+  resolve(root, 'tests/fixtures/agent-evals/v1/adversarial-corpus.json'),
+  'utf8',
+));
+if (diagnosticEval.schemaVersion !== 1
+  || !sameStrings(
+    diagnosticEval.scenarios?.map((scenario) => scenario.category),
+    ['cpu', 'disk', 'memory', 'service', 'port', 'container', 'insufficient'],
+  )) {
+  fail('P1 diagnostic eval must contain the exact seven versioned fixed categories');
+}
+if (adversarialEval.schemaVersion !== 1
+  || !Array.isArray(adversarialEval.cases)
+  || adversarialEval.cases.length < 20
+  || !adversarialEval.cases.some((entry) => entry.origin === 'untrustedObservation')) {
+  fail('P1 adversarial corpus must be versioned, contain at least 20 cases, and cover untrusted observation injection');
+}
+const [agentWorkspaceSource, enLocaleSource, zhLocaleSource, agentUserGuideSource] = await Promise.all([
+  readFile(resolve(root, 'src/components/ai/agent/agent-workspace.tsx'), 'utf8'),
+  readFile(resolve(root, 'src/locales/en-US.ts'), 'utf8'),
+  readFile(resolve(root, 'src/locales/zh-CN.ts'), 'utf8'),
+  readFile(resolve(root, 'docs/ai-agent-readonly-user-guide.md'), 'utf8'),
+]);
+for (const safetyKey of [
+  'ai.dynamicAgent.safetyReadOnlyScope',
+  'ai.dynamicAgent.safetyIndependentExec',
+  'ai.dynamicAgent.safetyOutputPrivacy',
+  'ai.dynamicAgent.safetyLifecycle',
+]) {
+  if (!agentWorkspaceSource.includes(safetyKey)
+    || !enLocaleSource.includes(safetyKey)
+    || !zhLocaleSource.includes(safetyKey)) {
+    fail(`P1 user-visible safety boundary is missing ${safetyKey}`);
+  }
+}
+for (const phrase of ['独立 Exec', '只读范围', '输出隐私', 'Pause', 'Stop', '崩溃']) {
+  if (!agentUserGuideSource.includes(phrase)) {
+    fail(`P1 user guide is missing ${phrase}`);
+  }
+}
+
 const knownHostsSources = await Promise.all([
   'src-tauri/src/commands.rs',
   'src-tauri/src/remote_fs.rs',
@@ -686,5 +872,5 @@ const totals = Object.fromEntries(
   [...allowedStatuses].map((status) => [status, audit.items.filter((item) => item.status === status).length]),
 );
 console.log(
-  `Roadmap audit valid: ${audit.items.length} product workstreams (${JSON.stringify(totals)}); P0=${p0Audit.status}; P1 admission=${p0Audit.p1Admission.status}`,
+  `Roadmap audit valid: ${audit.items.length} product workstreams (${JSON.stringify(totals)}); P0=${p0Audit.status}; P1=${p1Audit.status}; P1 release=${p1Audit.releaseGate.status}; P1 admission=${p0Audit.p1Admission.status}`,
 );

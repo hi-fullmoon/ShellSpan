@@ -12,6 +12,8 @@
 
 pub(crate) mod budgets;
 pub(crate) mod context;
+#[cfg(test)]
+mod eval;
 pub(crate) mod events;
 pub(crate) mod evidence;
 pub(crate) mod ipc;

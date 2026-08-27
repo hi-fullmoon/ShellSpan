@@ -206,6 +206,21 @@ describe('AgentWorkspace', () => {
     expect(onStaticFallback).toHaveBeenCalledWith('diagnose disk');
   });
 
+  it('shows the read-only, independent Exec, privacy, and lifecycle limits before start', async () => {
+    const transport = transportFor(vi.fn(async () => Promise.reject(runNotFound)));
+    render(<WorkspaceHarness transport={transport} />);
+
+    expect(await screen.findByText('ai.dynamicAgent.safetyTitle')).toBeInTheDocument();
+    for (const key of [
+      'ai.dynamicAgent.safetyReadOnlyScope',
+      'ai.dynamicAgent.safetyIndependentExec',
+      'ai.dynamicAgent.safetyOutputPrivacy',
+      'ai.dynamicAgent.safetyLifecycle',
+    ]) {
+      expect(screen.getByText(key)).toBeInTheDocument();
+    }
+  });
+
   it('blocks an incompatible provider locally while keeping diagnostic fallback available', async () => {
     const onStaticFallback = vi.fn();
     const transport = transportFor(vi.fn(async () => Promise.reject(runNotFound)));

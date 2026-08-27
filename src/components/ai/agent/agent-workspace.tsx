@@ -383,6 +383,18 @@ export function AgentWorkspace({
             description={t('ai.dynamicAgent.emptyDescription')}
             action={(
               <div className="flex w-full max-w-md flex-col gap-2 text-left">
+                <Alert>
+                  <LockKeyholeIcon />
+                  <AlertTitle>{t('ai.dynamicAgent.safetyTitle')}</AlertTitle>
+                  <AlertDescription>
+                    <ul className="list-disc space-y-1 pl-4">
+                      <li>{t('ai.dynamicAgent.safetyReadOnlyScope')}</li>
+                      <li>{t('ai.dynamicAgent.safetyIndependentExec')}</li>
+                      <li>{t('ai.dynamicAgent.safetyOutputPrivacy')}</li>
+                      <li>{t('ai.dynamicAgent.safetyLifecycle')}</li>
+                    </ul>
+                  </AlertDescription>
+                </Alert>
                 {!profileId && (
                   <Alert variant="destructive">
                     <CircleAlertIcon />

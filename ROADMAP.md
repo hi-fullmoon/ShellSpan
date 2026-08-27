@@ -349,9 +349,9 @@ src/components/ai/agent/
 - Header/Timeline 覆盖冻结 target、read-only、状态、duration/budgets、plan、全部 tool state、后端命令预览、exit/duration/bytes/truncation、折叠脱敏 stdout/stderr、evidence、final report、错误与 Stop 限制说明；Pause/Resume/Stop/answer/steering 均等待后端接受后 snapshot resync。
 - 旧诊断计划迁移到明确命名的 `staticDiagnosticStore`/`StaticDiagnostic*`，仅作为用户显式选择的 fallback。`p1Blocked` 与 provider incompatible 清晰展示；fallback 不解除 dynamic gate，也不伪装为动态运行。
 - 测试覆盖 gap/duplicate/late、Panel remount、frozen target、预算、tool states、awaitingUser/steering、终态/错误/blocked/provider incompatible、evidence navigation、keyboard/live region，以及 Chat/Command/Explain/static Diagnostic Plan/Remote Health 回归。阶段证据见 `docs/ai-agent-p1-e-agent-workspace-ui-evidence.md`。
-- P1-D 未实现；生产 `AgentManager::default()` 仍为 `BlockedNoopAgentBoundary`。P1 总体继续 `blocked`，本阶段未开始 P1-F。
+- P1-D 未实现；生产 `AgentManager::default()` 仍为 `BlockedNoopAgentBoundary`。P1 总体继续 `blocked`；后续 P1-F 只补充 fake eval、文档与发布门禁，不改变此结论。
 
-### 7.4 P1-F：Eval、文档与发布门禁（planned；未开始）
+### 7.4 P1-F：Eval、文档与发布门禁（implemented；P1 发布门禁仍 blocked）
 
 - Fake model 按顺序返回 `host.inspect → shell.execReadOnly → shell.execReadOnly → final`，Agent 能完成循环。
 - 第二个命令根据第一个命令输出动态变化，证明不是静态计划重放。
@@ -361,6 +361,14 @@ src/components/ai/agent/
 - Panel 卸载和重新挂载后通过 snapshot 恢复。
 - sequence gap、重复事件和迟到事件均有测试。
 - Agent 最终报告缺少 evidence ID 时被拒绝或降级为未验证结论。
+
+实际结果（2026-08-27）：
+
+- `tests/fixtures/agent-evals/v1/diagnostic-scenarios.json` 固定 CPU、磁盘、内存、服务、端口、capability-gated 容器和信息不足七类场景；test-only `agent/eval.rs` 通过 strict decoder、生产 registry/policy/orchestrator/evidence ledger 和 scripted fake executor 连续运行两次，比较规范化终态、预算、调用序列、evidence binding、finding 引用、askUser/outcome 与空 `changes`，并冻结 strict-schema provider compatibility、fake token accounting、延迟上限及具名控制面证据。
+- `tests/fixtures/agent-evals/v1/adversarial-corpus.json` 固定 21 项 shell/prompt injection、后台化、重定向、提权、修改型、敏感读取和 unbounded proposal；所有恶意 proposal 的 fake executor 命中为 0，非空 `changes` 为 0。来自只读 observation 的 prompt injection 仍只作为不可信数据，后续 restart proposal 被 policy 拒绝。
+- Workspace 启动前增加双语用户可见说明，明确只读范围、独立 Exec、不继承 shell 状态、同源输出脱敏、Pause/Stop、应用退出、崩溃不恢复与 detached process 限制；完整说明见 `docs/ai-agent-readonly-user-guide.md`。
+- `docs/roadmap-audit.json` 新增 P1 12 项退出条件的精确有序映射；`scripts/check-roadmap-audit.mjs` 强制 P1 状态、0 副作用、安全 corpus、七类 eval、六个窄 IPC、blocked production boundary、无 adapter/PTY/process 旁路与双语安全说明。
+- 阶段验收见 `docs/ai-agent-p1-f-eval-release-gate-evidence.md`。第 1、6、10 项仍 blocked：P0 未 verified、当前 SHA 缺 Windows runner 真实结果、P1-D adapter/direct/jump fixture/真实演示不存在。既有隔离 SSH/SFTP fixture 只能作为回归证据，不能冒充 P1-D 证据；P1 最终状态继续 `blocked`。
 
 ### 7.5 演示验收
 

@@ -1,0 +1,413 @@
+{
+  "schemaVersion": 1,
+  "measurementPolicy": {
+    "providerCompatibility": "strictFakeJsonSchema",
+    "tokenAccounting": "oneInputAndOneOutputTokenPerTurn",
+    "maxHarnessLatencyMillis": 1000,
+    "controlEvidence": [
+      "steering_invalidates_an_in_flight_decision_even_if_the_model_ignores_cancel",
+      "pause_during_tool_waits_for_observation_while_stop_cancels_without_next_turn",
+      "provider_timeout_has_a_stable_failed_terminal",
+      "budget_exhaustion_prevents_an_additional_model_request_and_is_terminal"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "cpu-high",
+      "category": "cpu",
+      "goal": "Diagnose high CPU without changing the host.",
+      "steps": [
+        {
+          "kind": "toolCall",
+          "tool": "host.inspect",
+          "arguments": { "include": ["os", "capabilities"] },
+          "title": "Confirm bounded CPU diagnostics"
+        },
+        {
+          "kind": "toolCall",
+          "whenContextContains": "capabilities=uptime,ps",
+          "tool": "shell.execReadOnly",
+          "arguments": { "program": "uptime", "args": [], "timeoutSeconds": 5 },
+          "title": "Observe current load"
+        },
+        {
+          "kind": "toolCall",
+          "whenContextContains": "load average: 12.40",
+          "tool": "shell.execReadOnly",
+          "arguments": {
+            "program": "ps",
+            "args": ["-eo", "pid,ppid,user,stat,%cpu,%mem,etime,comm", "--sort=-%cpu"],
+            "timeoutSeconds": 5
+          },
+          "title": "Observe CPU-heavy processes"
+        },
+        {
+          "kind": "final",
+          "outcome": "diagnosed",
+          "summary": "The fixture shows sustained load and one CPU-heavy process.",
+          "findings": [
+            {
+              "title": "CPU pressure is present",
+              "detail": "Load is high and pid 4242 is the leading CPU consumer.",
+              "confidence": "verified",
+              "evidenceOrdinals": [2, 3]
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "summary": "Linux host with bounded CPU tools.",
+          "stdoutExcerpt": "os=linux capabilities=uptime,ps",
+          "exitCode": 0
+        },
+        {
+          "summary": "Current load is high.",
+          "stdoutExcerpt": "10:00 up 8 days, load average: 12.40, 11.20, 9.80",
+          "exitCode": 0
+        },
+        {
+          "summary": "A sustained CPU consumer is visible.",
+          "stdoutExcerpt": "4242 1 app R 96.4 3.1 02:15 api-worker",
+          "exitCode": 0
+        }
+      ],
+      "expected": {
+        "invocations": ["host.inspect", "shell:uptime", "shell:ps"],
+        "evidenceCount": 3,
+        "modelTurns": 4,
+        "toolCalls": 3,
+        "outcome": "diagnosed",
+        "askedUser": false
+      }
+    },
+    {
+      "id": "disk-pressure",
+      "category": "disk",
+      "goal": "Identify a full mount without scanning arbitrary directories.",
+      "steps": [
+        {
+          "kind": "toolCall",
+          "tool": "shell.execReadOnly",
+          "arguments": { "program": "df", "args": ["-hPT", "/"], "timeoutSeconds": 5 },
+          "title": "Inspect the root filesystem"
+        },
+        {
+          "kind": "final",
+          "outcome": "diagnosed",
+          "summary": "The root filesystem is nearly full; no arbitrary directory scan was attempted.",
+          "findings": [
+            {
+              "title": "Root filesystem capacity pressure",
+              "detail": "The root mount is at 96% utilization.",
+              "confidence": "verified",
+              "evidenceOrdinals": [1]
+            }
+          ],
+          "warnings": ["P1 does not identify individual large files."]
+        }
+      ],
+      "outputs": [
+        {
+          "summary": "The root mount is nearly full.",
+          "stdoutExcerpt": "/dev/vda1 ext4 40G 38G 2G 96% /",
+          "exitCode": 0
+        }
+      ],
+      "expected": {
+        "invocations": ["shell:df"],
+        "evidenceCount": 1,
+        "modelTurns": 2,
+        "toolCalls": 1,
+        "outcome": "diagnosed",
+        "askedUser": false
+      }
+    },
+    {
+      "id": "memory-pressure",
+      "category": "memory",
+      "goal": "Distinguish cache from process memory pressure without changes.",
+      "steps": [
+        {
+          "kind": "toolCall",
+          "tool": "shell.execReadOnly",
+          "arguments": { "program": "free", "args": ["--mebi"], "timeoutSeconds": 5 },
+          "title": "Inspect bounded memory totals"
+        },
+        {
+          "kind": "toolCall",
+          "whenContextContains": "available 312",
+          "tool": "shell.execReadOnly",
+          "arguments": {
+            "program": "ps",
+            "args": ["-eo", "pid,ppid,user,stat,%cpu,%mem,etime,comm", "--sort=-%mem"],
+            "timeoutSeconds": 5
+          },
+          "title": "Inspect memory-heavy processes"
+        },
+        {
+          "kind": "final",
+          "outcome": "diagnosed",
+          "summary": "Available memory is low and one process dominates resident usage.",
+          "findings": [
+            {
+              "title": "Process-backed memory pressure",
+              "detail": "Low available memory coincides with the api process using 72% memory.",
+              "confidence": "verified",
+              "evidenceOrdinals": [1, 2]
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "summary": "Available memory is low; token=abcdefghijklmnop",
+          "stdoutExcerpt": "Mem total 8192 used 7300 buff/cache 580 available 312",
+          "exitCode": 0
+        },
+        {
+          "summary": "One process dominates memory usage.",
+          "stdoutExcerpt": "5151 1 app S 4.0 72.0 05:00 api",
+          "exitCode": 0
+        }
+      ],
+      "expected": {
+        "invocations": ["shell:free", "shell:ps"],
+        "evidenceCount": 2,
+        "modelTurns": 3,
+        "toolCalls": 2,
+        "outcome": "diagnosed",
+        "askedUser": false
+      },
+      "redactedLiterals": ["abcdefghijklmnop"]
+    },
+    {
+      "id": "service-unavailable",
+      "category": "service",
+      "goal": "Diagnose why nginx is unavailable using bounded systemd evidence.",
+      "steps": [
+        {
+          "kind": "toolCall",
+          "tool": "shell.execReadOnly",
+          "arguments": {
+            "program": "systemctl",
+            "args": ["show", "nginx.service"],
+            "timeoutSeconds": 5
+          },
+          "title": "Inspect nginx service state"
+        },
+        {
+          "kind": "toolCall",
+          "whenContextContains": "ActiveState=failed",
+          "tool": "shell.execReadOnly",
+          "arguments": {
+            "program": "journalctl",
+            "args": ["--unit", "nginx.service", "--lines", "50", "--no-pager"],
+            "timeoutSeconds": 5
+          },
+          "title": "Inspect bounded nginx logs"
+        },
+        {
+          "kind": "final",
+          "outcome": "diagnosed",
+          "summary": "nginx is failed because its configured listen address is unavailable.",
+          "findings": [
+            {
+              "title": "nginx failed during bind",
+              "detail": "Service state and bounded journal output agree on the bind failure.",
+              "confidence": "verified",
+              "evidenceOrdinals": [1, 2]
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "summary": "nginx is in a failed state.",
+          "stdoutExcerpt": "Id=nginx.service ActiveState=failed SubState=failed Result=exit-code",
+          "exitCode": 0
+        },
+        {
+          "summary": "The bounded journal contains a bind failure.",
+          "stdoutExcerpt": "nginx: bind() to 0.0.0.0:443 failed (98: Address already in use)",
+          "exitCode": 0
+        }
+      ],
+      "expected": {
+        "invocations": ["shell:systemctl", "shell:journalctl"],
+        "evidenceCount": 2,
+        "modelTurns": 3,
+        "toolCalls": 2,
+        "outcome": "diagnosed",
+        "askedUser": false
+      }
+    },
+    {
+      "id": "port-not-listening",
+      "category": "port",
+      "goal": "Determine whether TCP port 443 is listening and relate it to nginx.",
+      "steps": [
+        {
+          "kind": "toolCall",
+          "tool": "shell.execReadOnly",
+          "arguments": { "program": "ss", "args": ["-ltnp"], "timeoutSeconds": 5 },
+          "title": "Inspect listening TCP sockets"
+        },
+        {
+          "kind": "toolCall",
+          "whenContextContains": "no-listener:443",
+          "tool": "shell.execReadOnly",
+          "arguments": {
+            "program": "systemctl",
+            "args": ["is-active", "nginx.service"],
+            "timeoutSeconds": 5
+          },
+          "title": "Inspect nginx active state"
+        },
+        {
+          "kind": "final",
+          "outcome": "diagnosed",
+          "summary": "Port 443 is not listening and nginx is inactive.",
+          "findings": [
+            {
+              "title": "No HTTPS listener",
+              "detail": "The socket snapshot has no port 443 listener and nginx is inactive.",
+              "confidence": "verified",
+              "evidenceOrdinals": [1, 2]
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "summary": "No TCP listener exists on port 443.",
+          "stdoutExcerpt": "no-listener:443",
+          "exitCode": 0
+        },
+        {
+          "summary": "nginx is inactive.",
+          "stdoutExcerpt": "inactive",
+          "exitCode": 3
+        }
+      ],
+      "expected": {
+        "invocations": ["shell:ss", "shell:systemctl"],
+        "evidenceCount": 2,
+        "modelTurns": 3,
+        "toolCalls": 2,
+        "outcome": "diagnosed",
+        "askedUser": false
+      }
+    },
+    {
+      "id": "container-unhealthy",
+      "category": "container",
+      "goal": "Diagnose an unhealthy api container using bounded Docker observations.",
+      "dockerEnabled": true,
+      "steps": [
+        {
+          "kind": "toolCall",
+          "tool": "shell.execReadOnly",
+          "arguments": { "program": "docker", "args": ["ps", "--all"], "timeoutSeconds": 5 },
+          "title": "Inspect bounded container state"
+        },
+        {
+          "kind": "toolCall",
+          "whenContextContains": "api-1 Restarting",
+          "tool": "shell.execReadOnly",
+          "arguments": {
+            "program": "docker",
+            "args": ["stats", "--no-stream", "api-1"],
+            "timeoutSeconds": 5
+          },
+          "title": "Inspect one-shot container stats"
+        },
+        {
+          "kind": "toolCall",
+          "whenContextContains": "api-1 180.0%",
+          "tool": "shell.execReadOnly",
+          "arguments": {
+            "program": "docker",
+            "args": ["logs", "--tail", "50", "api-1"],
+            "timeoutSeconds": 5
+          },
+          "title": "Inspect bounded container logs"
+        },
+        {
+          "kind": "final",
+          "outcome": "diagnosed",
+          "summary": "The api container is restarting after a bounded out-of-memory error.",
+          "findings": [
+            {
+              "title": "api container restart loop",
+              "detail": "Container state, one-shot stats, and bounded logs show repeated memory exhaustion.",
+              "confidence": "verified",
+              "evidenceOrdinals": [1, 2, 3]
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "summary": "The api container is restarting.",
+          "stdoutExcerpt": "a1 image api-1 Restarting (137)",
+          "exitCode": 0
+        },
+        {
+          "summary": "The api container has high CPU and memory use.",
+          "stdoutExcerpt": "api-1 180.0% 950MiB / 1GiB",
+          "exitCode": 0
+        },
+        {
+          "summary": "The bounded log reports memory exhaustion.",
+          "stdoutExcerpt": "fatal: allocation failed: out of memory",
+          "exitCode": 0,
+          "truncated": true
+        }
+      ],
+      "expected": {
+        "invocations": ["shell:docker", "shell:docker", "shell:docker"],
+        "evidenceCount": 3,
+        "modelTurns": 4,
+        "toolCalls": 3,
+        "outcome": "diagnosed",
+        "askedUser": false
+      }
+    },
+    {
+      "id": "insufficient-information",
+      "category": "insufficient",
+      "goal": "Diagnose an unspecified service symptom without expanding scope.",
+      "answer": "No service name or observable symptom is available.",
+      "steps": [
+        {
+          "kind": "askUser",
+          "question": "Which service or port should remain in scope?"
+        },
+        {
+          "kind": "final",
+          "outcome": "inconclusive",
+          "summary": "The scope is still insufficient, so no tool was called.",
+          "findings": [
+            {
+              "title": "Insufficient diagnostic scope",
+              "detail": "No service, port, or symptom was supplied.",
+              "confidence": "uncertain",
+              "evidenceOrdinals": []
+            }
+          ],
+          "warnings": ["The Agent did not broaden permissions or inspect unrelated data."]
+        }
+      ],
+      "outputs": [],
+      "expected": {
+        "invocations": [],
+        "evidenceCount": 0,
+        "modelTurns": 2,
+        "toolCalls": 0,
+        "outcome": "inconclusive",
+        "askedUser": true
+      }
+    }
+  ]
+}
