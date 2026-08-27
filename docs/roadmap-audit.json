@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-08-27",
+  "reviewedAt": "2026-08-28",
   "reviewIntervalDays": 28,
   "roadmapSource": "docs/product-roadmap.md",
   "agentRoadmapSource": "ROADMAP.md",
@@ -36,8 +36,41 @@
     "deferred": [
       "traffic routing and load-balancer integration",
       "dynamic discovery or tag-derived deployment targets",
-      "unattended or recursive rollback",
-      "dedicated deployment UI and templates"
+      "unattended or recursive rollback"
+    ]
+  },
+  "deploymentWorkflowPhase5": {
+    "status": "implemented",
+    "finding": "独立 Deployment 工作台、两套合法 systemd Web 模板、v2 导入导出、review 冻结、精确单主机/批次审批、authoritative 进度/熔断/恢复和独立回滚审批已实现；最终状态以本次本地门禁和外部平台门禁证据分别记录。",
+    "securityInvariants": [
+      "普通 Runbook v1 入口和执行语义不变，v2 只调用阶段 2–4 的强类型 review/approval IPC。",
+      "后端 review 返回后 document、target、order、policy 控件冻结；任何编辑显式废弃旧 review。",
+      "profile/keychain 凭证只在调用栈临时组装，不进入草稿、localStorage、operation history、DOM 或 fixture。",
+      "单主机、canary、下一批次和 rollback 使用不同的精确审批文案；UI 不是新的执行授权源。",
+      "restart recovery 必须新 review，succeeded 主机跳过；rollback suggestion 必须逐主机独立 review/approval。"
+    ],
+    "evidence": [
+      "src/components/workbench/deployment-panel.tsx",
+      "src/components/workbench/deployment-approval-dialog.tsx",
+      "src/lib/deployment-workflow.ts",
+      "docs/deployment-workflow.md",
+      "docs/deployment-release-acceptance.md",
+      "docs/deployment-runbook-v2.md"
+    ],
+    "tests": [
+      "src/lib/__tests__/deployment-workflow.test.ts",
+      "src/components/workbench/__tests__/deployment-panel.test.tsx",
+      "src/components/workbench/__tests__/deployment-workflow.e2e.test.tsx",
+      "tests/fixtures/deployment-runbook/v2/ui-workflow-e2e.json",
+      "src/lib/__tests__/tauri.test.ts",
+      "src/lib/__tests__/deployment-rollout.test.ts"
+    ],
+    "deferred": [
+      "traffic routing and load-balancer integration",
+      "dynamic discovery or tag-derived deployment targets",
+      "arbitrary Shell, hooks, migrations, or environment injection",
+      "unattended automatic rollback or recursive rollback",
+      "release cleanup execution and background garbage collection"
     ]
   },
   "p0ExecutionFoundation": {

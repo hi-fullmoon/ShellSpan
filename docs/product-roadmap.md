@@ -180,6 +180,8 @@ TermBridge 当前已经具备四条清晰的产品主链路：
 
 验收状态（2026-08-23）：已通过。逐项证据、故障/恢复语义与回归门禁见 `docs/later-exit-criteria.md` 和 `docs/roadmap-audit.json`；本阶段已收束，不自动进入 EXPLORE。
 
+Deployment Runbook v2 阶段 5 补充验收（2026-08-28）：独立 Deployment 工作台已完成模板/导入、显式目标、后端 review 冻结、单主机与 canary/rolling 精确审批、持久恢复和独立回滚闭环；证据与保留限制见 `docs/deployment-workflow.md`、`docs/deployment-release-acceptance.md` 和 `docs/roadmap-audit.json`。
+
 ---
 
 ## EXPLORE — 便携性与生态（6–12 个月，3.0 候选）

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "transport": "mocked-typed-ipc",
+  "scenarios": {
+    "singleHostSuccess": {
+      "profileIds": ["prod-a"],
+      "deploymentPhase": "succeeded",
+      "healthStatus": "passed"
+    },
+    "canaryFailureRollback": {
+      "profileIds": ["prod-a", "prod-b", "prod-c"],
+      "canaryCount": 2,
+      "canaryOutcomes": ["succeeded", "failed"],
+      "untouchedStatus": "notStarted",
+      "rolloutPhase": "paused",
+      "circuitReason": "canaryFailed",
+      "rollbackSuggestionProfileIds": ["prod-a"],
+      "rollbackRequiresSeparateApproval": true,
+      "rollbackPhase": "succeeded"
+    }
+  },
+  "prohibited": {
+    "realSsh": true,
+    "automaticRollback": true,
+    "persistedCredentials": true
+  }
+}
