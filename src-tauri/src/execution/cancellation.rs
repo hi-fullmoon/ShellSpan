@@ -39,33 +39,11 @@ pub(crate) enum ExecutionCancellationErrorKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExecutionCancellationError {
     pub(crate) kind: ExecutionCancellationErrorKind,
-    operation_id: String,
 }
 
 impl ExecutionCancellationError {
-    fn new(kind: ExecutionCancellationErrorKind, operation_id: &str) -> Self {
-        Self {
-            kind,
-            operation_id: operation_id.to_string(),
-        }
-    }
-
-    pub(crate) fn runbook_message(&self) -> String {
-        match self.kind {
-            ExecutionCancellationErrorKind::InvalidOperationId => {
-                "invalid runbook execution identity".to_string()
-            }
-            ExecutionCancellationErrorKind::DuplicateOperationId => format!(
-                "runbook step operation {} is already registered",
-                self.operation_id
-            ),
-            ExecutionCancellationErrorKind::OperationNotFound => {
-                format!("runbook step operation {} not found", self.operation_id)
-            }
-            ExecutionCancellationErrorKind::RegistryPoisoned => {
-                "runbook step cancellation registry poisoned".to_string()
-            }
-        }
+    fn new(kind: ExecutionCancellationErrorKind) -> Self {
+        Self { kind }
     }
 }
 
@@ -139,20 +117,15 @@ impl ExecutionCancellationRegistry {
         if !valid_operation_id(&operation_id) {
             return Err(ExecutionCancellationError::new(
                 ExecutionCancellationErrorKind::InvalidOperationId,
-                &operation_id,
             ));
         }
         let entry = Arc::new(CancellationEntry::new());
         let mut operations = self.inner.operations.lock().map_err(|_| {
-            ExecutionCancellationError::new(
-                ExecutionCancellationErrorKind::RegistryPoisoned,
-                &operation_id,
-            )
+            ExecutionCancellationError::new(ExecutionCancellationErrorKind::RegistryPoisoned)
         })?;
         if operations.contains_key(&operation_id) {
             return Err(ExecutionCancellationError::new(
                 ExecutionCancellationErrorKind::DuplicateOperationId,
-                &operation_id,
             ));
         }
         operations.insert(operation_id.clone(), Arc::clone(&entry));
@@ -167,27 +140,19 @@ impl ExecutionCancellationRegistry {
 
     pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), ExecutionCancellationError> {
         let operations = self.inner.operations.lock().map_err(|_| {
-            ExecutionCancellationError::new(
-                ExecutionCancellationErrorKind::RegistryPoisoned,
-                operation_id,
-            )
+            ExecutionCancellationError::new(ExecutionCancellationErrorKind::RegistryPoisoned)
         })?;
         let entry = operations.get(operation_id).ok_or_else(|| {
-            ExecutionCancellationError::new(
-                ExecutionCancellationErrorKind::OperationNotFound,
-                operation_id,
-            )
+            ExecutionCancellationError::new(ExecutionCancellationErrorKind::OperationNotFound)
         })?;
         entry.claim(TERMINAL_CANCELLED);
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn remove(&self, operation_id: &str) -> Result<(), ExecutionCancellationError> {
         let mut operations = self.inner.operations.lock().map_err(|_| {
-            ExecutionCancellationError::new(
-                ExecutionCancellationErrorKind::RegistryPoisoned,
-                operation_id,
-            )
+            ExecutionCancellationError::new(ExecutionCancellationErrorKind::RegistryPoisoned)
         })?;
         operations.remove(operation_id);
         Ok(())
@@ -239,14 +204,11 @@ impl fmt::Debug for CancellationHandle {
 }
 
 impl CancellationHandle {
-    pub(crate) fn operation_id(&self) -> &str {
-        &self.inner.operation_id
-    }
-
     pub(crate) fn terminal_state(&self) -> ExecutionTerminalState {
         self.inner.entry.state()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_cancelled(&self) -> bool {
         self.terminal_state() == ExecutionTerminalState::Cancelled
     }

@@ -1,19 +1,16 @@
 use crate::execution::{
-    await_ssh_execution_worker, known_connection_secret_values, redact_known_secrets,
-    spawn_ssh_execution_worker, ExecutionCancellationRegistry, ExecutionErrorCategory,
-    ExecutionOutputPolicy, SshChannelExecutionOutcome, DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES,
+    execute_reviewed_ssh_command, ExecutionCancellationError, ExecutionCancellationErrorKind,
+    ExecutionCancellationRegistry, ExecutionErrorCategory, ExecutionOutputPolicy, ExecutionStatus,
+    FrozenTargetIdentity, ReviewedSshCommand, ReviewedSshExecutionRequest,
+    ReviewedSshExecutionResult, DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES,
 };
 use crate::keychain::{CredentialManager, ProfileSecretKind};
 use crate::models::RemoteConnectionRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Duration;
 use tauri::{AppHandle, State};
-
-#[cfg(test)]
-use crate::execution::{execute_ssh_channel, CancellationHandle};
-#[cfg(test)]
-use ssh2::Session;
 
 const MAX_RUNBOOK_BYTES: usize = 512 * 1024;
 const MAX_COMMAND_BYTES: usize = 8 * 1024;
@@ -176,18 +173,6 @@ struct PreparedCommand {
     command: String,
     preview: String,
     secrets: Vec<String>,
-}
-
-enum ExecutionOutcome {
-    Finished {
-        exit_code: i32,
-        expected_matched: bool,
-        stdout: String,
-        stderr: String,
-    },
-    Cancelled,
-    TimedOut,
-    Failed(String),
 }
 
 fn now_ms() -> i64 {
@@ -788,6 +773,17 @@ fn interpolate(
     credentials: &CredentialManager,
     profile_id: &str,
 ) -> Result<PreparedCommand, String> {
+    interpolate_with_secret_resolver(command, document, values, |reference| {
+        retrieve_keychain_ref(credentials, profile_id, reference)
+    })
+}
+
+fn interpolate_with_secret_resolver(
+    command: &str,
+    document: &RunbookDocument,
+    values: &HashMap<String, String>,
+    mut resolve_secret: impl FnMut(&str) -> Result<String, String>,
+) -> Result<PreparedCommand, String> {
     let variables = document
         .variables
         .iter()
@@ -819,7 +815,7 @@ fn interpolate(
             .get(name)
             .ok_or_else(|| format!("runbook command references undeclared variable {name}"))?;
         if let Some(reference) = variable.keychain_ref.as_deref() {
-            let secret = retrieve_keychain_ref(credentials, profile_id, reference)?;
+            let secret = resolve_secret(reference)?;
             expanded.push_str(&shell_quote(&secret));
             preview.push_str(&shell_quote(&format!("<{reference}>")));
             secrets.push(secret);
@@ -858,70 +854,40 @@ fn runbook_output_policy() -> ExecutionOutputPolicy {
     .expect("Runbook compatibility output policy stays within backend hard limits")
 }
 
-fn adapt_runbook_channel_outcome(
-    outcome: SshChannelExecutionOutcome,
-    expected: &RunbookExpectedResult,
-) -> ExecutionOutcome {
-    match outcome {
-        SshChannelExecutionOutcome::Completed { exit_code, output } => {
-            if output.stdout.truncated || output.stderr.truncated {
-                return ExecutionOutcome::Failed(
-                    "runbook command output exceeded the safety limit".to_string(),
-                );
-            }
-            let stdout = output.stdout.text;
-            let stderr = output.stderr.text;
-            let expected_matched = exit_code == expected.exit_code
-                && expected
-                    .stdout_contains
-                    .iter()
-                    .all(|needle| stdout.contains(needle));
-            ExecutionOutcome::Finished {
-                exit_code,
-                expected_matched,
-                stdout,
-                stderr,
-            }
+fn runbook_execution_error(execution: &ReviewedSshExecutionResult) -> String {
+    if execution.error_category == Some(ExecutionErrorCategory::OutputLimitExceeded) {
+        return "runbook command output exceeded the safety limit".to_string();
+    }
+    match execution.error.as_deref() {
+        Some("reviewed execution operation ID is already registered") => format!(
+            "runbook step operation {} is already registered",
+            execution.operation_id
+        ),
+        Some("reviewed execution cancellation registry is unavailable") => {
+            "runbook step cancellation registry poisoned".to_string()
         }
-        SshChannelExecutionOutcome::Cancelled => ExecutionOutcome::Cancelled,
-        SshChannelExecutionOutcome::TimedOut => ExecutionOutcome::TimedOut,
-        SshChannelExecutionOutcome::Failed(failure) => {
-            let message = if failure.category == ExecutionErrorCategory::OutputLimitExceeded {
-                "runbook command output exceeded the safety limit".to_string()
-            } else {
-                failure
-                    .message
-                    .replace("reviewed SSH execution", "runbook execution")
-                    .replace("reviewed SSH command", "runbook command")
-            };
-            ExecutionOutcome::Failed(message)
-        }
+        message => message
+            .unwrap_or("runbook execution failed without an error message")
+            .replace("reviewed SSH execution", "runbook execution")
+            .replace("reviewed SSH command", "runbook command"),
     }
 }
 
-#[cfg(test)]
-fn execute_runbook_channel_compat(
-    session: &Session,
-    command: &str,
-    expected: &RunbookExpectedResult,
-    cancellation: &CancellationHandle,
-    deadline: Instant,
-) -> ExecutionOutcome {
-    adapt_runbook_channel_outcome(
-        execute_ssh_channel(
-            session,
-            command,
-            runbook_output_policy(),
-            &[],
-            cancellation,
-            deadline,
-        ),
-        expected,
-    )
-}
-
-fn redact(value: String, secrets: &[String]) -> String {
-    redact_known_secrets(&value, secrets)
+fn runbook_cancellation_error(operation_id: &str, error: ExecutionCancellationError) -> String {
+    match error.kind {
+        ExecutionCancellationErrorKind::InvalidOperationId => {
+            "invalid runbook execution identity".to_string()
+        }
+        ExecutionCancellationErrorKind::DuplicateOperationId => {
+            format!("runbook step operation {operation_id} is already registered")
+        }
+        ExecutionCancellationErrorKind::OperationNotFound => {
+            format!("runbook step operation {operation_id} not found")
+        }
+        ExecutionCancellationErrorKind::RegistryPoisoned => {
+            "runbook step cancellation registry poisoned".to_string()
+        }
+    }
 }
 
 fn result(
@@ -965,13 +931,126 @@ fn result(
     }
 }
 
-#[tauri::command]
-pub(crate) fn execute_runbook_step(
-    app: AppHandle,
-    credentials: State<'_, CredentialManager>,
-    database: State<'_, crate::db::Database>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    mut request: RunbookStepExecutionRequest,
+fn map_reviewed_execution_result(
+    request: &RunbookStepExecutionRequest,
+    document: &RunbookDocument,
+    action: &SelectedAction<'_>,
+    command_preview: String,
+    started_at: i64,
+    execution: ReviewedSshExecutionResult,
+) -> RunbookStepExecutionResult {
+    match execution.status {
+        ExecutionStatus::Completed if execution.stdout_truncated || execution.stderr_truncated => {
+            result(
+                request,
+                document,
+                action,
+                command_preview,
+                started_at,
+                RunbookStepExecutionStatus::Failed,
+                None,
+                false,
+                None,
+                None,
+                Some("runbook command output exceeded the safety limit".to_string()),
+            )
+        }
+        ExecutionStatus::Completed => {
+            let Some(exit_code) = execution.exit_code else {
+                return result(
+                    request,
+                    document,
+                    action,
+                    command_preview,
+                    started_at,
+                    RunbookStepExecutionStatus::Failed,
+                    None,
+                    false,
+                    None,
+                    None,
+                    Some("runbook execution completed without an exit code".to_string()),
+                );
+            };
+            let expected_matched = exit_code == action.expected.exit_code
+                && action
+                    .expected
+                    .stdout_contains
+                    .iter()
+                    .all(|needle| execution.stdout.contains(needle));
+            result(
+                request,
+                document,
+                action,
+                command_preview,
+                started_at,
+                if expected_matched {
+                    RunbookStepExecutionStatus::Success
+                } else {
+                    RunbookStepExecutionStatus::Failed
+                },
+                Some(exit_code),
+                expected_matched,
+                Some(execution.stdout),
+                Some(execution.stderr),
+                (!expected_matched).then(|| {
+                    "runbook command did not match its reviewed expected result".to_string()
+                }),
+            )
+        }
+        ExecutionStatus::Cancelled => result(
+            request,
+            document,
+            action,
+            command_preview,
+            started_at,
+            RunbookStepExecutionStatus::Cancelled,
+            None,
+            false,
+            None,
+            None,
+            Some("runbook action was cancelled".to_string()),
+        ),
+        ExecutionStatus::TimedOut => result(
+            request,
+            document,
+            action,
+            command_preview,
+            started_at,
+            RunbookStepExecutionStatus::TimedOut,
+            None,
+            false,
+            None,
+            None,
+            Some(format!(
+                "runbook action timed out after {} ms",
+                request.timeout_ms
+            )),
+        ),
+        ExecutionStatus::Failed => {
+            let error = runbook_execution_error(&execution);
+            result(
+                request,
+                document,
+                action,
+                command_preview,
+                started_at,
+                RunbookStepExecutionStatus::Failed,
+                None,
+                false,
+                None,
+                None,
+                Some(error),
+            )
+        }
+    }
+}
+
+fn execute_runbook_step_with_known_hosts(
+    credentials: &CredentialManager,
+    database: &crate::db::Database,
+    cancellations: &ExecutionCancellationRegistry,
+    known_hosts_path: impl FnOnce() -> Result<PathBuf, String>,
+    request: RunbookStepExecutionRequest,
 ) -> Result<RunbookStepExecutionResult, String> {
     let document = parse_document(&request.runbook_text)?;
     if request.source_digest != source_digest(&request.runbook_text) {
@@ -1004,7 +1083,7 @@ pub(crate) fn execute_runbook_step(
         action.command,
         &document,
         &request.variable_values,
-        &credentials,
+        credentials,
         &request.profile_id,
     )?;
     if !request.authorized || request.approved_risk != action.risk {
@@ -1022,101 +1101,65 @@ pub(crate) fn execute_runbook_step(
             Some("runbook action requires explicit approval for its exact risk".to_string()),
         ));
     }
-    crate::validate_connection_fields(&request.connection.host, &request.connection.username)?;
-    crate::commands::resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
-    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
-    let cancellation = cancellations
-        .register(request.operation_id.clone())
-        .map_err(|error| error.runbook_message())?;
-    let mut secrets = prepared.secrets;
-    secrets.extend(known_connection_secret_values(&request.connection));
-    let worker_expected = action.expected.clone();
-    let deadline = Instant::now() + Duration::from_millis(request.timeout_ms);
-    let receiver = spawn_ssh_execution_worker(
-        request.connection.clone(),
-        known_hosts_path,
-        prepared.command,
-        runbook_output_policy(),
-        Vec::new(),
-        cancellation.clone(),
-        deadline,
+
+    let target =
+        FrozenTargetIdentity::from_connection(request.profile_id.clone(), &request.connection)
+            .map_err(|error| error.message.to_string())?;
+    let command_preview = prepared.preview.clone();
+    let command = ReviewedSshCommand::new(prepared.command, prepared.preview, prepared.secrets)
+        .map_err(|error| error.message.to_string())?;
+    let reviewed_request = ReviewedSshExecutionRequest {
+        operation_id: request.operation_id.clone(),
+        target,
+        connection: request.connection.clone(),
+        command,
+        timeout: Duration::from_millis(request.timeout_ms),
+        output_policy: runbook_output_policy(),
+    };
+    let execution = execute_reviewed_ssh_command(
+        database,
+        credentials,
+        cancellations,
+        &known_hosts_path()?,
+        reviewed_request,
     );
-    let outcome = adapt_runbook_channel_outcome(
-        await_ssh_execution_worker(&receiver, &cancellation, deadline),
-        &worker_expected,
-    );
-    cancellation.remove_registration();
-    Ok(match outcome {
-        ExecutionOutcome::Finished {
-            exit_code,
-            expected_matched,
-            stdout,
-            stderr,
-        } => {
-            let status = if expected_matched {
-                RunbookStepExecutionStatus::Success
-            } else {
-                RunbookStepExecutionStatus::Failed
-            };
-            result(
-                &request,
-                &document,
-                &action,
-                prepared.preview,
-                started_at,
-                status,
-                Some(exit_code),
-                expected_matched,
-                Some(redact(stdout, &secrets)),
-                Some(redact(stderr, &secrets)),
-                (!expected_matched).then(|| {
-                    "runbook command did not match its reviewed expected result".to_string()
-                }),
+    if execution.status == ExecutionStatus::Failed
+        && (matches!(
+            execution.error_category,
+            Some(
+                ExecutionErrorCategory::InvalidRequest
+                    | ExecutionErrorCategory::CredentialUnavailable
             )
-        }
-        ExecutionOutcome::Cancelled => result(
-            &request,
-            &document,
-            &action,
-            prepared.preview,
-            started_at,
-            RunbookStepExecutionStatus::Cancelled,
-            None,
-            false,
-            None,
-            None,
-            Some("runbook action was cancelled".to_string()),
-        ),
-        ExecutionOutcome::TimedOut => result(
-            &request,
-            &document,
-            &action,
-            prepared.preview,
-            started_at,
-            RunbookStepExecutionStatus::TimedOut,
-            None,
-            false,
-            None,
-            None,
-            Some(format!(
-                "runbook action timed out after {} ms",
-                request.timeout_ms
-            )),
-        ),
-        ExecutionOutcome::Failed(error) => result(
-            &request,
-            &document,
-            &action,
-            prepared.preview,
-            started_at,
-            RunbookStepExecutionStatus::Failed,
-            None,
-            false,
-            None,
-            None,
-            Some(redact(error, &secrets)),
-        ),
-    })
+        ) || execution.error.as_deref()
+            == Some("reviewed execution cancellation registry is unavailable"))
+    {
+        return Err(runbook_execution_error(&execution));
+    }
+    Ok(map_reviewed_execution_result(
+        &request,
+        &document,
+        &action,
+        command_preview,
+        started_at,
+        execution,
+    ))
+}
+
+#[tauri::command]
+pub(crate) fn execute_runbook_step(
+    app: AppHandle,
+    credentials: State<'_, CredentialManager>,
+    database: State<'_, crate::db::Database>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
+    request: RunbookStepExecutionRequest,
+) -> Result<RunbookStepExecutionResult, String> {
+    execute_runbook_step_with_known_hosts(
+        &credentials,
+        &database,
+        &cancellations,
+        || crate::known_hosts::known_hosts_path(&app),
+        request,
+    )
 }
 
 #[tauri::command]
@@ -1126,7 +1169,7 @@ pub(crate) fn cancel_runbook_step(
 ) -> Result<(), String> {
     cancellations
         .cancel(&operation_id)
-        .map_err(|error| error.runbook_message())
+        .map_err(|error| runbook_cancellation_error(&operation_id, error))
 }
 
 #[tauri::command]
@@ -1193,10 +1236,8 @@ pub(crate) async fn save_runbook_file(text: String) -> Result<Option<RunbookFile
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::{
-        open_ssh_execution_session, BoundedOutputCollector, SshExecutionSession,
-    };
-    use crate::models::{AuthMethod, JumpHostConfig};
+    use crate::models::{AuthMethod, JumpHostConfig, ProfileAuthMethod, ProfileRow};
+    use std::sync::Arc;
 
     fn valid_text(command: &str, risk: &str, keychain: bool) -> String {
         let variables = if keychain {
@@ -1267,20 +1308,164 @@ mod tests {
         }
     }
 
-    fn open_isolated_session(
+    fn profile_for_connection(
+        profile_id: &str,
         connection: &RemoteConnectionRequest,
-    ) -> (tempfile::TempDir, SshExecutionSession) {
-        let (known_hosts_temp, known_hosts_path) =
-            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
-        let session = open_ssh_execution_session(connection, &known_hosts_path)
-            .expect("authenticate isolated SSH with the trusted host key");
-        (known_hosts_temp, session)
+    ) -> ProfileRow {
+        ProfileRow {
+            id: profile_id.to_string(),
+            name: "Runbook fixture".to_string(),
+            host: connection.host.clone(),
+            port: connection.port,
+            username: connection.username.clone(),
+            auth_method: match connection.auth_method {
+                AuthMethod::Password => ProfileAuthMethod::Password,
+                AuthMethod::Key => ProfileAuthMethod::Key,
+            },
+            keychain_key_id: connection.keychain_key_id.clone(),
+            jump_host_config: connection.jump_host.as_ref().map(|jump| {
+                serde_json::json!({
+                    "host": jump.host,
+                    "port": jump.port,
+                    "username": jump.username,
+                    "authMethod": jump.auth_method,
+                    "keychainKeyId": jump.keychain_key_id,
+                })
+                .to_string()
+            }),
+            organization_json: None,
+            created_at: 1,
+            updated_at: 1,
+        }
     }
 
-    fn execution_handle(operation_id: &str) -> (ExecutionCancellationRegistry, CancellationHandle) {
-        let registry = ExecutionCancellationRegistry::default();
-        let handle = registry.register(operation_id).unwrap();
-        (registry, handle)
+    fn adapter_database(
+        profile_id: &str,
+        connection: &RemoteConnectionRequest,
+    ) -> (tempfile::TempDir, crate::db::Database) {
+        let directory = tempfile::tempdir().expect("create Runbook adapter database directory");
+        let database = crate::db::Database::open(&directory.path().join("termbridge.db"))
+            .expect("open Runbook adapter database");
+        database
+            .insert_profile(&profile_for_connection(profile_id, connection))
+            .expect("insert Runbook adapter profile");
+        (directory, database)
+    }
+
+    fn execution_text(
+        command: &str,
+        risk: &str,
+        expected_exit_code: i32,
+        stdout_contains: &[&str],
+    ) -> String {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "id": "test-runbook",
+            "name": "Test",
+            "description": "Test runbook",
+            "evidenceMaxAgeSeconds": 300,
+            "variables": [],
+            "prechecks": [{
+                "id": "check",
+                "description": "check",
+                "command": "uname -s",
+                "expected": { "exitCode": 0 },
+                "timeoutSeconds": 10
+            }],
+            "steps": [{
+                "id": "action",
+                "description": "action",
+                "command": command,
+                "risk": risk,
+                "impact": "reviewed impact",
+                "rollback": "restore the reviewed previous state",
+                "expected": {
+                    "exitCode": expected_exit_code,
+                    "stdoutContains": stdout_contains
+                },
+                "timeoutSeconds": 10,
+                "safeToRetry": true
+            }]
+        })
+        .to_string()
+    }
+
+    fn execution_request(
+        operation_id: &str,
+        connection: RemoteConnectionRequest,
+        command: &str,
+        risk: RunbookRisk,
+        expected_exit_code: i32,
+        stdout_contains: &[&str],
+    ) -> RunbookStepExecutionRequest {
+        let risk_name = match risk {
+            RunbookRisk::ReadOnly => "readOnly",
+            RunbookRisk::StateChange => "stateChange",
+            RunbookRisk::Destructive => "destructive",
+        };
+        let text = execution_text(command, risk_name, expected_exit_code, stdout_contains);
+        RunbookStepExecutionRequest {
+            operation_id: operation_id.to_string(),
+            run_id: format!("run:{operation_id}"),
+            source_digest: source_digest(&text),
+            runbook_text: text,
+            item_id: "action".to_string(),
+            item_kind: RunbookItemKind::Step,
+            profile_id: "profile-1".to_string(),
+            authorized: true,
+            approved_risk: risk,
+            variable_values: HashMap::new(),
+            timeout_ms: 10_000,
+            connection,
+        }
+    }
+
+    fn reviewed_result(
+        request: &RunbookStepExecutionRequest,
+        status: ExecutionStatus,
+        exit_code: Option<i32>,
+        stdout: &str,
+        stderr: &str,
+    ) -> ReviewedSshExecutionResult {
+        ReviewedSshExecutionResult {
+            operation_id: request.operation_id.clone(),
+            target: FrozenTargetIdentity::from_connection(
+                request.profile_id.clone(),
+                &request.connection,
+            )
+            .expect("freeze mapped result target"),
+            status,
+            started_at: 1_000,
+            completed_at: 1_250,
+            exit_code,
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+            stdout_bytes_captured: stdout.len() as u64,
+            stderr_bytes_captured: stderr.len() as u64,
+            stdout_bytes_read: stdout.len() as u64,
+            stderr_bytes_read: stderr.len() as u64,
+            stdout_truncated: false,
+            stderr_truncated: false,
+            error_category: None,
+            error: None,
+        }
+    }
+
+    fn map_reviewed_result(
+        request: &RunbookStepExecutionRequest,
+        execution: ReviewedSshExecutionResult,
+    ) -> RunbookStepExecutionResult {
+        let document = parse_document(&request.runbook_text).expect("parse mapped Runbook");
+        let action = selected_action(&document, &request.item_id, request.item_kind)
+            .expect("select mapped Runbook action");
+        map_reviewed_execution_result(
+            request,
+            &document,
+            &action,
+            action.command.to_string(),
+            900,
+            execution,
+        )
     }
 
     #[test]
@@ -1357,15 +1542,19 @@ mod tests {
             document.variables[0].keychain_ref.as_deref(),
             Some("keychain://profile/password")
         );
-    }
-
-    #[test]
-    fn redaction_covers_stdout_stderr_and_errors() {
-        let secrets = vec!["top-secret".to_string()];
-        assert_eq!(
-            redact("value=top-secret".to_string(), &secrets),
-            "value=[REDACTED]"
-        );
+        let prepared = interpolate_with_secret_resolver(
+            document.steps[0].command.as_str(),
+            &document,
+            &HashMap::new(),
+            |reference| {
+                assert_eq!(reference, "keychain://profile/password");
+                Ok("s'ecret".to_string())
+            },
+        )
+        .expect("resolve reviewed secret reference");
+        assert_eq!(prepared.command, "cat 's'\"'\"'ecret'");
+        assert_eq!(prepared.preview, "cat '<keychain://profile/password>'");
+        assert_eq!(prepared.secrets, vec!["s'ecret"]);
     }
 
     #[test]
@@ -1484,69 +1673,164 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_and_timeout_are_observed_before_channel_open() {
-        let session = Session::new().expect("create disconnected SSH session");
-        let (cancel_registry, cancel_handle) = execution_handle("runbook:pre-cancel");
-        cancel_registry.cancel("runbook:pre-cancel").unwrap();
-        let cancelled = execute_runbook_channel_compat(
-            &session,
-            "uname -s",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: Vec::new(),
-            },
-            &cancel_handle,
-            Instant::now() + Duration::from_secs(1),
+    fn unauthorized_adapter_result_keeps_exact_risk_and_does_not_enter_the_kernel() {
+        let connection = isolated_connection();
+        let (_database_temp, database) = adapter_database("profile-1", &connection);
+        let mut request = execution_request(
+            "runbook:adapter-unauthorized",
+            connection,
+            "printf APPROVAL_REQUIRED",
+            RunbookRisk::StateChange,
+            0,
+            &[],
         );
-        assert!(matches!(cancelled, ExecutionOutcome::Cancelled));
+        request.approved_risk = RunbookRisk::ReadOnly;
+        let known_hosts_requested = std::sync::atomic::AtomicBool::new(false);
+        let mapped = execute_runbook_step_with_known_hosts(
+            &CredentialManager::new(),
+            &database,
+            &ExecutionCancellationRegistry::default(),
+            || {
+                known_hosts_requested.store(true, std::sync::atomic::Ordering::SeqCst);
+                Err("kernel must not be reached without exact approval".to_string())
+            },
+            request,
+        )
+        .expect("return unauthorized Runbook result");
 
-        let (_timeout_registry, timeout_handle) = execution_handle("runbook:pre-timeout");
-        let timed_out = execute_runbook_channel_compat(
-            &session,
-            "uname -s",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: Vec::new(),
-            },
-            &timeout_handle,
-            Instant::now(),
-        );
-        assert!(matches!(timed_out, ExecutionOutcome::TimedOut));
-
-        let (race_registry, race_handle) = execution_handle("runbook:cancel-timeout-race");
-        race_registry.cancel("runbook:cancel-timeout-race").unwrap();
-        let cancelled_wins = execute_runbook_channel_compat(
-            &session,
-            "uname -s",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: Vec::new(),
-            },
-            &race_handle,
-            Instant::now(),
-        );
-        assert!(matches!(cancelled_wins, ExecutionOutcome::Cancelled));
+        assert_eq!(mapped.status, RunbookStepExecutionStatus::Unauthorized);
+        assert_eq!(mapped.risk, RunbookRisk::StateChange);
+        assert_eq!(mapped.command_preview, "printf APPROVAL_REQUIRED");
+        assert!(!known_hosts_requested.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
-    fn compatibility_wrapper_keeps_legacy_channel_error_wording() {
-        let session = Session::new().expect("create disconnected SSH session");
-        let (_registry, cancellation) = execution_handle("runbook:channel-error");
-        let outcome = execute_runbook_channel_compat(
-            &session,
-            "uname -s",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: Vec::new(),
+    fn adapter_freezes_then_revalidates_the_profile_before_network_access() {
+        let connection = isolated_connection();
+        let (_database_temp, database) = adapter_database("profile-1", &connection);
+        let database_during_dispatch = database.clone();
+        let changed_connection = connection.clone();
+        let mapped = execute_runbook_step_with_known_hosts(
+            &CredentialManager::new(),
+            &database,
+            &ExecutionCancellationRegistry::default(),
+            move || {
+                let mut changed = profile_for_connection("profile-1", &changed_connection);
+                changed.host = "changed.example.test".to_string();
+                database_during_dispatch
+                    .update_profile("profile-1", &changed)
+                    .expect("change profile after adapter freeze");
+                Ok(PathBuf::from("unused-known-hosts"))
             },
-            &cancellation,
-            Instant::now() + Duration::from_secs(1),
+            execution_request(
+                "runbook:adapter-profile-drift",
+                connection.clone(),
+                "uname -s",
+                RunbookRisk::ReadOnly,
+                0,
+                &[],
+            ),
+        )
+        .expect("map target drift into the Runbook result");
+
+        assert_eq!(mapped.status, RunbookStepExecutionStatus::Failed);
+        assert_eq!(mapped.source.host, connection.host);
+        assert_eq!(
+            mapped.error.as_deref(),
+            Some("stored profile identity does not match the frozen target")
         );
-        assert!(matches!(
-            outcome,
-            ExecutionOutcome::Failed(ref error)
-                if error.starts_with("failed to open runbook command channel:")
-        ));
+    }
+
+    #[test]
+    fn generic_completed_results_keep_runbook_expected_matching_and_identity() {
+        let request = execution_request(
+            "runbook:adapter-nonzero",
+            isolated_connection(),
+            "uname -s",
+            RunbookRisk::ReadOnly,
+            7,
+            &["Linux", "x86"],
+        );
+        let execution = reviewed_result(
+            &request,
+            ExecutionStatus::Completed,
+            Some(7),
+            "Linux x86\n",
+            "warning\n",
+        );
+        let mapped = map_reviewed_result(&request, execution);
+
+        assert_eq!(mapped.status, RunbookStepExecutionStatus::Success);
+        assert_eq!(mapped.exit_code, Some(7));
+        assert!(mapped.expected_matched);
+        assert_eq!(mapped.stdout.as_deref(), Some("Linux x86\n"));
+        assert_eq!(mapped.stderr.as_deref(), Some("warning\n"));
+        assert_eq!(mapped.command_preview, "uname -s");
+        assert_eq!(mapped.source.kind, "sshRunbook");
+        assert_eq!(mapped.source.profile_id, "profile-1");
+        assert_eq!(mapped.source.host, request.connection.host);
+        assert_eq!(mapped.source.port, request.connection.port);
+        assert_eq!(mapped.source.username, request.connection.username);
+
+        let mismatch = reviewed_result(
+            &request,
+            ExecutionStatus::Completed,
+            Some(7),
+            "Linux arm\n",
+            "",
+        );
+        let mismatch = map_reviewed_result(&request, mismatch);
+        assert_eq!(mismatch.status, RunbookStepExecutionStatus::Failed);
+        assert_eq!(mismatch.exit_code, Some(7));
+        assert!(!mismatch.expected_matched);
+        assert_eq!(
+            mismatch.error.as_deref(),
+            Some("runbook command did not match its reviewed expected result")
+        );
+    }
+
+    #[test]
+    fn generic_terminal_states_map_to_the_existing_runbook_contract() {
+        let request = execution_request(
+            "runbook:adapter-terminals",
+            isolated_connection(),
+            "uname -s",
+            RunbookRisk::ReadOnly,
+            0,
+            &[],
+        );
+        for (status, expected_status, expected_error) in [
+            (
+                ExecutionStatus::Cancelled,
+                RunbookStepExecutionStatus::Cancelled,
+                "runbook action was cancelled".to_string(),
+            ),
+            (
+                ExecutionStatus::TimedOut,
+                RunbookStepExecutionStatus::TimedOut,
+                "runbook action timed out after 10000 ms".to_string(),
+            ),
+        ] {
+            let mapped = map_reviewed_result(
+                &request,
+                reviewed_result(&request, status, None, "discarded", "discarded"),
+            );
+            assert_eq!(mapped.status, expected_status);
+            assert_eq!(mapped.exit_code, None);
+            assert_eq!(mapped.stdout, None);
+            assert_eq!(mapped.stderr, None);
+            assert_eq!(mapped.error, Some(expected_error));
+        }
+
+        let mut failure = reviewed_result(&request, ExecutionStatus::Failed, None, "", "");
+        failure.error_category = Some(ExecutionErrorCategory::ChannelOpenFailed);
+        failure.error = Some("failed to open reviewed SSH command channel: fixture".to_string());
+        let mapped = map_reviewed_result(&request, failure);
+        assert_eq!(mapped.status, RunbookStepExecutionStatus::Failed);
+        assert_eq!(
+            mapped.error.as_deref(),
+            Some("failed to open runbook command channel: fixture")
+        );
     }
 
     #[test]
@@ -1565,291 +1849,252 @@ mod tests {
             .remove("runbook:cancel-characterization")
             .expect("remove completed runbook operation");
         assert_eq!(
-            cancellations
-                .cancel("runbook:cancel-characterization")
-                .expect_err("removed operation is no longer cancellable")
-                .runbook_message(),
+            runbook_cancellation_error(
+                "runbook:cancel-characterization",
+                cancellations
+                    .cancel("runbook:cancel-characterization")
+                    .expect_err("removed operation is no longer cancellable"),
+            ),
             "runbook step operation runbook:cancel-characterization not found"
         );
     }
 
     #[test]
-    fn oversized_output_fails_at_the_existing_stream_limits() {
-        let expected = RunbookExpectedResult {
-            exit_code: 0,
-            stdout_contains: Vec::new(),
-        };
-        for (stdout, limit) in [(true, MAX_OUTPUT_BYTES), (false, MAX_ERROR_BYTES)] {
-            let mut exact = BoundedOutputCollector::new(runbook_output_policy()).unwrap();
-            if stdout {
-                exact.push_stdout(&vec![b'x'; limit]).unwrap();
-            } else {
-                exact.push_stderr(&vec![b'x'; limit]).unwrap();
-            }
-            let exact = adapt_runbook_channel_outcome(
-                SshChannelExecutionOutcome::Completed {
-                    exit_code: 0,
-                    output: exact.finish(&[]).unwrap(),
-                },
-                &expected,
-            );
-            assert!(matches!(exact, ExecutionOutcome::Finished { .. }));
+    fn duplicate_operation_registration_keeps_the_existing_command_error() {
+        let connection = isolated_connection();
+        let (_database_temp, database) = adapter_database("profile-1", &connection);
+        let cancellations = ExecutionCancellationRegistry::default();
+        let _existing = cancellations
+            .register("runbook:duplicate-operation")
+            .expect("reserve Runbook operation ID");
 
-            let mut oversized = BoundedOutputCollector::new(runbook_output_policy()).unwrap();
-            if stdout {
-                oversized.push_stdout(&vec![b'x'; limit + 1]).unwrap();
-            } else {
-                oversized.push_stderr(&vec![b'x'; limit + 1]).unwrap();
-            }
-            let oversized = adapt_runbook_channel_outcome(
-                SshChannelExecutionOutcome::Completed {
-                    exit_code: 0,
-                    output: oversized.finish(&[]).unwrap(),
-                },
-                &expected,
-            );
-            assert!(matches!(
-                oversized,
-                ExecutionOutcome::Failed(ref error)
-                    if error == "runbook command output exceeded the safety limit"
-            ));
-        }
+        let error = execute_runbook_step_with_known_hosts(
+            &CredentialManager::new(),
+            &database,
+            &cancellations,
+            || Ok(PathBuf::from("unused-known-hosts")),
+            execution_request(
+                "runbook:duplicate-operation",
+                connection,
+                "uname -s",
+                RunbookRisk::ReadOnly,
+                0,
+                &[],
+            ),
+        )
+        .expect_err("duplicate Runbook operation must remain a command error");
+        assert_eq!(
+            error,
+            "runbook step operation runbook:duplicate-operation is already registered"
+        );
     }
 
     #[test]
-    fn secret_redaction_includes_target_and_jump_host_credentials() {
-        let mut connection = request(valid_text("uname -s", "readOnly", false), true).connection;
-        connection.private_key_data = Some("target-private-key".to_string());
-        connection.passphrase = Some("target-passphrase".to_string());
-        connection.jump_host = Some(JumpHostConfig {
-            host: "jump.example.test".to_string(),
-            port: 22,
-            username: "jump-operator".to_string(),
-            auth_method: AuthMethod::Password,
-            password: Some("jump-password".to_string()),
-            keychain_key_id: None,
-            private_key_data: Some("jump-private-key".to_string()),
-            passphrase: Some("jump-passphrase".to_string()),
-        });
-        let secrets = known_connection_secret_values(&connection);
-        let raw = format!(
-            "{} {} {} {} {} {}",
-            connection.password.as_deref().unwrap(),
-            connection.private_key_data.as_deref().unwrap(),
-            connection.passphrase.as_deref().unwrap(),
-            connection
-                .jump_host
-                .as_ref()
-                .unwrap()
-                .password
-                .as_deref()
-                .unwrap(),
-            connection
-                .jump_host
-                .as_ref()
-                .unwrap()
-                .private_key_data
-                .as_deref()
-                .unwrap(),
-            connection
-                .jump_host
-                .as_ref()
-                .unwrap()
-                .passphrase
-                .as_deref()
-                .unwrap(),
+    fn oversized_output_fails_at_the_existing_stream_limits() {
+        let request = execution_request(
+            "runbook:adapter-truncation",
+            isolated_connection(),
+            "uname -s",
+            RunbookRisk::ReadOnly,
+            0,
+            &[],
         );
-        let redacted = redact(raw, &secrets);
+        for stdout_truncated in [true, false] {
+            let mut execution = reviewed_result(
+                &request,
+                ExecutionStatus::Completed,
+                Some(0),
+                "captured stdout",
+                "captured stderr",
+            );
+            execution.stdout_truncated = stdout_truncated;
+            execution.stderr_truncated = !stdout_truncated;
+            execution.stdout_bytes_read = (MAX_OUTPUT_BYTES + 1) as u64;
+            execution.stderr_bytes_read = (MAX_ERROR_BYTES + 1) as u64;
+            let mapped = map_reviewed_result(&request, execution);
 
-        assert_eq!(
-            redacted,
-            "[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED]"
-        );
-        for secret in secrets {
-            assert!(!redacted.contains(&secret));
+            assert_eq!(mapped.status, RunbookStepExecutionStatus::Failed);
+            assert_eq!(mapped.exit_code, None);
+            assert_eq!(mapped.stdout, None);
+            assert_eq!(mapped.stderr, None);
+            assert_eq!(
+                mapped.error.as_deref(),
+                Some("runbook command output exceeded the safety limit")
+            );
         }
+
+        let mut hard_limit = reviewed_result(&request, ExecutionStatus::Failed, None, "", "");
+        hard_limit.error_category = Some(ExecutionErrorCategory::OutputLimitExceeded);
+        hard_limit.error = Some("reviewed SSH output exceeded the hard limit".to_string());
+        assert_eq!(
+            map_reviewed_result(&request, hard_limit).error.as_deref(),
+            Some("runbook command output exceeded the safety limit")
+        );
+    }
+
+    fn execute_isolated_adapter(
+        request: RunbookStepExecutionRequest,
+    ) -> RunbookStepExecutionResult {
+        let connection = request.connection.clone();
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let (_database_temp, database) = adapter_database(&request.profile_id, &connection);
+        execute_runbook_step_with_known_hosts(
+            &CredentialManager::new(),
+            &database,
+            &ExecutionCancellationRegistry::default(),
+            || Ok(known_hosts_path),
+            request,
+        )
+        .expect("execute Runbook through the reviewed SSH adapter")
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_runbook_step() {
-        let connection = isolated_connection();
-        let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let expected = RunbookExpectedResult {
-            exit_code: 0,
-            stdout_contains: vec!["TERMBRIDGE_RUNBOOK_OK".to_string()],
-        };
-        let (_registry, cancellation) = execution_handle("runbook:fixture-success");
-        let outcome = execute_runbook_channel_compat(
-            &target.target,
+        let result = execute_isolated_adapter(execution_request(
+            "runbook:fixture-success",
+            isolated_connection(),
             "printf TERMBRIDGE_RUNBOOK_OK",
-            &expected,
-            &cancellation,
-            Instant::now() + Duration::from_secs(10),
-        );
-        match outcome {
-            ExecutionOutcome::Finished {
-                exit_code,
-                expected_matched,
-                stdout,
-                stderr,
-            } => {
-                assert_eq!(exit_code, 0);
-                assert!(expected_matched);
-                assert_eq!(stdout, "TERMBRIDGE_RUNBOOK_OK");
-                assert!(stderr.is_empty());
-            }
-            _ => panic!("isolated success command did not finish"),
-        }
+            RunbookRisk::StateChange,
+            0,
+            &["TERMBRIDGE_RUNBOOK_OK"],
+        ));
+        assert_eq!(result.status, RunbookStepExecutionStatus::Success);
+        assert_eq!(result.exit_code, Some(0));
+        assert!(result.expected_matched);
+        assert_eq!(result.stdout.as_deref(), Some("TERMBRIDGE_RUNBOOK_OK"));
+        assert_eq!(result.stderr, None);
+        assert_eq!(result.source.kind, "sshRunbook");
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_runbook_nonzero_exit_and_expected_mismatch() {
         let connection = isolated_connection();
-        let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let (_registry, cancellation) = execution_handle("runbook:fixture-nonzero");
-        let nonzero = execute_runbook_channel_compat(
-            &target.target,
+        let nonzero = execute_isolated_adapter(execution_request(
+            "runbook:fixture-nonzero",
+            connection.clone(),
             "sh -c 'printf TERMBRIDGE_NONZERO; printf TERMBRIDGE_STDERR >&2; exit 7'",
-            &RunbookExpectedResult {
-                exit_code: 7,
-                stdout_contains: vec!["TERMBRIDGE_NONZERO".to_string()],
-            },
-            &cancellation,
-            Instant::now() + Duration::from_secs(10),
-        );
-        assert!(matches!(
-            nonzero,
-            ExecutionOutcome::Finished {
-                exit_code: 7,
-                expected_matched: true,
-                ref stdout,
-                ref stderr,
-            } if stdout == "TERMBRIDGE_NONZERO" && stderr == "TERMBRIDGE_STDERR"
+            RunbookRisk::StateChange,
+            7,
+            &["TERMBRIDGE_NONZERO"],
         ));
+        assert_eq!(nonzero.status, RunbookStepExecutionStatus::Success);
+        assert_eq!(nonzero.exit_code, Some(7));
+        assert!(nonzero.expected_matched);
+        assert_eq!(nonzero.stdout.as_deref(), Some("TERMBRIDGE_NONZERO"));
+        assert_eq!(nonzero.stderr.as_deref(), Some("TERMBRIDGE_STDERR"));
 
-        let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let (_registry, cancellation) = execution_handle("runbook:fixture-mismatch");
-        let mismatch = execute_runbook_channel_compat(
-            &target.target,
+        let mismatch = execute_isolated_adapter(execution_request(
+            "runbook:fixture-mismatch",
+            connection,
             "printf TERMBRIDGE_ACTUAL",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: vec!["TERMBRIDGE_REVIEWED_EXPECTATION".to_string()],
-            },
-            &cancellation,
-            Instant::now() + Duration::from_secs(10),
-        );
-        assert!(matches!(
-            mismatch,
-            ExecutionOutcome::Finished {
-                exit_code: 0,
-                expected_matched: false,
-                ref stdout,
-                ..
-            } if stdout == "TERMBRIDGE_ACTUAL"
+            RunbookRisk::StateChange,
+            0,
+            &["TERMBRIDGE_REVIEWED_EXPECTATION"],
         ));
+        assert_eq!(mismatch.status, RunbookStepExecutionStatus::Failed);
+        assert_eq!(mismatch.exit_code, Some(0));
+        assert!(!mismatch.expected_matched);
+        assert_eq!(mismatch.stdout.as_deref(), Some("TERMBRIDGE_ACTUAL"));
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_runbook_cancel_and_timeout() {
         let connection = isolated_connection();
-        let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let (cancel_registry, cancellation) = execution_handle("runbook:fixture-cancel");
-        let cancel_worker = cancel_registry.clone();
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let (_database_temp, database) = adapter_database("profile-1", &connection);
+        let cancellations = ExecutionCancellationRegistry::default();
+        let cancel_worker = cancellations.clone();
         let canceller = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
             cancel_worker.cancel("runbook:fixture-cancel").unwrap();
         });
-        let cancelled = execute_runbook_channel_compat(
-            &target.target,
-            "sleep 5",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: Vec::new(),
-            },
-            &cancellation,
-            Instant::now() + Duration::from_secs(10),
-        );
+        let cancelled = execute_runbook_step_with_known_hosts(
+            &CredentialManager::new(),
+            &database,
+            &cancellations,
+            || Ok(known_hosts_path.clone()),
+            execution_request(
+                "runbook:fixture-cancel",
+                connection.clone(),
+                "sleep 5",
+                RunbookRisk::StateChange,
+                0,
+                &[],
+            ),
+        )
+        .expect("execute cancellable Runbook adapter fixture");
         canceller
             .join()
             .expect("join isolated cancellation trigger");
-        assert!(matches!(cancelled, ExecutionOutcome::Cancelled));
+        assert_eq!(cancelled.status, RunbookStepExecutionStatus::Cancelled);
 
-        let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let (_registry, cancellation) = execution_handle("runbook:fixture-timeout");
-        let timed_out = execute_runbook_channel_compat(
-            &target.target,
+        let mut timeout_request = execution_request(
+            "runbook:fixture-timeout",
+            connection,
             "sleep 5",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: Vec::new(),
-            },
-            &cancellation,
-            Instant::now() + Duration::from_millis(150),
+            RunbookRisk::StateChange,
+            0,
+            &[],
         );
-        assert!(matches!(timed_out, ExecutionOutcome::TimedOut));
+        timeout_request.timeout_ms = 1_000;
+        let timed_out = execute_runbook_step_with_known_hosts(
+            &CredentialManager::new(),
+            &database,
+            &cancellations,
+            || Ok(known_hosts_path),
+            timeout_request,
+        )
+        .expect("execute timed Runbook adapter fixture");
+        assert_eq!(timed_out.status, RunbookStepExecutionStatus::TimedOut);
+        assert_eq!(
+            timed_out.error.as_deref(),
+            Some("runbook action timed out after 1000 ms")
+        );
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_runbook_oversized_output_fails() {
-        let connection = isolated_connection();
-        let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let (_registry, cancellation) = execution_handle("runbook:fixture-oversized");
-        let outcome = execute_runbook_channel_compat(
-            &target.target,
+        let result = execute_isolated_adapter(execution_request(
+            "runbook:fixture-oversized",
+            isolated_connection(),
             "head -c 65537 /dev/zero",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: Vec::new(),
-            },
-            &cancellation,
-            Instant::now() + Duration::from_secs(10),
-        );
-        assert!(matches!(
-            outcome,
-            ExecutionOutcome::Failed(ref error)
-                if error == "runbook command output exceeded the safety limit"
+            RunbookRisk::ReadOnly,
+            0,
+            &[],
         ));
+        assert_eq!(result.status, RunbookStepExecutionStatus::Failed);
+        assert_eq!(result.exit_code, None);
+        assert_eq!(result.stdout, None);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("runbook command output exceeded the safety limit")
+        );
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_runbook_secret_output_is_redacted() {
         const SECRET: &str = "TERMBRIDGE_REDACT_ME";
-        let connection = isolated_connection();
-        let (_known_hosts_temp, target) = open_isolated_session(&connection);
-        let (_registry, cancellation) = execution_handle("runbook:fixture-secret");
-        let outcome = execute_runbook_channel_compat(
-            &target.target,
-            "sh -c 'printf TERMBRIDGE_REDACT_ME; printf TERMBRIDGE_REDACT_ME >&2'",
-            &RunbookExpectedResult {
-                exit_code: 0,
-                stdout_contains: vec![SECRET.to_string()],
-            },
-            &cancellation,
-            Instant::now() + Duration::from_secs(10),
-        );
-        let ExecutionOutcome::Finished {
-            expected_matched,
-            stdout,
-            stderr,
-            ..
-        } = outcome
-        else {
-            panic!("isolated secret echo command did not finish");
-        };
-        assert!(expected_matched);
-
-        let secrets = vec![SECRET.to_string()];
-        let stdout = redact(stdout, &secrets);
-        let stderr = redact(stderr, &secrets);
-        assert_eq!(stdout, "[REDACTED]");
-        assert_eq!(stderr, "[REDACTED]");
-        assert!(!stdout.contains(SECRET) && !stderr.contains(SECRET));
+        let mut connection = isolated_connection();
+        connection.passphrase = Some(SECRET.to_string());
+        let result = execute_isolated_adapter(execution_request(
+            "runbook:fixture-secret",
+            connection,
+            "sh -c 'printf TERMBRIDGE_RED\"\"ACT_ME; printf TERMBRIDGE_RED\"\"ACT_ME >&2'",
+            RunbookRisk::StateChange,
+            0,
+            &[],
+        ));
+        assert_eq!(result.status, RunbookStepExecutionStatus::Success);
+        assert_eq!(result.stdout.as_deref(), Some("[REDACTED]"));
+        assert_eq!(result.stderr.as_deref(), Some("[REDACTED]"));
+        assert!(!serde_json::to_string(&result).unwrap().contains(SECRET));
     }
 
     #[test]
@@ -1858,45 +2103,46 @@ mod tests {
         let connection = isolated_connection();
         let (_known_hosts_temp, known_hosts_path) =
             crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let (_database_temp, database) = adapter_database("profile-1", &connection);
+        let database = Arc::new(database);
+        let credentials = Arc::new(CredentialManager::new());
+        let cancellations = ExecutionCancellationRegistry::default();
         let handles = ["TERMBRIDGE_HOST_ALPHA", "TERMBRIDGE_HOST_BRAVO"].map(|marker| {
             let worker_connection = connection.clone();
             let worker_known_hosts_path = known_hosts_path.clone();
+            let worker_database = Arc::clone(&database);
+            let worker_credentials = Arc::clone(&credentials);
+            let worker_cancellations = cancellations.clone();
             std::thread::spawn(move || {
-                let session =
-                    open_ssh_execution_session(&worker_connection, &worker_known_hosts_path)
-                        .expect("authenticate isolated multi-host SSH with the trusted host key");
-                let expected = RunbookExpectedResult {
-                    exit_code: 0,
-                    stdout_contains: vec![marker.to_string()],
-                };
-                let (_registry, cancellation) =
-                    execution_handle(&format!("runbook:fixture-{marker}"));
-                match execute_runbook_channel_compat(
-                    &session.target,
-                    &format!("printf {marker}"),
-                    &expected,
-                    &cancellation,
-                    Instant::now() + Duration::from_secs(10),
-                ) {
-                    ExecutionOutcome::Finished {
-                        exit_code,
-                        expected_matched,
-                        stdout,
-                        stderr,
-                    } => (marker, exit_code, expected_matched, stdout, stderr),
-                    _ => panic!("isolated multi-host command did not finish"),
-                }
+                execute_runbook_step_with_known_hosts(
+                    &worker_credentials,
+                    &worker_database,
+                    &worker_cancellations,
+                    || Ok(worker_known_hosts_path),
+                    execution_request(
+                        &format!("runbook:fixture-{marker}"),
+                        worker_connection,
+                        &format!("printf {marker}"),
+                        RunbookRisk::StateChange,
+                        0,
+                        &[marker],
+                    ),
+                )
+                .expect("execute isolated multi-host Runbook adapter")
             })
         });
         let [alpha, bravo] = handles.map(|handle| handle.join().expect("join multi-host worker"));
 
-        assert_eq!(alpha.1, 0);
-        assert_eq!(bravo.1, 0);
-        assert!(alpha.2 && bravo.2);
-        assert_eq!(alpha.3, alpha.0);
-        assert_eq!(bravo.3, bravo.0);
-        assert!(!alpha.3.contains(bravo.0));
-        assert!(!bravo.3.contains(alpha.0));
-        assert!(alpha.4.is_empty() && bravo.4.is_empty());
+        assert_eq!(alpha.status, RunbookStepExecutionStatus::Success);
+        assert_eq!(bravo.status, RunbookStepExecutionStatus::Success);
+        assert_eq!(alpha.exit_code, Some(0));
+        assert_eq!(bravo.exit_code, Some(0));
+        assert!(alpha.expected_matched && bravo.expected_matched);
+        assert_eq!(alpha.stdout.as_deref(), Some("TERMBRIDGE_HOST_ALPHA"));
+        assert_eq!(bravo.stdout.as_deref(), Some("TERMBRIDGE_HOST_BRAVO"));
+        assert!(!alpha.stdout.as_deref().unwrap().contains("BRAVO"));
+        assert!(!bravo.stdout.as_deref().unwrap().contains("ALPHA"));
+        assert_eq!(alpha.stderr, None);
+        assert_eq!(bravo.stderr, None);
     }
 }
