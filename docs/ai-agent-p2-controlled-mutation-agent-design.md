@@ -1,6 +1,6 @@
 # AI Agent P2：受控修改 Agent 设计
 
-> 设计状态：ready for review（真实修改接入受 P1 verification gate 阻断）
+> 设计状态：P2-0 implemented locally；P2-A～P2-F planned（真实修改接入受 P1 verification gate 阻断）
 > 路线图阶段：P2 — 受控修改 MVP
 > 设计基线 HEAD：`b0dc16ccc2e2a3b5660ce743f63de67c1c8e91f7`
 > 设计日期：2026-08-27
@@ -101,6 +101,16 @@ P2 不能直接把这些能力当作已完成的 Agent 审批边界：
 - operation history 的通用记录接口不能成为“前端记得调用才有审计”的安全前置。
 - P1 evidence 以脱敏 observation 为主；P2 precondition 还需要后端解析的结构化 resource claim。
 - P1 final report 的 `changes` 被类型固定为空；P2 必须使用新版本协议，不能放宽 v1。
+
+### 3.4 P2-0 实现基线
+
+P2-0 已按本设计完成纯协议与状态机落地：
+
+- 后端 admission check 对 P0、P1、feature flag、provider、target、mutation policy 与 operation history 逐项失败关闭；当前仓库基线在 P0/P1 门禁处拒绝准入。
+- Rust/TypeScript 已分别定义 v2 decision、event、snapshot、run/tool/approval/verification 状态，并消费同一组严格 fixture。
+- `protocol/agent/v2/` 的三个 schema 与双端 decoder 都拒绝未知字段、版本、工具、事件类型与 tool/arguments 错配。
+- v1/v2 兼容性 fixture 明确证明 v1 仍拒绝 mutation 和非空 `changes`；四类状态机对所有终态与全部迟到状态组合均拒绝覆盖。
+- 本实现没有增加真实 executor、修改 IPC、approval registry、风险引擎、operation-history writer 或服务命令 renderer；这些仍属于 P2-A～P2-F，且受 P0/P1 verified 门禁约束。
 
 ## 4. 范围
 

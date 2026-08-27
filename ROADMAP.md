@@ -397,9 +397,9 @@ Agent 应能够：
 
 ## 8. P2 — 受控修改 MVP
 
-**状态：blocked（P1 verification gate；设计完成待评审）**
+**状态：blocked（P1 verification gate；P2-0 已本地实现）**
 
-> 第三阶段的 v2 协议、结构化风险、精确审批、服务工具、verification obligation、界面、测试与退出矩阵见 `docs/ai-agent-p2-controlled-mutation-agent-design.md`。P0/P1 verified 前不得接入真实修改 executor。
+> 第三阶段的 v2 协议、结构化风险、精确审批、服务工具、verification obligation、界面、测试与退出矩阵见 `docs/ai-agent-p2-controlled-mutation-agent-design.md`。P2-0 已完成纯协议、状态机与准入门禁；P0/P1 verified 前不得接入真实修改 executor。
 
 ### 8.1 目标
 
@@ -409,12 +409,13 @@ Agent 应能够：
 
 ### 8.2 工作包
 
-#### P2-0：准入、v2 协议与状态机（设计完成，待实现）
+#### P2-0：准入、v2 协议与状态机（implemented；生产准入继续 blocked）
 
-- P1 v1 保持冻结，只读工具与空 `changes` 语义不变。
-- P2 新增 `schemaVersion: 2`、strict decision/event/snapshot schema。
-- 新增 evaluatingRisk、awaitingApproval、executingChange、verifyingChange 及 approval/verification 状态机。
-- P0/P1 未 verified 时只允许纯协议、fake driver 和 UI 工作，不接真实修改 executor。
+- 已增加后端权威 P0/P1 admission check；当前基线因 P0 未 verified、P1 blocked 而失败关闭，且请求中不存在 executor 注入字段。
+- P1 v1 保持冻结，只读工具与空 `changes` 语义不变；Rust/TypeScript 共享兼容性 fixture 证明 v1 继续拒绝 mutation 与非空 `changes`。
+- P2 已增加 `schemaVersion: 2` Rust/TypeScript types，以及严格、独立的 decision/event/snapshot schema；未知字段、版本、工具和 tool/arguments 错配均失败关闭。
+- 已增加 run/tool/approval/verification 四类状态机与共享 fixture，并对所有终态和全部可能迟到状态做笛卡尔积拒绝测试。
+- 本工作包没有注册 IPC、真实 adapter、approval registry、风险引擎或修改 executor；P2-A 至 P2-F 仍未实现。
 
 #### P2-A：结构化 evidence 与多维风险
 
