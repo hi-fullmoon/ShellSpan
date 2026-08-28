@@ -113,6 +113,54 @@ export interface AgentToolApprovalSnapshot {
   readonly result?: AgentToolResult;
 }
 
+export type AgentRunPhase =
+  | 'analyzing'
+  | 'preparingCommand'
+  | 'awaitingApproval'
+  | 'executing'
+  | 'readingResult'
+  | 'verifying'
+  | 'completed'
+  | 'partial'
+  | 'incomplete';
+
+export type AgentRunStatus =
+  | 'running'
+  | 'completed'
+  | 'partial'
+  | 'incomplete'
+  | 'cancelled'
+  | 'failed';
+
+export interface AgentRunRecord {
+  readonly requestId: string;
+  readonly goal: string;
+  readonly providerId: string;
+  readonly target: Readonly<AgentTargetSnapshot>;
+  readonly targetTitle: string;
+  readonly permissionMode: AgentPermissionMode;
+  readonly toolCallIds: readonly string[];
+  readonly phase: AgentRunPhase;
+  readonly status: AgentRunStatus;
+  readonly stopRequested: boolean;
+  readonly fallback?: AgentSafeFallback;
+  readonly error?: string;
+  readonly maxToolSteps?: number;
+  readonly toolResultTimeoutMs?: number;
+  readonly stepLimitReached?: boolean;
+}
+
+export interface AgentChatMessage {
+  readonly id: string;
+  readonly requestId: string;
+  readonly role: 'user' | 'assistant';
+  readonly content: string;
+  readonly status: 'streaming' | 'completed' | 'cancelled' | 'failed';
+  readonly providerId: string;
+  readonly target: Readonly<AgentTargetSnapshot>;
+  readonly toolCallIds: readonly string[];
+}
+
 export const AGENT_TOOL_CALLING_SUPPORT = ['supported', 'unsupported', 'unknown'] as const;
 export type AgentToolCallingSupport = (typeof AGENT_TOOL_CALLING_SUPPORT)[number];
 

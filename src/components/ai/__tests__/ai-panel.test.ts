@@ -22,6 +22,7 @@ import {
   isMessageBoundToTerminal,
   retrySnapshotForMessage,
   sanitizeTerminalSelection,
+  selectAgentConversationHistory,
   selectConversationHistory,
   shouldCompactAiModeControls,
   shouldSubmitAiDraft,
@@ -29,8 +30,36 @@ import {
 } from '../ai-panel';
 
 const tauriCoreMock = vi.hoisted(() => ({ invoke: vi.fn() }));
+const tauriEventMock = vi.hoisted(() => ({ listen: vi.fn(async () => () => {}) }));
+const agentUiMock = vi.hoisted(() => ({
+  connect: vi.fn(async () => {}),
+  start: vi.fn(async () => 'agent-request'),
+  stop: vi.fn(() => true),
+  approve: vi.fn(() => true),
+  reject: vi.fn(() => true),
+  retry: vi.fn(async () => 'retry-request'),
+  canRetry: vi.fn(() => false),
+}));
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: tauriCoreMock.invoke }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: tauriEventMock.listen }));
+vi.mock('@/lib/agent-ui-controller', () => ({
+  agentUiController: agentUiMock,
+  agentTargetFromSession: (session: {
+    sessionId: string;
+    profileId?: string;
+    host: string;
+    port: number;
+    username: string;
+  }) => ({
+    kind: session.host === 'local' && session.port === 0 ? 'local' : 'remote',
+    sessionId: session.sessionId,
+    ...(session.profileId ? { profileId: session.profileId } : {}),
+    host: session.host,
+    port: session.port,
+    username: session.username,
+  }),
+}));
 
 function message(
   requestId: string,
@@ -54,6 +83,8 @@ beforeEach(() => {
   window.localStorage.removeItem('termbridge.aiPanelWidth');
   tauriCoreMock.invoke.mockReset();
   tauriCoreMock.invoke.mockResolvedValue(undefined);
+  tauriEventMock.listen.mockClear();
+  Object.values(agentUiMock).forEach((mock) => mock.mockClear());
 });
 
 describe('extractSingleLineCommand', () => {
@@ -63,6 +94,120 @@ describe('extractSingleLineCommand', () => {
 
   it('rejects multi-line command blocks so insertion cannot execute earlier lines', () => {
     expect(extractSingleLineCommand('```bash\ncd /tmp\nrm file\n```')).toBeUndefined();
+  });
+});
+
+describe('explicit AI modes', () => {
+  it('keeps the experimental Agent entry visible but disabled by default', async () => {
+    const previousApp = useAppStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ locale: 'en-US' });
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(true);
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const agentMode = await screen.findByRole('button', { name: 'Agent' });
+      expect(agentMode).toBeDisabled();
+      expect(agentMode).toHaveAttribute('aria-describedby', 'agent-mode-availability');
+      expect(screen.getByText(/experimental Agent feature is off/i)).toHaveClass('sr-only');
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('routes Chat and Generate command only to AI, and Agent only to the Agent coordinator', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    tauriCoreMock.invoke.mockImplementation(async (command: string) => {
+      if (command === 'agent_contract_status') {
+        return {
+          contractVersion: 1,
+          featureEnabled: true,
+          agentAvailable: true,
+          defaultPermissionMode: 'requestApproval',
+          providerCapability: {
+            support: 'supported',
+            source: 'ollamaModelMetadata',
+          },
+        };
+      }
+      return undefined;
+    });
+    await initI18n('en-US');
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(true);
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'mode-session',
+        title: 'Mode target',
+        host: 'mode.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+      }],
+      activeSessionId: 'mode-session',
+    });
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const textbox = screen.getByRole('textbox');
+      fireEvent.change(textbox, { target: { value: 'Explain nginx' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'ai_start_request',
+        expect.anything(),
+      ));
+      expect(agentUiMock.start).not.toHaveBeenCalled();
+      act(() => {
+        const requestId = useAiStore.getState().activeRequestId;
+        if (requestId) useAiStore.getState().cancelRequest(requestId);
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Generate command' }));
+      fireEvent.change(textbox, { target: { value: 'Show disk usage' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => {
+        const starts = tauriCoreMock.invoke.mock.calls.filter(([command]) => (
+          command === 'ai_start_request'
+        ));
+        expect(starts).toHaveLength(2);
+        expect(starts[1]?.[1]).toMatchObject({ request: { task: 'generateCommand' } });
+      });
+      expect(agentUiMock.start).not.toHaveBeenCalled();
+      act(() => {
+        const requestId = useAiStore.getState().activeRequestId;
+        if (requestId) useAiStore.getState().cancelRequest(requestId);
+      });
+
+      const agentMode = await screen.findByRole('button', { name: 'Agent' });
+      await waitFor(() => expect(agentMode).toBeEnabled());
+      fireEvent.click(agentMode);
+      fireEvent.change(textbox, { target: { value: 'Verify nginx' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(agentUiMock.start).toHaveBeenCalledWith(expect.objectContaining({
+        goal: 'Verify nginx',
+        target: expect.objectContaining({ sessionId: 'mode-session' }),
+      })));
+      expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => command === 'ai_start_request'))
+        .toHaveLength(2);
+    } finally {
+      unmount();
+      delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
   });
 });
 
@@ -438,6 +583,49 @@ describe('selectConversationHistory', () => {
       { role: 'user', content: 'Check server B' },
       { role: 'assistant', content: 'Server B needs attention' },
     ]);
+  });
+
+  it('keeps Agent history in its own exact-target lane', () => {
+    const targetA = {
+      kind: 'remote' as const,
+      sessionId: 'session-a',
+      host: 'a.example.com',
+      port: 22,
+      username: 'root',
+    };
+    const targetB = { ...targetA, sessionId: 'session-b' };
+    expect(selectAgentConversationHistory([
+      {
+        id: 'agent-a-user',
+        requestId: 'agent-a',
+        role: 'user',
+        content: 'Check A',
+        status: 'completed',
+        providerId: 'openai',
+        target: targetA,
+        toolCallIds: [],
+      },
+      {
+        id: 'agent-a-tool-only',
+        requestId: 'agent-a',
+        role: 'assistant',
+        content: '',
+        status: 'completed',
+        providerId: 'openai',
+        target: targetA,
+        toolCallIds: ['call-a'],
+      },
+      {
+        id: 'agent-b-user',
+        requestId: 'agent-b',
+        role: 'user',
+        content: 'Check B',
+        status: 'completed',
+        providerId: 'openai',
+        target: targetB,
+        toolCallIds: [],
+      },
+    ], targetA)).toEqual([{ role: 'user', content: 'Check A' }]);
   });
 });
 
@@ -852,7 +1040,9 @@ describe('clear conversation dialog', () => {
 
 describe('conversation history', () => {
   it('opens an archived terminal conversation as read-only', async () => {
+    const previousApp = useAppStore.getState();
     await initI18n('en-US');
+    useAppStore.setState({ locale: 'en-US' });
     useTerminalStore.setState({ sessions: [], activeSessionId: null });
     useAiStore.getState().clear();
     useAiStore.getState().hydrateSessions([{
@@ -891,6 +1081,8 @@ describe('conversation history', () => {
       unmount();
       useAiStore.getState().clear();
       useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
     }
   });
 

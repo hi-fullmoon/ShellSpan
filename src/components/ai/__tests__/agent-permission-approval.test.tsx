@@ -127,4 +127,48 @@ describe('M3 permission and approval components', () => {
     expect(onApprove).toHaveBeenCalledWith(approvalSnapshot().approval);
     expect(onReject).not.toHaveBeenCalled();
   });
+
+  it('shows status, exit code, redacted output, stop, and conditional retry actions accessibly', () => {
+    const onStop = vi.fn();
+    const onRetry = vi.fn();
+    const running = { ...approvalSnapshot(), status: 'running' as const, approval: undefined };
+    const { rerender } = render(
+      <AgentApprovalCard
+        snapshot={running}
+        targetTitle="Production"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onStop={onStop}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('agent.status.running');
+    fireEvent.click(screen.getByRole('button', { name: 'agent.tool.stop' }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <AgentApprovalCard
+        snapshot={{
+          ...approvalSnapshot(),
+          status: 'failed',
+          approval: undefined,
+          result: {
+            requestId: 'request-1',
+            callId: 'call-1',
+            status: 'failed',
+            exitCode: 1,
+            output: 'token=[REDACTED]\nservice failed',
+          },
+        }}
+        targetTitle="Production"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        retryAllowed
+        onRetry={onRetry}
+      />,
+    );
+    expect(screen.getByText(/agent.tool.exitCode/)).toHaveTextContent('1');
+    expect(screen.getByText(/token=\[REDACTED\]/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'agent.tool.retryTask' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });
