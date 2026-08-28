@@ -422,6 +422,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M3 — 权限与审批
 
+状态：已完成（2026-08-28）。
+
 交付：
 
 - 三档 Codex 风格权限选择器。
@@ -430,6 +432,15 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 完全访问提示及连接实例级自动重置。
 
 退出条件：权限矩阵的所有组合均有自动化测试，无法通过 UI 或事件竞态绕过审批。
+
+实现证据：
+
+- `src/lib/agent-command-risk.ts` 在进入权限策略前执行完全本地的命令分类：破坏性签名先于所有只读判断，简单管道和复合命令逐段复用既有 `isSafeReadOnlyCommand` 正向白名单并取整条命令最高风险，重定向、命令替换、复杂或未知语法统一 fail-closed 为 `stateChange`。M0 的未知风险值仍在三档权限下全部要求审批。
+- `src/stores/agentPermissionStore.ts` 将权限与冻结的 `sessionId`、会话种类、配置、主机、端口和用户名共同绑定；只允许已连接实例提权。断线、错误、关闭、删除、身份漂移以及产生新 `sessionId` 的重连都会删除内存授权，新连接和替换连接均恢复 `requestApproval`，切换标签不改变原实例权限。
+- `src/lib/agent-approval-controller.ts` 是结构化 `toolCall` 到 M2 PTY 执行器之间的策略闸门。它冻结命令和目标，使用不透明 `approvalId` 严格限定只有 `awaitingApproval` 能批准或拒绝，在进入 `running` 前重新校验 `sessionId` 与完整身份，随后仍由 M2 在写入前再次校验；事件重放、旧审批、批准/拒绝并发、权限变化和返回结果身份错配都不能重复执行或重复提交，每个终态只向 M1 提交一次。
+- `src/components/ai/agent-permission-selector.tsx` 与 `agent-approval-card.tsx` 复用现有 shadcn Button、DropdownMenu 单选组、Alert、AlertDialog、Badge 和 Card，提供三档权限、完全访问橙色高风险说明、完整冻结目标/命令展示以及批准/拒绝交互；完全访问只改变风险审批决策，不绕过 M0/M2 的单行与控制字符校验、目标绑定、交互命令阻断、超时、中止、输出上限和脱敏边界。本阶段未增加 M4 的 Agent 模式、消息流或完整产品界面。
+- `src/lib/__tests__/agent-command-risk.test.ts`、`agent-approval-controller.test.ts`、`src/stores/__tests__/agentPermissionStore.test.ts` 和组件测试覆盖本地分类、已知权限矩阵、未知风险 fail-closed、连接实例隔离/重置、完整目标展示及审批竞态；连同 M0 契约矩阵和 M2 执行器回归的定向运行共 6 个文件、118 项通过。
+- 全量验证：`pnpm test` 为 139 个文件、1226 项通过；`pnpm build` 成功；`cargo test --manifest-path src-tauri/Cargo.toml` 为 345 项通过、10 项隔离环境测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`、`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
 
 ### M4 — Agent 产品界面
 

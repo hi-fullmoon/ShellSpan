@@ -28,6 +28,17 @@ export interface AgentApprovalDecision {
   readonly reason: AgentApprovalDecisionReason;
 }
 
+export type AgentCommandRiskReason =
+  | 'destructivePattern'
+  | 'readOnlyAllowlist'
+  | 'compoundReadOnlyAllowlist'
+  | 'unrecognizedStateChange';
+
+export interface AgentCommandRiskAssessment {
+  readonly risk: AgentRisk;
+  readonly reason: AgentCommandRiskReason;
+}
+
 export interface AgentTargetSnapshot {
   readonly kind: 'remote' | 'local';
   readonly sessionId: string;
@@ -78,6 +89,28 @@ export interface AgentToolResult {
   readonly status: AgentToolResultStatus;
   readonly exitCode?: number;
   readonly output: string;
+}
+
+export type AgentToolApprovalStatus =
+  | 'pending'
+  | 'awaitingApproval'
+  | 'running'
+  | AgentToolResultStatus;
+
+export interface AgentApprovalReference {
+  readonly requestId: string;
+  readonly callId: string;
+  readonly approvalId: string;
+}
+
+export interface AgentToolApprovalSnapshot {
+  readonly toolCall: AgentToolCall;
+  readonly permissionMode: AgentPermissionMode;
+  readonly riskAssessment: AgentCommandRiskAssessment;
+  readonly decision: AgentApprovalDecision;
+  readonly status: AgentToolApprovalStatus;
+  readonly approval?: AgentApprovalReference;
+  readonly result?: AgentToolResult;
 }
 
 export const AGENT_TOOL_CALLING_SUPPORT = ['supported', 'unsupported', 'unknown'] as const;
