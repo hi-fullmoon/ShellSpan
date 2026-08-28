@@ -65,7 +65,9 @@
 
 审计确认 Agent terminal 注册命令精确为 snapshot、resolve approval、takeover-and-write、return、pause、stop 六个；不存在 generic Agent raw write/execute。Audit schema 为固定 19 列 identity/digest/state metadata，没有 raw input/output、secret/token/credential/transcript 字段。
 
-## Rust 实际执行与 deployment 基线
+## Rust 实际执行与历史 deployment 基线
+
+> 退役附记：以下 deployment 编译问题是本次验收发生时的原始记录。该功能随后从产品和代码中移除，不再构成当前 Rust 门禁或待修复项。
 
 精确起点和最终工作树在不带兼容补丁时，`cargo check --tests --locked --message-format=short` 都因相同 30 个既有 deployment 源级错误失败：
 
@@ -116,7 +118,7 @@ Rust 与 TypeScript 都消费 checked-in terminal protocol fixture；TS 还消�
 - Normal terminal：普通 `write_session` 注册不变；新增真实 PTY test 是 `cfg(target_os = "macos")` 的 test-only direct process；Agent dedicated path 不导入普通 terminal controller/store。
 - Agent v1/v2：decision union 未加入 terminal action；`agent-terminal/v1` 仍是独立 typed proposal；P0/P1/P2 admission 未改。
 - SFTP/SSH：没有修改 SFTP、connection、execution 或 SSH channel；现有 SSH/SFTP CI 不能冒充 AgentPty 证据。
-- Deployment：只记录并临时兼容 30-error baseline；四个 deployment 文件最终零 diff。全量稳定失败保持可见。
+- Deployment：本节只保留验收发生时的 30-error baseline 历史记录；该功能现已退役。
 - App exit：既有 exit hook 的 lease revoke 加上 coordinator-after-revoke test；不自动 reacquire/write。
 - i18n：没有新增或修改用户可见生产 copy，不需要 locale 变化。
 - Workspace persistence：没有修改普通 terminal/SFTP persistence schema；AST/schema 审计证明 dedicated raw input、PTY transcript 和 lease counters 不进入持久状态。
@@ -126,7 +128,7 @@ Rust 与 TypeScript 都消费 checked-in terminal protocol fixture；TS 还消�
 
 ## 未解决限制与退出条件
 
-- 修复并独立评审 30 个 deployment 编译基线后，macOS/Windows CI 才能直接运行最终工作树的 Rust contract/full suite；修复不属于本阶段。
+- 当前 Rust gate 已不再依赖退役的 deployment 源文件；该历史基线不属于后续 Agent 准入条件。
 - Windows 必须取得实际 `windows-2025` CI 和真实设备 ConPTY/Job Object 的 ownership、takeover、crash、remount、secret persistence 证据。
 - SSH 必须用隔离 fixture 创建真实专用 AgentPty，并验证 write ambiguity、断链、旧 epoch、reconnect no-reacquire；不得请求用户生产凭据。
 - Production verifier 必须是独立只读结构化证据，并精确绑定 run/target/obligation；PTY output 永远不能单独满足 verification。

@@ -1,9 +1,9 @@
-# Runbook v1 retirement
+# Runbook automation retirement
 
-The standalone Runbook v1 product surface and its multi-host executor were removed on 2026-08-28. They had no demonstrated product value and duplicated the clearer, purpose-built deployment workflow.
+The standalone Runbook v1 product surface, multi-host executor, and Deployment Runbook v2 workflow were removed on 2026-08-28. Neither automation surface had demonstrated product value sufficient to justify its product and maintenance cost.
 
-The removal includes the Workbench and command-palette entry points, JSON editor, single- and multi-host state machines, AI-to-Runbook handoff, frontend IPC wrappers, and native step execution commands. Historical operation-history labels remain readable so existing local audit rows do not lose their meaning.
+The removal includes the Workbench and command-palette entry points, JSON editors and templates, single-host and rollout state machines, AI-to-Runbook handoff, frontend IPC wrappers, native deployment/rollback commands, deployment-specific schemas, fixtures, and tests. Historical operation-history labels remain readable so existing local audit rows do not lose their meaning.
 
-Deployment Runbook v2 remains supported through the independent Deployment workbench and its semantic review, approval, rollout, recovery, and rollback APIs. The small shared `RunbookRisk` vocabulary, secret-literal guard, and deployment JSON file dialog are retained only for that workflow.
+Existing installations may still contain inert deployment tables or keychain entries created by earlier versions. The application no longer reads, writes, migrates, or executes them; the retirement deliberately avoids silently deleting local audit data or secrets during upgrade.
 
-Regression coverage verifies that the old navigation and handoff are absent, Deployment Runbook v2 still validates and builds, and the native deployment implementation still compiles.
+The generic reviewed SSH execution kernel remains because fixed-purpose remote probes and the separately gated Agent roadmap use that infrastructure. It is not exposed as a deployment or generic execution IPC.

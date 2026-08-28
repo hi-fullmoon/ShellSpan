@@ -63,7 +63,7 @@ Validation on this branch:
 - `git diff --check`: passed.
 - Browser visual QA: the Chinese no-run preview and closed-admission alerts rendered correctly at the default viewport, 900×650, and 720×600. Direct Vite browsing reported only the expected existing missing-Tauri-runtime IPC errors.
 - `cargo fmt --all -- --check`: passed.
-- `cargo check --tests --message-format=short`: phase-4 code introduces no Rust diagnostics; the command remains blocked by exactly the same 30 unrelated deployment baseline errors recorded in phase 3 (`LowerHex`, `rusqlite` `usize`, non-exhaustive deployment error matches, and rollout statement lifetimes). No Rust or deployment source changed.
+- `cargo check --tests --message-format=short`: at phase-4 acceptance time, the UI code introduced no Rust diagnostics while the same 30 unrelated deployment baseline errors recorded in phase 3 blocked the command. That subsystem was later retired and no longer blocks the current Rust gate.
 
 ## Privacy and bypass review
 

@@ -180,7 +180,7 @@ TermBridge 当前已经具备四条清晰的产品主链路：
 
 历史验收状态（2026-08-23）：曾通过。独立 Runbook v1、多主机执行和 AI 交接因缺少实际产品价值，已于 2026-08-28 从产品与代码中移除；保留本节仅用于记录决策沿革，详见 `docs/runbook-retirement.md`。
 
-Deployment Runbook v2 阶段 5 补充验收（2026-08-28）：独立 Deployment 工作台已完成模板/导入、显式目标、后端 review 冻结、单主机与 canary/rolling 精确审批、持久恢复和独立回滚闭环；证据与保留限制见 `docs/deployment-workflow.md`、`docs/deployment-release-acceptance.md` 和 `docs/roadmap-audit.json`。
+Deployment Runbook v2 曾于 2026-08-28 完成阶段 5 历史验收，随后因缺少足以覆盖产品与维护成本的实际价值，与 Runbook v1 一并从产品和代码中移除；决策边界见 `docs/runbook-retirement.md`。
 
 ---
 

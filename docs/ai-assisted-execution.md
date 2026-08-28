@@ -12,4 +12,4 @@ The frontend rejects unknown fields, duplicate or invalid IDs, missing evidence,
 
 Context evidence records its source, bound profile/session label, and observation time. Stale context is visibly marked. Suggested commands are never copied to the terminal or executed automatically, and there is no Runbook handoff or generic execution IPC.
 
-Users must independently verify the target, current evidence, impact, and rollback before acting on any suggestion. Deployment changes use the separate Deployment workflow and its semantic review and approval APIs.
+Users must independently verify the target, current evidence, impact, and rollback before acting on any suggestion. There is no separate Runbook or Deployment execution workflow.

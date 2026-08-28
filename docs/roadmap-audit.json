@@ -6,73 +6,6 @@
   "agentRoadmapSource": "ROADMAP.md",
   "p0DesignSource": "docs/ai-agent-p0-execution-foundation-design.md",
   "p1DesignSource": "docs/ai-agent-p1-readonly-dynamic-agent-design.md",
-  "deploymentRolloutPhase4": {
-    "status": "implemented",
-    "finding": "显式有序 profile IDs、canaryRolling、逐批人工审批、健康/失败阈值熔断、单主机执行器复用、持久化重启封存与新 review 恢复已实现；Windows GNU Rust 编译门禁在 openssl-sys 选择 MSWin32 Perl 时按已知环境限制失败，未提交 workaround，因此不标记 verified。",
-    "securityInvariants": [
-      "拒绝 tag/动态发现、重复 profile/主机、顺序漂移、空批次和跨环境目标。",
-      "rollout/review/plan/batch 与逐目标 single-host review/plan/target identity 全量绑定。",
-      "协调器不生成 Shell/SFTP、不共享或持久化凭证、不自动或递归回滚。",
-      "重启仅封存 running 主机；notStarted 不执行，rollout 进入 recoveryRequired 且不自动续跑。",
-      "恢复必须新 review，并保持文档、策略、批次摘要、目标顺序/身份；succeeded 主机不能重复部署。"
-    ],
-    "evidence": [
-      "protocol/runbook/v2/deployment-rollout.schema.json",
-      "src/types/deployment-rollout.ts",
-      "src/lib/deployment-rollout.ts",
-      "src/lib/tauri.ts",
-      "src-tauri/src/deployment_rollout.rs",
-      "src-tauri/src/deployment_execution.rs",
-      "src-tauri/src/db.rs",
-      "docs/deployment-runbook-v2.md",
-      "docs/adr/deployment-rollout-coordination.md"
-    ],
-    "tests": [
-      "tests/fixtures/deployment-runbook/v2/multi-host-rollout.json",
-      "src/lib/__tests__/deployment-rollout.test.ts",
-      "src/lib/__tests__/tauri.test.ts",
-      "src-tauri/src/deployment_rollout.rs"
-    ],
-    "deferred": [
-      "traffic routing and load-balancer integration",
-      "dynamic discovery or tag-derived deployment targets",
-      "unattended or recursive rollback"
-    ]
-  },
-  "deploymentWorkflowPhase5": {
-    "status": "implemented",
-    "finding": "独立 Deployment 工作台、两套合法 systemd Web 模板、v2 导入导出、review 冻结、精确单主机/批次审批、authoritative 进度/熔断/恢复和独立回滚审批已实现；最终状态以本次本地门禁和外部平台门禁证据分别记录。",
-    "securityInvariants": [
-      "普通 Runbook v1 入口和执行语义不变，v2 只调用阶段 2–4 的强类型 review/approval IPC。",
-      "后端 review 返回后 document、target、order、policy 控件冻结；任何编辑显式废弃旧 review。",
-      "profile/keychain 凭证只在调用栈临时组装，不进入草稿、localStorage、operation history、DOM 或 fixture。",
-      "单主机、canary、下一批次和 rollback 使用不同的精确审批文案；UI 不是新的执行授权源。",
-      "restart recovery 必须新 review，succeeded 主机跳过；rollback suggestion 必须逐主机独立 review/approval。"
-    ],
-    "evidence": [
-      "src/components/workbench/deployment-panel.tsx",
-      "src/components/workbench/deployment-approval-dialog.tsx",
-      "src/lib/deployment-workflow.ts",
-      "docs/deployment-workflow.md",
-      "docs/deployment-release-acceptance.md",
-      "docs/deployment-runbook-v2.md"
-    ],
-    "tests": [
-      "src/lib/__tests__/deployment-workflow.test.ts",
-      "src/components/workbench/__tests__/deployment-panel.test.tsx",
-      "src/components/workbench/__tests__/deployment-workflow.e2e.test.tsx",
-      "tests/fixtures/deployment-runbook/v2/ui-workflow-e2e.json",
-      "src/lib/__tests__/tauri.test.ts",
-      "src/lib/__tests__/deployment-rollout.test.ts"
-    ],
-    "deferred": [
-      "traffic routing and load-balancer integration",
-      "dynamic discovery or tag-derived deployment targets",
-      "arbitrary Shell, hooks, migrations, or environment injection",
-      "unattended automatic rollback or recursive rollback",
-      "release cleanup execution and background garbage collection"
-    ]
-  },
   "p0ExecutionFoundation": {
     "phase": "P0",
     "status": "implemented",
@@ -672,7 +605,7 @@
       "failurePath": "前后端共同拒绝解析/校验失败、未知字段、明文秘密、未授权或风险错配；前置检查、取消、超时、预期不匹配、步骤失败与结果身份错配均失败停止，不推进后续步骤",
       "recovery": "仅可从明确 safeToRetry 的步骤或固有安全的只读预检重试；暂停后证据过期必须重跑安全预检；秘密只在 Rust 执行边界解析钥匙串引用并在所有返回内容中按值脱敏",
       "testStrategy": "规范化 JSON、未知字段与明文秘密拒绝、风险分级、shell 安全变量解析、审批拒绝、暂停/跳过、取消/超时/失败停止、安全重试、证据陈旧和结果身份绑定测试，并在隔离 SSH 服务执行真实 Runbook 步骤",
-      "evidence": ["docs/runbook-retirement.md", "src/types/deployment-runbook.ts", "src/components/workbench/workbench-sidebar.tsx", "src-tauri/src/runbook.rs"],
+      "evidence": ["docs/runbook-retirement.md", "src/components/workbench/workbench-sidebar.tsx", "src/types/index.ts"],
       "tests": ["src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src/components/__tests__/command-palette.test.tsx", "src-tauri/src/runbook.rs"]
     },
     {
@@ -847,7 +780,7 @@
         "pluginApi": "blocked",
         "finding": "三种格式中只有 Runbook v1 接近可审阅契约；用户价值、完整版本/故障门禁和稳定性验收均未完成，故不建立新契约且不开始插件 API 评估。"
       },
-      "evidence": ["docs/explore-extension-contracts-assessment.md", "docs/runbook-retirement.md", "docs/review-process.md", "src/lib/connection-import.ts", "src/types/deployment-runbook.ts", "src-tauri/src/runbook.rs", "src/stores/appStore.ts", "src-tauri/src/db.rs", "src/lib/theme.ts", "src/types/index.ts", "src/styles/base.css", "src/components/terminal/registry/terminal-registry.ts", "scripts/check-roadmap-audit.mjs"],
+      "evidence": ["docs/explore-extension-contracts-assessment.md", "docs/runbook-retirement.md", "docs/review-process.md", "src/lib/connection-import.ts", "src/stores/appStore.ts", "src-tauri/src/db.rs", "src/lib/theme.ts", "src/types/index.ts", "src/styles/base.css", "src/components/terminal/registry/terminal-registry.ts", "scripts/check-roadmap-audit.mjs"],
       "tests": ["src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src-tauri/src/runbook.rs", "src/lib/__tests__/theme.test.ts", "src/stores/__tests__/appStore.test.ts", "src/components/terminal/__tests__/terminal-registry.test.ts", "src/components/terminal/__tests__/terminal-controller-layer.test.tsx", "src-tauri/src/db.rs", "scripts/__tests__/check-roadmap-audit.test.mjs"],
       "criteria": {
         "userGroup": {

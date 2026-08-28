@@ -57,7 +57,7 @@ Pause, stop, session close, disconnect, reconnect, restart, app exit, and crash 
 Validation on this branch:
 
 - `cargo fmt --all`: passed.
-- `cargo check --tests`: the phase-3 modules and integrations report no diagnostics; the command remains blocked by 30 pre-existing unrelated deployment baseline errors (SHA-256 `LowerHex`, `rusqlite` `usize`, non-exhaustive deployment error matches, and rollout statement lifetimes). No deployment baseline source was modified.
+- `cargo check --tests`: at phase-3 acceptance time, the modules and integrations reported no diagnostics while 30 unrelated deployment baseline errors blocked the command. That deployment subsystem was later retired and no longer blocks the current Rust gate.
 - Targeted terminal TypeScript tests: 8 passed, 0 failed.
 - Full TypeScript suite: 1292 passed, 0 failed.
 - Roadmap audit: passed.

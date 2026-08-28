@@ -6,6 +6,7 @@ export type OperationHistoryCategory =
   | 'portForward'
   | 'remoteHealth'
   | 'runbook'
+  // Read compatibility for operation-history rows written before automation retirement.
   | 'deployment'
   | 'multiHost';
 
@@ -35,6 +36,7 @@ export type OperationHistoryAction =
   | 'stopAllPortForwards'
   | 'collectRemoteHealth'
   | 'executeRunbookStep'
+  // Read compatibility for operation-history rows written before automation retirement.
   | 'executeDeployment'
   | 'executeDeploymentRollback'
   | 'executeMultiHostRunbook';
