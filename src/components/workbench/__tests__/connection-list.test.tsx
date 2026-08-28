@@ -160,7 +160,37 @@ describe('ConnectionList', () => {
     expect(grid).toHaveStyle({
       gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     });
+    expect(grid).not.toHaveClass('items-start');
     rectSpy.mockRestore();
+  });
+
+  it('keeps connection-card actions aligned at the bottom of equal-height rows', () => {
+    render(
+      <ConnectionList
+        profiles={[
+          makeProfile({ id: 'with-notes', name: 'Host with notes', notes: 'Personal host' }),
+          makeProfile({ id: 'without-notes', name: 'Host without notes' }),
+        ]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    const terminalActions = screen.getAllByRole('button', {
+      name: 'workbench.connections.connectTerminal',
+    });
+    expect(terminalActions).toHaveLength(2);
+    terminalActions.forEach((action) => {
+      expect(action.closest('.mt-auto')).not.toBeNull();
+    });
   });
 
   it('keeps connection notes on one line without a native title tooltip', () => {

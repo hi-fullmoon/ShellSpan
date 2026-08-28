@@ -1,6 +1,6 @@
 # Deployment Runbook v2 用户工作流
 
-TermBridge 的 **部署** 工作台把 Deployment Runbook v2 的后端安全边界组织成一条可见工作流。普通 Runbook v1 仍在原 **Runbook** 页面中运行；两者没有隐式迁移，也不共享执行入口。
+TermBridge 的 **部署** 工作台把 Deployment Runbook v2 的后端安全边界组织成一条可见工作流。已移除的普通 Runbook v1 不再提供页面或执行入口，部署也不会把 v2 文档解释为通用命令。
 
 ## 从模板或文件开始
 

@@ -12,10 +12,8 @@ import type {
   DeploymentServiceActionV2,
   DeploymentServiceV2,
   DeploymentVerificationV2,
-  VersionedRunbookDocument,
+  RunbookRisk,
 } from '@/types/deployment-runbook';
-import type { RunbookRisk } from '@/types/runbook';
-import { parseRunbookText, serializeRunbook } from '@/lib/runbook';
 
 const MAX_DOCUMENT_LENGTH = 512 * 1024;
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -473,25 +471,4 @@ export function parseDeploymentRunbookV2Text(text: string): DeploymentRunbookDoc
 
 export function serializeDeploymentRunbookV2(document: DeploymentRunbookDocumentV2): string {
   return `${JSON.stringify(parseDeploymentRunbookV2Text(JSON.stringify(document)), null, 2)}\n`;
-}
-
-export function parseRunbookContractText(text: string): VersionedRunbookDocument {
-  if (!text.trim()) fail('text is empty');
-  if (textEncoder.encode(text).length > MAX_DOCUMENT_LENGTH) fail('text exceeds 512 KiB');
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    fail('text is not valid JSON');
-  }
-  const probe = objectValue(value, 'document');
-  if (probe.schemaVersion === 1) return parseRunbookText(text);
-  if (probe.schemaVersion === 2) return parseDeploymentRunbookV2Text(text);
-  fail('schemaVersion must be 1 or 2');
-}
-
-export function serializeRunbookContract(document: VersionedRunbookDocument): string {
-  return document.schemaVersion === 1
-    ? serializeRunbook(document)
-    : serializeDeploymentRunbookV2(document);
 }

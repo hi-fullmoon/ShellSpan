@@ -50,7 +50,6 @@ vi.mock('../keychain-panel', () => ({ KeychainPanel: () => null }));
 vi.mock('../log-panel', () => ({ LogPanel: () => null }));
 vi.mock('../monitor-panel', () => ({ MonitorPanel: () => null }));
 vi.mock('../settings-panel', () => ({ SettingsPanel: () => null }));
-vi.mock('../runbook-panel', () => ({ RunbookPanel: () => null }));
 vi.mock('../operation-history-panel', () => ({ OperationHistoryPanel: () => null }));
 vi.mock('../connection-import-dialog', () => ({ ConnectionImportDialog: () => null }));
 

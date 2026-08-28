@@ -125,7 +125,7 @@ async function renderImportedReviewedPanel() {
   const reviewed = review(runbookText);
   vi.spyOn(tauri, 'invokeListDeploymentRollouts').mockResolvedValue([]);
   vi.spyOn(tauri, 'invokeListDeploymentOperations').mockResolvedValue([]);
-  vi.spyOn(tauri, 'invokeOpenRunbookFile').mockResolvedValue({
+  vi.spyOn(tauri, 'invokeOpenDeploymentRunbookFile').mockResolvedValue({
     path: 'C:\\fixtures\\deployment-v2.json',
     text: runbookText,
   });

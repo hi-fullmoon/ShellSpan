@@ -86,14 +86,12 @@ const run: StaticDiagnosticRun = {
 function renderView(value: StaticDiagnosticRun | undefined, overrides?: {
   onCancel?: () => void;
   onRetry?: () => void;
-  onReviewRunbook?: () => void;
 }) {
   return render(
     <AgentRunView
       run={value}
       onCancel={overrides?.onCancel ?? vi.fn()}
       onRetry={overrides?.onRetry ?? vi.fn()}
-      onReviewRunbook={overrides?.onReviewRunbook ?? vi.fn()}
     />,
   );
 }
@@ -126,14 +124,6 @@ describe('AgentRunView', () => {
     renderView({ ...run, contextObservedAt: Date.now() - 121_000 });
     expect(screen.getByText('ai.agent.evidenceStale')).toBeInTheDocument();
     expect(screen.getByText('ai.agent.evidencePending')).toBeInTheDocument();
-  });
-
-  it('hands the draft to Runbook only after an explicit review action', () => {
-    const onReviewRunbook = vi.fn();
-    renderView(run, { onReviewRunbook });
-    expect(onReviewRunbook).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'ai.agent.reviewRunbook' }));
-    expect(onReviewRunbook).toHaveBeenCalledOnce();
   });
 
   it('allows cancellation only while the model is still planning', () => {

@@ -80,11 +80,7 @@ import type {
   AgentStartResultV1,
 } from '@/types/agent';
 import type {
-  RunbookFile,
-  RunbookStepExecutionRequest,
-  RunbookStepExecutionResult,
-} from '@/types/runbook';
-import type {
+  DeploymentRunbookFile,
   DeploymentExecutionRequestV2,
   DeploymentExecutionResultV2,
   DeploymentExecutionReviewRequestV2,
@@ -944,21 +940,6 @@ export async function invokeCancelRemoteHealthSnapshot(operationId: string): Pro
   return invokeLogged('cancel_remote_health_snapshot', { operationId });
 }
 
-export async function invokeExecuteRunbookStep(
-  request: RunbookStepExecutionRequest,
-  historyMetadata?: OperationHistoryInvocationMetadata,
-): Promise<RunbookStepExecutionResult> {
-  return invokeLogged<RunbookStepExecutionResult>(
-    'execute_runbook_step',
-    { request },
-    historyMetadata,
-  );
-}
-
-export async function invokeCancelRunbookStep(operationId: string): Promise<void> {
-  return invokeLogged('cancel_runbook_step', { operationId });
-}
-
 export async function invokeReviewDeploymentExecution(
   request: DeploymentExecutionReviewRequestV2,
 ): Promise<DeploymentExecutionReviewV2> {
@@ -1103,10 +1084,12 @@ export async function invokeRecoverDeploymentRollout(
   return invokeLogged<DeploymentRolloutReviewV2>('recover_deployment_rollout', { request });
 }
 
-export async function invokeOpenRunbookFile(): Promise<RunbookFile | null> {
-  return invokeLogged<RunbookFile | null>('open_runbook_file');
+export async function invokeOpenDeploymentRunbookFile(): Promise<DeploymentRunbookFile | null> {
+  return invokeLogged<DeploymentRunbookFile | null>('open_deployment_runbook_file');
 }
 
-export async function invokeSaveRunbookFile(text: string): Promise<RunbookFile | null> {
-  return invokeLogged<RunbookFile | null>('save_runbook_file', { text });
+export async function invokeSaveDeploymentRunbookFile(
+  text: string,
+): Promise<DeploymentRunbookFile | null> {
+  return invokeLogged<DeploymentRunbookFile | null>('save_deployment_runbook_file', { text });
 }

@@ -44,7 +44,7 @@ describe('staticDiagnosticStore', () => {
     useStaticDiagnosticStore.getState().clear();
   });
 
-  it('stores a structured plan as a review-only Runbook handoff', () => {
+  it('stores a structured plan for review', () => {
     const store = useStaticDiagnosticStore.getState();
     store.beginRun('request-1', 'diagnose disk usage', 'session-1', 'root@server');
     store.appendDelta('request-1', structuredPlan());
@@ -64,9 +64,6 @@ describe('staticDiagnosticStore', () => {
       status: 'informational',
       risk: 'readOnly',
     });
-
-    useStaticDiagnosticStore.getState().markHandedOff();
-    expect(useStaticDiagnosticStore.getState().run?.phase).toBe('handedOff');
   });
 
   it('binds the plan to its profile, evidence source, and observation time', () => {
@@ -106,7 +103,7 @@ describe('staticDiagnosticStore', () => {
     expect(useStaticDiagnosticStore.getState().run?.requestId).toBe('request-1');
   });
 
-  it('allows a reviewed or handed-off draft to be replaced without executing it', () => {
+  it('allows a reviewed draft to be replaced without executing it', () => {
     const store = useStaticDiagnosticStore.getState();
     store.beginRun('request-1', 'first', 'session-1', 'server');
     store.appendDelta('request-1', structuredPlan());

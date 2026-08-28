@@ -2,8 +2,8 @@
 //!
 //! The reviewed API owns operation cancellation, target revalidation, SSH
 //! session/channel execution, bounded output, and known-secret redaction. It
-//! is not registered as a Tauri command; the Runbook adapter is the reviewed
-//! API's only current production caller. Existing fixed-purpose Remote FS and
+//! is not registered as a Tauri command; deployment and rollback adapters are
+//! its only current production callers. Existing fixed-purpose Remote FS and
 //! Remote Health probes share only the raw channel-start primitive so the
 //! production crate has one auditable `Channel::exec` call site; that primitive
 //! is not an authorization boundary and must not be used by a P1 Agent tool.
@@ -27,13 +27,13 @@ mod result;
 mod ssh;
 mod target;
 
-pub(crate) use cancellation::{
-    valid_operation_id, ExecutionCancellationError, ExecutionCancellationErrorKind,
-    ExecutionCancellationRegistry,
-};
+#[cfg(test)]
+pub(crate) use cancellation::ExecutionCancellationErrorKind;
+pub(crate) use cancellation::{valid_operation_id, ExecutionCancellationRegistry};
+#[cfg(test)]
+pub(crate) use request::DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES;
 pub(crate) use request::{
     ExecutionOutputPolicy, FrozenTargetIdentity, ReviewedSshCommand, ReviewedSshExecutionRequest,
-    DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES,
 };
 pub(crate) use result::{ExecutionErrorCategory, ExecutionStatus, ReviewedSshExecutionResult};
 pub(crate) use ssh::{execute_reviewed_ssh_command, start_ssh_exec_channel};

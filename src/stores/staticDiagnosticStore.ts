@@ -19,7 +19,6 @@ interface StaticDiagnosticState {
   completePlanning: (requestId: string) => void;
   cancelRun: (requestId: string) => void;
   failRun: (requestId: string, error: string) => void;
-  markHandedOff: () => void;
   stopRun: () => void;
   clear: () => void;
 }
@@ -146,9 +145,6 @@ export const useStaticDiagnosticStore = create<StaticDiagnosticState>()((set) =>
           },
         }
       : state),
-  markHandedOff: () => set((state) => state.run?.phase === 'awaitingReview'
-    ? { run: { ...state.run, phase: 'handedOff' } }
-    : state),
   stopRun: () =>
     set((state) => state.run?.phase === 'planning'
       ? {

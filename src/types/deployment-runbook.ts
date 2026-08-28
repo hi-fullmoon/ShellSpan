@@ -1,5 +1,11 @@
-import type { RunbookDocument, RunbookRisk } from '@/types/runbook';
 import type { RemoteConnectionRequest } from '@/types';
+
+export type RunbookRisk = 'readOnly' | 'stateChange' | 'destructive';
+
+export interface DeploymentRunbookFile {
+  path: string;
+  text: string;
+}
 
 export type DeploymentRunbookSchemaVersion = 2;
 export type DeploymentArtifactKind = 'file' | 'archive';
@@ -120,8 +126,6 @@ export interface DeploymentRunbookDocumentV2 {
   rollback: DeploymentRollbackV2;
   security: DeploymentSecurityV2;
 }
-
-export type VersionedRunbookDocument = RunbookDocument | DeploymentRunbookDocumentV2;
 
 export interface DeploymentExecutionPolicyV2 {
   artifactTimeoutSeconds: number;

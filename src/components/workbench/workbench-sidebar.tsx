@@ -64,10 +64,6 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       label: t('workbench.knownHosts.title'),
     },
     {
-      key: 'runbooks',
-      label: t('runbook.title'),
-    },
-    {
       key: 'deployments',
       label: t('deployment.title'),
     },

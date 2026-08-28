@@ -4,7 +4,7 @@
 >
 > This phase can execute one reviewed deployment or one separately reviewed rollback on one frozen SSH target, persist their audit state, and fail closed after restart. It still does **not** schedule multiple hosts, expose generic Shell/SFTP, provide deployment-specific UI, or migrate v1 documents.
 
-Deployment Runbook v2 is a semantic, reviewable description of deploying an already-built artifact to an SSH target. It is deliberately separate from the executable command-oriented Runbook v1 contract. The checked-in machine-readable schema is [`protocol/runbook/v2/deployment-runbook.schema.json`](../protocol/runbook/v2/deployment-runbook.schema.json), and a complete document is in [`docs/examples/deployment-runbook-v2.runbook.json`](examples/deployment-runbook-v2.runbook.json).
+Deployment Runbook v2 is a semantic, reviewable description of deploying an already-built artifact to an SSH target. It does not expose a generic command workflow. The checked-in machine-readable schema is [`protocol/runbook/v2/deployment-runbook.schema.json`](../protocol/runbook/v2/deployment-runbook.schema.json), and a complete document is in [`docs/examples/deployment-runbook-v2.runbook.json`](examples/deployment-runbook-v2.runbook.json).
 
 ## Design goals
 
@@ -158,7 +158,7 @@ On startup, every non-terminal deployment or rollback operation is atomically se
 
 There is no implicit v1-to-v2 migration. V1 commands cannot reliably reveal artifact identity, atomic activation, health evidence, or a complete semantic rollback. Migration is explicit re-authoring: preserve the v1 document for its existing behavior, create a separate v2 deployment document, fill every semantic field, and review the resulting canonical diff. The parsers never guess deployment semantics from Shell text.
 
-The TypeScript version dispatcher is `parseRunbookContractText`; the existing `parseRunbookText`, `prepareRunbook`, multi-host scheduler, and editor UI remain v1-only. Rust keeps `execute_runbook_step` on the v1-only parser. V2 reaches SSH/SFTP only through the separate `review_deployment_execution` and `execute_deployment` semantic path, so it cannot be reinterpreted as a v1 command.
+Runbook v1 and its generic command executor have been removed. Deployment v2 reaches SSH/SFTP only through the separate `review_deployment_execution` and `execute_deployment` semantic path, so deployment documents cannot be reinterpreted as generic shell commands.
 
 ## Normalization and validation layers
 

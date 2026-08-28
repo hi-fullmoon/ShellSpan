@@ -928,8 +928,8 @@ mod tests {
         .expect("serialize canonical document again");
         assert_eq!(first, second);
         assert_eq!(
-            first,
-            format!("{}\n", serde_json::to_string_pretty(&value).unwrap())
+            serde_json::from_str::<serde_json::Value>(&first).unwrap(),
+            value
         );
 
         let mut understated = document;
