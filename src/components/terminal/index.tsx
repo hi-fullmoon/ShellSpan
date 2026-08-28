@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -22,6 +22,10 @@ import { TerminalTabSwitcher } from './terminal-tab-switcher';
 import { TerminalPane } from './terminal-pane';
 import { NewSessionDialog } from './new-session-dialog';
 import { TerminalContextMenu } from './terminal-context-menu';
+import {
+  useTrackpadCarousel,
+  type TerminalCarouselDirection,
+} from './use-trackpad-carousel';
 import {
   findAdjacentTerminalGroup,
   findTerminalGroup,
@@ -51,6 +55,49 @@ type DropPreview =
   | { kind: 'tab-bar'; slot: TerminalGroupSlot; insertIndex: number };
 
 const TERMINAL_MIN_PANE_SIZE = 120;
+const SINGLE_TERMINAL_CAROUSEL_KEY = 'single';
+
+interface TerminalCarouselAnimation {
+  direction: TerminalCarouselDirection;
+  sequence: number;
+}
+
+const TerminalCarouselFrame: React.FC<{
+  animation?: TerminalCarouselAnimation;
+  children: React.ReactNode;
+}> = ({ animation, children }) => {
+  const frameRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !animation || typeof frame.animate !== 'function') return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+
+    const startX = animation.direction === 'next' ? '7%' : '-7%';
+    const runningAnimation = frame.animate(
+      [
+        { opacity: 0.72, transform: `translate3d(${startX}, 0, 0) scale(0.992)` },
+        { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)' },
+      ],
+      {
+        duration: 190,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      },
+    );
+    return () => runningAnimation.cancel();
+  }, [animation?.sequence]);
+
+  return (
+    <div
+      ref={frameRef}
+      data-terminal-carousel-frame
+      data-carousel-direction={animation?.direction}
+      className="h-full w-full"
+    >
+      {children}
+    </div>
+  );
+};
 
 const Terminal: React.FC = () => {
   const { t } = useI18n();
@@ -76,6 +123,9 @@ const Terminal: React.FC = () => {
       : null;
   });
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
+  const [carouselAnimations, setCarouselAnimations] = useState<
+    Record<string, TerminalCarouselAnimation>
+  >({});
   const terminalAreaRef = useRef<HTMLDivElement>(null);
   const focusedGroupRef = useRef<TerminalGroupSlot>('first');
   // Mirror of focusedGroupRef for rendering: mutating a ref does not trigger a
@@ -469,6 +519,61 @@ const Terminal: React.FC = () => {
     focusSession(sessionId);
   }, [activateGroupTab, focusSession, split]);
 
+  const getCarouselGroup = useCallback((target: Element): TerminalGroupState | null => {
+    if (!split) return null;
+    const groupId = target.closest<HTMLElement>('[data-terminal-group]')?.dataset.terminalGroup;
+    return groupId ? findTerminalGroup(split, groupId) : null;
+  }, [split]);
+
+  const canNavigateCarousel = useCallback((target: Element): boolean => {
+    if (!split) return sessions.length > 1;
+    return (getCarouselGroup(target)?.sessionIds.length ?? 0) > 1;
+  }, [getCarouselGroup, sessions.length, split]);
+
+  const navigateCarousel = useCallback((
+    direction: TerminalCarouselDirection,
+    target: Element,
+  ): void => {
+    const group = getCarouselGroup(target);
+    const carouselSessions = split
+      ? group?.sessionIds
+          .map((id) => sessions.find((session) => session.sessionId === id))
+          .filter((session): session is TerminalSession => Boolean(session)) ?? []
+      : sessions;
+    if (carouselSessions.length < 2) return;
+
+    const currentId = group?.activeSessionId ?? activeSessionId;
+    const currentIndex = carouselSessions.findIndex((session) => session.sessionId === currentId);
+    const offset = direction === 'next' ? 1 : -1;
+    const nextIndex = (Math.max(0, currentIndex) + offset + carouselSessions.length)
+      % carouselSessions.length;
+    const nextSession = carouselSessions[nextIndex];
+    if (!nextSession) return;
+
+    const animationKey = group?.id ?? SINGLE_TERMINAL_CAROUSEL_KEY;
+    setCarouselAnimations((current) => ({
+      ...current,
+      [animationKey]: {
+        direction,
+        sequence: (current[animationKey]?.sequence ?? 0) + 1,
+      },
+    }));
+
+    if (group) {
+      activateGroupTab(group.id, nextSession.sessionId);
+    } else {
+      useTerminalStore.getState().setActiveSession(nextSession.sessionId);
+      focusSession(nextSession.sessionId);
+    }
+  }, [activeSessionId, activateGroupTab, focusSession, getCarouselGroup, sessions, split]);
+
+  useTrackpadCarousel({
+    containerRef: terminalAreaRef,
+    enabled: sessions.length > 1,
+    canNavigate: canNavigateCarousel,
+    onNavigate: navigateCarousel,
+  });
+
   // Leader-key pane navigation, dispatched from the xterm key handler in
   // TerminalPane (which already consumed the key, so nothing reaches the pty).
   useEffect(() => {
@@ -701,7 +806,9 @@ const Terminal: React.FC = () => {
             : null}
         />
         <div data-terminal-content className="relative min-h-0 flex-1">
-          {renderTerminalPane(groupActiveSession, focused && groupActiveSession?.sessionId === activeSessionId)}
+          <TerminalCarouselFrame animation={carouselAnimations[slot]}>
+            {renderTerminalPane(groupActiveSession, focused && groupActiveSession?.sessionId === activeSessionId)}
+          </TerminalCarouselFrame>
           {(dropPreview?.kind === 'split' || dropPreview?.kind === 'move')
             && dropPreview.slot === slot && (
             <div
@@ -785,7 +892,9 @@ const Terminal: React.FC = () => {
           renderLayout(split)
         ) : (
           <div data-terminal-content className="relative h-full w-full">
-            {renderTerminalPane(activeSession, true)}
+            <TerminalCarouselFrame animation={carouselAnimations[SINGLE_TERMINAL_CAROUSEL_KEY]}>
+              {renderTerminalPane(activeSession, true)}
+            </TerminalCarouselFrame>
           </div>
         )}
         {dropPreview?.kind === 'split' && dropPreview.slot === null && (

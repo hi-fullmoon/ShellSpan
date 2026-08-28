@@ -185,6 +185,74 @@ describe('Terminal', () => {
     expect(focus).toHaveBeenCalledTimes(1);
   });
 
+  it('switches terminal tabs with a horizontal trackpad gesture and ignores momentum', async () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    useTerminalStore.getState().setActiveSession('s1');
+
+    const { container } = render(<Terminal />);
+    const content = container.querySelector<HTMLElement>('[data-terminal-content]')!;
+
+    fireEvent.wheel(content, { deltaX: 36, deltaY: 2, deltaMode: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+
+    fireEvent.wheel(content, { deltaX: 36, deltaY: 1, deltaMode: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+    expect(container.querySelector('[data-terminal-carousel-frame]'))
+      .toHaveAttribute('data-carousel-direction', 'next');
+
+    // Inertial wheel events from the same physical gesture are locked out.
+    fireEvent.wheel(content, { deltaX: 90, deltaY: 0, deltaMode: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
+    fireEvent.wheel(content, { deltaX: -70, deltaY: 0, deltaMode: 0 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    expect(container.querySelector('[data-terminal-carousel-frame]'))
+      .toHaveAttribute('data-carousel-direction', 'previous');
+  });
+
+  it('keeps vertical trackpad scrolling inside the active terminal', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    useTerminalStore.getState().setActiveSession('s1');
+
+    const { container } = render(<Terminal />);
+    const content = container.querySelector<HTMLElement>('[data-terminal-content]')!;
+    fireEvent.wheel(content, { deltaX: 12, deltaY: 80, deltaMode: 0 });
+
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+  });
+
+  it('cycles only the split group under the trackpad gesture', () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    const firstContent = firstGroup.querySelector<HTMLElement>('[data-terminal-content]')!;
+    fireEvent.wheel(firstContent, { deltaX: 70, deltaY: 0, deltaMode: 0 });
+
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+    expect(within(firstGroup).getByRole('tab', { name: /s2/ }))
+      .toHaveAttribute('aria-selected', 'true');
+    const secondGroup = container.querySelector<HTMLElement>('[data-terminal-group="second"]')!;
+    expect(within(secondGroup).getByRole('tab', { name: /s1/ }))
+      .toHaveAttribute('aria-selected', 'true');
+  });
+
   it('splits an inactive tab beside the active terminal from its context menu', () => {
     useTerminalStore.getState().addSession({
       sessionId: 's1', title: 'Session A', host: 'h', port: 22, username: 'u',
