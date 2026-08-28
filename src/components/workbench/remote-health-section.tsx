@@ -44,25 +44,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useI18n } from '@/hooks/useI18n';
-import { useConnectSession } from '@/hooks/useConnectSession';
 import {
-  buildRemoteHealthDiagnosticRequest,
   deriveRemoteHealthStatuses,
   isRemoteHealthSnapshotStale,
   remoteHealthResultMatchesProfile,
 } from '@/lib/remote-health';
-import { findConnectedTerminalSession } from '@/lib/host-quick-actions';
 import { formatClockTime, formatUptime } from '@/lib/monitor';
 import { cn, formatBytes } from '@/lib/utils';
-import { useAiStore } from '@/stores/aiStore';
-import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
-import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useRemoteHealthStore, type RemoteHealthEntry } from '@/stores/remoteHealthStore';
-import { useTerminalStore } from '@/stores/terminalStore';
-import { useToastStore } from '@/stores/toastStore';
 import type {
-  ConnectionProfile,
   HealthStatus,
   RemoteHealthSnapshotResult,
 } from '@/types';
@@ -165,7 +156,6 @@ export function RemoteHealthSection(): React.JSX.Element {
   const selectProfile = useRemoteHealthStore((state) => state.selectProfile);
   const collect = useRemoteHealthStore((state) => state.collect);
   const cancel = useRemoteHealthStore((state) => state.cancel);
-  const { connect } = useConnectSession();
   const [authorizationProfileId, setAuthorizationProfileId] = useState<string>();
   const [now, setNow] = useState(Date.now());
 
@@ -197,14 +187,6 @@ export function RemoteHealthSection(): React.JSX.Element {
   const busy = entry?.phase === 'preparing'
     || entry?.phase === 'collecting'
     || entry?.phase === 'cancelling';
-  const canDiagnose = Boolean(
-    selectedProfile
-    && !busy
-    && statuses
-    && statuses.overall !== 'ok'
-    && capturedResult
-    && sourceMatchesProfile,
-  );
   const authorizationProfile = profiles.find((profile) => profile.id === authorizationProfileId);
 
   useEffect(() => {
@@ -215,33 +197,6 @@ export function RemoteHealthSection(): React.JSX.Element {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-
-  const diagnose = async (profile: ConnectionProfile): Promise<void> => {
-    if (!capturedResult) return;
-    const activeRun = useStaticDiagnosticStore.getState().run;
-    if (activeRun?.phase === 'planning') {
-      useToastStore.getState().addToast(t('remoteHealth.diagnosisBusy'), 'info');
-      return;
-    }
-    let sessionId = findConnectedTerminalSession(profile.id);
-    if (!sessionId) {
-      await connect(profile);
-      sessionId = findConnectedTerminalSession(profile.id);
-    }
-    if (!sessionId) return;
-    const request = buildRemoteHealthDiagnosticRequest(profile, capturedResult);
-    useTerminalStore.getState().setActiveSession(sessionId);
-    useAppStore.getState().setActiveSection('terminal');
-    useAiStore.getState().setOpen(true);
-    document.dispatchEvent(new CustomEvent('termbridge:start-health-diagnosis', {
-      detail: {
-        profileId: profile.id,
-        sessionId,
-        goal: request.goal,
-        context: request.context,
-      },
-    }));
-  };
 
   return (
     <section aria-labelledby="remote-health-heading" className="flex flex-col gap-2.5">
@@ -426,13 +381,6 @@ export function RemoteHealthSection(): React.JSX.Element {
             </Alert>
           ) : null}
 
-          {canDiagnose && selectedProfile && (
-            <div data-slot="remote-health-actions" className="flex flex-wrap justify-end gap-2 pt-1">
-              <Button variant="secondary" size="sm" onClick={() => void diagnose(selectedProfile)}>
-                {t('remoteHealth.diagnose')}
-              </Button>
-            </div>
-          )}
         </CardContent>
       </Card>
 

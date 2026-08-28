@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildRemoteHealthDiagnosticRequest,
   deriveRemoteHealthStatuses,
   isRemoteHealthSnapshotStale,
   REMOTE_HEALTH_STALE_AFTER_MS,
@@ -97,24 +96,4 @@ describe('remote health semantics', () => {
       .toBe(true);
   });
 
-  it('binds diagnostic evidence to the exact profile, time and source', () => {
-    const diagnostic = buildRemoteHealthDiagnosticRequest(profile, result());
-    expect(diagnostic.goal).toContain(`Profile ID: ${profile.id}`);
-    expect(diagnostic.context.content).toContain('Collected at: 2026-08-23T08:00:00.000Z');
-    expect(diagnostic.context.content).toContain('SSH read-only · root@prod.example.com:22');
-    expect(diagnostic.context.content).toContain('CPU usage: 92.0%');
-  });
-
-  it('rejects cross-profile diagnostic context', () => {
-    const mismatched = { ...result(), profileId: 'other-profile' };
-    expect(() => buildRemoteHealthDiagnosticRequest(profile, mismatched))
-      .toThrow('does not match');
-  });
-
-  it('rejects a stale source endpoint after the profile is edited', () => {
-    const mismatched = result();
-    mismatched.source = { ...mismatched.source, host: 'old.example.com' };
-    expect(() => buildRemoteHealthDiagnosticRequest(profile, mismatched))
-      .toThrow('does not match');
-  });
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useProfileStore } from '@/stores/profileStore';
@@ -46,6 +46,7 @@ const Workbench: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ConnectionProfile | undefined>();
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
+  const editRequestRef = useRef(0);
   const [initialValues, setInitialValues] = useState<
     { host: string; port: string } | undefined
   >();
@@ -67,6 +68,7 @@ const Workbench: React.FC = () => {
   const duplicateProfile = useProfileStore((state) => state.duplicateProfile);
 
   const handleCreateFromKnownHost = (host: string, port: number): void => {
+    editRequestRef.current += 1;
     setEditing(undefined);
     setInitialValues({ host, port: String(port) });
     setActiveTab('connections');
@@ -74,6 +76,7 @@ const Workbench: React.FC = () => {
   };
 
   const handleAdd = useCallback((): void => {
+    editRequestRef.current += 1;
     setEditing(undefined);
     setInitialValues(undefined);
     setFormOpen(true);
@@ -87,9 +90,15 @@ const Workbench: React.FC = () => {
   }, [consumeWorkbenchAction, handleAdd, pendingWorkbenchAction, setActiveTab]);
 
   const handleEdit = useCallback((profile: ConnectionProfile): void => {
-    setEditing(profile);
+    const request = editRequestRef.current + 1;
+    editRequestRef.current = request;
     setInitialValues(undefined);
-    setFormOpen(true);
+
+    void useProfileStore.getState().ensurePassword(profile).then((profileWithSecrets) => {
+      if (editRequestRef.current !== request) return;
+      setEditing(profileWithSecrets);
+      setFormOpen(true);
+    });
   }, []);
 
   const handleSubmit = async (

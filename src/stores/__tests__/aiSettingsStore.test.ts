@@ -66,7 +66,6 @@ describe('aiSettingsStore', () => {
         baseUrl: 'https://api.deepseek.com',
         model: 'deepseek-v4-flash',
         requiresApiKey: true,
-        structuredOutput: 'jsonObject',
       },
       {
         id: 'local',
@@ -76,7 +75,6 @@ describe('aiSettingsStore', () => {
         baseUrl: 'http://127.0.0.1:11434',
         model: 'qwen3',
         requiresApiKey: false,
-        structuredOutput: 'jsonSchema',
       },
     ];
     const preferences = parseAiPreferences([
@@ -98,7 +96,6 @@ describe('aiSettingsStore', () => {
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-flash',
       requiresApiKey: true,
-      structuredOutput: 'jsonObject',
     });
   });
 
@@ -123,7 +120,6 @@ describe('aiSettingsStore', () => {
       baseUrl: 'https://api.minimaxi.com',
       model: 'MiniMax-M3',
       requiresApiKey: true,
-      structuredOutput: 'prompt',
       apiKey: '  database-key  ',
     };
     const preferences = parseAiPreferences([
@@ -139,7 +135,6 @@ describe('aiSettingsStore', () => {
       baseUrl: 'https://api.minimaxi.com',
       model: 'MiniMax-M3',
       requiresApiKey: true,
-      structuredOutput: 'prompt',
       apiKey: 'database-key',
     });
   });

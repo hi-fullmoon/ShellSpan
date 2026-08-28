@@ -1,17 +1,14 @@
 import {
   ActivityIcon,
-  BotIcon,
   CableIcon,
   FolderIcon,
   TerminalIcon,
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -26,7 +23,6 @@ import {
 import { Dialog } from '@/components/ui/dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { buildHostOverview } from '@/lib/host-overview';
-import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
 import { useMonitorStore } from '@/stores/monitorStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -76,7 +72,6 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
     [pathOccupancyRevision],
   );
   const disconnectEvents = useMonitorStore((state) => state.disconnectEvents);
-  const agentRun = useStaticDiagnosticStore((state) => state.run);
   const portForwards = usePortForwardStore((state) => state.runtimes);
   const snapshot = useMemo(() => profile
     ? buildHostOverview(
@@ -86,9 +81,8 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
         transfers,
         disconnectEvents,
         portForwards,
-        agentRun,
       )
-    : undefined, [agentRun, disconnectEvents, portForwards, profile, sessions, sftpConnections, transfers]);
+    : undefined, [disconnectEvents, portForwards, profile, sessions, sftpConnections, transfers]);
 
   return (
     <Dialog open={Boolean(profile)} onOpenChange={(open) => !open && onClose()}>
@@ -131,20 +125,6 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
                 detail={t('hostOverview.forwardsDetail', { failed: snapshot.failedPortForwards })}
               />
             </div>
-
-            <Card size="sm" className="shrink-0">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BotIcon />
-                  {t('hostOverview.diagnostic')}
-                </CardTitle>
-                <CardAction>
-                  <Badge variant="outline">
-                    {snapshot.diagnosticPhase ?? t('hostOverview.none')}
-                  </Badge>
-                </CardAction>
-              </CardHeader>
-            </Card>
 
             {snapshot.latestError && (
               <Alert variant="destructive" className="shrink-0">
