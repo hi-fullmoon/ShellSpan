@@ -40,6 +40,8 @@ pub(crate) enum TerminalLeaseState {
 pub(crate) enum TerminalLeaseRevocationReason {
     Paused,
     Stopped,
+    HandoffRequired,
+    UserReturnedControl,
     Disconnected,
     Closed,
     ApplicationExit,

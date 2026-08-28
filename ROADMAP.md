@@ -579,6 +579,10 @@ P3 不进入首个 MVP，必须在 P2 的安全指标稳定后启动。
 - 编译期 driver registry、唯一 renderer、本地 prompt detector 与 run/target/observation/lease policy 已接到 crate-private lease input seam，并只由 fake caller 与共享 Rust/TypeScript fixture 验证；没有注册 generic Agent session-write IPC，也没有接入生产 Agent manager/model loop、审批、operation history 或 UI。
 - 当前 registry 只包含 deterministic interactive fixture 定义，用于冻结 driver/program/args、response/key corpus 和 handoff 边界；它不是通用 TUI、编辑器、安装器或 computer-use 承诺。
 - 阶段 2 证据与限制见 [`docs/ai-agent-p3-terminal-protocol-phase2.md`](docs/ai-agent-p3-terminal-protocol-phase2.md)。
+- 阶段 3 已增加 feature-blocked 的后端权威 coordinator：严格 proposal decode、本地 risk/policy、精确且单次 approval、唯一 renderer、lease fence、审计预写、状态 journal、幂等与 `unknownEffect` 恢复构成唯一 Agent 输入路径；生产 P0/P1/P2 admission 仍未解除。
+- 专用 PTY 输出现由 Rust 在 Agent owner 期间形成有界、ANSI/control 处理且通用脱敏的 untrusted observation；user owner 输出直接丢弃，归还控制会旋转 capture epoch。秘密提示、未知敏感、alternate-screen、编辑器和安装器会实际撤销 lease 并进入 `handoffRequired`。
+- 阶段 4 可使用的窄 control plane 仅包含 snapshot、resolve approval、takeover-and-write、return control、pause 与 stop。takeover-and-write 是唯一原始用户输入入口，并在同一 SessionManager 权威锁内完成 owner 转移与首个输入；原始输入不进入 snapshot、event、audit 或通用调用日志。
+- PTY output 不能满足状态修改 verification obligation；只有正确绑定的独立只读结构化 verifier evidence 才能标记 verified。阶段 3 只接 fake verifier/adapter，未连接真实模型、任意 shell、修改 executor 或 UI。阶段 3 证据与限制见 [`docs/ai-agent-p3-terminal-coordinator-phase3.md`](docs/ai-agent-p3-terminal-coordinator-phase3.md)。
 
 ### 9.4 P3 退出条件
 

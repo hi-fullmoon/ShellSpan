@@ -40,6 +40,7 @@ pub(crate) enum TerminalPromptSurfaceV1 {
     LinePrompt,
     FullScreen,
     Editor,
+    Installer,
     Unknown,
 }
 
@@ -59,7 +60,7 @@ pub(crate) enum TerminalPromptClassV1 {
 }
 
 impl TerminalPromptClassV1 {
-    fn is_sensitive(self) -> bool {
+    pub(crate) fn is_sensitive(self) -> bool {
         matches!(
             self,
             Self::Password
@@ -289,6 +290,158 @@ impl<W: TerminalLeaseInputWriterV1> TerminalInteractionControllerV1<W> {
 
     pub(crate) fn lease_snapshot(&self) -> TerminalLeaseSnapshot {
         self.lease.clone()
+    }
+
+    pub(crate) fn synchronize_lease(
+        &mut self,
+        lease: TerminalLeaseSnapshot,
+        returned_to_agent: bool,
+    ) -> Result<(), TerminalPolicyErrorV1> {
+        if lease.binding != self.binding {
+            return Err(policy_error(
+                TerminalPolicyErrorCodeV1::BindingMismatch,
+                "terminal lease synchronization binding is mismatched",
+            ));
+        }
+        self.lease = lease;
+        self.current_observation_id = None;
+        self.observations.clear();
+        self.consumed_observation_ids.clear();
+        if returned_to_agent {
+            if self.lease.owner != TerminalLeaseOwner::Agent
+                || self.lease.state != TerminalLeaseState::Active
+            {
+                return Err(policy_error(
+                    TerminalPolicyErrorCodeV1::LeaseNotAgentOwned,
+                    "returned terminal lease is not active and Agent-owned",
+                ));
+            }
+            self.state = if self.active_driver.is_some() {
+                TerminalControllerStateV1::Active
+            } else {
+                TerminalControllerStateV1::NotStarted
+            };
+        } else if self.active_driver.is_some() {
+            self.state = TerminalControllerStateV1::HandoffPending;
+        }
+        Ok(())
+    }
+
+    /// Runs the complete local driver/prompt/lease policy without consuming an
+    /// action or crossing the writer seam. The coordinator uses this before it
+    /// creates an exact, one-time approval and repeats the same validation at
+    /// consumption time through `apply_action`.
+    pub(crate) fn validate_action(
+        &self,
+        context: &TerminalAuthorityContextV1,
+        action: &TerminalActionV1,
+    ) -> Result<(), TerminalPolicyErrorV1> {
+        self.validate_context(context)?;
+        if self.processed_action_ids.contains(action.action_id()) {
+            return Err(policy_error(
+                TerminalPolicyErrorCodeV1::Replay,
+                "terminal action was already processed",
+            ));
+        }
+        if let TerminalActionV1::Start(start) = action {
+            if self.state != TerminalControllerStateV1::NotStarted {
+                return Err(policy_error(
+                    TerminalPolicyErrorCodeV1::DriverAlreadyStarted,
+                    "terminal driver can be started only once",
+                ));
+            }
+            lookup_terminal_driver_v1(start.driver, start.program).map_err(|_| {
+                policy_error(
+                    TerminalPolicyErrorCodeV1::DriverNotRegistered,
+                    "terminal driver/program is not registered",
+                )
+            })?;
+            render_terminal_action_v1(action).map_err(|_| {
+                policy_error(
+                    TerminalPolicyErrorCodeV1::RendererRejected,
+                    "terminal start renderer rejected the action",
+                )
+            })?;
+            return Ok(());
+        }
+        if self.state != TerminalControllerStateV1::Active {
+            return Err(policy_error(
+                if self.state == TerminalControllerStateV1::NotStarted {
+                    TerminalPolicyErrorCodeV1::DriverNotStarted
+                } else {
+                    TerminalPolicyErrorCodeV1::InteractionClosed
+                },
+                "terminal interaction is not active",
+            ));
+        }
+        let observation_id = action
+            .observation_id()
+            .expect("non-start actions always carry observationId");
+        if self.current_observation_id.as_deref() != Some(observation_id) {
+            return Err(policy_error(
+                TerminalPolicyErrorCodeV1::ObservationNotCurrent,
+                "terminal action does not reference the current observation",
+            ));
+        }
+        if self.consumed_observation_ids.contains(observation_id) {
+            return Err(policy_error(
+                TerminalPolicyErrorCodeV1::ObservationReplay,
+                "terminal prompt observation was already consumed",
+            ));
+        }
+        let observation = self.observations.get(observation_id).ok_or_else(|| {
+            policy_error(
+                TerminalPolicyErrorCodeV1::ObservationNotFound,
+                "terminal prompt observation is unknown",
+            )
+        })?;
+        self.validate_observation_binding(observation)?;
+        if matches!(action, TerminalActionV1::Handoff(_)) {
+            render_terminal_action_v1(action).map_err(|_| {
+                policy_error(
+                    TerminalPolicyErrorCodeV1::RendererRejected,
+                    "terminal handoff renderer rejected the action",
+                )
+            })?;
+            return Ok(());
+        }
+        self.validate_observation_freshness(context, observation)?;
+        self.require_automatable_line_prompt(observation)?;
+        let active = self.active_driver.expect("active state has a driver");
+        match action {
+            TerminalActionV1::Respond(value)
+                if allowed_responses_v1(active.scenario).contains(&value.response)
+                    && prompt_class_matches_scenario(
+                        observation.effective_class,
+                        active.scenario,
+                    ) => {}
+            TerminalActionV1::Key(value)
+                if allowed_keys_v1(active.scenario).contains(&value.key)
+                    && prompt_class_matches_scenario(
+                        observation.effective_class,
+                        active.scenario,
+                    ) => {}
+            TerminalActionV1::Respond(_) => {
+                return Err(policy_error(
+                    TerminalPolicyErrorCodeV1::ResponseNotAllowed,
+                    "response is not allowed for the current driver prompt",
+                ));
+            }
+            TerminalActionV1::Key(_) => {
+                return Err(policy_error(
+                    TerminalPolicyErrorCodeV1::KeyNotAllowed,
+                    "key is not allowed for the current driver prompt",
+                ));
+            }
+            TerminalActionV1::Start(_) | TerminalActionV1::Handoff(_) => unreachable!(),
+        }
+        render_terminal_action_v1(action).map_err(|_| {
+            policy_error(
+                TerminalPolicyErrorCodeV1::RendererRejected,
+                "terminal renderer rejected the semantic action",
+            )
+        })?;
+        Ok(())
     }
 
     pub(crate) fn record_prompt_observation(
@@ -641,7 +794,7 @@ impl<W: TerminalLeaseInputWriterV1> TerminalInteractionControllerV1<W> {
         if observation.surface != TerminalPromptSurfaceV1::LinePrompt {
             return Err(policy_error(
                 TerminalPolicyErrorCodeV1::UnsupportedSurface,
-                "full-screen, editor, and unknown terminal surfaces require user handoff",
+                "full-screen, editor, installer, and unknown terminal surfaces require user handoff",
             ));
         }
         if observation.effective_class.is_sensitive()
@@ -696,7 +849,7 @@ fn elevate_prompt_class_v1(
     detect_sensitive_prompt_v1(untrusted_prompt_text).unwrap_or(claimed)
 }
 
-fn detect_sensitive_prompt_v1(text: &str) -> Option<TerminalPromptClassV1> {
+pub(crate) fn detect_sensitive_prompt_v1(text: &str) -> Option<TerminalPromptClassV1> {
     if text.chars().any(|character| {
         character == '\n'
             || character == '\r'

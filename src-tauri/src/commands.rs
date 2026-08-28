@@ -732,12 +732,27 @@ pub(crate) fn resize_session(
 #[tauri::command]
 pub(crate) fn close_session(
     state: State<'_, SessionManager>,
+    coordinator: State<'_, crate::agent::terminal_coordinator::AgentTerminalCoordinatorV1>,
+    database: State<'_, crate::db::Database>,
     session_id: String,
 ) -> Result<(), String> {
     info!("Closing SSH session session_id={session_id}");
     let result = state.close(&session_id);
     if let Err(error) = &result {
         warn!("Failed to close SSH session session_id={session_id}: {error}");
+    } else {
+        let audit = crate::agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
+        if let Err(error) = coordinator.handle_disconnect(
+            &session_id,
+            crate::db::current_timestamp_ms().max(0) as u64,
+            &state,
+            &audit,
+        ) {
+            warn!(
+                "Failed to synchronize Agent terminal close session_id={session_id} code={:?}",
+                error.code
+            );
+        }
     }
     result
 }
@@ -747,6 +762,8 @@ pub(crate) fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     sessions: State<'_, SessionManager>,
+    coordinator: State<'_, crate::agent::terminal_coordinator::AgentTerminalCoordinatorV1>,
+    database: State<'_, crate::db::Database>,
 ) {
     info!("Requesting application restart");
     if let Err(error) = forwards_state.cancel_all() {
@@ -754,6 +771,17 @@ pub(crate) fn request_app_restart(
     }
     if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
         warn!("Failed to revoke Agent terminal leases before restart: {error}");
+    }
+    let audit = crate::agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
+    if let Err(error) = coordinator.handle_application_exit_after_revoke(
+        crate::db::current_timestamp_ms().max(0) as u64,
+        &sessions,
+        &audit,
+    ) {
+        warn!(
+            "Failed to finalize Agent terminal controls before restart code={:?}",
+            error.code
+        );
     }
     app.request_restart();
 }
@@ -763,6 +791,8 @@ pub(crate) fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     sessions: State<'_, SessionManager>,
+    coordinator: State<'_, crate::agent::terminal_coordinator::AgentTerminalCoordinatorV1>,
+    database: State<'_, crate::db::Database>,
 ) {
     info!("Requesting application exit");
     if let Err(error) = forwards_state.cancel_all() {
@@ -770,6 +800,17 @@ pub(crate) fn request_app_exit(
     }
     if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
         warn!("Failed to revoke Agent terminal leases before exit: {error}");
+    }
+    let audit = crate::agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
+    if let Err(error) = coordinator.handle_application_exit_after_revoke(
+        crate::db::current_timestamp_ms().max(0) as u64,
+        &sessions,
+        &audit,
+    ) {
+        warn!(
+            "Failed to finalize Agent terminal controls before exit code={:?}",
+            error.code
+        );
     }
     app.exit(0);
 }

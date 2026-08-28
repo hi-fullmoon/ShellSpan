@@ -905,9 +905,9 @@ struct SessionRegistry {
     terminal_leases: HashMap<String, TerminalLease>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct SessionManager {
-    registry: Mutex<SessionRegistry>,
+    registry: Arc<Mutex<SessionRegistry>>,
 }
 
 pub(crate) struct ConnectedSftp {
@@ -1745,6 +1745,65 @@ impl SessionManager {
     ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
         self.write_input(TerminalInput::TakeoverUser { binding, data })
             .map(|snapshot| snapshot.expect("Agent PTY takeover always returns a lease snapshot"))
+    }
+
+    /// Explicitly returns a user-owned dedicated PTY to its bound Agent run.
+    /// Revocation and re-grant happen under the same registry lock, so no old
+    /// user/Agent epoch can write between the two authority changes. Callers
+    /// must separately rotate their output-capture epoch before exposing any
+    /// later output to a model.
+    #[allow(dead_code)]
+    pub(crate) fn return_agent_pty_control(
+        &self,
+        binding: &AgentTerminalBinding,
+    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
+        require_connected_agent_session(&guard.sessions, binding)?;
+        let lease = guard
+            .terminal_leases
+            .get_mut(&binding.session_id)
+            .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
+                session_id: binding.session_id.clone(),
+            })?;
+        lease.validate_binding(binding)?;
+        let snapshot = lease.snapshot();
+        if snapshot.owner != TerminalLeaseOwner::User
+            || snapshot.state != TerminalLeaseState::Active
+        {
+            return Err(TerminalLeaseError::OwnerMismatch {
+                owner: snapshot.owner,
+            });
+        }
+        lease.revoke(TerminalLeaseRevocationReason::UserReturnedControl)?;
+        lease.grant_agent_control(binding)?;
+        Ok(lease.snapshot())
+    }
+
+    /// Revokes one exact dedicated PTY before coordinator state changes are
+    /// published. This is used for sensitive/unsupported handoff and control
+    /// lifecycle fences; it never grants another owner implicitly.
+    #[allow(dead_code)]
+    pub(crate) fn revoke_agent_terminal(
+        &self,
+        binding: &AgentTerminalBinding,
+        reason: TerminalLeaseRevocationReason,
+    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
+        let lease = guard
+            .terminal_leases
+            .get_mut(&binding.session_id)
+            .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
+                session_id: binding.session_id.clone(),
+            })?;
+        lease.validate_binding(binding)?;
+        lease.revoke(reason)?;
+        Ok(lease.snapshot())
     }
 
     fn write_input(
