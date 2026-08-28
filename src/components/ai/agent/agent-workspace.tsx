@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleAlertIcon, LockKeyholeIcon, ScanSearchIcon } from 'lucide-react';
+import {
+  ActivityIcon,
+  CircleAlertIcon,
+  LockKeyholeIcon,
+  ScanSearchIcon,
+  SquareTerminalIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/hooks/useI18n';
 import { parseAgentCommandErrorV1 } from '@/lib/agent-protocol';
 import { isAgentRunTerminalStateV1 } from '@/lib/agent-state';
@@ -34,6 +41,8 @@ import { agentEvidenceElementId } from './agent-evidence';
 import { AgentComposer } from './agent-composer';
 import { AgentRunHeader, type AgentPendingAction } from './agent-run-header';
 import { AgentTimeline } from './agent-timeline';
+import { AgentTerminalWorkspace } from './agent-terminal-workspace';
+import type { AgentTerminalTransportV1 } from './use-agent-terminal';
 
 export interface AgentWorkspaceTransport {
   listen: (onEvent: (value: unknown) => void) => Promise<() => void>;
@@ -57,6 +66,38 @@ const defaultTransport: AgentWorkspaceTransport = {
 
 const EMPTY_ACCEPTED_MESSAGES: AgentAcceptedMessageV1[] = [];
 
+function AgentWorkspaceTabs({
+  children,
+  runId,
+  terminalTransport,
+}: {
+  children: React.ReactNode;
+  runId?: string;
+  terminalTransport?: AgentTerminalTransportV1;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <Tabs defaultValue="run" className="min-h-0 flex-1 gap-0">
+      <TabsList variant="line" className="mx-3 mt-2">
+        <TabsTrigger value="run">
+          <ActivityIcon data-icon="inline-start" />
+          {t('ai.agentTerminal.tab.run')}
+        </TabsTrigger>
+        <TabsTrigger value="terminal">
+          <SquareTerminalIcon data-icon="inline-start" />
+          {t('ai.agentTerminal.tab.terminal')}
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="run" className="flex min-h-0 flex-col">
+        {children}
+      </TabsContent>
+      <TabsContent value="terminal" className="flex min-h-0 flex-col">
+        <AgentTerminalWorkspace runId={runId} transport={terminalTransport} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
 export function AgentWorkspace({
   profileId,
   providerId,
@@ -75,6 +116,7 @@ export function AgentWorkspace({
   footerAction,
   contextHint,
   transport: providedTransport,
+  terminalTransport,
 }: {
   profileId?: string;
   providerId?: string;
@@ -93,6 +135,7 @@ export function AgentWorkspace({
   footerAction?: React.ReactNode;
   contextHint?: string;
   transport?: AgentWorkspaceTransport;
+  terminalTransport?: AgentTerminalTransportV1;
 }): React.JSX.Element {
   const { t } = useI18n();
   const transport = providedTransport ?? defaultTransport;
@@ -303,30 +346,33 @@ export function AgentWorkspace({
 
   if (staticFallbackActive && staticFallback) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <Alert className="mx-3 mt-3 w-auto">
-          <LockKeyholeIcon />
-          <AlertTitle>{t('ai.dynamicAgent.staticFallbackTitle')}</AlertTitle>
-          <AlertDescription>{t('ai.dynamicAgent.staticFallbackDescription')}</AlertDescription>
-        </Alert>
-        {staticFallback}
-        <AgentComposer
-          value={draft}
-          onChange={onDraftChange}
-          onSubmit={() => void start()}
-          onNewDiagnosis={newDiagnosis}
-          disabled={staticFallbackBusy || !profileId || !providerId || !providerCompatible}
-          pending={startPending}
-          modeControl={modeControl}
-          footerAction={footerAction}
-          contextHint={contextHint}
-        />
-      </div>
+      <AgentWorkspaceTabs runId={snapshot?.runId} terminalTransport={terminalTransport}>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <Alert className="mx-3 mt-3 w-auto">
+            <LockKeyholeIcon />
+            <AlertTitle>{t('ai.dynamicAgent.staticFallbackTitle')}</AlertTitle>
+            <AlertDescription>{t('ai.dynamicAgent.staticFallbackDescription')}</AlertDescription>
+          </Alert>
+          {staticFallback}
+          <AgentComposer
+            value={draft}
+            onChange={onDraftChange}
+            onSubmit={() => void start()}
+            onNewDiagnosis={newDiagnosis}
+            disabled={staticFallbackBusy || !profileId || !providerId || !providerCompatible}
+            pending={startPending}
+            modeControl={modeControl}
+            footerAction={footerAction}
+            contextHint={contextHint}
+          />
+        </div>
+      </AgentWorkspaceTabs>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <AgentWorkspaceTabs runId={snapshot?.runId} terminalTransport={terminalTransport}>
+      <div className="flex min-h-0 flex-1 flex-col">
       {snapshot ? (
         <>
           <AgentRunHeader
@@ -459,6 +505,7 @@ export function AgentWorkspace({
         footerAction={footerAction}
         contextHint={contextHint}
       />
-    </div>
+      </div>
+    </AgentWorkspaceTabs>
   );
 }

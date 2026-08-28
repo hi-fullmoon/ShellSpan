@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "stateNames": [
+    "proposed",
+    "validating",
+    "evaluatingRisk",
+    "awaitingApproval",
+    "approved",
+    "rejected",
+    "expired",
+    "revoked",
+    "writing",
+    "awaitingObservation",
+    "handoffRequired",
+    "completed",
+    "failed",
+    "cancelled",
+    "unknownEffect"
+  ],
+  "controlCommands": [
+    "agent_terminal_get_snapshot",
+    "agent_terminal_resolve_approval",
+    "agent_terminal_takeover_and_write",
+    "agent_terminal_return_control",
+    "agent_terminal_pause",
+    "agent_terminal_stop"
+  ],
+  "forbiddenControlCommands": [
+    "agent_terminal_execute",
+    "agent_terminal_write",
+    "agent_terminal_write_session",
+    "agent_terminal_send_raw"
+  ],
+  "unsupportedSurfaces": ["fullScreen", "editor", "installer", "unknown"],
+  "sensitivePromptClasses": [
+    "password",
+    "passphrase",
+    "mfa",
+    "otp",
+    "token",
+    "credential",
+    "unknownSensitive"
+  ],
+  "forbiddenSnapshotFields": [
+    "approvalToken",
+    "approvalChallenge",
+    "leaseToken",
+    "rawInput",
+    "rawOutput",
+    "credential",
+    "fullTranscript"
+  ],
+  "forbiddenAuditColumns": [
+    "raw_input",
+    "raw_output",
+    "credential",
+    "approval_token",
+    "approval_challenge",
+    "transcript"
+  ]
+}

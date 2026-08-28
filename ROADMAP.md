@@ -572,6 +572,22 @@ P3 不进入首个 MVP，必须在 P2 的安全指标稳定后启动。
 - PTY 输出边界不是可信执行证据；修改完成后仍用独立只读工具验证。
 - 全屏程序、编辑器和安装器优先 handoff 给用户，不承诺通用 computer-use。
 
+#### 9.3.1 已实现的隔离基础（P3 仍为 planned）
+
+- 阶段 1 已增加 `SessionKind::AgentPty`、run/session-bound `TerminalLease`、epoch/revision replay fence，以及普通 `write_session` 不得写入专用 Agent PTY 的硬边界。
+- 阶段 2 已增加独立且冻结的 `agent-terminal/v1` 强类型协议；它没有并入或放宽 Agent v1/v2 decision union，模型侧不能提交 session ID、lease token、PTY bytes、shell command 或自由文本响应。
+- 编译期 driver registry、唯一 renderer、本地 prompt detector 与 run/target/observation/lease policy 已接到 crate-private lease input seam，并只由 fake caller 与共享 Rust/TypeScript fixture 验证；没有注册 generic Agent session-write IPC，也没有接入生产 Agent manager/model loop、审批、operation history 或 UI。
+- 当前 registry 只包含 deterministic interactive fixture 定义，用于冻结 driver/program/args、response/key corpus 和 handoff 边界；它不是通用 TUI、编辑器、安装器或 computer-use 承诺。
+- 阶段 2 证据与限制见 [`docs/ai-agent-p3-terminal-protocol-phase2.md`](docs/ai-agent-p3-terminal-protocol-phase2.md)。
+- 阶段 3 已增加 feature-blocked 的后端权威 coordinator：严格 proposal decode、本地 risk/policy、精确且单次 approval、唯一 renderer、lease fence、审计预写、状态 journal、幂等与 `unknownEffect` 恢复构成唯一 Agent 输入路径；生产 P0/P1/P2 admission 仍未解除。
+- 专用 PTY 输出现由 Rust 在 Agent owner 期间形成有界、ANSI/control 处理且通用脱敏的 untrusted observation；user owner 输出直接丢弃，归还控制会旋转 capture epoch。秘密提示、未知敏感、alternate-screen、编辑器和安装器会实际撤销 lease 并进入 `handoffRequired`。
+- 阶段 4 可使用的窄 control plane 仅包含 snapshot、resolve approval、takeover-and-write、return control、pause 与 stop。takeover-and-write 是唯一原始用户输入入口，并在同一 SessionManager 权威锁内完成 owner 转移与首个输入；原始输入不进入 snapshot、event、audit 或通用调用日志。
+- PTY output 不能满足状态修改 verification obligation；只有正确绑定的独立只读结构化 verifier evidence 才能标记 verified。阶段 3 只接 fake verifier/adapter，未连接真实模型、任意 shell、修改 executor 或 UI。阶段 3 证据与限制见 [`docs/ai-agent-p3-terminal-coordinator-phase3.md`](docs/ai-agent-p3-terminal-coordinator-phase3.md)。
+- 阶段 4 已在现有 Agent workspace 增加独立“专用终端”标签，只按 run-bound snapshot 挂载 `AgentPty`；无绑定运行时明确显示 unavailable/preview/fake-gated，不会回退到或伪装普通用户终端。严格 decoder/store/hook 以 backend sequence 为权威，丢弃倒退 snapshot，并在 remount、状态提示、失败与断线后重新 snapshot；事件不改变 owner authority。
+- 专用 xterm 的所有用户输入只瞬时进入 `agent_terminal_takeover_and_write`：Agent owner 的首字节在后端原子接管后写入，User owner 的后续字节仍走同一窄入口；前端不持有 lease token、不注册 raw Agent write、不调用普通 `write_session`，也不把输入、秘密或用户期间输出复制到 React state、日志、审计、持久化或模型 observation。
+- 阶段 4 UI 持续展示 owner/control/lease/capture/action/risk/approval TTL/untrusted observation/verification/recovery，提供显式接管、归还、pause/stop 与精确 approval；秘密、未知敏感、全屏、编辑器和安装器只显示用户 handoff，不提供批准绕过。P3 仍为 `planned`，production admission 与 P0/P1/P2 gate 均未解除。阶段 4 证据与限制见 [`docs/ai-agent-p3-terminal-workspace-ui-phase4.md`](docs/ai-agent-p3-terminal-workspace-ui-phase4.md)。
+- 阶段 5 以机器可读 acceptance matrix、Rust/TypeScript 共享 fixture、deterministic UI → mocked narrow Tauri IPC → authoritative snapshot E2E、固定种子 property corpus 和结构化 import/command/schema 隐私审计收口阶段 1–4。十项 terminal 安全不变量的 platform-independent 自动化证据为 `automatedPass`；macOS 实际完成本地 direct-process PTY、Tauri debug build 和 5 秒 WebView/IPC 启动 smoke。Windows 只配置了现有 `windows-2025` matrix 的 Agent 定点检查但本阶段未运行，SSH 仍只有 contract evidence、未创建真实 AgentPty。既有 deployment 30-error Rust 编译基线仍阻断无补丁的 Rust full gate；用于执行 55 个定点/平台 Rust tests 的临时 deployment-only compatibility patch 已完全还原且不提交。P3 仍为 `planned`，production gate 不变；证据与退出条件见 [`docs/ai-agent-p3-terminal-control-phase5-acceptance.md`](docs/ai-agent-p3-terminal-control-phase5-acceptance.md)。
+
 ### 9.4 P3 退出条件
 
 - 文件写入失败不覆盖原文件，并能清理或保留可识别的临时产物。
@@ -579,6 +595,8 @@ P3 不进入首个 MVP，必须在 P2 的安全指标稳定后启动。
 - 用户接管 PTY 后 Agent 不再发送输入。
 - Agent PTY 不记录用户原始输入。
 - 本地执行在 Windows/macOS 都有真实平台 E2E 证据。
+
+阶段 5 没有满足 P3 总退出条件：macOS 证据只覆盖本地 Tauri/xterm 壳与真实 PTY transport，不是 production Agent action；Windows 与 SSH AgentPty 均未实际运行，文件语义工具也不在本阶段范围内。因此不得把阶段 5 自动化通过改写为 P3 verified 或解除任何 admission gate。
 
 ---
 

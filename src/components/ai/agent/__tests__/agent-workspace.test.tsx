@@ -221,6 +221,18 @@ describe('AgentWorkspace', () => {
     }
   });
 
+  it('exposes the dedicated terminal tab without substituting an ordinary terminal', async () => {
+    const transport = transportFor(vi.fn(async () => Promise.reject(runNotFound)));
+    render(<WorkspaceHarness transport={transport} />);
+
+    const terminalTab = await screen.findByRole('tab', {
+      name: 'ai.agentTerminal.tab.terminal',
+    });
+    fireEvent.click(terminalTab);
+    expect(await screen.findByText('ai.agentTerminal.previewTitle')).toBeInTheDocument();
+    expect(screen.getByText('ai.agentTerminal.gateClosedTitle')).toBeInTheDocument();
+  });
+
   it('blocks an incompatible provider locally while keeping diagnostic fallback available', async () => {
     const onStaticFallback = vi.fn();
     const transport = transportFor(vi.fn(async () => Promise.reject(runNotFound)));
