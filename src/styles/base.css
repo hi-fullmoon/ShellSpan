@@ -179,13 +179,6 @@ textarea,
   -webkit-user-select: none;
 }
 
-/* Monaco renders editable text as layered divs rather than a native textarea. */
-[data-slot='runbook-json-editor'],
-[data-slot='runbook-json-editor'] * {
-  user-select: text;
-  -webkit-user-select: text;
-}
-
 /* Chromium gives the standards-based scrollbar properties precedence over
    the WebKit pseudo-elements. Keep them as a Firefox fallback so WebView2 can
    render the rounded, inset thumb and suppress native arrow buttons below. */
