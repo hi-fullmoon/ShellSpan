@@ -8,6 +8,7 @@ import {
   invokeSavePreferences,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
+import { configurePetdex } from '@/lib/petdex';
 
 const logger = createLogger('appStore');
 
@@ -39,6 +40,7 @@ interface AppPreferences {
   theme: ThemeMode;
   locale: Locale;
   startupUpdateCheck: boolean;
+  petdexEnabled: boolean;
   startupSection: AppSection;
   terminalFontSize: number;
   terminalFontFamily: TerminalFontFamily;
@@ -83,6 +85,7 @@ interface AppState extends AppPreferences {
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
+  setPetdexEnabled: (enabled: boolean) => void;
   setStartupSection: (section: AppSection) => void;
   setTerminalFontSize: (fontSize: number) => void;
   setTerminalFontFamily: (fontFamily: TerminalFontFamily) => void;
@@ -115,7 +118,7 @@ interface AppState extends AppPreferences {
 }
 
 const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
-  'theme', 'locale', 'startupUpdateCheck', 'startupSection',
+  'theme', 'locale', 'startupUpdateCheck', 'petdexEnabled', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
   'terminalColorScheme', 'terminalMultiLinePasteWarning',
@@ -133,6 +136,7 @@ function getDefaultPreferences(): AppPreferences {
     theme: 'system',
     locale: 'zh-CN',
     startupUpdateCheck: true,
+    petdexEnabled: false,
     startupSection: 'workbench',
     terminalFontSize: 14,
     terminalFontFamily: 'system',
@@ -198,6 +202,7 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     theme: (prefs.theme as ThemeMode) ?? defaults.theme,
     locale: (prefs.locale as Locale) ?? defaults.locale,
     startupUpdateCheck: (prefs.startupUpdateCheck as boolean) ?? defaults.startupUpdateCheck,
+    petdexEnabled: (prefs.petdexEnabled as boolean) ?? defaults.petdexEnabled,
     startupSection: (prefs.startupSection as AppSection) ?? defaults.startupSection,
     terminalFontSize: (prefs.terminalFontSize as number) ?? defaults.terminalFontSize,
     terminalFontFamily: (prefs.terminalFontFamily as TerminalFontFamily) ?? defaults.terminalFontFamily,
@@ -258,12 +263,18 @@ export const useAppStore = create<AppState>()(
         if (entries.length > 0) {
           const prefs = entriesToPreferences(entries);
           set({ ...prefs, initialized: true, activeSection: prefs.startupSection ?? defaults.startupSection });
+          void configurePetdex(prefs.petdexEnabled ?? false).catch(() => {
+            logger.warn('failed to synchronize Petdex integration state');
+          });
           if (prefs.locale) {
             void changeLocale(prefs.locale);
           }
           logger.info('preferences loaded from database');
         } else {
           set({ initialized: true });
+          void configurePetdex(false).catch(() => {
+            logger.warn('failed to initialize Petdex integration state');
+          });
         }
       } catch (error) {
         logger.error('failed to hydrate preferences from database', error);
@@ -290,6 +301,12 @@ export const useAppStore = create<AppState>()(
       set({ locale });
     },
     setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
+    setPetdexEnabled: (petdexEnabled) => {
+      set({ petdexEnabled });
+      void configurePetdex(petdexEnabled).catch(() => {
+        logger.warn('failed to update Petdex integration state');
+      });
+    },
     setStartupSection: (startupSection) => set({ startupSection }),
     setTerminalFontSize: (terminalFontSize) => set({ terminalFontSize }),
     setTerminalFontFamily: (terminalFontFamily) => set({ terminalFontFamily }),
@@ -336,6 +353,7 @@ useAppStore.subscribe(
     theme: state.theme,
     locale: state.locale,
     startupUpdateCheck: state.startupUpdateCheck,
+    petdexEnabled: state.petdexEnabled,
     startupSection: state.startupSection,
     terminalFontSize: state.terminalFontSize,
     terminalFontFamily: state.terminalFontFamily,
