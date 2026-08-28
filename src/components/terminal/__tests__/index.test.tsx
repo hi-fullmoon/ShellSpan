@@ -185,7 +185,7 @@ describe('Terminal', () => {
     expect(focus).toHaveBeenCalledTimes(1);
   });
 
-  it('switches terminal tabs with a horizontal trackpad gesture and ignores momentum', async () => {
+  it('uses native scrolling to switch across multiple terminals without a settle lock', async () => {
     ['s1', 's2', 's3'].forEach((sessionId) => {
       useTerminalStore.getState().addSession({
         sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
@@ -194,25 +194,30 @@ describe('Terminal', () => {
     useTerminalStore.getState().setActiveSession('s1');
 
     const { container } = render(<Terminal />);
-    const content = container.querySelector<HTMLElement>('[data-terminal-content]')!;
+    const carousel = container.querySelector<HTMLElement>('[data-terminal-carousel]')!;
+    Object.defineProperty(carousel, 'clientWidth', { configurable: true, value: 500 });
 
-    fireEvent.wheel(content, { deltaX: 36, deltaY: 2, deltaMode: 0 });
-    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+    // The horizontal event remains uncancelled so WKWebView owns momentum,
+    // interruption, rubber-banding, and scroll snapping.
+    expect(fireEvent.wheel(carousel, { deltaX: 24, deltaY: 2, deltaMode: 0 })).toBe(true);
 
-    fireEvent.wheel(content, { deltaX: 36, deltaY: 1, deltaMode: 0 });
+    // Crossing page midpoints updates the selected tab immediately. A second
+    // movement can continue to the next page before the first one settles.
+    act(() => {
+      carousel.scrollLeft = 280;
+      fireEvent.scroll(carousel);
+    });
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
-    expect(container.querySelector('[data-terminal-carousel-frame]'))
-      .toHaveAttribute('data-carousel-direction', 'next');
 
-    // Inertial wheel events from the same physical gesture are locked out.
-    fireEvent.wheel(content, { deltaX: 90, deltaY: 0, deltaMode: 0 });
-    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+    act(() => {
+      carousel.scrollLeft = 1_020;
+      fireEvent.scroll(carousel);
+    });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s3');
 
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
-    fireEvent.wheel(content, { deltaX: -70, deltaY: 0, deltaMode: 0 });
-    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
-    expect(container.querySelector('[data-terminal-carousel-frame]'))
-      .toHaveAttribute('data-carousel-direction', 'previous');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 120)));
+    expect(screen.getAllByTestId('terminal-pane').map((pane) => pane.dataset.sessionId))
+      .toEqual(['s3']);
   });
 
   it('keeps vertical trackpad scrolling inside the active terminal', () => {
@@ -224,13 +229,34 @@ describe('Terminal', () => {
     useTerminalStore.getState().setActiveSession('s1');
 
     const { container } = render(<Terminal />);
-    const content = container.querySelector<HTMLElement>('[data-terminal-content]')!;
-    fireEvent.wheel(content, { deltaX: 12, deltaY: 80, deltaMode: 0 });
+    const carousel = container.querySelector<HTMLElement>('[data-terminal-carousel]')!;
+    fireEvent.wheel(carousel, { deltaX: 12, deltaY: 80, deltaMode: 0 });
 
     expect(useTerminalStore.getState().activeSessionId).toBe('s1');
   });
 
-  it('cycles only the split group under the trackpad gesture', () => {
+  it('accepts a quick horizontal swipe with a small diagonal drift', async () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    useTerminalStore.getState().setActiveSession('s1');
+
+    const { container } = render(<Terminal />);
+    const carousel = container.querySelector<HTMLElement>('[data-terminal-carousel]')!;
+    Object.defineProperty(carousel, 'clientWidth', { configurable: true, value: 500 });
+    fireEvent.wheel(carousel, { deltaX: 19, deltaY: 12, deltaMode: 0 });
+    act(() => {
+      carousel.scrollLeft = 500;
+      fireEvent.scroll(carousel);
+    });
+
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 120)));
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('switches only the split group under the trackpad gesture', async () => {
     ['s1', 's2', 's3'].forEach((sessionId) => {
       useTerminalStore.getState().addSession({
         sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
@@ -242,15 +268,40 @@ describe('Terminal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
 
     const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
-    const firstContent = firstGroup.querySelector<HTMLElement>('[data-terminal-content]')!;
-    fireEvent.wheel(firstContent, { deltaX: 70, deltaY: 0, deltaMode: 0 });
+    const firstCarousel = firstGroup.querySelector<HTMLElement>('[data-terminal-carousel]')!;
+    Object.defineProperty(firstCarousel, 'clientWidth', { configurable: true, value: 500 });
+    fireEvent.wheel(firstCarousel, { deltaX: -70, deltaY: 0, deltaMode: 0 });
+    act(() => {
+      firstCarousel.scrollLeft = 0;
+      fireEvent.scroll(firstCarousel);
+    });
 
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 120)));
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
     expect(within(firstGroup).getByRole('tab', { name: /s2/ }))
       .toHaveAttribute('aria-selected', 'true');
     const secondGroup = container.querySelector<HTMLElement>('[data-terminal-group="second"]')!;
     expect(within(secondGroup).getByRole('tab', { name: /s1/ }))
       .toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('rubber-bands at the last terminal instead of wrapping', async () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    useTerminalStore.getState().setActiveSession('s2');
+
+    const { container } = render(<Terminal />);
+    const carousel = container.querySelector<HTMLElement>('[data-terminal-carousel]')!;
+    Object.defineProperty(carousel, 'clientWidth', { configurable: true, value: 500 });
+    carousel.scrollLeft = 500;
+    fireEvent.wheel(carousel, { deltaX: 24, deltaY: 0, deltaMode: 0 });
+
+    expect(carousel).toHaveClass('snap-mandatory', 'overscroll-x-contain');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 120)));
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });
 
   it('splits an inactive tab beside the active terminal from its context menu', () => {
