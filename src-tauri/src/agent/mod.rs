@@ -40,4 +40,17 @@ pub(crate) mod risk_v2;
 mod safety_fixture_v2;
 pub(crate) mod state;
 pub(crate) mod state_v2;
+#[allow(dead_code)]
+pub(crate) mod terminal_audit;
+#[allow(dead_code)]
+pub(crate) mod terminal_coordinator;
+#[allow(dead_code)]
+pub(crate) mod terminal_driver;
+pub(crate) mod terminal_ipc;
+#[allow(dead_code)]
+pub(crate) mod terminal_observation;
+#[allow(dead_code)]
+pub(crate) mod terminal_policy;
+#[allow(dead_code)]
+pub(crate) mod terminal_protocol;
 pub(crate) mod tools;
