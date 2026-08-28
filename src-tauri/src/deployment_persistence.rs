@@ -172,7 +172,12 @@ fn digest(domain: &str, value: &[u8]) -> String {
     hasher.update(domain.as_bytes());
     hasher.update([0]);
     hasher.update(value);
-    format!("sha256-v1:{:x}", hasher.finalize())
+    let encoded = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("sha256-v1:{encoded}")
 }
 
 fn json_string<T: Serialize>(value: &T, label: &str) -> Result<String, String> {
