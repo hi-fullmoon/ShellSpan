@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+pub mod agent_contract;
 mod ai;
 mod ai_sessions;
 mod commands;
@@ -244,6 +245,7 @@ pub fn run() {
             ai::ai_list_models,
             ai::ai_start_request,
             ai::ai_cancel_request,
+            agent_contract::agent_contract_status,
             ai_sessions::create_ai_session,
             ai_sessions::append_ai_session_message,
             ai_sessions::clear_ai_session_lane,

@@ -64,6 +64,10 @@ import type {
   AiSessionMeta,
   AiStartRequest,
 } from '@/types/ai';
+import type {
+  AgentContractStatus,
+  AgentProviderCapabilityEvidence,
+} from '@/types/agent';
 
 const logger = createLogger('ipc');
 const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
@@ -220,6 +224,16 @@ export async function invokeStartAiRequest(request: AiStartRequest): Promise<voi
 
 export async function invokeCancelAiRequest(requestId: string): Promise<void> {
   return invokeLogged('ai_cancel_request', { requestId });
+}
+
+export async function invokeAgentContractStatus(
+  providerKind: AiProviderConfig['kind'],
+  evidence?: AgentProviderCapabilityEvidence,
+): Promise<AgentContractStatus> {
+  return invokeLogged<AgentContractStatus>('agent_contract_status', {
+    providerKind,
+    evidence,
+  });
 }
 
 export async function invokeOpenUrl(url: string): Promise<void> {

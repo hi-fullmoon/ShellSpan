@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termbridge.local/protocol/agent/v1/agent-contract.schema.json",
+  "title": "TermBridge Agent M0 contract fixtures",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "examples", "permissionMatrix"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "examples": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "toolCall", "toolResults"],
+      "properties": {
+        "request": { "$ref": "#/$defs/agentRequest" },
+        "toolCall": { "$ref": "#/$defs/agentToolCall" },
+        "toolResults": {
+          "type": "array",
+          "minItems": 5,
+          "items": { "$ref": "#/$defs/agentToolResult" }
+        }
+      }
+    },
+    "permissionMatrix": {
+      "type": "array",
+      "minItems": 12,
+      "items": { "$ref": "#/$defs/permissionMatrixCase" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "agentPermissionMode": {
+      "enum": ["requestApproval", "autoApproveReadOnly", "fullAccess"]
+    },
+    "agentRisk": {
+      "enum": ["readOnly", "stateChange", "destructive"]
+    },
+    "agentTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sessionId", "host", "port", "username"],
+      "properties": {
+        "kind": { "enum": ["remote", "local"] },
+        "sessionId": { "$ref": "#/$defs/identifier" },
+        "profileId": { "$ref": "#/$defs/identifier" },
+        "host": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 255 }
+      }
+    },
+    "agentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "task", "target", "permissionMode"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/identifier" },
+        "task": { "const": "agent" },
+        "target": { "$ref": "#/$defs/agentTarget" },
+        "permissionMode": { "$ref": "#/$defs/agentPermissionMode" }
+      }
+    },
+    "agentToolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "callId", "name", "command", "explanation", "target"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/identifier" },
+        "callId": { "$ref": "#/$defs/identifier" },
+        "name": { "const": "run_terminal_command" },
+        "command": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "target": { "$ref": "#/$defs/agentTarget" }
+      }
+    },
+    "agentToolResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "callId", "status", "output"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/identifier" },
+        "callId": { "$ref": "#/$defs/identifier" },
+        "status": { "enum": ["completed", "rejected", "failed", "timedOut", "cancelled"] },
+        "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+        "output": { "type": "string", "maxLength": 65536 }
+      }
+    },
+    "agentRiskClassification": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "risk"],
+          "properties": {
+            "status": { "const": "classified" },
+            "risk": { "$ref": "#/$defs/agentRisk" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "const": "unknown" }
+          }
+        }
+      ]
+    },
+    "agentApprovalDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiresApproval", "reason"],
+      "properties": {
+        "requiresApproval": { "type": "boolean" },
+        "reason": {
+          "enum": [
+            "unclassifiedRisk",
+            "modeRequiresApproval",
+            "readOnlyAutoApproved",
+            "riskRequiresApproval",
+            "fullAccess"
+          ]
+        }
+      }
+    },
+    "providerCapabilityEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["support", "source"],
+      "properties": {
+        "support": { "enum": ["supported", "unsupported", "unknown"] },
+        "source": { "enum": ["openAiResponses", "chatCompletionsProbe", "ollamaModelMetadata"] }
+      }
+    },
+    "providerCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["support", "source"],
+      "properties": {
+        "support": { "enum": ["supported", "unsupported", "unknown"] },
+        "source": { "enum": ["openAiResponses", "chatCompletionsProbe", "ollamaModelMetadata"] }
+      }
+    },
+    "safeFallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "automaticExecution", "assistantTextExecution", "reason"],
+      "properties": {
+        "task": { "const": "generateCommand" },
+        "automaticExecution": { "const": false },
+        "assistantTextExecution": { "const": "forbidden" },
+        "reason": { "enum": ["featureDisabled", "toolCallingUnsupported", "toolCallingUnverified"] }
+      }
+    },
+    "agentContractStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "featureEnabled", "agentAvailable", "defaultPermissionMode", "providerCapability"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "featureEnabled": { "type": "boolean" },
+        "agentAvailable": { "type": "boolean" },
+        "defaultPermissionMode": { "const": "requestApproval" },
+        "providerCapability": { "$ref": "#/$defs/providerCapability" },
+        "fallback": { "$ref": "#/$defs/safeFallback" }
+      }
+    },
+    "permissionMatrixCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mode", "risk", "expected"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "mode": { "$ref": "#/$defs/agentPermissionMode" },
+        "risk": { "enum": ["readOnly", "stateChange", "destructive", "unknown"] },
+        "expected": { "$ref": "#/$defs/agentApprovalDecision" }
+      }
+    }
+  }
+}
