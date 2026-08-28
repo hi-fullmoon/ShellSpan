@@ -1,0 +1,47 @@
+{
+  "$schema": "./evidence-ledger.schema.json",
+  "schemaVersion": 1,
+  "studyId": "petdex-phase3-2026-08-28",
+  "observation": {
+    "startedOn": "2026-08-28",
+    "plannedEndOn": "2026-09-11",
+    "endedOn": null
+  },
+  "recruitment": {
+    "consent": "explicit-opt-in",
+    "explicitOptInUsers": 0,
+    "equivalentDemandEvidence": 0,
+    "evidenceRefs": []
+  },
+  "retention": {
+    "day7EligibleUsers": 0,
+    "day7EnabledUsers": 0,
+    "evidenceRefs": []
+  },
+  "safety": {
+    "reviewCompleted": false,
+    "confirmedSeriousIncidents": null,
+    "evidenceRefs": []
+  },
+  "qualitative": {
+    "respondents": 0,
+    "stateAwarenessValueResponses": 0,
+    "valueByScenario": {
+      "backgroundTransfer": 0,
+      "aiCompletion": 0,
+      "connectionFailure": 0
+    },
+    "frictionReports": {
+      "interference": 0,
+      "resourceUse": 0,
+      "obstruction": 0
+    },
+    "preferredSurface": {
+      "externalFloatingPet": 0,
+      "inWindowCharacter": 0,
+      "systemNotification": 0,
+      "none": 0
+    },
+    "evidenceRefs": []
+  }
+}
