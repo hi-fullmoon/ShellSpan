@@ -1,0 +1,222 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/hi-fullmoon/TermBridge/blob/main/docs/petdex-phase3/evidence-ledger.schema.json",
+  "title": "TermBridge Petdex Phase 3 evidence ledger",
+  "description": "De-identified, explicitly consented aggregate evidence only. Free text and participant identifiers are intentionally not representable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "studyId",
+    "observation",
+    "recruitment",
+    "retention",
+    "safety",
+    "qualitative"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "./evidence-ledger.schema.json"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "studyId": {
+      "type": "string",
+      "pattern": "^petdex-phase3-[a-z0-9][a-z0-9-]{2,63}$"
+    },
+    "observation": {
+      "$ref": "#/definitions/observation"
+    },
+    "recruitment": {
+      "$ref": "#/definitions/recruitment"
+    },
+    "retention": {
+      "$ref": "#/definitions/retention"
+    },
+    "safety": {
+      "$ref": "#/definitions/safety"
+    },
+    "qualitative": {
+      "$ref": "#/definitions/qualitative"
+    }
+  },
+  "definitions": {
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "description": "Public issue URLs or de-identified custodian record IDs; never participant names, email addresses, paths, logs, host data, or content excerpts.",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(https://github\\.com/hi-fullmoon/TermBridge/issues/[1-9][0-9]*|anonymous:[a-z0-9][a-z0-9-]{2,63})$"
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedOn", "plannedEndOn", "endedOn"],
+      "properties": {
+        "startedOn": {
+          "$ref": "#/definitions/date"
+        },
+        "plannedEndOn": {
+          "$ref": "#/definitions/date"
+        },
+        "endedOn": {
+          "oneOf": [
+            { "$ref": "#/definitions/date" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "recruitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["consent", "explicitOptInUsers", "equivalentDemandEvidence", "evidenceRefs"],
+      "properties": {
+        "consent": {
+          "const": "explicit-opt-in"
+        },
+        "explicitOptInUsers": {
+          "$ref": "#/definitions/count"
+        },
+        "equivalentDemandEvidence": {
+          "$ref": "#/definitions/count"
+        },
+        "evidenceRefs": {
+          "$ref": "#/definitions/evidenceRefs"
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day7EligibleUsers", "day7EnabledUsers", "evidenceRefs"],
+      "properties": {
+        "day7EligibleUsers": {
+          "$ref": "#/definitions/count"
+        },
+        "day7EnabledUsers": {
+          "$ref": "#/definitions/count"
+        },
+        "evidenceRefs": {
+          "$ref": "#/definitions/evidenceRefs"
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewCompleted", "confirmedSeriousIncidents", "evidenceRefs"],
+      "properties": {
+        "reviewCompleted": {
+          "type": "boolean"
+        },
+        "confirmedSeriousIncidents": {
+          "oneOf": [
+            { "$ref": "#/definitions/count" },
+            { "type": "null" }
+          ]
+        },
+        "evidenceRefs": {
+          "$ref": "#/definitions/evidenceRefs"
+        }
+      }
+    },
+    "qualitative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "respondents",
+        "stateAwarenessValueResponses",
+        "valueByScenario",
+        "frictionReports",
+        "preferredSurface",
+        "evidenceRefs"
+      ],
+      "properties": {
+        "respondents": {
+          "$ref": "#/definitions/count"
+        },
+        "stateAwarenessValueResponses": {
+          "$ref": "#/definitions/count"
+        },
+        "valueByScenario": {
+          "$ref": "#/definitions/valueByScenario"
+        },
+        "frictionReports": {
+          "$ref": "#/definitions/frictionReports"
+        },
+        "preferredSurface": {
+          "$ref": "#/definitions/preferredSurface"
+        },
+        "evidenceRefs": {
+          "$ref": "#/definitions/evidenceRefs"
+        }
+      }
+    },
+    "valueByScenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backgroundTransfer", "aiCompletion", "connectionFailure"],
+      "properties": {
+        "backgroundTransfer": {
+          "$ref": "#/definitions/count"
+        },
+        "aiCompletion": {
+          "$ref": "#/definitions/count"
+        },
+        "connectionFailure": {
+          "$ref": "#/definitions/count"
+        }
+      }
+    },
+    "frictionReports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interference", "resourceUse", "obstruction"],
+      "properties": {
+        "interference": {
+          "$ref": "#/definitions/count"
+        },
+        "resourceUse": {
+          "$ref": "#/definitions/count"
+        },
+        "obstruction": {
+          "$ref": "#/definitions/count"
+        }
+      }
+    },
+    "preferredSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["externalFloatingPet", "inWindowCharacter", "systemNotification", "none"],
+      "properties": {
+        "externalFloatingPet": {
+          "$ref": "#/definitions/count"
+        },
+        "inWindowCharacter": {
+          "$ref": "#/definitions/count"
+        },
+        "systemNotification": {
+          "$ref": "#/definitions/count"
+        },
+        "none": {
+          "$ref": "#/definitions/count"
+        }
+      }
+    }
+  }
+}
