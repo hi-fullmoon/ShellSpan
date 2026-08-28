@@ -5,11 +5,8 @@ import schema from '../../../protocol/runbook/v2/deployment-runbook.schema.json'
 import example from '../../../docs/examples/deployment-runbook-v2.runbook.json';
 import {
   parseDeploymentRunbookV2Text,
-  parseRunbookContractText,
   serializeDeploymentRunbookV2,
-  serializeRunbookContract,
 } from '@/lib/deployment-runbook';
-import { parseRunbookText } from '@/lib/runbook';
 
 interface DeploymentFixtureCase {
   name: string;
@@ -80,17 +77,9 @@ describe('Deployment Runbook v2 contract', () => {
     })).toThrow(/understates/);
   });
 
-  it('keeps v1 compatible without treating v1 as an implicit deployment migration', () => {
+  it('rejects the removed v1 format instead of treating it as a deployment migration', () => {
     const v1Text = JSON.stringify(fixture.v1Document);
-    expect(parseRunbookText(v1Text)).toEqual(fixture.v1Document);
-    expect(parseRunbookContractText(v1Text)).toEqual(fixture.v1Document);
-    expect(serializeRunbookContract(parseRunbookContractText(v1Text)))
-      .toBe(`${JSON.stringify(fixture.v1Document, null, 2)}\n`);
     expect(() => parseDeploymentRunbookV2Text(v1Text)).toThrow(/unsupported field|schemaVersion/);
-
-    const v2Text = JSON.stringify(materialize(cases, cases[0]));
-    expect(parseRunbookContractText(v2Text).schemaVersion).toBe(2);
-    expect(() => parseRunbookText(v2Text)).toThrow(/unsupported field|schemaVersion/);
   });
 
   it('publishes a fail-closed JSON Schema for structural editor validation', () => {

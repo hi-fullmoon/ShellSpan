@@ -439,8 +439,6 @@ pub fn run() {
             health::get_system_health,
             remote_health::collect_remote_health_snapshot,
             remote_health::cancel_remote_health_snapshot,
-            runbook::execute_runbook_step,
-            runbook::cancel_runbook_step,
             deployment_execution::review_deployment_execution,
             deployment_execution::execute_deployment,
             deployment_execution::cancel_deployment,
@@ -458,8 +456,8 @@ pub fn run() {
             deployment_rollout::list_deployment_rollouts,
             deployment_rollout::get_deployment_rollout,
             deployment_rollout::recover_deployment_rollout,
-            runbook::open_runbook_file,
-            runbook::save_runbook_file,
+            runbook::open_deployment_runbook_file,
+            runbook::save_deployment_runbook_file,
         ]);
 
     let app = menu::configure_builder(builder)

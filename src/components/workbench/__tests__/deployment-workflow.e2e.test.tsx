@@ -201,7 +201,7 @@ describe('DeploymentPanel fixture E2E', () => {
     }));
     vi.spyOn(tauri, 'invokeListDeploymentRollouts').mockResolvedValue([]);
     vi.spyOn(tauri, 'invokeListDeploymentOperations').mockResolvedValue([]);
-    vi.spyOn(tauri, 'invokeOpenRunbookFile').mockResolvedValue({
+    vi.spyOn(tauri, 'invokeOpenDeploymentRunbookFile').mockResolvedValue({
       path: 'C:\\fixtures\\single-v2.json',
       text: `${JSON.stringify(runbook, null, 2)}\n`,
     });
@@ -248,7 +248,7 @@ describe('DeploymentPanel fixture E2E', () => {
     }));
     vi.spyOn(tauri, 'invokeListDeploymentRollouts').mockResolvedValue([]);
     vi.spyOn(tauri, 'invokeListDeploymentOperations').mockResolvedValue([]);
-    vi.spyOn(tauri, 'invokeOpenRunbookFile').mockResolvedValue({
+    vi.spyOn(tauri, 'invokeOpenDeploymentRunbookFile').mockResolvedValue({
       path: 'C:\\fixtures\\canary-v2.json',
       text: `${JSON.stringify(runbook, null, 2)}\n`,
     });

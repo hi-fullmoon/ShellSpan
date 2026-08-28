@@ -250,7 +250,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 columns={1}
                 breakpoints={CONNECTION_CARD_BREAKPOINTS}
                 gap="0.375rem"
-                gridClassName="items-start"
               >
                 {filteredProfiles.map((profile) => (
                   <ConnectionCard
@@ -442,7 +441,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
           </div>
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="mt-auto flex flex-wrap items-center gap-1">
         <div className="flex w-full items-center justify-end gap-1">
           <div className="flex flex-wrap items-center gap-1">
             <IconActionButton

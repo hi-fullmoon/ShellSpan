@@ -166,6 +166,7 @@ describe('CommandPalette', () => {
       'forward',
       'settings',
     ]));
+    expect(items.some((item) => item.id === 'navigation-runbooks')).toBe(false);
   });
 
   it('deduplicates bookmark loads by endpoint and retains a usable profile target', async () => {

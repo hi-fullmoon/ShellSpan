@@ -73,27 +73,6 @@ fn sha256_digest(domain: &str, value: &[u8]) -> String {
     format!("sha256-v1:{encoded}")
 }
 
-fn risk_name(risk: RunbookRisk) -> &'static str {
-    match risk {
-        RunbookRisk::ReadOnly => "readOnly",
-        RunbookRisk::StateChange => "stateChange",
-        RunbookRisk::Destructive => "destructive",
-    }
-}
-
-fn action_kind_name(kind: DeploymentExecutionActionKindV2) -> &'static str {
-    match kind {
-        DeploymentExecutionActionKindV2::InspectRelease => "inspectRelease",
-        DeploymentExecutionActionKindV2::CreateRelease => "createRelease",
-        DeploymentExecutionActionKindV2::StageArtifact => "stageArtifact",
-        DeploymentExecutionActionKindV2::VerifyArtifact => "verifyArtifact",
-        DeploymentExecutionActionKindV2::ActivateRelease => "activateRelease",
-        DeploymentExecutionActionKindV2::ServiceAction => "serviceAction",
-        DeploymentExecutionActionKindV2::HttpHealthCheck => "httpHealthCheck",
-        DeploymentExecutionActionKindV2::ServiceHealthCheck => "serviceHealthCheck",
-    }
-}
-
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum DeploymentExecutionActionKindV2 {

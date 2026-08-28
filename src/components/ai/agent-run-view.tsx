@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  ArrowRightIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   CircleDotDashedIcon,
@@ -50,7 +49,7 @@ type StageState = 'complete' | 'active' | 'pending' | 'failed';
 
 function phaseVariant(phase: StaticDiagnosticRunPhase): BadgeVariant {
   if (phase === 'error') return 'destructive';
-  if (phase === 'awaitingReview' || phase === 'handedOff') return 'default';
+  if (phase === 'awaitingReview') return 'default';
   return 'secondary';
 }
 
@@ -73,11 +72,7 @@ function runStages(run: StaticDiagnosticRun): [StageState, StageState, StageStat
   return [
     'complete',
     interrupted ? 'failed' : planReady ? 'complete' : 'active',
-    run.phase === 'handedOff'
-      ? 'complete'
-      : run.phase === 'awaitingReview'
-        ? 'active'
-        : 'pending',
+    run.phase === 'awaitingReview' ? 'active' : 'pending',
   ];
 }
 
@@ -457,8 +452,7 @@ export const AgentRunView: React.FC<{
   run?: StaticDiagnosticRun;
   onCancel: () => void;
   onRetry: () => void;
-  onReviewRunbook: () => void;
-}> = ({ run, onCancel, onRetry, onReviewRunbook }) => {
+}> = ({ run, onCancel, onRetry }) => {
   const { t } = useI18n();
 
   if (!run) return <AgentEmptyState />;
@@ -517,31 +511,6 @@ export const AgentRunView: React.FC<{
         <AlertTitle>{t('ai.agent.safetyTitle')}</AlertTitle>
         <AlertDescription>{t('ai.agent.safetyDescription')}</AlertDescription>
       </Alert>
-
-      {plan && ['awaitingReview', 'handedOff'].includes(run.phase) && (
-        <Card size="sm" variant="outline">
-          <CardHeader>
-            <CardTitle>{run.phase === 'handedOff'
-              ? t('ai.agent.handedOffTitle')
-              : t('ai.agent.reviewRunbookTitle')}</CardTitle>
-            <CardDescription>{run.phase === 'handedOff'
-              ? t('ai.agent.handedOffDescription')
-              : t('ai.agent.reviewRunbookDescription')}</CardDescription>
-          </CardHeader>
-          <CardFooter className="flex-col items-stretch gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <LockKeyholeIcon className="size-3.5" />
-              {t('ai.agent.reviewBoundary')}
-            </div>
-            <Button className="w-full" onClick={onReviewRunbook}>
-              {run.phase === 'handedOff'
-                ? <ArrowRightIcon data-icon="inline-start" />
-                : <FilePenLineIcon data-icon="inline-start" />}
-              {t('ai.agent.reviewRunbook')}
-            </Button>
-          </CardFooter>
-        </Card>
-      )}
     </MessageScroller>
   );
 };

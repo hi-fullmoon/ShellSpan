@@ -11,7 +11,6 @@ import { LogPanel } from './log-panel';
 import { MonitorPanel } from './monitor-panel';
 import { SettingsPanel } from './settings-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
-import { RunbookPanel } from './runbook-panel';
 import { DeploymentPanel } from './deployment-panel';
 import { OperationHistoryPanel } from './operation-history-panel';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
@@ -254,7 +253,6 @@ const Workbench: React.FC = () => {
             <KnownHostsPanel onCreateConnection={handleCreateFromKnownHost} />
           )}
           {activeTab === 'keychain' && <KeychainPanel />}
-          {activeTab === 'runbooks' && <RunbookPanel />}
           {activeTab === 'deployments' && <DeploymentPanel />}
           {activeTab === 'history' && <OperationHistoryPanel />}
           {activeTab === 'monitor' && <MonitorPanel />}

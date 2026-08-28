@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRunbookText } from '@/lib/runbook';
 import {
-  createAgentRunbookDraft,
   isSafeReadOnlyAgentCommand,
   parseDiagnosticAgentPlan,
 } from '../diagnostic-agent';
@@ -73,29 +71,6 @@ describe('diagnostic agent plan', () => {
       evidenceIds: ['service-status-output'],
       safeToRetry: false,
     });
-  });
-
-  it('creates a reviewable Runbook without executing or widening the target', () => {
-    const plan = parseDiagnosticAgentPlan(JSON.stringify(planValue()));
-    const runbook = parseRunbookText(createAgentRunbookDraft(plan));
-    expect(runbook.evidenceMaxAgeSeconds).toBe(45);
-    expect(runbook.prechecks).toEqual([
-      expect.objectContaining({ id: 'check-service', command: 'systemctl status nginx' }),
-    ]);
-    expect(runbook.steps).toEqual([
-      expect.objectContaining({
-        id: 'reload-service',
-        risk: 'stateChange',
-        rollback: 'Restore the previous configuration and reload nginx again.',
-      }),
-    ]);
-  });
-
-  it('allows an evidence-only diagnostic Runbook with no modifying steps', () => {
-    const value = planValue();
-    value.steps = [value.steps[0]];
-    const plan = parseDiagnosticAgentPlan(JSON.stringify(value));
-    expect(parseRunbookText(createAgentRunbookDraft(plan)).steps).toEqual([]);
   });
 
   it('blocks modifying steps that cite only context, stale structure, or missing rollback', () => {

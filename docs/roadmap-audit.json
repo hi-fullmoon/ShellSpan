@@ -97,7 +97,7 @@
         "status": "verified",
         "finding": "Adapter 保留 source digest、exact risk、expected match、外部结果映射与 operation-history 身份/状态语义，并通过 Rust/前端回归。",
         "evidence": ["src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", "docs/ai-agent-p0-step-0-characterization.md"],
-        "tests": ["src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", "src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/lib/__tests__/operation-history.test.ts"]
+        "tests": ["src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", "src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src/components/__tests__/command-palette.test.tsx", "src/lib/__tests__/operation-history.test.ts"]
       },
       {
         "roadmapItem": "正常执行、非零退出、取消、超时、输出截断、hard limit、target mismatch 和 secret redaction 均有自动化测试。",
@@ -481,8 +481,8 @@
         "roadmapItem": "Runbook 和多主机任务在中断、部分失败与重试时结果可预测。",
         "status": "verified",
         "finding": "执行状态机、恢复决策与多主机熔断均有自动化回归。",
-        "evidence": ["docs/later-exit-criteria.md", "src-tauri/src/runbook.rs", "src/lib/multi-host-runbook.ts"],
-        "tests": ["src-tauri/src/runbook.rs", "src/lib/__tests__/multi-host-runbook.test.ts"]
+        "evidence": ["docs/later-exit-criteria.md", "docs/runbook-retirement.md", "src-tauri/src/runbook.rs"],
+        "tests": ["src-tauri/src/runbook.rs", "src/components/workbench/__tests__/workbench-sidebar.test.tsx"]
       },
       {
         "roadmapItem": "每个远端修改都能追溯到用户批准、具体命令、目标主机与执行结果。",
@@ -672,8 +672,8 @@
       "failurePath": "前后端共同拒绝解析/校验失败、未知字段、明文秘密、未授权或风险错配；前置检查、取消、超时、预期不匹配、步骤失败与结果身份错配均失败停止，不推进后续步骤",
       "recovery": "仅可从明确 safeToRetry 的步骤或固有安全的只读预检重试；暂停后证据过期必须重跑安全预检；秘密只在 Rust 执行边界解析钥匙串引用并在所有返回内容中按值脱敏",
       "testStrategy": "规范化 JSON、未知字段与明文秘密拒绝、风险分级、shell 安全变量解析、审批拒绝、暂停/跳过、取消/超时/失败停止、安全重试、证据陈旧和结果身份绑定测试，并在隔离 SSH 服务执行真实 Runbook 步骤",
-      "evidence": ["docs/runbook-format.md", "src/lib/runbook.ts", "src/types/runbook.ts", "src/components/workbench/runbook-panel.tsx", "src-tauri/src/runbook.rs"],
-      "tests": ["src/lib/__tests__/runbook.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src-tauri/src/runbook.rs", "scripts/run-ssh-e2e.ps1"]
+      "evidence": ["docs/runbook-retirement.md", "src/types/deployment-runbook.ts", "src/components/workbench/workbench-sidebar.tsx", "src-tauri/src/runbook.rs"],
+      "tests": ["src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src/components/__tests__/command-palette.test.tsx", "src-tauri/src/runbook.rs"]
     },
     {
       "id": "later-multi-host",
@@ -686,8 +686,8 @@
       "failurePath": "标签目标在预检前冻结；失败、取消、超时、陈旧证据、目标变化或结果身份错配只打开对应主机熔断器，错配输出直接丢弃，部分成功保持独立终态",
       "recovery": "仅允许用户明确选择已失败、步骤声明可安全重试、仍匹配冻结身份与标签的主机；保留已完成修改，重新运行全部只读预检，并持续遵守原批次、并发和逐主机审批边界",
       "testStrategy": "标签与空目标、并发/批次边界、单主机熔断、取消/超时、部分成功、安全失败主机重试、陈旧预检、结果身份错配、变量/命令/证据/退出码/输出隔离，以及隔离 SSH 并行通道 E2E",
-      "evidence": ["docs/multi-host-runbook.md", "src/stores/profileStore.ts", "src/lib/multi-host-runbook.ts", "src/types/multi-host-runbook.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx", "src-tauri/src/runbook.rs"],
-      "tests": ["src/lib/__tests__/multi-host-runbook.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "src-tauri/src/runbook.rs", "scripts/run-ssh-e2e.ps1"]
+      "evidence": ["docs/runbook-retirement.md", "src/components/workbench/workbench-sidebar.tsx", "src/types/index.ts", "src-tauri/src/runbook.rs"],
+      "tests": ["src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src/components/__tests__/command-palette.test.tsx", "src-tauri/src/runbook.rs"]
     },
     {
       "id": "later-ai-execution",
@@ -700,8 +700,8 @@
       "failurePath": "严格结构化计划先经前端关系校验，再转为 Runbook 并复用同一风险/秘密/命令解析器；AI 无终端插入和执行通道，修改只能引用先前只读步骤证据并由 Runbook 重新采集，缺失、陈旧、身份错配、摘要错配或未批准均停止",
       "recovery": "失败、取消、证据不足与身份错配保留为显式终态；仅允许从 safeToRetry 步骤或只读预检人工恢复，修改重试必须重跑全部预检；多主机部分成功只重试用户明确选择且身份仍匹配的失败主机",
       "testStrategy": "结构化目标/假设/证据/风险/回滚、未知字段与风险低报、上下文证据绕过、只读顺序、证据新鲜度、草案显式交接、逐步审批、高风险确认、取消/恢复、身份错配、熔断和部分成功测试，并运行隔离 SSH E2E",
-      "evidence": ["docs/ai-assisted-execution.md", "docs/runbook-format.md", "src/stores/agentStore.ts", "src/components/ai/agent-run-view.tsx", "src/components/ai/ai-panel.tsx", "src/lib/diagnostic-agent.ts", "src/lib/runbook.ts", "src/lib/multi-host-runbook.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx", "src-tauri/src/ai.rs", "src-tauri/src/runbook.rs"],
-      "tests": ["src/lib/__tests__/diagnostic-agent.test.ts", "src/stores/__tests__/agentStore.test.ts", "src/components/ai/__tests__/agent-run-view.test.tsx", "src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "src-tauri/src/ai.rs", "src-tauri/src/runbook.rs", "scripts/run-ssh-e2e.ps1"]
+      "evidence": ["docs/ai-assisted-execution.md", "docs/runbook-retirement.md", "src/stores/agentStore.ts", "src/components/ai/agent-run-view.tsx", "src/components/ai/ai-panel.tsx", "src/lib/diagnostic-agent.ts", "src-tauri/src/ai.rs"],
+      "tests": ["src/lib/__tests__/diagnostic-agent.test.ts", "src/stores/__tests__/agentStore.test.ts", "src/components/ai/__tests__/agent-run-view.test.tsx", "src/components/__tests__/command-palette.test.tsx", "src-tauri/src/ai.rs"]
     },
     {
       "id": "later-operation-history",
@@ -714,8 +714,8 @@
       "failurePath": "统一 IPC 与 Runbook/多主机状态机只写白名单结构字段；交互式终端输入和原始输出不进入记录；写入失败不阻塞受控操作但记录日志并显示告警，导出失败不保留半成品",
       "recovery": "失败、取消、超时、身份错配、部分成功和重试保留独立终态；允许按类型/状态/时间检索并重新导出、缩短或无限期配置保留周期，以及确认后一键清除本地记录",
       "testStrategy": "数据库 v5 迁移、任务时间线关联、目标/批准/命令/证据/退出码、交互式输入与原始输出排除、失败/取消/超时/身份错配/部分成功/重试、写入失败告警、Markdown/JSON 二次脱敏、保留策略与确认清除测试，并复跑隔离 SSH/SFTP E2E",
-      "evidence": ["docs/operation-history.md", "src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/operation-history.ts", "src/types/operation-history.ts", "src/components/workbench/operation-history-panel.tsx", "src/lib/tauri.ts", "src/stores/transferStore.ts", "src/stores/portForwardStore.ts", "src/stores/remoteHealthStore.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx"],
-      "tests": ["src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/operation-history-panel.test.tsx", "src/stores/__tests__/transferStore.test.ts", "src/stores/__tests__/portForwardStore.test.ts", "src/stores/__tests__/remoteHealthStore.test.ts", "src/components/workbench/__tests__/runbook-panel.test.tsx", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "scripts/run-ssh-e2e.ps1"]
+      "evidence": ["docs/operation-history.md", "src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/operation-history.ts", "src/types/operation-history.ts", "src/components/workbench/operation-history-panel.tsx", "src/lib/tauri.ts", "src/stores/transferStore.ts", "src/stores/portForwardStore.ts", "src/stores/remoteHealthStore.ts", "docs/runbook-retirement.md"],
+      "tests": ["src-tauri/src/operation_history.rs", "src-tauri/src/db.rs", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/operation-history-panel.test.tsx", "src/stores/__tests__/transferStore.test.ts", "src/stores/__tests__/portForwardStore.test.ts", "src/stores/__tests__/remoteHealthStore.test.ts", "src/components/workbench/__tests__/workbench-sidebar.test.tsx", "scripts/run-ssh-e2e.ps1"]
     },
     {
       "id": "later-exit-criteria",
@@ -728,8 +728,8 @@
       "failurePath": "任一中断、部分失败、重试、批准/命令/目标/结果关联或 AI 风险/上限/脱敏断言失败即保持 LATER 未验收；结果身份、命令或风险不匹配按 identityMismatch 失败关闭",
       "recovery": "只允许修复退出条件所需的最小断点并重跑全部前端、Rust 与隔离 SSH 门禁；不创建新产品能力、不扩展执行通道，也不进入 EXPLORE",
       "testStrategy": "复核 Runbook、多主机、AI 和操作记录的既有状态机与安全测试；新增批准事件精确命令绑定、多主机父任务关联、命令/风险结果错配和多主机命令二次脱敏回归，并运行全套阶段门禁",
-      "evidence": ["docs/later-exit-criteria.md", "docs/operation-history.md", "src/lib/operation-history.ts", "src/lib/tauri.ts", "src/components/workbench/runbook-panel.tsx", "src/components/workbench/multi-host-runbook-execution.tsx", "src-tauri/src/operation_history.rs"],
-      "tests": ["src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/lib/__tests__/diagnostic-agent.test.ts", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/multi-host-runbook-execution.test.tsx", "src-tauri/src/runbook.rs", "src-tauri/src/ai.rs", "src-tauri/src/operation_history.rs", "scripts/run-ssh-e2e.ps1"]
+      "evidence": ["docs/later-exit-criteria.md", "docs/runbook-retirement.md", "docs/operation-history.md", "src/lib/operation-history.ts", "src/lib/tauri.ts", "src-tauri/src/operation_history.rs"],
+      "tests": ["src/lib/__tests__/diagnostic-agent.test.ts", "src/lib/__tests__/operation-history.test.ts", "src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src-tauri/src/runbook.rs", "src-tauri/src/ai.rs", "src-tauri/src/operation_history.rs"]
     },
     {
       "id": "explore-portability-targets",
@@ -794,8 +794,8 @@
       "failurePath": "任一准入项缺证据即保持 candidate/researching；未来候选必须在任何写入前完成大小/KDF/版本/完整性/范围预检，冲突默认跳过，秘密默认排除，未知必需格式、错口令、篡改、无效路径或钥匙串不可用均失败关闭",
       "recovery": "本次不产生备份实现；未来导出只允许临时密文、sync 与原子替换，导入保持源文件只读并以 SQLite 事务和钥匙串逆序补偿恢复导入前状态，补偿失败必须列出可定位的待清理项后允许重新预检",
       "testStrategy": "版本化 envelope/manifest/section 金色夹具与 N-1 兼容；错口令、篡改、截断、恶意 KDF 参数、默认无秘密和敏感范围预览；原子写入故障注入；profile ID 重映射、冲突默认跳过、SQLite/钥匙串部分失败与补偿；Windows/macOS 原生凭据和真实两设备迁移 E2E",
-      "evidence": ["docs/explore-local-backup-assessment.md", "src/lib/connection-import.ts", "src/stores/profileStore.ts", "src-tauri/src/db.rs", "src-tauri/src/keychain.rs", "src/lib/runbook.ts", "src-tauri/src/runbook.rs", "src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/stores/appStore.ts", "src/stores/aiSettingsStore.ts", "src-tauri/src/ai.rs", "src/lib/diagnostic-bundle.ts", "src-tauri/src/operation_history.rs", "src-tauri/src/ai_sessions.rs", "src-tauri/src/known_hosts.rs"],
-      "tests": ["src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src-tauri/src/db.rs", "src-tauri/src/keychain.rs", "src/lib/__tests__/runbook.test.ts", "src-tauri/src/runbook.rs", "src/lib/__tests__/terminal-workspace.test.ts", "src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/lib/__tests__/diagnostic-bundle.test.ts", "src-tauri/src/operation_history.rs", "src/stores/__tests__/aiSettingsStore.test.ts", "src-tauri/src/ai.rs"],
+      "evidence": ["docs/explore-local-backup-assessment.md", "src/lib/connection-import.ts", "src/stores/profileStore.ts", "src-tauri/src/db.rs", "src-tauri/src/keychain.rs", "docs/runbook-retirement.md", "src-tauri/src/runbook.rs", "src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/stores/appStore.ts", "src/stores/aiSettingsStore.ts", "src-tauri/src/ai.rs", "src/lib/diagnostic-bundle.ts", "src-tauri/src/operation_history.rs", "src-tauri/src/ai_sessions.rs", "src-tauri/src/known_hosts.rs"],
+      "tests": ["src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src-tauri/src/db.rs", "src-tauri/src/keychain.rs", "src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src-tauri/src/runbook.rs", "src/lib/__tests__/terminal-workspace.test.ts", "src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/lib/__tests__/diagnostic-bundle.test.ts", "src-tauri/src/operation_history.rs", "src/stores/__tests__/aiSettingsStore.test.ts", "src-tauri/src/ai.rs"],
       "criteria": {
         "userGroup": {
           "status": "not-met",
@@ -847,8 +847,8 @@
         "pluginApi": "blocked",
         "finding": "三种格式中只有 Runbook v1 接近可审阅契约；用户价值、完整版本/故障门禁和稳定性验收均未完成，故不建立新契约且不开始插件 API 评估。"
       },
-      "evidence": ["docs/explore-extension-contracts-assessment.md", "docs/runbook-format.md", "docs/review-process.md", "src/lib/connection-import.ts", "src/lib/runbook.ts", "src-tauri/src/runbook.rs", "src/stores/appStore.ts", "src-tauri/src/db.rs", "src/lib/theme.ts", "src/types/index.ts", "src/styles/base.css", "src/components/terminal/registry/terminal-registry.ts", "scripts/check-roadmap-audit.mjs"],
-      "tests": ["src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src/lib/__tests__/runbook.test.ts", "src-tauri/src/runbook.rs", "src/lib/__tests__/theme.test.ts", "src/stores/__tests__/appStore.test.ts", "src/components/terminal/__tests__/terminal-registry.test.ts", "src/components/terminal/__tests__/terminal-controller-layer.test.tsx", "src-tauri/src/db.rs", "scripts/__tests__/check-roadmap-audit.test.mjs"],
+      "evidence": ["docs/explore-extension-contracts-assessment.md", "docs/runbook-retirement.md", "docs/review-process.md", "src/lib/connection-import.ts", "src/types/deployment-runbook.ts", "src-tauri/src/runbook.rs", "src/stores/appStore.ts", "src-tauri/src/db.rs", "src/lib/theme.ts", "src/types/index.ts", "src/styles/base.css", "src/components/terminal/registry/terminal-registry.ts", "scripts/check-roadmap-audit.mjs"],
+      "tests": ["src/lib/__tests__/connection-import.test.ts", "src/stores/__tests__/profileStore.test.ts", "src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src-tauri/src/runbook.rs", "src/lib/__tests__/theme.test.ts", "src/stores/__tests__/appStore.test.ts", "src/components/terminal/__tests__/terminal-registry.test.ts", "src/components/terminal/__tests__/terminal-controller-layer.test.tsx", "src-tauri/src/db.rs", "scripts/__tests__/check-roadmap-audit.test.mjs"],
       "criteria": {
         "userGroup": {
           "status": "not-met",
@@ -999,8 +999,8 @@
           }
         }
       },
-      "evidence": ["docs/explore-team-services-assessment.md", "docs/review-process.md", "docs/product-roadmap.md", "docs/later-exit-criteria.md", "docs/runbook-format.md", "docs/multi-host-runbook.md", "docs/operation-history.md", "src-tauri/src/commands.rs", "src-tauri/src/connection.rs", "src-tauri/src/known_hosts.rs", "src-tauri/src/keychain.rs", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/lib/runbook.ts", "src/lib/multi-host-runbook.ts", "src/lib/operation-history.ts", "src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", ".github/workflows/quality-gate.yml", "scripts/check-roadmap-audit.mjs"],
-      "tests": ["src-tauri/src/connection.rs", "src-tauri/src/known_hosts.rs", "src-tauri/src/keychain.rs", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/lib/__tests__/terminal-workspace.test.ts", "src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/lib/__tests__/runbook.test.ts", "src/lib/__tests__/multi-host-runbook.test.ts", "src/lib/__tests__/operation-history.test.ts", "src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", "scripts/__tests__/check-roadmap-audit.test.mjs", "scripts/run-ssh-e2e.ps1"],
+      "evidence": ["docs/explore-team-services-assessment.md", "docs/review-process.md", "docs/product-roadmap.md", "docs/later-exit-criteria.md", "docs/runbook-retirement.md", "docs/operation-history.md", "src-tauri/src/commands.rs", "src-tauri/src/connection.rs", "src-tauri/src/known_hosts.rs", "src-tauri/src/keychain.rs", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/lib/terminal-workspace.ts", "src/lib/sftp-workspace.ts", "src/lib/operation-history.ts", "src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", ".github/workflows/quality-gate.yml", "scripts/check-roadmap-audit.mjs"],
+      "tests": ["src-tauri/src/connection.rs", "src-tauri/src/known_hosts.rs", "src-tauri/src/keychain.rs", "src-tauri/src/ai.rs", "src-tauri/src/db.rs", "src/lib/__tests__/terminal-workspace.test.ts", "src/lib/__tests__/terminal-workspace-persistence.test.ts", "src/lib/__tests__/sftp-workspace.test.ts", "src/lib/__tests__/sftp-workspace-persistence.test.ts", "src/components/workbench/__tests__/workbench-sidebar.test.tsx", "src/components/__tests__/command-palette.test.tsx", "src/lib/__tests__/operation-history.test.ts", "src-tauri/src/runbook.rs", "src-tauri/src/operation_history.rs", "scripts/__tests__/check-roadmap-audit.test.mjs"],
       "criteria": {
         "userGroup": {
           "status": "not-met",

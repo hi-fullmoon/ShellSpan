@@ -8,7 +8,7 @@ vi.mock('@/hooks/useI18n', () => ({
       'workbench.connections.title': 'Connections',
       'workbench.keychain.title': 'Keychain',
       'workbench.knownHosts.title': 'Known Hosts',
-      'runbook.title': 'Runbooks',
+      'deployment.title': 'Deployments',
       'workbench.monitor.title': 'Monitor',
       'workbench.logs.title': 'Log explorer',
       'workbench.settings.title': 'Settings',
@@ -20,6 +20,7 @@ describe('WorkbenchSidebar', () => {
   it('activates a menu item when WKWebView drops its trackpad pointerdown', () => {
     const onTabChange = vi.fn();
     render(<WorkbenchSidebar activeTab="connections" onTabChange={onTabChange} />);
+    expect(screen.queryByRole('button', { name: 'Runbooks' })).not.toBeInTheDocument();
     const keychain = screen.getByRole('button', { name: 'Keychain' });
     expect(keychain).toHaveClass('h-8');
 

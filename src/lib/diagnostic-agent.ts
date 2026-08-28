@@ -1,10 +1,8 @@
-import { parseRunbookText, serializeRunbook } from '@/lib/runbook';
 import type {
   DiagnosticAgentEvidenceRequirement,
   DiagnosticAgentPlan,
   DiagnosticAgentPlanStep,
 } from '@/types/ai';
-import type { RunbookDocument } from '@/types/runbook';
 
 const MAX_AGENT_STEPS = 8;
 const MAX_FIELD_LENGTH = 4000;
@@ -242,9 +240,6 @@ export function parseDiagnosticAgentPlan(value: string): DiagnosticAgentPlan {
     steps: plan.steps.map(parseStep),
   };
   validatePlanRelationships(result);
-  // Reuse the same parser that guards reviewed Runbooks so a model cannot
-  // understate command risk or smuggle an unsupported command into handoff.
-  parseRunbookText(buildRunbookText(result));
   return result;
 }
 
@@ -300,94 +295,4 @@ function validatePlanRelationships(plan: DiagnosticAgentPlan): void {
       }
     }
   }
-}
-
-function runbookId(plan: DiagnosticAgentPlan): string {
-  const slug = plan.objective
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 55);
-  return `ai-${slug || 'assisted-plan'}`;
-}
-
-function buildRunbookText(plan: DiagnosticAgentPlan): string {
-  const stepEvidence = plan.evidence.filter((evidence) => evidence.source === 'stepOutput');
-  const description = [
-    plan.summary,
-    `Objective: ${plan.objective}`,
-    `Target: ${plan.target}`,
-    `Assumptions: ${plan.assumptions.join('; ')}`,
-    'AI-generated draft: review and edit every field before execution.',
-  ].join('\n').slice(0, MAX_FIELD_LENGTH);
-  const document: RunbookDocument = {
-    schemaVersion: 1,
-    id: runbookId(plan),
-    name: plan.objective.slice(0, 200),
-    description,
-    evidenceMaxAgeSeconds: Math.min(...stepEvidence.map((item) => item.maxAgeSeconds)),
-    variables: [],
-    prechecks: plan.steps
-      .filter((step) => step.risk === 'readOnly')
-      .map((step) => ({
-        id: step.id,
-        description: `${step.title}: ${step.description}`.slice(0, MAX_FIELD_LENGTH),
-        command: step.command,
-        expected: {
-          exitCode: step.expected.exitCode,
-          ...(step.expected.stdoutContains.length
-            ? { stdoutContains: step.expected.stdoutContains }
-            : {}),
-        },
-        timeoutSeconds: step.timeoutSeconds,
-      })),
-    steps: plan.steps
-      .filter((step) => step.risk !== 'readOnly')
-      .map((step) => ({
-        id: step.id,
-        description: `${step.title}: ${step.description}`.slice(0, MAX_FIELD_LENGTH),
-        command: step.command,
-        risk: step.risk,
-        impact: step.impact,
-        rollback: step.rollback,
-        expected: {
-          exitCode: step.expected.exitCode,
-          ...(step.expected.stdoutContains.length
-            ? { stdoutContains: step.expected.stdoutContains }
-            : {}),
-        },
-        timeoutSeconds: step.timeoutSeconds,
-        safeToRetry: step.safeToRetry,
-      })),
-  };
-  return serializeRunbook(document);
-}
-
-export function createAgentRunbookDraft(plan: DiagnosticAgentPlan): string {
-  const text = buildRunbookText(plan);
-  return serializeRunbook(parseRunbookText(text));
-}
-
-export const AI_RUNBOOK_DRAFT_EVENT = 'termbridge:review-ai-runbook';
-
-export interface AiRunbookDraftDetail {
-  sourceText: string;
-  profileId?: string;
-  contextLabel: string;
-  contextObservedAt: number;
-  objective: string;
-  target: string;
-}
-
-let pendingAgentRunbookDraft: AiRunbookDraftDetail | undefined;
-
-export function dispatchAgentRunbookDraft(detail: AiRunbookDraftDetail): void {
-  pendingAgentRunbookDraft = detail;
-  window.dispatchEvent(new CustomEvent<AiRunbookDraftDetail>(AI_RUNBOOK_DRAFT_EVENT, { detail }));
-}
-
-export function consumePendingAgentRunbookDraft(): AiRunbookDraftDetail | undefined {
-  const detail = pendingAgentRunbookDraft;
-  pendingAgentRunbookDraft = undefined;
-  return detail;
 }

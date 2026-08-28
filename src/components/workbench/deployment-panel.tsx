@@ -86,12 +86,12 @@ import {
   invokeGetDeploymentRollout,
   invokeListDeploymentOperations,
   invokeListDeploymentRollouts,
-  invokeOpenRunbookFile,
+  invokeOpenDeploymentRunbookFile,
   invokeRecoverDeploymentRollout,
   invokeReviewDeploymentExecution,
   invokeReviewDeploymentRollout,
   invokeReviewRollbackExecution,
-  invokeSaveRunbookFile,
+  invokeSaveDeploymentRunbookFile,
   invokeStartDeploymentRollout,
 } from '@/lib/tauri';
 import { useProfileStore } from '@/stores/profileStore';
@@ -295,7 +295,7 @@ export const DeploymentPanel: React.FC = () => {
     if (draftLocked) return;
     setBusy('import');
     try {
-      const file = await invokeOpenRunbookFile();
+      const file = await invokeOpenDeploymentRunbookFile();
       if (!file) return;
       const document = parseDeploymentRunbookV2Text(file.text);
       replaceDraft(createImportedDeploymentDraft(document));
@@ -313,7 +313,7 @@ export const DeploymentPanel: React.FC = () => {
     if (!validation.normalizedText) return;
     setBusy('export');
     try {
-      const file = await invokeSaveRunbookFile(validation.normalizedText);
+      const file = await invokeSaveDeploymentRunbookFile(validation.normalizedText);
       if (file) {
         setSourcePath(file.path);
         showSuccess(t('deployment.exported', { path: file.path }));

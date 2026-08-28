@@ -90,7 +90,6 @@ export interface AiSessionFile {
 export type StaticDiagnosticRunPhase =
   | 'planning'
   | 'awaitingReview'
-  | 'handedOff'
   | 'cancelled'
   | 'error';
 

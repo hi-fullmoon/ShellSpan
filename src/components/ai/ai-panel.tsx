@@ -74,8 +74,6 @@ import {
 import { cn, generateId } from '@/lib/utils';
 import { parseAssistantContent } from '@/lib/ai-content';
 import {
-  createAgentRunbookDraft,
-  dispatchAgentRunbookDraft,
   isSafeReadOnlyAgentCommand,
 } from '@/lib/diagnostic-agent';
 import {
@@ -951,31 +949,6 @@ export const AiPanel: React.FC = () => {
     void runStaticDiagnosticPlan(run.goal, snapshot);
   };
 
-  const handleReviewAgentRunbook = (): void => {
-    const run = useStaticDiagnosticStore.getState().run;
-    if (!run?.plan || !['awaitingReview', 'handedOff'].includes(run.phase)) return;
-    try {
-      dispatchAgentRunbookDraft({
-        sourceText: createAgentRunbookDraft(run.plan),
-        profileId: run.profileId,
-        contextLabel: run.contextLabel,
-        contextObservedAt: run.contextObservedAt,
-        objective: run.plan.objective,
-        target: run.plan.target,
-      });
-      useStaticDiagnosticStore.getState().markHandedOff();
-      const app = useAppStore.getState();
-      app.setActiveSection('workbench');
-      app.setActiveWorkbenchTab('runbooks');
-      setOpen(false);
-    } catch (reason) {
-      useStaticDiagnosticStore.getState().failRun(
-        run.requestId,
-        reason instanceof Error ? reason.message : String(reason),
-      );
-    }
-  };
-
   const handleInsertCommand = (
     command: string,
     sourceConversationId?: string,
@@ -1619,7 +1592,6 @@ export const AiPanel: React.FC = () => {
                 run={staticAgentRun}
                 onCancel={handleStopAgentRun}
                 onRetry={handleRetryAgentRun}
-                onReviewRunbook={handleReviewAgentRunbook}
               />
             )}
             canUseStaticFallback={Boolean(

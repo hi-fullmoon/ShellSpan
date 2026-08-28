@@ -4,7 +4,7 @@
 
 ## 产品闭环
 
-- [x] Workbench 有独立 **部署** 入口，Runbook v1 页面与行为未改变。
+- [x] Workbench 有独立 **部署** 入口；后续移除 Runbook v1 不影响此部署入口与语义执行链。
 - [x] 两套内置模板通过 v2 解析器；占位符、制品摘要、release/systemd/health/rollback 摘要可见。
 - [x] 支持文件导入/导出和只读规范化 JSON。
 - [x] profile 显式选择、有序 rollout、canaryRolling 和人工批次门可见。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRunbookContractText } from '@/lib/deployment-runbook';
+import { parseDeploymentRunbookV2Text } from '@/lib/deployment-runbook';
 import {
   createDeploymentTemplate,
   deploymentTemplatePlaceholderPaths,
@@ -12,7 +12,6 @@ import {
   type DeploymentWorkflowDraft,
   type DeploymentWorkflowState,
 } from '@/lib/deployment-workflow';
-import { runbookExampleForLocale } from '@/lib/runbook';
 import type { DeploymentExecutionReviewV2 } from '@/types/deployment-runbook';
 import type { DeploymentRolloutReviewV2 } from '@/types/deployment-rollout';
 
@@ -71,7 +70,7 @@ describe('deployment workflow templates', () => {
     'generates a legal, secret-free v2 document for %s',
     (template) => {
       const draft = createDeploymentTemplate(template);
-      const parsed = parseRunbookContractText(JSON.stringify(draft.document));
+      const parsed = parseDeploymentRunbookV2Text(JSON.stringify(draft.document));
       const serialized = JSON.stringify(parsed);
 
       expect(parsed.schemaVersion).toBe(2);
@@ -94,12 +93,6 @@ describe('deployment workflow templates', () => {
       ['prod-b', 'prod-c'],
     ]);
     expect(rollout.batches.every((batch) => batch.approvalRequired)).toBe(true);
-  });
-
-  it('keeps ordinary Runbook v1 dispatch unchanged', () => {
-    const parsed = parseRunbookContractText(runbookExampleForLocale('en-US'));
-    expect(parsed.schemaVersion).toBe(1);
-    expect('kind' in parsed).toBe(false);
   });
 });
 
