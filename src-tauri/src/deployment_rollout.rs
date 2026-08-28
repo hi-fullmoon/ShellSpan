@@ -32,12 +32,49 @@ fn now_ms() -> i64 {
     crate::db::current_timestamp_ms()
 }
 
+fn sqlite_usize(value: usize) -> i64 {
+    i64::try_from(value).expect("deployment rollout integer is bounded")
+}
+
+fn usize_from_row(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<usize> {
+    let value = row.get::<_, i64>(index)?;
+    usize::try_from(value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
+    })
+}
+
+fn optional_usize_from_row(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<usize>> {
+    row.get::<_, Option<i64>>(index)?
+        .map(|value| {
+            usize::try_from(value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    index,
+                    rusqlite::types::Type::Integer,
+                    Box::new(error),
+                )
+            })
+        })
+        .transpose()
+}
+
 fn digest(domain: &str, value: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(domain.as_bytes());
     hasher.update([0]);
     hasher.update(value);
-    format!("sha256-v1:{:x}", hasher.finalize())
+    let encoded = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("sha256-v1:{encoded}")
 }
 
 fn json_digest<T: Serialize>(domain: &str, value: &T) -> Result<String, String> {
@@ -976,7 +1013,7 @@ fn create_rollout_state(
                      phase='running', current_batch_index=?4, circuit_open=0,
                      circuit_reason=NULL, recovery_required=0, cancellation_requested=0,
                      updated_at=?5 WHERE rollout_id=?1",
-                    params![review.rollout_id, review.review_id, review.plan_digest, approval.batch_index, now],
+                    params![review.rollout_id, review.review_id, review.plan_digest, sqlite_usize(approval.batch_index), now],
                 )
                 .map_err(|error| format!("failed to start recovered deployment rollout: {error}"))?;
             transaction
@@ -1004,7 +1041,7 @@ fn create_rollout_state(
                         review.application_id,
                         review.environment,
                         review.version,
-                        approval.batch_index,
+                        sqlite_usize(approval.batch_index),
                         now,
                     ],
                 )
@@ -1033,14 +1070,14 @@ fn create_rollout_state(
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, ?11)",
                     params![
                         review.rollout_id,
-                        batch.batch_index,
+                        sqlite_usize(batch.batch_index),
                         batch.batch_digest,
                         batch.kind.as_str(),
                         status,
-                        batch.target_indexes.len(),
-                        batch.required_healthy,
-                        batch.maximum_failures,
-                        completed_count,
+                        sqlite_usize(batch.target_indexes.len()),
+                        sqlite_usize(batch.required_healthy),
+                        sqlite_usize(batch.maximum_failures),
+                        sqlite_usize(completed_count),
                         (batch.batch_index == approval.batch_index).then_some(review.review_id.as_str()),
                         (batch.batch_index == approval.batch_index).then_some(now),
                     ],
@@ -1059,8 +1096,8 @@ fn create_rollout_state(
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'notStarted', 0)",
                     params![
                         review.rollout_id,
-                        target.target_index,
-                        target.batch_index,
+                        sqlite_usize(target.target_index),
+                        sqlite_usize(target.batch_index),
                         target.profile_id,
                         target.target.identity_digest,
                         target.operation_id,
@@ -1084,7 +1121,7 @@ fn create_rollout_state(
                 params![
                     review.review_id,
                     review.rollout_id,
-                    approval.batch_index,
+                    sqlite_usize(approval.batch_index),
                     approval.batch_digest,
                     approval_digest,
                     now,
@@ -1112,7 +1149,7 @@ fn consume_next_batch_approval(
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, Option<usize>>(1)?,
+                        optional_usize_from_row(row, 1)?,
                         row.get::<_, bool>(2)?,
                         row.get::<_, bool>(3)?,
                         row.get::<_, bool>(4)?,
@@ -1140,7 +1177,7 @@ fn consume_next_batch_approval(
                 params![
                     review.review_id,
                     review.rollout_id,
-                    approval.batch_index,
+                    sqlite_usize(approval.batch_index),
                     approval.batch_digest,
                     approval_digest,
                     now,
@@ -1162,7 +1199,7 @@ fn consume_next_batch_approval(
                  WHERE rollout_id=?1 AND batch_index=?2 AND status='awaitingApproval'",
                 params![
                     review.rollout_id,
-                    approval.batch_index,
+                    sqlite_usize(approval.batch_index),
                     review.review_id,
                     now
                 ],
@@ -1237,7 +1274,7 @@ fn persist_target_result(
                  WHERE rollout_id=?1 AND target_index=?2 AND status='running'",
                 params![
                     rollout_id,
-                    target_index,
+                    sqlite_usize(target_index),
                     status,
                     persisted_json,
                     error_category,
@@ -1265,8 +1302,14 @@ fn batch_counts(
                         SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),
                         SUM(CASE WHEN status IN ('failed','cancelled','interrupted') THEN 1 ELSE 0 END)
                  FROM deployment_rollout_targets WHERE rollout_id=?1 AND batch_index=?2",
-                params![rollout_id, batch_index],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                params![rollout_id, sqlite_usize(batch_index)],
+                |row| {
+                    Ok((
+                        usize_from_row(row, 0)?,
+                        usize_from_row(row, 1)?,
+                        usize_from_row(row, 2)?,
+                    ))
+                },
             )
             .map_err(|error| format!("failed to summarize deployment rollout batch: {error}"))
     })
@@ -1286,7 +1329,13 @@ fn stop_rollout(
                 "UPDATE deployment_rollout_batches SET status='failed', healthy_count=?3,
                  failed_count=?4, completed_at=?5
                  WHERE rollout_id=?1 AND batch_index=?2",
-                params![rollout_id, batch_index, healthy, failed, now],
+                params![
+                    rollout_id,
+                    sqlite_usize(batch_index),
+                    sqlite_usize(healthy),
+                    sqlite_usize(failed),
+                    now
+                ],
             )
             .map_err(|error| format!("failed to stop deployment rollout batch: {error}"))?;
         transaction
@@ -1326,7 +1375,13 @@ fn advance_after_batch(
             .execute(
                 "UPDATE deployment_rollout_batches SET status='succeeded', healthy_count=?3,
                  failed_count=?4, completed_at=?5 WHERE rollout_id=?1 AND batch_index=?2",
-                params![review.rollout_id, batch_index, healthy, failed, now],
+                params![
+                    review.rollout_id,
+                    sqlite_usize(batch_index),
+                    sqlite_usize(healthy),
+                    sqlite_usize(failed),
+                    now
+                ],
             )
             .map_err(|error| format!("failed to finish deployment rollout batch: {error}"))?;
         if let Some(next) = review.batches.get(batch_index + 1) {
@@ -1334,7 +1389,7 @@ fn advance_after_batch(
                 .execute(
                     "UPDATE deployment_rollout_batches SET status='awaitingApproval'
                      WHERE rollout_id=?1 AND batch_index=?2",
-                    params![review.rollout_id, next.batch_index],
+                    params![review.rollout_id, sqlite_usize(next.batch_index)],
                 )
                 .map_err(|error| {
                     format!("failed to open deployment rollout batch gate: {error}")
@@ -1343,16 +1398,16 @@ fn advance_after_batch(
                 .execute(
                     "UPDATE deployment_rollouts SET phase='awaitingBatchApproval',
                      current_batch_index=?2, updated_at=?3 WHERE rollout_id=?1",
-                    params![review.rollout_id, next.batch_index, now],
+                    params![review.rollout_id, sqlite_usize(next.batch_index), now],
                 )
                 .map_err(|error| format!("failed to advance deployment rollout: {error}"))?;
         } else {
-            let failed_total: usize = transaction
+            let failed_total = transaction
                 .query_row(
                     "SELECT COUNT(*) FROM deployment_rollout_targets
                      WHERE rollout_id=?1 AND status<>'succeeded'",
                     params![review.rollout_id],
-                    |row| row.get(0),
+                    |row| usize_from_row(row, 0),
                 )
                 .map_err(|error| format!("failed to finalize deployment rollout: {error}"))?;
             transaction
@@ -1426,7 +1481,7 @@ fn execute_batch(
                 db.execute(
                     "UPDATE deployment_rollout_targets SET status='running', started_at=?3
                      WHERE rollout_id=?1 AND target_index=?2 AND status='notStarted'",
-                    params![review.rollout_id, target_index, now_ms()],
+                    params![review.rollout_id, sqlite_usize(*target_index), now_ms()],
                 )
                 .map_err(|error| format!("failed to start deployment rollout target: {error}"))?;
                 Ok(())
@@ -1729,14 +1784,14 @@ fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRollo
         environment: row.get(5)?,
         version: row.get(6)?,
         phase: row.get(7)?,
-        current_batch_index: row.get(8)?,
+        current_batch_index: optional_usize_from_row(row, 8)?,
         circuit_open: row.get(9)?,
         circuit_reason: row.get(10)?,
         recovery_required: row.get(11)?,
-        total_targets: row.get(12)?,
-        succeeded_targets: row.get(13)?,
-        failed_targets: row.get(14)?,
-        not_started_targets: row.get(15)?,
+        total_targets: usize_from_row(row, 12)?,
+        succeeded_targets: usize_from_row(row, 13)?,
+        failed_targets: usize_from_row(row, 14)?,
+        not_started_targets: usize_from_row(row, 15)?,
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
     })
@@ -1785,10 +1840,10 @@ fn get_rollout(
             .map_err(|error| format!("failed to prepare rollout batch detail: {error}"))?;
         let batches = batch_statement
             .query_map(params![rollout_id], |row| {
-                let index: usize = row.get(0)?;
+                let index = usize_from_row(row, 0)?;
                 let plan = review.batches[index].clone();
-                let healthy: usize = row.get(2)?;
-                let failed: usize = row.get(3)?;
+                let healthy = usize_from_row(row, 2)?;
+                let failed = usize_from_row(row, 3)?;
                 let total = plan.target_indexes.len();
                 Ok(DeploymentRolloutBatchStateV2 {
                     health: DeploymentRolloutHealthSummaryV2 {
@@ -1819,7 +1874,7 @@ fn get_rollout(
             .map_err(|error| format!("failed to prepare rollout target detail: {error}"))?;
         let targets = target_statement
             .query_map(params![rollout_id], |row| {
-                let index: usize = row.get(0)?;
+                let index = usize_from_row(row, 0)?;
                 let result_json: Option<String> = row.get(2)?;
                 Ok(DeploymentRolloutTargetStateV2 {
                     reviewed: review.targets[index].clone(),
@@ -1899,14 +1954,15 @@ pub(crate) fn list_deployment_rollouts(
         let mut statement = connection
             .prepare(&sql)
             .map_err(|error| format!("failed to prepare deployment rollout list: {error}"))?;
-        statement
+        let summaries = statement
             .query_map(
                 params![request.phase, request.recovery_required, request.limit],
                 summary_from_row,
             )
             .map_err(|error| format!("failed to query deployment rollout list: {error}"))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("failed to collect deployment rollout list: {error}"))
+            .map_err(|error| format!("failed to collect deployment rollout list: {error}"))?;
+        Ok(summaries)
     })
 }
 
@@ -1919,11 +1975,12 @@ pub(crate) fn recover_interrupted_rollouts(
             let mut statement = transaction
                 .prepare("SELECT rollout_id FROM deployment_rollouts WHERE phase='running'")
                 .map_err(|error| format!("failed to prepare rollout recovery: {error}"))?;
-            statement
+            let ids = statement
                 .query_map([], |row| row.get::<_, String>(0))
                 .map_err(|error| format!("failed to query rollout recovery: {error}"))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| format!("failed to collect rollout recovery: {error}"))?
+                .map_err(|error| format!("failed to collect rollout recovery: {error}"))?;
+            ids
         };
         for rollout_id in &rollout_ids {
             transaction
