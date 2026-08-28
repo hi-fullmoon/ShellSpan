@@ -42,7 +42,6 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 - Runbook 已具备精确目标绑定、来源摘要、变量解析、风险复核、逐步审批、独立 SSH channel、超时、取消、输出截断、秘密擦除和结果身份校验。
 - 终端侧已具备输出缓冲、ANSI 清理、按行截断、敏感内容脱敏和实时上下文更新。
 - 操作历史已具备 append-only、幂等事件、目标身份、证据引用、脱敏命令预览和导出能力。
-- Deployment Runbook v2 已完成阶段 5/5：在阶段 2 单主机执行、阶段 3 持久化/恢复/独立回滚和阶段 4 显式 canary + rolling 协调之上，增加独立 Deployment 工作台、合法模板/导入导出、后端 review 冻结、精确单主机/批次审批、批次/主机证据、恢复入口与独立回滚建议；仍不进入 v1 tag 调度、流量切换、动态发现、任意 Shell、无人审批回滚或后台 GC。
 
 ### 3.2 主要缺口
 
@@ -54,7 +53,6 @@ TermBridge Agent 的默认执行方式采用**工具驱动的独立执行通道*
 - 当前风险模型偏向静态 Runbook，缺少适用于动态 Agent 的多维风险、审批摘要、防重放和策略版本。
 - P1-A/P1-E 已具备 Agent 事件序列、快照恢复、运行预算和连续失败投影；真实 SSH adapter 与后置真实 fixture 仍未准入。
 - 没有专用 Agent PTY、终端租约、用户接管或交互式密码边界。
-- Deployment Runbook v2 阶段 5 已提供专用 Deployment UI、两套 systemd Web 模板、v2 导入导出、review 后冻结、精确审批、authoritative 进度/熔断/恢复与逐主机独立回滚；流量/负载均衡集成、动态发现、任意 Shell、无人值守回滚和实际清理执行继续 deferred。
 
 ## 4. 不可破坏的安全约束
 
@@ -586,7 +584,7 @@ P3 不进入首个 MVP，必须在 P2 的安全指标稳定后启动。
 - 阶段 4 已在现有 Agent workspace 增加独立“专用终端”标签，只按 run-bound snapshot 挂载 `AgentPty`；无绑定运行时明确显示 unavailable/preview/fake-gated，不会回退到或伪装普通用户终端。严格 decoder/store/hook 以 backend sequence 为权威，丢弃倒退 snapshot，并在 remount、状态提示、失败与断线后重新 snapshot；事件不改变 owner authority。
 - 专用 xterm 的所有用户输入只瞬时进入 `agent_terminal_takeover_and_write`：Agent owner 的首字节在后端原子接管后写入，User owner 的后续字节仍走同一窄入口；前端不持有 lease token、不注册 raw Agent write、不调用普通 `write_session`，也不把输入、秘密或用户期间输出复制到 React state、日志、审计、持久化或模型 observation。
 - 阶段 4 UI 持续展示 owner/control/lease/capture/action/risk/approval TTL/untrusted observation/verification/recovery，提供显式接管、归还、pause/stop 与精确 approval；秘密、未知敏感、全屏、编辑器和安装器只显示用户 handoff，不提供批准绕过。P3 仍为 `planned`，production admission 与 P0/P1/P2 gate 均未解除。阶段 4 证据与限制见 [`docs/ai-agent-p3-terminal-workspace-ui-phase4.md`](docs/ai-agent-p3-terminal-workspace-ui-phase4.md)。
-- 阶段 5 以机器可读 acceptance matrix、Rust/TypeScript 共享 fixture、deterministic UI → mocked narrow Tauri IPC → authoritative snapshot E2E、固定种子 property corpus 和结构化 import/command/schema 隐私审计收口阶段 1–4。十项 terminal 安全不变量的 platform-independent 自动化证据为 `automatedPass`；macOS 实际完成本地 direct-process PTY、Tauri debug build 和 5 秒 WebView/IPC 启动 smoke。Windows 只配置了现有 `windows-2025` matrix 的 Agent 定点检查但本阶段未运行，SSH 仍只有 contract evidence、未创建真实 AgentPty。既有 deployment 30-error Rust 编译基线仍阻断无补丁的 Rust full gate；用于执行 55 个定点/平台 Rust tests 的临时 deployment-only compatibility patch 已完全还原且不提交。P3 仍为 `planned`，production gate 不变；证据与退出条件见 [`docs/ai-agent-p3-terminal-control-phase5-acceptance.md`](docs/ai-agent-p3-terminal-control-phase5-acceptance.md)。
+- 阶段 5 以机器可读 acceptance matrix、Rust/TypeScript 共享 fixture、deterministic UI → mocked narrow Tauri IPC → authoritative snapshot E2E、固定种子 property corpus 和结构化 import/command/schema 隐私审计收口阶段 1–4。十项 terminal 安全不变量的 platform-independent 自动化证据为 `automatedPass`；macOS 实际完成本地 direct-process PTY、Tauri debug build 和 5 秒 WebView/IPC 启动 smoke。Windows 只配置了现有 `windows-2025` matrix 的 Agent 定点检查但本阶段未运行，SSH 仍只有 contract evidence、未创建真实 AgentPty。验收时记录的 deployment 编译基线现仅作为历史证据；相关功能已退役，不再阻断当前 Rust gate。P3 仍为 `planned`，production gate 不变；证据与退出条件见 [`docs/ai-agent-p3-terminal-control-phase5-acceptance.md`](docs/ai-agent-p3-terminal-control-phase5-acceptance.md)。
 
 ### 9.4 P3 退出条件
 

@@ -35,7 +35,6 @@ fn ensure_native_store() -> Result<(), String> {
 pub(crate) const KEY_SERVICE: &str = "com.termbridge.key";
 pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.termbridge.profile-password";
 pub(crate) const PROFILE_SECRET_SERVICE: &str = "com.termbridge.profile-secret";
-pub(crate) const DEPLOYMENT_SECRET_SERVICE: &str = "com.termbridge.deployment";
 
 /// Kinds of per-profile secrets other than the main login password.
 ///

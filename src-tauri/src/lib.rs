@@ -7,11 +7,6 @@ mod ai_sessions;
 mod commands;
 mod connection;
 mod db;
-mod deployment_execution;
-mod deployment_persistence;
-mod deployment_rollout;
-#[allow(dead_code)]
-mod deployment_runbook;
 mod directory_request_registry;
 mod execution;
 mod health;
@@ -26,7 +21,6 @@ mod path_utils;
 mod port_forward;
 mod remote_fs;
 mod remote_health;
-mod rollback_execution;
 mod runbook;
 mod session;
 mod sftp_pool;
@@ -265,18 +259,6 @@ pub fn run() {
             }
             let termbridge_dir = app.path().home_dir()?.join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
-            let recovered = deployment_persistence::recover_interrupted_operations(&database)?;
-            if recovered > 0 {
-                log::warn!(
-                    "Marked {recovered} deployment operation(s) interrupted after application restart"
-                );
-            }
-            let recovered_rollouts = deployment_rollout::recover_interrupted_rollouts(&database)?;
-            if recovered_rollouts > 0 {
-                log::warn!(
-                    "Marked {recovered_rollouts} deployment rollout(s) recoveryRequired after application restart"
-                );
-            }
             let recovered_agent_terminal =
                 agent::terminal_audit::recover_interrupted_agent_terminal_audits(&database)?;
             if recovered_agent_terminal > 0 {
@@ -313,9 +295,6 @@ pub fn run() {
         .manage(PreflightCancellationRegistry::default())
         .manage(RemoteHealthCancellationRegistry::default())
         .manage(execution::ExecutionCancellationRegistry::default())
-        .manage(deployment_execution::DeploymentExecutionRegistry::default())
-        .manage(deployment_rollout::DeploymentRolloutRegistry::default())
-        .manage(rollback_execution::RollbackExecutionRegistry::default())
         .manage(DownloadCancellationRegistry::default())
         .manage(RemoteCopyCancellationRegistry::default())
         .manage(RemoteFileReadCancellationRegistry::default())
@@ -439,25 +418,6 @@ pub fn run() {
             health::get_system_health,
             remote_health::collect_remote_health_snapshot,
             remote_health::cancel_remote_health_snapshot,
-            deployment_execution::review_deployment_execution,
-            deployment_execution::execute_deployment,
-            deployment_execution::cancel_deployment,
-            rollback_execution::review_rollback_execution,
-            rollback_execution::execute_rollback,
-            rollback_execution::cancel_rollback,
-            deployment_persistence::list_deployment_operations,
-            deployment_persistence::get_deployment_operation,
-            deployment_persistence::list_deployment_release_cleanup_candidates,
-            deployment_persistence::review_deployment_release_cleanup,
-            deployment_rollout::review_deployment_rollout,
-            deployment_rollout::start_deployment_rollout,
-            deployment_rollout::approve_next_deployment_rollout_batch,
-            deployment_rollout::cancel_deployment_rollout,
-            deployment_rollout::list_deployment_rollouts,
-            deployment_rollout::get_deployment_rollout,
-            deployment_rollout::recover_deployment_rollout,
-            runbook::open_deployment_runbook_file,
-            runbook::save_deployment_runbook_file,
         ]);
 
     let app = menu::configure_builder(builder)

@@ -1,9 +1,10 @@
+#![allow(dead_code)]
+
 //! Crate-private SSH execution boundary.
 //!
 //! The reviewed API owns operation cancellation, target revalidation, SSH
 //! session/channel execution, bounded output, and known-secret redaction. It
-//! is not registered as a Tauri command; deployment and rollback adapters are
-//! its only current production callers. Existing fixed-purpose Remote FS and
+//! is not registered as a Tauri command. Existing fixed-purpose Remote FS and
 //! Remote Health probes share only the raw channel-start primitive so the
 //! production crate has one auditable `Channel::exec` call site; that primitive
 //! is not an authorization boundary and must not be used by a P1 Agent tool.
@@ -29,12 +30,15 @@ mod target;
 
 #[cfg(test)]
 pub(crate) use cancellation::ExecutionCancellationErrorKind;
-pub(crate) use cancellation::{valid_operation_id, ExecutionCancellationRegistry};
+pub(crate) use cancellation::ExecutionCancellationRegistry;
 #[cfg(test)]
 pub(crate) use request::DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES;
+#[cfg(test)]
 pub(crate) use request::{
     ExecutionOutputPolicy, FrozenTargetIdentity, ReviewedSshCommand, ReviewedSshExecutionRequest,
 };
+#[cfg(test)]
 pub(crate) use result::{ExecutionErrorCategory, ExecutionStatus, ReviewedSshExecutionResult};
-pub(crate) use ssh::{execute_reviewed_ssh_command, start_ssh_exec_channel};
-pub(crate) use target::revalidate_frozen_target_identity;
+#[cfg(test)]
+pub(crate) use ssh::execute_reviewed_ssh_command;
+pub(crate) use ssh::start_ssh_exec_channel;

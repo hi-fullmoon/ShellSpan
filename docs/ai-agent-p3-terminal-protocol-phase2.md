@@ -46,7 +46,7 @@ Test results for this phase:
 - TypeScript production build: passed.
 - Full TypeScript suite: 1288 passed, 1 pre-existing unrelated `useI18n` locale-switch test failed.
 - Rust formatting: passed.
-- Rust compilation/tests are blocked before test execution by the existing deployment baseline on the phase-1 starting commit: SHA-256 digest `LowerHex`, `rusqlite` `usize` conversion, non-exhaustive deployment error matches, and rollout statement lifetime errors. No deployment source was changed in this phase.
+- At phase-2 acceptance time, Rust compilation/tests were blocked before execution by an unrelated deployment baseline on the phase-1 starting commit. That subsystem was later retired and no longer blocks the current Rust gate.
 
 ## Known limitations and next phase
 

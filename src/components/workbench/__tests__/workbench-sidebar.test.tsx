@@ -8,7 +8,6 @@ vi.mock('@/hooks/useI18n', () => ({
       'workbench.connections.title': 'Connections',
       'workbench.keychain.title': 'Keychain',
       'workbench.knownHosts.title': 'Known Hosts',
-      'deployment.title': 'Deployments',
       'workbench.monitor.title': 'Monitor',
       'workbench.logs.title': 'Log explorer',
       'workbench.settings.title': 'Settings',
