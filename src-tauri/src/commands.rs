@@ -2744,7 +2744,11 @@ mod tests {
     use crate::models::SessionCommand;
     use crossbeam_channel::{bounded, never, unbounded, TryRecvError, TrySendError};
     use portable_pty::CommandBuilder;
+    #[cfg(target_os = "macos")]
+    use portable_pty::{native_pty_system, PtySize};
     use std::ffi::OsStr;
+    #[cfg(target_os = "macos")]
+    use std::io::Read;
     use std::sync::{Arc, Barrier};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -3002,6 +3006,40 @@ mod tests {
             command.get_env("TERM_PROGRAM_VERSION"),
             Some(OsStr::new(env!("CARGO_PKG_VERSION"))),
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_real_pty_smoke_uses_a_direct_deterministic_process() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("open a real local PTY");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone the real PTY reader");
+        let mut command = CommandBuilder::new("/usr/bin/printf");
+        command.arg("termbridge-pty-smoke\\n");
+        configure_local_terminal_environment(&mut command);
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .expect("spawn a fixed executable without a shell");
+        drop(pair.slave);
+
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("read the deterministic PTY output");
+        let status = child.wait().expect("wait for the PTY child");
+
+        assert!(status.success());
+        assert_eq!(output.replace("\r\n", "\n"), "termbridge-pty-smoke\n");
     }
 
     #[test]

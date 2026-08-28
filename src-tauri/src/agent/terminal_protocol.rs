@@ -317,4 +317,33 @@ mod tests {
         );
         assert_eq!(schema["oneOf"].as_array().unwrap().len(), 4);
     }
+
+    #[test]
+    fn fixed_seed_unknown_field_enum_and_size_corpus_fails_closed() {
+        let base = r#"{"schemaVersion":1,"action":"terminal.respond","actionId":"action-1","observationId":"observation-1","response":"accept"}"#;
+        let mut seed = 0x0a11_ce55_u32;
+        for index in 0..384 {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let raw = match seed % 3 {
+                0 => base.replacen(
+                    "\"response\":\"accept\"",
+                    &format!("\"response\":\"accept\",\"unknown{seed}\":true"),
+                    1,
+                ),
+                1 => base.replacen(
+                    "terminal.respond",
+                    &format!("terminal.unknown{seed}"),
+                    1,
+                ),
+                _ => format!(
+                    "{{\"schemaVersion\":1,\"action\":\"terminal.respond\",\"actionId\":\"{}\",\"observationId\":\"observation-1\",\"response\":\"accept\"}}",
+                    "a".repeat(MAX_TERMINAL_ACTION_BYTES_V1 + (seed as usize % 32))
+                ),
+            };
+            assert!(
+                decode_terminal_action_v1(&raw).is_err(),
+                "seeded mutation {index} unexpectedly decoded"
+            );
+        }
+    }
 }

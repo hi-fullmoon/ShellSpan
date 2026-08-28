@@ -62,6 +62,28 @@ function sameBinding(
     && current.sessionId === incoming.sessionId;
 }
 
+const TERMINAL_ACTION_STATES = new Set([
+  'rejected',
+  'expired',
+  'revoked',
+  'handoffRequired',
+  'completed',
+  'failed',
+  'cancelled',
+  'unknownEffect',
+]);
+
+function preservesTerminalActions(
+  current: AgentTerminalSnapshotV1,
+  incoming: AgentTerminalSnapshotV1,
+): boolean {
+  const incomingById = new Map(incoming.actions.map((action) => [action.actionId, action]));
+  return current.actions.every((action) => {
+    if (!TERMINAL_ACTION_STATES.has(action.state)) return true;
+    return incomingById.get(action.actionId)?.state === action.state;
+  });
+}
+
 /**
  * Backend-snapshot-only projection for a dedicated Agent PTY.
  *
@@ -84,6 +106,9 @@ export const useAgentTerminalStore = create<AgentTerminalProjectionStateV1>()((s
     }
     if (current && snapshot.lastSequence < current.lastSequence) {
       return 'stale';
+    }
+    if (current && !preservesTerminalActions(current, snapshot)) {
+      return 'invalid';
     }
     set((state) => ({
       snapshotsByRunId: {

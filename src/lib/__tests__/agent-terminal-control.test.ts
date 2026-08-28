@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import coordinatorFixture from '../../../tests/fixtures/agent-terminal-protocol/v1/terminal-coordinator.json';
+import acceptanceFixture from '../../../tests/fixtures/agent-terminal-protocol/v1/terminal-acceptance.json';
 import controlSource from '../agent-terminal-control.ts?raw';
 import backendIpcSource from '../../../src-tauri/src/agent/terminal_ipc.rs?raw';
 
@@ -33,5 +34,32 @@ describe('Agent terminal narrow control plane v1', () => {
     for (const field of coordinatorFixture.forbiddenSnapshotFields) {
       expect(controlSource).not.toMatch(new RegExp(`\\b${field}\\??:`));
     }
+  });
+
+  it('shares the phase-5 acceptance matrix with Rust without opening admission', () => {
+    expect(acceptanceFixture.schemaVersion).toBe(1);
+    expect(acceptanceFixture.startCommit).toBe(
+      '18cd213d426d650e6c6229f28897308f7a0b22c9',
+    );
+    expect(acceptanceFixture.requirements.map((requirement) => requirement.id)).toEqual([
+      'AT-OWNERSHIP-001',
+      'AT-PROTOCOL-002',
+      'AT-COORDINATOR-003',
+      'AT-HANDOFF-004',
+      'AT-CAPTURE-005',
+      'AT-VERIFICATION-006',
+      'AT-UI-AUTHORITY-007',
+      'AT-XTERM-ISOLATION-008',
+      'AT-LIFECYCLE-009',
+      'AT-ADMISSION-010',
+    ]);
+    expect(acceptanceFixture.admission).toEqual({
+      p0: 'blocked',
+      p1: 'blocked',
+      p2: 'blocked',
+      p3: 'planned',
+      productionAgentTerminal: 'blocked',
+    });
+    expect(controlSource).toContain('AGENT_TERMINAL_PRODUCTION_ADMITTED_V1 = false');
   });
 });

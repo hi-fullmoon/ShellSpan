@@ -81,4 +81,30 @@ describe('Agent terminal semantic protocol v1', () => {
       expect(['input', 'handoff', 'deny']).toContain(fixtureCase.expectedOutcome);
     }
   });
+
+  it('fails closed for a fixed-seed unknown-field enum and size property corpus', () => {
+    let seed = 0xa11c_e55;
+    const next = (): number => {
+      seed = (Math.imul(seed, 1_103_515_245) + 12_345) >>> 0;
+      return seed;
+    };
+    const valid = (actionFixture.cases as ActionFixtureCase[])
+      .filter((entry) => entry.valid)
+      .map((entry) => entry.value as Record<string, unknown>);
+    for (let index = 0; index < 384; index += 1) {
+      const base = structuredClone(valid[next() % valid.length]);
+      const mutation = next() % 3;
+      if (mutation === 0) {
+        base[`unknown${next()}`] = 'must-fail-closed';
+      } else if (mutation === 1) {
+        base.action = `terminal.unknown${next()}`;
+      } else {
+        base.actionId = 'a'.repeat(MAX_TERMINAL_ACTION_BYTES_V1 + (next() % 32));
+      }
+      expect(
+        () => decodeTerminalActionV1(JSON.stringify(base)),
+        `seeded mutation ${index}`,
+      ).toThrow();
+    }
+  });
 });
