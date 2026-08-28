@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://termbridge.local/protocol/agent/v1/agent-contract.schema.json",
-  "title": "TermBridge Agent M0 contract fixtures",
+  "title": "TermBridge Agent v1 contracts and fixtures",
   "type": "object",
   "additionalProperties": false,
   "required": ["contractVersion", "examples", "permissionMatrix"],
@@ -10,7 +10,7 @@
     "examples": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["request", "toolCall", "toolResults"],
+      "required": ["request", "toolCall", "toolResults", "streamEvents"],
       "properties": {
         "request": { "$ref": "#/$defs/agentRequest" },
         "toolCall": { "$ref": "#/$defs/agentToolCall" },
@@ -18,6 +18,11 @@
           "type": "array",
           "minItems": 5,
           "items": { "$ref": "#/$defs/agentToolResult" }
+        },
+        "streamEvents": {
+          "type": "array",
+          "minItems": 11,
+          "items": { "$ref": "#/$defs/agentStreamEvent" }
         }
       }
     },
@@ -72,7 +77,12 @@
         "requestId": { "$ref": "#/$defs/identifier" },
         "callId": { "$ref": "#/$defs/identifier" },
         "name": { "const": "run_terminal_command" },
-        "command": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+        },
         "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
         "target": { "$ref": "#/$defs/agentTarget" }
       }
@@ -168,6 +178,142 @@
         "providerCapability": { "$ref": "#/$defs/providerCapability" },
         "fallback": { "$ref": "#/$defs/safeFallback" }
       }
+    },
+    "agentStreamEventType": {
+      "enum": [
+        "started",
+        "capabilityDetected",
+        "safeFallback",
+        "textDelta",
+        "toolCall",
+        "toolResultAccepted",
+        "toolResultTimedOut",
+        "stepLimitReached",
+        "completed",
+        "cancelled",
+        "error"
+      ]
+    },
+    "agentStreamEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "target", "maxToolSteps", "toolResultTimeoutMs"],
+          "properties": {
+            "type": { "const": "started" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "target": { "$ref": "#/$defs/agentTarget" },
+            "maxToolSteps": { "type": "integer", "const": 8 },
+            "toolResultTimeoutMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "capability"],
+          "properties": {
+            "type": { "const": "capabilityDetected" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "capability": { "$ref": "#/$defs/providerCapability" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "fallback"],
+          "properties": {
+            "type": { "const": "safeFallback" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "fallback": { "$ref": "#/$defs/safeFallback" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "turn", "text"],
+          "properties": {
+            "type": { "const": "textDelta" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "turn": { "type": "integer", "minimum": 1 },
+            "text": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "step", "toolCall"],
+          "properties": {
+            "type": { "const": "toolCall" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "step": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "toolCall": { "$ref": "#/$defs/agentToolCall" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "step", "callId", "status"],
+          "properties": {
+            "type": { "const": "toolResultAccepted" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "step": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "callId": { "$ref": "#/$defs/identifier" },
+            "status": { "enum": ["completed", "rejected", "failed", "timedOut", "cancelled"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "step", "callId"],
+          "properties": {
+            "type": { "const": "toolResultTimedOut" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "step": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "callId": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "maxToolSteps"],
+          "properties": {
+            "type": { "const": "stepLimitReached" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "maxToolSteps": { "type": "integer", "const": 8 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "toolSteps", "fallback"],
+          "properties": {
+            "type": { "const": "completed" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "toolSteps": { "type": "integer", "minimum": 0, "maximum": 8 },
+            "fallback": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId"],
+          "properties": {
+            "type": { "const": "cancelled" },
+            "requestId": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "requestId", "message"],
+          "properties": {
+            "type": { "const": "error" },
+            "requestId": { "$ref": "#/$defs/identifier" },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
     },
     "permissionMatrixCase": {
       "type": "object",

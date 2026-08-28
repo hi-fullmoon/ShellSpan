@@ -1,3 +1,5 @@
+import type { AiMessageInput, AiProviderConfig } from './ai';
+
 export const AGENT_PERMISSION_MODES = [
   'requestApproval',
   'autoApproveReadOnly',
@@ -40,6 +42,12 @@ export interface AgentRequest {
   readonly task: 'agent';
   readonly target: AgentTargetSnapshot;
   readonly permissionMode: AgentPermissionMode;
+}
+
+export interface AgentStartRequest {
+  readonly request: AgentRequest;
+  readonly provider: AiProviderConfig;
+  readonly messages: AiMessageInput[];
 }
 
 export interface RunTerminalCommandArguments {
@@ -107,3 +115,64 @@ export interface AgentContractStatus {
   readonly providerCapability: AgentProviderCapabilityEvidence;
   readonly fallback?: AgentSafeFallback;
 }
+
+export const AGENT_STREAM_EVENT_TYPES = [
+  'started',
+  'capabilityDetected',
+  'safeFallback',
+  'textDelta',
+  'toolCall',
+  'toolResultAccepted',
+  'toolResultTimedOut',
+  'stepLimitReached',
+  'completed',
+  'cancelled',
+  'error',
+] as const;
+
+export type AgentStreamEvent =
+  | Readonly<{
+      type: 'started';
+      requestId: string;
+      target: AgentTargetSnapshot;
+      maxToolSteps: number;
+      toolResultTimeoutMs: number;
+    }>
+  | Readonly<{
+      type: 'capabilityDetected';
+      requestId: string;
+      capability: AgentProviderCapabilityEvidence;
+    }>
+  | Readonly<{
+      type: 'safeFallback';
+      requestId: string;
+      fallback: AgentSafeFallback;
+    }>
+  | Readonly<{ type: 'textDelta'; requestId: string; turn: number; text: string }>
+  | Readonly<{ type: 'toolCall'; requestId: string; step: number; toolCall: AgentToolCall }>
+  | Readonly<{
+      type: 'toolResultAccepted';
+      requestId: string;
+      step: number;
+      callId: string;
+      status: AgentToolResultStatus;
+    }>
+  | Readonly<{
+      type: 'toolResultTimedOut';
+      requestId: string;
+      step: number;
+      callId: string;
+    }>
+  | Readonly<{
+      type: 'stepLimitReached';
+      requestId: string;
+      maxToolSteps: number;
+    }>
+  | Readonly<{
+      type: 'completed';
+      requestId: string;
+      toolSteps: number;
+      fallback: boolean;
+    }>
+  | Readonly<{ type: 'cancelled'; requestId: string }>
+  | Readonly<{ type: 'error'; requestId: string; message: string }>;
