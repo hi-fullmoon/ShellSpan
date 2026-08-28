@@ -1,11 +1,32 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  configurePetdex: vi.fn(),
+  loadPreferences: vi.fn(),
+  savePreferences: vi.fn(),
+}));
+
+vi.mock('@/lib/petdex', () => ({ configurePetdex: mocks.configurePetdex }));
+vi.mock('@/lib/tauri', () => ({
+  invokeLoadPreferences: mocks.loadPreferences,
+  invokeSavePreferences: mocks.savePreferences,
+}));
+
 import { DEFAULT_SHORTCUTS, mergeShortcutBindings, useAppStore } from '../appStore';
 
 const initialState = useAppStore.getState();
 
 describe('appStore', () => {
   beforeEach(() => {
+    vi.useRealTimers();
+    mocks.configurePetdex.mockReset().mockResolvedValue('notDetected');
+    mocks.loadPreferences.mockReset().mockResolvedValue([]);
+    mocks.savePreferences.mockReset().mockResolvedValue(undefined);
     useAppStore.setState(initialState, true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('defaults to workbench section', () => {
@@ -19,6 +40,32 @@ describe('appStore', () => {
 
   it('defaults to connections workbench tab', () => {
     expect(useAppStore.getState().activeWorkbenchTab).toBe('connections');
+  });
+
+  it('keeps Petdex disabled by default and synchronizes explicit opt-in', () => {
+    expect(useAppStore.getState().petdexEnabled).toBe(false);
+
+    useAppStore.getState().setPetdexEnabled(true);
+
+    expect(useAppStore.getState().petdexEnabled).toBe(true);
+    expect(mocks.configurePetdex).toHaveBeenCalledWith(true);
+  });
+
+  it('hydrates and persists the Petdex opt-in as a boolean preference', async () => {
+    mocks.loadPreferences.mockResolvedValue([['petdexEnabled', 'true']]);
+
+    await useAppStore.getState().hydrateFromDb();
+
+    expect(useAppStore.getState().petdexEnabled).toBe(true);
+    expect(mocks.configurePetdex).toHaveBeenCalledWith(true);
+
+    vi.useFakeTimers();
+    useAppStore.getState().setPetdexEnabled(false);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(mocks.savePreferences).toHaveBeenCalledWith(
+      expect.arrayContaining([['petdexEnabled', 'false']]),
+    );
   });
 
   it('sets active workbench tab', () => {
