@@ -453,6 +453,16 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 退出条件：用户无需查看日志即可判断 Agent 的目标、命令、风险、审批、执行状态和结果。
 
+实现证据：
+
+- `src/components/ai/ai-panel.tsx` 提供互斥且显式的“问答 / 生成命令 / Agent”三模式。前两种仍只调用既有 `ai_start_request`，Agent 只在实验开关、服务商结构化工具能力和已连接终端均通过后调用独立的 `AgentUiController`；入口在默认关闭时仍可见但不可启用，并向辅助技术说明问答和生成命令不会获得终端工具。Agent lane 仅保存在内存，未进入 M5 的持久化或审计范围。
+- `src/lib/agent-ui-controller.ts` 在启动请求前完成 M1 事件监听，把结构化 `toolCall` 严格交给 M3 `AgentApprovalController`，再由 M2 PTY 执行器运行并将脱敏结果回传模型。拒绝、用户停止、结果回传失败、流目标错配以及终端断线/关闭/身份变化会同时收敛本地工具与后端请求；单纯切换活动标签不会取消或重绑定。条件重试生成新请求，但复用原目标快照且仅在原连接身份仍有效时开放。
+- `src/stores/agentStore.ts` 与 `src/components/ai/agent-run-view.tsx` 形成独立 Agent 产品状态流：展示正在分析、准备命令、等待批准、执行、读取结果、验证、完成/部分完成/未完成；非零退出码、失败工具或步骤上限不会被汇总为完全完成。Assistant 文本为空但携带工具卡时消息保留有效；没有文本也没有工具的空响应才失败。
+- `src/components/ai/agent-approval-card.tsx` 复用项目现有 shadcn Card、Badge、Button、AlertDialog 与 Alert，展示冻结目标标题和完整 `user@host:port · sessionId`、意图、完整单行命令、本地风险、工具状态、退出码及有界脱敏输出摘要，并提供复制、批准、拒绝、停止和满足原目标条件时的整任务重试。`src/locales/en-US.ts` 与 `zh-CN.ts` 覆盖全部模式、阶段、状态、降级和恢复文案，状态使用 live region，消息区、对话框与所有操作均具备语义标签和键盘焦点行为。
+- 定向回归命令 `pnpm exec vitest run src/stores/__tests__/agentStore.test.ts src/lib/__tests__/agent-ui-controller.test.ts src/components/ai/__tests__/agent-permission-approval.test.tsx src/components/ai/__tests__/agent-run-view.test.tsx src/components/ai/__tests__/ai-panel.test.ts` 覆盖三模式工具隔离、完整逐条批准、自动只读、拒绝、停止与 Ctrl-C 协调、后端结果超时、目标漂移/标签切换、同目标重试、空文本工具消息、非零退出和步骤上限、状态与辅助技术语义，共 5 个文件、55 项通过。
+- 本地浏览器 QA：在 1280×900 中文桌面视口验证冻结目标横幅、已完成只读卡、等待批准的状态修改卡、完整命令/风险/退出码/`[REDACTED]` 输出以及批准确认对话框；Esc 可关闭对话框并把焦点还给“批准”。在 390×844 英文视口验证工具卡、输出和批准/拒绝/停止操作区无横向溢出（`scrollWidth === viewportWidth === 390`）；只挂载生产组件的只读 QA 页面无 console warning/error。真实本地应用页同时验证实验开关默认关闭、三模式入口可见、问答与生成命令显式切换及 Agent 禁用原因；普通浏览器中预期存在的 Tauri IPC 不可用日志不作为桌面运行结果。
+- 全量验证：`pnpm test` 为 142 个文件、1246 项通过；`pnpm build` 成功（仅既有 Vite 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml` 为 345 项通过、10 项隔离环境测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`、`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
+
 ### M5 — 持久化、脱敏与审计
 
 交付：
