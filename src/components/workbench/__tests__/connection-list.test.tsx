@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, fireEvent, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ConnectionList } from '../connection-list';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
@@ -29,6 +30,10 @@ const makeProfile = (overrides?: Partial<ConnectionProfile>): ConnectionProfile 
 describe('ConnectionList', () => {
   beforeEach(() => {
     useRecentProfilesStore.setState({ recentIds: [], initialized: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('renders an empty state with a new-connection button when there are no profiles', () => {
@@ -156,6 +161,100 @@ describe('ConnectionList', () => {
       gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     });
     rectSpy.mockRestore();
+  });
+
+  it('keeps connection notes on one line without a native title tooltip', () => {
+    const notes = 'Personal server used for deployment and monitoring';
+    render(
+      <ConnectionList
+        profiles={[makeProfile({ notes })]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    const note = screen.getByText(notes);
+    expect(note).toHaveClass('truncate');
+    expect(note).not.toHaveClass('line-clamp-2');
+    expect(note).not.toHaveAttribute('title');
+  });
+
+  it('shows the full connection notes in a tooltip when they overflow', async () => {
+    const notes = 'A long operational note that does not fit on one line';
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(
+      function getScrollWidth(this: HTMLElement) {
+        return this.textContent === notes ? 320 : 0;
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
+      function getClientWidth(this: HTMLElement) {
+        return this.textContent === notes ? 120 : 0;
+      },
+    );
+
+    render(
+      <ConnectionList
+        profiles={[makeProfile({ notes })]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    await userEvent.hover(screen.getByText(notes));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(notes);
+    });
+  });
+
+  it('does not show a connection-notes tooltip when the text fits', async () => {
+    const notes = 'Short note';
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(
+      function getScrollWidth(this: HTMLElement) {
+        return this.textContent === notes ? 120 : 0;
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
+      function getClientWidth(this: HTMLElement) {
+        return this.textContent === notes ? 120 : 0;
+      },
+    );
+
+    render(
+      <ConnectionList
+        profiles={[makeProfile({ notes })]}
+        initialized={true}
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    await userEvent.hover(screen.getByText(notes));
+
+    expect(document.querySelector('[data-slot="tooltip-content"]')).not.toBeInTheDocument();
   });
 
   it('debounces repeated clicks on every profile-card action', () => {

@@ -1,4 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
@@ -290,6 +297,50 @@ interface ConnectionCardProps {
   onQuickActions: (profile: ConnectionProfile) => void;
 }
 
+const ConnectionNotes: React.FC<{ notes: string }> = ({ notes }) => {
+  const notesRef = useRef<HTMLParagraphElement>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  const updateTruncation = useCallback(() => {
+    const element = notesRef.current;
+    if (!element) return;
+    const nextIsTruncated = element.scrollWidth > element.clientWidth;
+    setIsTruncated((current) => (
+      current === nextIsTruncated ? current : nextIsTruncated
+    ));
+  }, []);
+
+  useLayoutEffect(() => {
+    updateTruncation();
+    const element = notesRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(updateTruncation);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [notes, updateTruncation]);
+
+  return (
+    <Tooltip disabled={!isTruncated}>
+      <TooltipTrigger
+        render={(
+          <p
+            ref={notesRef}
+            className="truncate text-xs text-muted-foreground"
+            onFocus={updateTruncation}
+            onMouseEnter={updateTruncation}
+          />
+        )}
+      >
+        {notes}
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm whitespace-pre-wrap break-words">
+        {notes}
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
 const ConnectionCard = React.memo<ConnectionCardProps>(({
   profile,
   onEdit,
@@ -379,9 +430,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(({
         </div>
       </div>
       {profile.notes && (
-        <p className="line-clamp-2 text-xs text-muted-foreground" title={profile.notes}>
-          {profile.notes}
-        </p>
+        <ConnectionNotes notes={profile.notes} />
       )}
       {profile.jumpHost && (
         <div className="rounded-lg border border-app-border bg-muted px-2.5 py-2">
