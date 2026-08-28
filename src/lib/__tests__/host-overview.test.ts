@@ -52,7 +52,6 @@ describe('buildHostOverview', () => {
         bytesSent: 10,
         bytesReceived: 20,
       }],
-      { id: 'agent-1', requestId: 'request-1', goal: 'diagnose', sessionId: 's1', contextLabel: 'root@prod', contextObservedAt: 1_000, phase: 'awaitingReview', responseText: '', steps: [] },
     );
 
     expect(snapshot).toMatchObject({
@@ -62,7 +61,6 @@ describe('buildHostOverview', () => {
       sftpRemotePanes: 1,
       activeTransfers: 1,
       failedTransfers: 0,
-      diagnosticPhase: 'awaitingReview',
       latestError: 'transport reset',
       activePortForwards: 1,
       failedPortForwards: 0,

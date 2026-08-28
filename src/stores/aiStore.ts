@@ -18,7 +18,7 @@ interface AiState {
   toggleOpen: () => void;
   beginRequest: (input: {
     requestId: string;
-    task: Exclude<AiTaskKind, 'diagnosticAgent'>;
+    task: AiTaskKind;
     userContent: string;
     providerId: string;
     conversationId?: string;
@@ -41,9 +41,8 @@ interface AiState {
   clear: () => void;
 }
 
-function messageLane(task: AiTaskKind): 'conversation' | 'command' | 'agent' {
+function messageLane(task: AiTaskKind): 'conversation' | 'command' {
   if (task === 'generateCommand') return 'command';
-  if (task === 'diagnosticAgent') return 'agent';
   return 'conversation';
 }
 

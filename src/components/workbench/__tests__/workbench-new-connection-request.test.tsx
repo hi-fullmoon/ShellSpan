@@ -1,7 +1,9 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Workbench from '../index';
 import { useAppStore } from '@/stores/appStore';
+import { useProfileStore } from '@/stores/profileStore';
+import type { ConnectionProfile } from '@/types';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -36,12 +38,32 @@ vi.mock('@/hooks/useSftpConnectionOpener', () => ({
 }));
 
 vi.mock('../connection-list', () => ({
-  ConnectionList: () => <div data-testid="connection-list" />,
+  ConnectionList: ({
+    profiles,
+    onEdit,
+  }: {
+    profiles: ConnectionProfile[];
+    onEdit: (profile: ConnectionProfile) => void;
+  }) => (
+    <div data-testid="connection-list">
+      {profiles.map((profile) => (
+        <button key={profile.id} type="button" onClick={() => onEdit(profile)}>
+          edit {profile.id}
+        </button>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock('../connection-form-drawer', () => ({
-  ConnectionFormDrawer: ({ open }: { open: boolean }) => (
-    open ? <div data-testid="connection-form-drawer" /> : null
+  ConnectionFormDrawer: ({ open, initial }: { open: boolean; initial?: ConnectionProfile }) => (
+    open ? (
+      <div
+        data-testid="connection-form-drawer"
+        data-profile-id={initial?.id}
+        data-password={initial?.password}
+      />
+    ) : null
   ),
 }));
 
@@ -54,10 +76,12 @@ vi.mock('../operation-history-panel', () => ({ OperationHistoryPanel: () => null
 vi.mock('../connection-import-dialog', () => ({ ConnectionImportDialog: () => null }));
 
 const initialAppState = useAppStore.getState();
+const initialProfileState = useProfileStore.getState();
 
 describe('Workbench new connection request', () => {
   beforeEach(() => {
     useAppStore.setState(initialAppState, true);
+    useProfileStore.setState(initialProfileState, true);
   });
 
   it('opens the connection form and consumes a request from another section', async () => {
@@ -76,6 +100,40 @@ describe('Workbench new connection request', () => {
       activeSection: 'workbench',
       activeWorkbenchTab: 'connections',
       pendingWorkbenchAction: null,
+    });
+  });
+
+  it('retrieves keychain secrets before opening an existing connection for editing', async () => {
+    const storedProfile: ConnectionProfile = {
+      id: 'profile-1',
+      name: 'Production',
+      host: 'prod.example.com',
+      port: 22,
+      username: 'deploy',
+      authMethod: 'password',
+      password: undefined,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const ensurePassword = vi.fn().mockResolvedValue({
+      ...storedProfile,
+      password: 'saved-secret',
+    });
+    useProfileStore.setState({
+      profiles: [storedProfile],
+      initialized: true,
+      ensurePassword,
+    });
+
+    render(<Workbench />);
+    fireEvent.click(screen.getByRole('button', { name: 'edit profile-1' }));
+
+    await waitFor(() => {
+      expect(ensurePassword).toHaveBeenCalledWith(storedProfile);
+      expect(screen.getByTestId('connection-form-drawer')).toHaveAttribute(
+        'data-password',
+        'saved-secret',
+      );
     });
   });
 });

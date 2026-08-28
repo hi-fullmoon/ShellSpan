@@ -1,7 +1,6 @@
 import type { SftpConnection } from '@/stores/sftpStore';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { TransferOperation } from '@/stores/transferStore';
-import type { StaticDiagnosticRun } from '@/types/ai';
 import type {
   ConnectionProfile,
   DisconnectEvent,
@@ -16,7 +15,6 @@ export interface HostOverviewSnapshot {
   sftpRemotePanes: number;
   activeTransfers: number;
   failedTransfers: number;
-  diagnosticPhase?: StaticDiagnosticRun['phase'];
   latestDisconnect?: DisconnectEvent;
   latestError?: string;
   activePortForwards: number;
@@ -33,7 +31,6 @@ export function buildHostOverview(
   transfers: TransferOperation[],
   disconnectEvents: DisconnectEvent[],
   portForwards: PortForwardRuntime[],
-  agentRun?: StaticDiagnosticRun,
 ): HostOverviewSnapshot {
   const hostSessions = sessions.filter((session) => session.profileId === profile.id);
   const terminals: Record<SessionStatus, number> = {
@@ -60,7 +57,6 @@ export function buildHostOverview(
   const failedTransfer = hostTransfers.find((transfer) => transfer.status === 'failed');
   const hostForwards = portForwards.filter((runtime) => runtime.profileId === profile.id);
   const failedForward = hostForwards.find((runtime) => runtime.status === 'failed');
-  const diagnosticSessionIds = new Set(hostSessions.map((session) => session.sessionId));
 
   return {
     terminals,
@@ -75,12 +71,6 @@ export function buildHostOverview(
       ACTIVE_TRANSFER_STATUSES.has(transfer.status ?? 'running')
     )).length,
     failedTransfers: hostTransfers.filter((transfer) => transfer.status === 'failed').length,
-    diagnosticPhase: agentRun && (
-      agentRun.profileId === profile.id
-      || (!agentRun.profileId && diagnosticSessionIds.has(agentRun.sessionId))
-    )
-      ? agentRun.phase
-      : undefined,
     latestDisconnect,
     latestError: failedForward?.lastError ?? failedTransfer?.error ?? latestDisconnect?.reason,
     activePortForwards: hostForwards.filter((runtime) => (

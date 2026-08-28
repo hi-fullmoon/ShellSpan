@@ -1,7 +1,6 @@
 export type AiProviderKind = 'ollama' | 'openAi' | 'openAiCompatible';
 export type AiProviderPreset = 'ollama' | 'openai' | 'deepseek' | 'minimax' | 'kimi' | 'custom';
-export type AiStructuredOutputMode = 'jsonSchema' | 'jsonObject' | 'prompt';
-export type AiTaskKind = 'chat' | 'explainTerminal' | 'generateCommand' | 'diagnosticAgent';
+export type AiTaskKind = 'chat' | 'explainTerminal' | 'generateCommand';
 
 export interface AiProviderConfig {
   id: string;
@@ -9,7 +8,6 @@ export interface AiProviderConfig {
   baseUrl: string;
   model: string;
   requiresApiKey: boolean;
-  structuredOutput: AiStructuredOutputMode;
   apiKey?: string;
 }
 
@@ -46,7 +44,7 @@ export type AiStreamEvent =
 export interface AiChatMessage extends AiMessageInput {
   id: string;
   requestId: string;
-  task: Exclude<AiTaskKind, 'diagnosticAgent'>;
+  task: AiTaskKind;
   status: 'streaming' | 'completed' | 'cancelled' | 'failed';
   providerId: string;
   conversationId?: string;
@@ -81,88 +79,4 @@ export interface AiSessionMeta {
 export interface AiSessionFile {
   conversation: AiConversation;
   messages: AiChatMessage[];
-}
-
-/**
- * Legacy one-shot diagnostic-plan state. Dynamic P1 runs use the versioned
- * contracts in `src/types/agent.ts` and are projected from backend snapshots.
- */
-export type StaticDiagnosticRunPhase =
-  | 'planning'
-  | 'awaitingReview'
-  | 'cancelled'
-  | 'error';
-
-export type StaticDiagnosticStepStatus =
-  | 'running'
-  | 'completed'
-  | 'informational'
-  | 'failed';
-
-export interface DiagnosticAgentPlanStep {
-  id: string;
-  title: string;
-  description: string;
-  command: string;
-  risk: 'readOnly' | 'stateChange' | 'destructive';
-  evidenceIds: string[];
-  impact: string;
-  rollback: string;
-  expected: {
-    exitCode: number;
-    stdoutContains: string[];
-  };
-  timeoutSeconds: number;
-  safeToRetry: boolean;
-}
-
-export interface DiagnosticAgentEvidenceRequirement {
-  id: string;
-  description: string;
-  source: 'context' | 'stepOutput';
-  sourceStepId: string | null;
-  maxAgeSeconds: number;
-}
-
-export interface DiagnosticAgentPlan {
-  objective: string;
-  target: string;
-  assumptions: string[];
-  summary: string;
-  evidence: DiagnosticAgentEvidenceRequirement[];
-  steps: DiagnosticAgentPlanStep[];
-}
-
-export interface StaticDiagnosticRunStep {
-  id: string;
-  kind: 'tool' | 'analysis' | 'command';
-  title: string;
-  description: string;
-  command?: string;
-  risk?: 'readOnly' | 'stateChange' | 'destructive';
-  evidenceIds?: string[];
-  impact?: string;
-  rollback?: string;
-  expected?: DiagnosticAgentPlanStep['expected'];
-  timeoutSeconds?: number;
-  safeToRetry?: boolean;
-  status: StaticDiagnosticStepStatus;
-}
-
-export interface StaticDiagnosticRun {
-  id: string;
-  requestId: string;
-  goal: string;
-  sessionId: string;
-  conversationId?: string;
-  profileId?: string;
-  contextLabel: string;
-  contextSource?: 'terminal' | 'remoteHealth';
-  contextObservedAt: number;
-  phase: StaticDiagnosticRunPhase;
-  summary?: string;
-  plan?: DiagnosticAgentPlan;
-  responseText: string;
-  steps: StaticDiagnosticRunStep[];
-  error?: string;
 }

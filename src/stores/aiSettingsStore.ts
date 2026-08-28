@@ -6,7 +6,6 @@ import type {
   AiProviderKind,
   AiProviderPreset,
   AiProviderProfile,
-  AiStructuredOutputMode,
 } from '@/types/ai';
 import { invokeLoadPreferences, invokeSavePreferences } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
@@ -21,7 +20,6 @@ export interface AiProviderPresetDefinition {
   baseUrl: string;
   model: string;
   requiresApiKey: boolean;
-  structuredOutput: AiStructuredOutputMode;
 }
 
 export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
@@ -32,7 +30,6 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     baseUrl: 'http://127.0.0.1:11434',
     model: 'qwen3',
     requiresApiKey: false,
-    structuredOutput: 'jsonSchema',
   },
   {
     preset: 'openai',
@@ -41,7 +38,6 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     baseUrl: 'https://api.openai.com',
     model: 'gpt-5.4-mini',
     requiresApiKey: true,
-    structuredOutput: 'jsonSchema',
   },
   {
     preset: 'deepseek',
@@ -50,7 +46,6 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-v4-flash',
     requiresApiKey: true,
-    structuredOutput: 'jsonObject',
   },
   {
     preset: 'minimax',
@@ -59,7 +54,6 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     baseUrl: 'https://api.minimaxi.com',
     model: 'MiniMax-M2.7',
     requiresApiKey: true,
-    structuredOutput: 'prompt',
   },
   {
     preset: 'kimi',
@@ -68,7 +62,6 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     baseUrl: 'https://api.kimi.com/coding',
     model: 'k3',
     requiresApiKey: true,
-    structuredOutput: 'jsonSchema',
   },
   {
     preset: 'custom',
@@ -77,7 +70,6 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     baseUrl: '',
     model: '',
     requiresApiKey: true,
-    structuredOutput: 'prompt',
   },
 ] as const;
 
@@ -142,10 +134,6 @@ function isProviderPreset(value: unknown): value is AiProviderPreset {
   return ['ollama', 'openai', 'deepseek', 'minimax', 'kimi', 'custom'].includes(String(value));
 }
 
-function isStructuredOutputMode(value: unknown): value is AiStructuredOutputMode {
-  return value === 'jsonSchema' || value === 'jsonObject' || value === 'prompt';
-}
-
 function sanitizeProviders(value: unknown): AiProviderProfile[] {
   if (!Array.isArray(value)) return [];
   const providers: AiProviderProfile[] = [];
@@ -173,11 +161,6 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
       requiresApiKey: typeof provider.requiresApiKey === 'boolean'
         ? provider.requiresApiKey
         : provider.kind !== 'ollama',
-      structuredOutput: isStructuredOutputMode(provider.structuredOutput)
-        ? provider.structuredOutput
-        : provider.kind === 'openAi' || provider.kind === 'ollama'
-          ? 'jsonSchema'
-          : 'prompt',
       apiKey: typeof provider.apiKey === 'string' ? provider.apiKey : undefined,
     });
   }
@@ -347,7 +330,6 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         baseUrl: provider.baseUrl.trim(),
         model: provider.model.trim(),
         requiresApiKey: provider.requiresApiKey,
-        structuredOutput: provider.structuredOutput,
         ...(provider.apiKey?.trim() ? { apiKey: provider.apiKey.trim() } : {}),
       };
     },
