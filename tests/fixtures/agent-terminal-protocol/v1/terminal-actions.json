@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "registered fixture start",
+      "valid": true,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.start",
+        "actionId": "action-start-1",
+        "driver": "fixture.shellPrompt",
+        "program": "termbridge-interactive-fixture",
+        "arguments": { "scenario": "confirm" }
+      }
+    },
+    {
+      "name": "enumerated prompt response",
+      "valid": true,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.respond",
+        "actionId": "action-respond-1",
+        "observationId": "observation-1",
+        "response": "accept"
+      }
+    },
+    {
+      "name": "allowlisted semantic key",
+      "valid": true,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.key",
+        "actionId": "action-key-1",
+        "observationId": "observation-1",
+        "key": "ctrlC"
+      }
+    },
+    {
+      "name": "handoff contains intent only",
+      "valid": true,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.handoff",
+        "actionId": "action-handoff-1",
+        "observationId": "observation-1",
+        "reason": "sensitivePrompt"
+      }
+    },
+    {
+      "name": "unknown protocol version",
+      "valid": false,
+      "value": {
+        "schemaVersion": 2,
+        "action": "terminal.respond",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "response": "accept"
+      }
+    },
+    {
+      "name": "unknown action",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.write",
+        "actionId": "action-1",
+        "data": "yes"
+      }
+    },
+    {
+      "name": "missing action id",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.respond",
+        "observationId": "observation-1",
+        "response": "accept"
+      }
+    },
+    {
+      "name": "extra session id is forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.respond",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "response": "accept",
+        "sessionId": "agent-session-1"
+      }
+    },
+    {
+      "name": "lease token is forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.key",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "key": "enter",
+        "leaseToken": { "epoch": 1, "revision": 1 }
+      }
+    },
+    {
+      "name": "arbitrary PTY bytes are forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.key",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "key": "enter",
+        "data": "\u001b[2J"
+      }
+    },
+    {
+      "name": "unknown driver",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.start",
+        "actionId": "action-1",
+        "driver": "generic.pty",
+        "program": "termbridge-interactive-fixture",
+        "arguments": { "scenario": "confirm" }
+      }
+    },
+    {
+      "name": "unknown program",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.start",
+        "actionId": "action-1",
+        "driver": "fixture.shellPrompt",
+        "program": "bash",
+        "arguments": { "scenario": "confirm" }
+      }
+    },
+    {
+      "name": "driver program mismatch",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.start",
+        "actionId": "action-1",
+        "driver": "fixture.shellPrompt",
+        "program": "sh",
+        "arguments": { "scenario": "choice" }
+      }
+    },
+    {
+      "name": "shell interpretation arguments are forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.start",
+        "actionId": "action-1",
+        "driver": "fixture.shellPrompt",
+        "program": "termbridge-interactive-fixture",
+        "arguments": { "scenario": "confirm", "shell": "sh", "args": ["-c", "echo owned"] }
+      }
+    },
+    {
+      "name": "start arguments cannot be free text",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.start",
+        "actionId": "action-1",
+        "driver": "fixture.shellPrompt",
+        "program": "termbridge-interactive-fixture",
+        "arguments": { "scenario": "echo yes | sh" }
+      }
+    },
+    {
+      "name": "raw credential response is forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.respond",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "response": "hunter2"
+      }
+    },
+    {
+      "name": "multiline paste is forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.respond",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "response": "yes\nrm -rf /"
+      }
+    },
+    {
+      "name": "escape response is forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.respond",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "response": "\u001b[2J"
+      }
+    },
+    {
+      "name": "nul response is forbidden",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.respond",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "response": "accept\u0000"
+      }
+    },
+    {
+      "name": "unknown key fails closed",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.key",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "key": "ctrlZ"
+      }
+    },
+    {
+      "name": "printable key fails closed",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.key",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "key": "y"
+      }
+    },
+    {
+      "name": "control character action id fails closed",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.handoff",
+        "actionId": "action\n1",
+        "observationId": "observation-1",
+        "reason": "unknownPrompt"
+      }
+    },
+    {
+      "name": "handoff cannot carry user input",
+      "valid": false,
+      "value": {
+        "schemaVersion": 1,
+        "action": "terminal.handoff",
+        "actionId": "action-1",
+        "observationId": "observation-1",
+        "reason": "sensitivePrompt",
+        "response": "secret"
+      }
+    }
+  ]
+}

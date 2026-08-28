@@ -572,6 +572,14 @@ P3 不进入首个 MVP，必须在 P2 的安全指标稳定后启动。
 - PTY 输出边界不是可信执行证据；修改完成后仍用独立只读工具验证。
 - 全屏程序、编辑器和安装器优先 handoff 给用户，不承诺通用 computer-use。
 
+#### 9.3.1 已实现的隔离基础（P3 仍为 planned）
+
+- 阶段 1 已增加 `SessionKind::AgentPty`、run/session-bound `TerminalLease`、epoch/revision replay fence，以及普通 `write_session` 不得写入专用 Agent PTY 的硬边界。
+- 阶段 2 已增加独立且冻结的 `agent-terminal/v1` 强类型协议；它没有并入或放宽 Agent v1/v2 decision union，模型侧不能提交 session ID、lease token、PTY bytes、shell command 或自由文本响应。
+- 编译期 driver registry、唯一 renderer、本地 prompt detector 与 run/target/observation/lease policy 已接到 crate-private lease input seam，并只由 fake caller 与共享 Rust/TypeScript fixture 验证；没有注册 generic Agent session-write IPC，也没有接入生产 Agent manager/model loop、审批、operation history 或 UI。
+- 当前 registry 只包含 deterministic interactive fixture 定义，用于冻结 driver/program/args、response/key corpus 和 handoff 边界；它不是通用 TUI、编辑器、安装器或 computer-use 承诺。
+- 阶段 2 证据与限制见 [`docs/ai-agent-p3-terminal-protocol-phase2.md`](docs/ai-agent-p3-terminal-protocol-phase2.md)。
+
 ### 9.4 P3 退出条件
 
 - 文件写入失败不覆盖原文件，并能清理或保留可识别的临时产物。
