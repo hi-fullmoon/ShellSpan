@@ -54,6 +54,14 @@ execution cancellation registry、worker 终态和未返回结果都只存在进
 
 P1/P2 若需要崩溃后的可解释状态，只能记录“结果未知”并重新采集只读证据；不得自动继续未确认的远端修改。
 
+## P3 阶段 5 验收附记（不改变本 ADR 的准入结论）
+
+截至 2026-08-28，P3 阶段 1–4 已把本 ADR 要求的专用 `SessionKind::AgentPty`、单 owner `TerminalLease`、run/session/epoch/revision fence、用户首输入原子 takeover、严格 `agent-terminal/v1` proposal、唯一 renderer/driver、后端 coordinator/audit/capture 和独立专用 xterm 实现为 feature-blocked foundation。阶段 5 用机器可读矩阵、Rust/TypeScript 共享 fixture、deterministic UI-to-mocked-narrow-IPC E2E 和结构化旁路/隐私审计完成了 platform-independent 自动化验收。
+
+该 foundation 不把 PTY 变成可信执行证据，也不改变 Exec 默认通道：PTY observation 始终 untrusted，修改后的成功只能由精确绑定的独立只读 verifier 证明；凭证、未知敏感、alternate screen、editor、installer 和 unknown surface 仍只 handoff。普通 `write_session` 仍只服务 `UserTerminal`，专用路径不存在 generic execute/raw write IPC。
+
+平台证据必须保持分级：macOS 只完成本机真实 Tauri/WebView/xterm 壳启动和 direct-process PTY smoke；Windows 只有 CI matrix 配置、未实际运行；SSH 只有 contract evidence、未创建真实 AgentPty。P0/P1/P2/P3 production admission 均未解除，没有接入真实模型、任意 shell、修改 executor 或通用 computer-use。详细证据与未验证退出条件见 `docs/ai-agent-p3-terminal-control-phase5-acceptance.md`。
+
 ## 结果
 
 Runbook 与未来 Agent 共享 reviewed kernel，交互终端保持用户控制，P1 的真实执行入口必须等待 P0 verified。代价是 Agent Exec 不自动继承用户 shell 上下文，交互式工具需要延后到带租约的专用 PTY；连接阶段 deadline 与崩溃后远端状态仍是显式限制，而不是被文档包装为已解决。

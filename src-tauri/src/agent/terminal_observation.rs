@@ -403,4 +403,42 @@ mod tests {
             TerminalPromptSurfaceV1::FullScreen
         );
     }
+
+    #[test]
+    fn fixed_seed_capture_property_is_bounded_redacted_and_time_limited() {
+        let mut capture = BoundedTerminalCaptureV1::new(10, vec!["fixture-extra-secret".into()]);
+        let mut seed = 0x5eed_1234_u32;
+        for index in 0..400 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let color = 30 + (seed % 8);
+            let chunk = format!(
+                "\u{1b}[{color}mline-{index} token=token-{seed} fixture-extra-secret\u{1b}[0m\n"
+            );
+            capture.ingest(&chunk, 11 + index);
+        }
+        let observation = capture.finish(500).unwrap();
+        assert!(observation.truncated);
+        assert!(observation.redacted_transcript.len() <= MAX_AGENT_TRANSCRIPT_BYTES_V1);
+        assert!(observation.line_count <= MAX_AGENT_TRANSCRIPT_LINES_V1 as u32);
+        assert!(!observation
+            .redacted_transcript
+            .contains("fixture-extra-secret"));
+        assert!(!observation.redacted_transcript.contains("token=token-"));
+        assert!(!observation
+            .redacted_transcript
+            .chars()
+            .any(|character| character == '\u{1b}' || character == '\0'));
+
+        let mut aged = BoundedTerminalCaptureV1::new(1_000, Vec::new());
+        assert!(aged.ingest("late output", 1_000 + MAX_AGENT_CAPTURE_AGE_MS_V1 + 1));
+        let aged_observation = aged
+            .finish(1_000 + MAX_AGENT_CAPTURE_AGE_MS_V1 + 2)
+            .unwrap();
+        assert!(aged_observation.truncated);
+        assert_eq!(aged_observation.surface, TerminalPromptSurfaceV1::Unknown);
+        assert_eq!(
+            aged_observation.prompt_class,
+            TerminalPromptClassV1::UnknownSensitive
+        );
+    }
 }

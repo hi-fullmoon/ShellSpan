@@ -3,6 +3,7 @@ import { decodeAgentTerminalSnapshotV1 } from '@/lib/agent-terminal-control';
 import {
   makeAgentTerminalSnapshot,
   makePendingTerminalApprovalSnapshot,
+  makeTerminalAction,
   makeTerminalApproval,
 } from '@/test/agent-terminal-fixtures';
 import { useAgentTerminalStore } from '../agentTerminalStore';
@@ -92,5 +93,45 @@ describe('agentTerminalStore', () => {
       .toBe('transport:disconnected');
     expect(useAgentTerminalStore.getState().snapshotsByRunId['run-1'].leaseOwner)
       .toBe('agent');
+  });
+
+  it('enforces fixed-seed sequence and terminal immutability properties', () => {
+    let seed = 0x5eed_1234;
+    const next = (): number => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed;
+    };
+    let acceptedSequence = 0;
+    for (let index = 0; index < 256; index += 1) {
+      const candidateSequence = next() % 64;
+      const result = useAgentTerminalStore.getState().installSnapshot(
+        makeAgentTerminalSnapshot({
+          lastSequence: candidateSequence,
+          leaseRevision: candidateSequence + 1,
+        }),
+      );
+      if (candidateSequence < acceptedSequence) {
+        expect(result, `seeded sequence sample ${index}`).toBe('stale');
+      } else {
+        expect(result, `seeded sequence sample ${index}`).toBe('installed');
+        acceptedSequence = candidateSequence;
+      }
+    }
+
+    const terminal = makeAgentTerminalSnapshot({
+      lastSequence: acceptedSequence + 1,
+      actions: [makeTerminalAction({
+        state: 'unknownEffect',
+        approvalId: null,
+      })],
+    });
+    expect(useAgentTerminalStore.getState().installSnapshot(terminal)).toBe('installed');
+    expect(useAgentTerminalStore.getState().installSnapshot({
+      ...terminal,
+      lastSequence: terminal.lastSequence + 1,
+      actions: [makeTerminalAction({ state: 'completed', approvalId: null })],
+    })).toBe('invalid');
+    expect(useAgentTerminalStore.getState().snapshotsByRunId['run-1'].actions[0].state)
+      .toBe('unknownEffect');
   });
 });

@@ -328,12 +328,14 @@ describe('AgentTerminalWorkspace', () => {
       lastSequence: 4,
       leaseEpoch: 2,
       leaseRevision: 2,
+      actions: unknown.actions,
     });
     const stopped = makeAgentTerminalSnapshot({
       controlState: 'stopped',
       lastSequence: 5,
       leaseEpoch: 3,
       leaseRevision: 3,
+      actions: unknown.actions,
     });
     const pause = vi.fn(async () => paused);
     const stop = vi.fn(async () => stopped);

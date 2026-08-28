@@ -58,6 +58,8 @@ jobs:
           cache: pnpm
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+      - name: Audit Agent terminal boundaries
+        run: pnpm check:agent-terminal
       - name: Run frontend tests
         run: pnpm test
       - name: Build frontend
@@ -73,6 +75,10 @@ jobs:
           workspaces: src-tauri -> target
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Run Agent terminal contract tests
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked agent::terminal -- --test-threads=1
+          cargo test --manifest-path src-tauri/Cargo.toml --locked terminal_lease -- --test-threads=1
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - name: Run Rust tests

@@ -2463,6 +2463,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn terminal_acceptance_fixture_is_shared_and_production_gates_remain_closed() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/agent-terminal-protocol/v1/terminal-acceptance.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture["schemaVersion"], 1);
+        assert_eq!(
+            fixture["startCommit"],
+            "18cd213d426d650e6c6229f28897308f7a0b22c9"
+        );
+        assert_eq!(fixture["knownBaseline"]["uniqueErrors"], 30);
+        let requirements = fixture["requirements"].as_array().unwrap();
+        assert_eq!(requirements.len(), 10);
+        let ids = requirements
+            .iter()
+            .map(|requirement| requirement["id"].as_str().unwrap())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(ids.len(), requirements.len());
+        assert!(requirements.iter().all(|requirement| {
+            !requirement["codeLocations"].as_array().unwrap().is_empty()
+                && !requirement["automatedEvidence"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+                && !requirement["exitCondition"].as_str().unwrap().is_empty()
+        }));
+        assert!(!CURRENT_AGENT_TERMINAL_ADMISSION_V1.p2_verified);
+        assert!(!CURRENT_AGENT_TERMINAL_ADMISSION_V1.feature_enabled);
+
+        let (manager, _receiver) = manager_and_receiver();
+        let lease = manager.terminal_lease_snapshot("agent-session-1").unwrap();
+        let error = AgentTerminalCoordinatorV1::default()
+            .register_interaction(
+                "run-1".to_string(),
+                "sha256-v1:target".to_string(),
+                lease,
+                manager,
+                1_000,
+                Vec::new(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, TerminalCoordinatorErrorCodeV1::AdmissionBlocked);
+    }
+
     #[derive(Default)]
     struct MemoryAudit {
         events: Mutex<Vec<TerminalAuditEventV1>>,
@@ -2796,6 +2841,102 @@ mod tests {
     }
 
     #[test]
+    fn control_and_approval_retries_are_exactly_once_and_reject_is_terminal() {
+        let (coordinator, manager, receiver, audit) = setup();
+        let first = coordinator
+            .takeover_and_write(
+                TerminalTakeoverAndWriteRequestV1 {
+                    schema_version: 1,
+                    run_id: "run-1".to_string(),
+                    client_action_id: "takeover-retry".to_string(),
+                    data: "first-user-input\n".to_string(),
+                },
+                1_001,
+                &manager,
+                &audit,
+            )
+            .unwrap();
+        let retry = coordinator
+            .takeover_and_write(
+                TerminalTakeoverAndWriteRequestV1 {
+                    schema_version: 1,
+                    run_id: "run-1".to_string(),
+                    client_action_id: "takeover-retry".to_string(),
+                    data: "different-retry-payload-must-not-write\n".to_string(),
+                },
+                1_002,
+                &manager,
+                &audit,
+            )
+            .unwrap();
+        assert_eq!(retry.last_sequence, first.last_sequence);
+        assert_eq!(
+            receiver
+                .try_iter()
+                .filter(|command| matches!(command, SessionCommand::Write(_)))
+                .count(),
+            1
+        );
+        let serialized = serde_json::to_string(&retry).unwrap();
+        assert!(!serialized.contains("first-user-input"));
+        assert!(!serialized.contains("different-retry-payload"));
+
+        let (coordinator, manager, receiver, audit) = setup();
+        start_and_observe(&coordinator, &manager, &audit);
+        let pending = coordinator
+            .propose_action(
+                "run-1",
+                r#"{"schemaVersion":1,"action":"terminal.respond","actionId":"respond-reject","observationId":"terminal-observation-1-1","response":"accept"}"#,
+                1_004,
+                5_000,
+                &manager,
+                &audit,
+            )
+            .unwrap();
+        let approval_id = pending.pending_approval.unwrap().approval_id;
+        let request = TerminalResolveApprovalRequestV1 {
+            schema_version: 1,
+            run_id: "run-1".to_string(),
+            approval_id: approval_id.clone(),
+            client_action_id: "reject-retry".to_string(),
+            decision: TerminalApprovalDecisionV1::Reject,
+        };
+        let rejected = coordinator
+            .resolve_approval(request.clone(), 1_005, &manager, &audit)
+            .unwrap();
+        assert_eq!(
+            rejected.actions.last().unwrap().state,
+            TerminalInteractionStateV1::Rejected
+        );
+        assert_eq!(
+            coordinator
+                .resolve_approval(request, 1_006, &manager, &audit)
+                .unwrap()
+                .last_sequence,
+            rejected.last_sequence
+        );
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(
+            coordinator
+                .resolve_approval(
+                    TerminalResolveApprovalRequestV1 {
+                        schema_version: 1,
+                        run_id: "run-1".to_string(),
+                        approval_id,
+                        client_action_id: "reject-changed-replay".to_string(),
+                        decision: TerminalApprovalDecisionV1::Reject,
+                    },
+                    1_007,
+                    &manager,
+                    &audit,
+                )
+                .unwrap_err()
+                .code,
+            TerminalCoordinatorErrorCodeV1::ApprovalReplay
+        );
+    }
+
+    #[test]
     fn changed_authoritative_lease_revokes_exact_approval_binding() {
         let (coordinator, manager, receiver, audit) = setup();
         start_and_observe(&coordinator, &manager, &audit);
@@ -3048,6 +3189,100 @@ mod tests {
             .unwrap();
         assert_eq!(stopped.control_state, TerminalRunControlStateV1::Stopped);
         assert_eq!(stopped.lease_owner, TerminalLeaseOwner::Unowned);
+    }
+
+    #[test]
+    fn application_exit_after_revoke_cancels_without_reacquiring_or_writing() {
+        let (coordinator, manager, receiver, audit) = setup();
+        start_and_observe(&coordinator, &manager, &audit);
+        coordinator
+            .propose_action(
+                "run-1",
+                r#"{"schemaVersion":1,"action":"terminal.respond","actionId":"exit-pending","observationId":"terminal-observation-1-1","response":"accept"}"#,
+                1_004,
+                5_000,
+                &manager,
+                &audit,
+            )
+            .unwrap();
+        manager
+            .revoke_agent_terminals_for_application_exit()
+            .unwrap();
+        assert_eq!(
+            coordinator
+                .handle_application_exit_after_revoke(1_005, &manager, &audit)
+                .unwrap(),
+            1
+        );
+        let snapshot = coordinator.snapshot("run-1").unwrap();
+        assert_eq!(snapshot.control_state, TerminalRunControlStateV1::Stopped);
+        assert_eq!(snapshot.lease_owner, TerminalLeaseOwner::Unowned);
+        assert_eq!(snapshot.lease_state, TerminalLeaseState::Revoked);
+        assert!(snapshot.pending_approval.is_none());
+        assert_eq!(
+            snapshot.actions.last().unwrap().state,
+            TerminalInteractionStateV1::Revoked
+        );
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn fixed_seed_sequence_and_terminal_state_immutability_properties_hold() {
+        let states = [
+            TerminalInteractionStateV1::Proposed,
+            TerminalInteractionStateV1::Validating,
+            TerminalInteractionStateV1::EvaluatingRisk,
+            TerminalInteractionStateV1::AwaitingApproval,
+            TerminalInteractionStateV1::Approved,
+            TerminalInteractionStateV1::Rejected,
+            TerminalInteractionStateV1::Expired,
+            TerminalInteractionStateV1::Revoked,
+            TerminalInteractionStateV1::Writing,
+            TerminalInteractionStateV1::AwaitingObservation,
+            TerminalInteractionStateV1::HandoffRequired,
+            TerminalInteractionStateV1::Completed,
+            TerminalInteractionStateV1::Failed,
+            TerminalInteractionStateV1::Cancelled,
+            TerminalInteractionStateV1::UnknownEffect,
+        ];
+        let mut seed = 0x51a7_e123_u32;
+        for index in 0..2_048 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let from = states[seed as usize % states.len()];
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let to = states[seed as usize % states.len()];
+            if from.is_terminal() {
+                assert!(
+                    !from.can_transition_to(to),
+                    "terminal seeded transition {index}: {from:?} -> {to:?}"
+                );
+            }
+        }
+
+        let (coordinator, manager, _receiver, audit) = setup();
+        start_and_observe(&coordinator, &manager, &audit);
+        let before = coordinator.snapshot("run-1").unwrap();
+        assert!(before.actions[0].state.is_terminal());
+        assert!(before
+            .events
+            .windows(2)
+            .all(|events| events[0].sequence < events[1].sequence));
+        let mut registry = coordinator.lock_registry().unwrap();
+        let run = registry.runs.get_mut("run-1").unwrap();
+        let sequence = run.next_sequence;
+        let state = run.actions["start-1"].public.state;
+        let error = run
+            .append_transition(
+                "start-1",
+                TerminalInteractionStateV1::Failed,
+                2_000,
+                "late terminal mutation",
+                &audit,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, TerminalCoordinatorErrorCodeV1::InvalidState);
+        assert_eq!(run.next_sequence, sequence);
+        assert_eq!(run.actions["start-1"].public.state, state);
     }
 
     #[test]
