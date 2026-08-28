@@ -65,7 +65,12 @@ fn sha256_digest(domain: &str, value: &[u8]) -> String {
     hasher.update(domain.as_bytes());
     hasher.update([0]);
     hasher.update(value);
-    format!("sha256-v1:{:x}", hasher.finalize())
+    let encoded = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("sha256-v1:{encoded}")
 }
 
 fn risk_name(risk: RunbookRisk) -> &'static str {
@@ -980,7 +985,12 @@ fn copy_and_hash<R: Read>(
     destination
         .flush()
         .map_err(|error| format!("failed to flush deployment artifact: {error}"))?;
-    Ok((total, format!("{:x}", hasher.finalize())))
+    let encoded = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok((total, encoded))
 }
 
 fn open_artifact_source(
@@ -1596,7 +1606,12 @@ fn execution_category_name(category: Option<ExecutionErrorCategory>) -> &'static
         Some(ExecutionErrorCategory::CredentialUnavailable) => "credentialUnavailable",
         Some(ExecutionErrorCategory::HostKeyRejected) => "hostKey",
         Some(ExecutionErrorCategory::ConnectionFailed) => "connection",
+        Some(ExecutionErrorCategory::ChannelOpenFailed) => "channelOpenFailed",
+        Some(ExecutionErrorCategory::CommandStartFailed) => "commandStartFailed",
         Some(ExecutionErrorCategory::OutputLimitExceeded) => "outputLimit",
+        Some(ExecutionErrorCategory::TransportFailed) => "transportFailed",
+        Some(ExecutionErrorCategory::Cancelled) => "cancelled",
+        Some(ExecutionErrorCategory::TimedOut) => "timedOut",
         Some(ExecutionErrorCategory::WorkerStopped) => "workerStopped",
         None => "remoteAction",
     }
