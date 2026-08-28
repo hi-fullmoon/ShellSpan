@@ -949,6 +949,61 @@ pub(crate) async fn delete_remote_path(
     result
 }
 
+fn is_cancelled_transfer_message(message: &str) -> bool {
+    matches!(
+        message,
+        "upload cancelled" | "download cancelled" | "remote copy cancelled"
+    )
+}
+
+fn notify_petdex_sftp_result(
+    app: &AppHandle,
+    operation_id: &str,
+    result: &Result<(), RemoteFsError>,
+) {
+    let event = match result {
+        Ok(()) => crate::petdex::PetdexEvent::SftpSucceeded(operation_id.to_string()),
+        Err(RemoteFsError::Other { message }) if is_cancelled_transfer_message(message) => {
+            crate::petdex::PetdexEvent::SftpCancelled(operation_id.to_string())
+        }
+        Err(_) => crate::petdex::PetdexEvent::SftpFailed(operation_id.to_string()),
+    };
+    crate::petdex::notify(app, event);
+}
+
+fn notify_petdex_sftp_batch_result(
+    app: &AppHandle,
+    operation_id: &str,
+    result: &Result<TransferBatchResult, RemoteFsError>,
+) {
+    let event = match result {
+        Ok(batch)
+            if batch.items.iter().any(|item| {
+                item.error
+                    .as_deref()
+                    .is_some_and(|message| !is_cancelled_transfer_message(message))
+            }) =>
+        {
+            crate::petdex::PetdexEvent::SftpFailed(operation_id.to_string())
+        }
+        Ok(batch)
+            if batch.items.iter().any(|item| {
+                item.error
+                    .as_deref()
+                    .is_some_and(is_cancelled_transfer_message)
+            }) =>
+        {
+            crate::petdex::PetdexEvent::SftpCancelled(operation_id.to_string())
+        }
+        Ok(_) => crate::petdex::PetdexEvent::SftpSucceeded(operation_id.to_string()),
+        Err(RemoteFsError::Other { message }) if is_cancelled_transfer_message(message) => {
+            crate::petdex::PetdexEvent::SftpCancelled(operation_id.to_string())
+        }
+        Err(_) => crate::petdex::PetdexEvent::SftpFailed(operation_id.to_string()),
+    };
+    crate::petdex::notify(app, event);
+}
+
 #[tauri::command]
 pub(crate) async fn copy_remote_path(
     app: AppHandle,
@@ -972,6 +1027,10 @@ pub(crate) async fn copy_remote_path(
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
+    crate::petdex::notify(
+        &app,
+        crate::petdex::PetdexEvent::SftpStarted(operation_id.clone()),
+    );
     let result = tauri::async_runtime::spawn_blocking(move || {
         copy_remote_path_blocking(request, cancel_flag, Some(&pool), Some(&known_hosts))
     })
@@ -979,14 +1038,21 @@ pub(crate) async fn copy_remote_path(
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = copies.remove(&operation_id);
-    let result = result.map_err(|error| RemoteFsError::Other {
-        message: format!("failed to join copy task: {error}"),
+    let result = result.map_err(|error| {
+        crate::petdex::notify(
+            &app,
+            crate::petdex::PetdexEvent::SftpFailed(operation_id.clone()),
+        );
+        RemoteFsError::Other {
+            message: format!("failed to join copy task: {error}"),
+        }
     })?;
     if let Err(error) = &result {
         error!("Copy remote path failed: {error:?}");
     } else {
         info!("Copied remote path successfully");
     }
+    notify_petdex_sftp_result(&app, &operation_id, &result);
     result
 }
 
@@ -1008,19 +1074,37 @@ pub(crate) async fn copy_remote_to_remote(
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
+    crate::petdex::notify(
+        &app,
+        crate::petdex::PetdexEvent::SftpStarted(operation_id.clone()),
+    );
+    let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        copy_remote_to_remote_blocking(app, request, cancel_flag, Some(&pool), Some(&known_hosts))
+        copy_remote_to_remote_blocking(
+            worker_app,
+            request,
+            cancel_flag,
+            Some(&pool),
+            Some(&known_hosts),
+        )
     })
     .await;
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = copies.remove(&operation_id);
-    let result = result.map_err(|error| RemoteFsError::Other {
-        message: format!("failed to join remote transfer task: {error}"),
+    let result = result.map_err(|error| {
+        crate::petdex::notify(
+            &app,
+            crate::petdex::PetdexEvent::SftpFailed(operation_id.clone()),
+        );
+        RemoteFsError::Other {
+            message: format!("failed to join remote transfer task: {error}"),
+        }
     })?;
     if let Err(error) = &result {
         error!("Copy remote to remote failed: {error:?}");
     }
+    notify_petdex_sftp_result(&app, &operation_id, &result);
     result
 }
 
@@ -1055,15 +1139,26 @@ pub(crate) async fn upload_local_paths(
         .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
+    crate::petdex::notify(
+        &app,
+        crate::petdex::PetdexEvent::SftpStarted(operation_id.clone()),
+    );
+    let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        upload_local_paths_blocking(app, request, cancel_flag, Some(&pool))
+        upload_local_paths_blocking(worker_app, request, cancel_flag, Some(&pool))
     })
     .await;
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = uploads.remove(&operation_id);
-    let result = result.map_err(|error| RemoteFsError::Other {
-        message: format!("failed to join upload task: {error}"),
+    let result = result.map_err(|error| {
+        crate::petdex::notify(
+            &app,
+            crate::petdex::PetdexEvent::SftpFailed(operation_id.clone()),
+        );
+        RemoteFsError::Other {
+            message: format!("failed to join upload task: {error}"),
+        }
     })?;
     match &result {
         Err(error) => warn!("Upload failed operation_id={operation_id}: {error:?}"),
@@ -1072,6 +1167,7 @@ pub(crate) async fn upload_local_paths(
         }
         Ok(_) => info!("Upload completed operation_id={operation_id}"),
     }
+    notify_petdex_sftp_batch_result(&app, &operation_id, &result);
     result
 }
 
@@ -1184,15 +1280,26 @@ pub(crate) async fn download_remote_paths(
         .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
+    crate::petdex::notify(
+        &app,
+        crate::petdex::PetdexEvent::SftpStarted(operation_id.clone()),
+    );
+    let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        download_remote_paths_blocking(app, request, cancel_flag, Some(&pool))
+        download_remote_paths_blocking(worker_app, request, cancel_flag, Some(&pool))
     })
     .await;
     // Remove the registry entry before propagating a JoinError so the
     // operation id does not leak on task failure.
     let _ = downloads.remove(&operation_id);
-    let result = result.map_err(|error| RemoteFsError::Other {
-        message: format!("failed to join download task: {error}"),
+    let result = result.map_err(|error| {
+        crate::petdex::notify(
+            &app,
+            crate::petdex::PetdexEvent::SftpFailed(operation_id.clone()),
+        );
+        RemoteFsError::Other {
+            message: format!("failed to join download task: {error}"),
+        }
     })?;
     match &result {
         Err(error) => warn!("Download failed operation_id={operation_id}: {error:?}"),
@@ -1201,6 +1308,7 @@ pub(crate) async fn download_remote_paths(
         }
         Ok(_) => info!("Download completed operation_id={operation_id}"),
     }
+    notify_petdex_sftp_batch_result(&app, &operation_id, &result);
     result
 }
 
@@ -2470,6 +2578,10 @@ pub(crate) fn spawn_ssh_thread(
 
         match run_result {
             Ok(message) => {
+                crate::petdex::notify(
+                    &app,
+                    crate::petdex::PetdexEvent::SshClosed(session_id.clone()),
+                );
                 let (reason_kind, retryable) =
                     classify_closed_reason(message.as_deref(), SessionStatus::Disconnected);
                 info!(
@@ -2493,6 +2605,10 @@ pub(crate) fn spawn_ssh_thread(
                 );
             }
             Err(connection_error) => {
+                crate::petdex::notify(
+                    &app,
+                    crate::petdex::PetdexEvent::SshFailed(session_id.clone()),
+                );
                 if let Some(tx) = connection_result_tx.as_ref() {
                     let _ = tx.send(Err(connection_error.to_create_session_error()));
                 }
