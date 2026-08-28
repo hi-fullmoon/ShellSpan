@@ -583,6 +583,9 @@ P3 不进入首个 MVP，必须在 P2 的安全指标稳定后启动。
 - 专用 PTY 输出现由 Rust 在 Agent owner 期间形成有界、ANSI/control 处理且通用脱敏的 untrusted observation；user owner 输出直接丢弃，归还控制会旋转 capture epoch。秘密提示、未知敏感、alternate-screen、编辑器和安装器会实际撤销 lease 并进入 `handoffRequired`。
 - 阶段 4 可使用的窄 control plane 仅包含 snapshot、resolve approval、takeover-and-write、return control、pause 与 stop。takeover-and-write 是唯一原始用户输入入口，并在同一 SessionManager 权威锁内完成 owner 转移与首个输入；原始输入不进入 snapshot、event、audit 或通用调用日志。
 - PTY output 不能满足状态修改 verification obligation；只有正确绑定的独立只读结构化 verifier evidence 才能标记 verified。阶段 3 只接 fake verifier/adapter，未连接真实模型、任意 shell、修改 executor 或 UI。阶段 3 证据与限制见 [`docs/ai-agent-p3-terminal-coordinator-phase3.md`](docs/ai-agent-p3-terminal-coordinator-phase3.md)。
+- 阶段 4 已在现有 Agent workspace 增加独立“专用终端”标签，只按 run-bound snapshot 挂载 `AgentPty`；无绑定运行时明确显示 unavailable/preview/fake-gated，不会回退到或伪装普通用户终端。严格 decoder/store/hook 以 backend sequence 为权威，丢弃倒退 snapshot，并在 remount、状态提示、失败与断线后重新 snapshot；事件不改变 owner authority。
+- 专用 xterm 的所有用户输入只瞬时进入 `agent_terminal_takeover_and_write`：Agent owner 的首字节在后端原子接管后写入，User owner 的后续字节仍走同一窄入口；前端不持有 lease token、不注册 raw Agent write、不调用普通 `write_session`，也不把输入、秘密或用户期间输出复制到 React state、日志、审计、持久化或模型 observation。
+- 阶段 4 UI 持续展示 owner/control/lease/capture/action/risk/approval TTL/untrusted observation/verification/recovery，提供显式接管、归还、pause/stop 与精确 approval；秘密、未知敏感、全屏、编辑器和安装器只显示用户 handoff，不提供批准绕过。P3 仍为 `planned`，production admission 与 P0/P1/P2 gate 均未解除。阶段 4 证据与限制见 [`docs/ai-agent-p3-terminal-workspace-ui-phase4.md`](docs/ai-agent-p3-terminal-workspace-ui-phase4.md)。
 
 ### 9.4 P3 退出条件
 

@@ -62,6 +62,10 @@ const TERMINAL_FONT_FAMILIES: Record<TerminalFontFamily, string> = {
   courierNew: '"Courier New", monospace',
 };
 
+export function resolveTerminalFontFamily(fontFamily: TerminalFontFamily): string {
+  return TERMINAL_FONT_FAMILIES[fontFamily];
+}
+
 const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
   fontSize: 14,
   fontFamily: 'system',
