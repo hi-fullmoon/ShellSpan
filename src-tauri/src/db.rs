@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 const CURRENT_SCHEMA_VERSION: i32 = 5;
 const CURRENT_DEPLOYMENT_SCHEMA_VERSION: i32 = 3;
+const CURRENT_AGENT_TERMINAL_SCHEMA_VERSION: i32 = 1;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -187,6 +188,45 @@ CREATE INDEX IF NOT EXISTS idx_operation_history_category_status
 CREATE INDEX IF NOT EXISTS idx_operation_history_profile_time
     ON operation_history_events(primary_profile_id, occurred_at DESC);
 INSERT INTO schema_version (version) VALUES (5);
+COMMIT;
+";
+
+// Agent terminal audit uses its own additive namespace. This preserves the
+// primary v5 compatibility promise while allowing a fixed, append-only schema
+// with no arbitrary JSON metadata or raw PTY content.
+const AGENT_TERMINAL_SCHEMA_V1: &str = "
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS agent_terminal_schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS agent_terminal_audit_events (
+    event_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    target_digest TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    action_digest TEXT NOT NULL,
+    risk_digest TEXT,
+    approval_digest TEXT,
+    lease_epoch INTEGER NOT NULL,
+    lease_revision INTEGER NOT NULL,
+    driver TEXT,
+    program TEXT,
+    scenario TEXT,
+    event_digest TEXT NOT NULL,
+    redacted_preview TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(run_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_terminal_audit_run_action
+    ON agent_terminal_audit_events(run_id, action_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_agent_terminal_audit_time
+    ON agent_terminal_audit_events(occurred_at DESC);
+INSERT INTO agent_terminal_schema_version (version) VALUES (1);
 COMMIT;
 ";
 
@@ -527,6 +567,23 @@ impl Database {
         if deployment_current < 3 {
             conn.execute_batch(DEPLOYMENT_SCHEMA_V3)
                 .map_err(|e| format!("deployment migration v3 failed: {e}"))?;
+        }
+
+        let agent_terminal_current: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM agent_terminal_schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if agent_terminal_current > CURRENT_AGENT_TERMINAL_SCHEMA_VERSION {
+            return Err(format!(
+                "Agent terminal schema version {agent_terminal_current} is newer than this build ({CURRENT_AGENT_TERMINAL_SCHEMA_VERSION})"
+            ));
+        }
+        if agent_terminal_current < 1 {
+            conn.execute_batch(AGENT_TERMINAL_SCHEMA_V1)
+                .map_err(|e| format!("Agent terminal migration v1 failed: {e}"))?;
         }
 
         Ok(())
