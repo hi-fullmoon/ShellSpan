@@ -26,8 +26,7 @@ pub(crate) const SSH_EXECUTION_POLL_INTERVAL: Duration = Duration::from_millis(2
 /// Starts an SSH exec channel without supplying policy or authorization.
 ///
 /// The reviewed executor below and the crate's pre-existing fixed-purpose
-/// Remote FS/Health probes are the only production callers. Agent tools must
-/// call [`execute_reviewed_ssh_command`] instead of this transport primitive.
+/// Remote FS/Health probes are the only production callers.
 pub(crate) fn start_ssh_exec_channel(
     channel: &mut ssh2::Channel,
     command: &str,

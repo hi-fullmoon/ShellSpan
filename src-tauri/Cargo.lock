@@ -19,7 +19,6 @@ dependencies = [
  "libssh2-sys",
  "log",
  "portable-pty",
- "regex",
  "reqwest 0.12.28",
  "rfd",
  "rusqlite",
@@ -45,7 +44,6 @@ dependencies = [
  "uuid",
  "windows-native-keyring-store",
  "windows-sys 0.60.2",
- "zeroize",
 ]
 
 [[package]]

@@ -75,14 +75,14 @@ const PROTOCOL_LABEL_KEYS: Record<AiProviderKind, LocaleKey> = {
   openAiCompatible: 'settings.ai.protocol.openAiCompatible',
 };
 
-const protocolOutputDefaults = (kind: AiProviderKind) => {
+const protocolDefaults = (kind: AiProviderKind) => {
   if (kind === 'ollama') {
-    return { kind, requiresApiKey: false, structuredOutput: 'jsonSchema' as const };
+    return { kind, requiresApiKey: false };
   }
   if (kind === 'openAi') {
-    return { kind, requiresApiKey: true, structuredOutput: 'jsonSchema' as const };
+    return { kind, requiresApiKey: true };
   }
-  return { kind, requiresApiKey: true, structuredOutput: 'prompt' as const };
+  return { kind, requiresApiKey: true };
 };
 
 export const AiSettingsSection: React.FC = () => {
@@ -294,7 +294,7 @@ export const AiSettingsSection: React.FC = () => {
                       <Select
                         value={selectedProvider.kind}
                         onValueChange={(value) => {
-                          if (value) updateProvider(selectedProvider.id, protocolOutputDefaults(value as AiProviderKind));
+                          if (value) updateProvider(selectedProvider.id, protocolDefaults(value as AiProviderKind));
                         }}
                       >
                         <SelectTrigger aria-label={t('settings.ai.protocol')}>

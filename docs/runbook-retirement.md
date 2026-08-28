@@ -6,4 +6,4 @@ The removal includes the Workbench and command-palette entry points, JSON editor
 
 Existing installations may still contain inert deployment tables or keychain entries created by earlier versions. The application no longer reads, writes, migrates, or executes them; the retirement deliberately avoids silently deleting local audit data or secrets during upgrade.
 
-The generic reviewed SSH execution kernel remains because fixed-purpose remote probes and the separately gated Agent roadmap use that infrastructure. It is not exposed as a deployment or generic execution IPC.
+The generic reviewed SSH execution kernel remains for fixed-purpose remote probes. It is not exposed as a deployment or generic execution IPC.

@@ -12,6 +12,7 @@ All notable changes to TermBridge are documented in this file.
 
 ### Chore
 
+- retire the Diagnostic Agent product and maintenance surface
 - close P0 execution foundation audit
 - update remaining files
 

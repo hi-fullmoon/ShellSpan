@@ -1,7 +1,5 @@
 #![allow(clippy::too_many_arguments)]
 
-#[allow(dead_code)]
-mod agent;
 mod ai;
 mod ai_sessions;
 mod commands;
@@ -24,8 +22,6 @@ mod remote_health;
 mod runbook;
 mod session;
 mod sftp_pool;
-#[allow(dead_code)]
-mod terminal_lease;
 
 use log::LevelFilter;
 use tauri::{AppHandle, Emitter, Manager};
@@ -78,10 +74,6 @@ pub(crate) fn emit_status(
     status: SessionStatus,
     message: Option<String>,
 ) -> Result<(), String> {
-    let previous_status = app
-        .try_state::<SessionManager>()
-        .and_then(|sessions| sessions.status(session_id).ok())
-        .map(|event| event.status);
     let event = StatusEvent {
         session_id: session_id.to_string(),
         status,
@@ -89,58 +81,12 @@ pub(crate) fn emit_status(
     };
     if let Some(sessions) = app.try_state::<SessionManager>() {
         let _ = sessions.set_status(session_id, event.clone());
-        if let (Some(coordinator), Some(database)) = (
-            app.try_state::<agent::terminal_coordinator::AgentTerminalCoordinatorV1>(),
-            app.try_state::<db::Database>(),
-        ) {
-            let audit = agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
-            let now_ms = db::current_timestamp_ms().max(0) as u64;
-            let lifecycle = match status {
-                SessionStatus::Disconnected | SessionStatus::Error => {
-                    coordinator.handle_disconnect(session_id, now_ms, &sessions, &audit)
-                }
-                SessionStatus::Connected
-                    if matches!(
-                        previous_status,
-                        Some(SessionStatus::Disconnected | SessionStatus::Error)
-                    ) =>
-                {
-                    coordinator.handle_reconnect(session_id, &sessions)
-                }
-                SessionStatus::Connecting | SessionStatus::Connected => Ok(()),
-            };
-            if let Err(error) = lifecycle {
-                log::warn!(
-                    "Agent terminal lifecycle synchronization failed session_id={session_id} code={:?}",
-                    error.code
-                );
-            }
-        }
     }
     app.emit(SSH_STATUS_EVENT, event)
         .map_err(|error| format!("failed to emit status event: {error}"))
 }
 
 pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Result<(), String> {
-    if let (Some(coordinator), Some(sessions), Some(database)) = (
-        app.try_state::<agent::terminal_coordinator::AgentTerminalCoordinatorV1>(),
-        app.try_state::<SessionManager>(),
-        app.try_state::<db::Database>(),
-    ) {
-        let audit = agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
-        if let Err(error) = coordinator.ingest_output(
-            session_id,
-            &chunk,
-            db::current_timestamp_ms().max(0) as u64,
-            &sessions,
-            &audit,
-        ) {
-            log::warn!(
-                "Agent terminal output capture failed closed session_id={session_id} code={:?}",
-                error.code
-            );
-        }
-    }
     app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), chunk)
         .map_err(|error| format!("failed to emit data event: {error}"))
 }
@@ -259,13 +205,6 @@ pub fn run() {
             }
             let termbridge_dir = app.path().home_dir()?.join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
-            let recovered_agent_terminal =
-                agent::terminal_audit::recover_interrupted_agent_terminal_audits(&database)?;
-            if recovered_agent_terminal > 0 {
-                log::warn!(
-                    "Marked {recovered_agent_terminal} Agent terminal effect(s) unknown after application restart"
-                );
-            }
             let credentials = keychain::CredentialManager::new();
             if let Err(error) = ai::migrate_keychain_api_keys(&credentials, &database) {
                 log::warn!("Failed to migrate AI API keys from the system keychain: {error}");
@@ -288,8 +227,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
         .manage(ai::AiRequestRegistry::default())
-        .manage(agent::manager::AgentManager::default())
-        .manage(agent::terminal_coordinator::AgentTerminalCoordinatorV1::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
@@ -304,18 +241,6 @@ pub fn run() {
         .manage(RemoteIdentityCache::default())
         .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
-            agent::ipc::agent_start,
-            agent::ipc::agent_get_snapshot,
-            agent::ipc::agent_pause,
-            agent::ipc::agent_resume,
-            agent::ipc::agent_stop,
-            agent::ipc::agent_send_message,
-            agent::terminal_ipc::agent_terminal_get_snapshot,
-            agent::terminal_ipc::agent_terminal_resolve_approval,
-            agent::terminal_ipc::agent_terminal_takeover_and_write,
-            agent::terminal_ipc::agent_terminal_return_control,
-            agent::terminal_ipc::agent_terminal_pause,
-            agent::terminal_ipc::agent_terminal_stop,
             ai::ai_list_models,
             ai::ai_start_request,
             ai::ai_cancel_request,
@@ -423,37 +348,7 @@ pub fn run() {
     let app = menu::configure_builder(builder)
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
-    app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
-            if let Some(sessions) = app_handle.try_state::<SessionManager>() {
-                if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
-                    log::warn!(
-                        "Failed to revoke Agent terminal leases on application exit: {error}"
-                    );
-                }
-                if let (Some(coordinator), Some(database)) = (
-                    app_handle.try_state::<
-                        agent::terminal_coordinator::AgentTerminalCoordinatorV1,
-                    >(),
-                    app_handle.try_state::<db::Database>(),
-                ) {
-                    let audit =
-                        agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
-                    if let Err(error) = coordinator.handle_application_exit_after_revoke(
-                        db::current_timestamp_ms().max(0) as u64,
-                        &sessions,
-                        &audit,
-                    ) {
-                        log::warn!(
-                            "Failed to finalize Agent terminal controls on application exit code={:?}",
-                            error.code
-                        );
-                    }
-                }
-            }
-            agent::ipc::cancel_active_for_app_exit(app_handle);
-        }
-    });
+    app.run(|_, _| {});
 }
 
 #[cfg(test)]

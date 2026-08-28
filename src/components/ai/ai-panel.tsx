@@ -3,7 +3,6 @@ import { listen } from '@tauri-apps/api/event';
 import {
   ArrowUpIcon,
   BotIcon,
-  BrainCircuitIcon,
   ChevronDownIcon,
   CircleAlertIcon,
   Code2Icon,
@@ -56,8 +55,6 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Bubble, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
-import { AgentRunView } from './agent-run-view';
-import { AgentWorkspace } from './agent/agent-workspace';
 import { useI18n } from '@/hooks/useI18n';
 import {
   invokeCancelAiRequest,
@@ -73,12 +70,9 @@ import {
 } from '@/lib/ai-stream-batcher';
 import { cn, generateId } from '@/lib/utils';
 import { parseAssistantContent } from '@/lib/ai-content';
-import {
-  isSafeReadOnlyAgentCommand,
-} from '@/lib/diagnostic-agent';
+import { isSafeReadOnlyCommand } from '@/lib/safe-shell-command';
 import {
   getRecentTerminalOutput,
-  MAX_AI_CONTEXT_BYTES,
   redactTerminalSecrets,
   renderTerminalText,
   stripAnsi,
@@ -88,8 +82,6 @@ import {
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiStore } from '@/stores/aiStore';
-import { useStaticDiagnosticStore } from '@/stores/staticDiagnosticStore';
-import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -107,8 +99,6 @@ import type {
 } from '@/types/ai';
 import type { Locale } from '@/types';
 import type { LocaleKey } from '@/locales';
-import type { AgentTerminalContextV1 } from '@/types/agent';
-import { isAgentRunTerminalStateV1 } from '@/lib/agent-state';
 
 const AI_STREAM_EVENT = 'ai-stream';
 const AI_PANEL_DEFAULT_WIDTH = 400;
@@ -121,7 +111,7 @@ const AI_PANEL_ENGLISH_COMPACT_CONTROLS_WIDTH = 440;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'termbridge.aiPanelWidth';
 export const LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS = 50;
 const logger = createLogger('ai');
-type ConversationTask = Exclude<AiTaskKind, 'diagnosticAgent'>;
+type ConversationTask = AiTaskKind;
 type CancelAiRequest = (requestId: string) => Promise<void>;
 
 interface TerminalContextSnapshot {
@@ -319,42 +309,18 @@ export function cancelActiveAiRequests(
   cancelBackend: CancelAiRequest = invokeCancelAiRequest,
 ): string[] {
   const ai = useAiStore.getState();
-  const agent = useStaticDiagnosticStore.getState();
   const requestIds = new Set<string>();
 
   if (ai.activeRequestId) {
     requestIds.add(ai.activeRequestId);
     ai.cancelRequest(ai.activeRequestId);
   }
-  if (agent.run?.phase === 'planning') {
-    requestIds.add(agent.run.requestId);
-    agent.cancelRun(agent.run.requestId);
-  }
-
   for (const requestId of requestIds) {
     void cancelBackend(requestId).catch((reason) => {
       logger.warn(`Failed to cancel AI request ${requestId}`, reason);
     });
   }
   return [...requestIds];
-}
-
-export function stopActiveAgentRun(
-  cancelBackend: CancelAiRequest = invokeCancelAiRequest,
-): string | undefined {
-  const agent = useStaticDiagnosticStore.getState();
-  const run = agent.run;
-  if (!run) return undefined;
-  const requestId = run.phase === 'planning'
-    ? run.requestId
-    : undefined;
-  agent.stopRun();
-  if (requestId) {
-    void cancelBackend(requestId).catch((reason) => {
-      logger.warn(`Failed to cancel AI request ${requestId}`, reason);
-    });
-  }
-  return requestId;
 }
 
 export function sanitizeTerminalSelection(selection: string): string {
@@ -467,62 +433,6 @@ function useCompactAiPanelViewport(): boolean {
   return compact;
 }
 
-interface DiagnosticAgentContextSnapshot {
-  context: AiContext;
-  sessionId: string;
-  conversationId?: string;
-  profileId?: string;
-  contextSource: 'terminal' | 'remoteHealth';
-  truncated?: boolean;
-}
-
-function diagnosticAgentContextForSession(
-  sessionId: string,
-): DiagnosticAgentContextSnapshot | undefined {
-  const terminalState = useTerminalStore.getState();
-  const session = terminalState.sessions.find((item) => item.sessionId === sessionId);
-  if (!session) return undefined;
-  const contextLines = useAiSettingsStore.getState().contextLines;
-  const output = getRecentTerminalOutput(session.sessionId, contextLines);
-  const rawSelection = terminalRegistry.get(session.sessionId)?.terminal.getSelection().trim();
-  const selection = rawSelection ? sanitizeTerminalSelection(rawSelection) : '';
-  const label = `${session.username ? `${session.username}@` : ''}${session.host || session.title}`;
-  const content = [
-    `Connection: ${label}:${session.port}`,
-    `Status: ${session.status}`,
-    '',
-    rawSelection
-      ? `Selected terminal content:\n${selection}`
-      : `Recent terminal output:\n${output || '(no recent output)'}`,
-  ].join('\n');
-  const truncatedContent = truncateAiContext(content);
-  return {
-    sessionId: session.sessionId,
-    conversationId: session.conversationId,
-    profileId: session.profileId,
-    contextSource: 'terminal',
-    context: { label, content: truncatedContent },
-    truncated: truncatedContent !== content || Boolean(
-      rawSelection
-      && new TextEncoder().encode(rawSelection).byteLength > MAX_AI_CONTEXT_BYTES,
-    ),
-  };
-}
-
-function currentDiagnosticAgentContext(): DiagnosticAgentContextSnapshot | undefined {
-  const app = useAppStore.getState();
-  if (app.activeSection !== 'terminal') return undefined;
-  const activeSessionId = useTerminalStore.getState().activeSessionId;
-  return activeSessionId ? diagnosticAgentContextForSession(activeSessionId) : undefined;
-}
-
-interface ExternalDiagnosticAgentRequest {
-  profileId: string;
-  sessionId: string;
-  goal: string;
-  context: AiContext;
-}
-
 function navigateToAiSettings(): void {
   const app = useAppStore.getState();
   app.setActiveSection('workbench');
@@ -540,12 +450,6 @@ export const AiPanel: React.FC = () => {
   const error = useAiStore((state) => state.error);
   const errorRequestId = useAiStore((state) => state.errorRequestId);
   const clearConversation = useAiStore((state) => state.clearConversation);
-  const staticAgentRun = useStaticDiagnosticStore((state) => state.run);
-  const dynamicAgentRun = useAgentStore((state) => state.activeRunId
-    ? state.runsById[state.activeRunId]
-    : undefined);
-  const dynamicAgentStartPending = useAgentStore((state) => state.startPending);
-  const dynamicAgentStartError = useAgentStore((state) => state.startError);
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
@@ -683,30 +587,12 @@ export const AiPanel: React.FC = () => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     const batcher = createAiStreamDeltaBatcher((requestId, text) => {
-      const agent = useStaticDiagnosticStore.getState();
-      if (agent.run?.requestId === requestId) {
-        agent.appendDelta(requestId, text);
-        return;
-      }
       useAiStore.getState().appendDelta(requestId, text);
     });
     const unregisterBatcher = registerAiStreamDeltaBatcher(batcher);
     streamDeltaBatcherRef.current = batcher;
     void listen<AiStreamEvent>(AI_STREAM_EVENT, (event) => {
       const payload = event.payload;
-      const agent = useStaticDiagnosticStore.getState();
-      if (agent.run?.requestId === payload.requestId) {
-        if (agent.run.phase !== 'planning') return;
-        if (payload.type === 'textDelta') {
-          batcher.push(payload.requestId, payload.text);
-          return;
-        }
-        batcher.flush(payload.requestId);
-        if (payload.type === 'completed') agent.completePlanning(payload.requestId);
-        else if (payload.type === 'cancelled') agent.cancelRun(payload.requestId);
-        else if (payload.type === 'error') agent.failRun(payload.requestId, payload.message);
-        return;
-      }
       const state = useAiStore.getState();
       if (payload.type === 'textDelta') {
         batcher.push(payload.requestId, payload.text);
@@ -809,90 +695,9 @@ export const AiPanel: React.FC = () => {
     }
   }, [contextEnabled]);
 
-  const runStaticDiagnosticPlan = useCallback(async (
-    text: string,
-    providedSnapshot?: DiagnosticAgentContextSnapshot,
-  ): Promise<void> => {
-    const goal = text.trim();
-    if (!goal) return;
-    const snapshot = providedSnapshot ?? currentDiagnosticAgentContext();
-    if (!snapshot || (!contextEnabled && snapshot.contextSource !== 'remoteHealth')) return;
-    const requestId = generateId();
-    const contextObservedAt = Date.now();
-    const provider = useAiSettingsStore.getState().getProviderConfig();
-    if (!provider.model) {
-      navigateToAiSettings();
-      return;
-    }
-    const started = useStaticDiagnosticStore.getState().beginRun(
-      requestId,
-      goal,
-      snapshot.sessionId,
-      snapshot.context.label,
-      snapshot.profileId,
-      snapshot.contextSource,
-      contextObservedAt,
-      snapshot.conversationId,
-    );
-    if (!started) return;
-    setDraft('');
-    try {
-      await invokeStartAiRequest({
-        requestId,
-        provider,
-        task: 'diagnosticAgent',
-        messages: [{ role: 'user', content: goal }],
-        context: {
-          ...snapshot.context,
-          content: truncateAiContext(
-            `${snapshot.context.content}\n\nContext observed at: ${new Date(contextObservedAt).toISOString()}`,
-          ),
-        },
-      });
-    } catch (reason) {
-      useStaticDiagnosticStore.getState().failRun(
-        requestId,
-        reason instanceof Error ? reason.message : String(reason),
-      );
-    }
-  }, [contextEnabled]);
-
-  useEffect(() => {
-    const handleHealthDiagnosis = (event: Event): void => {
-      const detail = (event as CustomEvent<ExternalDiagnosticAgentRequest>).detail;
-      if (!detail?.profileId || !detail.sessionId || !detail.goal || !detail.context) return;
-      const terminal = useTerminalStore.getState().sessions.find((session) => (
-        session.sessionId === detail.sessionId
-        && session.profileId === detail.profileId
-        && session.status === 'connected'
-      ));
-      if (!terminal) return;
-      useTerminalStore.getState().setActiveSession(detail.sessionId);
-      useAppStore.getState().setActiveSection('terminal');
-      setSelectedConversationId(null);
-      setContextEnabled(true);
-      setTask('diagnosticAgent');
-      setOpen(true);
-      void runStaticDiagnosticPlan(detail.goal, {
-        ...detail,
-        conversationId: terminal.conversationId,
-        contextSource: 'remoteHealth',
-      });
-    };
-    document.addEventListener('termbridge:start-health-diagnosis', handleHealthDiagnosis);
-    return () => document.removeEventListener(
-      'termbridge:start-health-diagnosis',
-      handleHealthDiagnosis,
-    );
-  }, [runStaticDiagnosticPlan, setOpen]);
-
   const handleContextEnabledChange = useCallback((enabled: boolean): void => {
-    if (!enabled && staticAgentRun) {
-      streamDeltaBatcherRef.current?.flush(staticAgentRun.requestId);
-      stopActiveAgentRun();
-    }
     setContextEnabled(enabled);
-  }, [staticAgentRun]);
+  }, []);
 
   const handleExplain = (): void => {
     const snapshot = currentTerminalContext();
@@ -920,41 +725,12 @@ export const AiPanel: React.FC = () => {
     }
   };
 
-  const handleStopAgentRun = (): void => {
-    const requestId = useStaticDiagnosticStore.getState().run?.requestId;
-    if (requestId) streamDeltaBatcherRef.current?.flush(requestId);
-    stopActiveAgentRun();
-  };
-
-  const handleRetryAgentRun = (): void => {
-    if (!contextEnabled) return;
-    const run = useStaticDiagnosticStore.getState().run;
-    if (!run || !['cancelled', 'error'].includes(run.phase)) return;
-    const terminalState = useTerminalStore.getState();
-    const terminal = run.conversationId
-      ? terminalState.sessions.find((session) => session.conversationId === run.conversationId)
-      : terminalState.sessions.find((session) => session.sessionId === run.sessionId);
-    if (!terminal) {
-      useStaticDiagnosticStore.getState().failRun(run.requestId, t('ai.agent.retryTargetUnavailable'));
-      return;
-    }
-    const snapshot = diagnosticAgentContextForSession(terminal.sessionId);
-    if (!snapshot) {
-      useStaticDiagnosticStore.getState().failRun(run.requestId, t('ai.agent.retryTargetUnavailable'));
-      return;
-    }
-    useTerminalStore.getState().setActiveSession(terminal.sessionId);
-    useAppStore.getState().setActiveSection('terminal');
-    setSelectedConversationId(null);
-    void runStaticDiagnosticPlan(run.goal, snapshot);
-  };
-
   const handleInsertCommand = (
     command: string,
     sourceConversationId?: string,
     sourceSessionId?: string,
   ): void => {
-    if (!isSafeReadOnlyAgentCommand(command)) return;
+    if (!isSafeReadOnlyCommand(command)) return;
     if (useAppStore.getState().activeSection !== 'terminal') return;
     if (!sourceConversationId && !sourceSessionId) return;
     const state = useTerminalStore.getState();
@@ -1066,15 +842,7 @@ export const AiPanel: React.FC = () => {
   const canExplain = !viewingHistory
     && activeSection === 'terminal'
     && Boolean(contextSnapshot.context);
-  const agentContext = contextEnabled ? currentDiagnosticAgentContext() : undefined;
-  const staticAgentPlanning = staticAgentRun?.phase === 'planning';
-  const dynamicAgentActive = Boolean(
-    dynamicAgentRun && !isAgentRunTerminalStateV1(dynamicAgentRun.state),
-  );
-  const busy = phase === 'streaming'
-    || staticAgentPlanning
-    || dynamicAgentActive
-    || dynamicAgentStartPending;
+  const busy = phase === 'streaming';
   const composerSubmitDisabled = busy
     || viewingHistory
     || conversationLoading
@@ -1084,9 +852,7 @@ export const AiPanel: React.FC = () => {
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
   const compactModeControls = shouldCompactAiModeControls(panelWidth, locale);
   const currentLane = conversationLane(task === 'generateCommand' ? 'generateCommand' : 'chat');
-  const hasCurrentConversation = task === 'diagnosticAgent'
-    ? Boolean(staticAgentRun || dynamicAgentRun || dynamicAgentStartError)
-    : visibleMessages.length > 0;
+  const hasCurrentConversation = visibleMessages.length > 0;
   const failedRequestMessage = errorRequestId
     ? messages.find((message) => (
         message.requestId === errorRequestId
@@ -1122,16 +888,6 @@ export const AiPanel: React.FC = () => {
       : contextSnapshot.context
         ? t('ai.context.sourceRecentOutput')
         : t('ai.context.sourceNoOutput');
-  const dynamicTerminalContext: AgentTerminalContextV1 | undefined = agentContext
-    ? {
-        sessionId: agentContext.sessionId,
-        capturedAt: Date.now(),
-        label: agentContext.context.label,
-        redactedText: agentContext.context.content,
-        truncated: Boolean(agentContext.truncated),
-      }
-    : undefined;
-  const providerCompatible = defaultProvider?.structuredOutput === 'jsonSchema';
   const modeControl = (
     <ToggleGroup
       value={[task]}
@@ -1167,24 +923,6 @@ export const AiPanel: React.FC = () => {
           {!compactModeControls && t('ai.mode.command')}
         </TooltipTrigger>
         <TooltipContent>{t('ai.mode.command')}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={(
-            <ToggleGroupItem
-              value="diagnosticAgent"
-              aria-label={t('ai.mode.agent')}
-              disabled={viewingHistory}
-            />
-          )}
-        >
-          <BrainCircuitIcon
-            data-icon={compactModeControls ? undefined : 'inline-start'}
-            className={cn(!compactModeControls && '-translate-y-px')}
-          />
-          {!compactModeControls && t('ai.mode.agent')}
-        </TooltipTrigger>
-        <TooltipContent>{t('ai.mode.agent')}</TooltipContent>
       </Tooltip>
     </ToggleGroup>
   );
@@ -1416,24 +1154,18 @@ export const AiPanel: React.FC = () => {
                     variant="destructive"
                     size="sm"
                     onClick={() => {
-                      if (task === 'diagnosticAgent') {
-                        useStaticDiagnosticStore.getState().clear();
-                        useAgentStore.getState().dismissActiveRun();
-                      }
-                      else {
-                        clearConversation(visibleConversationId, currentLane);
-                        const conversation = conversations.find((item) => (
-                          item.id === visibleConversationId
-                        ));
-                        if (conversation) {
-                          void clearPersistedAiConversation(
-                            conversation.id,
-                            conversation.startedAt,
-                            currentLane,
-                          ).catch((reason) => {
-                            logger.warn('Failed to persist cleared AI conversation', reason);
-                          });
-                        }
+                      clearConversation(visibleConversationId, currentLane);
+                      const conversation = conversations.find((item) => (
+                        item.id === visibleConversationId
+                      ));
+                      if (conversation) {
+                        void clearPersistedAiConversation(
+                          conversation.id,
+                          conversation.startedAt,
+                          currentLane,
+                        ).catch((reason) => {
+                          logger.warn('Failed to persist cleared AI conversation', reason);
+                        });
                       }
                       setClearDialogOpen(false);
                     }}
@@ -1490,38 +1222,7 @@ export const AiPanel: React.FC = () => {
               <SquareTerminalIcon data-icon="inline-start" />
               {t('ai.explainTerminal')}
             </Button>
-            {task === 'diagnosticAgent' && agentContext?.context ? (
-              <HoverCard>
-                <HoverCardTrigger
-                  render={(
-                    <Button
-                      variant="secondary"
-                      size="xs"
-                      onClick={() => handleContextEnabledChange(false)}
-                      aria-pressed
-                    />
-                  )}
-                >
-                  <PaperclipIcon data-icon="inline-start" />
-                  <span className="max-w-48 truncate">
-                    {agentContext.context.label} · {t('ai.agent.contextAttached')}
-                  </span>
-                </HoverCardTrigger>
-                <HoverCardContent align="start" className="w-80">
-                  <div className="flex flex-col gap-2">
-                    <div className="text-xs text-muted-foreground">
-                      {t('ai.context.redactedHint')}
-                    </div>
-                    <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 font-mono text-xs leading-5 whitespace-pre-wrap text-foreground">
-                      {agentContext.context.content}
-                    </pre>
-                    <div className="text-xs text-muted-foreground">
-                      {t('ai.context.clickToDisable')}
-                    </div>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            ) : contextSnapshot.context && contextAttachmentLabel ? (
+            {contextSnapshot.context && contextAttachmentLabel ? (
               <HoverCard>
                 <HoverCardTrigger
                   render={(
@@ -1559,15 +1260,6 @@ export const AiPanel: React.FC = () => {
                   </div>
                 </HoverCardContent>
               </HoverCard>
-            ) : task === 'diagnosticAgent' && contextSnapshot.label ? (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => handleContextEnabledChange(true)}
-              >
-                <PaperclipIcon data-icon="inline-start" />
-                {t('ai.context.clickToEnable')}
-              </Button>
             ) : contextSnapshot.label ? (
               <Badge variant="outline">
                 {contextSnapshot.label} · {t('ai.context.noOutput')}
@@ -1576,38 +1268,7 @@ export const AiPanel: React.FC = () => {
           </div>
         )}
 
-        {task === 'diagnosticAgent' ? (
-          <AgentWorkspace
-            profileId={activeProfile?.id}
-            providerId={model.trim() ? defaultProvider?.id : undefined}
-            providerCompatible={providerCompatible}
-            currentProfileId={activeProfile?.id}
-            terminalContext={dynamicTerminalContext}
-            draft={draft}
-            onDraftChange={setDraft}
-            staticFallbackActive={Boolean(staticAgentRun)}
-            staticFallbackBusy={staticAgentPlanning}
-            staticFallback={(
-              <AgentRunView
-                run={staticAgentRun}
-                onCancel={handleStopAgentRun}
-                onRetry={handleRetryAgentRun}
-              />
-            )}
-            canUseStaticFallback={Boolean(
-              contextEnabled && agentContext?.context && model.trim(),
-            )}
-            onStaticFallback={(goal) => void runStaticDiagnosticPlan(goal)}
-            onClearStaticFallback={() => useStaticDiagnosticStore.getState().clear()}
-            modeControl={modeControl}
-            footerAction={configureAction}
-            contextHint={!contextEnabled
-              ? t('ai.agent.requiresContext')
-              : !agentContext
-                ? t('ai.agent.requiresTerminal')
-                : undefined}
-          />
-        ) : conversationLoading && visibleMessages.length === 0 ? (
+        {conversationLoading && visibleMessages.length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <Spinner size={20} />
           </div>
@@ -1658,7 +1319,7 @@ export const AiPanel: React.FC = () => {
                 && message.status === 'completed'
                 ? extractSingleLineCommand(message.content)
                 : undefined;
-              const commandIsSafe = Boolean(command && isSafeReadOnlyAgentCommand(command));
+              const commandIsSafe = Boolean(command && isSafeReadOnlyCommand(command));
               const commandIsInsertable = Boolean(
                 command
                 && activeSection === 'terminal'
@@ -1724,7 +1385,7 @@ export const AiPanel: React.FC = () => {
           </MessageScroller>
         )}
 
-        {task !== 'diagnosticAgent' && conversationLoadFailed && (
+        {conversationLoadFailed && (
           <Alert variant="destructive" className="mx-3 mb-2 w-auto">
             <CircleAlertIcon />
             <AlertTitle>{t('ai.history.loadFailed')}</AlertTitle>
@@ -1740,7 +1401,7 @@ export const AiPanel: React.FC = () => {
           </Alert>
         )}
 
-        {task !== 'diagnosticAgent' && currentError && currentErrorPresentation && (
+        {currentError && currentErrorPresentation && (
           <Alert className="mx-3 mb-2 w-auto border-destructive/30 bg-destructive/5">
             <CircleAlertIcon className="text-destructive" />
             <AlertTitle>{t('ai.requestFailed')}</AlertTitle>
@@ -1783,14 +1444,11 @@ export const AiPanel: React.FC = () => {
           </Alert>
         )}
 
-        {task !== 'diagnosticAgent' && (
-          <span className="sr-only" aria-live="polite" aria-atomic="true">
-            {statusAnnouncement}
-          </span>
-        )}
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {statusAnnouncement}
+        </span>
 
-        {task !== 'diagnosticAgent' && (
-          <div className="shrink-0 p-3 pt-2">
+        <div className="shrink-0 p-3 pt-2">
             <InputGroup className="min-h-24 rounded-2xl bg-card shadow-xs has-[[data-slot=input-group-control]:focus-visible]:ring-1">
               <InputGroupTextarea
                 ref={composerRef}
@@ -1843,8 +1501,7 @@ export const AiPanel: React.FC = () => {
               </InputGroupAddon>
             </InputGroup>
             {configureAction}
-          </div>
-        )}
+        </div>
       </aside>
   );
 

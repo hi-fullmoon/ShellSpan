@@ -9,8 +9,8 @@ The standalone Runbook v1, multi-host executor, AI-to-Runbook handoff, and Deplo
 The current acceptance boundary is:
 
 - Runbook and Deployment navigation, editors, templates, state machines, IPC, native executors, schemas, and fixtures are absent;
-- the diagnostic Agent remains informational and has no terminal insertion or generic execution path;
+- the Diagnostic Agent, including its planning and terminal-control paths, is absent;
 - existing operation-history rows retain their historical labels;
 - the shared reviewed SSH kernel remains internal and does not expose a generic execution IPC.
 
-See `docs/runbook-retirement.md` for the removal inventory and regression boundary.
+See `docs/runbook-retirement.md` and `docs/agent-retirement.md` for the removal inventories and regression boundaries.

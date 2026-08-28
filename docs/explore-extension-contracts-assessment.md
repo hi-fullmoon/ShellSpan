@@ -129,7 +129,6 @@
 - `src/stores/__tests__/profileStore.test.ts` 与 `src-tauri/src/db.rs`：profile/秘密分离、钥匙串失败补偿、SQLite 迁移与较新内部 schema 拒绝。
 - `src/lib/__tests__/runbook.test.ts` 与 `src-tauri/src/runbook.rs`：严格字段、字节/数量上限、秘密引用、风险、规范化、执行前重新验证与错配失败关闭。
 - `src/lib/__tests__/theme.test.ts`、`src/stores/__tests__/appStore.test.ts`、`src/components/terminal/__tests__/terminal-registry.test.ts` 与 `terminal-controller-layer.test.tsx`：内置主题、偏好默认/快捷键兼容、终端配色切换和跟随应用主题。
-- `scripts/__tests__/check-roadmap-audit.test.mjs`：EXPLORE 精确映射、既有测试证据、独立用户价值判断，以及“准入证据未齐不得宣称稳定契约/稳定契约前不得评估插件 API”规则。
 
 这些测试只证明可复用基础和当前缺口，不是扩展格式已经验证。
 
@@ -150,7 +149,7 @@
 
 ## 插件 API 评估门槛
 
-当前门槛是 `blocked`，不进行插件 API 能力设计。只有三种数据契约中经用户证据证明必要的子集完成上述版本、安全、失败/恢复和自动化门禁，并在 `docs/roadmap-audit.json` 中取得 `necessary: true`、七项 `met`、`status: verified` 与 `extensionGates.dataContract: stable`后，才可建立新的独立 EXPLORE 评审来判断是否连“插件 API”都有必要。
+当前门槛是 `blocked`，不进行插件 API 能力设计。只有三种数据契约中经用户证据证明必要的子集完成上述版本、安全、失败/恢复和自动化门禁后，才可建立新的独立 EXPLORE 评审来判断是否连“插件 API”都有必要。
 
 那次评审也不得默认扩展到运行时、任意命令、第三方代码、网络权限、凭据访问、市场、账户或团队服务。首个候选若有必要，也应优先是对已稳定、纯数据契约的离线生成/验证边界，而不是在 TermBridge 进程内执行不受信任代码。
 

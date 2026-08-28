@@ -498,7 +498,7 @@ describe('SftpPane', () => {
     expect(input.tabIndex).toBe(-1);
   });
 
-  it('clears the filter query when the path changes', () => {
+  it('clears and collapses the filter when the path changes', () => {
     const connection = createConnection();
     const { rerender } = render(
       <SftpPane
@@ -526,6 +526,8 @@ describe('SftpPane', () => {
     );
 
     expect(input).toHaveValue('');
+    expect(input.tabIndex).toBe(-1);
+    expect(screen.getByRole('button', { name: 'sftp.showFilter' })).toBeInTheDocument();
   });
 
   it('clears the query when the filter is toggled closed via the icon', () => {

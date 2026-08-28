@@ -147,9 +147,11 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       }
     }, [showSearch]);
 
-    // The filter only applies to the directory it was typed in; carrying it
-    // across a path change would hide the new listing behind a stale query.
+    // The filter only applies to the directory it was typed in. A path change
+    // dismisses it entirely so both entering a folder and navigating through
+    // history start with the full listing and the compact toolbar.
     useEffect(() => {
+      setShowSearch(false);
       setSearchQuery('');
     }, [path]);
 
@@ -282,20 +284,10 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const paneTitle = isLocal ? t('sftp.local') : side === 'local' ? (connection.leftTitle ?? connection.title) : connection.title;
 
     const selectedEntries = useMemo(() => visibleEntries.filter((entry) => selectedPaths.has(entry.path)), [visibleEntries, selectedPaths]);
-    const selectedEntryPaths = useMemo(
-      () => selectedEntries.map((entry) => entry.path),
-      [selectedEntries],
-    );
-    const pathOccupancyRevision = useTransferStore(
-      (state) => state.pathOccupancyRevision,
-    );
+    const selectedEntryPaths = useMemo(() => selectedEntries.map((entry) => entry.path), [selectedEntries]);
+    const pathOccupancyRevision = useTransferStore((state) => state.pathOccupancyRevision);
     const selectionBusy = useMemo(
-      () =>
-        !isLocal &&
-        hasActivePathOperation(
-          getSftpPaneConnectionKey(connection, side),
-          selectedEntryPaths,
-        ),
+      () => !isLocal && hasActivePathOperation(getSftpPaneConnectionKey(connection, side), selectedEntryPaths),
       // The revision changes only when active path ownership can change.
       [connection, isLocal, pathOccupancyRevision, selectedEntryPaths, side],
     );
@@ -486,7 +478,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 showSearch ? 'w-56 bg-app-surface-muted' : 'w-7 bg-transparent',
               )}
             >
-              <div className="flex h-full w-56 items-center">
+              <div className="flex h-full w-46 items-center">
                 <Button
                   type="button"
                   variant="ghost"
@@ -542,10 +534,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
         </div>
 
         {/* Navigation row */}
-        <div
-          data-slot="sftp-path-bar"
-          className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-bg px-1"
-        >
+        <div data-slot="sftp-path-bar" className="flex h-9 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-bg px-1">
           <div className="flex items-center">
             <Button variant="ghost" size="icon" onClick={goBack} disabled={!canGoBack} className="h-6 w-6">
               <ChevronLeftIcon className={cn('h-4 w-4', !canGoBack && 'opacity-30')} />
@@ -555,12 +544,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </Button>
           </div>
 
-          <PathBreadcrumb
-            path={path}
-            pathKind={isLocal ? 'local' : 'remote'}
-            onNavigate={navigateTo}
-            className="flex-1"
-          />
+          <PathBreadcrumb path={path} pathKind={isLocal ? 'local' : 'remote'} onNavigate={navigateTo} className="flex-1" />
         </div>
 
         {/* File list */}
