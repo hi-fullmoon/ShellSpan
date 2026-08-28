@@ -6,6 +6,7 @@ import {
   getRecentTerminalOutputSnapshot,
   rebindTerminalOutput,
   renderTerminalText,
+  redactSensitiveValue,
   redactTerminalSecrets,
   stripAnsi,
   subscribeTerminalOutput,
@@ -88,6 +89,27 @@ describe('terminal output buffer', () => {
       expect(redacted).not.toContain(secret);
     }
     expect(redacted).toContain('[REDACTED PRIVATE KEY]');
+  });
+
+  it('recursively redacts nested tool fields without mutating the source', () => {
+    const source = {
+      command: 'systemctl status nginx',
+      arguments: {
+        credentials: { password: 'nested-password' },
+        items: [
+          { output: 'Authorization: Bearer nested-bearer' },
+          { token: 'nested-token' },
+        ],
+      },
+    };
+
+    const redacted = redactSensitiveValue(source);
+
+    expect(JSON.stringify(redacted)).not.toContain('nested-password');
+    expect(JSON.stringify(redacted)).not.toContain('nested-bearer');
+    expect(JSON.stringify(redacted)).not.toContain('nested-token');
+    expect(redacted.command).toBe('systemctl status nginx');
+    expect(source.arguments.credentials.password).toBe('nested-password');
   });
 
   it('redacts an incomplete private key block instead of caching its body', () => {

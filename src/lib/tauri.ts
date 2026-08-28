@@ -70,6 +70,7 @@ import type {
   AgentStartRequest,
   AgentStreamEvent,
   AgentToolResult,
+  PersistedAgentRunState,
 } from '@/types/agent';
 
 const logger = createLogger('ipc');
@@ -257,6 +258,19 @@ export async function invokeSubmitAgentToolResult(result: AgentToolResult): Prom
 
 export async function invokeCancelAgentRequest(requestId: string): Promise<void> {
   return invokeLogged('agent_cancel_request', { requestId });
+}
+
+export async function invokeAppendAiSessionAgentState(
+  conversationId: string,
+  startedAt: string,
+  state: PersistedAgentRunState,
+): Promise<void> {
+  return invokeLogged('append_ai_session_agent_state', {
+    conversationId,
+    startedAt,
+    timestamp: new Date().toISOString(),
+    state,
+  });
 }
 
 export async function invokeOpenUrl(url: string): Promise<void> {
@@ -820,7 +834,7 @@ export async function invokeAppendAiSessionMessage(
 export async function invokeClearAiSessionLane(
   conversationId: string,
   startedAt: string,
-  lane: 'conversation' | 'command',
+  lane: 'conversation' | 'command' | 'agent',
 ): Promise<void> {
   return invokeLogged('clear_ai_session_lane', {
     conversationId,

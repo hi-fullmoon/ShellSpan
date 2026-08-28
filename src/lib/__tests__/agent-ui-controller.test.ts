@@ -239,6 +239,29 @@ describe('AgentUiController M4 integration', () => {
     expect(h.submitResult).toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
   });
 
+  it('deeply redacts future nested tool-result fields before model submission', async () => {
+    const h = harness({
+      mode: 'fullAccess',
+      execute: async (call) => ({
+        ...completed(call, 'safe output'),
+        metadata: {
+          credentials: { password: 'nested-model-secret' },
+          safe: 'kept',
+        },
+      } as unknown as AgentToolResult),
+    });
+    controllers.push(h.controller);
+    await startRun(h);
+    h.emit({ type: 'toolCall', requestId: 'request-1', step: 1, toolCall: toolCall() });
+
+    await vi.waitFor(() => expect(h.submitResult).toHaveBeenCalledTimes(1));
+    const submitted = h.submitResult.mock.calls[0][0];
+    expect(JSON.stringify(submitted)).not.toContain('nested-model-secret');
+    expect(submitted).toMatchObject({
+      metadata: { credentials: '[REDACTED]', safe: 'kept' },
+    });
+  });
+
   it('rejects a call, submits the rejection once, and stops the backend task', async () => {
     const h = harness();
     controllers.push(h.controller);

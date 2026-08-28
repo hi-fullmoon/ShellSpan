@@ -36,6 +36,7 @@ export type OperationHistoryAction =
   | 'stopAllPortForwards'
   | 'collectRemoteHealth'
   | 'executeRunbookStep'
+  | 'executeAgentCommand'
   // Read compatibility for operation-history rows written before automation retirement.
   | 'executeDeployment'
   | 'executeDeploymentRollback'
@@ -133,6 +134,8 @@ export interface RecordOperationEventRequest {
   itemCount?: number;
   byteCount?: number;
   exitCode?: number;
+  permissionMode?: import('./agent').AgentPermissionMode;
+  humanApproved?: boolean;
   batchIndex?: number;
   batchTotal?: number;
   concurrencyLimit?: number;
@@ -143,6 +146,8 @@ export interface OperationHistoryEvent extends RecordOperationEventRequest {}
 export interface OperationHistoryFilter {
   category?: OperationHistoryCategory;
   status?: OperationHistoryStatus;
+  taskId?: string;
+  action?: OperationHistoryAction;
   profileId?: string;
   search?: string;
   from?: number;

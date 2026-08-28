@@ -6,6 +6,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use tauri::State;
 
+use crate::agent_contract::AgentPermissionMode;
+
 const DEFAULT_RETENTION_DAYS: u16 = 90;
 const RETENTION_PREFERENCE_KEY: &str = "operationHistoryRetentionDays";
 const MAX_STORED_EVENTS: usize = 20_000;
@@ -198,6 +200,23 @@ impl OperationRisk {
     }
 }
 
+fn permission_mode_str(mode: AgentPermissionMode) -> &'static str {
+    match mode {
+        AgentPermissionMode::RequestApproval => "requestApproval",
+        AgentPermissionMode::AutoApproveReadOnly => "autoApproveReadOnly",
+        AgentPermissionMode::FullAccess => "fullAccess",
+    }
+}
+
+fn parse_permission_mode(value: &str) -> Result<AgentPermissionMode, String> {
+    match value {
+        "requestApproval" => Ok(AgentPermissionMode::RequestApproval),
+        "autoApproveReadOnly" => Ok(AgentPermissionMode::AutoApproveReadOnly),
+        "fullAccess" => Ok(AgentPermissionMode::FullAccess),
+        _ => Err(format!("unknown Agent permission mode: {value}")),
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum OperationTargetKind {
@@ -321,6 +340,8 @@ pub(crate) struct RecordOperationEventRequest {
     item_count: Option<u64>,
     byte_count: Option<u64>,
     exit_code: Option<i32>,
+    permission_mode: Option<AgentPermissionMode>,
+    human_approved: Option<bool>,
     batch_index: Option<u32>,
     batch_total: Option<u32>,
     concurrency_limit: Option<u32>,
@@ -348,6 +369,8 @@ pub(crate) struct OperationHistoryEvent {
     item_count: Option<u64>,
     byte_count: Option<u64>,
     exit_code: Option<i32>,
+    permission_mode: Option<AgentPermissionMode>,
+    human_approved: Option<bool>,
     batch_index: Option<u32>,
     batch_total: Option<u32>,
     concurrency_limit: Option<u32>,
@@ -358,6 +381,8 @@ pub(crate) struct OperationHistoryEvent {
 pub(crate) struct OperationHistoryFilter {
     category: Option<OperationCategory>,
     status: Option<OperationStatus>,
+    task_id: Option<String>,
+    action: Option<String>,
     profile_id: Option<String>,
     search: Option<String>,
     from: Option<i64>,
@@ -438,6 +463,7 @@ const ALLOWED_ACTIONS: &[&str] = &[
     "stopAllPortForwards",
     "collectRemoteHealth",
     "executeRunbookStep",
+    "executeAgentCommand",
     "executeMultiHostRunbook",
 ];
 
@@ -455,13 +481,15 @@ fn valid_text(value: &str, max_len: usize) -> bool {
 
 fn sanitize_command_preview(
     category: OperationCategory,
+    action: &str,
     preview: Option<String>,
 ) -> Option<String> {
     let preview = preview?;
-    if !matches!(
+    if !(matches!(
         category,
         OperationCategory::Runbook | OperationCategory::MultiHost
-    ) || preview.is_empty()
+    ) || category == OperationCategory::Terminal && action == "executeAgentCommand")
+        || preview.is_empty()
     {
         return None;
     }
@@ -532,6 +560,16 @@ fn normalize_request(
     if !ALLOWED_ACTIONS.contains(&request.action.as_str()) {
         return Err("operation history action is not allowed".to_string());
     }
+    if request.action == "executeAgentCommand" {
+        if request.category != OperationCategory::Terminal
+            || request.permission_mode.is_none()
+            || request.human_approved.is_none()
+        {
+            return Err("Agent operation history is missing permission metadata".to_string());
+        }
+    } else if request.permission_mode.is_some() || request.human_approved.is_some() {
+        return Err("permission metadata is only valid for Agent operations".to_string());
+    }
     if request.occurred_at <= 0 || request.occurred_at > current_timestamp_ms() + 300_000 {
         return Err("operation history timestamp is invalid".to_string());
     }
@@ -553,7 +591,8 @@ fn normalize_request(
             return Err("operation history evidence reference is invalid".to_string());
         }
     }
-    request.command_preview = sanitize_command_preview(request.category, request.command_preview);
+    request.command_preview =
+        sanitize_command_preview(request.category, &request.action, request.command_preview);
     Ok(OperationHistoryEvent {
         event_id: request.event_id,
         task_id: request.task_id,
@@ -574,6 +613,8 @@ fn normalize_request(
         item_count: request.item_count,
         byte_count: request.byte_count,
         exit_code: request.exit_code,
+        permission_mode: request.permission_mode,
+        human_approved: request.human_approved,
         batch_index: request.batch_index,
         batch_total: request.batch_total,
         concurrency_limit: request.concurrency_limit,
@@ -626,10 +667,12 @@ fn insert(database: &Database, event: &OperationHistoryEvent) -> Result<(), Stri
                 category, action, event_kind, status, risk, subject_id,
                 primary_profile_id, targets_json, command_preview, evidence_json,
                 error_category, retry_of_operation_id, item_count, byte_count,
-                exit_code, batch_index, batch_total, concurrency_limit, created_at
+                exit_code, batch_index, batch_total, concurrency_limit,
+                permission_mode, human_approved, created_at
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
+                ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
+                ?25, ?26
              )",
             params![
                 event.event_id,
@@ -655,6 +698,8 @@ fn insert(database: &Database, event: &OperationHistoryEvent) -> Result<(), Stri
                 event.batch_index,
                 event.batch_total,
                 event.concurrency_limit,
+                event.permission_mode.map(permission_mode_str),
+                event.human_approved,
                 current_timestamp_ms(),
             ],
         )
@@ -682,7 +727,8 @@ fn load_events(database: &Database) -> Result<(Vec<OperationHistoryEvent>, bool)
                         category, action, event_kind, status, risk, subject_id,
                         targets_json, command_preview, evidence_json, error_category,
                         retry_of_operation_id, item_count, byte_count, exit_code,
-                        batch_index, batch_total, concurrency_limit
+                        batch_index, batch_total, concurrency_limit,
+                        permission_mode, human_approved
                  FROM operation_history_events
                  ORDER BY occurred_at DESC, created_at DESC
                  LIMIT ?1",
@@ -712,6 +758,11 @@ fn load_events(database: &Database) -> Result<(Vec<OperationHistoryEvent>, bool)
                     .map(|value| OperationErrorCategory::parse(&value))
                     .transpose()
                     .map_err(|error| conversion_error(14, error))?;
+                let permission_mode = row
+                    .get::<_, Option<String>>(22)?
+                    .map(|value| parse_permission_mode(&value))
+                    .transpose()
+                    .map_err(|error| conversion_error(22, error))?;
                 Ok(OperationHistoryEvent {
                     event_id: row.get(0)?,
                     task_id: row.get(1)?,
@@ -736,6 +787,8 @@ fn load_events(database: &Database) -> Result<(Vec<OperationHistoryEvent>, bool)
                         .get::<_, Option<i64>>(17)?
                         .and_then(|value| value.try_into().ok()),
                     exit_code: row.get(18)?,
+                    permission_mode,
+                    human_approved: row.get(23)?,
                     batch_index: row.get(19)?,
                     batch_total: row.get(20)?,
                     concurrency_limit: row.get(21)?,
@@ -754,6 +807,14 @@ fn load_events(database: &Database) -> Result<(Vec<OperationHistoryEvent>, bool)
 fn event_matches(event: &OperationHistoryEvent, filter: &OperationHistoryFilter) -> bool {
     if filter.category.is_some_and(|value| event.category != value)
         || filter.status.is_some_and(|value| event.status != value)
+        || filter
+            .task_id
+            .as_deref()
+            .is_some_and(|value| event.task_id != value)
+        || filter
+            .action
+            .as_deref()
+            .is_some_and(|value| event.action != value)
         || filter.from.is_some_and(|value| event.occurred_at < value)
         || filter.to.is_some_and(|value| event.occurred_at > value)
         || filter.profile_id.as_deref().is_some_and(|profile_id| {
@@ -1125,6 +1186,8 @@ mod tests {
             item_count: None,
             byte_count: None,
             exit_code: Some(0),
+            permission_mode: None,
+            human_approved: None,
             batch_index: None,
             batch_total: None,
             concurrency_limit: None,
@@ -1177,6 +1240,54 @@ mod tests {
         assert!(!json.contains("top-secret"));
         assert!(!markdown.contains("top-secret"));
         assert!(json.contains(REDACTED_COMMAND));
+    }
+
+    #[test]
+    fn agent_command_audit_tracks_permission_and_never_accepts_terminal_output() {
+        let (_directory, database) = database();
+        let mut agent = request("agent-started", "request-agent", OperationStatus::Running);
+        agent.category = OperationCategory::Terminal;
+        agent.action = "executeAgentCommand".to_string();
+        agent.operation_id = "call-agent".to_string();
+        agent.parent_operation_id = Some("request-agent".to_string());
+        agent.command_preview = Some("curl --api-key=top-secret https://example.test".to_string());
+        agent.permission_mode = Some(AgentPermissionMode::FullAccess);
+        agent.human_approved = Some(false);
+        agent.evidence.clear();
+
+        insert(&database, &normalize_request(agent).unwrap()).unwrap();
+        let (events, _) = load_events(&database).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].task_id, "request-agent");
+        assert_eq!(events[0].operation_id, "call-agent");
+        assert_eq!(
+            events[0].permission_mode,
+            Some(AgentPermissionMode::FullAccess)
+        );
+        assert_eq!(events[0].human_approved, Some(false));
+        assert_eq!(events[0].command_preview.as_deref(), Some(REDACTED_COMMAND));
+
+        let encoded = serde_json::to_string(&events).unwrap();
+        assert!(!encoded.contains("top-secret"));
+        assert!(!encoded.contains("terminal output that must not be stored"));
+        let with_output = serde_json::json!({
+            "eventId": "agent-output",
+            "taskId": "request-agent",
+            "operationId": "call-agent",
+            "parentOperationId": "request-agent",
+            "occurredAt": current_timestamp_ms(),
+            "category": "terminal",
+            "action": "executeAgentCommand",
+            "eventKind": "completed",
+            "status": "succeeded",
+            "risk": "readOnly",
+            "targets": [],
+            "evidence": [],
+            "permissionMode": "requestApproval",
+            "humanApproved": true,
+            "output": "terminal output that must not be stored"
+        });
+        assert!(serde_json::from_value::<RecordOperationEventRequest>(with_output).is_err());
     }
 
     #[test]

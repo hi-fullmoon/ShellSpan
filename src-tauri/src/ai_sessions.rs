@@ -7,12 +7,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 
+use crate::redaction::redact_json_value;
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 static AI_SESSION_ORDINALS: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 const SESSION_SUMMARY_TAIL_BYTES: u64 = 64 * 1024;
+const MAX_AGENT_STATE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +50,7 @@ pub(crate) struct AiConversationSummary {
 pub(crate) struct AiSessionFile {
     pub conversation: AiConversationSummary,
     pub messages: Vec<Value>,
+    pub agent_states: Vec<Value>,
 }
 
 fn sessions_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -179,7 +183,38 @@ pub(crate) fn append_ai_session_message(
     if !path.exists() {
         return Err("AI session does not exist".to_string());
     }
-    append_record(&path, &timestamp, "response_item", message)
+    append_record(
+        &path,
+        &timestamp,
+        "response_item",
+        redact_json_value(&message),
+    )
+}
+
+#[tauri::command]
+pub(crate) fn append_ai_session_agent_state(
+    app: AppHandle,
+    conversation_id: String,
+    started_at: String,
+    timestamp: String,
+    state: Value,
+) -> Result<(), String> {
+    let path = session_path(&sessions_root(&app)?, &conversation_id, &started_at)?;
+    if !path.exists() {
+        return Err("AI session does not exist".to_string());
+    }
+    let request_id = state
+        .pointer("/run/requestId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Agent session state is missing run.requestId".to_string())?;
+    validate_id(request_id)?;
+    let encoded_size = serde_json::to_vec(&state)
+        .map_err(|error| format!("failed to encode Agent session state: {error}"))?
+        .len();
+    if encoded_size > MAX_AGENT_STATE_BYTES {
+        return Err("Agent session state exceeds the 1 MiB persistence limit".to_string());
+    }
+    append_record(&path, &timestamp, "agent_state", redact_json_value(&state))
 }
 
 #[tauri::command]
@@ -190,7 +225,7 @@ pub(crate) fn clear_ai_session_lane(
     timestamp: String,
     lane: String,
 ) -> Result<(), String> {
-    if lane != "conversation" && lane != "command" {
+    if lane != "conversation" && lane != "command" && lane != "agent" {
         return Err("invalid AI conversation lane".to_string());
     }
     let path = session_path(&sessions_root(&app)?, &conversation_id, &started_at)?;
@@ -243,11 +278,74 @@ fn collect_jsonl_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(),
 }
 
 fn message_lane(message: &Value) -> &'static str {
-    if message.get("task").and_then(Value::as_str) == Some("generateCommand") {
-        "command"
-    } else {
-        "conversation"
+    match message.get("task").and_then(Value::as_str) {
+        Some("generateCommand") => "command",
+        Some("agent") => "agent",
+        _ => "conversation",
     }
+}
+
+fn recover_agent_state(mut state: Value) -> Option<Value> {
+    let request_id = state.pointer("/run/requestId")?.as_str()?.to_string();
+    if let Some(run) = state.get_mut("run").and_then(Value::as_object_mut) {
+        if run.get("status").and_then(Value::as_str) == Some("running") {
+            run.insert("status".to_string(), Value::String("cancelled".to_string()));
+            run.insert("phase".to_string(), Value::String("incomplete".to_string()));
+            run.insert("stopRequested".to_string(), Value::Bool(true));
+            run.insert(
+                "error".to_string(),
+                Value::String("Agent task was cancelled during application restart.".to_string()),
+            );
+        }
+    }
+    if let Some(messages) = state.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            if message.get("requestId").and_then(Value::as_str) != Some(request_id.as_str()) {
+                continue;
+            }
+            if message.get("status").and_then(Value::as_str) == Some("streaming") {
+                if let Some(message) = message.as_object_mut() {
+                    message.insert("status".to_string(), Value::String("cancelled".to_string()));
+                }
+            }
+        }
+    }
+    if let Some(tools) = state.get_mut("tools").and_then(Value::as_array_mut) {
+        for tool in tools {
+            if matches!(
+                tool.get("status").and_then(Value::as_str),
+                Some("pending" | "awaitingApproval" | "running")
+            ) {
+                let Some(tool) = tool.as_object_mut() else {
+                    continue;
+                };
+                let call_id = tool
+                    .get("toolCall")
+                    .and_then(Value::as_object)
+                    .and_then(|call| call.get("callId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let recovered_from_status = tool
+                    .get("status")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("pending".to_string()));
+                tool.insert("recoveredFromStatus".to_string(), recovered_from_status);
+                tool.insert("status".to_string(), Value::String("cancelled".to_string()));
+                tool.insert(
+                    "result".to_string(),
+                    json!({
+                        "requestId": request_id,
+                        "callId": call_id,
+                        "status": "cancelled",
+                        "output": ""
+                    }),
+                );
+                tool.remove("approval");
+            }
+        }
+    }
+    Some(state)
 }
 
 fn load_session_file(path: &Path) -> Option<AiSessionFile> {
@@ -256,6 +354,7 @@ fn load_session_file(path: &Path) -> Option<AiSessionFile> {
     let mut updated_at = String::new();
     let mut archived = false;
     let mut messages: Vec<Value> = Vec::new();
+    let mut agent_states: Vec<Value> = Vec::new();
 
     for line in BufReader::new(file).lines() {
         let Ok(line) = line else { continue };
@@ -282,6 +381,24 @@ fn load_session_file(path: &Path) -> Option<AiSessionFile> {
                     messages.push(message);
                 }
             }
+            Some("agent_state") => {
+                let Some(state) = record.get("payload").cloned().and_then(recover_agent_state)
+                else {
+                    continue;
+                };
+                let Some(request_id) = state
+                    .pointer("/run/requestId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                agent_states.retain(|item| {
+                    item.pointer("/run/requestId").and_then(Value::as_str)
+                        != Some(request_id.as_str())
+                });
+                agent_states.push(state);
+            }
             Some("event_msg") => match record
                 .get("payload")
                 .and_then(|payload| payload.get("type"))
@@ -294,7 +411,11 @@ fn load_session_file(path: &Path) -> Option<AiSessionFile> {
                         .and_then(|payload| payload.get("lane"))
                         .and_then(Value::as_str)
                     {
-                        messages.retain(|message| message_lane(message) != lane);
+                        if lane == "agent" {
+                            agent_states.clear();
+                        } else {
+                            messages.retain(|message| message_lane(message) != lane);
+                        }
                     }
                 }
                 _ => {}
@@ -322,6 +443,7 @@ fn load_session_file(path: &Path) -> Option<AiSessionFile> {
             username: meta.username,
         },
         messages,
+        agent_states,
     })
 }
 
@@ -404,7 +526,11 @@ pub(crate) fn load_ai_session(
 
 #[cfg(test)]
 mod tests {
-    use super::{date_parts, load_session_file, load_session_summary, session_path, AiSessionMeta};
+    use super::{
+        append_record, date_parts, load_session_file, load_session_summary, session_path,
+        AiSessionMeta,
+    };
+    use crate::redaction::redact_json_value;
     use serde_json::{json, to_value};
     use std::fs;
     use tempfile::tempdir;
@@ -450,8 +576,113 @@ mod tests {
         assert_eq!(loaded.messages.len(), 1);
         assert_eq!(loaded.messages[0]["id"], "m2");
         assert!(loaded.conversation.archived);
+        assert!(loaded.agent_states.is_empty());
         let summary = load_session_summary(&path).unwrap();
         assert_eq!(summary.id, "conversation-1");
         assert!(summary.archived);
+    }
+
+    #[test]
+    fn recovers_interrupted_agent_state_as_cancelled_without_actionable_approval() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("session.jsonl");
+        let meta = AiSessionMeta {
+            id: "conversation-agent".into(),
+            timestamp: "2026-08-22T10:49:08.000Z".into(),
+            title: "root@example.com".into(),
+            session_id: Some("terminal-1".into()),
+            profile_id: None,
+            host: "example.com".into(),
+            port: 22,
+            username: "root".into(),
+        };
+        let state = json!({
+            "run": {
+                "requestId": "request-agent",
+                "conversationId": "conversation-agent",
+                "conversationStartedAt": meta.timestamp,
+                "status": "running",
+                "phase": "executing",
+                "permissionMode": "fullAccess"
+            },
+            "messages": [{
+                "id": "agent-assistant-request-agent",
+                "requestId": "request-agent",
+                "status": "streaming"
+            }],
+            "tools": [{
+                "toolCall": {
+                    "requestId": "request-agent",
+                    "callId": "call-1"
+                },
+                "status": "awaitingApproval",
+                "approval": {
+                    "requestId": "request-agent",
+                    "callId": "call-1",
+                    "approvalId": "must-not-recover"
+                }
+            }]
+        });
+        let records = [
+            json!({"timestamp": meta.timestamp, "type": "session_meta", "payload": to_value(meta).unwrap(), "ordinal": 0}),
+            json!({"timestamp": "2026-08-22T10:50:00Z", "type": "agent_state", "payload": state, "ordinal": 1}),
+        ];
+        fs::write(
+            &path,
+            records
+                .iter()
+                .map(|record| format!("{}\n", record))
+                .collect::<String>(),
+        )
+        .unwrap();
+
+        let loaded = load_session_file(&path).unwrap();
+        let recovered = &loaded.agent_states[0];
+        assert_eq!(recovered.pointer("/run/status").unwrap(), "cancelled");
+        assert_eq!(
+            recovered.pointer("/run/permissionMode").unwrap(),
+            "fullAccess"
+        );
+        assert_eq!(
+            recovered.pointer("/messages/0/status").unwrap(),
+            "cancelled"
+        );
+        assert_eq!(recovered.pointer("/tools/0/status").unwrap(), "cancelled");
+        assert_eq!(
+            recovered.pointer("/tools/0/recoveredFromStatus").unwrap(),
+            "awaitingApproval"
+        );
+        assert!(recovered.pointer("/tools/0/approval").is_none());
+        assert_eq!(
+            recovered.pointer("/tools/0/result/status").unwrap(),
+            "cancelled"
+        );
+    }
+
+    #[test]
+    fn nested_agent_secrets_are_redacted_before_jsonl_append() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("session.jsonl");
+        let secret = "nested-agent-secret";
+        let state = json!({
+            "run": { "requestId": "request-redaction" },
+            "tools": [{
+                "arguments": {
+                    "credentials": { "password": secret },
+                    "items": [{ "output": format!("Authorization: Bearer {secret}") }]
+                }
+            }]
+        });
+        append_record(
+            &path,
+            "2026-08-22T10:50:00Z",
+            "agent_state",
+            redact_json_value(&state),
+        )
+        .unwrap();
+
+        let persisted = fs::read_to_string(path).unwrap();
+        assert!(!persisted.contains(secret));
+        assert!(persisted.contains("[REDACTED]"));
     }
 }

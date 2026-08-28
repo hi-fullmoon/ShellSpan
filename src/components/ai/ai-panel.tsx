@@ -100,6 +100,10 @@ import {
   ensureAiSessionFile,
   persistAiMessage,
 } from '@/lib/ai-sessions';
+import {
+  clearAgentConversationData,
+  hydrateAgentSession,
+} from '@/lib/agent-sessions';
 import type {
   AiChatMessage,
   AiContext,
@@ -827,8 +831,12 @@ export const AiPanel: React.FC = () => {
     const history = selectAgentConversationHistory(useAgentStore.getState().messages, target);
     setAgentStartError(undefined);
     try {
+      const conversation = await ensureAiSessionFile(session);
+      if (!conversation) throw new Error('Agent session persistence is unavailable.');
       const requestId = await agentUiController.start({
         goal: trimmed,
+        conversationId: conversation.id,
+        conversationStartedAt: conversation.startedAt,
         provider,
         target,
         targetTitle: session.title,
@@ -955,10 +963,13 @@ export const AiPanel: React.FC = () => {
       : [...current, visibleConversationId]);
     void invokeLoadAiSession(indexedConversation.id, indexedConversation.startedAt)
       .then((session) => {
-        useAiStore.getState().hydrateSession(session ?? {
+        const loaded = session ?? {
           conversation: indexedConversation,
           messages: [],
-        });
+          agentStates: [],
+        };
+        useAiStore.getState().hydrateSession(loaded);
+        hydrateAgentSession(loaded);
         setFailedConversationLoadIds((current) => current.includes(visibleConversationId)
           ? current.filter((id) => id !== visibleConversationId)
           : current);
@@ -1361,7 +1372,17 @@ export const AiPanel: React.FC = () => {
                     size="sm"
                     onClick={() => {
                       if (mode === 'agent') {
-                        useAgentStore.getState().clear();
+                        const conversation = conversations.find((item) => (
+                          item.id === visibleConversationId
+                        ));
+                        if (conversation) {
+                          void clearAgentConversationData(
+                            conversation.id,
+                            conversation.startedAt,
+                          ).catch((reason) => {
+                            logger.warn('Failed to clear persisted Agent lane', reason);
+                          });
+                        }
                       } else {
                         clearConversation(visibleConversationId, currentLane);
                         const conversation = conversations.find((item) => (
@@ -1480,6 +1501,9 @@ export const AiPanel: React.FC = () => {
 
         {mode === 'agent' ? (
           <AgentRunView
+            conversationId={activeAgentRequestId
+              ? agentRuns[activeAgentRequestId]?.conversationId
+              : visibleConversationId}
             onApprove={(reference) => agentUiController.approve(reference)}
             onReject={(reference) => agentUiController.reject(reference)}
             onStop={(requestId) => agentUiController.stop(requestId)}

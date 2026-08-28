@@ -109,6 +109,7 @@ export interface AgentToolApprovalSnapshot {
   readonly riskAssessment: AgentCommandRiskAssessment;
   readonly decision: AgentApprovalDecision;
   readonly status: AgentToolApprovalStatus;
+  readonly recoveredFromStatus?: 'pending' | 'awaitingApproval' | 'running';
   readonly approval?: AgentApprovalReference;
   readonly result?: AgentToolResult;
 }
@@ -134,6 +135,8 @@ export type AgentRunStatus =
 
 export interface AgentRunRecord {
   readonly requestId: string;
+  readonly conversationId: string;
+  readonly conversationStartedAt: string;
   readonly goal: string;
   readonly providerId: string;
   readonly target: Readonly<AgentTargetSnapshot>;
@@ -153,12 +156,19 @@ export interface AgentRunRecord {
 export interface AgentChatMessage {
   readonly id: string;
   readonly requestId: string;
+  readonly conversationId?: string;
   readonly role: 'user' | 'assistant';
   readonly content: string;
   readonly status: 'streaming' | 'completed' | 'cancelled' | 'failed';
   readonly providerId: string;
   readonly target: Readonly<AgentTargetSnapshot>;
   readonly toolCallIds: readonly string[];
+}
+
+export interface PersistedAgentRunState {
+  readonly run: AgentRunRecord;
+  readonly messages: readonly AgentChatMessage[];
+  readonly tools: readonly AgentToolApprovalSnapshot[];
 }
 
 export const AGENT_TOOL_CALLING_SUPPORT = ['supported', 'unsupported', 'unknown'] as const;

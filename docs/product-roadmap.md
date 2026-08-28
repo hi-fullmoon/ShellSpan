@@ -465,6 +465,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M5 — 持久化、脱敏与审计
 
+状态：已完成（2026-08-28）。
+
 交付：
 
 - Agent lane 和工具消息恢复。
@@ -473,6 +475,15 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 应用退出、终端关闭和归档时的统一取消。
 
 退出条件：重启应用不会重放命令或恢复完全访问权限；每次真实操作都有可追踪记录且不泄露完整输出或秘密。
+
+实现证据：
+
+- `src/lib/agent-sessions.ts`、`src/stores/agentStore.ts` 与 `src-tauri/src/ai_sessions.rs` 为每个独立 Agent 请求追加原子 `{ run, messages, tools }` 快照，恢复用户消息、Assistant 文本、工具调用元数据和终态；同一 `requestId` 只采用最后一份快照，Agent lane 可单独清理。磁盘中的 `running`、流式消息以及 `pending` / `awaitingApproval` / `running` 工具在加载时统一收敛为 `cancelled`，删除可操作的 `approvalId`，不设置 `activeRequestId`，也没有启动、重试或 PTY 写入恢复路径。
+- 权限授权继续只存在于 `src/stores/agentPermissionStore.ts` 的连接实例内存中；历史快照保留任务当时的权限模式用于解释和审计，但 hydrate 不接触权限 store。因此归档或重启后即使历史任务记录为 `fullAccess`，新连接仍从 `requestApproval` 开始。
+- `src/lib/terminal-output-buffer.ts` 与新增 Rust `src-tauri/src/redaction.rs` 提供等价的递归脱敏边界：敏感键不受嵌套层级和数组影响，每个字符串叶子继续应用密码、token、Authorization、URL 凭据、私钥、AWS、GitHub token 和 JWT 规则。Agent 工具结果在回传模型前、Agent/普通 AI 消息在 IPC 与 JSONL 落盘前均再次脱敏，测试确认不会修改 UI 中的原对象。
+- 数据库 schema v6 为操作历史增加 `permission_mode`、`human_approved` 和 Agent 查询索引；`executeAgentCommand` 记录 `taskId`、`operationId`、`parentOperationId`、冻结目标、风险、脱敏命令预览、权限与人工批准状态，以及 `started`、`approved`、`rejected`、`cancelRequested`、`completed`、`failed`、`statusChanged` 事件、退出码和超时/取消/身份不匹配/失败分类。输入结构以 `deny_unknown_fields` 拒绝终端输出字段，前端审计器也从不复制工具输出；v5→v6 迁移保留既有记录。
+- `src/lib/agent-ui-controller.ts`、`agent-lifecycle.ts`、`ai-sessions.ts` 与 Rust `AgentRequestRegistry` 统一应用退出、更新重启、终端关闭和会话归档的取消顺序：先冻结取消意图并终止等待审批/PTY/模型/工具结果，再等待终态审计与 Agent 快照落盘，最后归档。后端对“取消先于注册”保留有界 tombstone，并在退出/重启时取消全部请求，避免迟到启动重放；工具 store 与审批控制器均保证首个终态胜出且只提交一次。数据层已提供关闭 Agent、按 conversation 清理 Agent lane 和按任务查询 Agent 操作历史的能力；M7 的公开入口与发布策略未提前实现。
+- 定向回归覆盖 JSONL 恢复、重启不重放、完全访问不恢复、嵌套秘密在模型/磁盘边界脱敏、v5→v6 迁移、Agent lane 清理、取消/超时/迟到回调竞态、审计事件关联与完整输出不进入操作历史。全量验证：`pnpm test` 为 144 个文件、1260 项通过；`pnpm build` 成功（仅既有 Vite 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml` 为 353 项通过、10 项隔离环境测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`、`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
 
 ### M6 — 安全与兼容性验收
 

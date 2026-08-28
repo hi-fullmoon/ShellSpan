@@ -27,6 +27,7 @@ function runOutcomeVariant(run: AgentRunRecord): 'default' | 'warning' | 'destru
 }
 
 export interface AgentRunViewProps {
+  readonly conversationId?: string;
   readonly onApprove: Parameters<typeof AgentApprovalCard>[0]['onApprove'];
   readonly onReject: Parameters<typeof AgentApprovalCard>[0]['onReject'];
   readonly onStop: (requestId: string) => void;
@@ -37,6 +38,7 @@ export interface AgentRunViewProps {
 }
 
 export function AgentRunView({
+  conversationId,
   onApprove,
   onReject,
   onStop,
@@ -46,10 +48,13 @@ export function AgentRunView({
   onOpenSettings,
 }: AgentRunViewProps): React.ReactNode {
   const { t } = useI18n();
-  const messages = useAgentStore((state) => state.messages);
+  const allMessages = useAgentStore((state) => state.messages);
   const runs = useAgentStore((state) => state.runs);
   const tools = useAgentStore((state) => state.tools);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
+  const messages = conversationId
+    ? allMessages.filter((message) => message.conversationId === conversationId)
+    : allMessages;
   const latestMessage = messages[messages.length - 1];
   const latestRun = latestMessage ? runs[latestMessage.requestId] : undefined;
   const targetChanged = Boolean(
