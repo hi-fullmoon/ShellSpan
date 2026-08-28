@@ -17,6 +17,7 @@ use crate::models::{
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
+use crate::terminal_lease::{SessionKind, TerminalLeaseSnapshot};
 use base64::Engine;
 use crossbeam_channel::{after, bounded, never, unbounded, Receiver};
 use log::{debug, error, info, warn};
@@ -123,14 +124,55 @@ pub(crate) async fn create_session(
     state: State<'_, SessionManager>,
     pool: State<'_, SftpPool>,
     credentials: State<'_, crate::keychain::CredentialManager>,
-    mut request: SessionCreateRequest,
+    request: SessionCreateRequest,
 ) -> Result<SessionSummary, CreateSessionError> {
+    create_remote_terminal_session(
+        app,
+        state.inner(),
+        pool.inner(),
+        credentials.inner(),
+        request,
+        None,
+    )
+    .await
+    .map(|(summary, _)| summary)
+}
+
+/// A future explicitly authorized backend caller can use this crate-private
+/// constructor with a frozen connection request. It creates a real, separate
+/// SSH PTY and binds it to one run without exposing a frontend write IPC.
+#[allow(dead_code)]
+pub(crate) async fn create_agent_pty_session(
+    app: AppHandle,
+    state: &SessionManager,
+    pool: &SftpPool,
+    credentials: &crate::keychain::CredentialManager,
+    run_id: String,
+    request: SessionCreateRequest,
+) -> Result<(SessionSummary, TerminalLeaseSnapshot), CreateSessionError> {
+    let (summary, lease) =
+        create_remote_terminal_session(app, state, pool, credentials, request, Some(run_id))
+            .await?;
+    Ok((
+        summary,
+        lease.expect("Agent PTY registration always creates a terminal lease"),
+    ))
+}
+
+async fn create_remote_terminal_session(
+    app: AppHandle,
+    state: &SessionManager,
+    pool: &SftpPool,
+    credentials: &crate::keychain::CredentialManager,
+    mut request: SessionCreateRequest,
+    agent_run_id: Option<String>,
+) -> Result<(SessionSummary, Option<TerminalLeaseSnapshot>), CreateSessionError> {
     validate_connection_fields(&request.host, &request.username).map_err(|message| {
         error!("SSH session validation failed: {message}");
         CreateSessionError::Other { message }
     })?;
 
-    if let Err(message) = resolve_keychain_key_for_session(&credentials, &mut request) {
+    if let Err(message) = resolve_keychain_key_for_session(credentials, &mut request) {
         error!("Failed to resolve keychain key: {message}");
         return Err(CreateSessionError::Other { message });
     }
@@ -166,31 +208,44 @@ pub(crate) async fn create_session(
     })?;
     let output_ready = Arc::new(AtomicBool::new(false));
     let output_paused = Arc::new(AtomicBool::new(false));
-    state
-        .insert(
-            session_id.clone(),
-            ManagedSession {
-                sender: SessionCommandSender::Standard(tx),
-                waker: Some(waker),
-                output_state_sender: None,
-                status: StatusEvent {
-                    session_id: session_id.clone(),
-                    status: SessionStatus::Connecting,
-                    message: Some("connecting".to_string()),
-                },
-                // The shell can emit its first prompt immediately after the
-                // handshake. Hold it until the replacement controller has
-                // attached all event listeners, otherwise early carriage
-                // returns / cursor-control sequences can be lost while later
-                // text survives and leaves a garbled duplicate prompt.
-                output_ready: output_ready.clone(),
-                output_paused: output_paused.clone(),
-            },
+    let managed = ManagedSession {
+        // insert_agent_pty overwrites this marker as part of the authoritative
+        // registration transaction. Starting from UserTerminal prevents an
+        // unbound Agent kind from existing even briefly.
+        kind: SessionKind::UserTerminal,
+        sender: SessionCommandSender::Standard(tx),
+        waker: Some(waker),
+        output_state_sender: None,
+        status: StatusEvent {
+            session_id: session_id.clone(),
+            status: SessionStatus::Connecting,
+            message: Some("connecting".to_string()),
+        },
+        // The shell can emit its first prompt immediately after the
+        // handshake. Hold it until the replacement controller has attached
+        // all event listeners.
+        output_ready: output_ready.clone(),
+        output_paused: output_paused.clone(),
+    };
+    let lease = if let Some(run_id) = agent_run_id {
+        Some(
+            state
+                .insert_agent_pty(session_id.clone(), run_id, managed)
+                .map_err(|error| {
+                    let message = error.to_string();
+                    error!("Failed to register Agent PTY session_id={session_id}: {message}");
+                    CreateSessionError::Other { message }
+                })?,
         )
-        .map_err(|message| {
-            error!("Failed to register SSH session session_id={session_id}: {message}");
-            CreateSessionError::Other { message }
-        })?;
+    } else {
+        state
+            .insert(session_id.clone(), managed)
+            .map_err(|message| {
+                error!("Failed to register SSH session session_id={session_id}: {message}");
+                CreateSessionError::Other { message }
+            })?;
+        None
+    };
 
     info!(
         "Created SSH session session_id={} title={} host={} port={} username={}",
@@ -205,7 +260,7 @@ pub(crate) async fn create_session(
         wake_source,
         output_ready,
         output_paused,
-        pool.inner().clone(),
+        pool.clone(),
         connection_request,
         Some(connection_result_tx),
     );
@@ -218,16 +273,16 @@ pub(crate) async fn create_session(
         Ok(Ok(result)) => result,
         Ok(Err(_timeout)) => {
             warn!("Timeout waiting for connection result session_id={session_id}; falling back to async status updates");
-            return Ok(summary);
+            return Ok((summary, lease));
         }
         Err(_) => {
             warn!("Connection result task cancelled session_id={session_id}; falling back to async status updates");
-            return Ok(summary);
+            return Ok((summary, lease));
         }
     };
 
     match connection_result {
-        Ok(()) => Ok(summary),
+        Ok(()) => Ok((summary, lease)),
         Err(create_error) => {
             error!("SSH session connection failed session_id={session_id}: {create_error:?}");
             // The frontend never receives this session id and will not call
@@ -310,6 +365,7 @@ pub(crate) fn create_local_session(
         .insert(
             session_id.clone(),
             ManagedSession {
+                kind: SessionKind::UserTerminal,
                 sender: SessionCommandSender::Event(tx),
                 waker: None,
                 output_state_sender: Some(output_state_tx),
@@ -624,7 +680,7 @@ pub(crate) fn write_session(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let result = state.send(&session_id, SessionCommand::Write(data));
+    let result = state.write_user_session(&session_id, data);
     if let Err(error) = &result {
         warn!("Failed to write SSH session input session_id={session_id}: {error}");
     }
@@ -663,7 +719,7 @@ pub(crate) fn resize_session(
     cols: u32,
     rows: u32,
 ) -> Result<(), String> {
-    let result = state.send(&session_id, SessionCommand::Resize { cols, rows });
+    let result = state.resize(&session_id, cols, rows);
     if let Err(error) = &result {
         warn!(
             "Failed to resize SSH session session_id={} cols={} rows={}: {}",
@@ -679,17 +735,9 @@ pub(crate) fn close_session(
     session_id: String,
 ) -> Result<(), String> {
     info!("Closing SSH session session_id={session_id}");
-    let result = state.send(&session_id, SessionCommand::Close);
-    match &result {
-        Ok(()) => {
-            let _ = state.remove(&session_id);
-        }
-        Err(error) => {
-            let remove_result = state.remove(&session_id);
-            warn!(
-                "Failed to close SSH session session_id={session_id}: {error} (remove result: {remove_result:?})"
-            );
-        }
+    let result = state.close(&session_id);
+    if let Err(error) = &result {
+        warn!("Failed to close SSH session session_id={session_id}: {error}");
     }
     result
 }
@@ -698,10 +746,14 @@ pub(crate) fn close_session(
 pub(crate) fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    sessions: State<'_, SessionManager>,
 ) {
     info!("Requesting application restart");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before restart: {error}");
+    }
+    if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
+        warn!("Failed to revoke Agent terminal leases before restart: {error}");
     }
     app.request_restart();
 }
@@ -710,10 +762,14 @@ pub(crate) fn request_app_restart(
 pub(crate) fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    sessions: State<'_, SessionManager>,
 ) {
     info!("Requesting application exit");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before exit: {error}");
+    }
+    if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
+        warn!("Failed to revoke Agent terminal leases before exit: {error}");
     }
     app.exit(0);
 }
