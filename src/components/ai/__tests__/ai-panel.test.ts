@@ -153,6 +153,8 @@ describe('explicit AI modes', () => {
         port: 22,
         username: 'root',
         status: 'connected',
+        conversationId: 'mode-conversation',
+        conversationStartedAt: '2026-08-28T00:00:00.000Z',
       }],
       activeSessionId: 'mode-session',
     });

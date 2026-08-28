@@ -703,10 +703,14 @@ pub(crate) fn close_session(
 pub(crate) fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
 ) {
     info!("Requesting application restart");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before restart: {error}");
+    }
+    if let Err(error) = agent_requests.cancel_all() {
+        warn!("Failed to cancel Agent requests before restart: {error}");
     }
     app.request_restart();
 }
@@ -715,10 +719,14 @@ pub(crate) fn request_app_restart(
 pub(crate) fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
 ) {
     info!("Requesting application exit");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before exit: {error}");
+    }
+    if let Err(error) = agent_requests.cancel_all() {
+        warn!("Failed to cancel Agent requests before exit: {error}");
     }
     app.exit(0);
 }

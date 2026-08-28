@@ -8,10 +8,13 @@ import type {
   AgentSafeFallback,
   AgentTargetSnapshot,
   AgentToolApprovalSnapshot,
+  PersistedAgentRunState,
 } from '@/types/agent';
 
 export interface BeginAgentRunInput {
   readonly requestId: string;
+  readonly conversationId?: string;
+  readonly conversationStartedAt?: string;
   readonly goal: string;
   readonly providerId: string;
   readonly target: AgentTargetSnapshot;
@@ -37,6 +40,11 @@ interface AgentState {
   endIncomplete: (requestId: string) => void;
   cancelRun: (requestId: string) => void;
   failRun: (requestId: string, error: string) => void;
+  hydrateConversation: (
+    conversationId: string,
+    states: readonly PersistedAgentRunState[],
+  ) => void;
+  clearConversation: (conversationId: string) => void;
   clear: () => void;
 }
 
@@ -59,6 +67,10 @@ function phaseForTool(snapshot: AgentToolApprovalSnapshot): AgentRunPhase {
     case 'cancelled':
       return 'readingResult';
   }
+}
+
+function isTerminalToolStatus(status: AgentToolApprovalSnapshot['status']): boolean {
+  return ['completed', 'rejected', 'failed', 'timedOut', 'cancelled'].includes(status);
 }
 
 function deriveCompletedState(
@@ -109,6 +121,46 @@ function updateRun(
   return { ...runs, [requestId]: update(run) };
 }
 
+function recoverPersistedState(state: PersistedAgentRunState): PersistedAgentRunState {
+  const interrupted = state.run.status === 'running';
+  const run: AgentRunRecord = interrupted
+    ? {
+        ...state.run,
+        phase: 'incomplete',
+        status: 'cancelled',
+        stopRequested: true,
+        error: 'Agent task was cancelled during application restart.',
+      }
+    : { ...state.run };
+  const messages = state.messages.map((message) => (
+    message.status === 'streaming'
+      ? { ...message, status: 'cancelled' as const }
+      : { ...message }
+  ));
+  const tools = state.tools.map((snapshot) => {
+    if (
+      snapshot.status !== 'pending'
+      && snapshot.status !== 'awaitingApproval'
+      && snapshot.status !== 'running'
+    ) {
+      return { ...snapshot };
+    }
+    return {
+      ...snapshot,
+      approval: undefined,
+      recoveredFromStatus: snapshot.status,
+      status: 'cancelled' as const,
+      result: {
+        requestId: snapshot.toolCall.requestId,
+        callId: snapshot.toolCall.callId,
+        status: 'cancelled' as const,
+        output: '',
+      },
+    };
+  });
+  return { run, messages, tools };
+}
+
 export const useAgentStore = create<AgentState>()((set) => ({
   messages: [],
   runs: {},
@@ -117,6 +169,8 @@ export const useAgentStore = create<AgentState>()((set) => ({
     const target = Object.freeze({ ...input.target });
     const run: AgentRunRecord = Object.freeze({
       requestId: input.requestId,
+      conversationId: input.conversationId ?? input.target.sessionId,
+      conversationStartedAt: input.conversationStartedAt ?? new Date(0).toISOString(),
       goal: input.goal,
       providerId: input.providerId,
       target,
@@ -135,6 +189,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
         {
           id: generateId(),
           requestId: input.requestId,
+          conversationId: input.conversationId ?? input.target.sessionId,
           role: 'user',
           content: input.goal,
           status: 'completed',
@@ -145,6 +200,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
         {
           id: `agent-assistant-${input.requestId}`,
           requestId: input.requestId,
+          conversationId: input.conversationId ?? input.target.sessionId,
           role: 'assistant',
           content: '',
           status: 'streaming',
@@ -202,7 +258,8 @@ export const useAgentStore = create<AgentState>()((set) => ({
   updateTool: (snapshot) => set((state) => {
     const { requestId, callId } = snapshot.toolCall;
     const key = toolKey(requestId, callId);
-    if (!state.tools[key]) return state;
+    const current = state.tools[key];
+    if (!current || isTerminalToolStatus(current.status)) return state;
     return {
       tools: { ...state.tools, [key]: snapshot },
       runs: updateRun(state.runs, requestId, (run) => (
@@ -291,6 +348,58 @@ export const useAgentStore = create<AgentState>()((set) => ({
         [requestId]: { ...run, phase: 'incomplete', status: 'failed', error },
       },
       messages: finishAssistant(state.messages, requestId, 'failed'),
+    };
+  }),
+  hydrateConversation: (conversationId, persistedStates) => set((state) => {
+    const recovered = persistedStates
+      .map(recoverPersistedState)
+      .filter((item) => item.run.conversationId === conversationId);
+    const existingRequestIds = new Set(Object.values(state.runs)
+      .filter((run) => run.conversationId === conversationId)
+      .map((run) => run.requestId));
+    const recoveredRequestIds = new Set(recovered.map((item) => item.run.requestId));
+    const runs = Object.fromEntries(
+      Object.entries(state.runs).filter(([, run]) => run.conversationId !== conversationId),
+    );
+    const tools = Object.fromEntries(
+      Object.entries(state.tools).filter(([, tool]) => (
+        !existingRequestIds.has(tool.toolCall.requestId)
+      )),
+    );
+    for (const item of recovered) {
+      runs[item.run.requestId] = item.run;
+      for (const tool of item.tools) {
+        tools[toolKey(tool.toolCall.requestId, tool.toolCall.callId)] = tool;
+      }
+    }
+    const messageIds = new Set(
+      recovered.flatMap((item) => item.messages.map((message) => message.id)),
+    );
+    return {
+      runs,
+      tools,
+      messages: [
+        ...recovered.flatMap((item) => item.messages),
+        ...state.messages.filter((message) => (
+          message.conversationId !== conversationId && !messageIds.has(message.id)
+        )),
+      ],
+      activeRequestId: state.activeRequestId && recoveredRequestIds.has(state.activeRequestId)
+        ? undefined
+        : state.activeRequestId,
+    };
+  }),
+  clearConversation: (conversationId) => set((state) => {
+    const requestIds = new Set(Object.values(state.runs)
+      .filter((run) => run.conversationId === conversationId)
+      .map((run) => run.requestId));
+    if (state.activeRequestId && requestIds.has(state.activeRequestId)) return state;
+    return {
+      messages: state.messages.filter((message) => message.conversationId !== conversationId),
+      runs: Object.fromEntries(Object.entries(state.runs)
+        .filter(([requestId]) => !requestIds.has(requestId))),
+      tools: Object.fromEntries(Object.entries(state.tools)
+        .filter(([, tool]) => !requestIds.has(tool.toolCall.requestId))),
     };
   }),
   clear: () => set((state) => state.activeRequestId

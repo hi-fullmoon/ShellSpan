@@ -19,6 +19,7 @@ mod models;
 mod operation_history;
 mod path_utils;
 mod port_forward;
+mod redaction;
 mod remote_fs;
 mod remote_health;
 mod runbook;
@@ -254,6 +255,7 @@ pub fn run() {
             agent::agent_cancel_request,
             ai_sessions::create_ai_session,
             ai_sessions::append_ai_session_message,
+            ai_sessions::append_ai_session_agent_state,
             ai_sessions::clear_ai_session_lane,
             ai_sessions::archive_ai_session,
             ai_sessions::list_ai_sessions,
