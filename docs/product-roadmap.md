@@ -400,6 +400,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M2 — PTY 执行与输出捕获
 
+状态：已完成（2026-08-28）。
+
 交付：
 
 - 对冻结会话的直接终端输入。
@@ -408,6 +410,15 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 交互式与不可自动完成命令的本地阻断。
 
 退出条件：快速命令、长输出、非零退出、拆分输出、超时和中止测试全部通过，且不会把终端回显误判为命令结果。
+
+实现证据：
+
+- `src/components/terminal/registry/terminal-registry.ts` 在现有终端控制器上增加原始输出与生命周期订阅、监听就绪屏障和受连接状态约束的直接输入；执行器始终通过冻结 `sessionId` 对应控制器的既有 `write_session` 写入同一 PTY，不建立第二条 SSH 连接，活动标签切换不会改变目标。
+- `src/lib/agent-terminal-executor.ts` 只接受上层显式授权并与 `requestId + callId + sessionId` 严格关联的结构化 `run_terminal_command`；写入前后均校验 M1 冻结目标的会话种类、主机、端口、用户和配置身份，不提供权限选择、风险放行或自由文本执行路径。
+- POSIX 与本地 PowerShell 包装器在当前 shell 内执行单行命令，使用 192 bit 随机、控制字符成帧且在回显文本中拆分的唯一边界，可靠解析拆包、粘包和退出码；执行过程保留当前目录与 shell 环境，并临时禁用后恢复分页器环境变量。
+- 捕获器以前后段方式硬限制原始命令输出为 2 MiB，继续排空并识别结束边界；随后依次执行 ANSI 清理、终端控制字符渲染和敏感信息脱敏，送模型前按 UTF-8 安全裁剪到 64 KiB。默认总超时为 120 秒，用户中止或命令超时时仅在命令已写入且控制器仍绑定原 `sessionId` 时向同一 PTY 发送 Ctrl-C；断线、关闭、重连换绑和控制器销毁均终止执行。
+- 本地预检保持 M1 的 8192 字符、单行和无控制字符约束，并阻断编辑器、分页器、交互解释器、嵌套 SSH、交互式容器、输入提示、后台命令以及 `tail`、`journalctl`、容器日志和 PowerShell 日志的无限跟随等不可自动完成命令；执行器不承担 M3 风险分类和审批决策。
+- `src/lib/__tests__/agent-terminal-executor.test.ts` 与终端注册表定向测试共 77 项通过，覆盖监听就绪后写入、快速 ANSI 输出、非零退出、长输出、拆包/粘包、伪造边界、默认及自定义超时、中止、断线/关闭、换绑、标签切换、终端回显误判、授权/身份漂移和交互命令阻断；`pnpm test` 为 135 个文件、1175 项通过，`pnpm build` 成功，`cargo test --manifest-path src-tauri/Cargo.toml` 为 345 项通过、10 项隔离环境测试按既有标记忽略，`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
 
 ### M3 — 权限与审批
 
