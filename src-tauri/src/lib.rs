@@ -30,6 +30,8 @@ mod rollback_execution;
 mod runbook;
 mod session;
 mod sftp_pool;
+#[allow(dead_code)]
+mod terminal_lease;
 
 use log::LevelFilter;
 use tauri::{AppHandle, Emitter, Manager};
@@ -401,6 +403,13 @@ pub fn run() {
         .expect("error while building tauri application");
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            if let Some(sessions) = app_handle.try_state::<SessionManager>() {
+                if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
+                    log::warn!(
+                        "Failed to revoke Agent terminal leases on application exit: {error}"
+                    );
+                }
+            }
             agent::ipc::cancel_active_for_app_exit(app_handle);
         }
     });
