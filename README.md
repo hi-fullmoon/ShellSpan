@@ -1,6 +1,6 @@
 # TermBridge
 
-> 开发路线图：[ROADMAP.md](./ROADMAP.md)
+> 产品路线图：[docs/product-roadmap.md](./docs/product-roadmap.md)
 
 TermBridge 是一个面向运维场景的桌面 SSH 客户端，把终端、SFTP 文件管理与凭证安全整合进同一个应用。
 

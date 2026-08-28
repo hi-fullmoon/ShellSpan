@@ -17,7 +17,6 @@ use crate::models::{
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
-use crate::terminal_lease::{SessionKind, TerminalLeaseSnapshot};
 use base64::Engine;
 use crossbeam_channel::{after, bounded, never, unbounded, Receiver};
 use log::{debug, error, info, warn};
@@ -132,31 +131,8 @@ pub(crate) async fn create_session(
         pool.inner(),
         credentials.inner(),
         request,
-        None,
     )
     .await
-    .map(|(summary, _)| summary)
-}
-
-/// A future explicitly authorized backend caller can use this crate-private
-/// constructor with a frozen connection request. It creates a real, separate
-/// SSH PTY and binds it to one run without exposing a frontend write IPC.
-#[allow(dead_code)]
-pub(crate) async fn create_agent_pty_session(
-    app: AppHandle,
-    state: &SessionManager,
-    pool: &SftpPool,
-    credentials: &crate::keychain::CredentialManager,
-    run_id: String,
-    request: SessionCreateRequest,
-) -> Result<(SessionSummary, TerminalLeaseSnapshot), CreateSessionError> {
-    let (summary, lease) =
-        create_remote_terminal_session(app, state, pool, credentials, request, Some(run_id))
-            .await?;
-    Ok((
-        summary,
-        lease.expect("Agent PTY registration always creates a terminal lease"),
-    ))
 }
 
 async fn create_remote_terminal_session(
@@ -165,8 +141,7 @@ async fn create_remote_terminal_session(
     pool: &SftpPool,
     credentials: &crate::keychain::CredentialManager,
     mut request: SessionCreateRequest,
-    agent_run_id: Option<String>,
-) -> Result<(SessionSummary, Option<TerminalLeaseSnapshot>), CreateSessionError> {
+) -> Result<SessionSummary, CreateSessionError> {
     validate_connection_fields(&request.host, &request.username).map_err(|message| {
         error!("SSH session validation failed: {message}");
         CreateSessionError::Other { message }
@@ -209,10 +184,6 @@ async fn create_remote_terminal_session(
     let output_ready = Arc::new(AtomicBool::new(false));
     let output_paused = Arc::new(AtomicBool::new(false));
     let managed = ManagedSession {
-        // insert_agent_pty overwrites this marker as part of the authoritative
-        // registration transaction. Starting from UserTerminal prevents an
-        // unbound Agent kind from existing even briefly.
-        kind: SessionKind::UserTerminal,
         sender: SessionCommandSender::Standard(tx),
         waker: Some(waker),
         output_state_sender: None,
@@ -227,25 +198,12 @@ async fn create_remote_terminal_session(
         output_ready: output_ready.clone(),
         output_paused: output_paused.clone(),
     };
-    let lease = if let Some(run_id) = agent_run_id {
-        Some(
-            state
-                .insert_agent_pty(session_id.clone(), run_id, managed)
-                .map_err(|error| {
-                    let message = error.to_string();
-                    error!("Failed to register Agent PTY session_id={session_id}: {message}");
-                    CreateSessionError::Other { message }
-                })?,
-        )
-    } else {
-        state
-            .insert(session_id.clone(), managed)
-            .map_err(|message| {
-                error!("Failed to register SSH session session_id={session_id}: {message}");
-                CreateSessionError::Other { message }
-            })?;
-        None
-    };
+    state
+        .insert(session_id.clone(), managed)
+        .map_err(|message| {
+            error!("Failed to register SSH session session_id={session_id}: {message}");
+            CreateSessionError::Other { message }
+        })?;
 
     info!(
         "Created SSH session session_id={} title={} host={} port={} username={}",
@@ -273,16 +231,16 @@ async fn create_remote_terminal_session(
         Ok(Ok(result)) => result,
         Ok(Err(_timeout)) => {
             warn!("Timeout waiting for connection result session_id={session_id}; falling back to async status updates");
-            return Ok((summary, lease));
+            return Ok(summary);
         }
         Err(_) => {
             warn!("Connection result task cancelled session_id={session_id}; falling back to async status updates");
-            return Ok((summary, lease));
+            return Ok(summary);
         }
     };
 
     match connection_result {
-        Ok(()) => Ok((summary, lease)),
+        Ok(()) => Ok(summary),
         Err(create_error) => {
             error!("SSH session connection failed session_id={session_id}: {create_error:?}");
             // The frontend never receives this session id and will not call
@@ -365,7 +323,6 @@ pub(crate) fn create_local_session(
         .insert(
             session_id.clone(),
             ManagedSession {
-                kind: SessionKind::UserTerminal,
                 sender: SessionCommandSender::Event(tx),
                 waker: None,
                 output_state_sender: Some(output_state_tx),
@@ -732,27 +689,12 @@ pub(crate) fn resize_session(
 #[tauri::command]
 pub(crate) fn close_session(
     state: State<'_, SessionManager>,
-    coordinator: State<'_, crate::agent::terminal_coordinator::AgentTerminalCoordinatorV1>,
-    database: State<'_, crate::db::Database>,
     session_id: String,
 ) -> Result<(), String> {
     info!("Closing SSH session session_id={session_id}");
     let result = state.close(&session_id);
     if let Err(error) = &result {
         warn!("Failed to close SSH session session_id={session_id}: {error}");
-    } else {
-        let audit = crate::agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
-        if let Err(error) = coordinator.handle_disconnect(
-            &session_id,
-            crate::db::current_timestamp_ms().max(0) as u64,
-            &state,
-            &audit,
-        ) {
-            warn!(
-                "Failed to synchronize Agent terminal close session_id={session_id} code={:?}",
-                error.code
-            );
-        }
     }
     result
 }
@@ -761,27 +703,10 @@ pub(crate) fn close_session(
 pub(crate) fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
-    sessions: State<'_, SessionManager>,
-    coordinator: State<'_, crate::agent::terminal_coordinator::AgentTerminalCoordinatorV1>,
-    database: State<'_, crate::db::Database>,
 ) {
     info!("Requesting application restart");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before restart: {error}");
-    }
-    if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
-        warn!("Failed to revoke Agent terminal leases before restart: {error}");
-    }
-    let audit = crate::agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
-    if let Err(error) = coordinator.handle_application_exit_after_revoke(
-        crate::db::current_timestamp_ms().max(0) as u64,
-        &sessions,
-        &audit,
-    ) {
-        warn!(
-            "Failed to finalize Agent terminal controls before restart code={:?}",
-            error.code
-        );
     }
     app.request_restart();
 }
@@ -790,27 +715,10 @@ pub(crate) fn request_app_restart(
 pub(crate) fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
-    sessions: State<'_, SessionManager>,
-    coordinator: State<'_, crate::agent::terminal_coordinator::AgentTerminalCoordinatorV1>,
-    database: State<'_, crate::db::Database>,
 ) {
     info!("Requesting application exit");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before exit: {error}");
-    }
-    if let Err(error) = sessions.revoke_agent_terminals_for_application_exit() {
-        warn!("Failed to revoke Agent terminal leases before exit: {error}");
-    }
-    let audit = crate::agent::terminal_audit::DatabaseTerminalAuditWriterV1::new(&database);
-    if let Err(error) = coordinator.handle_application_exit_after_revoke(
-        crate::db::current_timestamp_ms().max(0) as u64,
-        &sessions,
-        &audit,
-    ) {
-        warn!(
-            "Failed to finalize Agent terminal controls before exit code={:?}",
-            error.code
-        );
     }
     app.exit(0);
 }

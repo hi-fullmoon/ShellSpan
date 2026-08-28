@@ -7,7 +7,7 @@
 //! is not registered as a Tauri command. Existing fixed-purpose Remote FS and
 //! Remote Health probes share only the raw channel-start primitive so the
 //! production crate has one auditable `Channel::exec` call site; that primitive
-//! is not an authorization boundary and must not be used by a P1 Agent tool.
+//! is not an authorization boundary and must stay behind fixed-purpose probes.
 //!
 //! A reviewed timeout is observed by the caller across the whole operation,
 //! but blocking DNS, TCP, SSH handshake, and authentication calls retain their
@@ -16,7 +16,7 @@
 //! a command. Cancellation closes the channel but cannot guarantee termination
 //! of a daemonized/background remote process. All registry state is in memory,
 //! so an application crash neither resumes an operation nor proves that a
-//! detached remote process stopped. See `docs/adr/agent-execution-channel.md`.
+//! detached remote process stopped.
 
 mod cancellation;
 #[cfg(test)]

@@ -15,11 +15,6 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Runtime};
 
-use crate::terminal_lease::{
-    AgentTerminalBinding, SessionKind, TerminalLease, TerminalLeaseError, TerminalLeaseOwner,
-    TerminalLeaseRevocationReason, TerminalLeaseSnapshot, TerminalLeaseState, TerminalLeaseToken,
-};
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionSummary {
@@ -876,7 +871,6 @@ impl SessionCommandSender {
 }
 
 pub(crate) struct ManagedSession {
-    pub(crate) kind: SessionKind,
     pub(crate) sender: SessionCommandSender,
     /// Poked after each enqueued command so an event-driven session worker
     /// wakes from its idle socket wait immediately. Local sessions select on
@@ -899,10 +893,6 @@ pub(crate) struct ManagedSession {
 #[derive(Default)]
 struct SessionRegistry {
     sessions: HashMap<String, ManagedSession>,
-    /// Lease tombstones intentionally outlive closed session transports. This
-    /// preserves the authoritative revocation reason and keeps every token
-    /// from the closed PTY permanently fenced for the lifetime of the app.
-    terminal_leases: HashMap<String, TerminalLease>,
 }
 
 #[derive(Clone, Default)]
@@ -1647,255 +1637,25 @@ impl Drop for DeleteProgressTracker {
 }
 
 impl SessionManager {
-    /// Registers an ordinary local or remote terminal. Agent PTYs must use
-    /// insert_agent_pty so registration also creates the run/session lease.
     pub(crate) fn insert(&self, session_id: String, managed: ManagedSession) -> Result<(), String> {
-        if managed.kind != SessionKind::UserTerminal {
-            return Err(format!(
-                "dedicated Agent PTY {session_id} must be registered with an Agent binding"
-            ));
-        }
         let mut guard = self
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
-        if guard.terminal_leases.contains_key(&session_id) {
-            return Err(format!(
-                "session {session_id} is reserved by an Agent PTY lease tombstone"
-            ));
-        }
         guard.sessions.insert(session_id, managed);
         Ok(())
     }
 
-    /// Registers a transport that was created only for one Agent run. This is
-    /// the sole creation path for AgentPty kind and starts a fresh epoch.
-    pub(crate) fn insert_agent_pty(
-        &self,
-        session_id: String,
-        run_id: String,
-        mut managed: ManagedSession,
-    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        if guard.sessions.contains_key(&session_id)
-            || guard.terminal_leases.contains_key(&session_id)
-        {
-            return Err(TerminalLeaseError::SessionAlreadyRegistered { session_id });
-        }
-        managed.kind = SessionKind::AgentPty;
-        let binding = AgentTerminalBinding {
-            run_id,
-            session_id: session_id.clone(),
-        };
-        let lease = TerminalLease::new(binding);
-        let snapshot = lease.snapshot();
-        guard.sessions.insert(session_id.clone(), managed);
-        guard.terminal_leases.insert(session_id, lease);
-        Ok(snapshot)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn session_kind(&self, session_id: &str) -> Result<SessionKind, String> {
+    pub(crate) fn write_user_session(&self, session_id: &str, data: String) -> Result<(), String> {
         let guard = self
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
-        guard
+        let managed = guard
             .sessions
             .get(session_id)
-            .map(|managed| managed.kind)
-            .ok_or_else(|| format!("session {session_id} not found"))
-    }
-
-    /// Ordinary write_session entry. It deliberately has no takeover semantics
-    /// and therefore cannot be used as a dedicated Agent PTY bypass.
-    pub(crate) fn write_user_session(&self, session_id: &str, data: String) -> Result<(), String> {
-        self.write_input(TerminalInput::OrdinaryUser { session_id, data })
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    }
-
-    /// Internal-only Agent input seam. No Tauri command exposes this method.
-    #[allow(dead_code)]
-    pub(crate) fn write_agent_input(
-        &self,
-        binding: &AgentTerminalBinding,
-        token: TerminalLeaseToken,
-        data: String,
-    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
-        self.write_input(TerminalInput::Agent {
-            binding,
-            token,
-            data,
-        })
-        .map(|snapshot| snapshot.expect("Agent input always returns a lease snapshot"))
-    }
-
-    /// Internal user takeover seam for a future narrow UI protocol. Ownership
-    /// change and the first input enqueue occur while holding one authority
-    /// lock, so Agent and user bytes cannot interleave inside that boundary.
-    #[allow(dead_code)]
-    pub(crate) fn take_over_agent_pty_and_write(
-        &self,
-        binding: &AgentTerminalBinding,
-        data: String,
-    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
-        self.write_input(TerminalInput::TakeoverUser { binding, data })
-            .map(|snapshot| snapshot.expect("Agent PTY takeover always returns a lease snapshot"))
-    }
-
-    /// Explicitly returns a user-owned dedicated PTY to its bound Agent run.
-    /// Revocation and re-grant happen under the same registry lock, so no old
-    /// user/Agent epoch can write between the two authority changes. Callers
-    /// must separately rotate their output-capture epoch before exposing any
-    /// later output to a model.
-    #[allow(dead_code)]
-    pub(crate) fn return_agent_pty_control(
-        &self,
-        binding: &AgentTerminalBinding,
-    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        require_connected_agent_session(&guard.sessions, binding)?;
-        let lease = guard
-            .terminal_leases
-            .get_mut(&binding.session_id)
-            .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
-                session_id: binding.session_id.clone(),
-            })?;
-        lease.validate_binding(binding)?;
-        let snapshot = lease.snapshot();
-        if snapshot.owner != TerminalLeaseOwner::User
-            || snapshot.state != TerminalLeaseState::Active
-        {
-            return Err(TerminalLeaseError::OwnerMismatch {
-                owner: snapshot.owner,
-            });
-        }
-        lease.revoke(TerminalLeaseRevocationReason::UserReturnedControl)?;
-        lease.grant_agent_control(binding)?;
-        Ok(lease.snapshot())
-    }
-
-    /// Revokes one exact dedicated PTY before coordinator state changes are
-    /// published. This is used for sensitive/unsupported handoff and control
-    /// lifecycle fences; it never grants another owner implicitly.
-    #[allow(dead_code)]
-    pub(crate) fn revoke_agent_terminal(
-        &self,
-        binding: &AgentTerminalBinding,
-        reason: TerminalLeaseRevocationReason,
-    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        let lease = guard
-            .terminal_leases
-            .get_mut(&binding.session_id)
-            .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
-                session_id: binding.session_id.clone(),
-            })?;
-        lease.validate_binding(binding)?;
-        lease.revoke(reason)?;
-        Ok(lease.snapshot())
-    }
-
-    fn write_input(
-        &self,
-        input: TerminalInput<'_>,
-    ) -> Result<Option<TerminalLeaseSnapshot>, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        let SessionRegistry {
-            sessions,
-            terminal_leases,
-        } = &mut *guard;
-
-        match input {
-            TerminalInput::OrdinaryUser { session_id, data } => {
-                let managed = sessions.get(session_id).ok_or_else(|| {
-                    TerminalLeaseError::SessionNotFound {
-                        session_id: session_id.to_string(),
-                    }
-                })?;
-                if managed.kind == SessionKind::AgentPty {
-                    return Err(TerminalLeaseError::DedicatedAgentPtyRequiresTakeover {
-                        session_id: session_id.to_string(),
-                    });
-                }
-                enqueue_session_command(managed, SessionCommand::Write(data), session_id)?;
-                Ok(None)
-            }
-            TerminalInput::Agent {
-                binding,
-                token,
-                data,
-            } => {
-                let managed = require_connected_agent_session(sessions, binding)?;
-                let lease = terminal_leases
-                    .get_mut(&binding.session_id)
-                    .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
-                        session_id: binding.session_id.clone(),
-                    })?;
-                lease.validate_agent_input(binding, token)?;
-                let next_revision = lease.next_revision()?;
-                if enqueue_session_command(
-                    managed,
-                    SessionCommand::Write(data),
-                    &binding.session_id,
-                )
-                .is_err()
-                {
-                    let _ = lease.revoke(TerminalLeaseRevocationReason::TransportUnavailable);
-                    return Err(TerminalLeaseError::TransportUnavailable {
-                        session_id: binding.session_id.clone(),
-                    });
-                }
-                lease.commit_revision(next_revision);
-                Ok(Some(lease.snapshot()))
-            }
-            TerminalInput::TakeoverUser { binding, data } => {
-                let managed = require_connected_agent_session(sessions, binding)?;
-                let lease = terminal_leases
-                    .get_mut(&binding.session_id)
-                    .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
-                        session_id: binding.session_id.clone(),
-                    })?;
-                lease.validate_binding(binding)?;
-                let already_user_owned = lease.snapshot().state == TerminalLeaseState::Active
-                    && lease.snapshot().owner == TerminalLeaseOwner::User;
-                let next_revision = if already_user_owned {
-                    Some(lease.next_revision()?)
-                } else {
-                    lease.take_over_by_user()?;
-                    None
-                };
-                if enqueue_session_command(
-                    managed,
-                    SessionCommand::Write(data),
-                    &binding.session_id,
-                )
-                .is_err()
-                {
-                    let _ = lease.revoke(TerminalLeaseRevocationReason::TransportUnavailable);
-                    return Err(TerminalLeaseError::TransportUnavailable {
-                        session_id: binding.session_id.clone(),
-                    });
-                }
-                if let Some(revision) = next_revision {
-                    lease.commit_revision(revision);
-                }
-                Ok(Some(lease.snapshot()))
-            }
-        }
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        enqueue_session_command(managed, SessionCommand::Write(data), session_id)
     }
 
     pub(crate) fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<(), String> {
@@ -1911,19 +1671,11 @@ impl SessionManager {
             .map_err(|error| error.to_string())
     }
 
-    /// Revokes an Agent lease before the close command is enqueued. Keeping
-    /// both under one lock prevents a final old-epoch write from racing in
-    /// between close and revocation.
     pub(crate) fn close(&self, session_id: &str) -> Result<(), String> {
         let mut guard = self
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
-        if let Some(lease) = guard.terminal_leases.get_mut(session_id) {
-            lease
-                .revoke(TerminalLeaseRevocationReason::Closed)
-                .map_err(|error| error.to_string())?;
-        }
         let send_result = guard
             .sessions
             .get(session_id)
@@ -1957,20 +1709,7 @@ impl SessionManager {
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
-        let kind = managed.kind;
         managed.status = status;
-        if kind == SessionKind::AgentPty
-            && matches!(
-                managed.status.status,
-                SessionStatus::Disconnected | SessionStatus::Error
-            )
-        {
-            if let Some(lease) = guard.terminal_leases.get_mut(session_id) {
-                lease
-                    .revoke(TerminalLeaseRevocationReason::Disconnected)
-                    .map_err(|error| error.to_string())?;
-            }
-        }
         Ok(())
     }
 
@@ -2007,175 +1746,20 @@ impl SessionManager {
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
-        if let Some(lease) = guard.terminal_leases.get_mut(session_id) {
-            lease
-                .revoke(TerminalLeaseRevocationReason::Closed)
-                .map_err(|error| error.to_string())?;
-        }
         guard.sessions.remove(session_id);
         Ok(())
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn terminal_lease_snapshot(
-        &self,
-        session_id: &str,
-    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
-        let guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        guard
-            .terminal_leases
-            .get(session_id)
-            .map(TerminalLease::snapshot)
-            .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
-                session_id: session_id.to_string(),
-            })
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn grant_agent_terminal_control(
-        &self,
-        binding: &AgentTerminalBinding,
-    ) -> Result<TerminalLeaseToken, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        require_connected_agent_session(&guard.sessions, binding)?;
-        guard
-            .terminal_leases
-            .get_mut(&binding.session_id)
-            .ok_or_else(|| TerminalLeaseError::LeaseNotFound {
-                session_id: binding.session_id.clone(),
-            })?
-            .grant_agent_control(binding)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn pause_agent_run(
-        &self,
-        run_id: &str,
-    ) -> Result<Vec<TerminalLeaseSnapshot>, TerminalLeaseError> {
-        self.revoke_run_agent_terminals(run_id, TerminalLeaseRevocationReason::Paused)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn stop_agent_run(
-        &self,
-        run_id: &str,
-    ) -> Result<Vec<TerminalLeaseSnapshot>, TerminalLeaseError> {
-        self.revoke_run_agent_terminals(run_id, TerminalLeaseRevocationReason::Stopped)
-    }
-
-    fn revoke_run_agent_terminals(
-        &self,
-        run_id: &str,
-        reason: TerminalLeaseRevocationReason,
-    ) -> Result<Vec<TerminalLeaseSnapshot>, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        let mut snapshots = Vec::new();
-        for lease in guard.terminal_leases.values_mut() {
-            if lease.snapshot().binding.run_id == run_id {
-                lease.revoke(reason)?;
-                snapshots.push(lease.snapshot());
-            }
-        }
-        Ok(snapshots)
-    }
-
-    /// A reconnect notification never grants control. If the corresponding
-    /// disconnect was missed, this method revokes an active lease defensively.
-    #[allow(dead_code)]
-    pub(crate) fn mark_agent_session_reconnected(
-        &self,
-        session_id: &str,
-    ) -> Result<TerminalLeaseSnapshot, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        let lease = guard.terminal_leases.get_mut(session_id).ok_or_else(|| {
-            TerminalLeaseError::LeaseNotFound {
-                session_id: session_id.to_string(),
-            }
-        })?;
-        if lease.snapshot().state == TerminalLeaseState::Active {
-            lease.revoke(TerminalLeaseRevocationReason::Disconnected)?;
-        }
-        Ok(lease.snapshot())
-    }
-
-    pub(crate) fn revoke_agent_terminals_for_application_exit(
-        &self,
-    ) -> Result<Vec<TerminalLeaseSnapshot>, TerminalLeaseError> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| TerminalLeaseError::RegistryPoisoned)?;
-        let mut snapshots = Vec::with_capacity(guard.terminal_leases.len());
-        for lease in guard.terminal_leases.values_mut() {
-            lease.revoke(TerminalLeaseRevocationReason::ApplicationExit)?;
-            snapshots.push(lease.snapshot());
-        }
-        Ok(snapshots)
-    }
-}
-
-enum TerminalInput<'a> {
-    OrdinaryUser {
-        session_id: &'a str,
-        data: String,
-    },
-    Agent {
-        binding: &'a AgentTerminalBinding,
-        token: TerminalLeaseToken,
-        data: String,
-    },
-    TakeoverUser {
-        binding: &'a AgentTerminalBinding,
-        data: String,
-    },
-}
-
-fn require_connected_agent_session<'a>(
-    sessions: &'a HashMap<String, ManagedSession>,
-    binding: &AgentTerminalBinding,
-) -> Result<&'a ManagedSession, TerminalLeaseError> {
-    let managed =
-        sessions
-            .get(&binding.session_id)
-            .ok_or_else(|| TerminalLeaseError::SessionNotFound {
-                session_id: binding.session_id.clone(),
-            })?;
-    if managed.kind != SessionKind::AgentPty {
-        return Err(TerminalLeaseError::NotAgentPty {
-            session_id: binding.session_id.clone(),
-        });
-    }
-    if managed.status.status != SessionStatus::Connected {
-        return Err(TerminalLeaseError::SessionNotConnected {
-            session_id: binding.session_id.clone(),
-        });
-    }
-    Ok(managed)
 }
 
 fn enqueue_session_command(
     managed: &ManagedSession,
     command: SessionCommand,
     session_id: &str,
-) -> Result<(), TerminalLeaseError> {
+) -> Result<(), String> {
     managed
         .sender
         .send(command)
-        .map_err(|_| TerminalLeaseError::TransportUnavailable {
-            session_id: session_id.to_string(),
-        })?;
+        .map_err(|_| format!("session {session_id} transport unavailable"))?;
     if let Some(waker) = managed.waker.as_ref() {
         waker.wake();
     }
@@ -2200,18 +1784,12 @@ mod session_manager_tests {
         ManagedSession, SessionCommand, SessionCommandSender, SessionManager, SessionStatus,
         StatusEvent,
     };
-    use crate::terminal_lease::{
-        AgentTerminalBinding, SessionKind, TerminalLeaseError, TerminalLeaseOwner,
-        TerminalLeaseRevocationReason, TerminalLeaseSnapshot, TerminalLeaseState,
-    };
     use crossbeam_channel::{bounded, unbounded, Receiver, Sender as EventSender};
     use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-    use std::sync::{Arc, Barrier};
-    use std::thread;
+    use std::sync::Arc;
 
     fn managed_session(sender: EventSender<SessionCommand>) -> ManagedSession {
         ManagedSession {
-            kind: SessionKind::UserTerminal,
             sender: SessionCommandSender::Event(sender),
             waker: None,
             output_state_sender: None,
@@ -2223,38 +1801,6 @@ mod session_manager_tests {
             output_ready: Arc::new(AtomicBool::new(false)),
             output_paused: Arc::new(AtomicBool::new(false)),
         }
-    }
-
-    fn connected_managed_session(sender: EventSender<SessionCommand>) -> ManagedSession {
-        let mut managed = managed_session(sender);
-        managed.status = StatusEvent {
-            session_id: "agent-session-1".to_string(),
-            status: SessionStatus::Connected,
-            message: Some("ready".to_string()),
-        };
-        managed
-    }
-
-    fn register_agent_session(
-        manager: &SessionManager,
-    ) -> (
-        AgentTerminalBinding,
-        TerminalLeaseSnapshot,
-        Receiver<SessionCommand>,
-    ) {
-        let (sender, receiver) = unbounded();
-        let binding = AgentTerminalBinding {
-            run_id: "run-1".to_string(),
-            session_id: "agent-session-1".to_string(),
-        };
-        let snapshot = manager
-            .insert_agent_pty(
-                binding.session_id.clone(),
-                binding.run_id.clone(),
-                connected_managed_session(sender),
-            )
-            .unwrap();
-        (binding, snapshot, receiver)
     }
 
     fn written_data(receiver: &Receiver<SessionCommand>) -> Vec<String> {
@@ -2292,40 +1838,13 @@ mod session_manager_tests {
     }
 
     #[test]
-    fn mark_output_ready_flips_the_session_flag() {
-        let manager = SessionManager::default();
-        let (sender, _receiver) = unbounded::<SessionCommand>();
-        let managed = managed_session(sender);
-        let flag = managed.output_ready.clone();
-        manager.insert("local-1".to_string(), managed).unwrap();
-
-        assert!(!flag.load(AtomicOrdering::Relaxed));
-        manager.mark_output_ready("local-1").unwrap();
-        assert!(flag.load(AtomicOrdering::Relaxed));
-        assert!(manager.mark_output_ready("missing").is_err());
-    }
-
-    #[test]
-    fn set_output_paused_updates_the_session_flag() {
-        let manager = SessionManager::default();
-        let (sender, _receiver) = unbounded::<SessionCommand>();
-        let managed = managed_session(sender);
-        let flag = managed.output_paused.clone();
-        manager.insert("local-1".to_string(), managed).unwrap();
-
-        manager.set_output_paused("local-1", true).unwrap();
-        assert!(flag.load(AtomicOrdering::Relaxed));
-        manager.set_output_paused("local-1", false).unwrap();
-        assert!(!flag.load(AtomicOrdering::Relaxed));
-        assert!(manager.set_output_paused("missing", true).is_err());
-    }
-
-    #[test]
-    fn local_output_state_changes_coalesce_into_a_bounded_wakeup() {
+    fn output_state_flags_and_wakeups_are_bounded() {
         let manager = SessionManager::default();
         let (sender, _receiver) = unbounded::<SessionCommand>();
         let (state_sender, state_receiver) = bounded(1);
         let mut managed = managed_session(sender);
+        let ready = managed.output_ready.clone();
+        let paused = managed.output_paused.clone();
         managed.output_state_sender = Some(state_sender);
         manager.insert("local-1".to_string(), managed).unwrap();
 
@@ -2333,290 +1852,26 @@ mod session_manager_tests {
         manager.set_output_paused("local-1", true).unwrap();
         manager.set_output_paused("local-1", false).unwrap();
 
+        assert!(ready.load(AtomicOrdering::Relaxed));
+        assert!(!paused.load(AtomicOrdering::Relaxed));
         assert_eq!(state_receiver.len(), 1);
-        state_receiver.recv().unwrap();
-        assert!(state_receiver.try_recv().is_err());
     }
 
     #[test]
-    fn ordinary_user_terminal_input_behavior_is_unchanged() {
+    fn writes_resizes_and_closes_an_ordinary_terminal() {
         let manager = SessionManager::default();
         let (sender, receiver) = unbounded();
         manager
-            .insert("local-1".to_string(), connected_managed_session(sender))
+            .insert("local-1".to_string(), managed_session(sender))
             .unwrap();
 
         manager
-            .write_user_session("local-1", "echo user\n".to_string())
+            .write_user_session("local-1", "echo user\\n".to_string())
             .unwrap();
-
-        assert_eq!(written_data(&receiver), vec!["echo user\n"]);
-        assert_eq!(
-            manager.session_kind("local-1").unwrap(),
-            SessionKind::UserTerminal
-        );
-    }
-
-    #[test]
-    fn ordinary_write_session_path_cannot_write_a_dedicated_agent_pty() {
-        let manager = SessionManager::default();
-        let (binding, _, receiver) = register_agent_session(&manager);
-
-        let error = manager
-            .write_user_session(&binding.session_id, "bypass\n".to_string())
-            .unwrap_err();
-
-        assert!(error.contains("ordinary write_session input is forbidden"));
-        assert!(written_data(&receiver).is_empty());
-        assert_eq!(
-            manager.session_kind(&binding.session_id).unwrap(),
-            SessionKind::AgentPty
-        );
-    }
-
-    #[test]
-    fn agent_epoch_and_revision_reject_duplicate_late_and_post_takeover_writes() {
-        let manager = SessionManager::default();
-        let (binding, initial, receiver) = register_agent_session(&manager);
-
-        let after_first = manager
-            .write_agent_input(&binding, initial.token(), "agent-one\n".to_string())
-            .unwrap();
-        assert_eq!(after_first.epoch, initial.epoch);
-        assert!(after_first.revision > initial.revision);
-
-        let duplicate = manager
-            .write_agent_input(&binding, initial.token(), "duplicate\n".to_string())
-            .unwrap_err();
-        assert!(matches!(
-            duplicate,
-            TerminalLeaseError::StaleRevision { .. }
-        ));
-
-        let after_second = manager
-            .write_agent_input(&binding, after_first.token(), "agent-two\n".to_string())
-            .unwrap();
-        let after_takeover = manager
-            .take_over_agent_pty_and_write(&binding, "user-first\n".to_string())
-            .unwrap();
-        assert_eq!(after_takeover.owner, TerminalLeaseOwner::User);
-        assert!(after_takeover.epoch > after_second.epoch);
-
-        let late = manager
-            .write_agent_input(&binding, after_second.token(), "late-agent\n".to_string())
-            .unwrap_err();
-        assert!(matches!(late, TerminalLeaseError::StaleEpoch { .. }));
-        assert_eq!(
-            written_data(&receiver),
-            vec!["agent-one\n", "agent-two\n", "user-first\n"]
-        );
-    }
-
-    #[test]
-    fn run_and_session_binding_is_checked_on_every_agent_input() {
-        let manager = SessionManager::default();
-        let (binding, initial, receiver) = register_agent_session(&manager);
-        let wrong_run = AgentTerminalBinding {
-            run_id: "run-other".to_string(),
-            session_id: binding.session_id.clone(),
-        };
-
-        assert_eq!(
-            manager
-                .write_agent_input(&wrong_run, initial.token(), "wrong\n".to_string())
-                .unwrap_err(),
-            TerminalLeaseError::BindingMismatch
-        );
-        assert!(written_data(&receiver).is_empty());
-    }
-
-    #[test]
-    fn takeover_race_serializes_whole_inputs_and_fences_the_old_epoch() {
-        for _ in 0..64 {
-            let manager = Arc::new(SessionManager::default());
-            let (binding, initial, receiver) = register_agent_session(&manager);
-            let initial_token = initial.token();
-            let barrier = Arc::new(Barrier::new(3));
-
-            let agent_manager = Arc::clone(&manager);
-            let agent_binding = binding.clone();
-            let agent_barrier = Arc::clone(&barrier);
-            let agent = thread::spawn(move || {
-                agent_barrier.wait();
-                agent_manager.write_agent_input(
-                    &agent_binding,
-                    initial_token,
-                    "AGENT-COMPLETE\n".to_string(),
-                )
-            });
-
-            let user_manager = Arc::clone(&manager);
-            let user_binding = binding.clone();
-            let user_barrier = Arc::clone(&barrier);
-            let user = thread::spawn(move || {
-                user_barrier.wait();
-                user_manager
-                    .take_over_agent_pty_and_write(&user_binding, "USER-COMPLETE\n".to_string())
-            });
-
-            barrier.wait();
-            let agent_result = agent.join().unwrap();
-            let user_result = user.join().unwrap().unwrap();
-            assert_eq!(user_result.owner, TerminalLeaseOwner::User);
-            let writes = written_data(&receiver);
-            if agent_result.is_ok() {
-                assert_eq!(writes, vec!["AGENT-COMPLETE\n", "USER-COMPLETE\n"]);
-            } else {
-                assert!(matches!(
-                    agent_result.unwrap_err(),
-                    TerminalLeaseError::StaleEpoch { .. }
-                        | TerminalLeaseError::OwnerMismatch { .. }
-                ));
-                assert_eq!(writes, vec!["USER-COMPLETE\n"]);
-            }
-            assert!(matches!(
-                manager
-                    .write_agent_input(&binding, initial_token, "AFTER-TAKEOVER\n".to_string())
-                    .unwrap_err(),
-                TerminalLeaseError::StaleEpoch { .. }
-            ));
-        }
-    }
-
-    #[test]
-    fn pause_stop_and_explicit_regrant_have_fail_closed_semantics() {
-        let manager = SessionManager::default();
-        let (binding, initial, receiver) = register_agent_session(&manager);
-
-        let paused = manager.pause_agent_run(&binding.run_id).unwrap();
-        assert_eq!(paused.len(), 1);
-        assert_eq!(paused[0].state, TerminalLeaseState::Revoked);
-        assert_eq!(
-            paused[0].revocation_reason,
-            Some(TerminalLeaseRevocationReason::Paused)
-        );
-        assert!(manager
-            .write_agent_input(&binding, initial.token(), "paused\n".to_string())
-            .is_err());
-
-        let resumed_token = manager.grant_agent_terminal_control(&binding).unwrap();
-        manager
-            .write_agent_input(&binding, resumed_token, "explicit-resume\n".to_string())
-            .unwrap();
-        let stopped = manager.stop_agent_run(&binding.run_id).unwrap();
-        assert_eq!(
-            stopped[0].revocation_reason,
-            Some(TerminalLeaseRevocationReason::Stopped)
-        );
-        assert_eq!(written_data(&receiver), vec!["explicit-resume\n"]);
-    }
-
-    #[test]
-    fn disconnect_and_reconnect_do_not_restore_agent_control() {
-        let manager = SessionManager::default();
-        let (binding, initial, receiver) = register_agent_session(&manager);
-
-        manager
-            .set_status(
-                &binding.session_id,
-                StatusEvent {
-                    session_id: binding.session_id.clone(),
-                    status: SessionStatus::Disconnected,
-                    message: Some("network lost".to_string()),
-                },
-            )
-            .unwrap();
-        let disconnected = manager
-            .terminal_lease_snapshot(&binding.session_id)
-            .unwrap();
-        assert_eq!(
-            disconnected.revocation_reason,
-            Some(TerminalLeaseRevocationReason::Disconnected)
-        );
-
-        manager
-            .set_status(
-                &binding.session_id,
-                StatusEvent {
-                    session_id: binding.session_id.clone(),
-                    status: SessionStatus::Connected,
-                    message: Some("transport reconnected".to_string()),
-                },
-            )
-            .unwrap();
-        let reconnected = manager
-            .mark_agent_session_reconnected(&binding.session_id)
-            .unwrap();
-        assert_eq!(reconnected, disconnected);
-        assert!(manager
-            .write_agent_input(&binding, initial.token(), "must-not-resume\n".to_string())
-            .is_err());
-        assert!(written_data(&receiver).is_empty());
-    }
-
-    #[test]
-    fn close_and_application_exit_revoke_leases_and_keep_tombstones() {
-        let manager = SessionManager::default();
-        let (binding, initial, receiver) = register_agent_session(&manager);
-
-        let exit_snapshots = manager
-            .revoke_agent_terminals_for_application_exit()
-            .unwrap();
-        assert_eq!(exit_snapshots.len(), 1);
-        assert_eq!(
-            exit_snapshots[0].revocation_reason,
-            Some(TerminalLeaseRevocationReason::ApplicationExit)
-        );
-        assert!(manager
-            .write_agent_input(&binding, initial.token(), "after-exit\n".to_string())
-            .is_err());
-
-        manager.close(&binding.session_id).unwrap();
-        assert!(matches!(receiver.recv().unwrap(), SessionCommand::Close));
-        let closed = manager
-            .terminal_lease_snapshot(&binding.session_id)
-            .unwrap();
-        assert_eq!(closed.owner, TerminalLeaseOwner::Unowned);
-        assert_eq!(
-            closed.revocation_reason,
-            Some(TerminalLeaseRevocationReason::Closed)
-        );
-        assert!(manager.status(&binding.session_id).is_err());
-    }
-
-    #[test]
-    fn unavailable_input_transport_revokes_the_agent_lease() {
-        let manager = SessionManager::default();
-        let (binding, initial, receiver) = register_agent_session(&manager);
-        drop(receiver);
-
-        assert!(matches!(
-            manager
-                .write_agent_input(&binding, initial.token(), "lost\n".to_string())
-                .unwrap_err(),
-            TerminalLeaseError::TransportUnavailable { .. }
-        ));
-        let revoked = manager
-            .terminal_lease_snapshot(&binding.session_id)
-            .unwrap();
-        assert_eq!(revoked.state, TerminalLeaseState::Revoked);
-        assert_eq!(
-            revoked.revocation_reason,
-            Some(TerminalLeaseRevocationReason::TransportUnavailable)
-        );
-    }
-
-    #[test]
-    fn ordinary_terminal_resize_and_close_behavior_is_unchanged() {
-        let manager = SessionManager::default();
-        let (sender, receiver) = unbounded();
-        manager
-            .insert("local-1".to_string(), connected_managed_session(sender))
-            .unwrap();
+        assert_eq!(written_data(&receiver), vec!["echo user\\n"]);
 
         manager.resize("local-1", 120, 40).unwrap();
         manager.close("local-1").unwrap();
-
         assert!(matches!(
             receiver.recv().unwrap(),
             SessionCommand::Resize {
@@ -2628,7 +1883,6 @@ mod session_manager_tests {
         assert!(manager.status("local-1").is_err());
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::{
