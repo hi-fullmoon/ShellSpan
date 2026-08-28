@@ -927,6 +927,7 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
         "/models",
         "/api/chat",
         "/api/tags",
+        "/api/show",
     ] {
         if let Some(api_root) = base_path.strip_suffix(endpoint_suffix) {
             base_path = api_root.to_string();

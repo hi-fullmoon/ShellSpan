@@ -377,6 +377,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M1 — 模型工具调用闭环
 
+状态：已完成（2026-08-28）。
+
 交付：
 
 - Tauri 后端 Agent 循环。
@@ -386,6 +388,15 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 流式文本与工具调用并存的事件协议。
 
 退出条件：Mock provider 能连续产生“检查—修改—验证”三个工具调用，并最终给出基于真实工具结果的回答。
+
+实现证据：
+
+- `src-tauri/src/agent.rs` 提供独立的 Tauri Agent 编排器以及 `agent_start_request`、`agent_submit_tool_result`、`agent_cancel_request` 和 `agent_detect_provider_capability` 命令；模型流与工具结果等待共享取消信号，默认工具结果等待超时 120 秒，默认最多 8 个工具步骤。
+- OpenAI Responses 回放完整 response output items 并追加 `function_call_output`；OpenAI Compatible 聚合流式 `tool_calls` 并回放 assistant/tool 消息；Ollama 依据 `/api/show` 的明确 `tools` capability 使用 `/api/chat` 工具消息。
+- `agent-stream` v1 事件将 `textDelta` 与结构化 `toolCall` 分离；每个请求只允许一个在途工具调用，结果按 `requestId + callId` 严格关联且只接受一次，并行工具调用、多行或含控制字符的命令在进入终端边界前即失败。
+- OpenAI Compatible 探测未明确成功、Ollama 元数据未明确声明 tools、实验开关关闭或提供商明确拒绝 tools 时，统一发出 `safeFallback` 并以不暴露工具的 `generateCommand` 提示继续；Assistant 自由文本和 Markdown 代码块没有任何自动执行路径。
+- Rust `mock_provider_completes_check_change_verify_from_structured_results_only` 自动完成连续“检查—修改—验证”三次调用；Mock 的最终回答仅从三份经结构化提交、callId 匹配且带真实状态/退出码的工具结果构造。提供商解析、完整 output item 回放、能力证据、超时、取消、步数上限、一次性提交和安全降级均有定向测试。
+- 本阶段没有 PTY 写入、输出捕获、审批策略或审批 UI；这些边界仍分别属于 M2 和 M3。
 
 ### M2 — PTY 执行与输出捕获
 

@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+mod agent;
 pub mod agent_contract;
 mod ai;
 mod ai_sessions;
@@ -228,6 +229,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
         .manage(ai::AiRequestRegistry::default())
+        .manage(agent::AgentRequestRegistry::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
@@ -246,6 +248,10 @@ pub fn run() {
             ai::ai_start_request,
             ai::ai_cancel_request,
             agent_contract::agent_contract_status,
+            agent::agent_detect_provider_capability,
+            agent::agent_start_request,
+            agent::agent_submit_tool_result,
+            agent::agent_cancel_request,
             ai_sessions::create_ai_session,
             ai_sessions::append_ai_session_message,
             ai_sessions::clear_ai_session_lane,

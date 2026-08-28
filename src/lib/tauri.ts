@@ -67,6 +67,9 @@ import type {
 import type {
   AgentContractStatus,
   AgentProviderCapabilityEvidence,
+  AgentStartRequest,
+  AgentStreamEvent,
+  AgentToolResult,
 } from '@/types/agent';
 
 const logger = createLogger('ipc');
@@ -234,6 +237,26 @@ export async function invokeAgentContractStatus(
     providerKind,
     evidence,
   });
+}
+
+export async function invokeDetectAgentProviderCapability(
+  provider: AiProviderConfig,
+): Promise<AgentProviderCapabilityEvidence> {
+  return invokeLogged<AgentProviderCapabilityEvidence>('agent_detect_provider_capability', {
+    provider,
+  });
+}
+
+export async function invokeStartAgentRequest(request: AgentStartRequest): Promise<void> {
+  return invokeLogged('agent_start_request', { request });
+}
+
+export async function invokeSubmitAgentToolResult(result: AgentToolResult): Promise<void> {
+  return invokeLogged('agent_submit_tool_result', { result });
+}
+
+export async function invokeCancelAgentRequest(requestId: string): Promise<void> {
+  return invokeLogged('agent_cancel_request', { requestId });
 }
 
 export async function invokeOpenUrl(url: string): Promise<void> {
@@ -635,6 +658,14 @@ export async function listenToSessionError(
   callback: EventCallback<SessionErrorEvent>,
 ): Promise<UnlistenFn> {
   return listen<SessionErrorEvent>('ssh-session-error', (event) => {
+    callback(event);
+  });
+}
+
+export async function listenToAgentStream(
+  callback: EventCallback<AgentStreamEvent>,
+): Promise<UnlistenFn> {
+  return listen<AgentStreamEvent>('agent-stream', (event) => {
     callback(event);
   });
 }

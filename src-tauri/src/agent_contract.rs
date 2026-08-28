@@ -293,11 +293,11 @@ fn parse_experimental_agent_flag(value: Option<&str>) -> bool {
     matches!(value, Some("1" | "true"))
 }
 
-fn experimental_agent_enabled() -> bool {
+pub(crate) fn experimental_agent_enabled() -> bool {
     parse_experimental_agent_flag(std::env::var(EXPERIMENTAL_AGENT_ENV).ok().as_deref())
 }
 
-fn resolve_agent_contract_status(
+pub(crate) fn resolve_agent_contract_status(
     feature_enabled: bool,
     kind: AiProviderKind,
     evidence: Option<AgentProviderCapabilityEvidence>,
@@ -355,6 +355,7 @@ mod tests {
         request: AgentRequest,
         tool_call: AgentToolCall,
         tool_results: Vec<AgentToolResult>,
+        stream_events: Vec<serde_json::Value>,
     }
 
     #[derive(Deserialize)]
@@ -388,6 +389,7 @@ mod tests {
             fixture.examples.tool_call.target
         );
         assert_eq!(fixture.examples.tool_results.len(), 5);
+        assert_eq!(fixture.examples.stream_events.len(), 11);
         let statuses = fixture
             .examples
             .tool_results
