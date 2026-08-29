@@ -491,4 +491,66 @@ describe('AgentUiController M4 integration', () => {
       .toBe('timedOut');
     expect(useAgentStore.getState().runs['request-1'].status).toBe('running');
   });
+
+  it('never executes a delayed tool call after the user stops a full-access task', async () => {
+    const h = harness({ mode: 'fullAccess' });
+    controllers.push(h.controller);
+    await startRun(h);
+
+    expect(h.controller.stop('request-1')).toBe(true);
+    h.emit({
+      type: 'toolCall',
+      requestId: 'request-1',
+      step: 1,
+      toolCall: toolCall('systemctl restart nginx'),
+    });
+
+    expect(h.execute).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().tools[agentToolKey('request-1', 'call-1')]).toBeUndefined();
+    expect(useAgentStore.getState().runs['request-1'].status).toBe('cancelled');
+  });
+
+  it('never executes a delayed tool call after a terminal completion event', async () => {
+    const h = harness({ mode: 'fullAccess' });
+    controllers.push(h.controller);
+    await startRun(h);
+    h.emit({ type: 'textDelta', requestId: 'request-1', turn: 1, text: 'No command needed.' });
+    h.emit({ type: 'completed', requestId: 'request-1', toolSteps: 0, fallback: false });
+
+    h.emit({
+      type: 'toolCall',
+      requestId: 'request-1',
+      step: 1,
+      toolCall: toolCall('systemctl restart nginx'),
+    });
+
+    expect(h.execute).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().tools[agentToolKey('request-1', 'call-1')]).toBeUndefined();
+    expect(useAgentStore.getState().runs['request-1'].status).toBe('completed');
+  });
+
+  it('fails closed on overlapping tool calls instead of authorizing a second command', async () => {
+    const execution = new Promise<AgentToolResult>(() => {});
+    const h = harness({
+      mode: 'fullAccess',
+      execute: () => execution,
+    });
+    controllers.push(h.controller);
+    await startRun(h);
+    h.emit({ type: 'toolCall', requestId: 'request-1', step: 1, toolCall: toolCall('sleep 30') });
+    h.emit({
+      type: 'toolCall',
+      requestId: 'request-1',
+      step: 2,
+      toolCall: toolCall('systemctl restart nginx', 'call-2'),
+    });
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState().tools[agentToolKey('request-1', 'call-2')]).toBeUndefined();
+    expect(useAgentStore.getState().runs['request-1']).toMatchObject({
+      status: 'failed',
+      error: 'Agent provider emitted an overlapping terminal tool call.',
+    });
+    expect(h.cancelRequest).toHaveBeenCalledWith('request-1');
+  });
 });

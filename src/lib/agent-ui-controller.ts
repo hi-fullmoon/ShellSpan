@@ -288,7 +288,17 @@ export class AgentUiController {
   handleStreamEvent(event: AgentStreamEvent): void {
     const state = useAgentStore.getState();
     const run = state.runs[event.requestId];
-    if (!run || this.blockedRequests.has(event.requestId)) return;
+    // Once the user stops a task, or any terminal run state has won, every
+    // later provider/UI event is stale. In particular, a delayed toolCall
+    // must never enter the approval controller because fullAccess would turn
+    // registration into immediate PTY authorization before the store has a
+    // chance to reject the stale snapshot.
+    if (
+      !run
+      || run.status !== 'running'
+      || this.blockedRequests.has(event.requestId)
+      || this.cancellationIntents.has(event.requestId)
+    ) return;
 
     switch (event.type) {
       case 'started':
@@ -321,6 +331,17 @@ export class AgentUiController {
         const targetError = this.validateTarget(run.target);
         if (targetError) {
           this.blockForTargetMismatch(event.requestId, targetError);
+          return;
+        }
+        const activeTool = activeToolSnapshot(event.requestId);
+        if (
+          activeTool
+          && activeTool.toolCall.callId !== event.toolCall.callId
+        ) {
+          this.blockRequest(
+            event.requestId,
+            'Agent provider emitted an overlapping terminal tool call.',
+          );
           return;
         }
         const snapshot = this.approvalController.registerToolCall(event.toolCall);
@@ -416,6 +437,10 @@ export class AgentUiController {
   }
 
   private blockForTargetMismatch(requestId: string, message: string): void {
+    this.blockRequest(requestId, message);
+  }
+
+  private blockRequest(requestId: string, message: string): void {
     if (this.blockedRequests.has(requestId)) return;
     this.blockedRequests.add(requestId);
     this.cancellationIntents.add(requestId);

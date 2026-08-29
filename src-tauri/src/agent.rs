@@ -816,7 +816,10 @@ fn validate_command(command: &str) -> Result<(), String> {
     if command.trim().is_empty() || chars > MAX_COMMAND_CHARS {
         return Err("Agent command is empty or too long".to_string());
     }
-    if command.chars().any(char::is_control) {
+    if command
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
+    {
         return Err("Agent command must be a single line without control characters".to_string());
     }
     Ok(())
@@ -928,7 +931,10 @@ impl HttpAgentBackend {
                 "function": { "name": "termbridge_capability_probe" }
             },
             "parallel_tool_calls": false,
-            "max_tokens": 16
+            // Reasoning-capable compatible models can consume a small token
+            // budget before emitting the forced call. A truncated 200 reply
+            // is not evidence that tools are unsupported.
+            "max_tokens": 256
         });
         let endpoint = match endpoint_url(&self.provider, "chat/completions") {
             Ok(endpoint) => endpoint,
@@ -1153,7 +1159,7 @@ fn compatible_probe_support(value: &Value) -> AgentToolCallingSupport {
         {
             AgentToolCallingSupport::Supported
         }
-        Some(_) | None => AgentToolCallingSupport::Unsupported,
+        Some(_) | None => AgentToolCallingSupport::Unknown,
     }
 }
 
@@ -2741,9 +2747,12 @@ mod tests {
         );
         assert_eq!(
             compatible_probe_support(&json!({
-                "choices": [{ "message": { "content": "plain text" } }]
+                "choices": [{
+                    "message": { "content": "plain text" },
+                    "finish_reason": "length"
+                }]
             })),
-            AgentToolCallingSupport::Unsupported
+            AgentToolCallingSupport::Unknown
         );
         assert_eq!(
             ollama_metadata_support(&json!({ "capabilities": ["completion", "tools"] })),
@@ -2779,6 +2788,8 @@ mod tests {
         .is_err());
         assert!(validate_command("echo one\necho two").is_err());
         assert!(validate_command("echo \u{1b}[31m").is_err());
+        assert!(validate_command("echo one\u{2028}echo two").is_err());
+        assert!(validate_command("echo one\u{2029}echo two").is_err());
     }
 
     #[test]
@@ -2873,5 +2884,155 @@ mod tests {
             .and_then(Value::as_str),
             Some("toolCall")
         );
+    }
+
+    fn required_live_env(name: &str) -> String {
+        std::env::var(name)
+            .unwrap_or_else(|_| panic!("{name} is required for the explicit M6 live-provider test"))
+    }
+
+    fn live_provider(
+        kind: AiProviderKind,
+        base_url: String,
+        model: String,
+        api_key: Option<String>,
+    ) -> AiProviderConfig {
+        AiProviderConfig {
+            id: "m6-live-provider".to_string(),
+            kind,
+            base_url,
+            model,
+            requires_api_key: api_key.is_some(),
+            api_key,
+        }
+    }
+
+    fn live_acceptance_messages() -> Vec<AiMessage> {
+        vec![AiMessage {
+            role: "user".to_string(),
+            content: "For a protocol acceptance test, call run_terminal_command exactly once with command `printf termbridge-live-provider-ok` and a short explanation. Do not answer in prose before the tool call.".to_string(),
+        }]
+    }
+
+    async fn assert_live_tool_provider(provider: AiProviderConfig) {
+        let api_key = api_key_for_provider(&provider).expect("resolve live-provider API key");
+        let mut backend = HttpAgentBackend::new(provider, api_key, live_acceptance_messages())
+            .expect("construct live-provider backend");
+        let cancellation = CancellationToken::new();
+        let capability = backend.detect_capability(&cancellation).await;
+        assert_eq!(capability.support, AgentToolCallingSupport::Supported);
+
+        let first = backend
+            .stream_turn(
+                AgentTurnMode::Tools,
+                "request-m6-live",
+                1,
+                &cancellation,
+                Arc::new(RecordingEvents::default()),
+            )
+            .await
+            .unwrap_or_else(|failure| panic!("live tool turn failed: {}", failure.message));
+        let call = first
+            .tool_call
+            .expect("live provider must return one structured tool call");
+        let arguments = parse_tool_arguments(&call).expect("validate live tool arguments");
+        assert_eq!(arguments.command, "printf termbridge-live-provider-ok");
+
+        backend
+            .push_tool_result(
+                &call,
+                &AgentToolResult {
+                    request_id: "request-m6-live".to_string(),
+                    call_id: "call-m6-live".to_string(),
+                    status: AgentToolResultStatus::Completed,
+                    exit_code: Some(0),
+                    output: "termbridge-live-provider-ok".to_string(),
+                },
+            )
+            .expect("replay structured live tool result");
+        let summary = backend
+            .stream_turn(
+                AgentTurnMode::SummaryOnly,
+                "request-m6-live",
+                2,
+                &cancellation,
+                Arc::new(RecordingEvents::default()),
+            )
+            .await
+            .unwrap_or_else(|failure| panic!("live summary turn failed: {}", failure.message));
+        assert!(summary.tool_call.is_none());
+        assert!(!summary.assistant_text.trim().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TERMBRIDGE_M6_OPENAI_LIVE=1 and an OpenAI API credential"]
+    async fn m6_live_openai_responses_tool_acceptance() {
+        assert_eq!(required_live_env("TERMBRIDGE_M6_OPENAI_LIVE"), "1");
+        assert_live_tool_provider(live_provider(
+            AiProviderKind::OpenAi,
+            std::env::var("TERMBRIDGE_M6_OPENAI_BASE_URL")
+                .unwrap_or_else(|_| "https://api.openai.com".to_string()),
+            required_live_env("TERMBRIDGE_M6_OPENAI_MODEL"),
+            Some(required_live_env("OPENAI_API_KEY")),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicitly configured live Chat Completions-compatible provider"]
+    async fn m6_live_chat_completions_tool_acceptance() {
+        assert_eq!(required_live_env("TERMBRIDGE_M6_COMPATIBLE_LIVE"), "1");
+        assert_live_tool_provider(live_provider(
+            AiProviderKind::OpenAiCompatible,
+            required_live_env("TERMBRIDGE_M6_COMPATIBLE_BASE_URL"),
+            required_live_env("TERMBRIDGE_M6_COMPATIBLE_MODEL"),
+            std::env::var("TERMBRIDGE_M6_COMPATIBLE_API_KEY").ok(),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicitly configured live Ollama tools model"]
+    async fn m6_live_ollama_tools_acceptance() {
+        assert_eq!(required_live_env("TERMBRIDGE_M6_OLLAMA_LIVE"), "1");
+        assert_live_tool_provider(live_provider(
+            AiProviderKind::Ollama,
+            std::env::var("TERMBRIDGE_M6_OLLAMA_BASE_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
+            required_live_env("TERMBRIDGE_M6_OLLAMA_TOOLS_MODEL"),
+            None,
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicitly configured live Ollama model without tools"]
+    async fn m6_live_ollama_no_tools_falls_back_without_tool_events() {
+        assert_eq!(required_live_env("TERMBRIDGE_M6_OLLAMA_LIVE"), "1");
+        let provider = live_provider(
+            AiProviderKind::Ollama,
+            std::env::var("TERMBRIDGE_M6_OLLAMA_BASE_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
+            required_live_env("TERMBRIDGE_M6_OLLAMA_NO_TOOLS_MODEL"),
+            None,
+        );
+        let mut backend = HttpAgentBackend::new(provider, None, live_acceptance_messages())
+            .expect("construct no-tools Ollama backend");
+        let cancellation = CancellationToken::new();
+        let capability = backend.detect_capability(&cancellation).await;
+        assert_eq!(capability.support, AgentToolCallingSupport::Unsupported);
+
+        let fallback = backend
+            .stream_turn(
+                AgentTurnMode::GenerateCommandFallback,
+                "request-m6-no-tools",
+                1,
+                &cancellation,
+                Arc::new(RecordingEvents::default()),
+            )
+            .await
+            .unwrap_or_else(|failure| panic!("live fallback turn failed: {}", failure.message));
+        assert!(fallback.tool_call.is_none());
+        assert!(!fallback.assistant_text.trim().is_empty());
     }
 }

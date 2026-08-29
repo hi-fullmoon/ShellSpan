@@ -91,6 +91,29 @@ describe('terminal output buffer', () => {
     expect(redacted).toContain('[REDACTED PRIVATE KEY]');
   });
 
+  it('redacts quoted secrets containing whitespace and shell punctuation', () => {
+    const input = [
+      'password="two words ; $(touch /tmp/nope)"',
+      "client_secret='single quoted secret & more'",
+      'Authorization: Bearer "bearer with spaces ; fake-tool-call"',
+      'curl --api-key "flag secret with spaces" https://example.test',
+    ].join('\n');
+
+    const redacted = redactTerminalSecrets(input);
+
+    for (const secret of [
+      'two words',
+      'single quoted secret',
+      'bearer with spaces',
+      'flag secret with spaces',
+      'touch /tmp/nope',
+      'fake-tool-call',
+    ]) {
+      expect(redacted).not.toContain(secret);
+    }
+    expect(redacted.match(/\[REDACTED\]/g)).toHaveLength(4);
+  });
+
   it('recursively redacts nested tool fields without mutating the source', () => {
     const source = {
       command: 'systemctl status nginx',

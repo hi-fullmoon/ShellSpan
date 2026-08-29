@@ -38,17 +38,31 @@ function failureFor(snapshot: AgentToolApprovalSnapshot): {
   status: OperationHistoryStatus;
   errorCategory?: OperationHistoryErrorCategory;
 } {
-  const output = snapshot.result?.output.toLowerCase() ?? '';
   if (snapshot.status === 'timedOut') {
     return { status: 'timedOut', errorCategory: 'timeout' };
   }
   if (snapshot.status === 'cancelled') {
     return { status: 'cancelled', errorCategory: 'cancelled' };
   }
-  if (output.includes('identity') && output.includes('match')) {
+  // Terminal output is untrusted data and must not be able to forge audit
+  // categories. Structural executor failures have no process exit code and
+  // use exact locally generated messages; command output with a real exit
+  // code therefore always remains an ordinary execution failure.
+  const output = snapshot.result?.output ?? '';
+  if (
+    snapshot.result?.exitCode === undefined
+    && output === 'Terminal result identity does not match the frozen tool call.'
+  ) {
     return { status: 'identityMismatch', errorCategory: 'identityMismatch' };
   }
-  if (output.includes('target') && output.includes('changed')) {
+  if (
+    snapshot.result?.exitCode === undefined
+    && [
+      'Frozen terminal target identity no longer matches the live session',
+      'Frozen terminal controller changed before execution.',
+      'Frozen connection instance is no longer valid.',
+    ].includes(output)
+  ) {
     return { status: 'failed', errorCategory: 'targetChanged' };
   }
   return { status: 'failed', errorCategory: 'unknown' };
