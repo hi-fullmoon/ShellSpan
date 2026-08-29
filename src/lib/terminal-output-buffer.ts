@@ -201,19 +201,64 @@ export function redactTerminalSecrets(value: string): string {
       /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|$)/gi,
       '[REDACTED PRIVATE KEY]',
     )
-    .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
     .replace(
-      /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|password|passwd|pwd)\s*[:=]\s*)(["']?)[^\s"']+\2/gi,
+      /\b(authorization\s*:\s*(?:bearer|basic)\s+)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi,
       '$1[REDACTED]',
     )
     .replace(
-      /(--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|secret|password|passwd))(?:=|\s+)\S+/gi,
+      /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase|pwd)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s"']+)/gi,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /(--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase))(?:=|\s+)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi,
       '$1=[REDACTED]',
     )
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1[REDACTED]@')
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED AWS ACCESS KEY]')
     .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, '[REDACTED GITHUB TOKEN]')
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED JWT]');
+}
+
+const SENSITIVE_FIELD_KEYS = new Set([
+  'apikey',
+  'accesstoken',
+  'authtoken',
+  'authorization',
+  'clientsecret',
+  'credential',
+  'credentials',
+  'passphrase',
+  'password',
+  'passwd',
+  'privatekey',
+  'privatekeydata',
+  'pwd',
+  'secret',
+  'token',
+]);
+
+function normalizedSensitiveKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Recursively sanitizes JSON-compatible data. Sensitive field names are
+ * replaced regardless of nesting depth, and every string leaf still passes
+ * through the terminal text redactor. This is the common boundary used before
+ * Agent tool data is sent to a model, persisted, or copied into audit metadata.
+ */
+export function redactSensitiveValue<T>(value: T): T {
+  if (typeof value === 'string') return redactTerminalSecrets(value) as T;
+  if (Array.isArray(value)) return value.map((item) => redactSensitiveValue(item)) as T;
+  if (typeof value !== 'object' || value === null) return value;
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    redacted[key] = SENSITIVE_FIELD_KEYS.has(normalizedSensitiveKey(key))
+      ? '[REDACTED]'
+      : redactSensitiveValue(item);
+  }
+  return redacted as T;
 }
 
 function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): boolean {

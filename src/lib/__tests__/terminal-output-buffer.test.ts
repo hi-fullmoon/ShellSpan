@@ -6,6 +6,7 @@ import {
   getRecentTerminalOutputSnapshot,
   rebindTerminalOutput,
   renderTerminalText,
+  redactSensitiveValue,
   redactTerminalSecrets,
   stripAnsi,
   subscribeTerminalOutput,
@@ -88,6 +89,50 @@ describe('terminal output buffer', () => {
       expect(redacted).not.toContain(secret);
     }
     expect(redacted).toContain('[REDACTED PRIVATE KEY]');
+  });
+
+  it('redacts quoted secrets containing whitespace and shell punctuation', () => {
+    const input = [
+      'password="two words ; $(touch /tmp/nope)"',
+      "client_secret='single quoted secret & more'",
+      'Authorization: Bearer "bearer with spaces ; fake-tool-call"',
+      'curl --api-key "flag secret with spaces" https://example.test',
+    ].join('\n');
+
+    const redacted = redactTerminalSecrets(input);
+
+    for (const secret of [
+      'two words',
+      'single quoted secret',
+      'bearer with spaces',
+      'flag secret with spaces',
+      'touch /tmp/nope',
+      'fake-tool-call',
+    ]) {
+      expect(redacted).not.toContain(secret);
+    }
+    expect(redacted.match(/\[REDACTED\]/g)).toHaveLength(4);
+  });
+
+  it('recursively redacts nested tool fields without mutating the source', () => {
+    const source = {
+      command: 'systemctl status nginx',
+      arguments: {
+        credentials: { password: 'nested-password' },
+        items: [
+          { output: 'Authorization: Bearer nested-bearer' },
+          { token: 'nested-token' },
+        ],
+      },
+    };
+
+    const redacted = redactSensitiveValue(source);
+
+    expect(JSON.stringify(redacted)).not.toContain('nested-password');
+    expect(JSON.stringify(redacted)).not.toContain('nested-bearer');
+    expect(JSON.stringify(redacted)).not.toContain('nested-token');
+    expect(redacted.command).toBe('systemctl status nginx');
+    expect(source.arguments.credentials.password).toBe('nested-password');
   });
 
   it('redacts an incomplete private key block instead of caching its body', () => {

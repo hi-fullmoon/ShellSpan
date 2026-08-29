@@ -22,8 +22,10 @@ import { useAiSettingsStore } from './stores/aiSettingsStore';
 import { useAiStore } from './stores/aiStore';
 import { useSftpStore } from './stores/sftpStore';
 import { hydrateTransferResumeCandidates } from './lib/transfer-resume';
+import { initializeAgentSessionPersistence } from './lib/agent-sessions';
 
 initGlobalErrorLogging();
+initializeAgentSessionPersistence();
 
 async function bootstrap(): Promise<void> {
   await Promise.all([

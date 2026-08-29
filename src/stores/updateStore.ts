@@ -11,6 +11,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { t } from '@/locales';
 import type { UpdateStatus, UpdateVersionInfo } from '@/types';
 import { usePortForwardStore } from '@/stores/portForwardStore';
+import { finalizeAiSessionsBeforeExit } from '@/lib/ai-sessions';
 
 const logger = createLogger('update');
 
@@ -138,6 +139,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     set({ restartDialogDismissed: true });
     try {
       logger.info('Installing update now');
+      await finalizeAiSessionsBeforeExit();
       await usePortForwardStore.getState().stopAll();
       await invokeRequestAppRestart();
       return;

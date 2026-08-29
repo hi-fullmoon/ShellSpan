@@ -37,6 +37,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 keyring-core = "1"
 sysinfo = "0.39"
 futures-util = "0.3"
+async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-util = "0.7"
@@ -65,3 +66,6 @@ dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] 
 
 [dev-dependencies]
 tempfile = "3.14.0"
+
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty" }

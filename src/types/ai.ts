@@ -79,4 +79,5 @@ export interface AiSessionMeta {
 export interface AiSessionFile {
   conversation: AiConversation;
   messages: AiChatMessage[];
+  agentStates?: import('./agent').PersistedAgentRunState[];
 }

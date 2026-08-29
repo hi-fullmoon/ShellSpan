@@ -73,8 +73,11 @@ jobs:
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri -> target
+          cache-on-failure: true
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Run M6 native shell and PTY acceptance
+        run: pnpm test:agent:platform
       - name: Run Agent terminal contract tests
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked agent::terminal -- --test-threads=1
@@ -105,7 +108,9 @@ jobs:
         with:
           workspaces: src-tauri -> target
       - name: Start isolated SSH service
-        run: docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml up --build --detach --wait
+        run: |
+          docker build --tag termbridge-ssh-e2e:local tests/ssh-e2e
+          docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml up --detach --wait --pull never
       - name: Run SSH/SFTP end-to-end test
         env:
           TERMBRIDGE_E2E_SSH_FIXTURE: "1"
