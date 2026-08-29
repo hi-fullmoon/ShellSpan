@@ -20,6 +20,11 @@ export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'history' | 'monitor' | 'logs' | 'settings';
 export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts';
+export type PetdexConnectionStatus =
+  | 'notDetected'
+  | 'connected'
+  | 'notRunning'
+  | 'connectionError';
 export type LogSource = 'frontend' | 'backend';
 export type ShortcutAction =
   | 'openWorkbench'

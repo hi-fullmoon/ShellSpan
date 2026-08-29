@@ -1,11 +1,12 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Globe2Icon, KeyboardIcon, RotateCcwIcon, Settings2Icon, XIcon } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ExternalLinkIcon, Globe2Icon, KeyboardIcon, RotateCcwIcon, Settings2Icon, XIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
 import { findShortcutConflict, getShortcutKeys, isLeaderShortcutAction, shortcutFromBareKeyEvent, shortcutFromKeyboardEvent } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Label } from '@/components/ui/label';
@@ -41,6 +42,9 @@ import {
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
 import { clearTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
 import { clearSftpWorkspace } from '@/lib/sftp-workspace-persistence';
+import { getPetdexStatus, listenToPetdexStatus, testPetdexConnection } from '@/lib/petdex';
+import { openPetdexPhase3Feedback } from '@/lib/petdex-feedback';
+import type { PetdexConnectionStatus } from '@/types';
 
 interface ShortcutGroup {
   id: 'app' | 'terminal' | 'sftp';
@@ -92,17 +96,26 @@ const SETTINGS_SECTIONS: { id: SettingsSection; titleKey: LocaleKey }[] = [
   { id: 'shortcuts', titleKey: 'settings.shortcuts.title' },
 ];
 
+const PETDEX_STATUS_LABEL_KEYS: Record<PetdexConnectionStatus, LocaleKey> = {
+  notDetected: 'settings.appearance.petdex.status.notDetected',
+  connected: 'settings.appearance.petdex.status.connected',
+  notRunning: 'settings.appearance.petdex.status.notRunning',
+  connectionError: 'settings.appearance.petdex.status.connectionError',
+};
+
 interface SettingRowProps {
   description: string;
+  descriptionId?: string;
   label: string;
+  labelId?: string;
   children: React.ReactNode;
 }
 
-const SettingRow: React.FC<SettingRowProps> = ({ description, label, children }) => (
+const SettingRow: React.FC<SettingRowProps> = ({ description, descriptionId, label, labelId, children }) => (
   <div className="grid min-h-16 grid-cols-[minmax(0,1fr)_11rem] items-center gap-6 px-4 py-2.5">
     <div className="flex min-w-0 flex-col gap-0.5">
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
-      <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+      <Label id={labelId} className="text-sm font-medium text-foreground">{label}</Label>
+      <p id={descriptionId} className="text-xs leading-5 text-muted-foreground">{description}</p>
     </div>
     <div>{children}</div>
   </div>
@@ -128,6 +141,8 @@ export const SettingsPanel: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
   const setStartupUpdateCheck = useAppStore((state) => state.setStartupUpdateCheck);
+  const petdexEnabled = useAppStore((state) => state.petdexEnabled);
+  const setPetdexEnabled = useAppStore((state) => state.setPetdexEnabled);
   const startupSection = useAppStore((state) => state.startupSection);
   const setStartupSection = useAppStore((state) => state.setStartupSection);
   const terminalFontSize = useAppStore((state) => state.terminalFontSize);
@@ -186,9 +201,35 @@ export const SettingsPanel: React.FC = () => {
   const resetShortcuts = useAppStore((state) => state.resetShortcuts);
   const [editingAction, setEditingAction] = useState<ShortcutAction | null>(null);
   const [conflictAction, setConflictAction] = useState<ShortcutAction | null>(null);
+  const [petdexStatus, setPetdexStatus] = useState<PetdexConnectionStatus>('notDetected');
+  const [testingPetdex, setTestingPetdex] = useState(false);
   const activeSection = useAppStore((state) => state.activeSettingsSection);
   const setActiveSection = useAppStore((state) => state.setActiveSettingsSection);
   const settingsViewportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void getPetdexStatus()
+      .then((status) => {
+        if (active) setPetdexStatus(status);
+      })
+      .catch(() => {
+        if (active) setPetdexStatus('connectionError');
+      });
+    void listenToPetdexStatus((status) => {
+      if (active) setPetdexStatus(status);
+    }).then((dispose) => {
+      if (active) unlisten = dispose;
+      else dispose();
+    }).catch(() => {
+      if (active) setPetdexStatus('connectionError');
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   const handleSectionChange = (value: string): void => {
     if (value === activeSection) return;
@@ -199,6 +240,22 @@ export const SettingsPanel: React.FC = () => {
   const handleClearWorkspace = (): void => {
     setRestoreWorkspace(false);
     void Promise.all([clearTerminalWorkspace(), clearSftpWorkspace()]);
+  };
+
+  const handlePetdexEnabledChange = (enabled: boolean): void => {
+    setPetdexStatus('notDetected');
+    setPetdexEnabled(enabled);
+  };
+
+  const handleTestPetdex = async (): Promise<void> => {
+    setTestingPetdex(true);
+    try {
+      setPetdexStatus(await testPetdexConnection());
+    } catch {
+      setPetdexStatus('connectionError');
+    } finally {
+      setTestingPetdex(false);
+    }
   };
 
   const shortcutLabels = useMemo<Record<ShortcutAction, string>>(
@@ -324,6 +381,82 @@ export const SettingsPanel: React.FC = () => {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                </SettingRow>
+                <Separator className="data-horizontal:border-border/40" />
+                <SettingGroupLabel>{t('settings.appearance.experimental')}</SettingGroupLabel>
+                <SettingRow
+                  label={t('settings.appearance.petdex.title')}
+                  description={t('settings.appearance.petdex.description')}
+                  labelId="petdex-integration-label"
+                  descriptionId="petdex-integration-description"
+                >
+                  <div className="flex justify-end">
+                    <Switch
+                      aria-label={t('settings.appearance.petdex.enabled')}
+                      aria-describedby="petdex-integration-description petdex-privacy-description"
+                      checked={petdexEnabled}
+                      onCheckedChange={handlePetdexEnabledChange}
+                    />
+                  </div>
+                </SettingRow>
+                <Separator className="data-horizontal:border-border/40" />
+                <SettingRow
+                  label={t('settings.appearance.petdex.status')}
+                  description={t('settings.appearance.petdex.privacy')}
+                  labelId="petdex-status-label"
+                  descriptionId="petdex-privacy-description"
+                >
+                  <div
+                    className="flex items-center justify-end gap-2"
+                    role="status"
+                    aria-label={t('settings.appearance.petdex.statusAnnouncement', {
+                      status: t(PETDEX_STATUS_LABEL_KEYS[petdexStatus]),
+                    })}
+                    aria-live="polite"
+                    aria-atomic="true"
+                    aria-busy={testingPetdex}
+                  >
+                    <Badge
+                      variant={petdexStatus === 'connected'
+                        ? 'default'
+                        : petdexStatus === 'connectionError'
+                          ? 'destructive'
+                          : 'outline'}
+                    >
+                      {t(PETDEX_STATUS_LABEL_KEYS[petdexStatus])}
+                    </Badge>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      aria-describedby="petdex-privacy-description"
+                      disabled={!petdexEnabled || testingPetdex}
+                      onClick={() => void handleTestPetdex()}
+                    >
+                      {testingPetdex
+                        ? t('settings.appearance.petdex.testing')
+                        : t('settings.appearance.petdex.testAction')}
+                    </Button>
+                  </div>
+                </SettingRow>
+                <Separator className="data-horizontal:border-border/40" />
+                <SettingRow
+                  label={t('settings.appearance.petdex.feedback')}
+                  description={t('settings.appearance.petdex.feedbackDescription')}
+                  descriptionId="petdex-feedback-description"
+                >
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      aria-describedby="petdex-feedback-description"
+                      onClick={() => void openPetdexPhase3Feedback()}
+                    >
+                      {t('settings.appearance.petdex.feedbackAction')}
+                      <ExternalLinkIcon data-icon="inline-end" />
+                    </Button>
+                  </div>
                 </SettingRow>
               </div>
             </TabsContent>

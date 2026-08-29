@@ -31,6 +31,7 @@ use crate::{
         ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent,
         SessionStatus,
     },
+    petdex::{self, PetdexEvent},
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
@@ -105,6 +106,7 @@ pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
     output_paused: Arc<AtomicBool>,
     on_connected: F,
 ) -> Result<Option<String>, ConnectionError> {
+    petdex::notify(app, PetdexEvent::SshConnecting(session_id.to_string()));
     info!(
         "SSH session connecting session_id={} {}",
         session_id,
@@ -241,6 +243,7 @@ pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
         Some("shell ready".to_string()),
     )
     .map_err(|message| ConnectionError::Other { message })?;
+    petdex::notify(app, PetdexEvent::SshConnected(session_id.to_string()));
 
     session_loop(
         app,

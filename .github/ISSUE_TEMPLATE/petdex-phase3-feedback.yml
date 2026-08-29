@@ -1,0 +1,104 @@
+name: Petdex Phase 3 voluntary feedback
+description: Voluntarily share whether the experimental Petdex integration improves background status awareness.
+title: "[Petdex Phase 3] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for choosing to help evaluate the experimental, off-by-default Petdex integration.
+
+        This is a **public GitHub issue** associated with your GitHub account. TermBridge did not upload or prefill any app data. Do **not** include passwords, credentials, tokens, terminal or AI content, commands, logs, diagnostic bundles, host names, IP addresses, usernames, paths, or file names. If you suspect secret exposure, disable the integration and contact a maintainer through an existing trusted private channel; do not paste details here.
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Voluntary consent
+      description: Your responses may be counted only as de-identified aggregate Phase 3 evidence.
+      options:
+        - label: I am submitting voluntarily and consent to these answers being included in de-identified aggregate results.
+          required: true
+        - label: I understand this issue is public and can be withdrawn by closing it and asking maintainers to exclude it from later aggregates.
+          required: true
+        - label: I confirm that I did not include secrets, logs, host information, paths, file names, terminal/AI content, or tokens.
+          required: true
+  - type: dropdown
+    id: trial
+    attributes:
+      label: Trial status
+      description: Did you actively enable and try the Petdex integration?
+      options:
+        - Yes, I enabled and tried it
+        - Not yet; I am providing verifiable demand feedback only
+    validations:
+      required: true
+  - type: dropdown
+    id: day7
+    attributes:
+      label: Seven-day continued enablement
+      description: Only choose the first option if at least seven days have elapsed since you enabled it.
+      options:
+        - Still enabled after at least 7 days
+        - Disabled before 7 days
+        - 7 days have not elapsed yet
+        - Demand feedback only; I did not enable it
+    validations:
+      required: true
+  - type: checkboxes
+    id: awareness
+    attributes:
+      label: Background state awareness
+      description: Which states, if any, did Petdex help you notice? Leave all unchecked if none.
+      options:
+        - label: Background file transfer activity or completion
+        - label: AI request completion
+        - label: Connection failure
+  - type: dropdown
+    id: value
+    attributes:
+      label: Practical value
+      description: Consider state awareness rather than novelty alone.
+      options:
+        - It meaningfully improved at least one background-state cue
+        - It was fun, but did not improve status awareness
+        - It provided no useful value
+        - Unsure
+    validations:
+      required: true
+  - type: checkboxes
+    id: friction
+    attributes:
+      label: Friction observed
+      description: Select every applicable concern. Leave all unchecked if none.
+      options:
+        - label: It was distracting or interfered with work
+        - label: Resource use was noticeable
+        - label: It obscured or covered part of the workspace
+  - type: dropdown
+    id: safety
+    attributes:
+      label: Serious integration problem
+      description: Do not include details that could reveal a secret, host, path, file name, log, terminal content, or AI content.
+      options:
+        - No crash, business-blocking behavior, or suspected secret exposure
+        - A crash appeared to be caused by the integration
+        - SSH, SFTP, or AI work appeared to be blocked by the integration
+        - I suspect secret exposure and will report privately without details here
+        - Unsure
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Preferred status surface
+      options:
+        - External floating desktop pet
+        - Character inside the TermBridge window
+        - Normal system notifications
+        - None of these
+    validations:
+      required: true
+  - type: textarea
+    id: optional-observation
+    attributes:
+      label: Optional de-identified observation
+      description: Do not paste secrets, logs, diagnostic output, host information, paths, file names, terminal/AI content, commands, or tokens. This text is never copied into the repository evidence ledger.
+      placeholder: A short observation about status-awareness value or friction, with all operational details removed.

@@ -111,6 +111,7 @@ describe('OperationHistoryPanel', () => {
     );
     expect(await screen.findByText('operationHistory.action.executeRunbookStep')).toBeInTheDocument();
     const table = screen.getByRole('table', { name: 'operationHistory.title' });
+    expect(table.parentElement).toHaveClass('overflow-x-auto', 'overflow-y-hidden');
     expect(table.parentElement?.parentElement).toHaveClass('shrink-0');
     expect(within(table).getByRole('columnheader', { name: 'operationHistory.action' })).toBeInTheDocument();
     expect(within(table).getAllByRole('row')).toHaveLength(2);

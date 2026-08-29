@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "evaluationId": "petdex-phase4-admission-2026-08-28",
+  "evaluatedOn": "2026-08-28",
+  "scope": "admission-only",
+  "phase3Gate": {
+    "asOf": "2026-08-28",
+    "status": "collecting",
+    "strictExitCode": 1
+  },
+  "decision": "blocked",
+  "implementationAuthorized": false,
+  "criteria": [
+    {
+      "id": "phase3.real-user-gate",
+      "status": "blocked",
+      "evidence": [
+        "The strict Phase 3 gate returned collecting with exit code 1 on 2026-08-28.",
+        "The real ledger contains 0 explicit opt-in users, 0 equivalent demand records, 0/0 Day-7 results, 0 qualitative respondents, and a pending safety review."
+      ],
+      "gaps": [
+        "Freeze a real 14-28 day observation cutoff with at least 30 qualified users or equivalent referenced demand.",
+        "Cover every opted-in trial user with a referenced Day-7 result and reach at least 30 percent continued enablement.",
+        "Complete the referenced safety review with zero serious integration incidents and provide referenced state-awareness value feedback."
+      ]
+    },
+    {
+      "id": "assets.machine-readable-rights",
+      "status": "blocked",
+      "evidence": [
+        "The Phase 0 snapshot found submittedBy, asset URLs, and spriteVersionNumber in the Petdex manifests, plus an upstream takedown process.",
+        "The same snapshot found no license, rights, copyright, attribution, or per-asset takedown-status fields in the manifests or sampled pet.json."
+      ],
+      "gaps": [
+        "Require per-asset machine-readable license, attribution requirements, immutable source, asset version, and active or withdrawn status.",
+        "Define how a withdrawal revokes TermBridge previews, downloads, packaged copies, and cached copies; upstream takedown alone is insufficient."
+      ]
+    },
+    {
+      "id": "downloads.integrity-cache-cleanup",
+      "status": "blocked",
+      "evidence": [
+        "Repository inspection found no Petdex Phase 4 asset downloader, checksum ledger, cache policy, or cleanup implementation.",
+        "The roadmap only records future limits for content type, file count, file size, decompressed size, image dimensions, and total cache size."
+      ],
+      "gaps": [
+        "Define a trusted checksum source, fail-closed verification, atomic writes, archive and image validation, quotas, corruption recovery, and offline behavior.",
+        "Define user-triggered clearing, automatic eviction, withdrawal cleanup, uninstall cleanup, and verifiable tests without downloading production assets during admission review."
+      ]
+    },
+    {
+      "id": "window.cross-platform-prototype",
+      "status": "blocked",
+      "evidence": [
+        "The current product only bridges finite states to an external Petdex Desktop loopback service.",
+        "No Phase 4 transparent, always-on-top, click-through, draggable, multi-display, or DPI window prototype and no platform result matrix exist in the repository."
+      ],
+      "gaps": [
+        "After Phase 3 passes, define supported platforms and produce reproducible prototypes for focus, accessibility, virtual desktops, multi-display and DPI changes, lifecycle, signing, and permission behavior.",
+        "Record failures and rollback behavior independently from the existing external Desktop bridge."
+      ]
+    },
+    {
+      "id": "resources.baseline",
+      "status": "blocked",
+      "evidence": [
+        "Existing performance tooling measures terminal paths, not a Petdex directory, embedded character, or native floating renderer.",
+        "No Phase 4 CPU, memory, GPU, wakeup, startup, idle, active-animation, or multi-display baseline has been recorded."
+      ],
+      "gaps": [
+        "Approve measurement scenarios, hardware and OS matrix, sample duration, comparison build, and resource budgets before collecting a reproducible baseline.",
+        "Record idle and active deltas and define a fail-closed decision when a platform exceeds its approved budget."
+      ]
+    },
+    {
+      "id": "format.compatibility-rollback",
+      "status": "blocked",
+      "evidence": [
+        "Phase 0 documented Petdex manifest v1 and v2, spriteVersionNumber, and the known 8x9 and 8x11 spritesheet families.",
+        "The current TermBridge integration does not parse manifests, pet.json, spritesheets, or downloaded pet packages."
+      ],
+      "gaps": [
+        "Define supported manifest, pet.json, spritesheet, and package versions with fixtures and fail-closed behavior for unknown or malformed versions.",
+        "Define last-known-good metadata and asset rollback, downgrade compatibility, cache schema migration, withdrawal behavior, and a complete feature-disable rollback path."
+      ]
+    }
+  ]
+}

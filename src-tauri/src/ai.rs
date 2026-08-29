@@ -12,7 +12,11 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::{db::Database, keychain::CredentialManager};
+use crate::{
+    db::Database,
+    keychain::CredentialManager,
+    petdex::{self, PetdexEvent},
+};
 
 pub(crate) const AI_STREAM_EVENT: &str = "ai-stream";
 const AI_KEY_SERVICE: &str = "com.termbridge.ai-provider";
@@ -316,19 +320,23 @@ pub(crate) fn ai_start_request(
             request_id: request_id.clone(),
         },
     )?;
+    petdex::notify(&app, PetdexEvent::AiStarted(request_id.clone()));
 
     tauri::async_runtime::spawn(async move {
         let outcome = run_request(&app, &request, api_key, cancellation.clone()).await;
         registry.finish(&request_id);
         if cancellation.is_cancelled() {
+            petdex::notify(&app, PetdexEvent::AiCancelled(request_id.clone()));
             let _ = emit(&app, AiStreamEvent::Cancelled { request_id });
             return;
         }
         match outcome {
             Ok(()) => {
+                petdex::notify(&app, PetdexEvent::AiSucceeded(request_id.clone()));
                 let _ = emit(&app, AiStreamEvent::Completed { request_id });
             }
             Err(message) => {
+                petdex::notify(&app, PetdexEvent::AiFailed(request_id.clone()));
                 log::warn!("AI request failed request_id={}", request_id);
                 let _ = emit(
                     &app,
