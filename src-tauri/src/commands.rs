@@ -3147,20 +3147,35 @@ mod tests {
             .master
             .try_clone_reader()
             .expect("clone the real ConPTY reader");
+        let mut writer = pair
+            .master
+            .take_writer()
+            .expect("take the real ConPTY writer");
         let mut command = CommandBuilder::new("powershell.exe");
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Write-Output 'termbridge-conpty-smoke'; exit 7",
-        ]);
+        command.args(["-NoLogo", "-NoProfile", "-NonInteractive"]);
         configure_local_terminal_environment(&mut command);
         let mut child = pair
             .slave
             .spawn_command(command)
             .expect("spawn the production Windows shell through ConPTY");
         drop(pair.slave);
+
+        let (output_tx, output_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let mut output = String::new();
+            let result = reader
+                .read_to_string(&mut output)
+                .map(|_| output)
+                .map_err(|error| error.to_string());
+            let _ = output_tx.send(result);
+        });
+        writer
+            .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
+            .expect("write deterministic commands to the PowerShell ConPTY");
+        writer
+            .flush()
+            .expect("flush deterministic commands to the PowerShell ConPTY");
+        drop(writer);
 
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {
@@ -3175,15 +3190,6 @@ mod tests {
         };
 
         drop(pair.master);
-        let (output_tx, output_rx) = std::sync::mpsc::channel();
-        thread::spawn(move || {
-            let mut output = String::new();
-            let result = reader
-                .read_to_string(&mut output)
-                .map(|_| output)
-                .map_err(|error| error.to_string());
-            let _ = output_tx.send(result);
-        });
         let output = output_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("read the PowerShell ConPTY output before the deadline")
