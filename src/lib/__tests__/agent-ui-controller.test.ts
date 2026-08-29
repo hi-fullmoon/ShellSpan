@@ -77,6 +77,7 @@ interface Harness {
 function harness(options: {
   mode?: 'requestApproval' | 'autoApproveReadOnly' | 'fullAccess';
   execute?: (call: AgentToolCall) => Promise<AgentToolResult>;
+  startRequest?: () => Promise<void>;
   validateTarget?: () => string | null;
   submitResult?: (result: AgentToolResult) => Promise<void>;
   subscribeToTerminalStore?: boolean;
@@ -87,7 +88,7 @@ function harness(options: {
   const execute = vi.fn(async ({ toolCall: call }: { toolCall: AgentToolCall }) => (
     options.execute ? options.execute(call) : completed(call)
   ));
-  const startRequest = vi.fn(async () => {});
+  const startRequest = vi.fn(options.startRequest ?? (async () => {}));
   const validateTarget = options.validateTarget ?? (() => null);
   const controller = new AgentUiController({
     startRequest,
@@ -361,6 +362,31 @@ describe('AgentUiController M4 integration', () => {
       expect(useAgentStore.getState().tools[agentToolKey('request-1', 'call-1')].status)
         .toBe('cancelled');
     });
+  });
+
+  it('reissues cancellation when stopped before backend start registration finishes', async () => {
+    let finishStart!: () => void;
+    const pendingStart = new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+    const h = harness({ startRequest: () => pendingStart });
+    controllers.push(h.controller);
+
+    const starting = h.controller.start({
+      goal: 'Check nginx', provider, target, targetTitle: 'Production A',
+      messages: [{ role: 'user', content: 'Check nginx' }],
+    });
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().runs['request-1']?.status).toBe('running');
+    });
+
+    expect(h.controller.stop('request-1')).toBe(true);
+    expect(h.cancelRequest).toHaveBeenCalledTimes(1);
+
+    finishStart();
+    await expect(starting).resolves.toBe('request-1');
+    expect(h.cancelRequest).toHaveBeenCalledTimes(2);
+    expect(useAgentStore.getState().runs['request-1'].status).toBe('cancelled');
   });
 
   it('cancels on exact target drift and never rebinds retry to a replacement session', async () => {

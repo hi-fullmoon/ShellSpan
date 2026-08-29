@@ -1,18 +1,34 @@
 import { isSafeReadOnlyCommand } from '@/lib/safe-shell-command';
 import type { AgentCommandRiskAssessment } from '@/types/agent';
 
+const EXECUTABLE_PREFIX = String.raw`(?:^|[\s;&|($\x60])(?:["']?(?:[^\s;&|($\x60"'<>]*[\\/])?)`;
+const EXECUTABLE_SUFFIX = String.raw`(?:\.exe|\.com|\.cmd|\.bat)?["']?(?=\s|$)`;
+
+function executablePattern(names: string): RegExp {
+  return new RegExp(`${EXECUTABLE_PREFIX}(?:${names})${EXECUTABLE_SUFFIX}`, 'iu');
+}
+
+function executableArgumentsPattern(names: string, argumentsPattern: string): RegExp {
+  return new RegExp(
+    `${EXECUTABLE_PREFIX}(?:${names})${EXECUTABLE_SUFFIX}\\s+(?:${argumentsPattern})(?=\\s|$)`,
+    'iu',
+  );
+}
+
 const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
-  /(?:^|[\s;&|($`])(?:rm|rmdir|shred|wipefs|truncate)(?:\s|$)/iu,
-  /(?:^|[\s;&|($`])(?:mkfs(?:\.[\p{L}\p{N}_+-]+)?|fdisk|sfdisk|cfdisk|parted)(?:\s|$)/iu,
-  /(?:^|[\s;&|($`])dd(?:\s|$)/iu,
-  /(?:^|[\s;&|($`])(?:shutdown|reboot|poweroff|halt)(?:\s|$)/iu,
-  /(?:^|[\s;&|($`])systemctl\s+(?:poweroff|reboot|halt|kexec|emergency|rescue)(?:\s|$)/iu,
+  executablePattern('rm|rmdir|shred|wipefs|truncate'),
+  executablePattern('remove-item|clear-content|clear-disk|format-volume|initialize-disk|remove-partition'),
+  executablePattern('del|erase|rd|format|diskpart'),
+  executablePattern('mkfs(?:\\.[\\p{L}\\p{N}_+-]+)?|fdisk|sfdisk|cfdisk|parted'),
+  executablePattern('dd'),
+  executablePattern('shutdown|reboot|poweroff|halt'),
+  executableArgumentsPattern('systemctl', 'poweroff|reboot|halt|kexec|emergency|rescue'),
   /(?:^|[\s;&|($`])(?:iptables|ip6tables)\b[^\n;&|]*(?:\s-F(?:\s|$)|--flush(?:\s|$))/iu,
-  /(?:^|[\s;&|($`])nft\s+(?:flush|delete)(?:\s|$)/iu,
-  /(?:^|[\s;&|($`])ufw\s+(?:reset|disable)(?:\s|$)/iu,
-  /(?:^|[\s;&|($`])git\s+(?:reset\s+--hard|clean\s+[^\n;&|]*-[^\s]*f)/iu,
-  /(?:^|[\s;&|($`])docker\s+(?:system|volume|image|container)\s+prune(?:\s|$)/iu,
-  /(?:^|[\s;&|($`])kubectl\s+delete(?:\s|$)/iu,
+  executableArgumentsPattern('nft', 'flush|delete'),
+  executableArgumentsPattern('ufw', 'reset|disable'),
+  executableArgumentsPattern('git', 'reset\\s+--hard|clean\\s+[^\\n;&|]*-[^\\s]*f'),
+  executableArgumentsPattern('docker', '(?:system|volume|image|container)\\s+prune'),
+  executableArgumentsPattern('kubectl', 'delete'),
   /\bDROP\s+(?:DATABASE|SCHEMA|TABLE)\b/iu,
 ];
 

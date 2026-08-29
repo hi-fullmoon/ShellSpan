@@ -1104,7 +1104,7 @@ export default {
   'agent.availability.disabled': 'Agent is disabled by the current rollout policy. Chat and command generation remain tool-free.',
   'agent.availability.userDisabled': 'Agent is turned off in AI settings. Chat and command generation remain tool-free.',
   'agent.availability.unsupported': 'This provider does not support structured tool calls. Use Generate command instead.',
-  'agent.availability.unverified': 'Structured tool support could not be verified. Agent execution remains disabled.',
+  'agent.availability.unverified': 'Select Agent to verify structured tool support before execution.',
   'agent.availability.needsTerminal': 'Open a connected terminal to start an Agent task.',
   'agent.availability.error': 'TermBridge could not verify Agent availability. Retry after checking the provider and app connection.',
   'agent.target.bound': 'Task target is frozen',

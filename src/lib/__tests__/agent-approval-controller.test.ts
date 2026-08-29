@@ -247,6 +247,51 @@ describe('Agent approval controller race boundaries', () => {
     expect(submitResult).toHaveBeenCalledTimes(1);
   });
 
+  it('releases full terminal records after the owning request reaches a terminal state', async () => {
+    const controller = new AgentApprovalController({
+      getPermissionMode: () => 'fullAccess',
+      validateTarget: () => null,
+      execute: async ({ toolCall: call }) => result(call),
+      submitResult: vi.fn(),
+      subscribeToTerminalStore: false,
+    });
+    controller.registerToolCall(toolCall('systemctl status nginx'));
+    await controller.waitForResult('request-1', 'call-1');
+
+    controller.releaseRequest('request-1');
+
+    expect(controller.getSnapshot('request-1', 'call-1')).toBeUndefined();
+    expect(controller.waitForResult('request-1', 'call-1')).toBeUndefined();
+  });
+
+  it('suppresses late execution events after a terminal request is released', async () => {
+    let finishExecution!: (value: AgentToolResult) => void;
+    const execution = new Promise<AgentToolResult>((resolve) => {
+      finishExecution = resolve;
+    });
+    const submitResult = vi.fn();
+    const listener = vi.fn();
+    const controller = new AgentApprovalController({
+      getPermissionMode: () => 'fullAccess',
+      validateTarget: () => null,
+      execute: () => execution,
+      submitResult,
+      subscribeToTerminalStore: false,
+    });
+    controller.subscribe(listener);
+    const call = toolCall('systemctl status nginx');
+    controller.registerToolCall(call);
+    const pendingResult = controller.waitForResult('request-1', 'call-1');
+    listener.mockClear();
+
+    controller.releaseRequest('request-1');
+    finishExecution(result(call));
+
+    await expect(pendingResult).resolves.toMatchObject({ status: 'completed' });
+    expect(listener).not.toHaveBeenCalled();
+    expect(submitResult).not.toHaveBeenCalled();
+  });
+
   it('keeps M2 single-line validation active under full access', async () => {
     const submitResult = vi.fn();
     const controller = new AgentApprovalController({

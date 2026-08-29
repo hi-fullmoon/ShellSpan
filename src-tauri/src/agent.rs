@@ -8,7 +8,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -16,6 +16,7 @@ use futures_util::StreamExt;
 use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -42,6 +43,9 @@ const MAX_AGENT_MESSAGE_BYTES: usize = 256 * 1024;
 const MAX_COMMAND_CHARS: usize = 8_192;
 const MAX_EXPLANATION_CHARS: usize = 2_048;
 const MAX_TOOL_OUTPUT_CHARS: usize = 65_536;
+const MAX_PROVIDER_CAPABILITY_CACHE_ENTRIES: usize = 32;
+const UNKNOWN_PROVIDER_CAPABILITY_CACHE_TTL: Duration = Duration::from_secs(30);
+const KNOWN_PROVIDER_CAPABILITY_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -234,6 +238,99 @@ impl AgentRequestRegistry {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct AgentProviderCapabilityCacheKey {
+    kind: AiProviderKind,
+    base_url: String,
+    model: String,
+    requires_api_key: bool,
+    credential_digest: [u8; 32],
+}
+
+#[derive(Clone, Copy)]
+struct AgentProviderCapabilityCacheEntry {
+    evidence: AgentProviderCapabilityEvidence,
+    cached_at: Instant,
+    expires_at: Instant,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct AgentProviderCapabilityCache {
+    entries:
+        Arc<Mutex<HashMap<AgentProviderCapabilityCacheKey, AgentProviderCapabilityCacheEntry>>>,
+}
+
+impl AgentProviderCapabilityCache {
+    fn key(provider: &AiProviderConfig, api_key: Option<&str>) -> AgentProviderCapabilityCacheKey {
+        AgentProviderCapabilityCacheKey {
+            kind: provider.kind,
+            base_url: provider.base_url.clone(),
+            model: provider.model.clone(),
+            requires_api_key: provider.requires_api_key,
+            credential_digest: Sha256::digest(api_key.unwrap_or_default().as_bytes()).into(),
+        }
+    }
+
+    fn get(
+        &self,
+        provider: &AiProviderConfig,
+        api_key: Option<&str>,
+    ) -> Result<Option<AgentProviderCapabilityEvidence>, String> {
+        let key = Self::key(provider, api_key);
+        let now = Instant::now();
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| "Agent provider capability cache lock poisoned".to_string())?;
+        let Some(entry) = entries.get(&key).copied() else {
+            return Ok(None);
+        };
+        if entry.expires_at <= now {
+            entries.remove(&key);
+            return Ok(None);
+        }
+        Ok(Some(entry.evidence))
+    }
+
+    fn insert(
+        &self,
+        provider: &AiProviderConfig,
+        api_key: Option<&str>,
+        evidence: AgentProviderCapabilityEvidence,
+    ) -> Result<(), String> {
+        let key = Self::key(provider, api_key);
+        let now = Instant::now();
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| "Agent provider capability cache lock poisoned".to_string())?;
+        entries.retain(|_, entry| entry.expires_at > now);
+        if entries.len() >= MAX_PROVIDER_CAPABILITY_CACHE_ENTRIES && !entries.contains_key(&key) {
+            if let Some(oldest) = entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.cached_at)
+                .map(|(key, _)| key.clone())
+            {
+                entries.remove(&oldest);
+            }
+        }
+        entries.insert(
+            key,
+            AgentProviderCapabilityCacheEntry {
+                evidence,
+                cached_at: now,
+                expires_at: now
+                    + if evidence.support == AgentToolCallingSupport::Unknown {
+                        UNKNOWN_PROVIDER_CAPABILITY_CACHE_TTL
+                    } else {
+                        KNOWN_PROVIDER_CAPABILITY_CACHE_TTL
+                    },
+            },
+        );
+        Ok(())
+    }
+}
+
 enum ToolResultWait {
     Submitted(AgentToolResult),
     TimedOut,
@@ -414,6 +511,7 @@ struct AgentRunOutcome {
 #[tauri::command]
 pub(crate) async fn agent_detect_provider_capability(
     access: State<'_, AgentRuntimeAccess>,
+    capabilities: State<'_, AgentProviderCapabilityCache>,
     provider: AiProviderConfig,
 ) -> Result<AgentProviderCapabilityEvidence, String> {
     if !agent_feature_enabled() || !access.user_enabled() {
@@ -421,8 +519,13 @@ pub(crate) async fn agent_detect_provider_capability(
     }
     validate_provider_config(&provider, true)?;
     let api_key = api_key_for_provider(&provider)?;
-    let mut backend = HttpAgentBackend::new(provider, api_key, Vec::new())?;
-    Ok(backend.detect_capability(&CancellationToken::new()).await)
+    if let Some(evidence) = capabilities.get(&provider, api_key.as_deref())? {
+        return Ok(evidence);
+    }
+    let mut backend = HttpAgentBackend::new(provider.clone(), api_key.clone(), Vec::new())?;
+    let evidence = backend.detect_capability(&CancellationToken::new()).await;
+    capabilities.insert(&provider, api_key.as_deref(), evidence)?;
+    Ok(evidence)
 }
 
 fn enforce_runtime_access_after_registration(
@@ -445,6 +548,7 @@ pub(crate) fn agent_start_request(
     app: AppHandle,
     registry: State<'_, AgentRequestRegistry>,
     access: State<'_, AgentRuntimeAccess>,
+    capabilities: State<'_, AgentProviderCapabilityCache>,
     request: AgentStartRequest,
 ) -> Result<(), String> {
     if !agent_feature_enabled() || !access.user_enabled() {
@@ -452,6 +556,7 @@ pub(crate) fn agent_start_request(
     }
     validate_agent_start_request(&request)?;
     let api_key = api_key_for_provider(&request.provider)?;
+    let provider_capability = capabilities.get(&request.provider, api_key.as_deref())?;
     let cancellation = registry.register(&request.request.request_id)?;
     // Close the register-vs-disable race: if disable/cancel_all happened before
     // registration, this recheck cancels the newly registered request; if it
@@ -480,7 +585,8 @@ pub(crate) fn agent_start_request(
 
     tauri::async_runtime::spawn(async move {
         let backend =
-            HttpAgentBackend::new(request.provider.clone(), api_key, request.messages.clone());
+            HttpAgentBackend::new(request.provider.clone(), api_key, request.messages.clone())
+                .map(|backend| backend.with_cached_capability(provider_capability));
         let outcome = match backend {
             Ok(backend) => {
                 run_agent_request(
@@ -933,6 +1039,7 @@ struct HttpAgentBackend {
     api_key: Option<String>,
     initial_messages: Vec<AiMessage>,
     history: Vec<Value>,
+    cached_capability: Option<AgentProviderCapabilityEvidence>,
 }
 
 impl HttpAgentBackend {
@@ -947,7 +1054,20 @@ impl HttpAgentBackend {
             api_key,
             initial_messages,
             history: Vec::new(),
+            cached_capability: None,
         })
+    }
+
+    fn with_cached_capability(
+        mut self,
+        capability: Option<AgentProviderCapabilityEvidence>,
+    ) -> Self {
+        self.cached_capability = capability.filter(|evidence| {
+            resolve_agent_contract_status(true, self.provider.kind, Some(*evidence))
+                .provider_capability
+                == *evidence
+        });
+        self
     }
 
     async fn detect_openai_compatible(
@@ -1230,6 +1350,9 @@ impl AgentModelBackend for HttpAgentBackend {
         &mut self,
         cancellation: &CancellationToken,
     ) -> AgentProviderCapabilityEvidence {
+        if let Some(capability) = self.cached_capability.take() {
+            return capability;
+        }
         let support = match self.provider.kind {
             AiProviderKind::OpenAi => AgentToolCallingSupport::Supported,
             AiProviderKind::OpenAiCompatible => self.detect_openai_compatible(cancellation).await,
@@ -2618,6 +2741,57 @@ mod tests {
         .is_err());
         assert!(cancellation.is_cancelled());
         assert!(registry.active("request-disable-race").is_err());
+    }
+
+    #[test]
+    fn provider_capability_cache_is_bound_to_model_and_credential() {
+        let cache = AgentProviderCapabilityCache::default();
+        let mut provider = AiProviderConfig {
+            id: "compatible".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://provider.example.com/v1".to_string(),
+            model: "tool-model-a".to_string(),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let evidence = AgentProviderCapabilityEvidence {
+            support: AgentToolCallingSupport::Supported,
+            source: AgentProviderCapabilitySource::ChatCompletionsProbe,
+        };
+
+        cache.insert(&provider, Some("key-a"), evidence).unwrap();
+        assert_eq!(cache.get(&provider, Some("key-a")).unwrap(), Some(evidence));
+        assert_eq!(cache.get(&provider, Some("key-b")).unwrap(), None);
+
+        provider.model = "tool-model-b".to_string();
+        assert_eq!(cache.get(&provider, Some("key-a")).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn validated_cached_capability_skips_a_duplicate_provider_probe() {
+        let evidence = AgentProviderCapabilityEvidence {
+            support: AgentToolCallingSupport::Supported,
+            source: AgentProviderCapabilitySource::ChatCompletionsProbe,
+        };
+        let mut backend = HttpAgentBackend::new(
+            AiProviderConfig {
+                id: "compatible".to_string(),
+                kind: AiProviderKind::OpenAiCompatible,
+                base_url: "http://127.0.0.1:1/v1".to_string(),
+                model: "tool-model".to_string(),
+                requires_api_key: false,
+                api_key: None,
+            },
+            None,
+            Vec::new(),
+        )
+        .unwrap()
+        .with_cached_capability(Some(evidence));
+
+        assert_eq!(
+            backend.detect_capability(&CancellationToken::new()).await,
+            evidence
+        );
     }
 
     #[test]

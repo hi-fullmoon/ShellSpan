@@ -31,6 +31,12 @@ describe('Agent command risk classification', () => {
 
   it.each([
     'rm -rf /tmp/cache',
+    '/usr/bin/rm -rf /tmp/cache',
+    '/sbin/mkfs.ext4 /dev/sdb1',
+    '/usr/bin/git reset --hard HEAD~1',
+    'C:\\Windows\\System32\\format.com D:',
+    'Remove-Item -Recurse -Force C:\\important',
+    'Clear-Disk -Number 1 -RemoveData -Confirm:$false',
     'sudo -n rm -rf /var/cache/app',
     'df -h && rm -rf /tmp/cache',
     'systemctl status nginx || shutdown -h now',

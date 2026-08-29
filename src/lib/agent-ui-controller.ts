@@ -104,7 +104,7 @@ function activeToolSnapshot(requestId: string): AgentToolApprovalSnapshot | unde
  */
 export class AgentUiController {
   private readonly approvalController: AgentApprovalController;
-  private readonly startBackend: (request: AgentStartRequest) => Promise<void>;
+  private readonly startBackend: NonNullable<AgentUiControllerDependencies['startRequest']>;
   private readonly cancelBackend: (requestId: string) => Promise<void>;
   private readonly submitBackendResult: (result: AgentToolResult) => Promise<void>;
   private readonly listenStream: NonNullable<AgentUiControllerDependencies['listen']>;
@@ -116,7 +116,9 @@ export class AgentUiController {
   private readonly expiredToolCalls = new Set<string>();
   private readonly blockedRequests = new Set<string>();
   private readonly cancellationIntents = new Set<string>();
+  private readonly startingRequests = new Set<string>();
   private readonly lifecyclePromises = new Set<Promise<unknown>>();
+  private readonly releaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly unsubscribeApproval: () => void;
   private unsubscribeTerminal?: () => void;
   private unsubscribeRegistry?: () => void;
@@ -191,6 +193,7 @@ export class AgentUiController {
       permissionMode,
       rolloutStage: input.rolloutStage,
     });
+    this.startingRequests.add(requestId);
     try {
       await this.startBackend({
         request: {
@@ -212,7 +215,13 @@ export class AgentUiController {
         useAgentStore.getState().runs[requestId],
         'provider',
       );
+      this.releaseTerminalRequest(requestId);
       return undefined;
+    } finally {
+      this.startingRequests.delete(requestId);
+      if (useAgentStore.getState().runs[requestId]?.status !== 'running') {
+        this.cancellationIntents.delete(requestId);
+      }
     }
   }
 
@@ -262,6 +271,7 @@ export class AgentUiController {
       useAgentStore.getState().runs[reference.requestId],
       'approvalRejected',
     );
+    this.releaseTerminalRequest(reference.requestId);
     this.trackLifecycle(this.cancelBackend(reference.requestId).catch((reason) => {
       logger.warn(`Failed to cancel rejected Agent request ${reference.requestId}`, reason);
     }));
@@ -280,6 +290,7 @@ export class AgentUiController {
     }
     useAgentStore.getState().cancelRun(requestId);
     agentRolloutAuditor.recordRunOutcome(useAgentStore.getState().runs[requestId], 'cancelled');
+    this.releaseTerminalRequest(requestId);
     this.trackLifecycle(this.cancelBackend(requestId).catch((reason) => {
       logger.warn(`Failed to cancel Agent request ${requestId}`, reason);
     }));
@@ -414,20 +425,30 @@ export class AgentUiController {
       case 'completed':
         state.completeRun(event.requestId, event.fallback);
         agentRolloutAuditor.recordRunOutcome(useAgentStore.getState().runs[event.requestId]);
+        this.releaseTerminalRequest(event.requestId);
         return;
-      case 'cancelled':
+      case 'cancelled': {
+        const activeTool = activeToolSnapshot(event.requestId);
+        if (activeTool) this.approvalController.cancel(event.requestId, activeTool.toolCall.callId);
         state.cancelRun(event.requestId);
         agentRolloutAuditor.recordRunOutcome(
           useAgentStore.getState().runs[event.requestId],
           'cancelled',
         );
+        this.releaseTerminalRequest(event.requestId);
         return;
-      case 'error':
+      }
+      case 'error': {
+        const activeTool = activeToolSnapshot(event.requestId);
+        if (activeTool) this.approvalController.cancel(event.requestId, activeTool.toolCall.callId);
         state.failRun(event.requestId, event.message);
         agentRolloutAuditor.recordRunOutcome(
           useAgentStore.getState().runs[event.requestId],
           'provider',
         );
+        this.releaseTerminalRequest(event.requestId);
+        return;
+      }
     }
   }
 
@@ -440,6 +461,12 @@ export class AgentUiController {
     this.unsubscribeRegistry?.();
     this.unsubscribeRegistry = undefined;
     this.approvalController.dispose();
+    this.expiredToolCalls.clear();
+    this.blockedRequests.clear();
+    this.cancellationIntents.clear();
+    this.startingRequests.clear();
+    for (const timer of this.releaseTimers.values()) clearTimeout(timer);
+    this.releaseTimers.clear();
   }
 
   private async submitToolResult(result: AgentToolResult): Promise<void> {
@@ -456,6 +483,7 @@ export class AgentUiController {
         useAgentStore.getState().runs[safeResult.requestId],
         'provider',
       );
+      this.releaseTerminalRequest(safeResult.requestId);
       void this.cancelBackend(safeResult.requestId).catch(() => undefined);
       throw reason;
     }
@@ -502,6 +530,7 @@ export class AgentUiController {
       useAgentStore.getState().runs[requestId],
       'targetChanged',
     );
+    this.releaseTerminalRequest(requestId);
     this.trackLifecycle(this.cancelBackend(requestId).catch((reason) => {
       logger.warn(`Failed to cancel invalid Agent target ${requestId}`, reason);
     }));
@@ -514,6 +543,34 @@ export class AgentUiController {
     };
     void promise.then(cleanup, cleanup);
     return promise;
+  }
+
+  private releaseTerminalRequest(requestId: string): void {
+    const activeTool = activeToolSnapshot(requestId);
+    const pendingResult = activeTool
+      ? this.approvalController.waitForResult(requestId, activeTool.toolCall.callId)
+      : undefined;
+    const release = (): void => {
+      const timer = this.releaseTimers.get(requestId);
+      if (timer) clearTimeout(timer);
+      this.releaseTimers.delete(requestId);
+      this.approvalController.releaseRequest(requestId);
+      agentOperationAuditor.releaseRequest(requestId);
+      this.blockedRequests.delete(requestId);
+      if (!this.startingRequests.has(requestId)) this.cancellationIntents.delete(requestId);
+      const prefix = `${requestId}\u0000`;
+      for (const key of this.expiredToolCalls) {
+        if (key.startsWith(prefix)) this.expiredToolCalls.delete(key);
+      }
+    };
+    if (!pendingResult) {
+      release();
+      return;
+    }
+    const existingTimer = this.releaseTimers.get(requestId);
+    if (existingTimer) clearTimeout(existingTimer);
+    this.releaseTimers.set(requestId, setTimeout(release, 5_000));
+    void pendingResult.then(release, release);
   }
 
   private async cancelAndWait(requestId: string): Promise<void> {

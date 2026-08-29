@@ -81,4 +81,39 @@ describe('AgentRunView', () => {
       approvalId: 'approval-1',
     });
   });
+
+  it('identifies the exact fallback run when switching to command generation', () => {
+    useAgentStore.getState().beginRun({
+      requestId: 'request-fallback',
+      goal: 'Inspect the old host',
+      providerId: 'compatible',
+      target,
+      targetTitle: 'Production A',
+      permissionMode: 'requestApproval',
+    });
+    useAgentStore.getState().markFallback('request-fallback', {
+      task: 'generateCommand',
+      automaticExecution: false,
+      assistantTextExecution: 'forbidden',
+      reason: 'toolCallingUnsupported',
+    });
+    useAgentStore.getState().appendText('request-fallback', 'Use command generation instead.');
+    useAgentStore.getState().completeRun('request-fallback', true);
+    const onSwitchToCommand = vi.fn();
+
+    render(
+      <AgentRunView
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onStop={vi.fn()}
+        onRetry={vi.fn()}
+        canRetry={() => false}
+        onSwitchToCommand={onSwitchToCommand}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Generate command' }));
+    expect(onSwitchToCommand).toHaveBeenCalledWith('request-fallback');
+  });
 });

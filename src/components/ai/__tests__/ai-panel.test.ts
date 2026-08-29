@@ -6,6 +6,8 @@ import { useAiStore } from '@/stores/aiStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { resetAgentProviderCapabilityCacheForTests } from '@/lib/agent-provider-capability';
 import type { AiChatMessage } from '@/types/ai';
 import {
   appendTerminalOutput,
@@ -81,6 +83,7 @@ function message(
 }
 
 beforeEach(() => {
+  resetAgentProviderCapabilityCacheForTests();
   window.localStorage.removeItem('termbridge.aiPanelWidth');
   tauriCoreMock.invoke.mockReset();
   tauriCoreMock.invoke.mockResolvedValue(undefined);
@@ -219,6 +222,102 @@ describe('explicit AI modes', () => {
       useAiStore.getState().setOpen(false);
       useAppStore.setState(previousApp, true);
       useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('defers a remote capability probe until the user explicitly selects Agent', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    tauriCoreMock.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'agent_rollout_policy') {
+        return {
+          stage: 'stable',
+          featureEnabled: true,
+          defaultAgentEnabled: true,
+          defaultPermissionMode: 'requestApproval',
+          availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
+          collectLocalDiagnostics: false,
+        };
+      }
+      if (command === 'agent_contract_status') {
+        const evidence = args?.evidence as { support?: string; source?: string } | undefined;
+        return {
+          contractVersion: 1,
+          featureEnabled: true,
+          agentAvailable: evidence?.support === 'supported',
+          defaultPermissionMode: 'requestApproval',
+          providerCapability: evidence ?? {
+            support: 'unknown',
+            source: 'ollamaModelMetadata',
+          },
+        };
+      }
+      if (command === 'agent_detect_provider_capability') {
+        return { support: 'supported', source: 'ollamaModelMetadata' };
+      }
+      return undefined;
+    });
+    await initI18n('en-US');
+    useAiSettingsStore.setState({ agentEnabled: true });
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(true);
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'probe-session',
+        title: 'Probe target',
+        host: 'probe.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'probe-conversation',
+        conversationStartedAt: '2026-08-28T00:00:00.000Z',
+      }],
+      activeSessionId: 'probe-session',
+    });
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const agentMode = await screen.findByRole('button', { name: 'Agent' });
+      await waitFor(() => expect(agentMode).toBeEnabled());
+      expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => (
+        command === 'agent_detect_provider_capability'
+      ))).toHaveLength(0);
+
+      fireEvent.click(agentMode);
+
+      await waitFor(() => expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => (
+        command === 'agent_detect_provider_capability'
+      ))).toHaveLength(1));
+      await waitFor(() => expect(agentMode).toBeEnabled());
+
+      useAiSettingsStore.getState().updateProvider(
+        useAiSettingsStore.getState().defaultProviderId,
+        { model: 'changed-agent-model' },
+      );
+      await waitFor(() => expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => (
+        command === 'agent_detect_provider_capability'
+      ))).toHaveLength(2));
+      const probes = tauriCoreMock.invoke.mock.calls.filter(([command]) => (
+        command === 'agent_detect_provider_capability'
+      ));
+      expect(probes[1]?.[1]).toMatchObject({
+        provider: { model: 'changed-agent-model' },
+      });
+    } finally {
+      unmount();
+      delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      useAiSettingsStore.setState(previousSettings, true);
       await initI18n(previousApp.locale);
     }
   });

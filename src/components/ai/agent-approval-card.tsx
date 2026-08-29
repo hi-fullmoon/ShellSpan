@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   CheckIcon,
   CopyIcon,
@@ -170,6 +170,10 @@ export function AgentApprovalCard({
     'cancelled',
   ].includes(status);
   const outputSummary = result ? summarizeAgentToolOutput(result.output) : undefined;
+
+  useEffect(() => {
+    if (!awaitingApproval) setDialogOpen(false);
+  }, [awaitingApproval]);
 
   const copyCommand = (): void => {
     void navigator.clipboard?.writeText(toolCall.command).then(() => {
