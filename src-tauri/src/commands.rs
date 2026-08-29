@@ -3162,11 +3162,32 @@ mod tests {
             .expect("spawn the production Windows shell through ConPTY");
         drop(pair.slave);
 
-        let mut output = String::new();
-        reader
-            .read_to_string(&mut output)
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let status = loop {
+            match child.try_wait().expect("poll the ConPTY child") {
+                Some(status) => break status,
+                None if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+                None => {
+                    child.kill().expect("terminate the timed-out ConPTY child");
+                    panic!("the production PowerShell did not exit before the ConPTY deadline");
+                }
+            }
+        };
+
+        drop(pair.master);
+        let (output_tx, output_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut output = String::new();
+            let result = reader
+                .read_to_string(&mut output)
+                .map(|_| output)
+                .map_err(|error| error.to_string());
+            let _ = output_tx.send(result);
+        });
+        let output = output_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("read the PowerShell ConPTY output before the deadline")
             .expect("read deterministic PowerShell ConPTY output");
-        let status = child.wait().expect("wait for the ConPTY child");
 
         assert!(!status.success());
         assert!(output.contains("termbridge-conpty-smoke"));

@@ -75,6 +75,8 @@ jobs:
           workspaces: src-tauri -> target
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Run M6 native shell and PTY acceptance
+        run: pnpm test:agent:platform
       - name: Run Agent terminal contract tests
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked agent::terminal -- --test-threads=1
