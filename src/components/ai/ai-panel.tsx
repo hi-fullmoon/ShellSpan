@@ -81,7 +81,6 @@ import {
   agentUiController,
 } from '@/lib/agent-ui-controller';
 import { agentRolloutAuditor } from '@/lib/agent-rollout-audit';
-import { isSafeReadOnlyCommand } from '@/lib/safe-shell-command';
 import {
   getRecentTerminalOutput,
   redactTerminalSecrets,
@@ -935,7 +934,6 @@ export const AiPanel: React.FC = () => {
     sourceConversationId?: string,
     sourceSessionId?: string,
   ): void => {
-    if (!isSafeReadOnlyCommand(command)) return;
     if (useAppStore.getState().activeSection !== 'terminal') return;
     if (!sourceConversationId && !sourceSessionId) return;
     const state = useTerminalStore.getState();
@@ -1615,11 +1613,9 @@ export const AiPanel: React.FC = () => {
                 && message.status === 'completed'
                 ? extractSingleLineCommand(message.content)
                 : undefined;
-              const commandIsSafe = Boolean(command && isSafeReadOnlyCommand(command));
               const commandIsInsertable = Boolean(
                 command
                 && activeSection === 'terminal'
-                && commandIsSafe
                 && isMessageBoundToTerminal(
                   message,
                   activeConversationId,
@@ -1644,7 +1640,7 @@ export const AiPanel: React.FC = () => {
                     {message.status === 'failed' && (
                       <div className="text-destructive">{t('ai.message.failed')}</div>
                     )}
-                    {command && commandIsSafe && (
+                    {command && (
                       <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
                         <Button
                           variant="secondary"
@@ -1664,15 +1660,6 @@ export const AiPanel: React.FC = () => {
                           {t('ai.insertCommand')}
                         </Button>
                       </div>
-                    )}
-                    {command && !commandIsSafe && (
-                      <Alert variant="destructive" className="mt-3">
-                        <CircleAlertIcon />
-                        <AlertTitle>{t('ai.commandReviewRequired')}</AlertTitle>
-                        <AlertDescription>
-                          {t('ai.commandReviewRequiredDescription')}
-                        </AlertDescription>
-                      </Alert>
                     )}
                   </Bubble>
                 </Message>

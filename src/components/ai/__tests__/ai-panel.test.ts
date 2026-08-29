@@ -11,6 +11,7 @@ import {
   appendTerminalOutput,
   clearTerminalOutput,
 } from '@/lib/terminal-output-buffer';
+import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import {
   AiPanel,
   LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS,
@@ -408,18 +409,40 @@ describe('terminal conversation binding', () => {
     }
   });
 
-  it('warns about commands outside the read-only allowlist and exposes one copy action', async () => {
+  it('allows commands outside the read-only allowlist to be inserted into the bound terminal', async () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
+    const paste = vi.fn();
+    const getTerminal = vi.spyOn(terminalRegistry, 'get').mockReturnValue({
+      terminal: {
+        getSelection: () => '',
+        onSelectionChange: () => ({ dispose: vi.fn() }),
+        paste,
+      },
+    } as never);
     await initI18n('en-US');
-    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
-    useTerminalStore.setState({ sessions: [], activeSessionId: null });
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'manual-review-session',
+        title: 'Service terminal',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'manual-review-conversation',
+        conversationStartedAt: '2026-08-29T00:00:00.000Z',
+      }],
+      activeSessionId: 'manual-review-session',
+    });
     useAiStore.getState().clear();
     useAiStore.getState().beginRequest({
       requestId: 'manual-review-command',
       task: 'generateCommand',
       userContent: 'Restart the service',
       providerId: 'ollama',
+      conversationId: 'manual-review-conversation',
+      sessionId: 'manual-review-session',
     });
     useAiStore.getState().appendDelta(
       'manual-review-command',
@@ -432,15 +455,20 @@ describe('terminal conversation binding', () => {
     try {
       fireEvent.click(screen.getByRole('button', { name: 'Generate command' }));
 
-      expect(await screen.findByText('Manual command review required')).toBeInTheDocument();
+      const insert = await screen.findByRole('button', { name: 'Insert into terminal' });
+      expect(insert).toBeEnabled();
+      fireEvent.click(insert);
+
       expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(1);
-      expect(screen.queryByRole('button', { name: 'Insert into terminal' })).toBeNull();
+      expect(screen.queryByText('Manual command review required')).toBeNull();
+      expect(paste).toHaveBeenCalledWith('systemctl restart nginx');
     } finally {
       unmount();
       useAiStore.getState().clear();
       useAiStore.getState().setOpen(false);
       useAppStore.setState(previousApp, true);
       useTerminalStore.setState(previousTerminal, true);
+      getTerminal.mockRestore();
       await initI18n(previousApp.locale);
     }
   });

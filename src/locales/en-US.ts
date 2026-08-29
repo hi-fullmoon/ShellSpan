@@ -1064,8 +1064,6 @@ export default {
   'ai.suggestion.troubleshoot': 'Troubleshoot SSH connection',
   'ai.suggestion.healthCheck': 'Generate health-check command',
   'ai.insertCommand': 'Insert into terminal',
-  'ai.commandReviewRequired': 'Manual command review required',
-  'ai.commandReviewRequiredDescription': 'TermBridge could not verify this as a bounded read-only command, so it cannot be inserted. Review its effects carefully before copying or using it.',
   'ai.conversation': 'AI conversation',
   'ai.history': 'Conversation history',
   'ai.history.current': 'Current terminal',
