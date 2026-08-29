@@ -3152,19 +3152,35 @@ mod tests {
             .take_writer()
             .expect("take the real ConPTY writer");
         let mut command = CommandBuilder::new("powershell.exe");
-        command.args(["-NoLogo", "-NoProfile", "-NonInteractive"]);
+        command.args(["-NoLogo", "-NoProfile"]);
         configure_local_terminal_environment(&mut command);
         let mut child = pair
             .slave
             .spawn_command(command)
             .expect("spawn the production Windows shell through ConPTY");
-        writer
-            .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
+        drop(pair.slave);
+
+        let (output_tx, output_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let mut output = String::new();
+            let result = reader
+                .read_to_string(&mut output)
+                .map(|_| output)
+                .map_err(|error| error.to_string());
+            let _ = output_tx.send(result);
+        });
+        let (write_tx, write_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let result = writer
+                .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
+                .and_then(|_| writer.flush())
+                .map_err(|error| error.to_string());
+            let _ = write_tx.send(result);
+        });
+        write_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("write the PowerShell ConPTY commands before the deadline")
             .expect("write deterministic commands to the PowerShell ConPTY");
-        writer
-            .flush()
-            .expect("flush deterministic commands to the PowerShell ConPTY");
-        drop(writer);
 
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {
@@ -3178,25 +3194,14 @@ mod tests {
             }
         };
 
-        drop(pair.slave);
-        // portable-pty's Windows reader can remain blocked when it starts before the ConPTY
-        // child exits. Read only after the bounded child wait, while the master is still alive.
-        let (output_tx, output_rx) = std::sync::mpsc::channel();
-        thread::spawn(move || {
-            let mut output = String::new();
-            let result = reader
-                .read_to_string(&mut output)
-                .map(|_| output)
-                .map_err(|error| error.to_string());
-            let _ = output_tx.send(result);
-        });
+        assert_eq!(status.exit_code(), 7);
+        // Closing the ConPTY master releases the reader EOF after the child has exited.
+        drop(pair.master);
         let output = output_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("read the PowerShell ConPTY output before the deadline")
             .expect("read deterministic PowerShell ConPTY output");
-        drop(pair.master);
 
-        assert_eq!(status.exit_code(), 7);
         assert!(
             output.contains("termbridge-conpty-smoke"),
             "missing ConPTY smoke marker in {output:?}"
