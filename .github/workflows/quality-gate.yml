@@ -79,6 +79,8 @@ jobs:
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked agent::terminal -- --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml --locked terminal_lease -- --test-threads=1
+      - name: Run Petdex Phase 0 contract probe
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --test petdex_contract_probe -- --test-threads=1
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - name: Run Rust tests

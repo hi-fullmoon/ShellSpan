@@ -18,6 +18,7 @@ mod menu;
 mod models;
 mod operation_history;
 mod path_utils;
+mod petdex;
 mod port_forward;
 mod redaction;
 mod remote_fs;
@@ -206,12 +207,14 @@ pub fn run() {
                     window.set_title("").ok();
                 }
             }
-            let termbridge_dir = app.path().home_dir()?.join(".termbridge");
+            let home_dir = app.path().home_dir()?;
+            let termbridge_dir = home_dir.join(".termbridge");
             let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
             let credentials = keychain::CredentialManager::new();
             if let Err(error) = ai::migrate_keychain_api_keys(&credentials, &database) {
                 log::warn!("Failed to migrate AI API keys from the system keychain: {error}");
             }
+            app.manage(petdex::PetdexAdapter::new(home_dir));
             app.manage(credentials);
             app.manage(database);
             #[cfg(not(target_os = "macos"))]
@@ -260,6 +263,9 @@ pub fn run() {
             ai_sessions::archive_ai_session,
             ai_sessions::list_ai_sessions,
             ai_sessions::load_ai_session,
+            petdex::petdex_set_enabled,
+            petdex::petdex_get_status,
+            petdex::petdex_test_connection,
             commands::create_session,
             commands::create_local_session,
             commands::write_session,

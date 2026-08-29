@@ -375,7 +375,11 @@ export const OperationHistoryPanel: React.FC = () => {
                 <p className="text-xs text-muted-foreground">
                   {t('operationHistory.resultCount', { shown: tasks.length, total: totalTasks })}
                 </p>
-                <Table aria-label={t('operationHistory.title')} className="min-w-[960px]">
+                <Table
+                  aria-label={t('operationHistory.title')}
+                  className="min-w-[960px]"
+                  containerClassName="overflow-y-hidden"
+                >
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t('operationHistory.occurredAt')}</TableHead>
