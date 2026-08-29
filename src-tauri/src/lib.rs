@@ -234,6 +234,7 @@ pub fn run() {
         .manage(SessionManager::default())
         .manage(ai::AiRequestRegistry::default())
         .manage(agent::AgentRequestRegistry::default())
+        .manage(agent::AgentProviderCapabilityCache::default())
         .manage(agent_contract::AgentRuntimeAccess::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())

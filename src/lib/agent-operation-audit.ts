@@ -170,6 +170,16 @@ export class AgentOperationAuditor {
     }
   }
 
+  releaseRequest(requestId: string): void {
+    const prefix = `${requestId}\u0000`;
+    for (const key of this.statuses.keys()) {
+      if (key.startsWith(prefix)) this.statuses.delete(key);
+    }
+    for (const key of this.humanApproved) {
+      if (key.startsWith(prefix)) this.humanApproved.delete(key);
+    }
+  }
+
   private enqueue(
     snapshot: AgentToolApprovalSnapshot,
     eventKind: OperationHistoryEventKind,

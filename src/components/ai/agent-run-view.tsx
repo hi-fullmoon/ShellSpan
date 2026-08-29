@@ -33,7 +33,7 @@ export interface AgentRunViewProps {
   readonly onStop: (requestId: string) => void;
   readonly onRetry: (requestId: string) => void;
   readonly canRetry: (requestId: string) => boolean;
-  readonly onSwitchToCommand: () => void;
+  readonly onSwitchToCommand: (requestId: string) => void;
   readonly onOpenSettings: () => void;
 }
 
@@ -166,7 +166,11 @@ export function AgentRunView({
                         <AlertDescription className="flex flex-col gap-2">
                           <p>{t(`agent.fallback.${run.fallback.reason}` as LocaleKey)}</p>
                           <div>
-                            <Button variant="secondary" size="xs" onClick={onSwitchToCommand}>
+                            <Button
+                              variant="secondary"
+                              size="xs"
+                              onClick={() => onSwitchToCommand(run.requestId)}
+                            >
                               <SquareTerminalIcon data-icon="inline-start" />
                               {t('agent.fallback.switchToCommand')}
                             </Button>

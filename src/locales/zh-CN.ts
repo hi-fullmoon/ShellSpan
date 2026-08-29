@@ -1102,7 +1102,7 @@ export default {
   'agent.availability.disabled': '当前发布策略未开放 Agent。问答和生成命令模式仍然不会获得终端工具。',
   'agent.availability.userDisabled': 'Agent 已在 AI 设置中关闭。问答和生成命令模式仍然不会获得终端工具。',
   'agent.availability.unsupported': '当前服务商不支持结构化工具调用，请改用“生成命令”。',
-  'agent.availability.unverified': '无法确认结构化工具支持，Agent 执行保持禁用。',
+  'agent.availability.unverified': '选择 Agent 后将先验证结构化工具支持，再开放执行。',
   'agent.availability.needsTerminal': '请先打开一个已连接的终端，再启动 Agent 任务。',
   'agent.availability.error': 'TermBridge 无法确认 Agent 是否可用，请检查服务商和应用连接后重试。',
   'agent.target.bound': '任务目标已冻结',

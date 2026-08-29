@@ -29,6 +29,7 @@ interface ApprovalRecord {
   readonly riskAssessment: AgentToolApprovalSnapshot['riskAssessment'];
   readonly decision: AgentToolApprovalSnapshot['decision'];
   readonly approval?: AgentApprovalReference;
+  released: boolean;
   status: AgentToolApprovalStatus;
   result?: AgentToolResult;
   resolveResult: (result: AgentToolResult) => void;
@@ -135,6 +136,7 @@ export class AgentApprovalController {
       riskAssessment,
       decision,
       ...(approval ? { approval } : {}),
+      released: false,
       status: decision.requiresApproval ? 'awaitingApproval' : 'pending',
       resolveResult,
       resultPromise,
@@ -204,6 +206,14 @@ export class AgentApprovalController {
     return this.records.get(approvalKey(requestId, callId))?.resultPromise;
   }
 
+  releaseRequest(requestId: string): void {
+    for (const [key, record] of this.records) {
+      if (record.toolCall.requestId !== requestId) continue;
+      record.released = true;
+      this.records.delete(key);
+    }
+  }
+
   subscribe(listener: AgentApprovalListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -212,6 +222,8 @@ export class AgentApprovalController {
   dispose(): void {
     this.unsubscribeTerminalStore?.();
     this.listeners.clear();
+    for (const record of this.records.values()) record.released = true;
+    this.records.clear();
   }
 
   private startExecution(
@@ -270,8 +282,9 @@ export class AgentApprovalController {
     const ownedResult = frozenResult(result);
     record.result = ownedResult;
     record.status = ownedResult.status;
-    this.emit(record);
+    if (!record.released) this.emit(record);
     record.resolveResult(ownedResult);
+    if (record.released) return;
     // Marking the terminal state above makes this callback exactly-once even
     // when UI events, lifecycle events, and executor completion race.
     void Promise.resolve(this.submitTerminalResult(ownedResult)).catch(() => undefined);

@@ -24,7 +24,7 @@ const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV3";
 const MAX_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AiProviderKind {
     Ollama,
