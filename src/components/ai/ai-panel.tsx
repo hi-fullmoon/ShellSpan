@@ -61,6 +61,7 @@ import { useI18n } from '@/hooks/useI18n';
 import {
   invokeCancelAiRequest,
   invokeAgentContractStatus,
+  invokeAgentRolloutPolicy,
   invokeDetectAgentProviderCapability,
   invokeLoadAiSession,
   invokeStartAiRequest,
@@ -79,6 +80,7 @@ import {
   agentTargetFromSession,
   agentUiController,
 } from '@/lib/agent-ui-controller';
+import { agentRolloutAuditor } from '@/lib/agent-rollout-audit';
 import { isSafeReadOnlyCommand } from '@/lib/safe-shell-command';
 import {
   getRecentTerminalOutput,
@@ -116,6 +118,7 @@ import type { LocaleKey } from '@/locales';
 import type {
   AgentChatMessage,
   AgentContractStatus,
+  AgentRolloutPolicy,
   AgentTargetSnapshot,
 } from '@/types/agent';
 
@@ -152,7 +155,17 @@ interface AiRequestSnapshot {
 interface AgentAvailability {
   state: 'checking' | 'ready' | 'error';
   status?: AgentContractStatus;
+  policy?: AgentRolloutPolicy;
 }
+
+const DISABLED_AGENT_ROLLOUT_POLICY: AgentRolloutPolicy = {
+  stage: 'disabled',
+  featureEnabled: false,
+  defaultAgentEnabled: false,
+  defaultPermissionMode: 'requestApproval',
+  availablePermissionModes: ['requestApproval'],
+  collectLocalDiagnostics: false,
+};
 
 export interface AiErrorPresentation {
   detail: string;
@@ -519,6 +532,7 @@ export const AiPanel: React.FC = () => {
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
+  const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const defaultProvider = providers.find((provider) => provider.id === defaultProviderId) ?? providers[0];
   const model = defaultProvider?.model ?? '';
   const activeSection = useAppStore((state) => state.activeSection);
@@ -576,22 +590,42 @@ export const AiPanel: React.FC = () => {
       setAgentAvailability({
         state: 'ready',
         status: resolveAgentContractStatus(false, provider.kind),
+        policy: DISABLED_AGENT_ROLLOUT_POLICY,
       });
       return;
     }
-    void invokeAgentContractStatus(provider.kind)
-      .then(async (status) => {
+    void Promise.all([
+      invokeAgentRolloutPolicy(),
+      invokeAgentContractStatus(provider.kind),
+    ])
+      .then(async ([policy, status]) => {
         if (
-          status.featureEnabled
+          agentEnabled
+          && status.featureEnabled
           && status.providerCapability.support === 'unknown'
         ) {
           const evidence = await invokeDetectAgentProviderCapability(provider);
-          return invokeAgentContractStatus(provider.kind, evidence);
+          return [policy, await invokeAgentContractStatus(provider.kind, evidence)] as const;
         }
-        return status;
+        return [policy, status] as const;
       })
-      .then((status) => {
-        if (!cancelled) setAgentAvailability({ state: 'ready', status });
+      .then(([policy, status]) => {
+        if (!cancelled) {
+          if (agentEnabled) {
+            agentRolloutAuditor.recordCompatibility(
+              policy,
+              provider.kind,
+              status.providerCapability,
+            );
+          }
+          setAgentAvailability({
+            state: 'ready',
+            policy,
+            status: agentEnabled
+              ? status
+              : resolveAgentContractStatus(false, provider.kind, status.providerCapability),
+          });
+        }
       })
       .catch((reason) => {
         if (cancelled) return;
@@ -601,7 +635,11 @@ export const AiPanel: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [defaultProvider?.id, open]);
+  }, [agentEnabled, defaultProvider?.id, open]);
+
+  useEffect(() => {
+    if (!agentEnabled && mode === 'agent') setMode('chat');
+  }, [agentEnabled, mode]);
 
   useEffect(() => {
     setSelectedConversationId(null);
@@ -844,12 +882,13 @@ export const AiPanel: React.FC = () => {
           ...history,
           agentUserMessage(trimmed, contextEnabled ? liveContext.context : undefined),
         ],
+        rolloutStage: agentAvailability.policy?.stage ?? 'disabled',
       });
       if (requestId) setDraft('');
     } catch (reason) {
       setAgentStartError(reason instanceof Error ? reason.message : String(reason));
     }
-  }, [agentAvailability.status?.agentAvailable, contextEnabled]);
+  }, [agentAvailability.policy?.stage, agentAvailability.status?.agentAvailable, contextEnabled]);
 
   const handleContextEnabledChange = useCallback((enabled: boolean): void => {
     setContextEnabled(enabled);
@@ -1020,7 +1059,9 @@ export const AiPanel: React.FC = () => {
     ? t('agent.availability.checking')
     : agentAvailability.state === 'error'
       ? t('agent.availability.error')
-      : !agentAvailability.status?.featureEnabled
+      : !agentEnabled
+        ? t('agent.availability.userDisabled')
+        : !agentAvailability.status?.featureEnabled
         ? t('agent.availability.disabled')
         : agentAvailability.status?.providerCapability.support === 'unsupported'
           ? t('agent.availability.unsupported')

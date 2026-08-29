@@ -533,6 +533,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M7 — 分阶段开放
 
+状态：已完成（2026-08-29）。
+
 交付：
 
 - 内部：功能开关开放全部权限模式。
@@ -541,6 +543,18 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 提供可关闭 Agent、清理 Agent 会话和查看操作历史的入口。
 
 退出条件：Preview 期间不存在未经批准执行、跨会话执行或秘密持久化事件。
+
+实现证据：
+
+- Rust `src-tauri/src/agent_contract.rs` 提供权威的 `disabled / internal / preview / stable` 发布策略与 `TERMBRIDGE_AGENT_ROLLOUT` 配置：未配置的新安装进入 Stable，未知显式值 fail-closed；既有 `TERMBRIDGE_EXPERIMENTAL_AGENT=true|1` 兼容映射为 Internal，显式旧版关闭仍保持关闭。Internal、Preview、Stable 均声明三档权限模式，但默认权限固定为 `requestApproval`；只有 Preview 开启本地诊断，Stable 默认开放 Agent。`.env.example` 同步记录阶段值和旧开关迁移语义。
+- 后端 `AgentRuntimeAccess` 在偏好同步前默认关闭；`agent_detect_provider_capability` 和 `agent_start_request` 同时检查发布策略与用户开关。`agent_set_enabled(false)` 先关闭运行权限并取消全部已注册请求，前端 `AgentUiController` 也在启动和重试前复核用户开关。关闭、重连、重启或清理时会重置连接实例内存中的权限绑定，因此“帮我批准”和“完全访问权限”仍只能由用户在当前连接主动选择，不会成为发布阶段或持久化默认值。
+- `src/lib/agent-rollout-audit.ts` 只在 Preview 把兼容性结论和任务终态写入本地操作历史，使用 `detectAgentProviderCapability` / `runAgentTask`、受控失败分类和已冻结目标；相同服务商协议结论会去重，所有非成功终态均有受控分类。记录不接收提示词、目标描述、模型文本、完整终端输出、服务地址、模型名称或凭据；`src-tauri/src/operation_history.rs` 继续以白名单 action、严格反序列化和命令脱敏执行持久化边界。真实命令仍只来自结构化 `run_terminal_command`，并继续走既有风险判断、逐条审批、目标冻结、PTY 执行、结果脱敏和 Agent 审计链路。
+- `src/components/ai/ai-settings-section.tsx` 使用现有 shadcn Card、Field、Switch、AlertDialog、Badge 与 Button 提供公开管理入口：显示当前发布阶段、启用/关闭 Agent、解释高权限非默认和 Preview 本地数据范围、查看按 Agent 分类筛选的操作历史，以及确认后清理所有本地 conversation 的 Agent lane。关闭与清理都会先取消并等待活动任务收敛、刷新 Agent 快照，再清除会话；普通问答和生成命令数据不受影响。zh-CN / en-US 文案与组件测试覆盖这些入口和键盘可访问的语义控件。
+- Preview 退出门禁采用本任务窗口内的可重复自动化验收，不声称存在远程遥测或外部 cohort 数据：三档权限、结构化调用、审批竞态、目标漂移/迟到工具调用、重启恢复、嵌套秘密脱敏和本地审计回归均通过，新增用例确认关闭后不能启动或重试、兼容性记录按协议去重、未知失败仍归入受控类别、Preview 记录不含提示词/模型标识/目标描述/输出。未发现未经批准执行、跨会话执行或秘密持久化事件。
+- 定向验证：`pnpm test:agent:security` 为 8 个文件、107 项通过；M7 设置、AI 面板、历史筛选与偏好同步回归为 4 个文件、51 项通过；Rust 发布策略 10 项、操作历史 7 项以及关闭/注册竞态 1 项通过。全量验证：`pnpm test` 为 152 个文件、1296 项通过、1 项平台条件跳过；`pnpm build` 成功（仅既有 Vite 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml --locked` 为 373 项单元测试与 5 项 Petdex 契约探针通过、16 项需显式现场环境的测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
+- M6 已接受的例外保持原样：本轮没有 OpenAI API key，未发起 OpenAI Responses 现场请求，其结论仍是产品授权“豁免（现场未执行）”而非现场通过；没有修复或重跑合并后 Windows 全量 Vitest 的原生 PowerShell 固定 10 秒超时，延期 P3 风险继续保留。
+
+退出判断：本任务窗口完成 Internal、Preview、Stable 策略、公开管理入口与本地诊断闭环；Preview 自动化验收中上述三类发布阻断事件均为 0，M7 标记完成。实际后续 Preview 数据仍应按第 17 节维护规则记录偏差，不会自动扩张为后续候选承诺。
 
 ## 11. 测试矩阵
 

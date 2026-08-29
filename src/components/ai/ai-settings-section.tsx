@@ -1,10 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  BotIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
+  HistoryIcon,
   ServerIcon,
+  Trash2Icon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,9 +52,25 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import type { LocaleKey } from '@/locales';
-import { invokeListAiModels } from '@/lib/tauri';
+import {
+  invokeAgentRolloutPolicy,
+  invokeListAiModels,
+  invokeSetAgentEnabled,
+  isTauriRuntime,
+} from '@/lib/tauri';
+import {
+  clearAgentConversationData,
+  flushAgentSessionPersistence,
+} from '@/lib/agent-sessions';
+import { agentUiController } from '@/lib/agent-ui-controller';
+import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
+import { useAgentStore } from '@/stores/agentStore';
+import { useAiStore } from '@/stores/aiStore';
+import { useAppStore } from '@/stores/appStore';
 import { AI_PROVIDER_PRESETS, useAiSettingsStore } from '@/stores/aiSettingsStore';
+import type { AgentRolloutPolicy } from '@/types/agent';
 import type { AiProviderKind, AiProviderPreset } from '@/types/ai';
 import {
   DeepSeekBrandIcon,
@@ -87,6 +116,7 @@ const protocolDefaults = (kind: AiProviderKind) => {
 
 export const AiSettingsSection: React.FC = () => {
   const { t } = useI18n();
+  const { error: showError, success: showSuccess } = useToast();
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const addProvider = useAiSettingsStore((state) => state.addProvider);
@@ -95,6 +125,9 @@ export const AiSettingsSection: React.FC = () => {
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
+  const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
+  const setAgentEnabled = useAiSettingsStore((state) => state.setAgentEnabled);
+  const activeAgentRequestId = useAgentStore((state) => state.activeRequestId);
   const persistenceStatus = useAiSettingsStore((state) => state.persistenceStatus);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
@@ -103,6 +136,24 @@ export const AiSettingsSection: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [success, setSuccess] = useState<string>();
+  const [agentPolicy, setAgentPolicy] = useState<AgentRolloutPolicy>();
+  const [agentActionBusy, setAgentActionBusy] = useState(false);
+  const [clearAgentOpen, setClearAgentOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let active = true;
+    void invokeAgentRolloutPolicy()
+      .then((policy) => {
+        if (active) setAgentPolicy(policy);
+      })
+      .catch(() => {
+        if (active) setAgentPolicy(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? providers[0],
@@ -168,6 +219,53 @@ export const AiSettingsSection: React.FC = () => {
     }
   };
 
+  const handleAgentEnabledChange = async (enabled: boolean): Promise<void> => {
+    setAgentActionBusy(true);
+    try {
+      const effective = await invokeSetAgentEnabled(enabled);
+      if (enabled && !effective) throw new Error('Agent rollout policy is disabled');
+      useAgentPermissionStore.getState().resetAll();
+      setAgentEnabled(enabled);
+      if (enabled) {
+        showSuccess(t('settings.ai.agent.enabled'));
+        return;
+      }
+      await agentUiController.shutdown();
+      await flushAgentSessionPersistence();
+      showSuccess(t('settings.ai.agent.disabled'));
+    } catch {
+      showError(t(enabled ? 'settings.ai.agent.enableFailed' : 'settings.ai.agent.closeFailed'));
+    } finally {
+      setAgentActionBusy(false);
+    }
+  };
+
+  const handleClearAgentSessions = async (): Promise<void> => {
+    setAgentActionBusy(true);
+    setClearAgentOpen(false);
+    try {
+      await agentUiController.shutdown();
+      await flushAgentSessionPersistence();
+      const conversations = useAiStore.getState().conversations;
+      for (const conversation of conversations) {
+        await clearAgentConversationData(conversation.id, conversation.startedAt);
+      }
+      useAgentPermissionStore.getState().resetAll();
+      showSuccess(t('settings.ai.agent.sessionsCleared', { count: conversations.length }));
+    } catch {
+      showError(t('settings.ai.agent.clearFailed'));
+    } finally {
+      setAgentActionBusy(false);
+    }
+  };
+
+  const openAgentHistory = (): void => {
+    const app = useAppStore.getState();
+    app.setOperationHistoryCategory('agent');
+    app.setActiveSection('workbench');
+    app.setActiveWorkbenchTab('history');
+  };
+
   return (
     <div className="@container flex flex-col gap-5 px-4 py-4">
       <div className="flex flex-col gap-3 @min-[36rem]:flex-row @min-[36rem]:items-start @min-[36rem]:justify-between">
@@ -179,6 +277,69 @@ export const AiSettingsSection: React.FC = () => {
           {t('settings.ai.addProvider')}
         </Button>
       </div>
+
+      <Card size="sm">
+        <CardHeader className="border-b">
+          <CardTitle className="flex items-center gap-2">
+            <BotIcon />
+            {t('settings.ai.agent.title')}
+          </CardTitle>
+          <CardDescription>{t('settings.ai.agent.description')}</CardDescription>
+          <CardAction>
+            <Badge variant={agentPolicy?.featureEnabled ? 'secondary' : 'outline'}>
+              {agentPolicy
+                ? t(`settings.ai.agent.stage.${agentPolicy.stage}` as LocaleKey)
+                : t('settings.ai.agent.stage.checking')}
+            </Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Field
+            className="flex-row items-center gap-3"
+            data-disabled={!agentPolicy?.featureEnabled || agentActionBusy || undefined}
+          >
+            <div className="min-w-0 flex-1">
+              <FieldLabel htmlFor="ai-agent-enabled">{t('settings.ai.agent.enable')}</FieldLabel>
+              <FieldDescription>{t('settings.ai.agent.enableDescription')}</FieldDescription>
+            </div>
+            <Switch
+              id="ai-agent-enabled"
+              checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
+              disabled={!agentPolicy?.featureEnabled || agentActionBusy}
+              onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
+            />
+          </Field>
+          <Alert>
+            <AlertTitle>{t('settings.ai.agent.permissionTitle')}</AlertTitle>
+            <AlertDescription>{t('settings.ai.agent.permissionDescription')}</AlertDescription>
+          </Alert>
+          {agentPolicy?.collectLocalDiagnostics && (
+            <Alert>
+              <AlertTitle>{t('settings.ai.agent.previewDataTitle')}</AlertTitle>
+              <AlertDescription>{t('settings.ai.agent.previewDataDescription')}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+        <CardFooter className="flex-wrap justify-between gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openAgentHistory}
+          >
+            <HistoryIcon data-icon="inline-start" />
+            {t('settings.ai.agent.viewHistory')}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={agentActionBusy}
+            onClick={() => setClearAgentOpen(true)}
+          >
+            {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
+            {t('settings.ai.agent.clearSessions')}
+          </Button>
+        </CardFooter>
+      </Card>
 
       <div className="grid min-w-0 items-start gap-4 @min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]">
         <div className="contents @min-[44rem]:flex @min-[44rem]:min-w-0 @min-[44rem]:flex-col @min-[44rem]:gap-4">
@@ -496,6 +657,28 @@ export const AiSettingsSection: React.FC = () => {
         description={t('settings.ai.deleteProviderDescription')}
         onConfirm={handleDeleteProvider}
       />
+
+      <AlertDialog open={clearAgentOpen} onOpenChange={setClearAgentOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.ai.agent.clearTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activeAgentRequestId
+                ? t('settings.ai.agent.clearActiveDescription')
+                : t('settings.ai.agent.clearDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => void handleClearAgentSessions()}
+            >
+              {t('settings.ai.agent.clearConfirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

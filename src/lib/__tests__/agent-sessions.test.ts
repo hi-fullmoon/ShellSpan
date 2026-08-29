@@ -54,6 +54,7 @@ describe('Agent session persistence', () => {
       target,
       targetTitle: 'Agent target',
       permissionMode: 'requestApproval',
+      rolloutStage: 'preview',
     });
     useAgentStore.getState().registerTool({
       toolCall: {
@@ -110,6 +111,7 @@ describe('Agent session persistence', () => {
           target,
           targetTitle: 'Agent target',
           permissionMode: 'fullAccess',
+          rolloutStage: 'preview',
           toolCallIds: [],
           phase: 'analyzing',
           status: 'running',
