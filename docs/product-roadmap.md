@@ -521,7 +521,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 平台与提供商证据：
 
-| 验收项 | 结论 | 2026-08-29 证据 |
+| 验收项 | 结论 | 证据 |
 | --- | --- | --- |
 | macOS zsh / PTY | 通过（现场） | macOS 26.6.2 arm64 上原生 `/bin/zsh` 生产 wrapper、ANSI/引号秘密/非零退出码通过；`portable-pty` 原生 PTY 的生产边界协议通过。 |
 | Windows PowerShell / ConPTY | 通过（真实 `windows-2025` runner） | GitHub Actions [run 33233185875](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233185875) 的 Windows job `99049462258` 在提交 `11dbb1d` 上全绿：原生 Windows PowerShell 执行生产 wrapper 并正确保留非零退出码 7；真实 ConPTY 接收原始 VT 输入，输出 `termbridge-conpty-smoke` 并以 7 退出。同一 job 的 build、Agent 契约、Petdex、Clippy 和全量 Rust 均通过。 |
@@ -529,7 +529,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 | Chat Completions tools | 通过（现场） | 同一本机 `qwen3:0.6b` 经 Ollama `/v1/chat/completions` 完成强制能力探测、结构化调用、结果回放和总结；探测预算为 256 tokens，无明确结构化证据时保持 `unknown`。 |
 | 无 tools 降级 | 通过（现场） | 本机 Ollama `smollm:135m` 元数据判定 `unsupported`，只返回无工具的生成命令降级文本，没有 `toolCall`。 |
 | OpenAI Responses | 历史豁免（现场未执行；非当前前置） | 环境中没有 `TERMBRIDGE_M6_OPENAI_LIVE`、模型配置或 `OPENAI_API_KEY`，未发起现场请求；2026-08-29 获得产品明确授权豁免该现场验收。Responses SSE、完整 output item 回放、`function_call_output` 和安全降级非现场契约测试均通过。用户当前不使用 OpenAI，该适配器可以保留，但不再作为其阶段或发布前置。 |
-| MiniMax OpenAI-compatible tools | 替代验收待现场 | 独立现场入口只接受 `MINIMAX_API_KEY` 与 `TERMBRIDGE_M6_MINIMAX_*`，不复用 OpenAI 凭证；国内默认根地址为 `https://api.minimaxi.com`（后端补 `/v1`），默认模型为 `MiniMax-M2.7`。结构化 `tool_calls`、完整 assistant 回放、tool 结果关联和最终总结的契约覆盖已就绪；没有本机密钥时不发起请求，也不记录为通过。 |
+| MiniMax OpenAI-compatible tools | 通过（现场，2026-08-30） | 使用国内官方根地址 `https://api.minimaxi.com`（后端补 `/v1`）与 `MiniMax-M2.7` 运行 `pnpm test:agent:providers:minimax:live`，退出码为 0。现场完成能力探测、结构化 `run_terminal_command` 调用、含 `tool_calls` 的完整 assistant 消息回放、按提供商 call ID 关联的 tool 结果回放，以及包含 `termbridge-live-provider-ok` 的最终总结。独立入口只接受 `MINIMAX_API_KEY` 与 `TERMBRIDGE_M6_MINIMAX_*`，不读取或转用 OpenAI 凭证。 |
 | 隔离 SSH/SFTP | 通过（现场） | `pnpm test:e2e:ssh` 单次构建镜像供目标与跳板复用，10/10 通过并在结束后删除容器、卷与 Compose 网络。 |
 
 本轮验证：`pnpm test:agent:security` 为 103/103；macOS 原生 zsh/PTY 与 Windows 原生 PowerShell/ConPTY 平台门禁均通过；提供商非现场定向测试为 17 通过、4 个现场用例按标记忽略，随后 Ollama tools、无 tools 和 Chat Completions 三个现场用例分别通过；SSH E2E 为 10/10。集成后全量 `pnpm test` 为 150 个文件、1288 通过、1 个平台条件跳过；`pnpm build` 成功（仅既有 500 kB chunk 提示）；Rust 在 macOS/本机为 368 单元测试 + 5 Petdex 通过、16 忽略，在 Windows 为 365 单元测试 + 5 Petdex 通过、15 忽略。[Quality Gate run 33233185875](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233185875) 的前端审计、macOS、Windows 和隔离 SSH 四个 job 全部通过；Clippy `-D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
@@ -572,13 +572,14 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### 阶段二 — MiniMax 云端工具调用替代验收
 
-状态：实现与无凭证契约复核已完成；真实现场待本机安全提供 `MINIMAX_API_KEY`，尚未记录为通过。
+状态：已完成（2026-08-30；MiniMax 官方 OpenAI-compatible tools 现场验收通过）。
 
 - 用户明确不使用 OpenAI。OpenAI Responses 适配器与历史豁免记录继续保留，但不再作为当前用户的阶段或发布前置；MiniMax 官方 OpenAI-compatible Chat Completions 是当前唯一真实云端替代验收目标。
 - 国内默认服务根地址为 `https://api.minimaxi.com`，由后端统一补 `/v1`；默认模型为 `MiniMax-M2.7`。现场脚本只允许 MiniMax 官方 HTTPS 服务根 `api.minimaxi.com` 或 `api.minimax.io`，防止凭证被发送到兼容或非官方端点。
 - 独立环境变量为 `TERMBRIDGE_M6_MINIMAX_LIVE`、`TERMBRIDGE_M6_MINIMAX_BASE_URL`、`TERMBRIDGE_M6_MINIMAX_MODEL` 和 `MINIMAX_API_KEY`。脚本不会读取或转用 `OPENAI_API_KEY`，并在 MiniMax Cargo 子进程环境中主动移除 OpenAI 凭证变量。
 - `pnpm test:agent:providers:minimax:live` 是不依赖 Ollama 的唯一 MiniMax 现场入口。它必须完成能力探测、结构化 `run_terminal_command` 调用、含 `tool_calls` 的完整 assistant 消息回放、按提供商 call ID 关联的 tool 结果回放，以及包含 `termbridge-live-provider-ok` 的最终总结。
-- 密钥只能由用户在本机当前进程通过隐藏输入或可信秘密注入方式临时设置；不得写入命令参数、聊天、日志、仓库文件或持久配置。没有密钥时入口在任何 Cargo 或网络调用前失败，历史 OpenAI 豁免和 MiniMax 待验收状态均不得改写。
+- 2026-08-30 在可见 PowerShell 子进程中通过隐藏输入临时注入 `MINIMAX_API_KEY`，运行上述唯一现场入口并以退出码 0 完成全部断言；测试结束后 `finally` 清理 MiniMax 环境变量和临时明文缓冲，父进程未接收密钥，OpenAI 凭证未参与。
+- 密钥只能由用户在本机当前进程通过隐藏输入或可信秘密注入方式临时设置；不得写入命令参数、聊天、日志、仓库文件或持久配置。没有密钥时入口仍会在任何 Cargo 或网络调用前失败，历史 OpenAI 豁免不得改写为通过。
 
 ## 11. 测试矩阵
 
@@ -653,7 +654,7 @@ Agent 首发只有同时满足以下条件才算完成：
 - [x] 工具输出和持久化内容通过秘密脱敏回归测试。
 - [x] 每个真实命令都有本地操作记录。
 - [x] OpenAI、兼容提供商、Ollama 和无工具模型都有明确行为（OpenAI Responses 现场请求按 2026-08-29 产品授权豁免，现仅为历史记录）。
-- [ ] 当前用户的 MiniMax 云端替代门禁完成一次真实结构化调用、tool 结果回放和最终总结验收；在取得不含秘密的现场证据前不得勾选。
+- [x] 当前用户的 MiniMax 云端替代门禁已于 2026-08-30 完成真实结构化调用、tool 结果回放和最终总结验收，证据不含密钥或模型输出正文。
 - [x] Windows 与 macOS 关键链路通过验证。
 - [x] 全量前端、Rust 和 SSH E2E 测试通过（以 [PR head 全绿 run 33233730312](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233730312) 为证据；合并后 Windows 夹具超时 P3 已由阶段一独立收口关闭）。
 - [x] 不存在未经批准执行、跨会话执行或自动恢复完全访问权限的已知缺陷。
