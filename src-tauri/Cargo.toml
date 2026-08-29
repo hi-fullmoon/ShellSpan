@@ -1,6 +1,6 @@
 [package]
 name = "TermBridge"
-version = "2.0.55"
+version = "2.1.0"
 description = "TermBridge desktop SSH client"
 authors = ["Codex"]
 license = "MIT"
