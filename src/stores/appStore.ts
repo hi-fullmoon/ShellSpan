@@ -3,6 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
 import type { AppSection, Locale, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
+import type { OperationHistoryCategory } from '@/types/operation-history';
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
@@ -76,12 +77,14 @@ interface AppState extends AppPreferences {
   activeWorkbenchTab: WorkbenchTab;
   activeSettingsSection: SettingsSection;
   pendingWorkbenchAction: 'newConnection' | null;
+  operationHistoryCategory: OperationHistoryCategory | 'all';
   hydrateFromDb: () => Promise<void>;
   setActiveSection: (section: AppSection) => void;
   setActiveWorkbenchTab: (tab: WorkbenchTab) => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
   requestNewConnection: () => void;
   consumeWorkbenchAction: (action: 'newConnection') => void;
+  setOperationHistoryCategory: (category: OperationHistoryCategory | 'all') => void;
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
@@ -256,6 +259,7 @@ export const useAppStore = create<AppState>()(
     activeWorkbenchTab: 'connections' as WorkbenchTab,
     activeSettingsSection: 'general' as SettingsSection,
     pendingWorkbenchAction: null,
+    operationHistoryCategory: 'all',
 
     hydrateFromDb: async () => {
       try {
@@ -295,6 +299,7 @@ export const useAppStore = create<AppState>()(
         ? { pendingWorkbenchAction: null }
         : {}
     )),
+    setOperationHistoryCategory: (operationHistoryCategory) => set({ operationHistoryCategory }),
     setTheme: (theme) => set({ theme }),
     setLocale: (locale) => {
       void changeLocale(locale);

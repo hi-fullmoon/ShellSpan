@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/compact-alert-dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
+import { useAppStore } from '@/stores/appStore';
 import type { LocaleKey } from '@/locales';
 import {
   clearOperationHistory,
@@ -70,6 +71,7 @@ import {
 } from './workbench-page';
 
 const CATEGORIES: OperationHistoryCategory[] = [
+  'agent',
   'connection',
   'terminal',
   'sftp',
@@ -121,7 +123,8 @@ export const OperationHistoryPanel: React.FC = () => {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState<OperationHistoryCategory | 'all'>('all');
+  const category = useAppStore((state) => state.operationHistoryCategory);
+  const setCategory = useAppStore((state) => state.setOperationHistoryCategory);
   const [status, setStatus] = useState<OperationHistoryStatus | 'all'>('all');
   const [range, setRange] = useState<'day' | 'week' | 'month' | 'all'>('month');
   const [retentionDays, setRetentionDays] = useState(90);

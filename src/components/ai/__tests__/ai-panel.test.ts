@@ -98,7 +98,7 @@ describe('extractSingleLineCommand', () => {
 });
 
 describe('explicit AI modes', () => {
-  it('keeps the experimental Agent entry visible but disabled by default', async () => {
+  it('keeps the Agent entry visible when the runtime rollout is unavailable', async () => {
     const previousApp = useAppStore.getState();
     await initI18n('en-US');
     useAppStore.setState({ locale: 'en-US' });
@@ -109,7 +109,7 @@ describe('explicit AI modes', () => {
       const agentMode = await screen.findByRole('button', { name: 'Agent' });
       expect(agentMode).toBeDisabled();
       expect(agentMode).toHaveAttribute('aria-describedby', 'agent-mode-availability');
-      expect(screen.getByText(/experimental Agent feature is off/i)).toHaveClass('sr-only');
+      expect(screen.getByText(/disabled by the current rollout policy/i)).toHaveClass('sr-only');
     } finally {
       unmount();
       useAiStore.getState().clear();
@@ -127,6 +127,16 @@ describe('explicit AI modes', () => {
       value: {},
     });
     tauriCoreMock.invoke.mockImplementation(async (command: string) => {
+      if (command === 'agent_rollout_policy') {
+        return {
+          stage: 'stable',
+          featureEnabled: true,
+          defaultAgentEnabled: true,
+          defaultPermissionMode: 'requestApproval',
+          availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
+          collectLocalDiagnostics: false,
+        };
+      }
       if (command === 'agent_contract_status') {
         return {
           contractVersion: 1,

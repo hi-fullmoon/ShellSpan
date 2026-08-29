@@ -17,6 +17,7 @@ const REDACTED_COMMAND: &str = "[REDACTED COMMAND]";
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum OperationCategory {
+    Agent,
     Connection,
     Terminal,
     Sftp,
@@ -30,6 +31,7 @@ pub(crate) enum OperationCategory {
 impl OperationCategory {
     fn as_str(self) -> &'static str {
         match self {
+            Self::Agent => "agent",
             Self::Connection => "connection",
             Self::Terminal => "terminal",
             Self::Sftp => "sftp",
@@ -43,6 +45,7 @@ impl OperationCategory {
 
     fn parse(value: &str) -> Result<Self, String> {
         match value {
+            "agent" => Ok(Self::Agent),
             "connection" => Ok(Self::Connection),
             "terminal" => Ok(Self::Terminal),
             "sftp" => Ok(Self::Sftp),
@@ -259,6 +262,7 @@ pub(crate) struct OperationEvidenceReference {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum OperationErrorCategory {
+    ApprovalRejected,
     Authentication,
     Timeout,
     Network,
@@ -272,12 +276,17 @@ pub(crate) enum OperationErrorCategory {
     StaleEvidence,
     TargetChanged,
     CredentialUnavailable,
+    Provider,
+    StepLimit,
+    ToolCallingUnsupported,
+    ToolCallingUnverified,
     Unknown,
 }
 
 impl OperationErrorCategory {
     fn as_str(self) -> &'static str {
         match self {
+            Self::ApprovalRejected => "approvalRejected",
             Self::Authentication => "authentication",
             Self::Timeout => "timeout",
             Self::Network => "network",
@@ -291,12 +300,17 @@ impl OperationErrorCategory {
             Self::StaleEvidence => "staleEvidence",
             Self::TargetChanged => "targetChanged",
             Self::CredentialUnavailable => "credentialUnavailable",
+            Self::Provider => "provider",
+            Self::StepLimit => "stepLimit",
+            Self::ToolCallingUnsupported => "toolCallingUnsupported",
+            Self::ToolCallingUnverified => "toolCallingUnverified",
             Self::Unknown => "unknown",
         }
     }
 
     fn parse(value: &str) -> Result<Self, String> {
         match value {
+            "approvalRejected" => Ok(Self::ApprovalRejected),
             "authentication" => Ok(Self::Authentication),
             "timeout" => Ok(Self::Timeout),
             "network" => Ok(Self::Network),
@@ -310,6 +324,10 @@ impl OperationErrorCategory {
             "staleEvidence" => Ok(Self::StaleEvidence),
             "targetChanged" => Ok(Self::TargetChanged),
             "credentialUnavailable" => Ok(Self::CredentialUnavailable),
+            "provider" => Ok(Self::Provider),
+            "stepLimit" => Ok(Self::StepLimit),
+            "toolCallingUnsupported" => Ok(Self::ToolCallingUnsupported),
+            "toolCallingUnverified" => Ok(Self::ToolCallingUnverified),
             "unknown" => Ok(Self::Unknown),
             _ => Err(format!("unknown operation error category: {value}")),
         }
@@ -438,6 +456,8 @@ struct JsonExport<'a> {
 }
 
 const ALLOWED_ACTIONS: &[&str] = &[
+    "detectAgentProviderCapability",
+    "runAgentTask",
     "connectRemoteSession",
     "connectLocalSession",
     "closeSession",
@@ -488,7 +508,10 @@ fn sanitize_command_preview(
     if !(matches!(
         category,
         OperationCategory::Runbook | OperationCategory::MultiHost
-    ) || category == OperationCategory::Terminal && action == "executeAgentCommand")
+    ) || matches!(
+        category,
+        OperationCategory::Agent | OperationCategory::Terminal
+    ) && action == "executeAgentCommand")
         || preview.is_empty()
     {
         return None;
@@ -561,8 +584,10 @@ fn normalize_request(
         return Err("operation history action is not allowed".to_string());
     }
     if request.action == "executeAgentCommand" {
-        if request.category != OperationCategory::Terminal
-            || request.permission_mode.is_none()
+        if !matches!(
+            request.category,
+            OperationCategory::Agent | OperationCategory::Terminal
+        ) || request.permission_mode.is_none()
             || request.human_approved.is_none()
         {
             return Err("Agent operation history is missing permission metadata".to_string());
@@ -1246,7 +1271,7 @@ mod tests {
     fn agent_command_audit_tracks_permission_and_never_accepts_terminal_output() {
         let (_directory, database) = database();
         let mut agent = request("agent-started", "request-agent", OperationStatus::Running);
-        agent.category = OperationCategory::Terminal;
+        agent.category = OperationCategory::Agent;
         agent.action = "executeAgentCommand".to_string();
         agent.operation_id = "call-agent".to_string();
         agent.parent_operation_id = Some("request-agent".to_string());
@@ -1258,6 +1283,7 @@ mod tests {
         insert(&database, &normalize_request(agent).unwrap()).unwrap();
         let (events, _) = load_events(&database).unwrap();
         assert_eq!(events.len(), 1);
+        assert_eq!(events[0].category, OperationCategory::Agent);
         assert_eq!(events[0].task_id, "request-agent");
         assert_eq!(events[0].operation_id, "call-agent");
         assert_eq!(
@@ -1276,7 +1302,7 @@ mod tests {
             "operationId": "call-agent",
             "parentOperationId": "request-agent",
             "occurredAt": current_timestamp_ms(),
-            "category": "terminal",
+            "category": "agent",
             "action": "executeAgentCommand",
             "eventKind": "completed",
             "status": "succeeded",
@@ -1288,6 +1314,47 @@ mod tests {
             "output": "terminal output that must not be stored"
         });
         assert!(serde_json::from_value::<RecordOperationEventRequest>(with_output).is_err());
+    }
+
+    #[test]
+    fn preview_agent_classifications_are_filterable_without_command_payloads() {
+        let (_directory, database) = database();
+        let mut compatibility = request(
+            "agent-preview-capability",
+            "agent-compatibility",
+            OperationStatus::Failed,
+        );
+        compatibility.category = OperationCategory::Agent;
+        compatibility.action = "detectAgentProviderCapability".to_string();
+        compatibility.risk = None;
+        compatibility.subject_id =
+            Some("openAiCompatible:chatCompletionsProbe:unknown".to_string());
+        compatibility.command_preview = Some("secret prompt must be dropped".to_string());
+        compatibility.evidence.clear();
+        compatibility.error_category = Some(OperationErrorCategory::ToolCallingUnverified);
+
+        let normalized = normalize_request(compatibility).unwrap();
+        assert_eq!(normalized.command_preview, None);
+        insert(&database, &normalized).unwrap();
+        let page = filtered_page(
+            &database,
+            &OperationHistoryFilter {
+                category: Some(OperationCategory::Agent),
+                ..OperationHistoryFilter::default()
+            },
+            100,
+        )
+        .unwrap();
+
+        assert_eq!(page.total_tasks, 1);
+        assert_eq!(page.events[0].category, OperationCategory::Agent);
+        assert_eq!(
+            page.events[0].error_category,
+            Some(OperationErrorCategory::ToolCallingUnverified)
+        );
+        assert!(!serde_json::to_string(&page.events)
+            .unwrap()
+            .contains("secret prompt"));
     }
 
     #[test]
