@@ -2660,10 +2660,10 @@ mod tests {
     use crate::models::SessionCommand;
     use crossbeam_channel::{bounded, never, unbounded, TryRecvError, TrySendError};
     use portable_pty::CommandBuilder;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     use portable_pty::{native_pty_system, PtySize};
     use std::ffi::OsStr;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     use std::io::Read;
     use std::sync::{Arc, Barrier};
     use std::thread;
@@ -2956,6 +2956,100 @@ mod tests {
 
         assert!(status.success());
         assert_eq!(output.replace("\r\n", "\n"), "termbridge-pty-smoke\n");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_real_pty_runs_the_shell_boundary_protocol() {
+        use std::io::Write;
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 160,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("open a real local PTY for the shell protocol");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone the real shell PTY reader");
+        let mut writer = pair
+            .master
+            .take_writer()
+            .expect("take the real shell PTY writer");
+        let mut command = CommandBuilder::new("/bin/zsh");
+        command.arg("-f");
+        configure_local_terminal_environment(&mut command);
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .expect("spawn the native macOS shell through a PTY");
+        drop(pair.slave);
+
+        let nonce = "0123456789abcdef0123456789abcdef0123456789abcdef";
+        let first = "TERMBRIDGE_M2_0123456789abcdef0123";
+        let second = "456789abcdef0123456789abcdef";
+        let wrapper = format!(
+            "__tb_marker_{nonce}='{first}''{second}'; __tb_command_{nonce}='printf macos-shell-protocol; false'; printf '\\036%s:BEGIN\\037\\n' \"$__tb_marker_{nonce}\"; eval \"$__tb_command_{nonce}\"; __tb_exit_{nonce}=$?; printf '\\036%s:END:%d\\037\\n' \"$__tb_marker_{nonce}\" \"$__tb_exit_{nonce}\"; unset __tb_marker_{nonce} __tb_command_{nonce} __tb_exit_{nonce}\nexit\n"
+        );
+        writer
+            .write_all(wrapper.as_bytes())
+            .expect("write the shell boundary protocol to the PTY");
+        writer.flush().expect("flush the shell boundary protocol");
+        drop(writer);
+
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("read the shell boundary protocol output");
+        let status = child.wait().expect("wait for the native shell");
+
+        assert!(status.success());
+        assert!(output.contains("\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN\u{1f}"));
+        assert!(output.contains("macos-shell-protocol"));
+        assert!(output.contains("\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:1\u{1f}"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_real_conpty_smoke_runs_the_production_powershell() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("open a real Windows ConPTY");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone the real ConPTY reader");
+        let mut command = CommandBuilder::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Write-Output 'termbridge-conpty-smoke'; exit 7",
+        ]);
+        configure_local_terminal_environment(&mut command);
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .expect("spawn the production Windows shell through ConPTY");
+        drop(pair.slave);
+
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("read deterministic PowerShell ConPTY output");
+        let status = child.wait().expect("wait for the ConPTY child");
+
+        assert!(!status.success());
+        assert!(output.contains("termbridge-conpty-smoke"));
     }
 
     #[test]

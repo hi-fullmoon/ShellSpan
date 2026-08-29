@@ -772,7 +772,9 @@ function validateCommand(command: string): string | null {
   if ([...command].length > AGENT_TERMINAL_COMMAND_LIMIT_CHARS) {
     return 'Agent terminal command exceeds the 8192 character limit';
   }
-  if ([...command].some((character) => /\p{Cc}/u.test(character))) {
+  if ([...command].some((character) => (
+    /\p{Cc}/u.test(character) || character === '\u2028' || character === '\u2029'
+  ))) {
     return 'Agent terminal command must be one line without control characters';
   }
   if (hasIncompleteShellSyntax(command)) return 'Incomplete shell syntax is blocked';

@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+state_dir=/var/lib/termbridge-m6
+state_file="$state_dir/service.state"
+count_file="$state_dir/restart.count"
+
+case "${1:-}" in
+  reset)
+    printf 'inactive\n' > "$state_file"
+    printf '0\n' > "$count_file"
+    printf 'reset\n'
+    ;;
+  status)
+    cat "$state_file"
+    ;;
+  restart)
+    count=$(cat "$count_file")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$count_file"
+    printf 'active\n' > "$state_file"
+    printf 'restart accepted\n'
+    ;;
+  restart-count)
+    cat "$count_file"
+    ;;
+  *)
+    printf 'usage: termbridge-m6-service {reset|status|restart|restart-count}\n' >&2
+    exit 64
+    ;;
+esac

@@ -201,13 +201,16 @@ export function redactTerminalSecrets(value: string): string {
       /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|$)/gi,
       '[REDACTED PRIVATE KEY]',
     )
-    .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
     .replace(
-      /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase|pwd)\s*[:=]\s*)(["']?)[^\s"']+\2/gi,
+      /\b(authorization\s*:\s*(?:bearer|basic)\s+)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi,
       '$1[REDACTED]',
     )
     .replace(
-      /(--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase))(?:=|\s+)\S+/gi,
+      /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase|pwd)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s"']+)/gi,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /(--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase))(?:=|\s+)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi,
       '$1=[REDACTED]',
     )
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1[REDACTED]@')

@@ -533,10 +533,12 @@ describe('Agent M2 PTY executor', () => {
         const call = toolCall('pwd', { ...remoteTarget(), host: 'changed.example.com' });
         return { toolCall: call, authorization: authorization(call) };
       })(),
-      (() => {
-        const call = toolCall('echo one\necho two');
-        return { toolCall: call, authorization: authorization(call) };
-      })(),
+      ...['echo one\necho two', 'echo one\recho two', 'echo one\0echo two',
+        'echo one\u001becho two', 'echo one\u2028echo two', 'echo one\u2029echo two']
+        .map((command) => {
+          const call = toolCall(command);
+          return { toolCall: call, authorization: authorization(call) };
+        }),
       (() => {
         const call = toolCall('x'.repeat(AGENT_TERMINAL_COMMAND_LIMIT_CHARS + 1));
         return { toolCall: call, authorization: authorization(call) };

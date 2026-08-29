@@ -103,7 +103,9 @@ jobs:
         with:
           workspaces: src-tauri -> target
       - name: Start isolated SSH service
-        run: docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml up --build --detach --wait
+        run: |
+          docker build --tag termbridge-ssh-e2e:local tests/ssh-e2e
+          docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml up --detach --wait --pull never
       - name: Run SSH/SFTP end-to-end test
         env:
           TERMBRIDGE_E2E_SSH_FIXTURE: "1"
