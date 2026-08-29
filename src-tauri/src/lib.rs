@@ -234,6 +234,7 @@ pub fn run() {
         .manage(SessionManager::default())
         .manage(ai::AiRequestRegistry::default())
         .manage(agent::AgentRequestRegistry::default())
+        .manage(agent_contract::AgentRuntimeAccess::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
@@ -252,7 +253,9 @@ pub fn run() {
             ai::ai_start_request,
             ai::ai_cancel_request,
             agent_contract::agent_contract_status,
+            agent_contract::agent_rollout_policy,
             agent::agent_detect_provider_capability,
+            agent::agent_set_enabled,
             agent::agent_start_request,
             agent::agent_submit_tool_result,
             agent::agent_cancel_request,

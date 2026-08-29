@@ -67,6 +67,7 @@ import type {
 import type {
   AgentContractStatus,
   AgentProviderCapabilityEvidence,
+  AgentRolloutPolicy,
   AgentStartRequest,
   AgentStreamEvent,
   AgentToolResult,
@@ -238,6 +239,14 @@ export async function invokeAgentContractStatus(
     providerKind,
     evidence,
   });
+}
+
+export async function invokeAgentRolloutPolicy(): Promise<AgentRolloutPolicy> {
+  return invokeLogged<AgentRolloutPolicy>('agent_rollout_policy');
+}
+
+export async function invokeSetAgentEnabled(enabled: boolean): Promise<boolean> {
+  return invokeLogged<boolean>('agent_set_enabled', { enabled });
 }
 
 export async function invokeDetectAgentProviderCapability(

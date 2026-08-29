@@ -1,4 +1,4 @@
-//! Frozen M0 contracts and fail-closed policy for the experimental terminal Agent.
+//! Frozen M0 contracts and fail-closed policy for the terminal Agent.
 //!
 //! This module intentionally contains no model loop or terminal executor. Those
 //! capabilities belong to later roadmap milestones and must enter through this
@@ -6,12 +6,15 @@
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize, Serializer};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::State;
 
 use crate::ai::AiProviderKind;
 
 pub const AGENT_CONTRACT_VERSION: u8 = 1;
 pub const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = AgentPermissionMode::RequestApproval;
 const EXPERIMENTAL_AGENT_ENV: &str = "TERMBRIDGE_EXPERIMENTAL_AGENT";
+const AGENT_ROLLOUT_ENV: &str = "TERMBRIDGE_AGENT_ROLLOUT";
 
 pub const AGENT_CONTRACT_SCHEMA: &str =
     include_str!("../../protocol/agent/v1/agent-contract.schema.json");
@@ -22,6 +25,41 @@ pub enum AgentPermissionMode {
     RequestApproval,
     AutoApproveReadOnly,
     FullAccess,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentRolloutStage {
+    Disabled,
+    Internal,
+    Preview,
+    Stable,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentRolloutPolicy {
+    pub stage: AgentRolloutStage,
+    pub feature_enabled: bool,
+    pub default_agent_enabled: bool,
+    pub default_permission_mode: AgentPermissionMode,
+    pub available_permission_modes: [AgentPermissionMode; 3],
+    pub collect_local_diagnostics: bool,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct AgentRuntimeAccess {
+    user_enabled: AtomicBool,
+}
+
+impl AgentRuntimeAccess {
+    pub(crate) fn set_user_enabled(&self, enabled: bool) {
+        self.user_enabled.store(enabled, Ordering::SeqCst);
+    }
+
+    pub(crate) fn user_enabled(&self) -> bool {
+        self.user_enabled.load(Ordering::SeqCst)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -293,8 +331,50 @@ fn parse_experimental_agent_flag(value: Option<&str>) -> bool {
     matches!(value, Some("1" | "true"))
 }
 
-pub(crate) fn experimental_agent_enabled() -> bool {
-    parse_experimental_agent_flag(std::env::var(EXPERIMENTAL_AGENT_ENV).ok().as_deref())
+fn parse_agent_rollout_stage(
+    rollout: Option<&str>,
+    legacy_experiment: Option<&str>,
+) -> AgentRolloutStage {
+    match rollout {
+        Some("disabled") => AgentRolloutStage::Disabled,
+        Some("internal") => AgentRolloutStage::Internal,
+        Some("preview") => AgentRolloutStage::Preview,
+        Some("stable") => AgentRolloutStage::Stable,
+        // An explicit but unknown release value must never open the Agent.
+        Some(_) => AgentRolloutStage::Disabled,
+        None if parse_experimental_agent_flag(legacy_experiment) => AgentRolloutStage::Internal,
+        // Preserve an explicit legacy opt-out while making a clean M7 install Stable.
+        None if legacy_experiment.is_some() => AgentRolloutStage::Disabled,
+        None => AgentRolloutStage::Stable,
+    }
+}
+
+fn resolve_agent_rollout_policy(stage: AgentRolloutStage) -> AgentRolloutPolicy {
+    AgentRolloutPolicy {
+        stage,
+        feature_enabled: stage != AgentRolloutStage::Disabled,
+        default_agent_enabled: stage != AgentRolloutStage::Disabled,
+        default_permission_mode: DEFAULT_AGENT_PERMISSION_MODE,
+        available_permission_modes: [
+            AgentPermissionMode::RequestApproval,
+            AgentPermissionMode::AutoApproveReadOnly,
+            AgentPermissionMode::FullAccess,
+        ],
+        collect_local_diagnostics: stage == AgentRolloutStage::Preview,
+    }
+}
+
+pub(crate) fn current_agent_rollout_policy() -> AgentRolloutPolicy {
+    let rollout = std::env::var(AGENT_ROLLOUT_ENV).ok();
+    let legacy = std::env::var(EXPERIMENTAL_AGENT_ENV).ok();
+    resolve_agent_rollout_policy(parse_agent_rollout_stage(
+        rollout.as_deref(),
+        legacy.as_deref(),
+    ))
+}
+
+pub(crate) fn agent_feature_enabled() -> bool {
+    current_agent_rollout_policy().feature_enabled
 }
 
 pub(crate) fn resolve_agent_contract_status(
@@ -329,10 +409,20 @@ pub(crate) fn resolve_agent_contract_status(
 
 #[tauri::command]
 pub(crate) fn agent_contract_status(
+    access: State<'_, AgentRuntimeAccess>,
     provider_kind: AiProviderKind,
     evidence: Option<AgentProviderCapabilityEvidence>,
 ) -> AgentContractStatus {
-    resolve_agent_contract_status(experimental_agent_enabled(), provider_kind, evidence)
+    resolve_agent_contract_status(
+        agent_feature_enabled() && access.user_enabled(),
+        provider_kind,
+        evidence,
+    )
+}
+
+#[tauri::command]
+pub(crate) fn agent_rollout_policy() -> AgentRolloutPolicy {
+    current_agent_rollout_policy()
 }
 
 #[cfg(test)]
@@ -438,13 +528,73 @@ mod tests {
     }
 
     #[test]
-    fn experiment_flag_defaults_off_and_accepts_only_explicit_true_values() {
+    fn legacy_experiment_flag_accepts_only_explicit_true_values() {
         assert!(!parse_experimental_agent_flag(None));
         assert!(!parse_experimental_agent_flag(Some("false")));
         assert!(!parse_experimental_agent_flag(Some("TRUE")));
         assert!(!parse_experimental_agent_flag(Some("yes")));
         assert!(parse_experimental_agent_flag(Some("true")));
         assert!(parse_experimental_agent_flag(Some("1")));
+    }
+
+    #[test]
+    fn rollout_defaults_stable_and_fails_closed_for_unknown_or_explicit_legacy_opt_out() {
+        assert_eq!(
+            parse_agent_rollout_stage(None, None),
+            AgentRolloutStage::Stable
+        );
+        assert_eq!(
+            parse_agent_rollout_stage(None, Some("true")),
+            AgentRolloutStage::Internal
+        );
+        assert_eq!(
+            parse_agent_rollout_stage(None, Some("false")),
+            AgentRolloutStage::Disabled
+        );
+        assert_eq!(
+            parse_agent_rollout_stage(Some("preview"), Some("false")),
+            AgentRolloutStage::Preview
+        );
+        assert_eq!(
+            parse_agent_rollout_stage(Some("future"), Some("true")),
+            AgentRolloutStage::Disabled
+        );
+    }
+
+    #[test]
+    fn rollout_policy_keeps_request_approval_default_and_all_modes_explicit() {
+        let internal = resolve_agent_rollout_policy(AgentRolloutStage::Internal);
+        assert!(internal.feature_enabled);
+        assert!(internal.default_agent_enabled);
+        assert_eq!(
+            internal.available_permission_modes,
+            [
+                AgentPermissionMode::RequestApproval,
+                AgentPermissionMode::AutoApproveReadOnly,
+                AgentPermissionMode::FullAccess,
+            ]
+        );
+
+        let preview = resolve_agent_rollout_policy(AgentRolloutStage::Preview);
+        assert_eq!(
+            preview.default_permission_mode,
+            AgentPermissionMode::RequestApproval
+        );
+        assert!(preview.collect_local_diagnostics);
+
+        let stable = resolve_agent_rollout_policy(AgentRolloutStage::Stable);
+        assert!(stable.default_agent_enabled);
+        assert!(!stable.collect_local_diagnostics);
+    }
+
+    #[test]
+    fn runtime_access_starts_closed_and_tracks_only_explicit_synchronization() {
+        let access = AgentRuntimeAccess::default();
+        assert!(!access.user_enabled());
+        access.set_user_enabled(true);
+        assert!(access.user_enabled());
+        access.set_user_enabled(false);
+        assert!(!access.user_enabled());
     }
 
     #[test]

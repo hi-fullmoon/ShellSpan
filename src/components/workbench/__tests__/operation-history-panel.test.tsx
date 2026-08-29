@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OperationHistoryPanel } from '../operation-history-panel';
+import { useAppStore } from '@/stores/appStore';
 import type { OperationHistoryEvent } from '@/types/operation-history';
 
 const mocks = vi.hoisted(() => ({
@@ -89,11 +90,20 @@ const events: OperationHistoryEvent[] = [
 describe('OperationHistoryPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useAppStore.setState({ operationHistoryCategory: 'all' });
     mocks.list.mockResolvedValue({ events, totalTasks: 1, truncated: false });
     mocks.settings.mockResolvedValue({ retentionDays: 90, defaultLocalOnly: true });
     mocks.retention.mockResolvedValue(0);
     mocks.clear.mockResolvedValue(2);
     mocks.export.mockResolvedValue('C:/exports/history.md');
+  });
+
+  it('honors the public Agent-history entry filter', async () => {
+    useAppStore.setState({ operationHistoryCategory: 'agent' });
+    render(<OperationHistoryPanel />);
+
+    await screen.findByText('operationHistory.action.executeRunbookStep');
+    expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ category: 'agent' }));
   });
 
   it('renders task summaries and a traceable detail timeline without raw output', async () => {

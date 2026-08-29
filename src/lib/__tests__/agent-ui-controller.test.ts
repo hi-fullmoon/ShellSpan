@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentUiController } from '../agent-ui-controller';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { agentToolKey, useAgentStore } from '@/stores/agentStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type {
   AgentStreamEvent,
@@ -152,6 +153,7 @@ describe('AgentUiController M4 integration', () => {
   beforeEach(() => {
     useAgentStore.setState({ messages: [], runs: {}, tools: {}, activeRequestId: undefined });
     useAgentPermissionStore.setState({ bindings: {} });
+    useAiSettingsStore.setState({ agentEnabled: true });
     connectTerminal();
   });
 
@@ -224,6 +226,37 @@ describe('AgentUiController M4 integration', () => {
     controller.handleStreamEvent({ type: 'textDelta', requestId: 'request-1', turn: 2, text: 'Nginx is active.' });
     controller.handleStreamEvent({ type: 'completed', requestId: 'request-1', toolSteps: 1, fallback: false });
     expect(useAgentStore.getState().runs['request-1'].status).toBe('completed');
+  });
+
+  it('refuses to start or retry after the user closes Agent access', async () => {
+    const h = harness();
+    controllers.push(h.controller);
+    useAiSettingsStore.setState({ agentEnabled: false });
+
+    expect(await h.controller.start({
+      goal: 'Check nginx',
+      provider,
+      target,
+      targetTitle: 'Production A',
+      messages: [{ role: 'user', content: 'Check nginx' }],
+    })).toBeUndefined();
+    expect(h.startRequest).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().activeRequestId).toBeUndefined();
+
+    useAiSettingsStore.setState({ agentEnabled: true });
+    await h.controller.start({
+      goal: 'Check nginx',
+      provider,
+      target,
+      targetTitle: 'Production A',
+      messages: [{ role: 'user', content: 'Check nginx' }],
+    });
+    h.emit({ type: 'error', requestId: 'request-1', message: 'provider unavailable' });
+    useAiSettingsStore.setState({ agentEnabled: false });
+
+    expect(h.controller.canRetry('request-1')).toBe(false);
+    expect(await h.controller.retry('request-1', provider)).toBeUndefined();
+    expect(h.startRequest).toHaveBeenCalledOnce();
   });
 
   it('auto-runs only the read-only tool in approve-for-me mode', async () => {

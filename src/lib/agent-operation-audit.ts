@@ -186,7 +186,7 @@ export class AgentOperationAuditor {
       operationId: snapshot.toolCall.callId,
       parentOperationId: snapshot.toolCall.requestId,
       occurredAt: Date.now(),
-      category: 'terminal',
+      category: 'agent',
       action: 'executeAgentCommand',
       eventKind,
       status,

@@ -8,6 +8,7 @@ import {
 const tauri = vi.hoisted(() => ({
   invokeLoadPreferences: vi.fn().mockResolvedValue([]),
   invokeSavePreferences: vi.fn().mockResolvedValue(undefined),
+  invokeSetAgentEnabled: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('@/lib/tauri', () => tauri);
@@ -23,6 +24,7 @@ describe('aiSettingsStore', () => {
     vi.clearAllMocks();
     tauri.invokeLoadPreferences.mockResolvedValue([]);
     tauri.invokeSavePreferences.mockResolvedValue(undefined);
+    tauri.invokeSetAgentEnabled.mockResolvedValue(true);
     useAiSettingsStore.setState(initialState, true);
   });
 
@@ -84,6 +86,17 @@ describe('aiSettingsStore', () => {
 
     expect(preferences.providers).toHaveLength(2);
     expect(preferences.defaultProviderId).toBe('deepseek-primary');
+  });
+
+  it('defaults Stable installs on and preserves an explicit user opt-out', async () => {
+    expect(parseAiPreferences([]).agentEnabled).toBe(true);
+    expect(parseAiPreferences([preference('agentEnabled', false)]).agentEnabled).toBe(false);
+
+    tauri.invokeLoadPreferences.mockResolvedValue([preference('agentEnabled', false)]);
+    await useAiSettingsStore.getState().hydrateFromDb();
+
+    expect(useAiSettingsStore.getState().agentEnabled).toBe(false);
+    expect(tauri.invokeSetAgentEnabled).toHaveBeenCalledWith(false);
   });
 
   it('adds a preset and exposes it as the selected request config', () => {

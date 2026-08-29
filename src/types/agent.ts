@@ -8,6 +8,24 @@ export const AGENT_PERMISSION_MODES = [
 
 export type AgentPermissionMode = (typeof AGENT_PERMISSION_MODES)[number];
 
+export const AGENT_ROLLOUT_STAGES = [
+  'disabled',
+  'internal',
+  'preview',
+  'stable',
+] as const;
+
+export type AgentRolloutStage = (typeof AGENT_ROLLOUT_STAGES)[number];
+
+export interface AgentRolloutPolicy {
+  readonly stage: AgentRolloutStage;
+  readonly featureEnabled: boolean;
+  readonly defaultAgentEnabled: boolean;
+  readonly defaultPermissionMode: 'requestApproval';
+  readonly availablePermissionModes: readonly AgentPermissionMode[];
+  readonly collectLocalDiagnostics: boolean;
+}
+
 export const AGENT_RISKS = ['readOnly', 'stateChange', 'destructive'] as const;
 
 export type AgentRisk = (typeof AGENT_RISKS)[number];
@@ -142,6 +160,7 @@ export interface AgentRunRecord {
   readonly target: Readonly<AgentTargetSnapshot>;
   readonly targetTitle: string;
   readonly permissionMode: AgentPermissionMode;
+  readonly rolloutStage: AgentRolloutStage;
   readonly toolCallIds: readonly string[];
   readonly phase: AgentRunPhase;
   readonly status: AgentRunStatus;
