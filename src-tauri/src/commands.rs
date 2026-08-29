@@ -3175,7 +3175,7 @@ mod tests {
         };
 
         drop(pair.master);
-        let (output_tx, output_rx) = mpsc::channel();
+        let (output_tx, output_rx) = std::sync::mpsc::channel();
         thread::spawn(move || {
             let mut output = String::new();
             let result = reader
