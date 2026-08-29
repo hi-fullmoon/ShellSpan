@@ -487,7 +487,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M6 — 安全与兼容性验收
 
-状态：未完成（2026-08-29 收口复核；真实 Windows runner 已通过，仅等待 OpenAI Responses 现场证据）。
+状态：已完成（2026-08-29；OpenAI Responses 现场验收经产品授权豁免）。
 
 交付：
 
@@ -501,7 +501,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 收口复核：
 
 - 基线提交为 `05fa6b3`，保存的 M6 WIP 为 `2378dd6`，detached 最终提交 `a6b340d` 已接回 M6 分支并累计集成于 `8f7ad72`；真实 Windows 收口修复完成于 `11dbb1d`。复核确认迟到或重叠 `toolCall` 在进入完全访问执行路径前 fail-closed；终端文本不能伪造结构化审计类别；引号包围且包含空白、shell 标点的秘密会在模型与持久化边界前脱敏；兼容提供商探测只有收到指定结构化探测调用才为 `supported`，截断或无明确证据的响应为 `unknown` 并安全降级。
-- 累计缺陷分级为 P0 0、P1 2、P2 1、P3 6，全部已关闭，没有剩余已知代码缺陷。P1 为 PowerShell 生产 wrapper 退出码丢失与 ConPTY 错用 Win32 input mode 导致前端 VT 输入不兼容；P2 为异步 locale 切换在高并发测试下不触发重渲染；P3 包含原有 3 项（Windows 验收脚本参数边界、SSH E2E 失败清理、WIP rustfmt）以及 macOS Petdex 接受流的非阻塞状态、ConPTY 测试生命周期边界、Windows 测试模块导入。
+- 累计缺陷分级为 P0 0、P1 2、P2 1、P3 7。P1 2 项、P2 1 项与 P3 6 项已关闭：P1 为 PowerShell 生产 wrapper 退出码丢失与 ConPTY 错用 Win32 input mode 导致前端 VT 输入不兼容；P2 为异步 locale 切换在高并发测试下不触发重渲染；已关闭 P3 包含 Windows 验收脚本参数边界、SSH E2E 失败清理、WIP rustfmt、macOS Petdex 接受流的非阻塞状态、ConPTY 测试生命周期边界和 Windows 测试模块导入。剩余 1 项 P3 是 [`main` 合并后 run 33234155897](https://github.com/hi-fullmoon/TermBridge/actions/runs/33234155897) 的全量 Vitest 高负载下原生 PowerShell 验收夹具触发固定 10 秒超时，已按 2026-08-29 产品授权接受风险并延期；它不否定两次真实 Windows 成功证据，也不构成 P0/P1 发布阻塞。
+- 产品例外决策：环境无 OpenAI API key，且不为验收获取或替代凭证。2026-08-29 产品授权明确豁免 OpenAI Responses 现场请求；豁免不改写为“现场通过”，非现场 SSE、完整 output item 回放、`function_call_output` 和安全降级契约测试仍作为明确行为证据。
 
 第 12 节逐项证据：
 
@@ -523,12 +524,12 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 | Ollama 原生 tools | 通过（现场） | 本机 Ollama `qwen3:0.6b` 经 `/api/show` tools 元数据、`/api/chat` 结构化调用、工具结果回放和最终总结通过。 |
 | Chat Completions tools | 通过（现场） | 同一本机 `qwen3:0.6b` 经 Ollama `/v1/chat/completions` 完成强制能力探测、结构化调用、结果回放和总结；探测预算为 256 tokens，无明确结构化证据时保持 `unknown`。 |
 | 无 tools 降级 | 通过（现场） | 本机 Ollama `smollm:135m` 元数据判定 `unsupported`，只返回无工具的生成命令降级文本，没有 `toolCall`。 |
-| OpenAI Responses | **未执行** | 环境中没有 `TERMBRIDGE_M6_OPENAI_LIVE`、模型配置或 `OPENAI_API_KEY`；按安全凭证前置条件未发起现场请求。Responses SSE、完整 output item 回放与 function output 的非现场契约测试通过，但不能替代现场证据。 |
+| OpenAI Responses | 豁免（现场未执行） | 环境中没有 `TERMBRIDGE_M6_OPENAI_LIVE`、模型配置或 `OPENAI_API_KEY`，未发起现场请求；2026-08-29 获得产品明确授权豁免该现场验收。Responses SSE、完整 output item 回放、`function_call_output` 和安全降级非现场契约测试均通过。 |
 | 隔离 SSH/SFTP | 通过（现场） | `pnpm test:e2e:ssh` 单次构建镜像供目标与跳板复用，10/10 通过并在结束后删除容器、卷与 Compose 网络。 |
 
 本轮验证：`pnpm test:agent:security` 为 103/103；macOS 原生 zsh/PTY 与 Windows 原生 PowerShell/ConPTY 平台门禁均通过；提供商非现场定向测试为 17 通过、4 个现场用例按标记忽略，随后 Ollama tools、无 tools 和 Chat Completions 三个现场用例分别通过；SSH E2E 为 10/10。集成后全量 `pnpm test` 为 150 个文件、1288 通过、1 个平台条件跳过；`pnpm build` 成功（仅既有 500 kB chunk 提示）；Rust 在 macOS/本机为 368 单元测试 + 5 Petdex 通过、16 忽略，在 Windows 为 365 单元测试 + 5 Petdex 通过、15 忽略。[Quality Gate run 33233185875](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233185875) 的前端审计、macOS、Windows 和隔离 SSH 四个 job 全部通过；Clippy `-D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
 
-退出判断：第 12 节自动化与本机/隔离 SSH 场景均通过，macOS 与真实 Windows 关键链路已取证，且无剩余 P0/P1 已知缺陷。唯一未关闭的严格阻塞是 OpenAI Responses 现场验收；非现场契约测试不能替代它。因此 M6 **不得标记完成**，第 13 节复选框保持未勾选，也不允许开始 M7。
+退出判断：第 12 节自动化与本机/隔离 SSH 场景通过，macOS 与真实 Windows 关键链路已取证，没有剩余 P0/P1 已知缺陷。OpenAI Responses 现场验收经产品授权豁免，合并后 Windows 夹具超时作为已接受延期的 P3 记录。基于上述明确例外与风险接受，M6 标记完成，第 13 节复选框勾选，M7 可在独立任务窗口开始。
 
 ### M7 — 分阶段开放
 
@@ -606,17 +607,17 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Agent 首发只有同时满足以下条件才算完成：
 
-- [ ] 三档权限模式行为与文案完整，并按连接实例隔离。
-- [ ] 模型通过结构化工具调用执行，不解析自由文本命令。
-- [ ] 终端执行、输出捕获、退出码、超时和 Ctrl-C 形成闭环。
-- [ ] 标签切换、断线、重连和关闭不会导致目标漂移。
-- [ ] 用户可以看见并中止每个真实操作。
-- [ ] 工具输出和持久化内容通过秘密脱敏回归测试。
-- [ ] 每个真实命令都有本地操作记录。
-- [ ] OpenAI、兼容提供商、Ollama 和无工具模型都有明确行为。
-- [ ] Windows 与 macOS 关键链路通过验证。
-- [ ] 全量前端、Rust 和 SSH E2E 测试通过。
-- [ ] 不存在未经批准执行、跨会话执行或自动恢复完全访问权限的已知缺陷。
+- [x] 三档权限模式行为与文案完整，并按连接实例隔离。
+- [x] 模型通过结构化工具调用执行，不解析自由文本命令。
+- [x] 终端执行、输出捕获、退出码、超时和 Ctrl-C 形成闭环。
+- [x] 标签切换、断线、重连和关闭不会导致目标漂移。
+- [x] 用户可以看见并中止每个真实操作。
+- [x] 工具输出和持久化内容通过秘密脱敏回归测试。
+- [x] 每个真实命令都有本地操作记录。
+- [x] OpenAI、兼容提供商、Ollama 和无工具模型都有明确行为（OpenAI Responses 现场请求按 2026-08-29 产品授权豁免）。
+- [x] Windows 与 macOS 关键链路通过验证。
+- [x] 全量前端、Rust 和 SSH E2E 测试通过（以 [PR head 全绿 run 33233730312](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233730312) 为证据；合并后 Windows 夹具超时已作 P3 风险接受）。
+- [x] 不存在未经批准执行、跨会话执行或自动恢复完全访问权限的已知缺陷。
 
 ## 14. 首发不进入范围
 
