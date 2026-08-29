@@ -11,7 +11,6 @@ function run(command, args, options = {}) {
     cwd: workspace,
     env: options.env ?? process.env,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -19,16 +18,20 @@ function run(command, args, options = {}) {
   }
 }
 
-let started = false;
+let composeAttempted = false;
+let failure;
 try {
   run('docker', [
     'build', '--tag', 'termbridge-ssh-e2e:local', path.dirname(composeFile),
   ]);
+  // Set this before `up`: Docker can create part of the project and still
+  // return a failure (for example, after one container becomes unhealthy).
+  // The finally block must tear down that partial environment as well.
+  composeAttempted = true;
   run('docker', [
     'compose', '--project-name', projectName, '--file', composeFile,
     'up', '--detach', '--wait', '--pull', 'never',
   ]);
-  started = true;
   run('cargo', [
     'test', '--manifest-path', path.join(workspace, 'src-tauri', 'Cargo.toml'),
     '--locked', 'isolated_ssh_sftp_end_to_end', '--', '--ignored', '--nocapture',
@@ -47,17 +50,22 @@ try {
       TERMBRIDGE_E2E_SSH_JUMP_TARGET_PORT: '22',
     },
   });
+} catch (error) {
+  failure = error;
 } finally {
-  if (started) {
+  if (composeAttempted) {
     const cleanup = spawnSync('docker', [
       'compose', '--project-name', projectName, '--file', composeFile,
       'down', '--volumes', '--remove-orphans',
     ], {
       cwd: workspace,
       stdio: 'inherit',
-      shell: process.platform === 'win32',
     });
-    if (cleanup.error) throw cleanup.error;
-    if (cleanup.status !== 0 && process.exitCode === undefined) process.exitCode = cleanup.status ?? 1;
+    if (!failure && cleanup.error) failure = cleanup.error;
+    if (!failure && cleanup.status !== 0) {
+      failure = new Error(`docker compose down exited with status ${cleanup.status}`);
+    }
   }
 }
+
+if (failure) throw failure;

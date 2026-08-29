@@ -638,33 +638,39 @@ fn isolated_ssh_sftp_end_to_end_reviewed_execution_secret_redaction() {
 fn isolated_ssh_sftp_end_to_end_agent_m6_security_acceptance() {
     let fixture = ReviewedExecutionFixture::direct();
     let policy = || {
-        ExecutionOutputPolicy::new(8_192, 4_096, 32_768)
-            .expect("M6 SSH acceptance output policy")
+        ExecutionOutputPolicy::new(8_192, 4_096, 32_768).expect("M6 SSH acceptance output policy")
     };
     let execute = |operation_id: &str, command: FixedFixtureCommand| {
-        fixture.execute(fixture.request(
-            operation_id,
-            command,
-            Duration::from_secs(5),
-            policy(),
-        ))
+        fixture.execute(fixture.request(operation_id, command, Duration::from_secs(5), policy()))
     };
 
-    let reset = execute("fixture:m6-service-reset", FixedFixtureCommand::M6ServiceReset);
+    let reset = execute(
+        "fixture:m6-service-reset",
+        FixedFixtureCommand::M6ServiceReset,
+    );
     assert_eq!(reset.status, ExecutionStatus::Completed);
     assert_eq!(reset.exit_code, Some(0));
 
-    let before = execute("fixture:m6-service-before", FixedFixtureCommand::M6ServiceStatus);
+    let before = execute(
+        "fixture:m6-service-before",
+        FixedFixtureCommand::M6ServiceStatus,
+    );
     assert_eq!(before.status, ExecutionStatus::Completed);
     assert_eq!(before.exit_code, Some(0));
     assert_eq!(before.stdout.trim(), "inactive");
 
-    let restart = execute("fixture:m6-service-restart", FixedFixtureCommand::M6ServiceRestart);
+    let restart = execute(
+        "fixture:m6-service-restart",
+        FixedFixtureCommand::M6ServiceRestart,
+    );
     assert_eq!(restart.status, ExecutionStatus::Completed);
     assert_eq!(restart.exit_code, Some(0));
     assert_eq!(restart.stdout.trim(), "restart accepted");
 
-    let after = execute("fixture:m6-service-after", FixedFixtureCommand::M6ServiceStatus);
+    let after = execute(
+        "fixture:m6-service-after",
+        FixedFixtureCommand::M6ServiceStatus,
+    );
     assert_eq!(after.status, ExecutionStatus::Completed);
     assert_eq!(after.exit_code, Some(0));
     assert_eq!(after.stdout.trim(), "active");
@@ -672,7 +678,11 @@ fn isolated_ssh_sftp_end_to_end_agent_m6_security_acceptance() {
         "fixture:m6-service-restart-count",
         FixedFixtureCommand::M6ServiceRestartCount,
     );
-    assert_eq!(count.stdout.trim(), "1", "restart must execute exactly once");
+    assert_eq!(
+        count.stdout.trim(),
+        "1",
+        "restart must execute exactly once"
+    );
 
     let denied = execute(
         "fixture:m6-permission-denied",
