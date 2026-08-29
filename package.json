@@ -12,6 +12,7 @@
     "test:agent:security": "vitest run src/lib/__tests__/agent-terminal-executor.test.ts src/lib/__tests__/agent-approval-controller.test.ts src/lib/__tests__/agent-ui-controller.test.ts src/lib/__tests__/agent-operation-audit.test.ts src/lib/__tests__/agent-rollout-audit.test.ts src/lib/__tests__/agent-sessions.test.ts src/lib/__tests__/terminal-output-buffer.test.ts src/stores/__tests__/agentPermissionStore.test.ts",
     "test:agent:platform": "vitest run src/lib/__tests__/agent-platform-acceptance.test.ts && cargo test --manifest-path src-tauri/Cargo.toml --locked real_",
     "test:agent:providers:live": "node scripts/run-agent-provider-acceptance.mjs",
+    "test:agent:providers:minimax:live": "node scripts/run-agent-provider-acceptance.mjs --minimax-only",
     "check:agent-terminal": "pnpm test:agent:security",
     "petdex:phase3": "node scripts/petdex-phase3-gate.mjs",
     "petdex:phase3:gate": "node scripts/petdex-phase3-gate.mjs --require-pass",

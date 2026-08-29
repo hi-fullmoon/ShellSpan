@@ -182,7 +182,8 @@ Tauri 后端负责与模型服务通信并维护工具调用循环：
 
 | 提供商 | 协议 | 目标支持 |
 | --- | --- | --- |
-| OpenAI | Responses API function calling | 完整支持，保存并回放所有必要输出项 |
+| MiniMax | OpenAI-compatible Chat Completions `tool_calls` | 当前真实云端验收目标；保存完整 assistant 消息并回放 tool 结果 |
+| OpenAI | Responses API function calling | 保留适配器与契约覆盖；不再作为当前用户的阶段或发布前置 |
 | OpenAI Compatible | Chat Completions `tool_calls` | 能力检测后支持 |
 | Ollama | `/api/chat` tools | 模型声明支持 tools 时启用 |
 
@@ -191,6 +192,7 @@ Tauri 后端负责与模型服务通信并维护工具调用循环：
 能力检测契约：
 
 - 能力状态只有 `supported`、`unsupported`、`unknown`，检测证据同时记录来源。
+- MiniMax 复用 OpenAI-compatible 能力探测；只有指定结构化探测调用成功才为 `supported`，后续轮次必须回放含 `tool_calls` 的完整 assistant 消息和对应 tool 消息。
 - OpenAI Responses 使用内建协议能力；若后续请求明确拒绝工具调用，按 `unsupported` 处理。
 - OpenAI Compatible 只有兼容性探测明确成功后才为 `supported`；未探测、结果不明或证据来源不匹配均为 `unknown`。
 - Ollama 只有模型元数据明确声明 tools 能力后才为 `supported`；缺少声明时为 `unknown`。
@@ -383,7 +385,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 - Tauri 后端 Agent 循环。
 - OpenAI Responses function calling。
-- OpenAI Compatible 和 Ollama 工具调用适配。
+- OpenAI Compatible（含 MiniMax）和 Ollama 工具调用适配。
 - 工具结果提交、取消、超时和最大步数。
 - 流式文本与工具调用并存的事件协议。
 
@@ -392,7 +394,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 实现证据：
 
 - `src-tauri/src/agent.rs` 提供独立的 Tauri Agent 编排器以及 `agent_start_request`、`agent_submit_tool_result`、`agent_cancel_request` 和 `agent_detect_provider_capability` 命令；模型流与工具结果等待共享取消信号，默认工具结果等待超时 120 秒，默认最多 8 个工具步骤。
-- OpenAI Responses 回放完整 response output items 并追加 `function_call_output`；OpenAI Compatible 聚合流式 `tool_calls` 并回放 assistant/tool 消息；Ollama 依据 `/api/show` 的明确 `tools` capability 使用 `/api/chat` 工具消息。
+- OpenAI Responses 回放完整 response output items 并追加 `function_call_output`；OpenAI Compatible 聚合流式 `tool_calls` 并回放 assistant/tool 消息，其中 MiniMax M2.x 的累计流式内容与完整 assistant 消息均保留；Ollama 依据 `/api/show` 的明确 `tools` capability 使用 `/api/chat` 工具消息。
 - `agent-stream` v1 事件将 `textDelta` 与结构化 `toolCall` 分离；每个请求只允许一个在途工具调用，结果按 `requestId + callId` 严格关联且只接受一次，并行工具调用、多行或含控制字符的命令在进入终端边界前即失败。
 - OpenAI Compatible 探测未明确成功、Ollama 元数据未明确声明 tools、实验开关关闭或提供商明确拒绝 tools 时，统一发出 `safeFallback` 并以不暴露工具的 `generateCommand` 提示继续；Assistant 自由文本和 Markdown 代码块没有任何自动执行路径。
 - Rust `mock_provider_completes_check_change_verify_from_structured_results_only` 自动完成连续“检查—修改—验证”三次调用；Mock 的最终回答仅从三份经结构化提交、callId 匹配且带真实状态/退出码的工具结果构造。提供商解析、完整 output item 回放、能力证据、超时、取消、步数上限、一次性提交和安全降级均有定向测试。
@@ -489,7 +491,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M6 — 安全与兼容性验收
 
-状态：已完成（2026-08-29；OpenAI Responses 现场验收经产品授权豁免）。
+状态：历史阶段已完成（2026-08-29；OpenAI Responses 现场验收当时经产品授权豁免）。当前 MiniMax 替代现场验收见“阶段二”，不将历史豁免改写为通过。
 
 交付：
 
@@ -526,7 +528,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 | Ollama 原生 tools | 通过（现场） | 本机 Ollama `qwen3:0.6b` 经 `/api/show` tools 元数据、`/api/chat` 结构化调用、工具结果回放和最终总结通过。 |
 | Chat Completions tools | 通过（现场） | 同一本机 `qwen3:0.6b` 经 Ollama `/v1/chat/completions` 完成强制能力探测、结构化调用、结果回放和总结；探测预算为 256 tokens，无明确结构化证据时保持 `unknown`。 |
 | 无 tools 降级 | 通过（现场） | 本机 Ollama `smollm:135m` 元数据判定 `unsupported`，只返回无工具的生成命令降级文本，没有 `toolCall`。 |
-| OpenAI Responses | 豁免（现场未执行） | 环境中没有 `TERMBRIDGE_M6_OPENAI_LIVE`、模型配置或 `OPENAI_API_KEY`，未发起现场请求；2026-08-29 获得产品明确授权豁免该现场验收。Responses SSE、完整 output item 回放、`function_call_output` 和安全降级非现场契约测试均通过。 |
+| OpenAI Responses | 历史豁免（现场未执行；非当前前置） | 环境中没有 `TERMBRIDGE_M6_OPENAI_LIVE`、模型配置或 `OPENAI_API_KEY`，未发起现场请求；2026-08-29 获得产品明确授权豁免该现场验收。Responses SSE、完整 output item 回放、`function_call_output` 和安全降级非现场契约测试均通过。用户当前不使用 OpenAI，该适配器可以保留，但不再作为其阶段或发布前置。 |
+| MiniMax OpenAI-compatible tools | 替代验收待现场 | 独立现场入口只接受 `MINIMAX_API_KEY` 与 `TERMBRIDGE_M6_MINIMAX_*`，不复用 OpenAI 凭证；国内默认根地址为 `https://api.minimaxi.com`（后端补 `/v1`），默认模型为 `MiniMax-M2.7`。结构化 `tool_calls`、完整 assistant 回放、tool 结果关联和最终总结的契约覆盖已就绪；没有本机密钥时不发起请求，也不记录为通过。 |
 | 隔离 SSH/SFTP | 通过（现场） | `pnpm test:e2e:ssh` 单次构建镜像供目标与跳板复用，10/10 通过并在结束后删除容器、卷与 Compose 网络。 |
 
 本轮验证：`pnpm test:agent:security` 为 103/103；macOS 原生 zsh/PTY 与 Windows 原生 PowerShell/ConPTY 平台门禁均通过；提供商非现场定向测试为 17 通过、4 个现场用例按标记忽略，随后 Ollama tools、无 tools 和 Chat Completions 三个现场用例分别通过；SSH E2E 为 10/10。集成后全量 `pnpm test` 为 150 个文件、1288 通过、1 个平台条件跳过；`pnpm build` 成功（仅既有 500 kB chunk 提示）；Rust 在 macOS/本机为 368 单元测试 + 5 Petdex 通过、16 忽略，在 Windows 为 365 单元测试 + 5 Petdex 通过、15 忽略。[Quality Gate run 33233185875](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233185875) 的前端审计、macOS、Windows 和隔离 SSH 四个 job 全部通过；Clippy `-D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
@@ -554,7 +557,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - `src/components/ai/ai-settings-section.tsx` 使用现有 shadcn Card、Field、Switch、AlertDialog、Badge 与 Button 提供公开管理入口：显示当前发布阶段、启用/关闭 Agent、解释高权限非默认和 Preview 本地数据范围、查看按 Agent 分类筛选的操作历史，以及确认后清理所有本地 conversation 的 Agent lane。关闭与清理都会先取消并等待活动任务收敛、刷新 Agent 快照，再清除会话；普通问答和生成命令数据不受影响。zh-CN / en-US 文案与组件测试覆盖这些入口和键盘可访问的语义控件。
 - Preview 退出门禁采用本任务窗口内的可重复自动化验收，不声称存在远程遥测或外部 cohort 数据：三档权限、结构化调用、审批竞态、目标漂移/迟到工具调用、重启恢复、嵌套秘密脱敏和本地审计回归均通过，新增用例确认关闭后不能启动或重试、兼容性记录按协议去重、未知失败仍归入受控类别、Preview 记录不含提示词/模型标识/目标描述/输出。未发现未经批准执行、跨会话执行或秘密持久化事件。
 - 定向验证：`pnpm test:agent:security` 为 8 个文件、107 项通过；M7 设置、AI 面板、历史筛选与偏好同步回归为 4 个文件、51 项通过；Rust 发布策略 10 项、操作历史 7 项以及关闭/注册竞态 1 项通过。全量验证：`pnpm test` 为 152 个文件、1296 项通过、1 项平台条件跳过；`pnpm build` 成功（仅既有 Vite 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml --locked` 为 373 项单元测试与 5 项 Petdex 契约探针通过、16 项需显式现场环境的测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
-- M6 已接受的 OpenAI 例外保持原样：本轮没有 OpenAI API key，未发起 OpenAI Responses 现场请求，其结论仍是产品授权“豁免（现场未执行）”而非现场通过。M7 本轮当时没有修复或重跑合并后 Windows 全量 Vitest 的原生 PowerShell 固定 10 秒超时；该延期 P3 后续已由下述阶段一独立收口关闭。
+- M6 已接受的 OpenAI 例外保持原样：本轮没有 OpenAI API key，未发起 OpenAI Responses 现场请求，其结论仍是产品授权“豁免（现场未执行）”而非现场通过。该记录现在只描述历史事实；当前用户的云端替代门禁是下述阶段二 MiniMax 验收。M7 本轮当时没有修复或重跑合并后 Windows 全量 Vitest 的原生 PowerShell 固定 10 秒超时；该延期 P3 后续已由下述阶段一独立收口关闭。
 
 退出判断：本任务窗口完成 Internal、Preview、Stable 策略、公开管理入口与本地诊断闭环；Preview 自动化验收中上述三类发布阻断事件均为 0，M7 标记完成。实际后续 Preview 数据仍应按第 17 节维护规则记录偏差，不会自动扩张为后续候选承诺。
 
@@ -567,6 +570,16 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 新增确定性 fake-timer 回归，分别证明有效进度会刷新 idle deadline，以及持续进度不能延长 hard deadline。Windows 定向文件连续 5 轮均为 3 项通过、1 项 macOS 条件跳过；高负载全量 `pnpm test -- --reporter=dot --silent` 为 153 个文件、1311 项通过、1 项平台条件跳过，耗时 359.92 秒；`pnpm build` 成功，仅有既有的 500 kB chunk 提示。
 - `pnpm test:agent:platform` 的 Vitest/原生 PowerShell 部分为 3 项通过、1 项 macOS 条件跳过；随后 Cargo `real_` 在执行测试前被本机 `x86_64-pc-windows-gnu`、Windows 原生 Perl 与 vendored OpenSSL 的冷编译环境组合阻断。该环境问题不在阶段一代码范围，Rust 生产代码本轮零修改；同一 Windows 主机的主工作区此前已通过该门禁中的 2 个 `real_` 测试，真实 Windows/ConPTY 证据继续有效。
 
+### 阶段二 — MiniMax 云端工具调用替代验收
+
+状态：实现与无凭证契约复核已完成；真实现场待本机安全提供 `MINIMAX_API_KEY`，尚未记录为通过。
+
+- 用户明确不使用 OpenAI。OpenAI Responses 适配器与历史豁免记录继续保留，但不再作为当前用户的阶段或发布前置；MiniMax 官方 OpenAI-compatible Chat Completions 是当前唯一真实云端替代验收目标。
+- 国内默认服务根地址为 `https://api.minimaxi.com`，由后端统一补 `/v1`；默认模型为 `MiniMax-M2.7`。现场脚本只允许 MiniMax 官方 HTTPS 服务根 `api.minimaxi.com` 或 `api.minimax.io`，防止凭证被发送到兼容或非官方端点。
+- 独立环境变量为 `TERMBRIDGE_M6_MINIMAX_LIVE`、`TERMBRIDGE_M6_MINIMAX_BASE_URL`、`TERMBRIDGE_M6_MINIMAX_MODEL` 和 `MINIMAX_API_KEY`。脚本不会读取或转用 `OPENAI_API_KEY`，并在 MiniMax Cargo 子进程环境中主动移除 OpenAI 凭证变量。
+- `pnpm test:agent:providers:minimax:live` 是不依赖 Ollama 的唯一 MiniMax 现场入口。它必须完成能力探测、结构化 `run_terminal_command` 调用、含 `tool_calls` 的完整 assistant 消息回放、按提供商 call ID 关联的 tool 结果回放，以及包含 `termbridge-live-provider-ok` 的最终总结。
+- 密钥只能由用户在本机当前进程通过隐藏输入或可信秘密注入方式临时设置；不得写入命令参数、聊天、日志、仓库文件或持久配置。没有密钥时入口在任何 Cargo 或网络调用前失败，历史 OpenAI 豁免和 MiniMax 待验收状态均不得改写。
+
 ## 11. 测试矩阵
 
 | 层级 | 必测内容 |
@@ -578,7 +591,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 | PTY 集成测试 | 输出标记、拆包/粘包、退出码、ANSI、长输出、超时、Ctrl-C |
 | SSH E2E | systemctl/mock service、断线、标签切换、同主机双会话、重连 |
 | 安全回归 | Prompt Injection、多行注入、控制字符、危险复合命令、秘密泄漏、审批竞态 |
-| 提供商契约 | OpenAI Responses、Chat Completions tools、Ollama tools、无 tools 降级 |
+| 提供商契约 | MiniMax OpenAI-compatible Chat Completions tools、保留的 OpenAI Responses、通用 Chat Completions tools、Ollama tools、无 tools 降级 |
 
 提交前必须通过：
 
@@ -639,7 +652,8 @@ Agent 首发只有同时满足以下条件才算完成：
 - [x] 用户可以看见并中止每个真实操作。
 - [x] 工具输出和持久化内容通过秘密脱敏回归测试。
 - [x] 每个真实命令都有本地操作记录。
-- [x] OpenAI、兼容提供商、Ollama 和无工具模型都有明确行为（OpenAI Responses 现场请求按 2026-08-29 产品授权豁免）。
+- [x] OpenAI、兼容提供商、Ollama 和无工具模型都有明确行为（OpenAI Responses 现场请求按 2026-08-29 产品授权豁免，现仅为历史记录）。
+- [ ] 当前用户的 MiniMax 云端替代门禁完成一次真实结构化调用、tool 结果回放和最终总结验收；在取得不含秘密的现场证据前不得勾选。
 - [x] Windows 与 macOS 关键链路通过验证。
 - [x] 全量前端、Rust 和 SSH E2E 测试通过（以 [PR head 全绿 run 33233730312](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233730312) 为证据；合并后 Windows 夹具超时 P3 已由阶段一独立收口关闭）。
 - [x] 不存在未经批准执行、跨会话执行或自动恢复完全访问权限的已知缺陷。
@@ -695,5 +709,7 @@ v2.1 稳定后再按用户价值排序评估：
 
 ## 参考
 
+- [MiniMax OpenAI API 兼容接口](https://platform.minimax.io/docs/api-reference/text-openai-api)
+- [MiniMax API 概览](https://platform.minimax.io/docs/api-reference/api-overview)
 - [OpenAI Function Calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [OpenAI Model Guidance：自主性与审批边界](https://developers.openai.com/api/docs/guides/latest-model#define-autonomy-and-approval-boundaries)
