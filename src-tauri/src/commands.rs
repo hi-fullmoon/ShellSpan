@@ -3170,7 +3170,7 @@ mod tests {
             let _ = output_tx.send(result);
         });
         writer
-            .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
+            .write_all(b"Write-Output 'termbridge-conpty-smoke'\rexit 7\r")
             .expect("write deterministic commands to the PowerShell ConPTY");
         writer
             .flush()
