@@ -2,6 +2,26 @@
 
 All notable changes to TermBridge are documented in this file.
 
+## [v2.1.0](https://github.com/hi-fullmoon/TermBridge/releases/tag/v2.1.0) - 2026-08-30
+
+### Features
+
+- **agent:** open the terminal Agent to Stable with structured `run_terminal_command` tool calls, same-PTY execution, and real output/exit-code verification
+- **agent:** add request-approval, read-only auto-approval, and per-connection full-access permission modes while keeping the default at request approval
+- **agent:** freeze every task to its original terminal identity and fail closed on disconnects, reconnects, identity changes, or late tool calls
+- **agent:** add bounded cancellation and timeout handling across the model request, approval wait, terminal command, and tool-result loop
+
+### Security
+
+- **agent:** redact secrets before model submission and persistence, and record bounded local audit events without storing complete terminal output
+- **agent:** restore interrupted runs as cancelled without replaying commands or restoring full-access permission after restart
+
+### Compatibility
+
+- **agent:** support MiniMax through its official OpenAI-compatible Chat Completions interface, including capability probing, complete assistant `tool_calls` replay, and provider call-ID result association
+- **agent:** keep the OpenAI Responses adapter and contract coverage without requiring OpenAI credentials for v2.1 or treating the historical live-test waiver as a pass
+- **windows:** make the native PowerShell acceptance fixture resilient to valid progress under high test-runner load while retaining a hard deadline
+
 
 ## [v2.0.55](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.55) - 2026-08-27
 

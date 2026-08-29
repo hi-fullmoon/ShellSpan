@@ -1,7 +1,7 @@
 # TermBridge 产品路线图
 
-> 基线版本：v2.0.55
-> 更新日期：2026-08-29
+> 基线版本：v2.1.0
+> 更新日期：2026-08-30
 > 当前主线：Codex 风格的可控终端 Agent
 > 规划方式：以退出条件驱动的滚动路线图，版本号表示目标主题，不承诺固定发布日期。
 
@@ -580,6 +580,18 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - `pnpm test:agent:providers:minimax:live` 是不依赖 Ollama 的唯一 MiniMax 现场入口。它必须完成能力探测、结构化 `run_terminal_command` 调用、含 `tool_calls` 的完整 assistant 消息回放、按提供商 call ID 关联的 tool 结果回放，以及包含 `termbridge-live-provider-ok` 的最终总结。
 - 2026-08-30 在可见 PowerShell 子进程中通过隐藏输入临时注入 `MINIMAX_API_KEY`，运行上述唯一现场入口并以退出码 0 完成全部断言；测试结束后 `finally` 清理 MiniMax 环境变量和临时明文缓冲，父进程未接收密钥，OpenAI 凭证未参与。
 - 密钥只能由用户在本机当前进程通过隐藏输入或可信秘密注入方式临时设置；不得写入命令参数、聊天、日志、仓库文件或持久配置。没有密钥时入口仍会在任何 Cargo 或网络调用前失败，历史 OpenAI 豁免不得改写为通过。
+
+### 阶段三 — v2.1 发布收口
+
+状态：本地发布收口已完成（2026-08-30；未发布、未推送、未创建 Git tag；macOS 安装包待真实 macOS runner）。
+
+- 版本权威源已统一为 `2.1.0`：`package.json`、`src-tauri/Cargo.toml`、根包对应的 `src-tauri/Cargo.lock` 条目和 `src-tauri/tauri.conf.json` 一致。pnpm lockfile v9 不记录私有根工作区自身版本，因此 `pnpm-lock.yaml` 没有可替换的 `2.0.55` 字段；`pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` 已确认现有依赖快照与新 manifest 一致，未写入 pnpm 不识别的伪版本字段。Cargo `metadata --no-deps --locked` 同步通过。
+- `CHANGELOG.md`、`README.md` 与 `docs/terminal-agent.md` 记录 v2.1 的结构化工具调用、同一 PTY、三档权限、目标冻结、取消/超时、秘密脱敏、审计/恢复与 Stable 开放边界；MiniMax 使用官方 OpenAI-compatible Chat Completions 预设 `https://api.minimaxi.com` / `MiniMax-M2.7`，凭证只在应用厂商设置中输入。OpenAI Responses 适配器和 2026-08-29 历史现场豁免原意保留，OpenAI 不是 v2.1 使用或发布前置，豁免没有被改写成现场通过。
+- 前端与脚本验证通过：脚本定向测试为 6 个文件、28 项通过；独立 `pnpm exec tsc --noEmit` 通过；`pnpm build` 通过，仅有既有的 Vite 500 kB chunk 提示；全量 `pnpm test -- --reporter=dot --silent` 为 154 个文件、1314 项通过、1 项平台条件跳过，Windows 高负载原生 PowerShell 夹具没有复发。
+- Rust `cargo fmt --all -- --check` 通过。本机仓库默认的 `x86_64-pc-windows-gnu` 在 Clippy 的依赖冷编译阶段再次被 `openssl-sys 0.9.112` 阻断：Windows 原生 Strawberry Perl 不能为 vendored OpenSSL 生成 Unix 风格路径，退出码 101，尚未进入 TermBridge 项目代码检查；本轮没有替换 Perl、改写 PATH 或修改依赖绕过。随后使用本机已安装、也与 release CI 一致的 Rust 1.95.0 MSVC host toolchain 和 Visual Studio x64 构建环境，在当前进程内完成 Clippy `-D warnings`；全量 Rust 为 373 项通过、16 项需显式现场环境的用例忽略，Petdex 契约探针 5/5 通过，MSVC `real_` 定向门禁 2/2 通过。vendored `portable-pty` 仍有 3 条既有 dead-code warning，不属于 TermBridge `-D warnings` 失败。
+- Windows Tauri 首次显式 `--target x86_64-pc-windows-msvc` 调用因 CLI 仍读取仓库默认 GNU toolchain，在编译前误报 MSVC target 未安装并退出 1；仅为当前构建进程设置已安装的 `RUSTUP_TOOLCHAIN=1.95.0-x86_64-pc-windows-msvc` 后重试成功，没有写入 rustup override 或修改仓库工具链。Tauri release profile 与 NSIS bundle 退出 0，生成 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/TermBridge_2.1.0_x64-setup.exe`，文件与内嵌产品版本均为 2.1.0，SHA-256 为 `38B545314A17829B379846D55923EF325C1C5CB937B97D989F4E9F111B4E2356`。
+- 本机没有 Tauri updater 私钥，本地 bundle 明确关闭 updater 归档生成，安装包没有 Authenticode 签名；不得把它表述为正式发布签名产物。现有当前用户安装从 2.0.55 在 `D:\Programs\TermBridge` 原地静默升级到 2.1.0，安装器退出 0、路径不变、注册表和主程序版本均为 2.1.0，应用启动后持续存活 8 秒；隐藏冒烟没有可用主窗口句柄，清理时只终止本轮精确 PID。
+- release workflow 继续以 `macos-15` / `aarch64-apple-darwin` 构建 `app,dmg`，用 adhoc identity、`lipo` 和 `codesign --verify` 校验应用，并要求 `.app.tar.gz`、签名和 DMG 齐全；Windows 继续以 `windows-2025` / `x86_64-pc-windows-msvc` 只构建 NSIS，避免 MSI 与 NSIS 升级路径错位。当前 Windows 主机无法执行 Apple SDK、`lipo`、`codesign` 或 DMG 安装升级，且本机没有 `actionlint`，因此 macOS v2.1 bundle、安装和升级结论明确为“待真实 macOS runner”，没有伪造现场通过。正式 tag 构建还必须由 CI secrets 生成并验证 macOS/Windows updater 签名归档。
 
 ## 11. 测试矩阵
 
