@@ -15,6 +15,7 @@ export function useI18n(): {
 
   useEffect(() => {
     let cancelled = false;
+    setReady(false);
     changeLocale(locale).then(() => {
       if (!cancelled) setReady(true);
     });
