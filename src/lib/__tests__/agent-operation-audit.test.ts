@@ -82,6 +82,7 @@ describe('Agent operation audit', () => {
       event.taskId === 'request-agent'
       && event.operationId === 'call-agent'
       && event.parentOperationId === 'request-agent'
+      && event.category === 'agent'
       && event.permissionMode === 'requestApproval'
     ))).toBe(true);
     expect(events[events.length - 1]).toMatchObject({

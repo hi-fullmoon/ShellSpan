@@ -18,14 +18,17 @@ import { freezeAgentTarget } from '@/lib/agent-contract';
 import { generateId } from '@/lib/utils';
 import { redactSensitiveValue } from '@/lib/terminal-output-buffer';
 import { agentOperationAuditor } from '@/lib/agent-operation-audit';
+import { agentRolloutAuditor } from '@/lib/agent-rollout-audit';
 import { registerAgentLifecycleHandlers } from '@/lib/agent-lifecycle';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { agentToolKey, useAgentStore } from '@/stores/agentStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { AiMessageInput, AiProviderConfig } from '@/types/ai';
 import type {
   AgentApprovalReference,
   AgentStartRequest,
+  AgentRolloutStage,
   AgentStreamEvent,
   AgentTargetSnapshot,
   AgentToolApprovalSnapshot,
@@ -42,6 +45,7 @@ export interface StartAgentUiRunInput {
   readonly target: AgentTargetSnapshot;
   readonly targetTitle: string;
   readonly messages: readonly AiMessageInput[];
+  readonly rolloutStage?: AgentRolloutStage;
 }
 
 export interface AgentUiControllerDependencies {
@@ -165,7 +169,11 @@ export class AgentUiController {
 
   async start(input: StartAgentUiRunInput): Promise<string | undefined> {
     const goal = input.goal.trim();
-    if (!goal || useAgentStore.getState().activeRequestId) return undefined;
+    if (
+      !goal
+      || !useAiSettingsStore.getState().agentEnabled
+      || useAgentStore.getState().activeRequestId
+    ) return undefined;
     const target = freezeAgentTarget(input.target);
     const targetError = this.validateTarget(target);
     if (targetError) throw new Error(targetError);
@@ -181,6 +189,7 @@ export class AgentUiController {
       target,
       targetTitle: input.targetTitle,
       permissionMode,
+      rolloutStage: input.rolloutStage,
     });
     try {
       await this.startBackend({
@@ -199,6 +208,10 @@ export class AgentUiController {
       return requestId;
     } catch (reason) {
       useAgentStore.getState().failRun(requestId, errorMessage(reason));
+      agentRolloutAuditor.recordRunOutcome(
+        useAgentStore.getState().runs[requestId],
+        'provider',
+      );
       return undefined;
     }
   }
@@ -220,6 +233,7 @@ export class AgentUiController {
       target: run.target,
       targetTitle: run.targetTitle,
       messages: [{ role: 'user', content: run.goal }],
+      rolloutStage: run.rolloutStage,
     });
   }
 
@@ -227,6 +241,7 @@ export class AgentUiController {
     const run = useAgentStore.getState().runs[requestId];
     return Boolean(
       run
+      && useAiSettingsStore.getState().agentEnabled
       && run.status !== 'running'
       && run.status !== 'completed'
       && !this.validateTarget(run.target),
@@ -243,6 +258,10 @@ export class AgentUiController {
     this.blockedRequests.add(reference.requestId);
     this.cancellationIntents.add(reference.requestId);
     useAgentStore.getState().endIncomplete(reference.requestId);
+    agentRolloutAuditor.recordRunOutcome(
+      useAgentStore.getState().runs[reference.requestId],
+      'approvalRejected',
+    );
     this.trackLifecycle(this.cancelBackend(reference.requestId).catch((reason) => {
       logger.warn(`Failed to cancel rejected Agent request ${reference.requestId}`, reason);
     }));
@@ -260,6 +279,7 @@ export class AgentUiController {
       this.approvalController.cancel(requestId, activeTool.toolCall.callId);
     }
     useAgentStore.getState().cancelRun(requestId);
+    agentRolloutAuditor.recordRunOutcome(useAgentStore.getState().runs[requestId], 'cancelled');
     this.trackLifecycle(this.cancelBackend(requestId).catch((reason) => {
       logger.warn(`Failed to cancel Agent request ${requestId}`, reason);
     }));
@@ -272,6 +292,7 @@ export class AgentUiController {
       .map((run) => run.requestId);
     await Promise.allSettled(requestIds.map((requestId) => this.cancelAndWait(requestId)));
     await agentOperationAuditor.flush();
+    await agentRolloutAuditor.flush();
   }
 
   async shutdown(): Promise<void> {
@@ -283,6 +304,7 @@ export class AgentUiController {
       await Promise.allSettled([...this.lifecyclePromises]);
     }
     await agentOperationAuditor.flush();
+    await agentRolloutAuditor.flush();
   }
 
   handleStreamEvent(event: AgentStreamEvent): void {
@@ -309,6 +331,19 @@ export class AgentUiController {
         state.markStarted(event.requestId, event.maxToolSteps, event.toolResultTimeoutMs);
         return;
       case 'capabilityDetected':
+        agentRolloutAuditor.recordCompatibility(
+          {
+            stage: run.rolloutStage,
+            collectLocalDiagnostics: run.rolloutStage === 'preview',
+          },
+          event.capability.source === 'openAiResponses'
+            ? 'openAi'
+            : event.capability.source === 'ollamaModelMetadata'
+              ? 'ollama'
+              : 'openAiCompatible',
+          event.capability,
+          run.target,
+        );
         if (event.capability.support === 'supported') state.setPhase(event.requestId, 'preparingCommand');
         return;
       case 'safeFallback':
@@ -378,12 +413,21 @@ export class AgentUiController {
         return;
       case 'completed':
         state.completeRun(event.requestId, event.fallback);
+        agentRolloutAuditor.recordRunOutcome(useAgentStore.getState().runs[event.requestId]);
         return;
       case 'cancelled':
         state.cancelRun(event.requestId);
+        agentRolloutAuditor.recordRunOutcome(
+          useAgentStore.getState().runs[event.requestId],
+          'cancelled',
+        );
         return;
       case 'error':
         state.failRun(event.requestId, event.message);
+        agentRolloutAuditor.recordRunOutcome(
+          useAgentStore.getState().runs[event.requestId],
+          'provider',
+        );
     }
   }
 
@@ -408,6 +452,10 @@ export class AgentUiController {
       const message = `Failed to submit terminal result: ${errorMessage(reason)}`;
       this.blockedRequests.add(result.requestId);
       useAgentStore.getState().failRun(safeResult.requestId, message);
+      agentRolloutAuditor.recordRunOutcome(
+        useAgentStore.getState().runs[safeResult.requestId],
+        'provider',
+      );
       void this.cancelBackend(safeResult.requestId).catch(() => undefined);
       throw reason;
     }
@@ -450,6 +498,10 @@ export class AgentUiController {
       this.approvalController.cancel(requestId, activeTool.toolCall.callId);
     }
     useAgentStore.getState().failRun(requestId, message);
+    agentRolloutAuditor.recordRunOutcome(
+      useAgentStore.getState().runs[requestId],
+      'targetChanged',
+    );
     this.trackLifecycle(this.cancelBackend(requestId).catch((reason) => {
       logger.warn(`Failed to cancel invalid Agent target ${requestId}`, reason);
     }));

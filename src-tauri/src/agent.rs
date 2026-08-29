@@ -1,4 +1,4 @@
-//! Experimental M1 model/tool orchestration for the terminal Agent.
+//! Model/tool orchestration for the terminal Agent.
 //!
 //! This module deliberately stops at the tool-result boundary. It never writes
 //! to a PTY, interprets assistant prose as a command, or makes approval
@@ -23,10 +23,10 @@ use uuid::Uuid;
 
 use crate::{
     agent_contract::{
-        experimental_agent_enabled, resolve_agent_contract_status, AgentProviderCapabilityEvidence,
-        AgentProviderCapabilitySource, AgentSafeFallback, AgentTargetSnapshot, AgentToolCall,
-        AgentToolCallingSupport, AgentToolName, AgentToolResult, AgentToolResultStatus,
-        RunTerminalCommandArguments,
+        agent_feature_enabled, resolve_agent_contract_status, AgentProviderCapabilityEvidence,
+        AgentProviderCapabilitySource, AgentRuntimeAccess, AgentSafeFallback, AgentTargetSnapshot,
+        AgentToolCall, AgentToolCallingSupport, AgentToolName, AgentToolResult,
+        AgentToolResultStatus, RunTerminalCommandArguments,
     },
     ai::{
         api_key_for_provider, build_client, endpoint_url, validate_provider_config, AiMessage,
@@ -413,23 +413,56 @@ struct AgentRunOutcome {
 
 #[tauri::command]
 pub(crate) async fn agent_detect_provider_capability(
+    access: State<'_, AgentRuntimeAccess>,
     provider: AiProviderConfig,
 ) -> Result<AgentProviderCapabilityEvidence, String> {
+    if !agent_feature_enabled() || !access.user_enabled() {
+        return Err("Agent is disabled by the current runtime policy".to_string());
+    }
     validate_provider_config(&provider, true)?;
     let api_key = api_key_for_provider(&provider)?;
     let mut backend = HttpAgentBackend::new(provider, api_key, Vec::new())?;
     Ok(backend.detect_capability(&CancellationToken::new()).await)
 }
 
+fn enforce_runtime_access_after_registration(
+    registry: &AgentRequestRegistry,
+    access: &AgentRuntimeAccess,
+    request_id: &str,
+    cancellation: &CancellationToken,
+    rollout_enabled: bool,
+) -> Result<(), String> {
+    if rollout_enabled && access.user_enabled() {
+        return Ok(());
+    }
+    cancellation.cancel();
+    registry.finish(request_id);
+    Err("Agent is disabled by the current runtime policy".to_string())
+}
+
 #[tauri::command]
 pub(crate) fn agent_start_request(
     app: AppHandle,
     registry: State<'_, AgentRequestRegistry>,
+    access: State<'_, AgentRuntimeAccess>,
     request: AgentStartRequest,
 ) -> Result<(), String> {
+    if !agent_feature_enabled() || !access.user_enabled() {
+        return Err("Agent is disabled by the current runtime policy".to_string());
+    }
     validate_agent_start_request(&request)?;
     let api_key = api_key_for_provider(&request.provider)?;
     let cancellation = registry.register(&request.request.request_id)?;
+    // Close the register-vs-disable race: if disable/cancel_all happened before
+    // registration, this recheck cancels the newly registered request; if it
+    // happens after the recheck, cancel_all observes the registration.
+    enforce_runtime_access_after_registration(
+        &registry,
+        &access,
+        &request.request.request_id,
+        &cancellation,
+        agent_feature_enabled(),
+    )?;
     let registry = registry.inner().clone();
     let request_id = request.request.request_id.clone();
     let config = AgentLoopConfig::default();
@@ -452,7 +485,7 @@ pub(crate) fn agent_start_request(
             Ok(backend) => {
                 run_agent_request(
                     request.provider.kind,
-                    experimental_agent_enabled(),
+                    agent_feature_enabled(),
                     Box::new(backend),
                     request.request,
                     cancellation.clone(),
@@ -489,6 +522,20 @@ pub(crate) fn agent_start_request(
     });
 
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn agent_set_enabled(
+    registry: State<'_, AgentRequestRegistry>,
+    access: State<'_, AgentRuntimeAccess>,
+    enabled: bool,
+) -> Result<bool, String> {
+    let effective = enabled && agent_feature_enabled();
+    access.set_user_enabled(effective);
+    if !effective {
+        registry.cancel_all()?;
+    }
+    Ok(effective)
 }
 
 #[tauri::command]
@@ -2551,6 +2598,26 @@ mod tests {
         assert_eq!(registry.cancel_all().unwrap(), 2);
         assert!(first.is_cancelled());
         assert!(second.is_cancelled());
+    }
+
+    #[test]
+    fn runtime_disable_after_registration_cancels_and_removes_the_request() {
+        let registry = AgentRequestRegistry::default();
+        let access = AgentRuntimeAccess::default();
+        access.set_user_enabled(true);
+        let cancellation = registry.register("request-disable-race").unwrap();
+        access.set_user_enabled(false);
+
+        assert!(enforce_runtime_access_after_registration(
+            &registry,
+            &access,
+            "request-disable-race",
+            &cancellation,
+            true,
+        )
+        .is_err());
+        assert!(cancellation.is_cancelled());
+        assert!(registry.active("request-disable-race").is_err());
     }
 
     #[test]

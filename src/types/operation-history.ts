@@ -1,4 +1,5 @@
 export type OperationHistoryCategory =
+  | 'agent'
   | 'connection'
   | 'terminal'
   | 'sftp'
@@ -11,6 +12,8 @@ export type OperationHistoryCategory =
   | 'multiHost';
 
 export type OperationHistoryAction =
+  | 'detectAgentProviderCapability'
+  | 'runAgentTask'
   | 'connectRemoteSession'
   | 'connectLocalSession'
   | 'closeSession'
@@ -99,6 +102,7 @@ export interface OperationEvidenceReference {
 }
 
 export type OperationHistoryErrorCategory =
+  | 'approvalRejected'
   | 'authentication'
   | 'timeout'
   | 'network'
@@ -112,6 +116,10 @@ export type OperationHistoryErrorCategory =
   | 'staleEvidence'
   | 'targetChanged'
   | 'credentialUnavailable'
+  | 'provider'
+  | 'stepLimit'
+  | 'toolCallingUnsupported'
+  | 'toolCallingUnverified'
   | 'unknown';
 
 export interface RecordOperationEventRequest {

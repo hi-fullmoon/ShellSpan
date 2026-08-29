@@ -5,6 +5,7 @@ import type {
   AgentPermissionMode,
   AgentRunPhase,
   AgentRunRecord,
+  AgentRolloutStage,
   AgentSafeFallback,
   AgentTargetSnapshot,
   AgentToolApprovalSnapshot,
@@ -20,6 +21,7 @@ export interface BeginAgentRunInput {
   readonly target: AgentTargetSnapshot;
   readonly targetTitle: string;
   readonly permissionMode: AgentPermissionMode;
+  readonly rolloutStage?: AgentRolloutStage;
 }
 
 interface AgentState {
@@ -176,6 +178,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
       target,
       targetTitle: input.targetTitle,
       permissionMode: input.permissionMode,
+      rolloutStage: input.rolloutStage ?? 'stable',
       toolCallIds: Object.freeze([]),
       phase: 'analyzing',
       status: 'running',
