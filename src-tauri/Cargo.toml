@@ -66,3 +66,6 @@ dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] 
 
 [dev-dependencies]
 tempfile = "3.14.0"
+
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty" }
