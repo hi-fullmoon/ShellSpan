@@ -1,8 +1,8 @@
 # TermBridge 产品路线图
 
-> 基线版本：v2.0.55  
-> 更新日期：2026-08-28  
-> 当前主线：Codex 风格的可控终端 Agent  
+> 基线版本：v2.0.55
+> 更新日期：2026-08-29
+> 当前主线：Codex 风格的可控终端 Agent
 > 规划方式：以退出条件驱动的滚动路线图，版本号表示目标主题，不承诺固定发布日期。
 
 ## 1. 产品判断
@@ -188,6 +188,14 @@ Tauri 后端负责与模型服务通信并维护工具调用循环：
 
 不支持工具调用时必须明确降级到“生成命令”，不得解析普通文本并自动执行，也不得声称已经完成操作。
 
+能力检测契约：
+
+- 能力状态只有 `supported`、`unsupported`、`unknown`，检测证据同时记录来源。
+- OpenAI Responses 使用内建协议能力；若后续请求明确拒绝工具调用，按 `unsupported` 处理。
+- OpenAI Compatible 只有兼容性探测明确成功后才为 `supported`；未探测、结果不明或证据来源不匹配均为 `unknown`。
+- Ollama 只有模型元数据明确声明 tools 能力后才为 `supported`；缺少声明时为 `unknown`。
+- `unsupported` 和 `unknown` 都安全降级到 `generateCommand`，只生成供用户手动插入的命令；禁止自动执行 Assistant 文本或 Markdown 代码块。
+
 ### 7.2 工具契约
 
 首发仅向模型暴露一个最小工具：
@@ -348,7 +356,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M0 — 契约与开关
 
-状态：规划完成，待实现。
+状态：已完成（2026-08-28）。
 
 交付：
 
@@ -359,7 +367,17 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 退出条件：前后端共享契约无歧义，所有未知风险默认需要审批。
 
+实现证据：
+
+- `protocol/agent/v1/agent-contract.schema.json` 是 M0 v1 线协议的唯一规范，冻结 Agent 请求、工具调用、目标快照、工具结果、权限、风险、能力检测和降级字段。
+- `protocol/agent/v1/agent-contract-fixtures.json` 同时驱动 TypeScript 与 Rust 契约测试；三档权限与三种已知风险、未知风险共 12 个组合全部表驱动覆盖。
+- 实验开关 `TERMBRIDGE_EXPERIMENTAL_AGENT` 默认关闭，只有精确值 `true` 或 `1` 才启用；后端状态契约是后续前端入口的权威开关。
+- 未分类或未来新增风险在任何权限模式（包括完全访问权限）下都返回 `requiresApproval: true`。
+- 本阶段不包含模型工具循环、PTY 执行、审批 UI 或 Agent 产品界面，不提前进入 M1。
+
 ### M1 — 模型工具调用闭环
+
+状态：已完成（2026-08-28）。
 
 交付：
 
@@ -371,7 +389,18 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 退出条件：Mock provider 能连续产生“检查—修改—验证”三个工具调用，并最终给出基于真实工具结果的回答。
 
+实现证据：
+
+- `src-tauri/src/agent.rs` 提供独立的 Tauri Agent 编排器以及 `agent_start_request`、`agent_submit_tool_result`、`agent_cancel_request` 和 `agent_detect_provider_capability` 命令；模型流与工具结果等待共享取消信号，默认工具结果等待超时 120 秒，默认最多 8 个工具步骤。
+- OpenAI Responses 回放完整 response output items 并追加 `function_call_output`；OpenAI Compatible 聚合流式 `tool_calls` 并回放 assistant/tool 消息；Ollama 依据 `/api/show` 的明确 `tools` capability 使用 `/api/chat` 工具消息。
+- `agent-stream` v1 事件将 `textDelta` 与结构化 `toolCall` 分离；每个请求只允许一个在途工具调用，结果按 `requestId + callId` 严格关联且只接受一次，并行工具调用、多行或含控制字符的命令在进入终端边界前即失败。
+- OpenAI Compatible 探测未明确成功、Ollama 元数据未明确声明 tools、实验开关关闭或提供商明确拒绝 tools 时，统一发出 `safeFallback` 并以不暴露工具的 `generateCommand` 提示继续；Assistant 自由文本和 Markdown 代码块没有任何自动执行路径。
+- Rust `mock_provider_completes_check_change_verify_from_structured_results_only` 自动完成连续“检查—修改—验证”三次调用；Mock 的最终回答仅从三份经结构化提交、callId 匹配且带真实状态/退出码的工具结果构造。提供商解析、完整 output item 回放、能力证据、超时、取消、步数上限、一次性提交和安全降级均有定向测试。
+- 本阶段没有 PTY 写入、输出捕获、审批策略或审批 UI；这些边界仍分别属于 M2 和 M3。
+
 ### M2 — PTY 执行与输出捕获
+
+状态：已完成（2026-08-28）。
 
 交付：
 
@@ -382,7 +411,18 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 退出条件：快速命令、长输出、非零退出、拆分输出、超时和中止测试全部通过，且不会把终端回显误判为命令结果。
 
+实现证据：
+
+- `src/components/terminal/registry/terminal-registry.ts` 在现有终端控制器上增加原始输出与生命周期订阅、监听就绪屏障和受连接状态约束的直接输入；执行器始终通过冻结 `sessionId` 对应控制器的既有 `write_session` 写入同一 PTY，不建立第二条 SSH 连接，活动标签切换不会改变目标。
+- `src/lib/agent-terminal-executor.ts` 只接受上层显式授权并与 `requestId + callId + sessionId` 严格关联的结构化 `run_terminal_command`；写入前后均校验 M1 冻结目标的会话种类、主机、端口、用户和配置身份，不提供权限选择、风险放行或自由文本执行路径。
+- POSIX 与本地 PowerShell 包装器在当前 shell 内执行单行命令，使用 192 bit 随机、控制字符成帧且在回显文本中拆分的唯一边界，可靠解析拆包、粘包和退出码；执行过程保留当前目录与 shell 环境，并临时禁用后恢复分页器环境变量。
+- 捕获器以前后段方式硬限制原始命令输出为 2 MiB，继续排空并识别结束边界；随后依次执行 ANSI 清理、终端控制字符渲染和敏感信息脱敏，送模型前按 UTF-8 安全裁剪到 64 KiB。默认总超时为 120 秒，用户中止或命令超时时仅在命令已写入且控制器仍绑定原 `sessionId` 时向同一 PTY 发送 Ctrl-C；断线、关闭、重连换绑和控制器销毁均终止执行。
+- 本地预检保持 M1 的 8192 字符、单行和无控制字符约束，并阻断编辑器、分页器、交互解释器、嵌套 SSH、交互式容器、输入提示、后台命令以及 `tail`、`journalctl`、容器日志和 PowerShell 日志的无限跟随等不可自动完成命令；执行器不承担 M3 风险分类和审批决策。
+- `src/lib/__tests__/agent-terminal-executor.test.ts` 与终端注册表定向测试共 77 项通过，覆盖监听就绪后写入、快速 ANSI 输出、非零退出、长输出、拆包/粘包、伪造边界、默认及自定义超时、中止、断线/关闭、换绑、标签切换、终端回显误判、授权/身份漂移和交互命令阻断；`pnpm test` 为 135 个文件、1175 项通过，`pnpm build` 成功，`cargo test --manifest-path src-tauri/Cargo.toml` 为 345 项通过、10 项隔离环境测试按既有标记忽略，`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
+
 ### M3 — 权限与审批
+
+状态：已完成（2026-08-28）。
 
 交付：
 
@@ -392,6 +432,15 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 完全访问提示及连接实例级自动重置。
 
 退出条件：权限矩阵的所有组合均有自动化测试，无法通过 UI 或事件竞态绕过审批。
+
+实现证据：
+
+- `src/lib/agent-command-risk.ts` 在进入权限策略前执行完全本地的命令分类：破坏性签名先于所有只读判断，简单管道和复合命令逐段复用既有 `isSafeReadOnlyCommand` 正向白名单并取整条命令最高风险，重定向、命令替换、复杂或未知语法统一 fail-closed 为 `stateChange`。M0 的未知风险值仍在三档权限下全部要求审批。
+- `src/stores/agentPermissionStore.ts` 将权限与冻结的 `sessionId`、会话种类、配置、主机、端口和用户名共同绑定；只允许已连接实例提权。断线、错误、关闭、删除、身份漂移以及产生新 `sessionId` 的重连都会删除内存授权，新连接和替换连接均恢复 `requestApproval`，切换标签不改变原实例权限。
+- `src/lib/agent-approval-controller.ts` 是结构化 `toolCall` 到 M2 PTY 执行器之间的策略闸门。它冻结命令和目标，使用不透明 `approvalId` 严格限定只有 `awaitingApproval` 能批准或拒绝，在进入 `running` 前重新校验 `sessionId` 与完整身份，随后仍由 M2 在写入前再次校验；事件重放、旧审批、批准/拒绝并发、权限变化和返回结果身份错配都不能重复执行或重复提交，每个终态只向 M1 提交一次。
+- `src/components/ai/agent-permission-selector.tsx` 与 `agent-approval-card.tsx` 复用现有 shadcn Button、DropdownMenu 单选组、Alert、AlertDialog、Badge 和 Card，提供三档权限、完全访问橙色高风险说明、完整冻结目标/命令展示以及批准/拒绝交互；完全访问只改变风险审批决策，不绕过 M0/M2 的单行与控制字符校验、目标绑定、交互命令阻断、超时、中止、输出上限和脱敏边界。本阶段未增加 M4 的 Agent 模式、消息流或完整产品界面。
+- `src/lib/__tests__/agent-command-risk.test.ts`、`agent-approval-controller.test.ts`、`src/stores/__tests__/agentPermissionStore.test.ts` 和组件测试覆盖本地分类、已知权限矩阵、未知风险 fail-closed、连接实例隔离/重置、完整目标展示及审批竞态；连同 M0 契约矩阵和 M2 执行器回归的定向运行共 6 个文件、118 项通过。
+- 全量验证：`pnpm test` 为 139 个文件、1226 项通过；`pnpm build` 成功；`cargo test --manifest-path src-tauri/Cargo.toml` 为 345 项通过、10 项隔离环境测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`、`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
 
 ### M4 — Agent 产品界面
 
@@ -404,7 +453,19 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 退出条件：用户无需查看日志即可判断 Agent 的目标、命令、风险、审批、执行状态和结果。
 
+实现证据：
+
+- `src/components/ai/ai-panel.tsx` 提供互斥且显式的“问答 / 生成命令 / Agent”三模式。前两种仍只调用既有 `ai_start_request`，Agent 只在实验开关、服务商结构化工具能力和已连接终端均通过后调用独立的 `AgentUiController`；入口在默认关闭时仍可见但不可启用，并向辅助技术说明问答和生成命令不会获得终端工具。Agent lane 仅保存在内存，未进入 M5 的持久化或审计范围。
+- `src/lib/agent-ui-controller.ts` 在启动请求前完成 M1 事件监听，把结构化 `toolCall` 严格交给 M3 `AgentApprovalController`，再由 M2 PTY 执行器运行并将脱敏结果回传模型。拒绝、用户停止、结果回传失败、流目标错配以及终端断线/关闭/身份变化会同时收敛本地工具与后端请求；单纯切换活动标签不会取消或重绑定。条件重试生成新请求，但复用原目标快照且仅在原连接身份仍有效时开放。
+- `src/stores/agentStore.ts` 与 `src/components/ai/agent-run-view.tsx` 形成独立 Agent 产品状态流：展示正在分析、准备命令、等待批准、执行、读取结果、验证、完成/部分完成/未完成；非零退出码、失败工具或步骤上限不会被汇总为完全完成。Assistant 文本为空但携带工具卡时消息保留有效；没有文本也没有工具的空响应才失败。
+- `src/components/ai/agent-approval-card.tsx` 复用项目现有 shadcn Card、Badge、Button、AlertDialog 与 Alert，展示冻结目标标题和完整 `user@host:port · sessionId`、意图、完整单行命令、本地风险、工具状态、退出码及有界脱敏输出摘要，并提供复制、批准、拒绝、停止和满足原目标条件时的整任务重试。`src/locales/en-US.ts` 与 `zh-CN.ts` 覆盖全部模式、阶段、状态、降级和恢复文案，状态使用 live region，消息区、对话框与所有操作均具备语义标签和键盘焦点行为。
+- 定向回归命令 `pnpm exec vitest run src/stores/__tests__/agentStore.test.ts src/lib/__tests__/agent-ui-controller.test.ts src/components/ai/__tests__/agent-permission-approval.test.tsx src/components/ai/__tests__/agent-run-view.test.tsx src/components/ai/__tests__/ai-panel.test.ts` 覆盖三模式工具隔离、完整逐条批准、自动只读、拒绝、停止与 Ctrl-C 协调、后端结果超时、目标漂移/标签切换、同目标重试、空文本工具消息、非零退出和步骤上限、状态与辅助技术语义，共 5 个文件、55 项通过。
+- 本地浏览器 QA：在 1280×900 中文桌面视口验证冻结目标横幅、已完成只读卡、等待批准的状态修改卡、完整命令/风险/退出码/`[REDACTED]` 输出以及批准确认对话框；Esc 可关闭对话框并把焦点还给“批准”。在 390×844 英文视口验证工具卡、输出和批准/拒绝/停止操作区无横向溢出（`scrollWidth === viewportWidth === 390`）；只挂载生产组件的只读 QA 页面无 console warning/error。真实本地应用页同时验证实验开关默认关闭、三模式入口可见、问答与生成命令显式切换及 Agent 禁用原因；普通浏览器中预期存在的 Tauri IPC 不可用日志不作为桌面运行结果。
+- 全量验证：`pnpm test` 为 142 个文件、1246 项通过；`pnpm build` 成功（仅既有 Vite 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml` 为 345 项通过、10 项隔离环境测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`、`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
+
 ### M5 — 持久化、脱敏与审计
+
+状态：已完成（2026-08-28）。
 
 交付：
 
@@ -415,7 +476,18 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 退出条件：重启应用不会重放命令或恢复完全访问权限；每次真实操作都有可追踪记录且不泄露完整输出或秘密。
 
+实现证据：
+
+- `src/lib/agent-sessions.ts`、`src/stores/agentStore.ts` 与 `src-tauri/src/ai_sessions.rs` 为每个独立 Agent 请求追加原子 `{ run, messages, tools }` 快照，恢复用户消息、Assistant 文本、工具调用元数据和终态；同一 `requestId` 只采用最后一份快照，Agent lane 可单独清理。磁盘中的 `running`、流式消息以及 `pending` / `awaitingApproval` / `running` 工具在加载时统一收敛为 `cancelled`，删除可操作的 `approvalId`，不设置 `activeRequestId`，也没有启动、重试或 PTY 写入恢复路径。
+- 权限授权继续只存在于 `src/stores/agentPermissionStore.ts` 的连接实例内存中；历史快照保留任务当时的权限模式用于解释和审计，但 hydrate 不接触权限 store。因此归档或重启后即使历史任务记录为 `fullAccess`，新连接仍从 `requestApproval` 开始。
+- `src/lib/terminal-output-buffer.ts` 与新增 Rust `src-tauri/src/redaction.rs` 提供等价的递归脱敏边界：敏感键不受嵌套层级和数组影响，每个字符串叶子继续应用密码、token、Authorization、URL 凭据、私钥、AWS、GitHub token 和 JWT 规则。Agent 工具结果在回传模型前、Agent/普通 AI 消息在 IPC 与 JSONL 落盘前均再次脱敏，测试确认不会修改 UI 中的原对象。
+- 数据库 schema v6 为操作历史增加 `permission_mode`、`human_approved` 和 Agent 查询索引；`executeAgentCommand` 记录 `taskId`、`operationId`、`parentOperationId`、冻结目标、风险、脱敏命令预览、权限与人工批准状态，以及 `started`、`approved`、`rejected`、`cancelRequested`、`completed`、`failed`、`statusChanged` 事件、退出码和超时/取消/身份不匹配/失败分类。输入结构以 `deny_unknown_fields` 拒绝终端输出字段，前端审计器也从不复制工具输出；v5→v6 迁移保留既有记录。
+- `src/lib/agent-ui-controller.ts`、`agent-lifecycle.ts`、`ai-sessions.ts` 与 Rust `AgentRequestRegistry` 统一应用退出、更新重启、终端关闭和会话归档的取消顺序：先冻结取消意图并终止等待审批/PTY/模型/工具结果，再等待终态审计与 Agent 快照落盘，最后归档。后端对“取消先于注册”保留有界 tombstone，并在退出/重启时取消全部请求，避免迟到启动重放；工具 store 与审批控制器均保证首个终态胜出且只提交一次。数据层已提供关闭 Agent、按 conversation 清理 Agent lane 和按任务查询 Agent 操作历史的能力；M7 的公开入口与发布策略未提前实现。
+- 定向回归覆盖 JSONL 恢复、重启不重放、完全访问不恢复、嵌套秘密在模型/磁盘边界脱敏、v5→v6 迁移、Agent lane 清理、取消/超时/迟到回调竞态、审计事件关联与完整输出不进入操作历史。全量验证：`pnpm test` 为 144 个文件、1260 项通过；`pnpm build` 成功（仅既有 Vite 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml` 为 353 项通过、10 项隔离环境测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`、`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`pnpm exec tsc --noEmit` 和 `git diff --check` 均通过。
+
 ### M6 — 安全与兼容性验收
+
+状态：未完成（2026-08-29 收口复核；真实 Windows runner 已通过，仅等待 OpenAI Responses 现场证据）。
 
 交付：
 
@@ -425,6 +497,38 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 前端构建、Vitest、Rust 测试和人工 SSH E2E。
 
 退出条件：第 12 节全部验收场景通过，无 P0/P1 已知缺陷。
+
+收口复核：
+
+- 基线提交为 `05fa6b3`，保存的 M6 WIP 为 `2378dd6`，detached 最终提交 `a6b340d` 已接回 M6 分支并累计集成于 `8f7ad72`；真实 Windows 收口修复完成于 `11dbb1d`。复核确认迟到或重叠 `toolCall` 在进入完全访问执行路径前 fail-closed；终端文本不能伪造结构化审计类别；引号包围且包含空白、shell 标点的秘密会在模型与持久化边界前脱敏；兼容提供商探测只有收到指定结构化探测调用才为 `supported`，截断或无明确证据的响应为 `unknown` 并安全降级。
+- 累计缺陷分级为 P0 0、P1 2、P2 1、P3 6，全部已关闭，没有剩余已知代码缺陷。P1 为 PowerShell 生产 wrapper 退出码丢失与 ConPTY 错用 Win32 input mode 导致前端 VT 输入不兼容；P2 为异步 locale 切换在高并发测试下不触发重渲染；P3 包含原有 3 项（Windows 验收脚本参数边界、SSH E2E 失败清理、WIP rustfmt）以及 macOS Petdex 接受流的非阻塞状态、ConPTY 测试生命周期边界、Windows 测试模块导入。
+
+第 12 节逐项证据：
+
+| 场景 | 结论 | 证据 |
+| --- | --- | --- |
+| 12.1 服务重启 | 通过（自动化与隔离 SSH） | 三档权限矩阵覆盖逐条审批、只读自动批准和完全访问；Rust 结构化工具循环完成“检查→重启→验证”；隔离 SSH mock service 验证 `inactive→restart accepted→active` 且重启计数严格为 1。 |
+| 12.2 执行失败 | 通过（自动化与隔离 SSH） | 非零退出码不会得到完成状态；结构化失败结果仍可进入下一轮诊断；系统提示禁止索取或输入秘密；隔离 SSH 的 root-only 读取失败且错误结果不泄露受保护内容。 |
+| 12.3 目标隔离 | 通过（自动化与隔离 SSH） | 标签切换继续写入冻结会话；断线、控制器替换、同主机不同 `sessionId`、配置身份漂移均 fail-closed；隔离 SSH 身份漂移探测确认不会连接旧目标或跳板。 |
+| 12.4 停止与超时 | 通过（自动化与隔离 SSH） | 停止与超时向同一 PTY 发送 Ctrl-C，同时取消模型请求与工具等待；首个终态胜出，UI、快照和审计收敛；隔离 SSH 覆盖取消、超时和迟到结果。 |
+| 12.5 提供商降级 | 通过（契约与本机现场） | `unsupported` / `unknown` 只产生显式 `generateCommand` 降级且不暴露工具；普通文本与 Markdown 从不自动执行；本机 `smollm:135m` 现场验证无 tools 降级。 |
+| 12.6 恶意输出 | 通过（自动化与隔离 SSH） | 伪造工具调用、`APPROVED` 与“忽略规则”只作为不可信输出；带真实退出码的恶意文本不能污染审计类别；密码、token、私钥及带引号秘密在模型/落盘前脱敏。 |
+
+平台与提供商证据：
+
+| 验收项 | 结论 | 2026-08-29 证据 |
+| --- | --- | --- |
+| macOS zsh / PTY | 通过（现场） | macOS 26.6.2 arm64 上原生 `/bin/zsh` 生产 wrapper、ANSI/引号秘密/非零退出码通过；`portable-pty` 原生 PTY 的生产边界协议通过。 |
+| Windows PowerShell / ConPTY | 通过（真实 `windows-2025` runner） | GitHub Actions [run 33233185875](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233185875) 的 Windows job `99049462258` 在提交 `11dbb1d` 上全绿：原生 Windows PowerShell 执行生产 wrapper 并正确保留非零退出码 7；真实 ConPTY 接收原始 VT 输入，输出 `termbridge-conpty-smoke` 并以 7 退出。同一 job 的 build、Agent 契约、Petdex、Clippy 和全量 Rust 均通过。 |
+| Ollama 原生 tools | 通过（现场） | 本机 Ollama `qwen3:0.6b` 经 `/api/show` tools 元数据、`/api/chat` 结构化调用、工具结果回放和最终总结通过。 |
+| Chat Completions tools | 通过（现场） | 同一本机 `qwen3:0.6b` 经 Ollama `/v1/chat/completions` 完成强制能力探测、结构化调用、结果回放和总结；探测预算为 256 tokens，无明确结构化证据时保持 `unknown`。 |
+| 无 tools 降级 | 通过（现场） | 本机 Ollama `smollm:135m` 元数据判定 `unsupported`，只返回无工具的生成命令降级文本，没有 `toolCall`。 |
+| OpenAI Responses | **未执行** | 环境中没有 `TERMBRIDGE_M6_OPENAI_LIVE`、模型配置或 `OPENAI_API_KEY`；按安全凭证前置条件未发起现场请求。Responses SSE、完整 output item 回放与 function output 的非现场契约测试通过，但不能替代现场证据。 |
+| 隔离 SSH/SFTP | 通过（现场） | `pnpm test:e2e:ssh` 单次构建镜像供目标与跳板复用，10/10 通过并在结束后删除容器、卷与 Compose 网络。 |
+
+本轮验证：`pnpm test:agent:security` 为 103/103；macOS 原生 zsh/PTY 与 Windows 原生 PowerShell/ConPTY 平台门禁均通过；提供商非现场定向测试为 17 通过、4 个现场用例按标记忽略，随后 Ollama tools、无 tools 和 Chat Completions 三个现场用例分别通过；SSH E2E 为 10/10。集成后全量 `pnpm test` 为 150 个文件、1288 通过、1 个平台条件跳过；`pnpm build` 成功（仅既有 500 kB chunk 提示）；Rust 在 macOS/本机为 368 单元测试 + 5 Petdex 通过、16 忽略，在 Windows 为 365 单元测试 + 5 Petdex 通过、15 忽略。[Quality Gate run 33233185875](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233185875) 的前端审计、macOS、Windows 和隔离 SSH 四个 job 全部通过；Clippy `-D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
+
+退出判断：第 12 节自动化与本机/隔离 SSH 场景均通过，macOS 与真实 Windows 关键链路已取证，且无剩余 P0/P1 已知缺陷。唯一未关闭的严格阻塞是 OpenAI Responses 现场验收；非现场契约测试不能替代它。因此 M6 **不得标记完成**，第 13 节复选框保持未勾选，也不允许开始 M7。
 
 ### M7 — 分阶段开放
 
@@ -567,4 +671,3 @@ v2.1 稳定后再按用户价值排序评估：
 
 - [OpenAI Function Calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [OpenAI Model Guidance：自主性与审批边界](https://developers.openai.com/api/docs/guides/latest-model#define-autonomy-and-approval-boundaries)
-

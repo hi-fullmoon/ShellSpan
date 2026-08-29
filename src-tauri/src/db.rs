@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 5;
+const CURRENT_SCHEMA_VERSION: i32 = 6;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -189,6 +189,22 @@ INSERT INTO schema_version (version) VALUES (5);
 COMMIT;
 ";
 
+const SCHEMA_V6: &str = "
+BEGIN IMMEDIATE;
+ALTER TABLE operation_history_events
+    ADD COLUMN permission_mode TEXT
+    CHECK(permission_mode IS NULL OR permission_mode IN (
+        'requestApproval', 'autoApproveReadOnly', 'fullAccess'
+    ));
+ALTER TABLE operation_history_events
+    ADD COLUMN human_approved INTEGER
+    CHECK(human_approved IS NULL OR human_approved IN (0, 1));
+CREATE INDEX IF NOT EXISTS idx_operation_history_action_task
+    ON operation_history_events(action, task_id, occurred_at);
+INSERT INTO schema_version (version) VALUES (6);
+COMMIT;
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -256,6 +272,11 @@ impl Database {
         if current < 5 {
             conn.execute_batch(SCHEMA_V5)
                 .map_err(|e| format!("migration v5 failed: {e}"))?;
+        }
+
+        if current < 6 {
+            conn.execute_batch(SCHEMA_V6)
+                .map_err(|e| format!("migration v6 failed: {e}"))?;
         }
 
         Ok(())
@@ -941,6 +962,15 @@ mod tests {
             .unwrap();
         conn.execute("SELECT 1 FROM operation_history_events LIMIT 0", [])
             .unwrap();
+        let operation_history_columns = conn
+            .prepare("PRAGMA table_info(operation_history_events)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(operation_history_columns.contains(&"permission_mode".to_string()));
+        assert!(operation_history_columns.contains(&"human_approved".to_string()));
         let has_secret_value_column: bool = conn
             .prepare("PRAGMA table_info(key_credentials)")
             .unwrap()
@@ -1033,6 +1063,51 @@ mod tests {
             )
             .unwrap();
         assert_eq!(organization_json, None);
+    }
+
+    #[test]
+    fn migration_v6_preserves_v5_history_and_adds_agent_audit_fields() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
+            .unwrap();
+        conn.execute_batch(SCHEMA_V2).unwrap();
+        conn.execute_batch(SCHEMA_V3).unwrap();
+        conn.execute_batch(SCHEMA_V4).unwrap();
+        conn.execute_batch(SCHEMA_V5).unwrap();
+        conn.execute(
+            "INSERT INTO operation_history_events (
+                event_id, task_id, operation_id, occurred_at, category, action,
+                event_kind, status, targets_json, evidence_json, created_at
+             ) VALUES (
+                'event-v5', 'task-v5', 'operation-v5', 1, 'terminal',
+                'closeSession', 'completed', 'succeeded', '[]', '[]', 1
+             )",
+            [],
+        )
+        .unwrap();
+        let db = Database {
+            conn: Arc::new(Mutex::new(conn)),
+        };
+
+        db.migrate().unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let preserved: (String, Option<String>, Option<bool>) = conn
+            .query_row(
+                "SELECT action, permission_mode, human_approved
+                 FROM operation_history_events WHERE event_id='event-v5'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(preserved, ("closeSession".to_string(), None, None));
+        let version: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 6);
     }
 
     #[test]

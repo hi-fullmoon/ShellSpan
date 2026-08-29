@@ -703,10 +703,14 @@ pub(crate) fn close_session(
 pub(crate) fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
 ) {
     info!("Requesting application restart");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before restart: {error}");
+    }
+    if let Err(error) = agent_requests.cancel_all() {
+        warn!("Failed to cancel Agent requests before restart: {error}");
     }
     app.request_restart();
 }
@@ -715,10 +719,14 @@ pub(crate) fn request_app_restart(
 pub(crate) fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
+    agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
 ) {
     info!("Requesting application exit");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before exit: {error}");
+    }
+    if let Err(error) = agent_requests.cancel_all() {
+        warn!("Failed to cancel Agent requests before exit: {error}");
     }
     app.exit(0);
 }
@@ -2768,10 +2776,10 @@ mod tests {
     use crate::models::SessionCommand;
     use crossbeam_channel::{bounded, never, unbounded, TryRecvError, TrySendError};
     use portable_pty::CommandBuilder;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     use portable_pty::{native_pty_system, PtySize};
     use std::ffi::OsStr;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     use std::io::Read;
     use std::sync::{Arc, Barrier};
     use std::thread;
@@ -3064,6 +3072,137 @@ mod tests {
 
         assert!(status.success());
         assert_eq!(output.replace("\r\n", "\n"), "termbridge-pty-smoke\n");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_real_pty_runs_the_shell_boundary_protocol() {
+        use std::io::Write;
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 160,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("open a real local PTY for the shell protocol");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone the real shell PTY reader");
+        let mut writer = pair
+            .master
+            .take_writer()
+            .expect("take the real shell PTY writer");
+        let mut command = CommandBuilder::new("/bin/zsh");
+        command.arg("-f");
+        configure_local_terminal_environment(&mut command);
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .expect("spawn the native macOS shell through a PTY");
+        drop(pair.slave);
+
+        let nonce = "0123456789abcdef0123456789abcdef0123456789abcdef";
+        let first = "TERMBRIDGE_M2_0123456789abcdef0123";
+        let second = "456789abcdef0123456789abcdef";
+        let wrapper = format!(
+            "__tb_marker_{nonce}='{first}''{second}'; __tb_command_{nonce}='printf macos-shell-protocol; false'; printf '\\036%s:BEGIN\\037\\n' \"$__tb_marker_{nonce}\"; eval \"$__tb_command_{nonce}\"; __tb_exit_{nonce}=$?; printf '\\036%s:END:%d\\037\\n' \"$__tb_marker_{nonce}\" \"$__tb_exit_{nonce}\"; unset __tb_marker_{nonce} __tb_command_{nonce} __tb_exit_{nonce}\nexit\n"
+        );
+        writer
+            .write_all(wrapper.as_bytes())
+            .expect("write the shell boundary protocol to the PTY");
+        writer.flush().expect("flush the shell boundary protocol");
+        drop(writer);
+
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("read the shell boundary protocol output");
+        let status = child.wait().expect("wait for the native shell");
+
+        assert!(status.success());
+        assert!(output.contains(
+            "\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN\u{1f}"
+        ));
+        assert!(output.contains("macos-shell-protocol"));
+        assert!(output.contains(
+            "\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:1\u{1f}"
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_real_conpty_smoke_runs_the_production_powershell() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("open a real Windows ConPTY");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone the real ConPTY reader");
+        let mut writer = pair
+            .master
+            .take_writer()
+            .expect("take the real ConPTY writer");
+        let mut command = CommandBuilder::new("powershell.exe");
+        command.args(["-NoLogo", "-NoProfile"]);
+        configure_local_terminal_environment(&mut command);
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .expect("spawn the production Windows shell through ConPTY");
+        drop(pair.slave);
+
+        let (output_tx, output_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let mut output = String::new();
+            let result = reader
+                .read_to_string(&mut output)
+                .map(|_| output)
+                .map_err(|error| error.to_string());
+            let _ = output_tx.send(result);
+        });
+        writer
+            .write_all(b"Write-Output 'termbridge-conpty-smoke'\rexit 7\r")
+            .expect("write deterministic commands to the PowerShell ConPTY");
+        writer
+            .flush()
+            .expect("flush deterministic commands to the PowerShell ConPTY");
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let status = loop {
+            match child.try_wait().expect("poll the ConPTY child") {
+                Some(status) => break status,
+                None if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+                None => {
+                    child.kill().expect("terminate the timed-out ConPTY child");
+                    panic!("the production PowerShell did not exit before the ConPTY deadline");
+                }
+            }
+        };
+
+        assert_eq!(status.exit_code(), 7);
+        // Keep the input writer alive until the explicit `exit 7`; dropping it earlier makes
+        // ConPTY terminate interactive PowerShell with STATUS_CONTROL_C_EXIT (0xC000013A).
+        drop(writer);
+        // Closing the ConPTY master releases the reader EOF after the child has exited.
+        drop(pair.master);
+        let output = output_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("read the PowerShell ConPTY output before the deadline")
+            .expect("read deterministic PowerShell ConPTY output");
+
+        assert!(
+            output.contains("termbridge-conpty-smoke"),
+            "missing ConPTY smoke marker in {output:?}"
+        );
     }
 
     #[test]

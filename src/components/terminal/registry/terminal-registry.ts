@@ -39,6 +39,13 @@ export type StatusCallback = (sessionId: string, payload: StatusEvent) => void;
 export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
 export type GetStatusCallback = (sessionId: string) => SessionStatus;
 export type RequestReconnectCallback = (sessionId: string) => void;
+export type TerminalOutputCallback = (chunk: string) => void;
+export type TerminalLifecycleEvent =
+  | Readonly<{ type: 'status'; sessionId: string; payload: StatusEvent }>
+  | Readonly<{ type: 'closed'; sessionId: string; payload: ClosedEvent }>
+  | Readonly<{ type: 'rebound'; sessionId: string; newSessionId: string }>
+  | Readonly<{ type: 'disposed'; sessionId: string }>;
+export type TerminalLifecycleCallback = (event: TerminalLifecycleEvent) => void;
 
 export interface TerminalDisplayPreferences {
   fontSize: number;
@@ -327,6 +334,10 @@ export interface TerminalController {
   detach(): void;
   focus(): void;
   simulateInput(data: string): void;
+  writeInput(data: string): Promise<void>;
+  whenOutputReady(): Promise<void>;
+  subscribeOutput(listener: TerminalOutputCallback): () => void;
+  subscribeLifecycle(listener: TerminalLifecycleCallback): () => void;
   write(chunk: string): void;
   writeDisconnectedHint(): void;
   rebindSession(sessionId: string): void;
@@ -374,6 +385,9 @@ class TerminalControllerImpl implements TerminalController {
   private outputPauseCommand: Promise<void> = Promise.resolve();
   private outputResumeRetryTimer: number | null = null;
   private outputResumeRetryAttempts = 0;
+  private readonly outputListeners = new Set<TerminalOutputCallback>();
+  private readonly lifecycleListeners = new Set<TerminalLifecycleCallback>();
+  private listenerSetup: Promise<void>;
 
   constructor(
     sessionId: string,
@@ -424,7 +438,15 @@ class TerminalControllerImpl implements TerminalController {
     });
     this.updateLinkProvider();
 
-    void this.setupListeners();
+    this.listenerSetup = this.startListenerSetup();
+  }
+
+  private startListenerSetup(): Promise<void> {
+    const setup = this.setupListeners();
+    void setup.catch((error) => {
+      logger.warn(`Failed to install terminal listeners for session ${this.sessionId}`, error);
+    });
+    return setup;
   }
 
   private handleInput(data: string): void {
@@ -435,7 +457,7 @@ class TerminalControllerImpl implements TerminalController {
         logger.debug(`Dropped input during post-reconnect grace period session=${this.sessionId}`);
         return;
       }
-      void invokeWriteSession(this.sessionId, data).catch((error) => {
+      void this.writeInput(data).catch((error) => {
         logger.error(`Failed to write input to session ${this.sessionId}`, error);
         this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
       });
@@ -587,6 +609,13 @@ class TerminalControllerImpl implements TerminalController {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
+      for (const listener of this.outputListeners) {
+        try {
+          listener(event.payload);
+        } catch (error) {
+          logger.warn(`Terminal output subscriber failed for session ${sessionId}`, error);
+        }
+      }
       appendTerminalOutput(sessionId, event.payload);
       this.writeSessionOutput(event.payload);
     });
@@ -598,6 +627,7 @@ class TerminalControllerImpl implements TerminalController {
 
     const statusUnlisten = await listenToSshStatus(sessionId, (event) => {
       logger.info(`Session ${sessionId} status: ${event.payload.status}`);
+      this.emitLifecycle({ type: 'status', sessionId, payload: event.payload });
       this.setStatus(sessionId, event.payload);
       this.writeSystemLine(formatTerminalStatusLine(event.payload.status, event.payload.message));
       if (event.payload.status === 'connected' || event.payload.status === 'error') {
@@ -612,6 +642,7 @@ class TerminalControllerImpl implements TerminalController {
 
     const closedUnlisten = await listenToSshClosed(sessionId, (event) => {
       logger.info(`Session ${sessionId} closed${event.payload.reason ? `: ${event.payload.reason}` : ''}`);
+      this.emitLifecycle({ type: 'closed', sessionId, payload: event.payload });
       this.setClosed(sessionId, event.payload);
       this.writeSystemLine(
         formatTerminalNoticeLine(t('terminal.notice.closedLabel'), event.payload.reason ? `: ${event.payload.reason}` : undefined, '31'),
@@ -641,6 +672,7 @@ class TerminalControllerImpl implements TerminalController {
       const snapshot = await invokeGetSessionStatus(sessionId);
       if (!this.disposed && generation === this.listenerGeneration && this.getStatus(sessionId) === 'connecting') {
         logger.info(`Session ${sessionId} reconciled status: ${snapshot.status}`);
+        this.emitLifecycle({ type: 'status', sessionId, payload: snapshot });
         this.setStatus(sessionId, snapshot);
         this.writeSystemLine(formatTerminalStatusLine(snapshot.status, snapshot.message));
         if (snapshot.status === 'connected' || snapshot.status === 'error') {
@@ -887,6 +919,42 @@ class TerminalControllerImpl implements TerminalController {
     this.handleInput(data);
   }
 
+  writeInput(data: string): Promise<void> {
+    if (this.disposed) {
+      return Promise.reject(new Error(`terminal controller ${this.sessionId} is disposed`));
+    }
+    if (this.getStatus(this.sessionId) !== 'connected') {
+      return Promise.reject(new Error(`terminal session ${this.sessionId} is not connected`));
+    }
+    return invokeWriteSession(this.sessionId, data);
+  }
+
+  whenOutputReady(): Promise<void> {
+    return this.listenerSetup;
+  }
+
+  subscribeOutput(listener: TerminalOutputCallback): () => void {
+    if (this.disposed) return () => {};
+    this.outputListeners.add(listener);
+    return () => this.outputListeners.delete(listener);
+  }
+
+  subscribeLifecycle(listener: TerminalLifecycleCallback): () => void {
+    if (this.disposed) return () => {};
+    this.lifecycleListeners.add(listener);
+    return () => this.lifecycleListeners.delete(listener);
+  }
+
+  private emitLifecycle(event: TerminalLifecycleEvent): void {
+    for (const listener of this.lifecycleListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        logger.warn(`Terminal lifecycle subscriber failed for session ${event.sessionId}`, error);
+      }
+    }
+  }
+
   write(chunk: string): void {
     this.terminal.write(chunk);
   }
@@ -899,6 +967,11 @@ class TerminalControllerImpl implements TerminalController {
   rebindSession(sessionId: string): void {
     if (this.disposed || sessionId === this.sessionId) return;
     const previousSessionId = this.sessionId;
+    this.emitLifecycle({
+      type: 'rebound',
+      sessionId: previousSessionId,
+      newSessionId: sessionId,
+    });
     this.clearListeners();
     this.cancelPendingResize();
     this.cancelOutputResumeRetry();
@@ -912,7 +985,7 @@ class TerminalControllerImpl implements TerminalController {
     rebindTerminalOutput(previousSessionId, sessionId);
     this.resetNoticeState();
     this.inputGraceDeadlineRef = Date.now() + RECONNECT_INPUT_GRACE_MS;
-    void this.setupListeners();
+    this.listenerSetup = this.startListenerSetup();
   }
 
   updateOptions(preferences: TerminalDisplayPreferences): void {
@@ -974,6 +1047,7 @@ class TerminalControllerImpl implements TerminalController {
     if (this.disposed) return;
     this.disposed = true;
     logger.debug(`Terminal disposed for session ${this.sessionId}`);
+    this.emitLifecycle({ type: 'disposed', sessionId: this.sessionId });
     this.cancelOutputResumeRetry();
     if (this.outputPaused) {
       this.setOutputPaused(false);
@@ -984,6 +1058,8 @@ class TerminalControllerImpl implements TerminalController {
     this.disposeWebglRenderer();
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);
+    this.outputListeners.clear();
+    this.lifecycleListeners.clear();
     this.removeFromRegistry(this.sessionId);
   }
 }

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAiStore } from '@/stores/aiStore';
+import { useTerminalStore } from '@/stores/terminalStore';
+import { registerAgentLifecycleHandlers } from '@/lib/agent-lifecycle';
 import type { AiChatMessage, AiConversation } from '@/types/ai';
 import {
   createAiStreamDeltaBatcher,
@@ -23,6 +25,7 @@ vi.mock('@/lib/tauri', () => ({
 }));
 
 import {
+  archiveTerminalAiSession,
   clearPersistedAiConversation,
   finalizeAiSessionsBeforeExit,
   flushAiSessionPersistence,
@@ -58,6 +61,7 @@ describe('AI session persistence queue', () => {
     await flushAiSessionPersistence();
     useAiStore.getState().clear();
     useAiStore.getState().upsertConversation(conversation);
+    useTerminalStore.setState({ sessions: [], activeSessionId: null });
     vi.clearAllMocks();
   });
 
@@ -137,6 +141,58 @@ describe('AI session persistence queue', () => {
     } finally {
       unregister();
       batcher.dispose();
+    }
+  });
+
+  it('awaits Agent shutdown before final exit persistence completes', async () => {
+    const shutdown = vi.fn().mockResolvedValue(undefined);
+    const unregister = registerAgentLifecycleHandlers({
+      cancelForSession: vi.fn().mockResolvedValue(undefined),
+      shutdown,
+    });
+
+    try {
+      await finalizeAiSessionsBeforeExit();
+      expect(shutdown).toHaveBeenCalledTimes(1);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('cancels the Agent lane before archiving a closed terminal conversation', async () => {
+    let finishCancellation: (() => void) | undefined;
+    const cancelForSession = vi.fn(() => new Promise<void>((resolve) => {
+      finishCancellation = resolve;
+    }));
+    const unregister = registerAgentLifecycleHandlers({
+      cancelForSession,
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'session-1',
+        title: conversation.title,
+        host: conversation.host,
+        port: conversation.port,
+        username: conversation.username,
+        status: 'connected',
+        conversationId: conversation.id,
+        conversationStartedAt: conversation.startedAt,
+      }],
+      activeSessionId: 'session-1',
+    });
+
+    try {
+      archiveTerminalAiSession('session-1');
+      expect(cancelForSession).toHaveBeenCalledWith('session-1');
+      expect(tauriMocks.archive).not.toHaveBeenCalled();
+      finishCancellation?.();
+      await vi.waitFor(() => expect(tauriMocks.archive).toHaveBeenCalledWith(
+        conversation.id,
+        conversation.startedAt,
+      ));
+    } finally {
+      unregister();
     }
   });
 });

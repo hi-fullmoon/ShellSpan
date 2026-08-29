@@ -64,6 +64,14 @@ import type {
   AiSessionMeta,
   AiStartRequest,
 } from '@/types/ai';
+import type {
+  AgentContractStatus,
+  AgentProviderCapabilityEvidence,
+  AgentStartRequest,
+  AgentStreamEvent,
+  AgentToolResult,
+  PersistedAgentRunState,
+} from '@/types/agent';
 
 const logger = createLogger('ipc');
 const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
@@ -220,6 +228,49 @@ export async function invokeStartAiRequest(request: AiStartRequest): Promise<voi
 
 export async function invokeCancelAiRequest(requestId: string): Promise<void> {
   return invokeLogged('ai_cancel_request', { requestId });
+}
+
+export async function invokeAgentContractStatus(
+  providerKind: AiProviderConfig['kind'],
+  evidence?: AgentProviderCapabilityEvidence,
+): Promise<AgentContractStatus> {
+  return invokeLogged<AgentContractStatus>('agent_contract_status', {
+    providerKind,
+    evidence,
+  });
+}
+
+export async function invokeDetectAgentProviderCapability(
+  provider: AiProviderConfig,
+): Promise<AgentProviderCapabilityEvidence> {
+  return invokeLogged<AgentProviderCapabilityEvidence>('agent_detect_provider_capability', {
+    provider,
+  });
+}
+
+export async function invokeStartAgentRequest(request: AgentStartRequest): Promise<void> {
+  return invokeLogged('agent_start_request', { request });
+}
+
+export async function invokeSubmitAgentToolResult(result: AgentToolResult): Promise<void> {
+  return invokeLogged('agent_submit_tool_result', { result });
+}
+
+export async function invokeCancelAgentRequest(requestId: string): Promise<void> {
+  return invokeLogged('agent_cancel_request', { requestId });
+}
+
+export async function invokeAppendAiSessionAgentState(
+  conversationId: string,
+  startedAt: string,
+  state: PersistedAgentRunState,
+): Promise<void> {
+  return invokeLogged('append_ai_session_agent_state', {
+    conversationId,
+    startedAt,
+    timestamp: new Date().toISOString(),
+    state,
+  });
 }
 
 export async function invokeOpenUrl(url: string): Promise<void> {
@@ -625,6 +676,14 @@ export async function listenToSessionError(
   });
 }
 
+export async function listenToAgentStream(
+  callback: EventCallback<AgentStreamEvent>,
+): Promise<UnlistenFn> {
+  return listen<AgentStreamEvent>('agent-stream', (event) => {
+    callback(event);
+  });
+}
+
 export async function listenToUploadProgress(
   operationId: string,
   callback: EventCallback<UploadProgressEvent>,
@@ -775,7 +834,7 @@ export async function invokeAppendAiSessionMessage(
 export async function invokeClearAiSessionLane(
   conversationId: string,
   startedAt: string,
-  lane: 'conversation' | 'command',
+  lane: 'conversation' | 'command' | 'agent',
 ): Promise<void> {
   return invokeLogged('clear_ai_session_lane', {
     conversationId,

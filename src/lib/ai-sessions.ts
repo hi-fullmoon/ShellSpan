@@ -12,26 +12,17 @@ import {
 import { createLogger } from '@/lib/logger';
 import { flushAiStreamDelta } from '@/lib/ai-stream-batcher';
 import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
+import {
+  enqueueAiSessionPersistence,
+  flushAiSessionPersistenceQueue,
+} from '@/lib/ai-session-persistence-queue';
+import {
+  cancelAgentForSession,
+  shutdownAgentLifecycle,
+} from '@/lib/agent-lifecycle';
+import { flushAgentSessionPersistence } from '@/lib/agent-sessions';
 
 const logger = createLogger('aiSessions');
-const persistenceQueues = new Map<string, Promise<void>>();
-
-function enqueuePersistence(
-  conversationId: string,
-  operation: () => Promise<void>,
-): Promise<void> {
-  const previous = persistenceQueues.get(conversationId) ?? Promise.resolve();
-  const next = previous.catch(() => {}).then(operation);
-  persistenceQueues.set(conversationId, next);
-  const cleanup = (): void => {
-    if (persistenceQueues.get(conversationId) === next) {
-      persistenceQueues.delete(conversationId);
-    }
-  };
-  void next.then(cleanup, cleanup);
-  return next;
-}
-
 export function conversationFromTerminal(session: TerminalSession): AiConversation | undefined {
   if (!session.conversationId || !session.conversationStartedAt) return undefined;
   return {
@@ -68,7 +59,7 @@ export async function ensureAiSessionFile(session: TerminalSession): Promise<AiC
     username: conversation.username,
   };
   useAiStore.getState().upsertConversation(conversation);
-  await enqueuePersistence(conversation.id, () => invokeCreateAiSession(meta));
+  await enqueueAiSessionPersistence(conversation.id, () => invokeCreateAiSession(meta));
   return conversation;
 }
 
@@ -82,7 +73,7 @@ export async function persistAiMessage(message: AiChatMessage): Promise<void> {
     ...message,
     content: redactTerminalSecrets(message.content),
   };
-  await enqueuePersistence(conversation.id, () => (
+  await enqueueAiSessionPersistence(conversation.id, () => (
     invokeAppendAiSessionMessage(conversation.id, conversation.startedAt, redactedMessage)
   ));
   const latestConversation = useAiStore
@@ -97,20 +88,20 @@ export async function persistAiMessage(message: AiChatMessage): Promise<void> {
 export async function clearPersistedAiConversation(
   conversationId: string,
   startedAt: string,
-  lane: 'conversation' | 'command',
+  lane: 'conversation' | 'command' | 'agent',
 ): Promise<void> {
-  return enqueuePersistence(conversationId, () => (
+  return enqueueAiSessionPersistence(conversationId, () => (
     invokeClearAiSessionLane(conversationId, startedAt, lane)
   ));
 }
 
 export async function flushAiSessionPersistence(): Promise<void> {
-  while (persistenceQueues.size > 0) {
-    await Promise.allSettled([...persistenceQueues.values()]);
-  }
+  await flushAiSessionPersistenceQueue();
 }
 
 export async function finalizeAiSessionsBeforeExit(): Promise<void> {
+  await shutdownAgentLifecycle();
+  await flushAgentSessionPersistence();
   const ai = useAiStore.getState();
   const requestId = ai.activeRequestId;
   if (requestId) {
@@ -138,6 +129,11 @@ export function archiveTerminalAiSession(sessionId: string): void {
   if (!session?.conversationId || !session.conversationStartedAt) return;
   const conversationId = session.conversationId;
   const conversationStartedAt = session.conversationStartedAt;
+  const agentFinalization = cancelAgentForSession(sessionId)
+    .then(() => flushAgentSessionPersistence())
+    .catch((error) => {
+      logger.warn('Failed to finalize Agent task for closed terminal', error);
+    });
 
   const ai = useAiStore.getState();
   const activeRequestId = ai.activeRequestId;
@@ -164,8 +160,8 @@ export function archiveTerminalAiSession(sessionId: string): void {
   }
 
   ai.archiveConversation(conversationId);
-  void enqueuePersistence(conversationId, () => (
+  void agentFinalization.then(() => enqueueAiSessionPersistence(conversationId, () => (
     invokeArchiveAiSession(conversationId, conversationStartedAt)
-  ))
+  )))
     .catch((error) => logger.warn('Failed to archive AI session', error));
 }
