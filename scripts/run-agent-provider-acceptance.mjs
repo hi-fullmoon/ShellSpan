@@ -13,7 +13,6 @@ function run(command, args, env = process.env) {
     cwd: workspace,
     env,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
   });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} exited with status ${result.status}`);
@@ -23,8 +22,8 @@ function requireLocalModel(model) {
   const result = spawnSync('ollama', ['show', model], {
     cwd: workspace,
     stdio: 'ignore',
-    shell: process.platform === 'win32',
   });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`Ollama model ${model} is not installed; pull it explicitly before live acceptance`);
   }

@@ -3007,9 +3007,13 @@ mod tests {
         let status = child.wait().expect("wait for the native shell");
 
         assert!(status.success());
-        assert!(output.contains("\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN\u{1f}"));
+        assert!(output.contains(
+            "\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN\u{1f}"
+        ));
         assert!(output.contains("macos-shell-protocol"));
-        assert!(output.contains("\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:1\u{1f}"));
+        assert!(output.contains(
+            "\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:1\u{1f}"
+        ));
     }
 
     #[cfg(target_os = "windows")]

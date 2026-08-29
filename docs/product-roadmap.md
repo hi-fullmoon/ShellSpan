@@ -1,7 +1,7 @@
 # TermBridge 产品路线图
 
 > 基线版本：v2.0.55
-> 更新日期：2026-08-28
+> 更新日期：2026-08-29
 > 当前主线：Codex 风格的可控终端 Agent
 > 规划方式：以退出条件驱动的滚动路线图，版本号表示目标主题，不承诺固定发布日期。
 
@@ -487,6 +487,8 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 
 ### M6 — 安全与兼容性验收
 
+状态：未完成（2026-08-29 收口复核；等待真实 Windows runner 与 OpenAI Responses 现场证据）。
+
 交付：
 
 - Prompt Injection、命令注入、审批绕过、目标混淆和秘密泄漏测试。
@@ -495,6 +497,38 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - 前端构建、Vitest、Rust 测试和人工 SSH E2E。
 
 退出条件：第 12 节全部验收场景通过，无 P0/P1 已知缺陷。
+
+收口复核：
+
+- 基线提交为 `05fa6b3`，保存的 M6 WIP 为 `2378dd6`。复核确认迟到或重叠 `toolCall` 在进入完全访问执行路径前 fail-closed；终端文本不能伪造结构化审计类别；引号包围且包含空白、shell 标点的秘密会在模型与持久化边界前脱敏；兼容提供商探测只有收到指定结构化探测调用才为 `supported`，截断或无明确证据的响应为 `unknown` 并安全降级。
+- 缺陷分级为 P0 0、P1 0、P2 0、P3 3，P3 已全部关闭：Windows 验收帮助脚本不再通过 shell 解释子进程参数；SSH E2E 在 Compose `up` 部分失败后也会清理项目；WIP 中未通过 rustfmt 的两处测试代码已标准化。没有剩余已知代码缺陷。
+
+第 12 节逐项证据：
+
+| 场景 | 结论 | 证据 |
+| --- | --- | --- |
+| 12.1 服务重启 | 通过（自动化与隔离 SSH） | 三档权限矩阵覆盖逐条审批、只读自动批准和完全访问；Rust 结构化工具循环完成“检查→重启→验证”；隔离 SSH mock service 验证 `inactive→restart accepted→active` 且重启计数严格为 1。 |
+| 12.2 执行失败 | 通过（自动化与隔离 SSH） | 非零退出码不会得到完成状态；结构化失败结果仍可进入下一轮诊断；系统提示禁止索取或输入秘密；隔离 SSH 的 root-only 读取失败且错误结果不泄露受保护内容。 |
+| 12.3 目标隔离 | 通过（自动化与隔离 SSH） | 标签切换继续写入冻结会话；断线、控制器替换、同主机不同 `sessionId`、配置身份漂移均 fail-closed；隔离 SSH 身份漂移探测确认不会连接旧目标或跳板。 |
+| 12.4 停止与超时 | 通过（自动化与隔离 SSH） | 停止与超时向同一 PTY 发送 Ctrl-C，同时取消模型请求与工具等待；首个终态胜出，UI、快照和审计收敛；隔离 SSH 覆盖取消、超时和迟到结果。 |
+| 12.5 提供商降级 | 通过（契约与本机现场） | `unsupported` / `unknown` 只产生显式 `generateCommand` 降级且不暴露工具；普通文本与 Markdown 从不自动执行；本机 `smollm:135m` 现场验证无 tools 降级。 |
+| 12.6 恶意输出 | 通过（自动化与隔离 SSH） | 伪造工具调用、`APPROVED` 与“忽略规则”只作为不可信输出；带真实退出码的恶意文本不能污染审计类别；密码、token、私钥及带引号秘密在模型/落盘前脱敏。 |
+
+平台与提供商证据：
+
+| 验收项 | 结论 | 2026-08-29 证据 |
+| --- | --- | --- |
+| macOS zsh / PTY | 通过（现场） | macOS 26.6.2 arm64 上原生 `/bin/zsh` 生产 wrapper、ANSI/引号秘密/非零退出码通过；`portable-pty` 原生 PTY 的生产边界协议通过。 |
+| Windows PowerShell / ConPTY | **未执行** | 本机不是 Windows，不能把条件跳过或模拟算作现场通过。可执行门禁已落入 `quality-gate.yml` 的 `windows-2025` 矩阵：全量 Vitest 会运行原生 PowerShell wrapper 测试，Rust 全量测试会运行原生 ConPTY smoke；需取得真实 runner 成功结果后补证。 |
+| Ollama 原生 tools | 通过（现场） | 本机 Ollama `qwen3:0.6b` 经 `/api/show` tools 元数据、`/api/chat` 结构化调用、工具结果回放和最终总结通过。 |
+| Chat Completions tools | 通过（现场） | 同一本机 `qwen3:0.6b` 经 Ollama `/v1/chat/completions` 完成强制能力探测、结构化调用、结果回放和总结；探测预算为 256 tokens，无明确结构化证据时保持 `unknown`。 |
+| 无 tools 降级 | 通过（现场） | 本机 Ollama `smollm:135m` 元数据判定 `unsupported`，只返回无工具的生成命令降级文本，没有 `toolCall`。 |
+| OpenAI Responses | **未执行** | 环境中没有 `TERMBRIDGE_M6_OPENAI_LIVE`、模型配置或 `OPENAI_API_KEY`；按安全凭证前置条件未发起现场请求。Responses SSE、完整 output item 回放与 function output 的非现场契约测试通过，但不能替代现场证据。 |
+| 隔离 SSH/SFTP | 通过（现场） | `pnpm test:e2e:ssh` 单次构建镜像供目标与跳板复用，10/10 通过并在结束后删除容器、卷与 Compose 网络。 |
+
+本轮验证：`pnpm test:agent:security` 为 103/103；平台 Vitest 在 macOS 为 1 通过、Windows 1 条件跳过，Rust 原生平台命令为 3/3；提供商非现场定向测试为 17 通过、4 个现场用例按标记忽略，随后 Ollama tools、无 tools 和 Chat Completions 三个现场用例分别通过；SSH E2E 为 10/10。全量 `pnpm test` 为 145 个文件、1266 通过、1 个 Windows 条件跳过；`pnpm build` 成功（仅既有 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked` 为 354 通过、15 个显式环境用例忽略；Clippy `-D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
+
+退出判断：第 12 节自动化与本机/隔离 SSH 场景通过，且无 P0/P1 已知缺陷；但交付清单和第 13 节同时要求 OpenAI 与 Windows 关键链路的明确行为/真实验证，而上述两项现场证据仍缺失。因此 M6 **不得标记完成**，第 13 节复选框保持未勾选，也不允许开始 M7。
 
 ### M7 — 分阶段开放
 
