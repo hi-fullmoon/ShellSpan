@@ -333,6 +333,7 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
   const variable = (name: string): string => `$__tb_${name}_${nonce}`;
   const markerVar = variable('marker');
   const commandVar = variable('command');
+  const scriptVar = variable('script');
   const exitVar = variable('exit');
   const okVar = variable('ok');
   const pagerHadVar = variable('pager_had');
@@ -356,7 +357,8 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
     `Write-Host (-join ([char]30,${markerVar},':BEGIN',[char]31))`,
     `$env:PAGER='cat'; $env:GIT_PAGER='cat'; $env:SYSTEMD_PAGER='cat'`,
     '$global:LASTEXITCODE=$null',
-    `Invoke-Expression ${commandVar}`,
+    `${scriptVar}=[ScriptBlock]::Create(${commandVar})`,
+    `. ${scriptVar}`,
     `${okVar}=$?`,
     `${exitVar}=if (${okVar}) { 0 } elseif ($null -ne $global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 1 }`,
     restore('PAGER', pagerHadVar, pagerValueVar),
@@ -367,6 +369,7 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
     `Remove-Variable ${[
       markerVar,
       commandVar,
+      scriptVar,
       exitVar,
       okVar,
       pagerHadVar,

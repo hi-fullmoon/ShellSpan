@@ -219,6 +219,10 @@ describe('Agent M2 command wrapper and local blocking', () => {
       expect(wrapper).not.toContain(boundary.endPrefix);
       expect(wrapper).toContain(boundary.marker.slice(0, Math.floor(boundary.marker.length / 2)));
       expect(wrapper).toContain(boundary.marker.slice(Math.floor(boundary.marker.length / 2)));
+      if (shell === 'powershell') {
+        expect(wrapper).toContain('[ScriptBlock]::Create(');
+        expect(wrapper).not.toContain('Invoke-Expression');
+      }
     },
   );
 
