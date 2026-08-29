@@ -1062,8 +1062,6 @@ export default {
   'ai.suggestion.troubleshoot': '排查 SSH 连接失败',
   'ai.suggestion.healthCheck': '生成系统巡检命令',
   'ai.insertCommand': '插入终端',
-  'ai.commandReviewRequired': '命令需要人工审核',
-  'ai.commandReviewRequiredDescription': 'TermBridge 无法确认这是一条受约束的只读命令，因此不会将其插入终端。复制或使用前，请仔细检查它的影响。',
   'ai.conversation': 'AI 对话记录',
   'ai.history': '历史对话',
   'ai.history.current': '当前终端',
