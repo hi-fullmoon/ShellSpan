@@ -19,7 +19,7 @@ export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'history' | 'monitor' | 'logs' | 'settings';
-export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts';
+export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental';
 export type PetdexConnectionStatus =
   | 'notDetected'
   | 'connected'

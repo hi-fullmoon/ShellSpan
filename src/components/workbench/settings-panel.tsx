@@ -94,13 +94,14 @@ const SETTINGS_SECTIONS: { id: SettingsSection; titleKey: LocaleKey }[] = [
   { id: 'sftp', titleKey: 'settings.sftp.title' },
   { id: 'ai', titleKey: 'settings.ai.title' },
   { id: 'shortcuts', titleKey: 'settings.shortcuts.title' },
+  { id: 'experimental', titleKey: 'settings.experimental.title' },
 ];
 
 const PETDEX_STATUS_LABEL_KEYS: Record<PetdexConnectionStatus, LocaleKey> = {
-  notDetected: 'settings.appearance.petdex.status.notDetected',
-  connected: 'settings.appearance.petdex.status.connected',
-  notRunning: 'settings.appearance.petdex.status.notRunning',
-  connectionError: 'settings.appearance.petdex.status.connectionError',
+  notDetected: 'settings.experimental.petdex.status.notDetected',
+  connected: 'settings.experimental.petdex.status.connected',
+  notRunning: 'settings.experimental.petdex.status.notRunning',
+  connectionError: 'settings.experimental.petdex.status.connectionError',
 };
 
 interface SettingRowProps {
@@ -382,17 +383,24 @@ export const SettingsPanel: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </SettingRow>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="experimental" className="w-full">
+              <div>
+                <div className="px-3 pb-2 pt-1">
+                  <p className="text-xs text-muted-foreground">{t('settings.experimental.description')}</p>
+                </div>
                 <Separator className="data-horizontal:border-border/40" />
-                <SettingGroupLabel>{t('settings.appearance.experimental')}</SettingGroupLabel>
                 <SettingRow
-                  label={t('settings.appearance.petdex.title')}
-                  description={t('settings.appearance.petdex.description')}
+                  label={t('settings.experimental.petdex.title')}
+                  description={t('settings.experimental.petdex.description')}
                   labelId="petdex-integration-label"
                   descriptionId="petdex-integration-description"
                 >
                   <div className="flex justify-end">
                     <Switch
-                      aria-label={t('settings.appearance.petdex.enabled')}
+                      aria-label={t('settings.experimental.petdex.enabled')}
                       aria-describedby="petdex-integration-description petdex-privacy-description"
                       checked={petdexEnabled}
                       onCheckedChange={handlePetdexEnabledChange}
@@ -401,15 +409,15 @@ export const SettingsPanel: React.FC = () => {
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
-                  label={t('settings.appearance.petdex.status')}
-                  description={t('settings.appearance.petdex.privacy')}
+                  label={t('settings.experimental.petdex.status')}
+                  description={t('settings.experimental.petdex.privacy')}
                   labelId="petdex-status-label"
                   descriptionId="petdex-privacy-description"
                 >
                   <div
                     className="flex items-center justify-end gap-2"
                     role="status"
-                    aria-label={t('settings.appearance.petdex.statusAnnouncement', {
+                    aria-label={t('settings.experimental.petdex.statusAnnouncement', {
                       status: t(PETDEX_STATUS_LABEL_KEYS[petdexStatus]),
                     })}
                     aria-live="polite"
@@ -434,15 +442,15 @@ export const SettingsPanel: React.FC = () => {
                       onClick={() => void handleTestPetdex()}
                     >
                       {testingPetdex
-                        ? t('settings.appearance.petdex.testing')
-                        : t('settings.appearance.petdex.testAction')}
+                        ? t('settings.experimental.petdex.testing')
+                        : t('settings.experimental.petdex.testAction')}
                     </Button>
                   </div>
                 </SettingRow>
                 <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
-                  label={t('settings.appearance.petdex.feedback')}
-                  description={t('settings.appearance.petdex.feedbackDescription')}
+                  label={t('settings.experimental.petdex.feedback')}
+                  description={t('settings.experimental.petdex.feedbackDescription')}
                   descriptionId="petdex-feedback-description"
                 >
                   <div className="flex justify-end">
@@ -453,7 +461,7 @@ export const SettingsPanel: React.FC = () => {
                       aria-describedby="petdex-feedback-description"
                       onClick={() => void openPetdexPhase3Feedback()}
                     >
-                      {t('settings.appearance.petdex.feedbackAction')}
+                      {t('settings.experimental.petdex.feedbackAction')}
                       <ExternalLinkIcon data-icon="inline-end" />
                     </Button>
                   </div>

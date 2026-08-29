@@ -65,15 +65,19 @@ describe('SettingsPanel', () => {
     await waitFor(() => {});
 
     expect(screen.getByText('workbench.settings.title')).toBeInTheDocument();
-    for (const titleKey of [
-      'settings.appearance.title',
+    const sectionTitleKeys = [
       'settings.general.title',
+      'settings.appearance.title',
       'settings.terminal.title',
       'settings.sftp.title',
+      'settings.ai.title',
       'settings.shortcuts.title',
-    ]) {
+      'settings.experimental.title',
+    ];
+    for (const titleKey of sectionTitleKeys) {
       expect(screen.getByRole('tab', { name: titleKey })).toBeInTheDocument();
     }
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(sectionTitleKeys);
 
     // General is the default section.
     expect(screen.getByText('settings.general.update')).toBeInTheDocument();
@@ -94,27 +98,31 @@ describe('SettingsPanel', () => {
     expect(
       screen.getByRole('combobox', { name: 'settings.appearance.language' }),
     ).toHaveTextContent('locale.zh-CN');
-    expect(screen.getByText('settings.appearance.petdex.title')).toBeInTheDocument();
+    expect(screen.queryByText('settings.experimental.petdex.title')).not.toBeInTheDocument();
+
+    openSection('settings.experimental.title');
+    expect(screen.getByText('settings.experimental.description')).toBeInTheDocument();
+    expect(screen.getByText('settings.experimental.petdex.title')).toBeInTheDocument();
     expect(screen.getByRole('switch', {
-      name: 'settings.appearance.petdex.enabled',
+      name: 'settings.experimental.petdex.enabled',
     })).not.toBeChecked();
     expect(screen.getByRole('button', {
-      name: 'settings.appearance.petdex.testAction',
+      name: 'settings.experimental.petdex.testAction',
     })).toBeDisabled();
     expect(screen.getByRole('switch', {
-      name: 'settings.appearance.petdex.enabled',
+      name: 'settings.experimental.petdex.enabled',
     })).toHaveAttribute(
       'aria-describedby',
       'petdex-integration-description petdex-privacy-description',
     );
     expect(screen.getByRole('status', {
-      name: 'settings.appearance.petdex.statusAnnouncement',
+      name: 'settings.experimental.petdex.statusAnnouncement',
     })).toHaveAttribute('aria-live', 'polite');
     expect(screen.getByRole('status', {
-      name: 'settings.appearance.petdex.statusAnnouncement',
+      name: 'settings.experimental.petdex.statusAnnouncement',
     })).toHaveAttribute('aria-atomic', 'true');
     expect(screen.getByRole('button', {
-      name: 'settings.appearance.petdex.feedbackAction',
+      name: 'settings.experimental.petdex.feedbackAction',
     })).toHaveAttribute('aria-describedby', 'petdex-feedback-description');
     expect(petdexFeedbackMocks.open).not.toHaveBeenCalled();
 
@@ -147,9 +155,9 @@ describe('SettingsPanel', () => {
 
   it('persists the opt-in and exposes a user-triggered test result', async () => {
     render(<SettingsPanel />);
-    openSection('settings.appearance.title');
+    openSection('settings.experimental.title');
     const toggle = screen.getByRole('switch', {
-      name: 'settings.appearance.petdex.enabled',
+      name: 'settings.experimental.petdex.enabled',
     });
 
     fireEvent.click(toggle);
@@ -157,31 +165,31 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().petdexEnabled).toBe(true);
     expect(petdexMocks.configure).toHaveBeenCalledWith(true);
     const testButton = screen.getByRole('button', {
-      name: 'settings.appearance.petdex.testAction',
+      name: 'settings.experimental.petdex.testAction',
     });
     expect(testButton).toBeEnabled();
 
     fireEvent.click(testButton);
 
-    expect(await screen.findByText('settings.appearance.petdex.status.connected')).toBeInTheDocument();
+    expect(await screen.findByText('settings.experimental.petdex.status.connected')).toBeInTheDocument();
     expect(petdexMocks.testConnection).toHaveBeenCalledTimes(1);
 
     fireEvent.click(toggle);
     expect(useAppStore.getState().petdexEnabled).toBe(false);
     expect(petdexMocks.configure).toHaveBeenLastCalledWith(false);
     expect(testButton).toBeDisabled();
-    expect(screen.getByText('settings.appearance.petdex.status.notDetected')).toBeInTheDocument();
+    expect(screen.getByText('settings.experimental.petdex.status.notDetected')).toBeInTheDocument();
   });
 
   it('opens voluntary feedback only after a user action and without reading the opt-in state', async () => {
     render(<SettingsPanel />);
-    openSection('settings.appearance.title');
+    openSection('settings.experimental.title');
 
     expect(useAppStore.getState().petdexEnabled).toBe(false);
     expect(petdexFeedbackMocks.open).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', {
-      name: 'settings.appearance.petdex.feedbackAction',
+      name: 'settings.experimental.petdex.feedbackAction',
     }));
 
     expect(petdexFeedbackMocks.open).toHaveBeenCalledTimes(1);
