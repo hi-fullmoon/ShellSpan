@@ -3169,18 +3169,12 @@ mod tests {
                 .map_err(|error| error.to_string());
             let _ = output_tx.send(result);
         });
-        let (write_tx, write_rx) = std::sync::mpsc::channel();
-        thread::spawn(move || {
-            let result = writer
-                .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
-                .and_then(|_| writer.flush())
-                .map_err(|error| error.to_string());
-            let _ = write_tx.send(result);
-        });
-        write_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("write the PowerShell ConPTY commands before the deadline")
+        writer
+            .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
             .expect("write deterministic commands to the PowerShell ConPTY");
+        writer
+            .flush()
+            .expect("flush deterministic commands to the PowerShell ConPTY");
 
         let deadline = Instant::now() + Duration::from_secs(15);
         let status = loop {
@@ -3195,6 +3189,9 @@ mod tests {
         };
 
         assert_eq!(status.exit_code(), 7);
+        // Keep the input writer alive until the explicit `exit 7`; dropping it earlier makes
+        // ConPTY terminate interactive PowerShell with STATUS_CONTROL_C_EXIT (0xC000013A).
+        drop(writer);
         // Closing the ConPTY master releases the reader EOF after the child has exited.
         drop(pair.master);
         let output = output_rx
