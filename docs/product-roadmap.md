@@ -503,7 +503,7 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 收口复核：
 
 - 基线提交为 `05fa6b3`，保存的 M6 WIP 为 `2378dd6`，detached 最终提交 `a6b340d` 已接回 M6 分支并累计集成于 `8f7ad72`；真实 Windows 收口修复完成于 `11dbb1d`。复核确认迟到或重叠 `toolCall` 在进入完全访问执行路径前 fail-closed；终端文本不能伪造结构化审计类别；引号包围且包含空白、shell 标点的秘密会在模型与持久化边界前脱敏；兼容提供商探测只有收到指定结构化探测调用才为 `supported`，截断或无明确证据的响应为 `unknown` 并安全降级。
-- 累计缺陷分级为 P0 0、P1 2、P2 1、P3 7。P1 2 项、P2 1 项与 P3 6 项已关闭：P1 为 PowerShell 生产 wrapper 退出码丢失与 ConPTY 错用 Win32 input mode 导致前端 VT 输入不兼容；P2 为异步 locale 切换在高并发测试下不触发重渲染；已关闭 P3 包含 Windows 验收脚本参数边界、SSH E2E 失败清理、WIP rustfmt、macOS Petdex 接受流的非阻塞状态、ConPTY 测试生命周期边界和 Windows 测试模块导入。剩余 1 项 P3 是 [`main` 合并后 run 33234155897](https://github.com/hi-fullmoon/TermBridge/actions/runs/33234155897) 的全量 Vitest 高负载下原生 PowerShell 验收夹具触发固定 10 秒超时，已按 2026-08-29 产品授权接受风险并延期；它不否定两次真实 Windows 成功证据，也不构成 P0/P1 发布阻塞。
+- 累计缺陷分级为 P0 0、P1 2、P2 1、P3 7，现已全部关闭：P1 为 PowerShell 生产 wrapper 退出码丢失与 ConPTY 错用 Win32 input mode 导致前端 VT 输入不兼容；P2 为异步 locale 切换在高并发测试下不触发重渲染；P3 包含 Windows 验收脚本参数边界、SSH E2E 失败清理、WIP rustfmt、macOS Petdex 接受流的非阻塞状态、ConPTY 测试生命周期边界、Windows 测试模块导入，以及 [`main` 合并后 run 33234155897](https://github.com/hi-fullmoon/TermBridge/actions/runs/33234155897) 暴露的全量 Vitest 高负载下原生 PowerShell 验收夹具固定 10 秒超时。最后一项曾按 2026-08-29 产品授权接受风险并延期，现已由下述阶段一独立收口关闭。
 - 产品例外决策：环境无 OpenAI API key，且不为验收获取或替代凭证。2026-08-29 产品授权明确豁免 OpenAI Responses 现场请求；豁免不改写为“现场通过”，非现场 SSE、完整 output item 回放、`function_call_output` 和安全降级契约测试仍作为明确行为证据。
 
 第 12 节逐项证据：
@@ -554,9 +554,18 @@ Agent 作为 v2.1 的单一主线交付，不发布只有“自动回车”而�
 - `src/components/ai/ai-settings-section.tsx` 使用现有 shadcn Card、Field、Switch、AlertDialog、Badge 与 Button 提供公开管理入口：显示当前发布阶段、启用/关闭 Agent、解释高权限非默认和 Preview 本地数据范围、查看按 Agent 分类筛选的操作历史，以及确认后清理所有本地 conversation 的 Agent lane。关闭与清理都会先取消并等待活动任务收敛、刷新 Agent 快照，再清除会话；普通问答和生成命令数据不受影响。zh-CN / en-US 文案与组件测试覆盖这些入口和键盘可访问的语义控件。
 - Preview 退出门禁采用本任务窗口内的可重复自动化验收，不声称存在远程遥测或外部 cohort 数据：三档权限、结构化调用、审批竞态、目标漂移/迟到工具调用、重启恢复、嵌套秘密脱敏和本地审计回归均通过，新增用例确认关闭后不能启动或重试、兼容性记录按协议去重、未知失败仍归入受控类别、Preview 记录不含提示词/模型标识/目标描述/输出。未发现未经批准执行、跨会话执行或秘密持久化事件。
 - 定向验证：`pnpm test:agent:security` 为 8 个文件、107 项通过；M7 设置、AI 面板、历史筛选与偏好同步回归为 4 个文件、51 项通过；Rust 发布策略 10 项、操作历史 7 项以及关闭/注册竞态 1 项通过。全量验证：`pnpm test` 为 152 个文件、1296 项通过、1 项平台条件跳过；`pnpm build` 成功（仅既有 Vite 500 kB chunk 提示）；`cargo test --manifest-path src-tauri/Cargo.toml --locked` 为 373 项单元测试与 5 项 Petdex 契约探针通过、16 项需显式现场环境的测试按既有标记忽略；`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings`、rustfmt、独立 TypeScript 和 `git diff --check` 均通过。
-- M6 已接受的例外保持原样：本轮没有 OpenAI API key，未发起 OpenAI Responses 现场请求，其结论仍是产品授权“豁免（现场未执行）”而非现场通过；没有修复或重跑合并后 Windows 全量 Vitest 的原生 PowerShell 固定 10 秒超时，延期 P3 风险继续保留。
+- M6 已接受的 OpenAI 例外保持原样：本轮没有 OpenAI API key，未发起 OpenAI Responses 现场请求，其结论仍是产品授权“豁免（现场未执行）”而非现场通过。M7 本轮当时没有修复或重跑合并后 Windows 全量 Vitest 的原生 PowerShell 固定 10 秒超时；该延期 P3 后续已由下述阶段一独立收口关闭。
 
 退出判断：本任务窗口完成 Internal、Preview、Stable 策略、公开管理入口与本地诊断闭环；Preview 自动化验收中上述三类发布阻断事件均为 0，M7 标记完成。实际后续 Preview 数据仍应按第 17 节维护规则记录偏差，不会自动扩张为后续候选承诺。
+
+### 阶段一 — Windows 高负载原生 PowerShell 夹具收口
+
+状态：已关闭（2026-08-29）。
+
+- 根因限定在 `src/lib/__tests__/agent-platform-acceptance.test.ts` 的测试夹具：它从 `spawn()` 起使用不可续期的固定 10 秒墙钟，并以两个互不关联的定时器写入、关闭 stdin；在全量 Vitest 的 Windows 高负载调度下，即使子进程已启动、stdin 已接收或 stdout/stderr 正在产生有效协议进度，夹具仍会在总墙钟到点时误报超时。生产 PowerShell wrapper、ConPTY、退出码、取消和安全边界没有参与该故障，也未作修改。
+- 修复把原有 10 秒限制改为进度感知的 idle deadline：进程启动、完整 stdin 提交和每个 stdout/stderr 数据块都会刷新 idle deadline；另保留不可由进度刷新的 30 秒 hard deadline，超时仍终止子进程。stdin 只在 Node 确认完整写入已接收后关闭，消除固定 50 毫秒 EOF 竞态；原生 wrapper 的非零退出码 7、捕获内容、秘密文本和唯一边界标记断言全部保留。
+- 新增确定性 fake-timer 回归，分别证明有效进度会刷新 idle deadline，以及持续进度不能延长 hard deadline。Windows 定向文件连续 5 轮均为 3 项通过、1 项 macOS 条件跳过；高负载全量 `pnpm test -- --reporter=dot --silent` 为 153 个文件、1311 项通过、1 项平台条件跳过，耗时 359.92 秒；`pnpm build` 成功，仅有既有的 500 kB chunk 提示。
+- `pnpm test:agent:platform` 的 Vitest/原生 PowerShell 部分为 3 项通过、1 项 macOS 条件跳过；随后 Cargo `real_` 在执行测试前被本机 `x86_64-pc-windows-gnu`、Windows 原生 Perl 与 vendored OpenSSL 的冷编译环境组合阻断。该环境问题不在阶段一代码范围，Rust 生产代码本轮零修改；同一 Windows 主机的主工作区此前已通过该门禁中的 2 个 `real_` 测试，真实 Windows/ConPTY 证据继续有效。
 
 ## 11. 测试矩阵
 
@@ -632,7 +641,7 @@ Agent 首发只有同时满足以下条件才算完成：
 - [x] 每个真实命令都有本地操作记录。
 - [x] OpenAI、兼容提供商、Ollama 和无工具模型都有明确行为（OpenAI Responses 现场请求按 2026-08-29 产品授权豁免）。
 - [x] Windows 与 macOS 关键链路通过验证。
-- [x] 全量前端、Rust 和 SSH E2E 测试通过（以 [PR head 全绿 run 33233730312](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233730312) 为证据；合并后 Windows 夹具超时已作 P3 风险接受）。
+- [x] 全量前端、Rust 和 SSH E2E 测试通过（以 [PR head 全绿 run 33233730312](https://github.com/hi-fullmoon/TermBridge/actions/runs/33233730312) 为证据；合并后 Windows 夹具超时 P3 已由阶段一独立收口关闭）。
 - [x] 不存在未经批准执行、跨会话执行或自动恢复完全访问权限的已知缺陷。
 
 ## 14. 首发不进入范围
