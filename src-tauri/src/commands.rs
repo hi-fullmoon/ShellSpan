@@ -3162,12 +3162,21 @@ mod tests {
 
         let (output_tx, output_rx) = std::sync::mpsc::channel();
         thread::spawn(move || {
-            let mut output = String::new();
-            let result = reader
-                .read_to_string(&mut output)
-                .map(|_| output)
-                .map_err(|error| error.to_string());
-            let _ = output_tx.send(result);
+            let mut chunk = [0_u8; 4096];
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        if output_tx.send(Ok(chunk[..count].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = output_tx.send(Err(error.to_string()));
+                        break;
+                    }
+                }
+            }
         });
         writer
             .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
@@ -3189,14 +3198,29 @@ mod tests {
             }
         };
 
+        let output_deadline = Instant::now() + Duration::from_secs(5);
+        let mut output_bytes = Vec::new();
+        loop {
+            if String::from_utf8_lossy(&output_bytes).contains("termbridge-conpty-smoke") {
+                break;
+            }
+            let remaining = output_deadline
+                .checked_duration_since(Instant::now())
+                .expect("read the PowerShell ConPTY output before the deadline");
+            let chunk = output_rx
+                .recv_timeout(remaining)
+                .expect("read the PowerShell ConPTY output before the deadline")
+                .expect("read deterministic PowerShell ConPTY output");
+            output_bytes.extend_from_slice(&chunk);
+        }
         drop(pair.master);
-        let output = output_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("read the PowerShell ConPTY output before the deadline")
-            .expect("read deterministic PowerShell ConPTY output");
+        let output = String::from_utf8_lossy(&output_bytes);
 
-        assert!(!status.success());
-        assert!(output.contains("termbridge-conpty-smoke"));
+        assert_eq!(status.exit_code(), 7);
+        assert!(
+            output.contains("termbridge-conpty-smoke"),
+            "missing ConPTY smoke marker in {output:?}"
+        );
     }
 
     #[test]
