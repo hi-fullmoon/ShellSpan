@@ -2851,6 +2851,133 @@ mod tests {
     }
 
     #[test]
+    fn minimax_chat_completions_preserves_cumulative_assistant_message_and_tool_replay() {
+        let events: Arc<dyn AgentEventSink> = Arc::new(RecordingEvents::default());
+        let mut previous = String::new();
+        let mut text = String::new();
+        let mut calls = BTreeMap::new();
+        let mut completed = false;
+        for event in [
+            json!({
+                "choices": [{
+                    "delta": {
+                        "content": "<think>Select the required tool.</think>",
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "minimax-call-1",
+                            "function": {
+                                "name": "run_terminal",
+                                "arguments": "{\"command\":\"printf termbridge"
+                            }
+                        }]
+                    },
+                    "finish_reason": null
+                }]
+            }),
+            json!({
+                "choices": [{
+                    "delta": {
+                        "content": "<think>Select the required tool.</think>",
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "minimax-call-1",
+                            "function": {
+                                "name": "run_terminal_command",
+                                "arguments": "{\"command\":\"printf termbridge-live-provider-ok\",\"explanation\":\"Verify MiniMax tool replay\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+        ] {
+            process_chat_event(
+                &format!("data: {event}"),
+                "request-minimax",
+                1,
+                &events,
+                true,
+                &mut previous,
+                &mut text,
+                &mut calls,
+                &mut completed,
+            )
+            .unwrap();
+        }
+
+        let parsed = build_chat_streamed_turn(text, calls, true).unwrap();
+        assert!(completed);
+        assert_eq!(
+            parsed.assistant_text,
+            "<think>Select the required tool.</think>"
+        );
+        assert_eq!(
+            parsed.assistant_message,
+            json!({
+                "role": "assistant",
+                "content": "<think>Select the required tool.</think>",
+                "tool_calls": [{
+                    "id": "minimax-call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "run_terminal_command",
+                        "arguments": "{\"command\":\"printf termbridge-live-provider-ok\",\"explanation\":\"Verify MiniMax tool replay\"}"
+                    }
+                }]
+            })
+        );
+        assert_eq!(
+            parse_tool_arguments(&parsed.tool_calls[0]).unwrap(),
+            RunTerminalCommandArguments {
+                command: "printf termbridge-live-provider-ok".to_string(),
+                explanation: "Verify MiniMax tool replay".to_string(),
+            }
+        );
+
+        let mut backend = HttpAgentBackend::new(
+            AiProviderConfig {
+                id: "minimax-live".to_string(),
+                kind: AiProviderKind::OpenAiCompatible,
+                base_url: "https://api.minimaxi.com".to_string(),
+                model: "MiniMax-M2.7".to_string(),
+                requires_api_key: true,
+                api_key: Some("minimax-test-key".to_string()),
+            },
+            Some("minimax-test-key".to_string()),
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(provider_uses_cumulative_content(&backend.provider));
+        backend.history.push(parsed.assistant_message);
+        backend
+            .push_tool_result(
+                &parsed.tool_calls[0],
+                &AgentToolResult {
+                    request_id: "request-minimax".to_string(),
+                    call_id: "termbridge-call-1".to_string(),
+                    status: AgentToolResultStatus::Completed,
+                    exit_code: Some(0),
+                    output: "termbridge-live-provider-ok".to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            backend.history[1].get("role").and_then(Value::as_str),
+            Some("tool")
+        );
+        assert_eq!(
+            backend.history[1]
+                .get("tool_call_id")
+                .and_then(Value::as_str),
+            Some("minimax-call-1")
+        );
+        assert!(backend.history[1]
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| content.contains("termbridge-live-provider-ok")));
+    }
+
+    #[test]
     fn openai_responses_replays_complete_output_items_before_function_output() {
         let events: Arc<dyn AgentEventSink> = Arc::new(RecordingEvents::default());
         let mut text = String::new();
@@ -3202,7 +3329,9 @@ mod tests {
             .await
             .unwrap_or_else(|failure| panic!("live summary turn failed: {}", failure.message));
         assert!(summary.tool_call.is_none());
-        assert!(!summary.assistant_text.trim().is_empty());
+        assert!(summary
+            .assistant_text
+            .contains("termbridge-live-provider-ok"));
     }
 
     #[tokio::test]
@@ -3215,6 +3344,21 @@ mod tests {
                 .unwrap_or_else(|_| "https://api.openai.com".to_string()),
             required_live_env("TERMBRIDGE_M6_OPENAI_MODEL"),
             Some(required_live_env("OPENAI_API_KEY")),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TERMBRIDGE_M6_MINIMAX_LIVE=1 and a MiniMax API credential"]
+    async fn m6_live_minimax_chat_completions_tool_acceptance() {
+        assert_eq!(required_live_env("TERMBRIDGE_M6_MINIMAX_LIVE"), "1");
+        assert_live_tool_provider(live_provider(
+            AiProviderKind::OpenAiCompatible,
+            std::env::var("TERMBRIDGE_M6_MINIMAX_BASE_URL")
+                .unwrap_or_else(|_| "https://api.minimaxi.com".to_string()),
+            std::env::var("TERMBRIDGE_M6_MINIMAX_MODEL")
+                .unwrap_or_else(|_| "MiniMax-M2.7".to_string()),
+            Some(required_live_env("MINIMAX_API_KEY")),
         ))
         .await;
     }
