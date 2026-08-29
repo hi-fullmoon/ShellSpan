@@ -336,6 +336,7 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
   const scriptVar = variable('script');
   const exitVar = variable('exit');
   const okVar = variable('ok');
+  const nativeExitVar = variable('native_exit');
   const pagerHadVar = variable('pager_had');
   const pagerValueVar = variable('pager_value');
   const gitPagerHadVar = variable('git_pager_had');
@@ -357,10 +358,11 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
     `Write-Host (-join ([char]30,${markerVar},':BEGIN',[char]31))`,
     `$env:PAGER='cat'; $env:GIT_PAGER='cat'; $env:SYSTEMD_PAGER='cat'`,
     '$global:LASTEXITCODE=$null',
-    `${scriptVar}=[ScriptBlock]::Create(${commandVar})`,
+    `${okVar}=$false`,
+    `${nativeExitVar}=$null`,
+    `${scriptVar}=[ScriptBlock]::Create(${commandVar}+[Environment]::NewLine+${quotePowerShell(`${okVar}=$?;${nativeExitVar}=$global:LASTEXITCODE`)})`,
     `. ${scriptVar}`,
-    `${okVar}=$?`,
-    `${exitVar}=if (${okVar}) { 0 } elseif ($null -ne $global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 1 }`,
+    `${exitVar}=if (${okVar}) { 0 } elseif ($null -ne ${nativeExitVar}) { [int]${nativeExitVar} } else { 1 }`,
     restore('PAGER', pagerHadVar, pagerValueVar),
     restore('GIT_PAGER', gitPagerHadVar, gitPagerValueVar),
     restore('SYSTEMD_PAGER', systemdPagerHadVar, systemdPagerValueVar),
@@ -372,6 +374,7 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
       scriptVar,
       exitVar,
       okVar,
+      nativeExitVar,
       pagerHadVar,
       pagerValueVar,
       gitPagerHadVar,
