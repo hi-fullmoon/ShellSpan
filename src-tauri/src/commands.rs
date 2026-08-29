@@ -3158,26 +3158,6 @@ mod tests {
             .slave
             .spawn_command(command)
             .expect("spawn the production Windows shell through ConPTY");
-        drop(pair.slave);
-
-        let (output_tx, output_rx) = std::sync::mpsc::channel();
-        thread::spawn(move || {
-            let mut chunk = [0_u8; 4096];
-            loop {
-                match reader.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(count) => {
-                        if output_tx.send(Ok(chunk[..count].to_vec())).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = output_tx.send(Err(error.to_string()));
-                        break;
-                    }
-                }
-            }
-        });
         writer
             .write_all(b"Write-Output 'termbridge-conpty-smoke'\r\nexit 7\r\n")
             .expect("write deterministic commands to the PowerShell ConPTY");
@@ -3198,23 +3178,23 @@ mod tests {
             }
         };
 
-        let output_deadline = Instant::now() + Duration::from_secs(5);
-        let mut output_bytes = Vec::new();
-        loop {
-            if String::from_utf8_lossy(&output_bytes).contains("termbridge-conpty-smoke") {
-                break;
-            }
-            let remaining = output_deadline
-                .checked_duration_since(Instant::now())
-                .expect("read the PowerShell ConPTY output before the deadline");
-            let chunk = output_rx
-                .recv_timeout(remaining)
-                .expect("read the PowerShell ConPTY output before the deadline")
-                .expect("read deterministic PowerShell ConPTY output");
-            output_bytes.extend_from_slice(&chunk);
-        }
+        drop(pair.slave);
+        // portable-pty's Windows reader can remain blocked when it starts before the ConPTY
+        // child exits. Read only after the bounded child wait, while the master is still alive.
+        let (output_tx, output_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let mut output = String::new();
+            let result = reader
+                .read_to_string(&mut output)
+                .map(|_| output)
+                .map_err(|error| error.to_string());
+            let _ = output_tx.send(result);
+        });
+        let output = output_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("read the PowerShell ConPTY output before the deadline")
+            .expect("read deterministic PowerShell ConPTY output");
         drop(pair.master);
-        let output = String::from_utf8_lossy(&output_bytes);
 
         assert_eq!(status.exit_code(), 7);
         assert!(
