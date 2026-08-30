@@ -42,6 +42,8 @@ import type {
   JumpHostConfig,
 } from '@/types';
 import { ConnectionPreflightDialog } from './connection-preflight-dialog';
+import { useAppStore } from '@/stores/appStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 
 const logger = createLogger('connectionForm');
 
@@ -53,7 +55,10 @@ export interface ConnectionFormDrawerProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void | Promise<void>;
-  onConnect: (profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>) => void | Promise<void>;
+  onConnect: (
+    profile: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
+    connectionAttemptId?: string,
+  ) => void | Promise<void>;
   initial?: ConnectionProfile;
   /** Partial pre-fill values (e.g. host + port from a known-host entry). */
   initialValues?: Pick<FormState, 'host' | 'port'>;
@@ -449,19 +454,45 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
     }
   };
 
-  const submit = async (action: ConnectionFormDrawerProps['onSubmit']): Promise<void> => {
+  const submit = async (
+    action: ConnectionFormDrawerProps['onSubmit'] | ConnectionFormDrawerProps['onConnect'],
+    connectAfterSave = false,
+  ): Promise<void> => {
     if (submissionInFlightRef.current || !validate()) return;
 
+    const connectionAttemptId = connectAfterSave
+      ? useTerminalStore.getState().beginConnectionAttempt({
+          title: form.name.trim() || form.host.trim(),
+          host: form.host.trim(),
+          port: Number(form.port),
+          username: form.username.trim(),
+          profileId: initial?.id,
+        })
+      : undefined;
+    if (connectionAttemptId) {
+      onClose();
+      useAppStore.getState().setActiveSection('terminal');
+    }
     submissionInFlightRef.current = true;
     setIsSubmitting(true);
     try {
       const values = await buildValues();
-      await action(values);
-      onClose();
+      if (connectionAttemptId) {
+        await (action as ConnectionFormDrawerProps['onConnect'])(
+          values,
+          connectionAttemptId,
+        );
+      } else {
+        await action(values);
+      }
+      if (!connectionAttemptId) onClose();
     } catch (error) {
       logger.error('failed to submit connection form', error);
       showError(t('connection.form.submitFailed'));
     } finally {
+      if (connectionAttemptId) {
+        useTerminalStore.getState().endConnectionAttempt(connectionAttemptId);
+      }
       submissionInFlightRef.current = false;
       setIsSubmitting(false);
     }
@@ -472,7 +503,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
   };
 
   const handleConnect = (): void => {
-    void submit(onConnect);
+    void submit(onConnect, true);
   };
 
   const handleHostBlur = (): void => {

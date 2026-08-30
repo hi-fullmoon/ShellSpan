@@ -10,6 +10,7 @@ import type { ConnectionProfile } from '@/types';
 
 vi.mock('@/lib/tauri', () => ({
   invokeCreateSession: vi.fn(),
+  invokeCreateLocalSession: vi.fn(),
   invokeTrustHost: vi.fn(),
   invokeStoreProfilePassword: vi.fn().mockResolvedValue(undefined),
   invokeRetrieveProfilePassword: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +61,7 @@ vi.mock('@/lib/keychain-key-prompt', () => ({
 }));
 
 import {
+  invokeCreateLocalSession,
   invokeCreateSession,
   invokeRetrieveProfilePassword,
   invokeRetrieveProfileSecret,
@@ -109,6 +111,7 @@ describe('useConnectSession', () => {
     useRecentProfilesStore.setState(initialRecent, true);
     useHostKeyDialogStore.setState(initialHostKeyDialog, true);
     vi.mocked(invokeCreateSession).mockReset();
+    vi.mocked(invokeCreateLocalSession).mockReset();
     vi.mocked(invokeTrustHost).mockReset();
     vi.mocked(invokeTrustHost).mockResolvedValue(undefined);
     vi.mocked(invokeStoreProfilePassword).mockReset();
@@ -149,6 +152,67 @@ describe('useConnectSession', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
     expect(useRecentProfilesStore.getState().recentIds).toEqual(['p1']);
     expect(hostKeyDialog().open).toBe(false);
+  });
+
+  it('switches to terminal and starts loading before session creation resolves', async () => {
+    let resolveSession!: (summary: typeof SUMMARY) => void;
+    vi.mocked(invokeCreateSession).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSession = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useConnectSession());
+
+    let connection!: Promise<void>;
+    act(() => {
+      connection = result.current.connect(profile);
+    });
+
+    expect(useAppStore.getState().activeSection).toBe('terminal');
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      title: 'P',
+      profileId: 'p1',
+      status: 'connecting',
+      pendingConnection: true,
+    });
+
+    await act(async () => {
+      resolveSession(SUMMARY);
+      await connection;
+    });
+
+    expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s1');
+    expect(useTerminalStore.getState().sessions[0]?.pendingConnection).toBeUndefined();
+  });
+
+  it('switches to terminal immediately while a local session is being created', async () => {
+    let resolveSession!: (summary: typeof SUMMARY) => void;
+    vi.mocked(invokeCreateLocalSession).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSession = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useConnectSession());
+
+    let connection!: Promise<void>;
+    act(() => {
+      connection = result.current.openLocal();
+    });
+
+    expect(useAppStore.getState().activeSection).toBe('terminal');
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      title: 'terminal.newSession.localTerminal',
+      pendingConnection: true,
+    });
+
+    await act(async () => {
+      resolveSession(SUMMARY);
+      await connection;
+    });
+
+    expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s1');
+    expect(useTerminalStore.getState().sessions[0]?.pendingConnection).toBeUndefined();
   });
 
   it('opens a terminal in the requested remote directory with a safely quoted command', async () => {
@@ -253,6 +317,7 @@ describe('useConnectSession', () => {
       'error',
     );
     expect(hostKeyDialog().open).toBe(false);
+    expect(useTerminalStore.getState().sessions).toHaveLength(0);
   });
 
   it('shows the original message for non-recoverable Other errors', async () => {

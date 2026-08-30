@@ -113,6 +113,7 @@ const Workbench: React.FC = () => {
 
   const handleSubmitAndConnect = async (
     values: Omit<ConnectionProfile, 'id' | 'createdAt' | 'updatedAt'>,
+    connectionAttemptId?: string,
   ): Promise<void> => {
     let profile: ConnectionProfile;
     if (editing) {
@@ -121,7 +122,7 @@ const Workbench: React.FC = () => {
     } else {
       profile = await addProfile(values);
     }
-    void connect(profile);
+    await connect(profile, { connectionAttemptId });
   };
 
   const handleDelete = async (): Promise<void> => {
