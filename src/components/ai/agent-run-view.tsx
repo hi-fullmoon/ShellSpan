@@ -2,10 +2,10 @@ import {
   BotIcon,
   CircleAlertIcon,
   LockKeyholeIcon,
+  MessageCircleQuestionIcon,
   RotateCcwIcon,
   SettingsIcon,
   ShieldCheckIcon,
-  SquareTerminalIcon,
 } from 'lucide-react';
 import { AgentApprovalCard } from '@/components/ai/agent-approval-card';
 import { AssistantMessageContent } from '@/components/ai/assistant-message-content';
@@ -33,7 +33,7 @@ export interface AgentRunViewProps {
   readonly onStop: (requestId: string) => void;
   readonly onRetry: (requestId: string) => void;
   readonly canRetry: (requestId: string) => boolean;
-  readonly onSwitchToCommand: (requestId: string) => void;
+  readonly onSwitchToAsk: (requestId: string) => void;
   readonly onOpenSettings: () => void;
 }
 
@@ -44,7 +44,7 @@ export function AgentRunView({
   onStop,
   onRetry,
   canRetry,
-  onSwitchToCommand,
+  onSwitchToAsk,
   onOpenSettings,
 }: AgentRunViewProps): React.ReactNode {
   const { t } = useI18n();
@@ -76,45 +76,53 @@ export function AgentRunView({
     );
   }
 
+  const phaseLabel = t(`agent.phase.${latestRun.phase}` as LocaleKey);
+  const outcomeLabel = t(`agent.outcome.${latestRun.status}` as LocaleKey);
+  const statusLabel = latestRun.status === 'running' ? phaseLabel : outcomeLabel;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Alert
         variant={targetChanged ? 'warning' : 'default'}
-        className="mx-3 mt-3 w-auto shrink-0"
+        className="mx-3 mt-2 w-auto shrink-0 py-1.5"
         data-testid="agent-target-binding"
       >
         <LockKeyholeIcon />
-        <AlertTitle>
-          {targetChanged ? t('agent.target.changedTab') : t('agent.target.bound')}
+        <AlertTitle className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate">
+            {targetChanged ? t('agent.target.changedTab') : t('agent.target.bound')}
+          </span>
+          <Badge
+            variant={latestRun.status === 'running' ? 'secondary' : 'outline'}
+            size="sm"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {latestRun.status === 'running'
+              ? <Spinner data-icon="inline-start" size={12} />
+              : latestRun.status === 'completed'
+                ? <ShieldCheckIcon data-icon="inline-start" />
+                : <CircleAlertIcon data-icon="inline-start" />}
+            {statusLabel}
+          </Badge>
         </AlertTitle>
-        <AlertDescription className="flex min-w-0 flex-col gap-1">
-          <span>{latestRun.targetTitle}</span>
-          <code className="break-all">
+        <AlertDescription className="flex min-w-0 items-center gap-2">
+          {latestRun.targetTitle !== latestRun.target.host && (
+            <span className="shrink-0">{latestRun.targetTitle}</span>
+          )}
+          <code
+            className="min-w-0 flex-1 truncate"
+            title={`${latestRun.target.username}@${latestRun.target.host}:${latestRun.target.port} · ${latestRun.target.sessionId}`}
+          >
             {latestRun.target.username}@{latestRun.target.host}:{latestRun.target.port}
             {' · '}{latestRun.target.sessionId}
           </code>
-          {targetChanged && <span>{t('agent.target.changedTabDescription')}</span>}
+          {targetChanged && (
+            <span className="shrink-0">{t('agent.target.changedTabDescription')}</span>
+          )}
         </AlertDescription>
       </Alert>
-
-      <div
-        className="flex shrink-0 items-center gap-2 px-3 py-2"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {latestRun.status === 'running'
-          ? <Spinner size={14} />
-          : latestRun.status === 'completed'
-            ? <ShieldCheckIcon className="size-3.5" />
-            : <CircleAlertIcon className="size-3.5" />}
-        <span className="text-xs text-muted-foreground">
-          {t(`agent.phase.${latestRun.phase}` as LocaleKey)}
-        </span>
-        <Badge variant={latestRun.status === 'running' ? 'secondary' : 'outline'} size="sm">
-          {t(`agent.outcome.${latestRun.status}` as LocaleKey)}
-        </Badge>
-      </div>
 
       <MessageScroller
         className="flex-1"
@@ -134,6 +142,7 @@ export function AgentRunView({
                       <AssistantMessageContent
                         content={message.content}
                         streaming={message.status === 'streaming'}
+                        showCodeBlockActions={!run.fallback}
                       />
                     )}
                     {!message.content && message.toolCallIds.length === 0 && message.status === 'streaming' && (
@@ -161,7 +170,7 @@ export function AgentRunView({
                     })}
                     {run.fallback && (
                       <Alert variant="warning" className="mt-2">
-                        <SquareTerminalIcon />
+                        <MessageCircleQuestionIcon />
                         <AlertTitle>{t('agent.fallback.title')}</AlertTitle>
                         <AlertDescription className="flex flex-col gap-2">
                           <p>{t(`agent.fallback.${run.fallback.reason}` as LocaleKey)}</p>
@@ -169,10 +178,10 @@ export function AgentRunView({
                             <Button
                               variant="secondary"
                               size="xs"
-                              onClick={() => onSwitchToCommand(run.requestId)}
+                              onClick={() => onSwitchToAsk(run.requestId)}
                             >
-                              <SquareTerminalIcon data-icon="inline-start" />
-                              {t('agent.fallback.switchToCommand')}
+                              <MessageCircleQuestionIcon data-icon="inline-start" />
+                              {t('agent.fallback.switchToAsk')}
                             </Button>
                           </div>
                         </AlertDescription>

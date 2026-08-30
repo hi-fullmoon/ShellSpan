@@ -5,10 +5,9 @@ import {
   BotIcon,
   ChevronDownIcon,
   CircleAlertIcon,
-  Code2Icon,
   EraserIcon,
   HistoryIcon,
-  MessageCircleIcon,
+  MessageCircleQuestionIcon,
   PaperclipIcon,
   PanelRightCloseIcon,
   RotateCcwIcon,
@@ -51,7 +50,6 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from '@/components/ui/input-group';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Bubble, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
@@ -112,7 +110,6 @@ import type {
   AiStreamEvent,
   AiTaskKind,
 } from '@/types/ai';
-import type { Locale } from '@/types';
 import type { LocaleKey } from '@/locales';
 import type {
   AgentChatMessage,
@@ -127,13 +124,11 @@ const AI_PANEL_MIN_WIDTH = 320;
 const AI_PANEL_MAX_WIDTH = 720;
 const MAIN_CONTENT_MIN_WIDTH = 480;
 const AI_PANEL_KEYBOARD_RESIZE_STEP = 24;
-const AI_PANEL_COMPACT_CONTROLS_WIDTH = 380;
-const AI_PANEL_ENGLISH_COMPACT_CONTROLS_WIDTH = 440;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'termbridge.aiPanelWidth';
 export const LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS = 50;
 const logger = createLogger('ai');
 type ConversationTask = AiTaskKind;
-type AiPanelMode = 'chat' | 'generateCommand' | 'agent';
+type AiPanelMode = 'ask' | 'agent';
 type CancelAiRequest = (requestId: string) => Promise<void>;
 
 interface TerminalContextSnapshot {
@@ -225,13 +220,6 @@ export function getAiPanelWidthBounds(containerWidth: number): { min: number; ma
 export function clampAiPanelWidth(width: number, containerWidth: number): number {
   const bounds = getAiPanelWidthBounds(containerWidth);
   return Math.round(Math.min(Math.max(width, bounds.min), bounds.max));
-}
-
-export function shouldCompactAiModeControls(panelWidth: number, locale: Locale): boolean {
-  const compactWidth = locale === 'en-US'
-    ? AI_PANEL_ENGLISH_COMPACT_CONTROLS_WIDTH
-    : AI_PANEL_COMPACT_CONTROLS_WIDTH;
-  return panelWidth < compactWidth;
 }
 
 function conversationLane(task: ConversationTask): 'conversation' | 'command' {
@@ -337,24 +325,6 @@ export function shouldSubmitAiDraft(
   keyCode: number,
 ): boolean {
   return key === 'Enter' && !shiftKey && !isComposing && keyCode !== 229;
-}
-
-export function extractSingleLineCommand(content: string): string | undefined {
-  const match = /```(?:bash|sh|shell)?\s*\n([\s\S]*?)```/i.exec(content);
-  if (!match) return undefined;
-  const command = match[1].trim();
-  if (!command || /[\r\n]/.test(command)) return undefined;
-  return command;
-}
-
-export function isMessageBoundToTerminal(
-  message: Pick<AiChatMessage, 'conversationId' | 'sessionId'>,
-  activeConversationId: string | undefined,
-  activeSessionId: string | null,
-): boolean {
-  return message.conversationId
-    ? message.conversationId === activeConversationId
-    : Boolean(message.sessionId && message.sessionId === activeSessionId);
 }
 
 export function retrySnapshotForMessage(
@@ -536,7 +506,6 @@ export const AiPanel: React.FC = () => {
   const defaultProvider = providers.find((provider) => provider.id === defaultProviderId) ?? providers[0];
   const model = defaultProvider?.model ?? '';
   const activeSection = useAppStore((state) => state.activeSection);
-  const locale = useAppStore((state) => state.locale);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId);
@@ -545,7 +514,7 @@ export const AiPanel: React.FC = () => {
     ? profiles.find((profile) => profile.id === activeSession.profileId)
     : undefined;
   const [draft, setDraft] = useState('');
-  const [mode, setMode] = useState<AiPanelMode>('chat');
+  const [mode, setMode] = useState<AiPanelMode>('ask');
   const [agentAvailability, setAgentAvailability] = useState<AgentAvailability>({
     state: 'checking',
   });
@@ -675,7 +644,7 @@ export const AiPanel: React.FC = () => {
   ]);
 
   useEffect(() => {
-    if (!agentEnabled && mode === 'agent') setMode('chat');
+    if (!agentEnabled && mode === 'agent') setMode('ask');
   }, [agentEnabled, mode]);
 
   useEffect(() => {
@@ -931,14 +900,14 @@ export const AiPanel: React.FC = () => {
     setContextEnabled(enabled);
   }, []);
 
-  const handleExplain = (): void => {
+  const handleAskFromContext = (): void => {
     const snapshot = currentTerminalContext();
     if (!snapshot.context) return;
     const prompt = snapshot.selection
-      ? t('ai.prompt.explainSelection')
-      : t('ai.prompt.explainRecentOutput');
-    setMode('chat');
-    void send('explainTerminal', prompt, snapshot);
+      ? t('ai.prompt.askSelection')
+      : t('ai.prompt.askRecentOutput');
+    setMode('ask');
+    void send('ask', prompt, snapshot);
   };
 
   const handleCancel = (): void => {
@@ -967,27 +936,8 @@ export const AiPanel: React.FC = () => {
     else void send(mode, draft);
   };
 
-  const handleInsertCommand = (
-    command: string,
-    sourceConversationId?: string,
-    sourceSessionId?: string,
-  ): void => {
-    if (useAppStore.getState().activeSection !== 'terminal') return;
-    if (!sourceConversationId && !sourceSessionId) return;
-    const state = useTerminalStore.getState();
-    if (!state.activeSessionId) return;
-    const session = state.sessions.find((item) => item.sessionId === state.activeSessionId);
-    if (session?.status !== 'connected') return;
-    if (sourceConversationId) {
-      if (sourceConversationId !== session.conversationId) return;
-    } else if (sourceSessionId && sourceSessionId !== state.activeSessionId) {
-      return;
-    }
-    terminalRegistry.get(state.activeSessionId)?.terminal.paste(command.replace(/[\r\n]+$/g, ''));
-  };
-
-  const applySuggestedPrompt = (prompt: string, nextTask: ConversationTask = 'chat'): void => {
-    setMode(nextTask === 'generateCommand' ? 'generateCommand' : 'chat');
+  const applySuggestedPrompt = (prompt: string): void => {
+    setMode('ask');
     setDraft(prompt);
     window.requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -1076,15 +1026,13 @@ export const AiPanel: React.FC = () => {
 
   const visibleMessages = messages.filter((message) => (
     mode !== 'agent'
-    && (viewingHistory || conversationLane(message.task) === conversationLane(
-      mode === 'generateCommand' ? 'generateCommand' : 'chat',
-    ))
+    && conversationLane(message.task) === 'conversation'
     && (visibleConversationId
       ? message.conversationId === visibleConversationId
       : message.conversationId === undefined && message.sessionId === conversationSessionId)
   ));
   const followKey = `${visibleMessages.length}:${visibleMessages[visibleMessages.length - 1]?.content.length ?? 0}`;
-  const canExplain = !viewingHistory
+  const canAskFromContext = !viewingHistory
     && activeSection === 'terminal'
     && Boolean(contextSnapshot.context);
   const busy = phase === 'streaming' || Boolean(activeAgentRequestId);
@@ -1119,8 +1067,7 @@ export const AiPanel: React.FC = () => {
     || !model.trim()
     || (mode === 'agent' && (!agentAvailable || !activeTerminalReady));
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
-  const compactModeControls = shouldCompactAiModeControls(panelWidth, locale);
-  const currentLane = conversationLane(mode === 'generateCommand' ? 'generateCommand' : 'chat');
+  const currentLane = 'conversation' as const;
   const hasCurrentConversation = mode === 'agent'
     ? agentMessages.length > 0
     : visibleMessages.length > 0;
@@ -1168,62 +1115,97 @@ export const AiPanel: React.FC = () => {
       : contextSnapshot.context
         ? t('ai.context.sourceRecentOutput')
         : t('ai.context.sourceNoOutput');
+  const modeSwitchUnavailableReason = busy
+    ? t('ai.mode.switchBlockedBusy')
+    : viewingHistory
+      ? t('ai.mode.switchBlockedHistory')
+      : t('ai.mode.selectorHint');
+  const selectAiMode = (value: string): void => {
+    if (value === 'ask') {
+      setMode('ask');
+      return;
+    }
+    if (value === 'agent' && agentModeSelectable) setMode('agent');
+  };
   const modeControl = (
-    <><ToggleGroup
-      value={[mode]}
-      onValueChange={(values) => {
-        const value = values[0] as AiPanelMode | undefined;
-        if (value) setMode(value);
-      }}
-      variant="tag"
-      size="xs"
-      spacing={1}
-      className="min-w-0"
-      aria-label={t('ai.mode')}
-      disabled={busy || viewingHistory}
-    >
-      <Tooltip>
-        <TooltipTrigger render={<ToggleGroupItem value="chat" aria-label={t('ai.mode.chat')} />}>
-          <MessageCircleIcon
-            data-icon={compactModeControls ? undefined : 'inline-start'}
-            className={cn(!compactModeControls && '-translate-y-px')}
-          />
-          {!compactModeControls && t('ai.mode.chat')}
-        </TooltipTrigger>
-        <TooltipContent>{t('ai.mode.chat')}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={<ToggleGroupItem value="generateCommand" aria-label={t('ai.mode.command')} />}
-        >
-          <SquareTerminalIcon
-            data-icon={compactModeControls ? undefined : 'inline-start'}
-            className={cn(!compactModeControls && '-translate-y-px')}
-          />
-          {!compactModeControls && t('ai.mode.command')}
-        </TooltipTrigger>
-        <TooltipContent>{t('ai.mode.command')}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={(
-            <ToggleGroupItem
-              value="agent"
-              disabled={!agentModeSelectable}
-              aria-label={t('ai.mode.agent')}
-              aria-describedby="agent-mode-availability"
-            />
-          )}
-        >
-          <BotIcon data-icon={compactModeControls ? undefined : 'inline-start'} />
-          {!compactModeControls && t('ai.mode.agent')}
-        </TooltipTrigger>
-        <TooltipContent>{agentModeUnavailableReason}</TooltipContent>
-      </Tooltip>
-    </ToggleGroup>
-    <span id="agent-mode-availability" className="sr-only">
-      {agentModeUnavailableReason}
-    </span></>
+    <div className="flex min-w-0 items-center gap-1">
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger
+            render={(
+              <DropdownMenuTrigger
+                render={(
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="min-w-0 max-w-32"
+                    disabled={busy || viewingHistory}
+                    aria-label={t('ai.mode')}
+                    aria-describedby="ai-mode-availability"
+                  />
+                )}
+              />
+            )}
+          >
+            <span
+              data-slot="ai-mode-trigger-content"
+              className="flex min-w-0 items-center gap-1 leading-none"
+            >
+              {mode === 'ask'
+                ? <MessageCircleQuestionIcon data-icon="inline-start" />
+                : <BotIcon data-icon="inline-start" />}
+              <span className="truncate leading-none">
+                {mode === 'ask' ? t('ai.mode.ask') : t('ai.mode.agent')}
+              </span>
+              <ChevronDownIcon data-icon="inline-end" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{modeSwitchUnavailableReason}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" className="w-64">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{t('ai.mode')}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={mode} onValueChange={selectAiMode}>
+              <DropdownMenuRadioItem value="ask" closeOnClick className="items-start py-1.5">
+                <MessageCircleQuestionIcon className="mt-0.5" />
+                <span className="min-w-0">
+                  <span className="block">{t('ai.mode.ask')}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t('ai.mode.askDescription')}
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem
+                value="agent"
+                closeOnClick
+                disabled={!agentModeSelectable}
+                className="items-start py-1.5"
+              >
+                <BotIcon className="mt-0.5" />
+                <span className="min-w-0">
+                  <span className="block">{t('ai.mode.agent')}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {agentModeSelectable
+                      ? t('ai.mode.agentDescription')
+                      : agentModeUnavailableReason}
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <span id="ai-mode-availability" className="sr-only">
+        {modeSwitchUnavailableReason}
+      </span>
+      {mode === 'agent' && agentPermissionSessionId && agentAvailable && (
+        <AgentPermissionSelector
+          sessionId={agentPermissionSessionId}
+          disabled={busy}
+          variant="composer"
+        />
+      )}
+    </div>
   );
   const configureAction = !model.trim() ? (
     <Button variant="link" size="xs" className="mt-1 px-0" onClick={openSettings}>
@@ -1399,7 +1381,7 @@ export const AiPanel: React.FC = () => {
                     <DropdownMenuItem
                       key={conversation.id}
                       onClick={() => {
-                        setMode('chat');
+                        setMode('ask');
                         setSelectedConversationId(conversation.id);
                       }}
                     >
@@ -1528,12 +1510,12 @@ export const AiPanel: React.FC = () => {
             <Button
               variant="ghost"
               size="xs"
-              onClick={handleExplain}
-              disabled={!canExplain || busy}
-              title={!canExplain ? t('ai.context.noOutput') : undefined}
+              onClick={handleAskFromContext}
+              disabled={!canAskFromContext || busy}
+              title={!canAskFromContext ? t('ai.context.noOutput') : undefined}
             >
-              <SquareTerminalIcon data-icon="inline-start" />
-              {t('ai.explainTerminal')}
+              <MessageCircleQuestionIcon data-icon="inline-start" />
+              {t('ai.askTerminal')}
             </Button>
             {contextSnapshot.context && contextAttachmentLabel ? (
               <HoverCard>
@@ -1598,9 +1580,9 @@ export const AiPanel: React.FC = () => {
                 if (!nextRequestId) setAgentStartError(t('agent.recovery.retryUnavailable'));
               });
             }}
-            onSwitchToCommand={(requestId) => {
+            onSwitchToAsk={(requestId) => {
               const run = useAgentStore.getState().runs[requestId];
-              setMode('generateCommand');
+              setMode('ask');
               setDraft(run?.goal ?? '');
               window.requestAnimationFrame(() => composerRef.current?.focus());
             }}
@@ -1618,28 +1600,25 @@ export const AiPanel: React.FC = () => {
               description={t('ai.empty')}
               action={!viewingHistory ? (
                 <div className="flex max-w-xs flex-wrap justify-center gap-2">
-                  {canExplain && (
-                    <Button variant="secondary" size="sm" onClick={handleExplain}>
-                      <SquareTerminalIcon data-icon="inline-start" />
-                      {t('ai.suggestion.analyzeOutput')}
+                  {canAskFromContext && (
+                    <Button variant="secondary" size="sm" onClick={handleAskFromContext}>
+                      <MessageCircleQuestionIcon data-icon="inline-start" />
+                      {t('ai.suggestion.askOutput')}
                     </Button>
                   )}
                   <Button
-                    variant={canExplain ? 'outline' : 'secondary'}
+                    variant={canAskFromContext ? 'outline' : 'secondary'}
                     size="sm"
-                    onClick={() => applySuggestedPrompt(t('ai.suggestion.troubleshoot'))}
+                    onClick={() => applySuggestedPrompt(t('ai.suggestion.askTroubleshooting'))}
                   >
-                    {t('ai.suggestion.troubleshoot')}
+                    {t('ai.suggestion.askTroubleshooting')}
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => applySuggestedPrompt(
-                      t('ai.suggestion.healthCheck'),
-                      'generateCommand',
-                    )}
+                    onClick={() => applySuggestedPrompt(t('ai.suggestion.askMaintenance'))}
                   >
-                    {t('ai.suggestion.healthCheck')}
+                    {t('ai.suggestion.askMaintenance')}
                   </Button>
                 </div>
               ) : undefined}
@@ -1651,32 +1630,25 @@ export const AiPanel: React.FC = () => {
             followKey={followKey}
             ariaLabel={t('ai.conversation')}
           >
-            {visibleMessages.map((message) => {
-              const command = message.role === 'assistant'
-                && message.task === 'generateCommand'
-                && message.status === 'completed'
-                ? extractSingleLineCommand(message.content)
-                : undefined;
-              const commandIsInsertable = Boolean(
-                command
-                && activeSection === 'terminal'
-                && isMessageBoundToTerminal(
-                  message,
-                  activeConversationId,
-                  activeSessionId,
-                ),
-              );
-              return (
+            {visibleMessages.map((message) => (
                 <Message
                   key={message.id}
                   role={message.role}
                 >
                   <Bubble role={message.role}>
                     {message.role === 'assistant' ? (
-                      <AssistantMessageContent
-                        content={message.content}
-                        streaming={message.status === 'streaming'}
-                      />
+                      <div className="flex flex-col gap-2">
+                        <Badge variant="outline" className="self-start">
+                          {message.task === 'ask'
+                            ? t('ai.message.ask')
+                            : t('ai.message.legacyChat')}
+                        </Badge>
+                        <AssistantMessageContent
+                          content={message.content}
+                          streaming={message.status === 'streaming'}
+                          showCodeBlockActions={message.task !== 'ask'}
+                        />
+                      </div>
                     ) : message.content}
                     {message.status === 'cancelled' && (
                       <div className="text-muted-foreground">{t('ai.message.cancelled')}</div>
@@ -1684,31 +1656,9 @@ export const AiPanel: React.FC = () => {
                     {message.status === 'failed' && (
                       <div className="text-destructive">{t('ai.message.failed')}</div>
                     )}
-                    {command && (
-                      <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
-                        <Button
-                          variant="secondary"
-                          size="xs"
-                          onClick={() => handleInsertCommand(
-                            command,
-                            message.conversationId,
-                            message.sessionId,
-                          )}
-                          disabled={
-                            !commandIsInsertable
-                            || !activeSession
-                            || activeSession.status !== 'connected'
-                          }
-                        >
-                          <Code2Icon data-icon="inline-start" />
-                          {t('ai.insertCommand')}
-                        </Button>
-                      </div>
-                    )}
                   </Bubble>
                 </Message>
-              );
-            })}
+            ))}
           </MessageScroller>
         )}
 
@@ -1740,7 +1690,7 @@ export const AiPanel: React.FC = () => {
                     variant="secondary"
                     size="xs"
                     onClick={() => void send(
-                      failedRequestMessage.task,
+                      'ask',
                       failedRequestMessage.content,
                       retrySnapshotForMessage(
                         failedRequestMessage,
@@ -1797,25 +1747,24 @@ export const AiPanel: React.FC = () => {
                         <Button
                           variant="secondary"
                           size="xs"
-                          onClick={() => setMode('generateCommand')}
+                          onClick={() => setMode('ask')}
                         >
-                          <SquareTerminalIcon data-icon="inline-start" />
-                          {t('agent.fallback.switchToCommand')}
+                          <MessageCircleQuestionIcon data-icon="inline-start" />
+                          {t('agent.fallback.switchToAsk')}
                         </Button>
                       </div>
                     )}
                 </AlertDescription>
               </Alert>
             )}
-            {mode === 'agent' && agentPermissionSessionId && agentAvailable && (
-              <div className="mb-2">
-                <AgentPermissionSelector
-                  sessionId={agentPermissionSessionId}
-                  disabled={busy}
-                />
-              </div>
-            )}
-            <InputGroup className="min-h-24 rounded-2xl bg-card shadow-xs has-[[data-slot=input-group-control]:focus-visible]:ring-1">
+            <InputGroup
+              data-mode={mode}
+              className={cn(
+                'min-h-28 rounded-3xl bg-card shadow-xs transition-colors has-[[data-slot=input-group-control]:focus-visible]:ring-1',
+                mode === 'agent'
+                  && 'border-app-warning/60 has-[[data-slot=input-group-control]:focus-visible]:border-app-warning/80 has-[[data-slot=input-group-control]:focus-visible]:ring-app-warning/30',
+              )}
+            >
               <InputGroupTextarea
                 ref={composerRef}
                 value={draft}
@@ -1835,36 +1784,36 @@ export const AiPanel: React.FC = () => {
                 }}
                 placeholder={mode === 'agent'
                   ? t('agent.placeholder')
-                  : mode === 'generateCommand'
-                    ? t('ai.commandPlaceholder')
-                    : t('ai.placeholder')}
-                className="min-h-14 max-h-48 px-3.5 pt-3 pb-1 leading-5"
+                  : t('ai.askPlaceholder')}
+                className="min-h-16 max-h-48 px-4 pt-4 pb-1 leading-5"
               />
               <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   {modeControl}
-                  {busy ? (
-                    <InputGroupButton
-                      variant="default"
-                      size="icon-sm"
-                      className="shrink-0 rounded-full"
-                      onClick={mode === 'agent' ? handleAgentCancel : handleCancel}
-                      aria-label={mode === 'agent' ? t('agent.stopTask') : t('ai.stop')}
-                    >
-                      <SquareIcon />
-                    </InputGroupButton>
-                  ) : (
-                    <InputGroupButton
-                      variant="default"
-                      size="icon-sm"
-                      className="shrink-0 rounded-full"
-                      onClick={submitComposer}
-                      disabled={composerSubmitDisabled}
-                      aria-label={t('ai.send')}
-                    >
-                      <ArrowUpIcon />
-                    </InputGroupButton>
-                  )}
+                  <div className="flex min-w-0 shrink items-center justify-end gap-1">
+                    {busy ? (
+                      <InputGroupButton
+                        variant="default"
+                        size="icon-sm"
+                        className="shrink-0 rounded-full"
+                        onClick={mode === 'agent' ? handleAgentCancel : handleCancel}
+                        aria-label={mode === 'agent' ? t('agent.stopTask') : t('ai.stop')}
+                      >
+                        <SquareIcon />
+                      </InputGroupButton>
+                    ) : (
+                      <InputGroupButton
+                        variant="default"
+                        size="icon-sm"
+                        className="shrink-0 rounded-full"
+                        onClick={submitComposer}
+                        disabled={composerSubmitDisabled}
+                        aria-label={t('ai.send')}
+                      >
+                        <ArrowUpIcon />
+                      </InputGroupButton>
+                    )}
+                  </div>
                 </div>
               </InputGroupAddon>
             </InputGroup>

@@ -38,18 +38,21 @@ const PERMISSION_OPTIONS = [
   {
     mode: 'requestApproval',
     icon: HandIcon,
+    iconClassName: 'bg-muted text-foreground',
     label: 'agent.permission.requestApproval',
     description: 'agent.permission.requestApprovalDescription',
   },
   {
     mode: 'autoApproveReadOnly',
     icon: ShieldCheckIcon,
+    iconClassName: 'bg-app-primary/10 text-app-primary',
     label: 'agent.permission.autoApproveReadOnly',
     description: 'agent.permission.autoApproveReadOnlyDescription',
   },
   {
     mode: 'fullAccess',
     icon: TriangleAlertIcon,
+    iconClassName: 'bg-app-warning/10 text-app-warning',
     label: 'agent.permission.fullAccess',
     description: 'agent.permission.fullAccessDescription',
   },
@@ -58,11 +61,13 @@ const PERMISSION_OPTIONS = [
 export interface AgentPermissionSelectorProps {
   readonly sessionId: string;
   readonly disabled?: boolean;
+  readonly variant?: 'default' | 'composer';
 }
 
 export function AgentPermissionSelector({
   sessionId,
   disabled = false,
+  variant = 'default',
 }: AgentPermissionSelectorProps): React.ReactNode {
   const { t } = useI18n();
   const binding = useAgentPermissionStore((state) => state.bindings[sessionId]);
@@ -75,6 +80,7 @@ export function AgentPermissionSelector({
   const current = PERMISSION_OPTIONS.find((option) => option.mode === mode)
     ?? PERMISSION_OPTIONS[0];
   const CurrentIcon = current.icon;
+  const composer = variant === 'composer';
 
   const selectMode = (value: string): void => {
     const nextMode = value as AgentPermissionMode;
@@ -87,24 +93,40 @@ export function AgentPermissionSelector({
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-slot="agent-permission-selector">
+    <div
+      className={cn('flex min-w-0 flex-col', composer ? 'gap-0' : 'gap-2')}
+      data-slot="agent-permission-selector"
+      data-variant={variant}
+    >
       <DropdownMenu>
         <DropdownMenuTrigger
           render={(
             <Button
-              variant="outline"
-              size="sm"
+              variant={composer ? 'ghost' : 'outline'}
+              size={composer ? 'xs' : 'sm'}
+              className={cn(composer && 'max-w-40')}
               disabled={disabled || !connected}
               aria-label={t('agent.permission')}
             />
           )}
         >
-          <CurrentIcon
-            data-icon="inline-start"
-            className={cn(mode === 'fullAccess' && 'text-app-warning')}
-          />
-          {t(current.label)}
-          <ChevronDownIcon data-icon="inline-end" />
+          <span
+            data-slot="agent-permission-trigger-content"
+            className={cn(
+              'flex items-center leading-none',
+              composer ? 'min-w-0 gap-1' : 'gap-2',
+            )}
+          >
+            <CurrentIcon
+              data-icon="inline-start"
+              strokeWidth={1.75}
+              className={cn(mode === 'fullAccess' && 'text-app-warning')}
+            />
+            <span className={cn('leading-none', composer && 'truncate')}>
+              {t(current.label)}
+            </span>
+            <ChevronDownIcon data-icon="inline-end" />
+          </span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">
           <DropdownMenuGroup>
@@ -117,12 +139,20 @@ export function AgentPermissionSelector({
                     key={option.mode}
                     value={option.mode}
                     closeOnClick
-                    className="items-start py-2"
+                    className="items-start gap-2.5 py-2"
                   >
-                    <Icon className={cn('mt-0.5', option.mode === 'fullAccess' && 'text-app-warning')} />
-                    <span className="min-w-0">
-                      <span className="block">{t(option.label)}</span>
-                      <span className="block text-xs text-muted-foreground">
+                    <span
+                      data-slot="agent-permission-option-icon"
+                      className={cn(
+                        'mt-px flex size-5 shrink-0 items-center justify-center rounded-md',
+                        option.iconClassName,
+                      )}
+                    >
+                      <Icon strokeWidth={1.75} />
+                    </span>
+                    <span className="min-w-0 leading-tight">
+                      <span className="block font-medium">{t(option.label)}</span>
+                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
                         {t(option.description)}
                       </span>
                     </span>
@@ -134,7 +164,7 @@ export function AgentPermissionSelector({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {mode === 'fullAccess' && (
+      {!composer && mode === 'fullAccess' && (
         <Alert variant="warning">
           <TriangleAlertIcon />
           <AlertTitle>{t('agent.permission.fullAccess')}</AlertTitle>
@@ -143,7 +173,7 @@ export function AgentPermissionSelector({
       )}
 
       <AlertDialog open={fullAccessDialogOpen} onOpenChange={setFullAccessDialogOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="p-4">
           <AlertDialogHeader>
             <AlertDialogMedia>
               <TriangleAlertIcon className="text-app-warning" />
