@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentRunView } from '../agent-run-view';
 import { initI18n } from '@/locales';
 import { useAgentStore } from '@/stores/agentStore';
-import { useTerminalStore } from '@/stores/terminalStore';
 
 const target = {
   kind: 'remote' as const,
@@ -18,20 +17,9 @@ describe('AgentRunView', () => {
   beforeEach(async () => {
     await initI18n('en-US');
     useAgentStore.setState({ messages: [], runs: {}, tools: {}, activeRequestId: undefined });
-    useTerminalStore.setState({
-      sessions: [{
-        sessionId: 'session-b',
-        title: 'Staging B',
-        host: 'b.example.com',
-        port: 22,
-        username: 'deploy',
-        status: 'connected',
-      }],
-      activeSessionId: 'session-b',
-    });
   });
 
-  it('keeps an empty-text tool message visible and announces the frozen target and phase', () => {
+  it('keeps an empty-text tool message visible without the target-binding banner', () => {
     useAgentStore.getState().beginRun({
       requestId: 'request-1',
       goal: 'Restart nginx',
@@ -60,7 +48,6 @@ describe('AgentRunView', () => {
       <AgentRunView
         onApprove={vi.fn()}
         onReject={onReject}
-        onStop={vi.fn()}
         onRetry={vi.fn()}
         canRetry={() => false}
         onSwitchToAsk={vi.fn()}
@@ -68,12 +55,9 @@ describe('AgentRunView', () => {
       />,
     );
 
-    expect(screen.getByTestId('agent-target-binding')).toHaveTextContent('Task remains on its original terminal');
-    expect(screen.getByTestId('agent-target-binding')).toHaveTextContent('Production A');
-    expect(screen.getByTestId('agent-target-binding')).toHaveTextContent('root@a.example.com:22 · session-a');
     expect(screen.getByRole('log', { name: 'Agent task conversation' })).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-target-binding')).not.toBeInTheDocument();
     expect(screen.getByText('systemctl restart nginx')).toBeVisible();
-    expect(screen.getAllByText('Waiting for approval').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
     expect(onReject).toHaveBeenCalledWith({
       requestId: 'request-1',
@@ -105,7 +89,6 @@ describe('AgentRunView', () => {
       <AgentRunView
         onApprove={vi.fn()}
         onReject={vi.fn()}
-        onStop={vi.fn()}
         onRetry={vi.fn()}
         canRetry={() => false}
         onSwitchToAsk={onSwitchToAsk}
@@ -115,5 +98,44 @@ describe('AgentRunView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue in Ask' }));
     expect(onSwitchToAsk).toHaveBeenCalledWith('request-fallback');
+  });
+
+  it('uses the persistent composer stop control instead of flashing a destructive tool-card action', () => {
+    useAgentStore.getState().beginRun({
+      requestId: 'request-full-access',
+      goal: 'Inspect nginx',
+      providerId: 'openai',
+      target,
+      targetTitle: 'Production A',
+      permissionMode: 'fullAccess',
+    });
+    useAgentStore.getState().registerTool({
+      toolCall: {
+        requestId: 'request-full-access',
+        callId: 'call-running',
+        name: 'run_terminal_command',
+        command: 'systemctl status nginx',
+        explanation: 'Inspect nginx on the frozen production target.',
+        target,
+      },
+      permissionMode: 'fullAccess',
+      riskAssessment: { risk: 'readOnly', reason: 'readOnlyAllowlist' },
+      decision: { requiresApproval: false, reason: 'fullAccess' },
+      status: 'running',
+    });
+
+    render(
+      <AgentRunView
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onRetry={vi.fn()}
+        canRetry={() => false}
+        onSwitchToAsk={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Running');
+    expect(screen.queryByRole('button', { name: 'Stop command' })).not.toBeInTheDocument();
   });
 });

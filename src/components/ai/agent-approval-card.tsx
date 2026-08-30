@@ -80,7 +80,7 @@ export function AgentApprovalDialog({
   const { approval, riskAssessment, toolCall } = snapshot;
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent className="p-4">
         <AlertDialogHeader>
           <AlertDialogMedia>
             <ShieldAlertIcon />

@@ -4,6 +4,7 @@ import {
   CheckCircle2Icon,
   CircleAlertIcon,
   HistoryIcon,
+  PlusIcon,
   ServerIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -268,14 +269,9 @@ export const AiSettingsSection: React.FC = () => {
 
   return (
     <div className="@container flex flex-col gap-5 px-4 py-4">
-      <div className="flex flex-col gap-3 @min-[36rem]:flex-row @min-[36rem]:items-start @min-[36rem]:justify-between">
-        <div className="flex min-w-0 flex-col gap-1">
-          <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
-          <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
-        </div>
-        <Button className="shrink-0" size="sm" onClick={() => setAddOpen(true)} disabled={busy}>
-          {t('settings.ai.addProvider')}
-        </Button>
+      <div className="flex min-w-0 flex-col gap-1">
+        <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
+        <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
       </div>
 
       <Card size="sm">
@@ -376,6 +372,18 @@ export const AiSettingsSection: React.FC = () => {
                 );
               })}
             </CardContent>
+            <CardFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => setAddOpen(true)}
+                disabled={busy}
+              >
+                <PlusIcon data-icon="inline-start" />
+                {t('settings.ai.addProvider')}
+              </Button>
+            </CardFooter>
           </Card>
 
           <Card size="sm" className="order-3 @min-[44rem]:order-none">

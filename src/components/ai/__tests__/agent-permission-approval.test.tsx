@@ -64,7 +64,7 @@ describe('M3 permission and approval components', () => {
   });
 
   it('selects safer modes directly and confirms full access with a persistent warning', async () => {
-    render(<AgentPermissionSelector sessionId="session-1" />);
+    const { container } = render(<AgentPermissionSelector sessionId="session-1" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission' }));
     fireEvent.click(await screen.findByRole('menuitemradio', {
@@ -84,6 +84,10 @@ describe('M3 permission and approval components', () => {
     }));
     expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('fullAccess');
     expect(await screen.findByText('agent.permission.fullAccessActive')).toBeVisible();
+    expect(screen.getByText('agent.permission.fullAccessSelected')).toBeVisible();
+    expect(container.querySelector('[data-slot="agent-permission-trigger-content"]')).toHaveClass(
+      'text-app-warning',
+    );
   });
 
   it('keeps full descriptions and confirmation in the compact composer variant', async () => {
@@ -149,6 +153,7 @@ describe('M3 permission and approval components', () => {
     expect(screen.getByText('systemctl restart nginx --no-block')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'agent.approval.approve' }));
     expect(await screen.findByText('agent.approval.dialogDescription')).toBeVisible();
+    expect(screen.getByRole('alertdialog')).toHaveClass('p-4');
     expect(screen.getAllByText('operator@server.example.com:22 · session-1')).toHaveLength(2);
     expect(screen.getAllByText('systemctl restart nginx --no-block')).toHaveLength(2);
 

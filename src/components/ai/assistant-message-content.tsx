@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { BrainCircuitIcon, CheckIcon, ChevronRightIcon, ClipboardIcon } from 'lucide-react';
+import { AtomIcon, CheckIcon, ChevronRightIcon, ClipboardIcon } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
@@ -157,6 +157,8 @@ const AssistantMessageContentComponent: React.FC<{
   const hasReasoning = Boolean(reasoning);
   const hadAnswer = useRef(hasAnswer);
   const hadReasoning = useRef(hasReasoning);
+  const reasoningStartedAt = useRef<number | null>(streaming ? Date.now() : null);
+  const [reasoningDurationSeconds, setReasoningDurationSeconds] = useState<number | null>(null);
   const [reasoningOpen, setReasoningOpen] = useState(!hasAnswer && hasReasoning);
 
   useEffect(() => {
@@ -165,6 +167,23 @@ const AssistantMessageContentComponent: React.FC<{
     hadReasoning.current = hasReasoning;
     hadAnswer.current = hasAnswer;
   }, [hasAnswer, hasReasoning]);
+
+  useEffect(() => {
+    if (streaming && reasoningStartedAt.current === null) {
+      reasoningStartedAt.current = Date.now();
+    }
+    if (
+      !hasReasoning
+      || reasoningDurationSeconds !== null
+      || reasoningStartedAt.current === null
+      || (streaming && !reasoningComplete)
+    ) return;
+
+    setReasoningDurationSeconds(Math.max(
+      1,
+      Math.ceil((Date.now() - reasoningStartedAt.current) / 1000),
+    ));
+  }, [hasReasoning, reasoningComplete, reasoningDurationSeconds, streaming]);
 
   if (!renderedContent) {
     return <span className="shimmer text-xs">{t('ai.thinking.inProgress')}</span>;
@@ -175,18 +194,20 @@ const AssistantMessageContentComponent: React.FC<{
       {reasoning && (
         <Collapsible open={reasoningOpen} onOpenChange={setReasoningOpen}>
           <CollapsibleTrigger
-            render={<Button variant="ghost" size="xs" className="group justify-start" />}
+            render={<Button variant="plain" size="xs" className="justify-start px-0" />}
           >
-            <ChevronRightIcon
-              data-icon="inline-start"
-              className={cn('transition-transform', reasoningOpen && 'rotate-90')}
-            />
-            <BrainCircuitIcon data-icon="inline-start" />
+            <AtomIcon data-icon="inline-start" className="text-primary" />
             <span className={cn(streaming && !reasoningComplete && 'shimmer')}>
               {streaming && !reasoningComplete
                 ? t('ai.thinking.inProgress')
-                : t('ai.thinking')}
+                : reasoningDurationSeconds === null
+                  ? t('ai.thinking')
+                  : t('ai.thinking.completed', { seconds: reasoningDurationSeconds })}
             </span>
+            <ChevronRightIcon
+              data-icon="inline-end"
+              className={cn('transition-transform', reasoningOpen && 'rotate-90')}
+            />
           </CollapsibleTrigger>
           <CollapsibleContent className="pl-3">
             <div className="border-l border-border py-1 pl-3 text-xs leading-5 text-muted-foreground whitespace-pre-wrap">

@@ -7,6 +7,8 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
+import { useAgentStore } from '@/stores/agentStore';
 import { resetAgentProviderCapabilityCacheForTests } from '@/lib/agent-provider-capability';
 import type { AiChatMessage } from '@/types/ai';
 import {
@@ -85,6 +87,9 @@ beforeEach(() => {
   tauriCoreMock.invoke.mockResolvedValue(undefined);
   tauriEventMock.listen.mockClear();
   Object.values(agentUiMock).forEach((mock) => mock.mockClear());
+  useAgentPermissionStore.getState().resetAll();
+  useAgentStore.setState({ activeRequestId: undefined });
+  useAgentStore.getState().clear();
 });
 
 describe('explicit AI modes', () => {
@@ -175,6 +180,10 @@ describe('explicit AI modes', () => {
       const inputGroup = textbox.closest('[data-slot="input-group"]');
       expect(inputGroup).toHaveAttribute('data-mode', 'ask');
       expect(inputGroup).toHaveClass('bg-card');
+      expect(screen.getByRole('button', { name: 'Send' })).toHaveClass(
+        'bg-app-button',
+        'text-app-button-text',
+      );
       fireEvent.change(textbox, { target: { value: 'Explain nginx' } });
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
@@ -207,13 +216,29 @@ describe('explicit AI modes', () => {
       await waitFor(() => expect(modeSelector).toHaveTextContent('Agent'));
       expect(textbox).toHaveValue('Verify nginx');
       expect(inputGroup).toHaveAttribute('data-mode', 'agent');
+      expect(inputGroup).toHaveAttribute('data-permission-mode', 'requestApproval');
+      expect(inputGroup).toHaveClass(
+        'border-app-warning/60',
+        'has-[[data-slot=input-group-control]:focus-visible]:border-app-warning/80',
+        'has-[[data-slot=input-group-control]:focus-visible]:ring-app-warning/30',
+      );
+      expect(screen.getByRole('button', { name: 'Terminal permissions' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Send' })).toHaveClass(
+        'bg-app-warning',
+        'text-app-primary-text',
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Terminal permissions' }));
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Enable full access' }));
+      await waitFor(() => expect(inputGroup).toHaveAttribute('data-permission-mode', 'fullAccess'));
       expect(inputGroup).toHaveClass(
         'border-app-warning/60',
         'has-[[data-slot=input-group-control]:focus-visible]:border-app-warning/80',
         'has-[[data-slot=input-group-control]:focus-visible]:ring-app-warning/30',
       );
       expect(inputGroup).toHaveClass('bg-card');
-      expect(screen.getByRole('button', { name: 'Terminal permissions' })).toBeInTheDocument();
+      expect(inputGroup).toHaveClass('transition-none');
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       await waitFor(() => expect(agentUiMock.start).toHaveBeenCalledWith(expect.objectContaining({
         goal: 'Verify nginx',
@@ -221,6 +246,12 @@ describe('explicit AI modes', () => {
       })));
       expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => command === 'ai_start_request'))
         .toHaveLength(1);
+      act(() => useAgentStore.setState({ activeRequestId: 'agent-request' }));
+      expect(screen.getByRole('button', { name: 'Stop Agent task' })).toHaveClass(
+        'bg-app-warning',
+        'text-app-primary-text',
+      );
+      act(() => useAgentStore.setState({ activeRequestId: undefined }));
       fireEvent.change(textbox, { target: { value: 'Draft the next question' } });
       fireEvent.click(modeSelector);
       fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Ask/ }));
@@ -724,6 +755,7 @@ describe('selectConversationHistory', () => {
       {
         id: 'agent-a-user',
         requestId: 'agent-a',
+        conversationId: 'conversation-a',
         role: 'user',
         content: 'Check A',
         status: 'completed',
@@ -734,6 +766,7 @@ describe('selectConversationHistory', () => {
       {
         id: 'agent-a-tool-only',
         requestId: 'agent-a',
+        conversationId: 'conversation-a',
         role: 'assistant',
         content: '',
         status: 'completed',
@@ -744,6 +777,7 @@ describe('selectConversationHistory', () => {
       {
         id: 'agent-b-user',
         requestId: 'agent-b',
+        conversationId: 'conversation-b',
         role: 'user',
         content: 'Check B',
         status: 'completed',
@@ -751,7 +785,18 @@ describe('selectConversationHistory', () => {
         target: targetB,
         toolCallIds: [],
       },
-    ], targetA)).toEqual([{ role: 'user', content: 'Check A' }]);
+      {
+        id: 'agent-a-previous-conversation',
+        requestId: 'agent-a-old',
+        conversationId: 'conversation-a-old',
+        role: 'user',
+        content: 'Previous A task',
+        status: 'completed',
+        providerId: 'openai',
+        target: targetA,
+        toolCallIds: [],
+      },
+    ], targetA, 'conversation-a')).toEqual([{ role: 'user', content: 'Check A' }]);
   });
 });
 
@@ -1153,6 +1198,69 @@ describe('clear conversation dialog', () => {
 });
 
 describe('conversation history', () => {
+  it('starts a new conversation from the panel and preserves the previous one in history', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'active-session',
+        title: 'Active target',
+        host: 'active.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'active-conversation',
+        conversationStartedAt: '2026-08-29T09:00:00.000Z',
+      }],
+      activeSessionId: 'active-session',
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().hydrateSessions([{
+      conversation: {
+        id: 'active-conversation',
+        startedAt: '2026-08-29T09:00:00.000Z',
+        updatedAt: '2026-08-29T09:01:00.000Z',
+        title: 'Active target',
+        archived: false,
+        sessionId: 'active-session',
+        host: 'active.example.com',
+        port: 22,
+        username: 'root',
+      },
+      messages: [message('active-message', 'user', 'Previous question', {
+        conversationId: 'active-conversation',
+        sessionId: 'active-session',
+      })],
+    }]);
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      expect(screen.getByRole('button', { name: 'New conversation' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
+
+      expect(useTerminalStore.getState().sessions[0]?.conversationId)
+        .not.toBe('active-conversation');
+      expect(screen.queryByText('Previous question')).not.toBeInTheDocument();
+      expect(useAiStore.getState().conversations[0]).toMatchObject({
+        id: 'active-conversation',
+        archived: true,
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+      expect(await screen.findAllByText('Active target')).toHaveLength(2);
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useTerminalStore.setState(previousTerminal, true);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
   it('opens an archived terminal conversation as read-only', async () => {
     const previousApp = useAppStore.getState();
     await initI18n('en-US');
@@ -1248,6 +1356,126 @@ describe('conversation history', () => {
       expect(await screen.findByText('Recovered history')).toBeInTheDocument();
       expect(useAiStore.getState().loadedConversationIds).toContain(conversation.id);
       expect(loadAttempts).toBe(2);
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('permanently deletes one archived conversation after confirmation', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useTerminalStore.setState({ sessions: [], activeSessionId: null });
+    useAiStore.getState().clear();
+    const conversation = {
+      id: 'delete-one-history',
+      startedAt: '2026-08-22T09:00:00.000Z',
+      updatedAt: '2026-08-22T09:01:00.000Z',
+      title: 'root@delete.example.com',
+      archived: true,
+      sessionId: 'closed-session',
+      host: 'delete.example.com',
+      port: 22,
+      username: 'root',
+    };
+    useAiStore.getState().hydrateSessionIndex([conversation]);
+    tauriCoreMock.invoke.mockImplementation((command: string) => (
+      Promise.resolve(command === 'delete_ai_sessions' ? 1 : undefined)
+    ));
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+      fireEvent.click(await screen.findByRole('button', {
+        name: `Delete “${conversation.title}”`,
+      }));
+      const confirmation = await screen.findByRole('alertdialog');
+      fireEvent.click(within(confirmation).getByRole('button', { name: 'Delete' }));
+
+      await waitFor(() => expect(useAiStore.getState().conversations).toEqual([]));
+      expect(tauriCoreMock.invoke).toHaveBeenCalledWith('delete_ai_sessions', {
+        sessions: [{ id: conversation.id, startedAt: conversation.startedAt }],
+      });
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('deletes all history while preserving the current conversation', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    const currentConversation = {
+      id: 'current-conversation',
+      startedAt: '2026-08-30T09:00:00.000Z',
+      updatedAt: '2026-08-30T09:01:00.000Z',
+      title: 'Current target',
+      archived: false,
+      sessionId: 'current-session',
+      host: 'current.example.com',
+      port: 22,
+      username: 'root',
+    };
+    const archivedConversations = [1, 2].map((index) => ({
+      id: `archived-conversation-${index}`,
+      startedAt: `2026-08-2${index}T09:00:00.000Z`,
+      updatedAt: `2026-08-2${index}T09:01:00.000Z`,
+      title: `Archived target ${index}`,
+      archived: true,
+      sessionId: `archived-session-${index}`,
+      host: `archived-${index}.example.com`,
+      port: 22,
+      username: 'root',
+    }));
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: currentConversation.sessionId,
+        title: currentConversation.title,
+        host: currentConversation.host,
+        port: currentConversation.port,
+        username: currentConversation.username,
+        status: 'connected',
+        conversationId: currentConversation.id,
+        conversationStartedAt: currentConversation.startedAt,
+      }],
+      activeSessionId: currentConversation.sessionId,
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().hydrateSessionIndex([
+      currentConversation,
+      ...archivedConversations,
+    ]);
+    tauriCoreMock.invoke.mockImplementation((command: string) => (
+      Promise.resolve(command === 'delete_ai_sessions' ? 2 : undefined)
+    ));
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete all history' }));
+      const confirmation = await screen.findByRole('alertdialog');
+      fireEvent.click(within(confirmation).getByRole('button', { name: 'Delete' }));
+
+      await waitFor(() => expect(useAiStore.getState().conversations).toEqual([
+        currentConversation,
+      ]));
+      expect(tauriCoreMock.invoke).toHaveBeenCalledWith('delete_ai_sessions', {
+        sessions: archivedConversations.map(({ id, startedAt }) => ({ id, startedAt })),
+      });
     } finally {
       unmount();
       useAiStore.getState().clear();

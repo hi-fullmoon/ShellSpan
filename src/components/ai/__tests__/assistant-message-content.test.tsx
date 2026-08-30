@@ -4,7 +4,9 @@ import { AssistantMessageContent } from '../assistant-message-content';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, variables?: Record<string, string | number>) => (
+      variables ? `${key}:${variables.seconds}` : key
+    ),
     ready: true,
     locale: 'en-US',
     setLocale: () => {},
@@ -28,7 +30,7 @@ describe('AssistantMessageContent', () => {
     expect(screen.getByText('Check the terminal state.')).toBeVisible();
   });
 
-  it('rotates the reasoning arrow with the controlled expanded state', () => {
+  it('places the reasoning arrow after the status and rotates it with the expanded state', () => {
     const { container } = render(
       <AssistantMessageContent
         content="<think>Check the terminal state.</think>Final answer."
@@ -37,10 +39,14 @@ describe('AssistantMessageContent', () => {
     );
     const trigger = screen.getByRole('button', { name: 'ai.thinking' });
     const arrow = container.querySelector('.lucide-chevron-right');
+    const atom = container.querySelector('.lucide-atom');
 
     expect(trigger).not.toHaveClass('-ml-2');
-    expect(trigger).toHaveClass('px-2', 'rounded-md');
+    expect(trigger).toHaveClass('bg-transparent', 'px-0', 'rounded-md', 'leading-none');
+    expect(trigger).not.toHaveClass('px-2', 'hover:bg-accent', 'hover:text-accent-foreground');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(atom).toHaveClass('text-primary');
+    expect(trigger.lastElementChild).toBe(arrow);
     expect(arrow).not.toHaveClass('rotate-90');
 
     fireEvent.click(trigger);
@@ -52,6 +58,31 @@ describe('AssistantMessageContent', () => {
 
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(arrow).not.toHaveClass('rotate-90');
+  });
+
+  it('shows the elapsed thinking time after reasoning completes', async () => {
+    let now = new Date('2026-08-30T00:00:00Z').getTime();
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+    try {
+      const { rerender } = render(
+        <AssistantMessageContent content="" streaming />,
+      );
+      now += 2_100;
+
+      rerender(
+        <AssistantMessageContent
+          content="<think>Check the terminal state.</think>Final answer."
+          streaming={false}
+        />,
+      );
+
+      expect(await screen.findByRole('button', {
+        name: 'ai.thinking.completed:3',
+      })).toBeInTheDocument();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('copies fenced code blocks', async () => {
