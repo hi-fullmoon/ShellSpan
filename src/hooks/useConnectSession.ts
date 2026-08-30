@@ -22,12 +22,14 @@ import { openHostKeyPrompt } from '@/lib/host-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
 import { buildChangeDirectoryCommand } from '@/lib/host-context';
 import { usePortForwardStore } from '@/stores/portForwardStore';
+import { t } from '@/locales';
 
 export interface ConnectSessionOptions {
   insertAfterId?: string;
   pinned?: boolean;
   color?: string;
   initialDirectory?: string;
+  connectionAttemptId?: string;
 }
 
 const logger = createLogger('connect');
@@ -39,7 +41,9 @@ export function useConnectSession(): {
   ) => Promise<void>;
   openLocal: () => Promise<void>;
 } {
-  const addSession = useTerminalStore((state) => state.addSession);
+  const beginConnectionAttempt = useTerminalStore((state) => state.beginConnectionAttempt);
+  const resolveConnectionAttempt = useTerminalStore((state) => state.resolveConnectionAttempt);
+  const endConnectionAttempt = useTerminalStore((state) => state.endConnectionAttempt);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
 
   const handleConnectionError = useCallback((
@@ -78,91 +82,113 @@ export function useConnectSession(): {
     profile: ConnectionProfile,
     options?: ConnectSessionOptions,
   ): Promise<void> => {
+    const connectionAttemptId = beginConnectionAttempt({
+      title: profile.name || profile.host,
+      host: profile.host,
+      port: profile.port,
+      username: profile.username,
+      profileId: profile.id,
+      insertAfterId: options?.insertAfterId,
+      pinned: options?.pinned,
+      color: options?.color,
+    }, options?.connectionAttemptId);
+    setActiveSection('terminal');
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
 
-    let currentProfile = profile;
-    let keyPromptShown = false;
+    try {
+      let currentProfile = profile;
+      let keyPromptShown = false;
 
-    while (true) {
-      const profileWithSavedSecrets = await useProfileStore
-        .getState()
-        .ensurePassword(currentProfile);
-      const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
-      if (!profileWithPassword) {
-        logger.info('Connection cancelled by user (password dialog dismissed)');
-        return;
-      }
-
-      const ensuredProfile = await ensureKeychainKeyForProfile(profileWithPassword);
-      if (!ensuredProfile) {
-        logger.info('Connection cancelled by user (key prompt dismissed)');
-        return;
-      }
-
-      const preparedProfile = ensuredProfile;
-
-      try {
-        const summary = await invokeCreateSession(
-          buildSessionCreateRequest(preparedProfile, 120, 30),
-        );
-        await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
-        addSession(summary, profile.id, options);
-        void usePortForwardStore
+      while (true) {
+        const profileWithSavedSecrets = await useProfileStore
           .getState()
-          .startAutoForOwner(preparedProfile, `terminal:${summary.sessionId}`);
-        if (options?.initialDirectory) {
-          const changeDirectoryCommand = buildChangeDirectoryCommand(options.initialDirectory);
-          if (changeDirectoryCommand) {
-            try {
-              await invokeWriteSession(summary.sessionId, changeDirectoryCommand);
-            } catch (error) {
-              logger.error(
-                `failed to set initial directory session_id=${summary.sessionId}`,
-                error,
-              );
-              useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
+          .ensurePassword(currentProfile);
+        const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
+        if (!profileWithPassword) {
+          logger.info('Connection cancelled by user (password dialog dismissed)');
+          return;
+        }
+
+        const ensuredProfile = await ensureKeychainKeyForProfile(profileWithPassword);
+        if (!ensuredProfile) {
+          logger.info('Connection cancelled by user (key prompt dismissed)');
+          return;
+        }
+
+        const preparedProfile = ensuredProfile;
+
+        try {
+          const summary = await invokeCreateSession(
+            buildSessionCreateRequest(preparedProfile, 120, 30),
+          );
+          resolveConnectionAttempt(connectionAttemptId, summary, profile.id);
+          await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
+          void usePortForwardStore
+            .getState()
+            .startAutoForOwner(preparedProfile, `terminal:${summary.sessionId}`);
+          if (options?.initialDirectory) {
+            const changeDirectoryCommand = buildChangeDirectoryCommand(options.initialDirectory);
+            if (changeDirectoryCommand) {
+              try {
+                await invokeWriteSession(summary.sessionId, changeDirectoryCommand);
+              } catch (error) {
+                logger.error(
+                  `failed to set initial directory session_id=${summary.sessionId}`,
+                  error,
+                );
+                useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
+              }
             }
           }
-        }
-        logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
-        useRecentProfilesStore.getState().touchProfile(profile.id);
-        setActiveSection('terminal');
-        return;
-      } catch (error) {
-        const message = getErrorMessage(error);
-        const missingKeyTarget = getMissingKeychainKeyTarget(preparedProfile, message);
-        if (
-          !keyPromptShown &&
-          missingKeyTarget
-        ) {
-          const recovered = await promptForMissingKeychainKey(
-            preparedProfile,
-            missingKeyTarget,
-          );
-          if (!recovered) {
-            logger.info('Connection cancelled by user (key prompt dismissed)');
-            return;
+          logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
+          useRecentProfilesStore.getState().touchProfile(profile.id);
+          return;
+        } catch (error) {
+          const message = getErrorMessage(error);
+          const missingKeyTarget = getMissingKeychainKeyTarget(preparedProfile, message);
+          if (
+            !keyPromptShown &&
+            missingKeyTarget
+          ) {
+            const recovered = await promptForMissingKeychainKey(
+              preparedProfile,
+              missingKeyTarget,
+            );
+            if (!recovered) {
+              logger.info('Connection cancelled by user (key prompt dismissed)');
+              return;
+            }
+            keyPromptShown = true;
+            currentProfile = recovered;
+            continue;
           }
-          keyPromptShown = true;
-          currentProfile = recovered;
-          continue;
-        }
 
-        handleConnectionError(error, () => {
-          void connect(preparedProfile, options);
-        });
-        return;
+          handleConnectionError(error, () => {
+            void connect(preparedProfile, options);
+          });
+          return;
+        }
       }
+    } finally {
+      endConnectionAttempt(connectionAttemptId);
     }
-  }, [addSession, handleConnectionError, setActiveSection]);
+  }, [beginConnectionAttempt, endConnectionAttempt, handleConnectionError, resolveConnectionAttempt, setActiveSection]);
 
   const openLocal = async (): Promise<void> => {
+    const connectionAttemptId = beginConnectionAttempt({
+      title: t('terminal.newSession.localTerminal'),
+      host: '',
+      port: 0,
+      username: '',
+    });
+    setActiveSection('terminal');
     try {
       const summary = await invokeCreateLocalSession();
-      addSession(summary);
-      setActiveSection('terminal');
+      resolveConnectionAttempt(connectionAttemptId, summary);
     } catch (error) {
       useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
+    } finally {
+      endConnectionAttempt(connectionAttemptId);
     }
   };
 

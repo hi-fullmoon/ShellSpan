@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { ConnectionFormDrawer } from '../connection-form-drawer';
 import type { ConnectionProfile } from '@/types';
+import { useAppStore } from '@/stores/appStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -47,9 +50,13 @@ const profile: ConnectionProfile = {
 };
 
 const noop = (): void => {};
+const initialAppState = useAppStore.getState();
+const initialTerminalState = useTerminalStore.getState();
 
 describe('ConnectionFormDrawer', () => {
   beforeEach(() => {
+    useAppStore.setState(initialAppState, true);
+    useTerminalStore.setState(initialTerminalState, true);
     vi.clearAllMocks();
     tauriMocks.pickPrivateKey.mockResolvedValue(null);
     tauriMocks.readTextFile.mockResolvedValue('private-key-data');
@@ -293,10 +300,11 @@ describe('ConnectionFormDrawer', () => {
   it('calls onConnect instead of onSubmit when save and connect is clicked', async () => {
     const onSubmit = vi.fn();
     const onConnect = vi.fn();
+    const onClose = vi.fn();
     render(
       <ConnectionFormDrawer
         open={true}
-        onClose={() => {}}
+        onClose={onClose}
         onSubmit={onSubmit}
         onConnect={onConnect}
         initial={profile}
@@ -305,12 +313,50 @@ describe('ConnectionFormDrawer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'connection.form.saveAndConnect' }));
 
+    expect(useAppStore.getState().activeSection).toBe('terminal');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      title: 'My Server',
+      host: '192.168.1.1',
+      username: 'root',
+      pendingConnection: true,
+    });
     await waitFor(() => {
       expect(onConnect).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'My Server' }),
+        expect.any(String),
       );
     });
+    await waitFor(() => {
+      expect(useTerminalStore.getState().sessions).toHaveLength(0);
+    });
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('closes the controlled drawer before the connection finishes', async () => {
+    const onConnect = vi.fn(() => new Promise<void>(() => {}));
+
+    const ControlledDrawer = (): React.ReactElement => {
+      const [open, setOpen] = useState(true);
+      return (
+        <ConnectionFormDrawer
+          open={open}
+          onClose={() => setOpen(false)}
+          onSubmit={noop}
+          onConnect={onConnect}
+          initial={profile}
+        />
+      );
+    };
+
+    render(<ControlledDrawer />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'connection.form.saveAndConnect' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(onConnect).toHaveBeenCalledTimes(1);
   });
 
   it('uses save as the primary action while editing', async () => {
