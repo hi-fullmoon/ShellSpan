@@ -89,7 +89,7 @@ describe('Workbench new connection request', () => {
 
     act(() => {
       useAppStore.getState().setActiveSection('terminal');
-      useAppStore.getState().setActiveWorkbenchTab('settings');
+      useAppStore.getState().setActiveWorkbenchTab('logs');
       useAppStore.getState().requestNewConnection();
     });
 

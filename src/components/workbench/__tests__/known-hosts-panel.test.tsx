@@ -42,7 +42,7 @@ describe('KnownHostsPanel', () => {
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
       'min-w-0',
-      'w-72',
+      'w-64',
       'max-w-full',
       'flex-none',
     );

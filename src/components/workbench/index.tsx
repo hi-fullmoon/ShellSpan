@@ -9,7 +9,6 @@ import { KnownHostsPanel } from './known-hosts-panel';
 import { KeychainPanel } from './keychain-panel';
 import { LogPanel } from './log-panel';
 import { MonitorPanel } from './monitor-panel';
-import { SettingsPanel } from './settings-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
 import { OperationHistoryPanel } from './operation-history-panel';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
@@ -36,11 +35,22 @@ import { useRemoteHealthStore } from '@/stores/remoteHealthStore';
 
 const logger = createLogger('connection-import');
 
-const Workbench: React.FC = () => {
+interface WorkbenchProps {
+  onCheckForUpdates?: () => void;
+  onOpenAbout?: () => void;
+  onRequestExit?: () => void;
+}
+
+const Workbench: React.FC<WorkbenchProps> = ({
+  onCheckForUpdates = () => undefined,
+  onOpenAbout = () => undefined,
+  onRequestExit = () => undefined,
+}) => {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
   const activeTab = useAppStore((state) => state.activeWorkbenchTab);
   const setActiveTab = useAppStore((state) => state.setActiveWorkbenchTab);
+  const openSettings = useAppStore((state) => state.openSettings);
   const pendingWorkbenchAction = useAppStore((state) => state.pendingWorkbenchAction);
   const consumeWorkbenchAction = useAppStore((state) => state.consumeWorkbenchAction);
   const [formOpen, setFormOpen] = useState(false);
@@ -238,7 +248,14 @@ const Workbench: React.FC = () => {
 
   return (
     <div className="flex h-full w-full">
-      <WorkbenchSidebar activeTab={activeTab} onTabChange={setActiveTab} />
+      <WorkbenchSidebar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onOpenSettings={openSettings}
+        onCheckForUpdates={onCheckForUpdates}
+        onOpenAbout={onOpenAbout}
+        onRequestExit={onRequestExit}
+      />
 
       <div className="flex h-full flex-1 flex-col overflow-hidden">
         <div className="min-h-0 flex-1">
@@ -265,7 +282,6 @@ const Workbench: React.FC = () => {
           {activeTab === 'history' && <OperationHistoryPanel />}
           {activeTab === 'monitor' && <MonitorPanel />}
           {activeTab === 'logs' && <LogPanel />}
-          {activeTab === 'settings' && <SettingsPanel />}
         </div>
       </div>
 
