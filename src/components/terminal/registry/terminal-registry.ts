@@ -105,11 +105,10 @@ const OUTPUT_RESUME_RETRY_MAX_MS = 2000;
 // leaving garbled duplicate prompt lines, so it is dropped briefly.
 const RECONNECT_INPUT_GRACE_MS = 800;
 
-// Hides the DOM renderer's scroll viewport layer. With the webgl renderer
-// the viewport only carries the scrollbar, so it must stay visible.
+// xterm 6 renders its scrollbar in `.xterm-scrollable-element`. The legacy
+// `.xterm-viewport` still has `overflow-y: scroll` in xterm.css, but no longer
+// owns scrolling; exposing it creates a second, stale native scrollbar.
 const VIEWPORT_HIDDEN_CLASS = '[&_.xterm-viewport]:opacity-0';
-
-type RendererMode = 'webgl' | 'dom';
 
 function trimUrlPunctuation(url: string): string {
   return url.replace(/[),.;!?\]}]+$/g, '');
@@ -380,7 +379,6 @@ class TerminalControllerImpl implements TerminalController {
   // SIGWINCH makes the remote shell redraw its prompt — sometimes leaving
   // duplicated/garbled prompt lines — so identical resizes are dropped here.
   private lastSentDimensions: { cols: number; rows: number } | null = null;
-  private rendererMode: RendererMode = 'dom';
   private rendererInitialized = false;
   private webglAddon?: WebglAddon;
   private webglContextLossDisposable?: IDisposable;
@@ -530,19 +528,12 @@ class TerminalControllerImpl implements TerminalController {
         this.disposeWebglRenderer(addon);
       });
       this.terminal.loadAddon(addon);
-      this.setRendererMode('webgl');
     } catch (error) {
       // loadAddon wraps dispose before calling activate, so disposing here
       // also removes a partially activated addon from xterm's addon manager.
       this.disposeWebglRenderer();
-      this.setRendererMode('dom');
       logger.warn(`WebGL renderer unavailable for session ${this.sessionId}; using DOM renderer`, error);
     }
-  }
-
-  private setRendererMode(mode: RendererMode): void {
-    this.rendererMode = mode;
-    this.container.classList.toggle(VIEWPORT_HIDDEN_CLASS, mode === 'dom');
   }
 
   private disposeWebglRenderer(expectedAddon?: WebglAddon): void {
@@ -557,7 +548,6 @@ class TerminalControllerImpl implements TerminalController {
     } catch (error) {
       logger.warn(`Failed to dispose WebGL renderer for session ${this.sessionId}`, error);
     }
-    this.setRendererMode('dom');
   }
 
   private writeSystemLine(line: string): void {

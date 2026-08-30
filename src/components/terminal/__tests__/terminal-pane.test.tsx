@@ -258,7 +258,10 @@ describe('TerminalPane', () => {
 
     expect(await screen.findByText('terminal.pasteWarning.title')).toBeInTheDocument();
     expect(terminal.paste).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' }));
+    const pasteConfirm = screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' });
+    expect(pasteConfirm).toHaveClass('h-8');
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
+    await userEvent.click(pasteConfirm);
     expect(terminal.paste).toHaveBeenCalledWith('echo one\necho two');
   });
 

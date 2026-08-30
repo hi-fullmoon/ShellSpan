@@ -184,9 +184,13 @@ describe('TerminalTabBar', () => {
     rerender(<TerminalTabBar externalInsertIndex={0} />);
     tabs = screen.getAllByRole('tab');
     const leadingIndicator = tabs[0].querySelector('[data-drop-indicator="left"]');
-    expect(leadingIndicator).toHaveClass('left-0', '-translate-x-1/2');
-    expect(leadingIndicator).not.toHaveClass('left-[-3.5px]');
+    expect(leadingIndicator).toHaveClass('left-[-3.5px]', '-translate-x-1/2');
     expect(tabs[0].querySelector('[data-tab-separator]')).toHaveClass('right-[-4px]');
+
+    rerender(<TerminalTabBar externalInsertIndex={2} />);
+    tabs = screen.getAllByRole('tab');
+    const trailingIndicator = tabs[1].querySelector('[data-drop-indicator="right"]');
+    expect(trailingIndicator).toHaveClass('right-[-3.5px]', 'translate-x-1/2');
 
     rerender(<TerminalTabBar externalInsertIndex={null} />);
     expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
@@ -495,6 +499,10 @@ describe('TerminalTabBar', () => {
       fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 150, clientY: 10 });
     });
     expect(document.body.classList.contains('tab-dragging')).toBe(true);
+    const overlayTab = Array.from(document.querySelectorAll<HTMLElement>('[data-session-tab="s1"]'))
+      .find((tab) => tab !== tabs[0]);
+    expect(overlayTab?.parentElement?.style.transform)
+      .toContain('translate3d(152px, 12px, 0)');
 
     await act(async () => {
       fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 150, clientY: 10 });

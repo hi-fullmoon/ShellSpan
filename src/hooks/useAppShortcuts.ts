@@ -45,7 +45,7 @@ export function useAppShortcuts(): void {
       ) return;
 
       event.preventDefault();
-      const { setActiveSection, setActiveWorkbenchTab } = useAppStore.getState();
+      const { openSettings, setActiveSection } = useAppStore.getState();
 
       switch (action) {
         case 'openWorkbench':
@@ -58,8 +58,7 @@ export function useAppShortcuts(): void {
           setActiveSection('sftp');
           break;
         case 'openSettings':
-          setActiveSection('workbench');
-          setActiveWorkbenchTab('settings');
+          openSettings();
           break;
         case 'openCommandPalette':
           document.dispatchEvent(new Event('termbridge:open-command-palette'));
