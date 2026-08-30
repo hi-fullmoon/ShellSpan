@@ -232,7 +232,63 @@ describe('SftpTabBar', () => {
     expect(indicator).toHaveClass('left-[-3.5px]', '-translate-x-1/2');
 
     await act(async () => {
-      fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 110, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 0, clientY: 10 });
+    });
+    const leadingIndicator = tabs[0].querySelector('[data-drop-indicator="left"]');
+    expect(leadingIndicator).toHaveClass('left-[-3.5px]', '-translate-x-1/2');
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 0, clientY: 10 });
+    });
+    expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
+  });
+
+  it('offsets the trailing drag insert indicator from the last tab border', async () => {
+    addConnection('Conn A');
+    addConnection('Conn B');
+    addConnection('Conn C');
+    render(<SftpTabBar />);
+
+    const tabs = screen.getAllByRole('tab');
+    const setRect = (element: HTMLElement, left: number): void => {
+      element.getBoundingClientRect = vi.fn(() => ({
+        left,
+        right: left + 100,
+        top: 0,
+        bottom: 24,
+        x: left,
+        y: 0,
+        width: 100,
+        height: 24,
+        toJSON: () => ({}),
+      }));
+    };
+    setRect(tabs[0], 0);
+    setRect(tabs[1], 105);
+    setRect(tabs[2], 210);
+
+    await act(async () => {
+      fireEvent.pointerDown(tabs[0], {
+        button: 0,
+        isPrimary: true,
+        pointerType: 'mouse',
+        clientX: 50,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 62, clientY: 10 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 330, clientY: 10 });
+    });
+
+    const indicator = tabs[2].querySelector('[data-drop-indicator="right"]');
+    expect(indicator).toHaveClass('right-[-3.5px]', 'translate-x-1/2');
+    const draggedId = tabs[0].dataset.sftpTab;
+    const overlayTab = Array.from(document.querySelectorAll<HTMLElement>(`[data-sftp-tab="${draggedId}"]`))
+      .find((tab) => tab !== tabs[0]);
+    expect(overlayTab?.parentElement?.style.transform)
+      .toContain('translate3d(332px, 12px, 0)');
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 330, clientY: 10 });
     });
     expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
   });
