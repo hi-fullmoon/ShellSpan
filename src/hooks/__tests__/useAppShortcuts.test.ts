@@ -19,11 +19,12 @@ describe('useAppShortcuts', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
   });
 
-  it('opens the settings tab', () => {
+  it('opens the settings dialog without leaving the active section', () => {
+    useAppStore.setState({ activeSection: 'terminal' });
     renderHook(() => useAppShortcuts());
     document.dispatchEvent(new KeyboardEvent('keydown', { key: ',', metaKey: true, bubbles: true }));
-    expect(useAppStore.getState().activeSection).toBe('workbench');
-    expect(useAppStore.getState().activeWorkbenchTab).toBe('settings');
+    expect(useAppStore.getState().activeSection).toBe('terminal');
+    expect(useAppStore.getState().settingsDialogOpen).toBe(true);
   });
 
   it('opens the command palette through the configured global shortcut', () => {

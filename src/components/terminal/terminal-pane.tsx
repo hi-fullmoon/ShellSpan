@@ -394,10 +394,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingPaste(null)}>
+            <AlertDialogCancel size="sm" onClick={() => setPendingPaste(null)}>
               {t('common.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
+              size="sm"
               onClick={() => {
                 if (pendingPaste) {
                   terminalRegistry.get(pendingPaste.sessionId)?.terminal.paste(pendingPaste.text);

@@ -64,13 +64,18 @@ describe('terminal output buffer', () => {
       'sensitive-key-material',
       '-----END OPENSSH PRIVATE KEY-----',
     ].join('\n');
+    const slackFallback = ['xoxb', '1234567890', 'abcdefghijklmnopqrstuvwxyz'].join('-');
     const input = [
       privateKey,
       'Authorization: Bearer bearer-secret',
       'export CLIENT_SECRET="client-secret"',
       'curl --api-key command-secret https://alice:url-secret@example.com',
       'AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF',
+      'AWS_SECRET_ACCESS_KEY=aws-secret-material-without-a-known-prefix',
       'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz1234',
+      'PROVIDER_FALLBACK=sk-ant-abcdefghijklmnopqrstuvwxyz1234567890',
+      'GOOGLE_FALLBACK=AIzaabcdefghijklmnopqrstuvwxyz1234567890',
+      `SLACK_FALLBACK=${slackFallback}`,
       'SESSION=eyJabcdefghijk.abcdefghijkl.abcdefghijkl',
     ].join('\n');
 
@@ -83,7 +88,11 @@ describe('terminal output buffer', () => {
       'command-secret',
       'url-secret',
       'AKIA1234567890ABCDEF',
+      'aws-secret-material-without-a-known-prefix',
       'ghp_abcdefghijklmnopqrstuvwxyz1234',
+      'sk-ant-abcdefghijklmnopqrstuvwxyz1234567890',
+      'AIzaabcdefghijklmnopqrstuvwxyz1234567890',
+      slackFallback,
       'eyJabcdefghijk.abcdefghijkl.abcdefghijkl',
     ]) {
       expect(redacted).not.toContain(secret);

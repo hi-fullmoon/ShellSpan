@@ -207,18 +207,20 @@ describe('terminalRegistry', () => {
     expect(controller.terminal.element?.style.backgroundColor).toBe('rgb(15, 23, 42)');
   });
 
-  it('hides the xterm viewport via the container Tailwind descendant class', () => {
+  it('hides xterm 6 legacy viewport while leaving its real scrollable element available', () => {
     const controller = createController('s1');
     controller.attach(document.createElement('div'));
 
     const viewport = controller.terminal.element?.querySelector<HTMLElement>('.xterm-viewport');
+    const scrollable = controller.terminal.element?.querySelector<HTMLElement>('.xterm-scrollable-element');
     expect(viewport).not.toBeNull();
+    expect(scrollable).not.toBeNull();
     // Tailwind compiles the descendant variant into `container .xterm-viewport { opacity: 0 }`,
     // so the generating class lives on the container; jsdom has no compiled stylesheet.
     expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
   });
 
-  it('activates WebGL once and keeps the viewport scrollbar visible', () => {
+  it('activates WebGL once without revealing xterm 6 legacy viewport', () => {
     webglMocks.reset('success');
     const controller = createController('s1');
     const host1 = document.createElement('div');
@@ -229,7 +231,7 @@ describe('terminalRegistry', () => {
     expect(webglMocks.instances).toHaveLength(1);
     expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
     expect(webglMocks.instances[0].contextLossListenerCount).toBe(1);
-    expect(controller.container).not.toHaveClass('[&_.xterm-viewport]:opacity-0');
+    expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
 
     controller.detach();
     controller.attach(host2);
@@ -237,7 +239,7 @@ describe('terminalRegistry', () => {
     expect(webglMocks.instances).toHaveLength(1);
     expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
     expect(webglMocks.instances[0].contextLossListenerCount).toBe(1);
-    expect(controller.container).not.toHaveClass('[&_.xterm-viewport]:opacity-0');
+    expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
   });
 
   it.each(['constructor-throw', 'activate-throw'] as const)(
