@@ -40,6 +40,10 @@ export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
 export type GetStatusCallback = (sessionId: string) => SessionStatus;
 export type RequestReconnectCallback = (sessionId: string) => void;
 export type TerminalOutputCallback = (chunk: string) => void;
+export interface TerminalOutputFilter {
+  push(chunk: string): string;
+  finish(): string;
+}
 export type TerminalLifecycleEvent =
   | Readonly<{ type: 'status'; sessionId: string; payload: StatusEvent }>
   | Readonly<{ type: 'closed'; sessionId: string; payload: ClosedEvent }>
@@ -337,6 +341,7 @@ export interface TerminalController {
   writeInput(data: string): Promise<void>;
   whenOutputReady(): Promise<void>;
   subscribeOutput(listener: TerminalOutputCallback): () => void;
+  subscribeOutputFilter(filter: TerminalOutputFilter): () => void;
   subscribeLifecycle(listener: TerminalLifecycleCallback): () => void;
   write(chunk: string): void;
   writeDisconnectedHint(): void;
@@ -386,6 +391,7 @@ class TerminalControllerImpl implements TerminalController {
   private outputResumeRetryTimer: number | null = null;
   private outputResumeRetryAttempts = 0;
   private readonly outputListeners = new Set<TerminalOutputCallback>();
+  private readonly outputFilters = new Set<TerminalOutputFilter>();
   private readonly lifecycleListeners = new Set<TerminalLifecycleCallback>();
   private listenerSetup: Promise<void>;
 
@@ -609,6 +615,7 @@ class TerminalControllerImpl implements TerminalController {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
+      const displayPayload = this.filterSessionOutput(event.payload);
       for (const listener of this.outputListeners) {
         try {
           listener(event.payload);
@@ -616,8 +623,7 @@ class TerminalControllerImpl implements TerminalController {
           logger.warn(`Terminal output subscriber failed for session ${sessionId}`, error);
         }
       }
-      appendTerminalOutput(sessionId, event.payload);
-      this.writeSessionOutput(event.payload);
+      this.writeVisibleSessionOutput(displayPayload);
     });
     if (this.disposed || generation !== this.listenerGeneration) {
       dataUnlisten();
@@ -713,6 +719,35 @@ class TerminalControllerImpl implements TerminalController {
         this.setOutputPaused(false);
       }
     });
+  }
+
+  private writeVisibleSessionOutput(chunk: string): void {
+    if (!chunk) return;
+    appendTerminalOutput(this.sessionId, chunk);
+    this.writeSessionOutput(chunk);
+  }
+
+  private finishOutputFilter(filter: TerminalOutputFilter): string {
+    try {
+      return filter.finish();
+    } catch (error) {
+      logger.warn(`Terminal output filter failed while flushing session ${this.sessionId}`, error);
+      return '';
+    }
+  }
+
+  private filterSessionOutput(chunk: string): string {
+    let display = chunk;
+    for (const filter of [...this.outputFilters]) {
+      try {
+        display = filter.push(display);
+      } catch (error) {
+        logger.warn(`Terminal output filter failed for session ${this.sessionId}`, error);
+        this.outputFilters.delete(filter);
+        display = `${this.finishOutputFilter(filter)}${display}`;
+      }
+    }
+    return display;
   }
 
   private setOutputPaused(paused: boolean, force = false): void {
@@ -939,6 +974,18 @@ class TerminalControllerImpl implements TerminalController {
     return () => this.outputListeners.delete(listener);
   }
 
+  subscribeOutputFilter(filter: TerminalOutputFilter): () => void {
+    if (this.disposed) return () => {};
+    this.outputFilters.add(filter);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      if (!this.outputFilters.delete(filter)) return;
+      this.writeVisibleSessionOutput(this.finishOutputFilter(filter));
+    };
+  }
+
   subscribeLifecycle(listener: TerminalLifecycleCallback): () => void {
     if (this.disposed) return () => {};
     this.lifecycleListeners.add(listener);
@@ -1059,6 +1106,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);
     this.outputListeners.clear();
+    this.outputFilters.clear();
     this.lifecycleListeners.clear();
     this.removeFromRegistry(this.sessionId);
   }
