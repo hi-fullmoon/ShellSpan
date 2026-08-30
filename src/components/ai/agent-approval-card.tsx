@@ -184,7 +184,7 @@ export function AgentApprovalCard({
 
   return (
     <>
-      <Card size="sm" data-slot="agent-approval-card">
+      <Card size="sm" className="my-2 ring-0" data-slot="agent-approval-card">
         <CardHeader>
           <CardTitle>{t('agent.tool.title')}</CardTitle>
           {targetTitle && (

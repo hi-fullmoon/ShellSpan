@@ -34,10 +34,12 @@ const MarkdownContent = React.memo(function MarkdownContent({
   children,
   copiedLabel,
   copyLabel,
+  showCodeBlockActions,
 }: {
   children: string;
   copiedLabel: string;
   copyLabel: string;
+  showCodeBlockActions: boolean;
 }): React.JSX.Element {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
@@ -95,23 +97,25 @@ const MarkdownContent = React.memo(function MarkdownContent({
           const copied = copiedCode === code;
           return (
             <div className="group/code-block relative">
-              <Button
-                variant="outline"
-                size="xs"
-                className={cn(
-                  'absolute right-1.5 top-1.5 size-6 p-0 transition-opacity',
-                  !copied && 'pointer-events-none opacity-0 group-hover/code-block:pointer-events-auto group-hover/code-block:opacity-100 group-focus-within/code-block:pointer-events-auto group-focus-within/code-block:opacity-100',
-                )}
-                onClick={() => copyCode(code)}
-                aria-label={copied ? copiedLabel : copyLabel}
-              >
-                {copied
-                  ? <CheckIcon data-icon="inline-start" />
-                  : <ClipboardIcon data-icon="inline-start" />}
-                <span className="sr-only" aria-live="polite">
-                  {copied ? copiedLabel : copyLabel}
-                </span>
-              </Button>
+              {showCodeBlockActions && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className={cn(
+                    'absolute right-1.5 top-1.5 size-6 p-0 transition-opacity',
+                    !copied && 'pointer-events-none opacity-0 group-hover/code-block:pointer-events-auto group-hover/code-block:opacity-100 group-focus-within/code-block:pointer-events-auto group-focus-within/code-block:opacity-100',
+                  )}
+                  onClick={() => copyCode(code)}
+                  aria-label={copied ? copiedLabel : copyLabel}
+                >
+                  {copied
+                    ? <CheckIcon data-icon="inline-start" />
+                    : <ClipboardIcon data-icon="inline-start" />}
+                  <span className="sr-only" aria-live="polite">
+                    {copied ? copiedLabel : copyLabel}
+                  </span>
+                </Button>
+              )}
               <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
                 {codeChildren}
               </pre>
@@ -142,7 +146,8 @@ const MarkdownContent = React.memo(function MarkdownContent({
 const AssistantMessageContentComponent: React.FC<{
   content: string;
   streaming: boolean;
-}> = ({ content, streaming }) => {
+  showCodeBlockActions?: boolean;
+}> = ({ content, streaming, showCodeBlockActions = true }) => {
   const { t } = useI18n();
   const deferredContent = useDeferredValue(content);
   const renderedContent = streaming ? deferredContent : content;
@@ -197,6 +202,7 @@ const AssistantMessageContentComponent: React.FC<{
               key={index}
               copiedLabel={t('common.copied')}
               copyLabel={t('common.copy')}
+              showCodeBlockActions={showCodeBlockActions}
             >
               {chunk}
             </MarkdownContent>
