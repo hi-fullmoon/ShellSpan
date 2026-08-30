@@ -4,13 +4,9 @@ import {
   FolderIcon,
   InfoIcon,
   PencilIcon,
-  PlayIcon,
-  PlusIcon,
-  SaveIcon,
   SquareTerminalIcon,
   Trash2Icon,
   WrenchIcon,
-  XIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -29,7 +25,7 @@ import {
   CompactDialogHeader,
 } from '@/components/ui/compact-dialog';
 import { Dialog } from '@/components/ui/dialog';
-import { EmptyState, Spinner } from '@/components/ui/empty-state';
+import { EmptyState } from '@/components/ui/empty-state';
 import {
   Field,
   FieldDescription,
@@ -373,9 +369,6 @@ export function HostQuickActionsDialog({
                 {t('common.cancel')}
               </Button>
               <Button size="sm" onClick={() => void saveDraft()} disabled={saving}>
-                {saving
-                  ? <span data-icon="inline-start"><Spinner /></span>
-                  : <SaveIcon data-icon="inline-start" />}
                 {t('common.save')}
               </Button>
             </CardFooter>
@@ -436,7 +429,6 @@ export function HostQuickActionsDialog({
                       disabled={commandDisabled}
                       title={commandDisabled ? t('hostQuickActions.noTerminal') : undefined}
                     >
-                      <PlayIcon data-icon="inline-start" />
                       {action.kind === 'command'
                         ? t('hostQuickActions.insert')
                         : t('hostQuickActions.run')}
@@ -459,11 +451,9 @@ export function HostQuickActionsDialog({
             }}
             disabled={Boolean(draft) || actions.length >= 24}
           >
-            <PlusIcon data-icon="inline-start" />
             {t('hostQuickActions.create')}
           </Button>
           <Button variant="outline" size="sm" onClick={onClose}>
-            <XIcon data-icon="inline-start" />
             {t('common.close')}
           </Button>
         </CompactDialogFooter>
