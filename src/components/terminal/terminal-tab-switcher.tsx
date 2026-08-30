@@ -180,7 +180,7 @@ export const TerminalTabSwitcher: React.FC<TerminalTabSwitcherProps> = ({
               </p>
             </div>
           ) : (
-            <div role="listbox" className="flex flex-col gap-1 p-2">
+            <div role="listbox" className="flex flex-col gap-1 px-4 py-3">
               {filteredSessions.map((session, index) => {
                 const selected = index === activeIndex;
                 const current = session.sessionId === activeSessionId;
@@ -225,7 +225,7 @@ export const TerminalTabSwitcher: React.FC<TerminalTabSwitcherProps> = ({
 
         <Separator />
 
-        <DialogFooter className="flex-row flex-wrap items-center justify-between gap-2 px-3 py-2.5 pt-2.5">
+        <DialogFooter className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-2.5 pt-2.5">
           <span className="text-xs text-muted-foreground">
             {t('terminal.tabSwitcher.count', { count: filteredSessions.length })}
           </span>

@@ -306,11 +306,11 @@ export const KeychainPanel: React.FC = () => {
         }}
       >
         <DrawerContent className="w-100 gap-0 p-0">
-          <DrawerHeader className="border-b border-app-border px-5 py-4">
+          <DrawerHeader className="border-b border-app-border px-4 py-4">
             <DrawerTitle>{editing ? t('workbench.keychain.edit') : t('workbench.keychain.new')}</DrawerTitle>
             <p className="text-xs text-muted-foreground">{editing ? t('workbench.keychain.editSubtitle') : t('workbench.keychain.newSubtitle')}</p>
           </DrawerHeader>
-          <FieldGroup className="gap-5 px-5 py-4">
+          <FieldGroup className="gap-5 px-4 py-4">
             <FormRow controlId="keychain-label" label={t('common.label')} error={errors.label}>
               <Input id="keychain-label" aria-invalid={Boolean(errors.label)} aria-describedby={errors.label ? 'keychain-label-error' : undefined} value={form.label} onChange={(e) => updateField('label', e.target.value)} placeholder={t('keychain.form.labelPlaceholder')} />
             </FormRow>
@@ -346,7 +346,7 @@ export const KeychainPanel: React.FC = () => {
               }}
             />
           </FieldGroup>
-          <DrawerFooter className="px-5 pb-4 pt-1">
+          <DrawerFooter className="px-4 pb-4 pt-1">
             <Button size="sm" onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
               <SaveIcon data-icon="inline-start" />
               {t('common.save')}

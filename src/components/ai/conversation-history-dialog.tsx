@@ -143,7 +143,7 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
               />
             </div>
           </div>
-          <CompactDialogBody className="flex-1 gap-4 px-2 py-3">
+          <CompactDialogBody className="flex-1 gap-4">
             {currentConversation && !normalizedQuery && (
               <section className="flex flex-col gap-1">
                 <span className="px-2 text-xs font-medium text-muted-foreground">

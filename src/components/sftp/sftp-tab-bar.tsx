@@ -567,7 +567,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         }}
       >
         <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-2.5 text-left">
+          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
             <AlertDialogTitle className="text-sm leading-5">{t('sftp.tab.closeConfirmTitle')}</AlertDialogTitle>
           </AlertDialogHeader>
           <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
@@ -582,7 +582,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                 : ''}
             </AlertDialogDescription>
           </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 py-2.5">
+          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
             <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseConnection}>
               {t('common.close')}

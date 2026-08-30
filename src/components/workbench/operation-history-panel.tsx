@@ -469,7 +469,7 @@ export const OperationHistoryPanel: React.FC = () => {
           />
           <ScrollArea className="h-[min(640px,calc(100vh-8rem))] min-h-0">
             <ScrollAreaContent
-              className="flex min-w-0 flex-col gap-3 px-6 py-4"
+              className="flex min-w-0 flex-col gap-3 px-4 py-3"
             >
               {selected?.events.map((event, index) => (
                 <React.Fragment key={event.eventId}>
