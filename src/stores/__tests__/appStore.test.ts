@@ -68,14 +68,23 @@ describe('appStore', () => {
     );
   });
 
-  it('sets active workbench tab', () => {
-    useAppStore.getState().setActiveWorkbenchTab('settings');
-    expect(useAppStore.getState().activeWorkbenchTab).toBe('settings');
+  it('opens settings without replacing the current workspace context', () => {
+    useAppStore.getState().setActiveSection('terminal');
+    useAppStore.getState().openSettings('shortcuts');
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeSection: 'terminal',
+      activeSettingsSection: 'shortcuts',
+      settingsDialogOpen: true,
+    });
+
+    useAppStore.getState().setSettingsDialogOpen(false);
+    expect(useAppStore.getState().settingsDialogOpen).toBe(false);
   });
 
   it('routes a new connection request to the workbench until it is consumed', () => {
     useAppStore.getState().setActiveSection('terminal');
-    useAppStore.getState().setActiveWorkbenchTab('settings');
+    useAppStore.getState().setActiveWorkbenchTab('logs');
 
     useAppStore.getState().requestNewConnection();
 

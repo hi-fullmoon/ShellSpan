@@ -11,6 +11,9 @@ import { Toaster } from '@/components/ui/sonner';
 const Workbench = React.memo(React.lazy(() => import('@/components/workbench')));
 const Terminal = React.memo(React.lazy(() => import('@/components/terminal')));
 const Sftp = React.memo(React.lazy(() => import('@/components/sftp')));
+const SettingsPanel = React.lazy(() => import('@/components/workbench/settings-panel').then((module) => ({
+  default: module.SettingsPanel,
+})));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { useMonitorEvents } from '@/hooks/useMonitorEvents';
@@ -42,7 +45,17 @@ import {
 import { usePortForwardEvents } from '@/hooks/usePortForwardEvents';
 const logger = createLogger('app');
 
-const AppSections: React.FC = () => {
+interface AppSectionsProps {
+  onCheckForUpdates: () => void;
+  onOpenAbout: () => void;
+  onRequestExit: () => void;
+}
+
+const AppSections: React.FC<AppSectionsProps> = ({
+  onCheckForUpdates,
+  onOpenAbout,
+  onRequestExit,
+}) => {
   const activeSection = useAppStore((state) => state.activeSection);
 
   return (
@@ -59,7 +72,11 @@ const AppSections: React.FC = () => {
           activeSection !== 'workbench' && 'hidden',
         )}
       >
-        <Workbench />
+        <Workbench
+          onCheckForUpdates={onCheckForUpdates}
+          onOpenAbout={onOpenAbout}
+          onRequestExit={onRequestExit}
+        />
       </div>
       <div
         className={cn(
@@ -91,7 +108,17 @@ export const App: React.FC = () => {
 
   const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
   const [exitDialogOpen, setExitDialogOpen] = React.useState(false);
+  const settingsDialogOpen = useAppStore((state) => state.settingsDialogOpen);
+  const setSettingsDialogOpen = useAppStore((state) => state.setSettingsDialogOpen);
   const exitInFlightRef = React.useRef(false);
+
+  const checkForUpdates = React.useCallback((): void => {
+    void useUpdateStore.getState().runCheck('manual');
+  }, []);
+
+  const openAbout = React.useCallback((): void => {
+    setAboutDialogOpen(true);
+  }, []);
 
   const requestAppExit = React.useCallback((): void => {
     if (exitInFlightRef.current) return;
@@ -120,15 +147,21 @@ export const App: React.FC = () => {
       });
   }, []);
 
+  const requestUserExit = React.useCallback((): void => {
+    if (useAppStore.getState().confirmBeforeExit) {
+      setExitDialogOpen(true);
+    } else {
+      requestAppExit();
+    }
+  }, [requestAppExit]);
+
   React.useEffect(() => {
     const listeners: Promise<() => void>[] = [];
 
     const setup = async (): Promise<void> => {
       listeners.push(
         listen('system-open-settings', () => {
-          const { setActiveSection, setActiveWorkbenchTab } = useAppStore.getState();
-          setActiveSection('workbench');
-          setActiveWorkbenchTab('settings');
+          useAppStore.getState().openSettings();
         }),
       );
       listeners.push(
@@ -138,11 +171,7 @@ export const App: React.FC = () => {
       );
       listeners.push(
         listen('system-request-app-exit', () => {
-          if (useAppStore.getState().confirmBeforeExit) {
-            setExitDialogOpen(true);
-          } else {
-            requestAppExit();
-          }
+          requestUserExit();
         }),
       );
       listeners.push(
@@ -159,7 +188,7 @@ export const App: React.FC = () => {
         unlisteners.forEach((unlisten) => unlisten());
       });
     };
-  }, [requestAppExit]);
+  }, [requestUserExit]);
 
   const { ready, t } = useI18n();
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
@@ -212,12 +241,22 @@ export const App: React.FC = () => {
     <AppShell>
       <div className="relative flex min-h-0 flex-1">
         <MainContent>
-          <AppSections />
+          <AppSections
+            onCheckForUpdates={checkForUpdates}
+            onOpenAbout={openAbout}
+            onRequestExit={requestUserExit}
+          />
         </MainContent>
         <AiPanel />
       </div>
 
       <AboutDialog open={aboutDialogOpen} onClose={() => setAboutDialogOpen(false)} />
+
+      {settingsDialogOpen && (
+        <Suspense fallback={null}>
+          <SettingsPanel open onOpenChange={setSettingsDialogOpen} />
+        </Suspense>
+      )}
 
       <ConfirmDeleteDialog
         open={exitDialogOpen}
