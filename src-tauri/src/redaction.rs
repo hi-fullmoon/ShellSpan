@@ -54,6 +54,14 @@ pub(crate) fn redact_sensitive_text(value: &str) -> String {
         "auth-token=",
         "client_secret=",
         "client-secret=",
+        "aws_secret_access_key=",
+        "aws-secret-access-key=",
+        "openai_api_key=",
+        "openai-api-key=",
+        "anthropic_api_key=",
+        "anthropic-api-key=",
+        "google_api_key=",
+        "google-api-key=",
         "password=",
         "password:",
         "passwd=",
@@ -104,6 +112,23 @@ fn contains_well_known_token(value: &str) -> bool {
                 || (["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
                     .iter()
                     .any(|prefix| token.starts_with(prefix) && token.len() >= prefix.len() + 20))
+        })
+        || value.split_whitespace().any(|token| {
+            let token = token.trim_matches(|character: char| {
+                matches!(character, '"' | '\'' | ',' | ';' | ')' | ']' | '}')
+            });
+            let known_prefix = [
+                "sk-", "sk-ant-", "AIza", "glpat-", "npm_", "xoxb-", "xoxa-", "xoxp-", "xoxr-",
+                "xoxs-", "sk_live_", "sk_test_",
+            ]
+            .iter()
+            .find(|prefix| token.starts_with(**prefix));
+            known_prefix.is_some_and(|prefix| {
+                token.len() >= prefix.len() + 20
+                    && token.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+                    })
+            })
         })
 }
 
@@ -185,5 +210,17 @@ mod tests {
         assert!(!encoded.contains("nested-secret"));
         assert!(!encoded.contains("bearer-secret"));
         assert_eq!(redacted["arguments"]["safe"], "systemctl status nginx");
+    }
+
+    #[test]
+    fn redacts_common_provider_tokens_and_prefixed_cloud_secret_names() {
+        for secret in [
+            "AWS_SECRET_ACCESS_KEY=plain-cloud-secret-material",
+            "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890",
+            "AIzaabcdefghijklmnopqrstuvwxyz1234567890",
+            concat!("xoxb", "-1234567890-abcdefghijklmnopqrstuvwxyz"),
+        ] {
+            assert_eq!(redact_sensitive_text(secret), REDACTED_VALUE);
+        }
     }
 }

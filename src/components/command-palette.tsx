@@ -161,7 +161,6 @@ export function buildCommandPaletteItems({
     ['workbench', 'workbench', undefined, WrenchIcon],
     ['terminal', 'terminal', undefined, SquareTerminalIcon],
     ['sftp', 'sftp', undefined, FolderSyncIcon],
-    ['settings', 'workbench', 'settings', SettingsIcon],
     ['logs', 'workbench', 'logs', LogsIcon],
     ['monitor', 'workbench', 'monitor', MonitorIcon],
   ].map(([id, section, tab, icon]) => ({
@@ -172,6 +171,15 @@ export function buildCommandPaletteItems({
     icon: icon as React.ElementType,
     run: () => navigate(section as AppSection, tab as WorkbenchTab | undefined),
   }));
+
+  navigation.push({
+    id: 'navigation-settings',
+    group: 'navigation',
+    label: label('commandPalette.action.settings'),
+    keywords: 'settings preferences',
+    icon: SettingsIcon,
+    run: () => openSettings('general'),
+  });
 
   const canSplit = terminalSessions.length >= 2
     && terminalSessions.some((session) => session.sessionId === activeTerminalSessionId);
@@ -417,10 +425,7 @@ export const CommandPalette: React.FC = () => {
         if (tab) app.setActiveWorkbenchTab(tab);
       },
       openSettings: (section) => {
-        const app = useAppStore.getState();
-        app.setActiveSection('workbench');
-        app.setActiveWorkbenchTab('settings');
-        app.setActiveSettingsSection(section);
+        useAppStore.getState().openSettings(section);
       },
       connect: (profileId, target) => {
         document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {

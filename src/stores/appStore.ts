@@ -76,12 +76,15 @@ interface AppState extends AppPreferences {
   activeSection: AppSection;
   activeWorkbenchTab: WorkbenchTab;
   activeSettingsSection: SettingsSection;
+  settingsDialogOpen: boolean;
   pendingWorkbenchAction: 'newConnection' | null;
   operationHistoryCategory: OperationHistoryCategory | 'all';
   hydrateFromDb: () => Promise<void>;
   setActiveSection: (section: AppSection) => void;
   setActiveWorkbenchTab: (tab: WorkbenchTab) => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
+  setSettingsDialogOpen: (open: boolean) => void;
+  openSettings: (section?: SettingsSection) => void;
   requestNewConnection: () => void;
   consumeWorkbenchAction: (action: 'newConnection') => void;
   setOperationHistoryCategory: (category: OperationHistoryCategory | 'all') => void;
@@ -258,6 +261,7 @@ export const useAppStore = create<AppState>()(
     activeSection: defaults.startupSection,
     activeWorkbenchTab: 'connections' as WorkbenchTab,
     activeSettingsSection: 'general' as SettingsSection,
+    settingsDialogOpen: false,
     pendingWorkbenchAction: null,
     operationHistoryCategory: 'all',
 
@@ -289,6 +293,11 @@ export const useAppStore = create<AppState>()(
     setActiveSection: (activeSection) => set({ activeSection }),
     setActiveWorkbenchTab: (activeWorkbenchTab) => set({ activeWorkbenchTab }),
     setActiveSettingsSection: (activeSettingsSection) => set({ activeSettingsSection }),
+    setSettingsDialogOpen: (settingsDialogOpen) => set({ settingsDialogOpen }),
+    openSettings: (section) => set((state) => ({
+      settingsDialogOpen: true,
+      activeSettingsSection: section ?? state.activeSettingsSection,
+    })),
     requestNewConnection: () => set({
       activeSection: 'workbench',
       activeWorkbenchTab: 'connections',

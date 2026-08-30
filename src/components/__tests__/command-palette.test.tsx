@@ -277,6 +277,7 @@ describe('CommandPalette', () => {
   });
 
   it('opens the exact settings section selected from search', async () => {
+    useAppStore.setState({ activeSection: 'terminal' });
     render(<CommandPalette />);
     act(() => document.dispatchEvent(new Event('termbridge:open-command-palette')));
     const input = screen.getByRole('textbox');
@@ -285,9 +286,9 @@ describe('CommandPalette', () => {
 
     await waitFor(() => {
       expect(useAppStore.getState()).toMatchObject({
-        activeSection: 'workbench',
-        activeWorkbenchTab: 'settings',
+        activeSection: 'terminal',
         activeSettingsSection: 'shortcuts',
+        settingsDialogOpen: true,
       });
     });
   });

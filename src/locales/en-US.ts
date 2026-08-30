@@ -246,6 +246,13 @@ export default {
   'common.label': 'Label',
 
   'workbench.settings.title': 'Settings',
+  'workbench.userMenu.open': 'Open user menu',
+  'workbench.userMenu.name': 'Me',
+  'workbench.userMenu.localProfile': 'Local profile',
+  'workbench.userMenu.about': 'About',
+  'workbench.userMenu.checkingUpdate': 'Checking for updates…',
+  'workbench.userMenu.downloadingUpdate': 'Downloading update…',
+  'workbench.userMenu.quit': 'Quit',
   'settings.sectionNavigation': 'Settings categories',
 
   'workbench.logs.title': 'Log explorer',
@@ -1169,7 +1176,8 @@ export default {
   'agent.permission.requestApproval': 'Request approval',
   'agent.permission.requestApprovalDescription': 'Ask before every terminal command.',
   'agent.permission.autoApproveReadOnly': 'Approve for me',
-  'agent.permission.autoApproveReadOnlyDescription': 'Ask only for detected risk operations.',
+  'agent.permission.autoApproveReadOnlyDescription':
+    'Ask for changes, destructive operations, and reads that may expose sensitive information.',
   'agent.permission.fullAccess': 'Full access',
   'agent.permission.fullAccessSelected': 'Full access',
   'agent.permission.fullAccessDescription': 'Automatically run any command in this terminal.',

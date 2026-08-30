@@ -246,6 +246,13 @@ export default {
   'common.label': '名称',
 
   'workbench.settings.title': '设置',
+  'workbench.userMenu.open': '打开个人菜单',
+  'workbench.userMenu.name': '我',
+  'workbench.userMenu.localProfile': '本地用户',
+  'workbench.userMenu.about': '关于',
+  'workbench.userMenu.checkingUpdate': '检查更新中…',
+  'workbench.userMenu.downloadingUpdate': '下载更新中…',
+  'workbench.userMenu.quit': '退出',
   'settings.sectionNavigation': '设置分类',
 
   'workbench.logs.title': '日志中心',
@@ -1167,7 +1174,7 @@ export default {
   'agent.permission.requestApproval': '请求批准',
   'agent.permission.requestApprovalDescription': '执行每条终端命令前都先询问。',
   'agent.permission.autoApproveReadOnly': '帮我批准',
-  'agent.permission.autoApproveReadOnlyDescription': '仅对检测到的风险操作请求批准。',
+  'agent.permission.autoApproveReadOnlyDescription': '对修改、破坏性操作及可能暴露敏感信息的读取请求批准。',
   'agent.permission.fullAccess': '完全访问权限',
   'agent.permission.fullAccessSelected': '完全访问',
   'agent.permission.fullAccessDescription': '可在当前终端中自动执行任何命令。',
