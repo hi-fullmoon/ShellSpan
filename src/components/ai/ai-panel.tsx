@@ -502,9 +502,7 @@ function useCompactAiPanelViewport(): boolean {
 }
 
 function navigateToAiSettings(): void {
-  const app = useAppStore.getState();
-  app.setActiveSection('workbench');
-  app.setActiveWorkbenchTab('settings');
+  useAppStore.getState().openSettings('ai');
 }
 
 export const AiPanel: React.FC = () => {

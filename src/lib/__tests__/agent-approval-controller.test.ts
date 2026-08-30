@@ -38,7 +38,7 @@ function result(call: AgentToolCall, status: AgentToolResult['status'] = 'comple
 }
 
 const commands: Record<AgentRisk, string> = {
-  readOnly: 'systemctl status nginx',
+  readOnly: 'df -h',
   stateChange: 'systemctl restart nginx',
   destructive: 'rm -rf /tmp/cache',
 };
@@ -245,6 +245,28 @@ describe('Agent approval controller race boundaries', () => {
     });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(submitResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps confidentiality-sensitive reads behind approval in approve-for-me mode', () => {
+    const execute = vi.fn();
+    const controller = new AgentApprovalController({
+      getPermissionMode: () => 'autoApproveReadOnly',
+      validateTarget: () => null,
+      execute,
+      submitResult: vi.fn(),
+      createApprovalId: () => 'approval-sensitive-read',
+      subscribeToTerminalStore: false,
+    });
+
+    const snapshot = controller.registerToolCall(toolCall('cat .env'));
+
+    expect(snapshot.riskAssessment.risk).toBe('readOnly');
+    expect(snapshot.decision).toEqual({
+      requiresApproval: true,
+      reason: 'riskRequiresApproval',
+    });
+    expect(snapshot.status).toBe('awaitingApproval');
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('releases full terminal records after the owning request reaches a terminal state', async () => {

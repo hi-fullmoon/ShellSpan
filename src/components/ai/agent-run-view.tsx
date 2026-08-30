@@ -114,7 +114,7 @@ export function AgentRunView({
       </MessageScroller>
 
       {latestRun.status !== 'running' && latestRun.status !== 'completed' && (
-        <Alert variant={runOutcomeVariant(latestRun)} className="mx-3 mb-2 w-auto shrink-0">
+        <Alert variant={runOutcomeVariant(latestRun)} className="mx-3 w-auto shrink-0">
           <CircleAlertIcon />
           <AlertTitle>{t(`agent.phase.${latestRun.phase}` as LocaleKey)}</AlertTitle>
           <AlertDescription className="flex flex-col gap-1.5">

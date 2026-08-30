@@ -32,6 +32,29 @@ const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
   /\bDROP\s+(?:DATABASE|SCHEMA|TABLE)\b/iu,
 ];
 
+// These commands are observational from an integrity perspective, but can
+// disclose arbitrary file contents, process arguments, logs, container
+// environment variables, or cluster secrets. They therefore stay in the
+// read-only risk class while still requiring an explicit user decision in the
+// "auto approve read-only" mode.
+const APPROVAL_REQUIRED_READ_PROGRAMS = new Set([
+  'cat',
+  'docker',
+  'du',
+  'grep',
+  'head',
+  'journalctl',
+  'kubectl',
+  'ls',
+  'lsof',
+  'netstat',
+  'ps',
+  'ss',
+  'stat',
+  'systemctl',
+  'tail',
+]);
+
 function containsDestructivePattern(command: string): boolean {
   return DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
 }
@@ -119,4 +142,25 @@ export function classifyAgentCommandRisk(command: string): AgentCommandRiskAsses
     return { risk: 'readOnly', reason: 'compoundReadOnlyAllowlist' };
   }
   return { risk: 'stateChange', reason: 'unrecognizedStateChange' };
+}
+
+function segmentProgram(segment: string): string | undefined {
+  const first = segment.trim().split(/\s+/, 1)[0];
+  if (!first) return undefined;
+  return first.split(/[\\/]/).pop()?.toLowerCase().replace(/\.(?:exe|com|cmd|bat)$/i, '');
+}
+
+/**
+ * Read-only does not imply confidentiality-safe. Keep content-bearing or
+ * identity-rich diagnostics behind an explicit approval even when the user
+ * selected automatic approval for ordinary health checks.
+ */
+export function requiresApprovalForReadOnlyCommand(command: string): boolean {
+  if (classifyAgentCommandRisk(command).risk !== 'readOnly') return false;
+  const segments = splitSimpleCompoundCommand(command);
+  if (!segments) return true;
+  return segments.some((segment) => {
+    const program = segmentProgram(segment);
+    return !program || APPROVAL_REQUIRED_READ_PROGRAMS.has(program);
+  });
 }

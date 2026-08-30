@@ -22,7 +22,12 @@ pub(crate) const AI_STREAM_EVENT: &str = "ai-stream";
 const AI_KEY_SERVICE: &str = "com.termbridge.ai-provider";
 const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV3";
 const MAX_CONTEXT_BYTES: usize = 256 * 1024;
+const MAX_AI_MESSAGES: usize = 128;
+const MAX_AI_MESSAGE_BYTES: usize = 128 * 1024;
+const MAX_AI_MESSAGES_BYTES: usize = 256 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
+pub(crate) const MAX_PROVIDER_STREAM_EVENT_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_PROVIDER_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -537,6 +542,7 @@ async fn stream_openai(
     };
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
+    let mut response_bytes = 0;
     let mut completed = false;
     loop {
         tokio::select! {
@@ -544,7 +550,7 @@ async fn stream_openai(
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(format_transport_error)?;
-                buffer.extend_from_slice(&chunk);
+                append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)?;
                 while let Some(event) = take_sse_event(&mut buffer)? {
                     completed |= openai_event_is_completed(&event)?;
                     if let Some(text) = parse_openai_delta(&event)? {
@@ -554,6 +560,7 @@ async fn stream_openai(
                         })?;
                     }
                 }
+                ensure_provider_stream_frame_size(buffer.len())?;
             }
         }
     }
@@ -588,6 +595,7 @@ async fn stream_openai_compatible(
     };
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
+    let mut response_bytes = 0;
     let mut previous_content = String::new();
     let mut completed = false;
     loop {
@@ -596,7 +604,7 @@ async fn stream_openai_compatible(
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(format_transport_error)?;
-                buffer.extend_from_slice(&chunk);
+                append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)?;
                 while let Some(event) = take_sse_event(&mut buffer)? {
                     completed |= openai_compatible_event_is_completed(&event)?;
                     if let Some(text) = parse_openai_compatible_delta(&event)?
@@ -612,6 +620,7 @@ async fn stream_openai_compatible(
                         })?;
                     }
                 }
+                ensure_provider_stream_frame_size(buffer.len())?;
             }
         }
     }
@@ -647,6 +656,7 @@ async fn stream_ollama(
     };
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
+    let mut response_bytes = 0;
     let mut completed = false;
     loop {
         tokio::select! {
@@ -654,7 +664,7 @@ async fn stream_ollama(
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(format_transport_error)?;
-                buffer.extend_from_slice(&chunk);
+                append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)?;
                 while let Some(line) = take_line(&mut buffer)? {
                     if line.trim().is_empty() { continue; }
                     let value: Value = serde_json::from_str(line.trim())
@@ -675,6 +685,7 @@ async fn stream_ollama(
                         })?;
                     }
                 }
+                ensure_provider_stream_frame_size(buffer.len())?;
             }
         }
     }
@@ -715,6 +726,7 @@ fn take_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
     let Some((index, separator_len)) = earliest_separator(lf, crlf) else {
         return Ok(None);
     };
+    ensure_provider_stream_frame_size(index)?;
     let event = buffer.drain(..index).collect::<Vec<_>>();
     buffer.drain(..separator_len);
     String::from_utf8(event)
@@ -722,11 +734,35 @@ fn take_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
         .map_err(|error| format!("invalid UTF-8 in OpenAI stream event: {error}"))
 }
 
+pub(crate) fn append_provider_stream_chunk(
+    buffer: &mut Vec<u8>,
+    chunk: &[u8],
+    response_bytes: &mut usize,
+) -> Result<(), String> {
+    *response_bytes = (*response_bytes)
+        .checked_add(chunk.len())
+        .ok_or_else(|| "AI provider stream size overflowed".to_string())?;
+    if *response_bytes > MAX_PROVIDER_STREAM_RESPONSE_BYTES {
+        return Err("AI provider stream exceeded the 16 MiB response limit".to_string());
+    }
+    buffer.extend_from_slice(chunk);
+    Ok(())
+}
+
+pub(crate) fn ensure_provider_stream_frame_size(frame_bytes: usize) -> Result<(), String> {
+    if frame_bytes > MAX_PROVIDER_STREAM_EVENT_BYTES {
+        Err("AI provider stream event exceeded the 1 MiB framing limit".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 fn take_final_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
     if buffer.iter().all(|byte| byte.is_ascii_whitespace()) {
         buffer.clear();
         return Ok(None);
     }
+    ensure_provider_stream_frame_size(buffer.len())?;
     String::from_utf8(std::mem::take(buffer))
         .map(Some)
         .map_err(|error| format!("invalid UTF-8 in final AI stream event: {error}"))
@@ -838,6 +874,7 @@ fn take_line(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
     let Some(index) = buffer.iter().position(|byte| *byte == b'\n') else {
         return Ok(None);
     };
+    ensure_provider_stream_frame_size(index)?;
     let mut line = buffer.drain(..index).collect::<Vec<_>>();
     buffer.drain(..1);
     if line.last() == Some(&b'\r') {
@@ -876,10 +913,30 @@ fn validate_request(request: &AiStartRequest) -> Result<(), String> {
     if request.messages.is_empty() {
         return Err("AI request messages cannot be empty".to_string());
     }
+    if request.messages.len() > MAX_AI_MESSAGES {
+        return Err("AI request contains too many messages".to_string());
+    }
     if request.messages.iter().any(|message| {
         !matches!(message.role.as_str(), "user" | "assistant") || message.content.trim().is_empty()
     }) {
         return Err("AI request contains an invalid message".to_string());
+    }
+    if request
+        .messages
+        .iter()
+        .any(|message| message.content.len() > MAX_AI_MESSAGE_BYTES)
+    {
+        return Err("AI request message is too large".to_string());
+    }
+    let message_bytes = request
+        .messages
+        .iter()
+        .try_fold(0usize, |total, message| {
+            total.checked_add(message.content.len())
+        })
+        .ok_or_else(|| "AI request messages are too large".to_string())?;
+    if message_bytes > MAX_AI_MESSAGES_BYTES {
+        return Err("AI request messages are too large".to_string());
     }
     let context_bytes = request
         .context
@@ -1192,6 +1249,101 @@ mod tests {
         );
 
         assert!(result.is_none());
+    }
+
+    fn test_ai_request(messages: Vec<AiMessage>) -> AiStartRequest {
+        AiStartRequest {
+            request_id: "request-1".to_string(),
+            provider: AiProviderConfig {
+                id: "ollama".to_string(),
+                kind: AiProviderKind::Ollama,
+                base_url: "http://127.0.0.1:11434".to_string(),
+                model: "qwen3".to_string(),
+                reasoning_effort: None,
+                requires_api_key: false,
+                api_key: None,
+            },
+            task: AiTaskKind::Ask,
+            messages,
+            context: None,
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_ai_messages_before_provider_io() {
+        let oversized = test_ai_request(vec![AiMessage {
+            role: "user".to_string(),
+            content: "x".repeat(MAX_AI_MESSAGE_BYTES + 1),
+        }]);
+        assert_eq!(
+            validate_request(&oversized).unwrap_err(),
+            "AI request message is too large"
+        );
+
+        let too_many = test_ai_request(
+            (0..=MAX_AI_MESSAGES)
+                .map(|_| AiMessage {
+                    role: "user".to_string(),
+                    content: "x".to_string(),
+                })
+                .collect(),
+        );
+        assert_eq!(
+            validate_request(&too_many).unwrap_err(),
+            "AI request contains too many messages"
+        );
+
+        let aggregate = test_ai_request(
+            (0..3)
+                .map(|_| AiMessage {
+                    role: "user".to_string(),
+                    content: "x".repeat(96 * 1024),
+                })
+                .collect(),
+        );
+        assert_eq!(
+            validate_request(&aggregate).unwrap_err(),
+            "AI request messages are too large"
+        );
+    }
+
+    #[test]
+    fn provider_stream_limits_bound_frames_and_total_bytes() {
+        let oversized_frame = vec![b'x'; MAX_PROVIDER_STREAM_EVENT_BYTES + 1];
+        assert_eq!(
+            ensure_provider_stream_frame_size(oversized_frame.len()).unwrap_err(),
+            "AI provider stream event exceeded the 1 MiB framing limit"
+        );
+
+        let mut complete_sse_frame = oversized_frame.clone();
+        complete_sse_frame.extend_from_slice(b"\n\n");
+        assert_eq!(
+            take_sse_event(&mut complete_sse_frame).unwrap_err(),
+            "AI provider stream event exceeded the 1 MiB framing limit"
+        );
+        assert_eq!(
+            complete_sse_frame.len(),
+            MAX_PROVIDER_STREAM_EVENT_BYTES + 3
+        );
+
+        let mut complete_ndjson_frame = oversized_frame;
+        complete_ndjson_frame.push(b'\n');
+        assert_eq!(
+            take_line(&mut complete_ndjson_frame).unwrap_err(),
+            "AI provider stream event exceeded the 1 MiB framing limit"
+        );
+        assert_eq!(
+            complete_ndjson_frame.len(),
+            MAX_PROVIDER_STREAM_EVENT_BYTES + 2
+        );
+
+        let mut buffer = Vec::new();
+        let mut response_bytes = MAX_PROVIDER_STREAM_RESPONSE_BYTES;
+        assert_eq!(
+            append_provider_stream_chunk(&mut buffer, b"x", &mut response_bytes).unwrap_err(),
+            "AI provider stream exceeded the 16 MiB response limit"
+        );
+        assert!(buffer.is_empty());
     }
 
     #[test]

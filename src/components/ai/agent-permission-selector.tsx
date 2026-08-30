@@ -188,8 +188,9 @@ export function AgentPermissionSelector({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
+              size="sm"
               onClick={() => {
                 setMode(sessionId, 'fullAccess');
                 setFullAccessDialogOpen(false);

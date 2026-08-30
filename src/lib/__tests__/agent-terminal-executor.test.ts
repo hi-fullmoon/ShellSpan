@@ -232,6 +232,17 @@ describe('Agent M2 terminal display filter', () => {
     },
   );
 
+  it.each([
+    ['posix', '/usr/bin/env -i', 'eval "'] as const,
+    ['powershell', '$env:PSModulePath=', '. $__tb_script_'] as const,
+  ])('runs auto-approved read-only commands in an isolated %s shell', (shell, expected, excluded) => {
+    const boundary = createAgentTerminalBoundary(NONCE);
+    const wrapper = buildAgentTerminalWrapper('df -h', boundary, shell, true);
+
+    expect(wrapper).toContain(expected);
+    expect(wrapper).not.toContain(excluded);
+  });
+
   it('removes boundary records when shell echo is disabled without hiding command output', () => {
     const boundary = createAgentTerminalBoundary(NONCE);
     const filter = new AgentTerminalDisplayFilter(boundary, 'printf ready', 'posix');
@@ -561,6 +572,93 @@ describe('Agent M2 PTY executor', () => {
     expect(result.output).toContain('cancelled by the user');
     expect(invokeWriteSession).toHaveBeenLastCalledWith('session-1', '\u0003');
     expect(executor.cancel(call.requestId, call.callId)).toBe(false);
+  });
+
+  it('quarantines a PTY after cancellation until the wrapper confirms termination', async () => {
+    const { invokeWriteSession } = await import('@/lib/tauri');
+    const boundary = createAgentTerminalBoundary(NONCE);
+    const firstCall = toolCall('sleep 60');
+    const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
+
+    const pending = executor.execute({
+      toolCall: firstCall,
+      authorization: authorization(firstCall),
+    });
+    await vi.waitFor(() => expect(invokeWriteSession).toHaveBeenCalledTimes(1));
+    terminalEvents.emitData('session-1', `${boundary.beginToken}\r\nrunning`);
+    expect(executor.cancel(firstCall.requestId, firstCall.callId)).toBe(true);
+    await expect(pending).resolves.toMatchObject({ status: 'cancelled' });
+
+    const blockedCall = {
+      ...toolCall('uptime'),
+      requestId: 'request-2',
+      callId: 'call-2',
+    };
+    await expect(executor.execute({
+      toolCall: blockedCall,
+      authorization: authorization(blockedCall),
+    })).resolves.toMatchObject({
+      status: 'failed',
+      output: expect.stringContaining('has not confirmed termination'),
+    });
+    expect(invokeWriteSession).toHaveBeenCalledTimes(2);
+
+    terminalEvents.emitData('session-1', `${boundary.endPrefix}130\u001f`);
+    const resumedCall = {
+      ...toolCall('uptime'),
+      requestId: 'request-3',
+      callId: 'call-3',
+    };
+    vi.mocked(invokeWriteSession).mockImplementationOnce(async (sessionId) => {
+      terminalEvents.emitData(
+        sessionId,
+        `${boundary.beginToken}\r\nready${boundary.endPrefix}0\u001f`,
+      );
+    });
+
+    await expect(executor.execute({
+      toolCall: resumedCall,
+      authorization: authorization(resumedCall),
+    })).resolves.toMatchObject({ status: 'completed', output: 'ready' });
+  });
+
+  it('releases cancellation quarantine when the original PTY write is rejected', async () => {
+    const { invokeWriteSession } = await import('@/lib/tauri');
+    let rejectWrite!: (error: Error) => void;
+    vi.mocked(invokeWriteSession).mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectWrite = reject;
+    }));
+    const firstCall = toolCall('sleep 60');
+    const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
+
+    const pending = executor.execute({
+      toolCall: firstCall,
+      authorization: authorization(firstCall),
+    });
+    await vi.waitFor(() => expect(invokeWriteSession).toHaveBeenCalledTimes(1));
+    expect(executor.cancel(firstCall.requestId, firstCall.callId)).toBe(true);
+    await expect(pending).resolves.toMatchObject({ status: 'cancelled' });
+    rejectWrite(new Error('write rejected'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const resumedCall = {
+      ...toolCall('uptime'),
+      requestId: 'request-2',
+      callId: 'call-2',
+    };
+    const boundary = createAgentTerminalBoundary(NONCE);
+    vi.mocked(invokeWriteSession).mockImplementationOnce(async (sessionId) => {
+      terminalEvents.emitData(
+        sessionId,
+        `${boundary.beginToken}\r\nready${boundary.endPrefix}0\u001f`,
+      );
+    });
+
+    await expect(executor.execute({
+      toolCall: resumedCall,
+      authorization: authorization(resumedCall),
+    })).resolves.toMatchObject({ status: 'completed', output: 'ready' });
   });
 
   it('fails cleanly when the frozen session disconnects', async () => {

@@ -265,7 +265,12 @@ describe('AgentUiController M4 integration', () => {
     const h = harness({ mode: 'autoApproveReadOnly' });
     controllers.push(h.controller);
     await startRun(h);
-    h.emit({ type: 'toolCall', requestId: 'request-1', step: 1, toolCall: toolCall() });
+    h.emit({
+      type: 'toolCall',
+      requestId: 'request-1',
+      step: 1,
+      toolCall: toolCall('df -h'),
+    });
 
     await vi.waitFor(() => expect(h.execute).toHaveBeenCalledTimes(1));
     expect(useAgentStore.getState().tools[agentToolKey('request-1', 'call-1')].decision)

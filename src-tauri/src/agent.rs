@@ -30,9 +30,9 @@ use crate::{
         AgentToolResultStatus, RunTerminalCommandArguments,
     },
     ai::{
-        api_key_for_provider, apply_reasoning_effort, build_client, endpoint_url,
-        is_kimi_code_provider, validate_provider_config, AiMessage, AiProviderConfig,
-        AiProviderKind,
+        api_key_for_provider, append_provider_stream_chunk, apply_reasoning_effort, build_client,
+        endpoint_url, ensure_provider_stream_frame_size, is_kimi_code_provider,
+        validate_provider_config, AiMessage, AiProviderConfig, AiProviderKind,
     },
     redaction::redact_sensitive_text,
 };
@@ -1647,6 +1647,7 @@ async fn stream_responses_events(
 ) -> Result<ResponsesStreamedTurn, ProviderFailure> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
+    let mut response_bytes = 0;
     let mut output_items = BTreeMap::<usize, Value>::new();
     let mut assistant_text = String::new();
     let mut completed = false;
@@ -1656,7 +1657,8 @@ async fn stream_responses_events(
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(|error| ProviderFailure::other(format_transport_error(error)))?;
-                buffer.extend_from_slice(&chunk);
+                append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)
+                    .map_err(ProviderFailure::other)?;
                 while let Some(event) = take_sse_event(&mut buffer)? {
                     process_responses_event(
                         &event,
@@ -1668,6 +1670,7 @@ async fn stream_responses_events(
                         &mut completed,
                     )?;
                 }
+                ensure_provider_stream_frame_size(buffer.len()).map_err(ProviderFailure::other)?;
             }
         }
     }
@@ -1828,6 +1831,7 @@ async fn stream_chat_events(
 ) -> Result<ChatStreamedTurn, ProviderFailure> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
+    let mut response_bytes = 0;
     let mut completed = false;
     let mut assistant_text = String::new();
     let mut previous_content = String::new();
@@ -1838,7 +1842,8 @@ async fn stream_chat_events(
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(|error| ProviderFailure::other(format_transport_error(error)))?;
-                buffer.extend_from_slice(&chunk);
+                append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)
+                    .map_err(ProviderFailure::other)?;
                 while let Some(event) = take_sse_event(&mut buffer)? {
                     process_chat_event(
                         &event,
@@ -1852,6 +1857,7 @@ async fn stream_chat_events(
                         &mut completed,
                     )?;
                 }
+                ensure_provider_stream_frame_size(buffer.len()).map_err(ProviderFailure::other)?;
             }
         }
     }
@@ -2024,6 +2030,7 @@ async fn stream_ollama_events(
 ) -> Result<OllamaStreamedTurn, ProviderFailure> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
+    let mut response_bytes = 0;
     let mut completed = false;
     let mut assistant_text = String::new();
     let mut calls = BTreeMap::<usize, ToolCallAccumulator>::new();
@@ -2033,7 +2040,8 @@ async fn stream_ollama_events(
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(|error| ProviderFailure::other(format_transport_error(error)))?;
-                buffer.extend_from_slice(&chunk);
+                append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)
+                    .map_err(ProviderFailure::other)?;
                 while let Some(line) = take_line(&mut buffer)? {
                     if !line.trim().is_empty() {
                         process_ollama_line(
@@ -2047,6 +2055,7 @@ async fn stream_ollama_events(
                         )?;
                     }
                 }
+                ensure_provider_stream_frame_size(buffer.len()).map_err(ProviderFailure::other)?;
             }
         }
     }
@@ -2216,6 +2225,7 @@ fn take_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, ProviderFailur
     let Some((index, separator_len)) = earliest_separator(lf, crlf) else {
         return Ok(None);
     };
+    ensure_provider_stream_frame_size(index).map_err(ProviderFailure::other)?;
     let event = buffer.drain(..index).collect::<Vec<_>>();
     buffer.drain(..separator_len);
     String::from_utf8(event)
@@ -2228,6 +2238,7 @@ fn take_final_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, Provider
         buffer.clear();
         return Ok(None);
     }
+    ensure_provider_stream_frame_size(buffer.len()).map_err(ProviderFailure::other)?;
     String::from_utf8(std::mem::take(buffer))
         .map(Some)
         .map_err(|error| {
@@ -2239,6 +2250,7 @@ fn take_line(buffer: &mut Vec<u8>) -> Result<Option<String>, ProviderFailure> {
     let Some(index) = buffer.iter().position(|byte| *byte == b'\n') else {
         return Ok(None);
     };
+    ensure_provider_stream_frame_size(index).map_err(ProviderFailure::other)?;
     let mut line = buffer.drain(..index).collect::<Vec<_>>();
     buffer.drain(..1);
     if line.last() == Some(&b'\r') {
