@@ -52,8 +52,13 @@ export const TerminalControllerLayer: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const currentIds = new Set(sessions.map((s) => s.sessionId));
+    const currentIds = new Set(
+      sessions
+        .filter((session) => !session.pendingConnection)
+        .map((session) => session.sessionId),
+    );
     for (const session of sessions) {
+      if (session.pendingConnection) continue;
       if (!knownRef.current.has(session.sessionId) && !terminalRegistry.get(session.sessionId)) {
         const controller = terminalRegistry.create(
           session.sessionId,

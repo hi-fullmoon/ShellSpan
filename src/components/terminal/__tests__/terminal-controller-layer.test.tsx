@@ -57,6 +57,25 @@ describe('TerminalControllerLayer', () => {
     expect(terminalRegistry.get('s1')).toBeDefined();
   });
 
+  it('does not create a controller until a placeholder resolves to a real session', () => {
+    render(<TerminalControllerLayer />);
+    act(() => {
+      useTerminalStore.getState().beginConnectionAttempt({
+        title: 'Pending', host: 'h', port: 22, username: 'u',
+      }, 'attempt-1');
+    });
+    expect(terminalRegistry.get('attempt-1')).toBeUndefined();
+
+    act(() => {
+      useTerminalStore.getState().resolveConnectionAttempt('attempt-1', {
+        sessionId: 's1', title: 'Connected', host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    expect(terminalRegistry.get('attempt-1')).toBeUndefined();
+    expect(terminalRegistry.get('s1')).toBeDefined();
+  });
+
   it('disposes the controller when a session is removed', () => {
     render(<TerminalControllerLayer />);
     act(() => {

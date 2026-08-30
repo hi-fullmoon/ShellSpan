@@ -158,7 +158,7 @@ const Terminal: React.FC = () => {
   }, [restoreWorkspace]);
 
   useEffect(() => {
-    if (!restoreWorkspace) return;
+    if (!restoreWorkspace || sessions.some((session) => session.pendingConnection)) return;
     stageTerminalWorkspace(serializeTerminalWorkspace(sessions, split));
     const timer = window.setTimeout(() => {
       void flushTerminalWorkspace().catch((error) => {

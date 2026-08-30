@@ -16,8 +16,20 @@ export interface TerminalSession {
   pinned?: boolean;
   color?: string;
   reconnecting?: boolean;
+  pendingConnection?: boolean;
   conversationId?: string;
   conversationStartedAt?: string;
+}
+
+export interface PendingTerminalConnection {
+  title: string;
+  host: string;
+  port: number;
+  username: string;
+  profileId?: string;
+  insertAfterId?: string;
+  pinned?: boolean;
+  color?: string;
 }
 
 export type TerminalWorkspaceSession = Pick<
@@ -45,6 +57,16 @@ interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
   restoredLayout: TerminalLayoutNode | null;
+  beginConnectionAttempt: (
+    pending: PendingTerminalConnection,
+    attemptId?: string,
+  ) => string;
+  resolveConnectionAttempt: (
+    attemptId: string,
+    summary: SessionSummary,
+    profileId?: string,
+  ) => void;
+  endConnectionAttempt: (attemptId: string) => void;
   addSession: (
     summary: SessionSummary,
     profileId?: string,
@@ -77,6 +99,99 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
   sessions: [],
   activeSessionId: null,
   restoredLayout: null,
+  beginConnectionAttempt: (pending, attemptId = `pending-${generateId()}`) => {
+    set((state) => {
+      const existingIndex = state.sessions.findIndex(
+        (session) => session.sessionId === attemptId && session.pendingConnection,
+      );
+      if (existingIndex >= 0) {
+        const sessions = [...state.sessions];
+        const existing = sessions[existingIndex];
+        sessions[existingIndex] = {
+          ...existing,
+          title: pending.title,
+          host: pending.host,
+          port: pending.port,
+          username: pending.username,
+          profileId: pending.profileId ?? existing.profileId,
+          pinned: pending.pinned ?? existing.pinned,
+          color: pending.color ?? existing.color,
+        };
+        return { sessions, activeSessionId: attemptId };
+      }
+
+      const pendingSession: TerminalSession = {
+        sessionId: attemptId,
+        title: pending.title,
+        host: pending.host,
+        port: pending.port,
+        username: pending.username,
+        status: 'connecting',
+        profileId: pending.profileId,
+        pinned: pending.pinned,
+        color: pending.color,
+        pendingConnection: true,
+        ...createConversationIdentity(),
+      };
+      const sourceIndex = pending.insertAfterId
+        ? state.sessions.findIndex((session) => session.sessionId === pending.insertAfterId)
+        : -1;
+      const sessions = [...state.sessions];
+      if (sourceIndex >= 0) {
+        sessions.splice(sourceIndex + 1, 0, pendingSession);
+      } else {
+        sessions.push(pendingSession);
+      }
+      return {
+        sessions: sortSessions(sessions),
+        activeSessionId: attemptId,
+      };
+    });
+    return attemptId;
+  },
+  resolveConnectionAttempt: (attemptId, summary, profileId) =>
+    set((state) => {
+      const pendingIndex = state.sessions.findIndex(
+        (session) => session.sessionId === attemptId && session.pendingConnection,
+      );
+      if (pendingIndex < 0) return state;
+
+      const pending = state.sessions[pendingIndex];
+      const sessions = [...state.sessions];
+      sessions[pendingIndex] = {
+        sessionId: summary.sessionId,
+        title: summary.title,
+        host: summary.host,
+        port: summary.port,
+        username: summary.username,
+        status: 'connecting',
+        profileId: profileId ?? pending.profileId,
+        pinned: pending.pinned,
+        color: pending.color,
+        conversationId: pending.conversationId,
+        conversationStartedAt: pending.conversationStartedAt,
+      };
+      return {
+        sessions,
+        activeSessionId: state.activeSessionId === attemptId
+          ? summary.sessionId
+          : state.activeSessionId,
+      };
+    }),
+  endConnectionAttempt: (attemptId) =>
+    set((state) => {
+      const pendingIndex = state.sessions.findIndex(
+        (session) => session.sessionId === attemptId && session.pendingConnection,
+      );
+      if (pendingIndex < 0) return state;
+      const sessions = state.sessions.filter((session) => session.sessionId !== attemptId);
+      return {
+        sessions,
+        activeSessionId: state.activeSessionId === attemptId
+          ? sessions[sessions.length - 1]?.sessionId ?? null
+          : state.activeSessionId,
+      };
+    }),
   addSession: (summary, profileId, options) =>
     set((state) => {
       const exists = state.sessions.some(
