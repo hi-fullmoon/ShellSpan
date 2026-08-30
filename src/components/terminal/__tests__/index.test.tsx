@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import Terminal from '../index';
+import { useAgentStore } from '@/stores/agentStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { terminalRegistry } from '../registry/terminal-registry';
 
@@ -77,10 +78,12 @@ vi.mock('../terminal-context-menu', () => ({
 }));
 
 const initialState = useTerminalStore.getState();
+const initialAgentState = useAgentStore.getState();
 
 describe('Terminal', () => {
   beforeEach(() => {
     useTerminalStore.setState(initialState, true);
+    useAgentStore.setState(initialAgentState, true);
     mockConnect.mockReset();
   });
 
@@ -169,6 +172,75 @@ describe('Terminal', () => {
 
     expect(screen.getByTestId('terminal-pane')).toBeInTheDocument();
     expect(screen.queryByText('terminal.empty')).not.toBeInTheDocument();
+  });
+
+  it('shows the Agent control glow only while the Agent operates the visible terminal', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+    useTerminalStore.getState().setActiveSession('s1');
+
+    const { container } = render(<Terminal />);
+    expect(container.querySelector('[data-agent-controlled="true"]')).toBeNull();
+
+    act(() => {
+      useAgentStore.getState().beginRun({
+        requestId: 'agent-1',
+        goal: 'inspect the terminal',
+        providerId: 'provider-1',
+        target: {
+          kind: 'remote', sessionId: 's1', host: 'h', port: 22, username: 'u',
+        },
+        targetTitle: 's1',
+        permissionMode: 'requestApproval',
+      });
+    });
+
+    expect(container.querySelector('[data-agent-controlled="true"]'))
+      .toHaveClass('agent-terminal-glow');
+
+    act(() => useTerminalStore.getState().setActiveSession('s2'));
+    expect(container.querySelector('[data-agent-controlled="true"]')).toBeNull();
+
+    act(() => useAgentStore.getState().cancelRun('agent-1'));
+    expect(container.querySelector('[data-agent-controlled="true"]')).toBeNull();
+  });
+
+  it('limits the Agent control glow to its target split pane', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    act(() => {
+      useAgentStore.getState().beginRun({
+        requestId: 'agent-1',
+        goal: 'inspect the terminal',
+        providerId: 'provider-1',
+        target: {
+          kind: 'remote', sessionId: 's1', host: 'h', port: 22, username: 'u',
+        },
+        targetTitle: 's1',
+        permissionMode: 'requestApproval',
+      });
+    });
+
+    const targetGroup = container
+      .querySelector('[data-session-tab="s1"]')
+      ?.closest('[data-terminal-group]');
+    const otherGroup = container
+      .querySelector('[data-session-tab="s2"]')
+      ?.closest('[data-terminal-group]');
+    expect(targetGroup).toHaveAttribute('data-agent-controlled', 'true');
+    expect(targetGroup).toHaveClass('agent-terminal-glow');
+    expect(otherGroup).not.toHaveAttribute('data-agent-controlled');
   });
 
   it('focuses the terminal when its active tab is clicked', async () => {

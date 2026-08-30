@@ -67,6 +67,7 @@ interface TerminalState {
   clearRestoredLayout: () => void;
   setStatus: (sessionId: string, event: StatusEvent) => void;
   setClosed: (sessionId: string, event: ClosedEvent) => void;
+  startNewConversation: (sessionId: string) => void;
   updateTitle: (sessionId: string, title: string) => void;
   togglePin: (sessionId: string) => void;
   setTabColor: (sessionId: string, color?: string) => void;
@@ -236,6 +237,16 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           closed: event,
           status: event.reasonKind === 'error' ? 'error' : 'disconnected',
         };
+      });
+      return changed ? { sessions } : state;
+    }),
+  startNewConversation: (sessionId) =>
+    set((state) => {
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.sessionId !== sessionId) return session;
+        changed = true;
+        return { ...session, ...createConversationIdentity() };
       });
       return changed ? { sessions } : state;
     }),
