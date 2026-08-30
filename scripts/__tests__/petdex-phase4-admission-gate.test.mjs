@@ -8,7 +8,6 @@ import {
 import {
   DEFAULT_PETDEX_PHASE4_ASSESSMENT,
   DEFAULT_PETDEX_PHASE4_RECORD,
-  DEFAULT_PETDEX_ROADMAP,
   evaluatePetdexPhase4Admission,
   readPhase4DocumentMarkers,
 } from '../petdex-phase4-admission-gate.mjs';
@@ -24,7 +23,6 @@ const currentMarkers = [
     readFileSync(DEFAULT_PETDEX_PHASE4_ASSESSMENT, 'utf8'),
     'assessment',
   ),
-  readPhase4DocumentMarkers(readFileSync(DEFAULT_PETDEX_ROADMAP, 'utf8'), 'roadmap'),
 ];
 
 describe('Petdex Phase 4 admission audit', () => {
@@ -60,15 +58,15 @@ describe('Petdex Phase 4 admission audit', () => {
     ]));
   });
 
-  it('rejects a roadmap or assessment marker that disagrees with the record', () => {
+  it('rejects an assessment marker that disagrees with the record', () => {
     const mismatchedMarkers = structuredClone(currentMarkers);
-    mismatchedMarkers[1].decision = 'admitted';
+    mismatchedMarkers[0].decision = 'admitted';
 
     const result = evaluatePetdexPhase4Admission(record, phase3Result, mismatchedMarkers);
 
     expect(result.status).toBe('invalid');
     expect(result.errors).toContainEqual(expect.objectContaining({
-      id: 'document.roadmap.decision',
+      id: 'document.assessment.decision',
     }));
   });
 

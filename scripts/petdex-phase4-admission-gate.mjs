@@ -16,10 +16,6 @@ export const DEFAULT_PETDEX_PHASE4_ASSESSMENT = path.join(
   REPOSITORY_ROOT,
   'docs/petdex-phase4-admission.md',
 );
-export const DEFAULT_PETDEX_ROADMAP = path.join(
-  REPOSITORY_ROOT,
-  'docs/petdex-integration-roadmap.md',
-);
 
 export const REQUIRED_PETDEX_PHASE4_CRITERIA = [
   'phase3.real-user-gate',
@@ -246,19 +242,17 @@ async function runCli() {
   }
 
   try {
-    const [record, ledger, schema, assessment, roadmap] = await Promise.all([
+    const [record, ledger, schema, assessment] = await Promise.all([
       readFile(DEFAULT_PETDEX_PHASE4_RECORD, 'utf8').then(JSON.parse),
       readFile(DEFAULT_PETDEX_PHASE3_LEDGER, 'utf8').then(JSON.parse),
       readFile(DEFAULT_PETDEX_PHASE3_SCHEMA, 'utf8').then(JSON.parse),
       readFile(DEFAULT_PETDEX_PHASE4_ASSESSMENT, 'utf8'),
-      readFile(DEFAULT_PETDEX_ROADMAP, 'utf8'),
     ]);
     const phase3Result = evaluatePetdexPhase3Ledger(ledger, schema, {
       asOf: record.phase3Gate?.asOf,
     });
     const result = evaluatePetdexPhase4Admission(record, phase3Result, [
       readPhase4DocumentMarkers(assessment, 'assessment'),
-      readPhase4DocumentMarkers(roadmap, 'roadmap'),
     ]);
     console.log(renderText(result));
     if (result.status !== 'consistent') process.exitCode = 2;
