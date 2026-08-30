@@ -21,6 +21,7 @@ interface ConfirmDeleteDialogProps {
   description: string;
   onConfirm: () => void;
   confirmLabel?: string;
+  confirmVariant?: React.ComponentProps<typeof AlertDialogAction>['variant'];
 }
 
 /** Shared destructive-action confirmation dialog (compact file-manager style). */
@@ -31,6 +32,7 @@ export const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
   description,
   onConfirm,
   confirmLabel,
+  confirmVariant = 'destructive',
 }) => {
   const { t } = useI18n();
   return (
@@ -46,7 +48,7 @@ export const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
         </CompactAlertDialogBody>
         <CompactAlertDialogFooter>
           <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" size="sm" onClick={onConfirm}>
+          <AlertDialogAction variant={confirmVariant} size="sm" onClick={onConfirm}>
             {confirmLabel ?? t('common.delete')}
           </AlertDialogAction>
         </CompactAlertDialogFooter>
