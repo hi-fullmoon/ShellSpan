@@ -23,6 +23,24 @@ describe('terminalStore', () => {
     expect(state.sessions[0]?.conversationStartedAt).toBeTruthy();
   });
 
+  it('starts a new AI conversation without replacing the terminal session', () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 's1',
+      title: 'Test',
+      host: 'h',
+      port: 22,
+      username: 'u',
+    });
+    const previous = useTerminalStore.getState().sessions[0];
+
+    useTerminalStore.getState().startNewConversation('s1');
+
+    const next = useTerminalStore.getState().sessions[0];
+    expect(next?.sessionId).toBe('s1');
+    expect(next?.conversationId).not.toBe(previous?.conversationId);
+    expect(next?.conversationStartedAt).toBeTruthy();
+  });
+
   it('removes a session and updates active session', () => {
     const store = useTerminalStore.getState();
     store.addSession({
