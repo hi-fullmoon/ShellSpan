@@ -31,6 +31,8 @@ describe('MessageScroller', () => {
       expect(content).not.toHaveClass('gap-5', 'px-4', 'py-5');
       expect(viewport).toHaveStyle({ overflow: 'scroll' });
       expect(viewport).not.toHaveClass('overflow-y-auto');
+      expect(container.querySelector('[data-slot="message-scroller-button"]'))
+        .toHaveClass('rounded-full');
     });
   });
 

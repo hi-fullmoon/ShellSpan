@@ -81,6 +81,19 @@ describe('AssistantMessageContent', () => {
     expect(copiedButton).not.toHaveClass('opacity-0');
   });
 
+  it('renders fenced code blocks without actions when disabled', () => {
+    render(
+      <AssistantMessageContent
+        content={'Review:\n```bash\ndf -h\n```'}
+        streaming={false}
+        showCodeBlockActions={false}
+      />,
+    );
+
+    expect(screen.getByText('df -h')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'common.copy' })).not.toBeInTheDocument();
+  });
+
   it('renders Markdown while streaming', () => {
     const content = '## Run\n\n```bash\ndf -h\n```';
     render(

@@ -63,7 +63,7 @@ describe('AgentRunView', () => {
         onStop={vi.fn()}
         onRetry={vi.fn()}
         canRetry={() => false}
-        onSwitchToCommand={vi.fn()}
+        onSwitchToAsk={vi.fn()}
         onOpenSettings={vi.fn()}
       />,
     );
@@ -82,7 +82,7 @@ describe('AgentRunView', () => {
     });
   });
 
-  it('identifies the exact fallback run when switching to command generation', () => {
+  it('identifies the exact fallback run when continuing in Ask', () => {
     useAgentStore.getState().beginRun({
       requestId: 'request-fallback',
       goal: 'Inspect the old host',
@@ -92,14 +92,14 @@ describe('AgentRunView', () => {
       permissionMode: 'requestApproval',
     });
     useAgentStore.getState().markFallback('request-fallback', {
-      task: 'generateCommand',
+      task: 'ask',
       automaticExecution: false,
       assistantTextExecution: 'forbidden',
       reason: 'toolCallingUnsupported',
     });
-    useAgentStore.getState().appendText('request-fallback', 'Use command generation instead.');
+    useAgentStore.getState().appendText('request-fallback', 'Use read-only Ask instead.');
     useAgentStore.getState().completeRun('request-fallback', true);
-    const onSwitchToCommand = vi.fn();
+    const onSwitchToAsk = vi.fn();
 
     render(
       <AgentRunView
@@ -108,12 +108,12 @@ describe('AgentRunView', () => {
         onStop={vi.fn()}
         onRetry={vi.fn()}
         canRetry={() => false}
-        onSwitchToCommand={onSwitchToCommand}
+        onSwitchToAsk={onSwitchToAsk}
         onOpenSettings={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to Generate command' }));
-    expect(onSwitchToCommand).toHaveBeenCalledWith('request-fallback');
+    fireEvent.click(screen.getByRole('button', { name: 'Continue in Ask' }));
+    expect(onSwitchToAsk).toHaveBeenCalledWith('request-fallback');
   });
 });
