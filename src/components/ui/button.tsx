@@ -9,15 +9,17 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: 'bg-app-button text-app-button-text hover:bg-app-button/90',
+        warning: 'bg-app-warning text-app-primary-text hover:bg-app-warning/90',
         destructive: 'bg-destructive text-white hover:bg-destructive/90',
         outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
+        plain: 'bg-transparent',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-9 px-3 py-2 leading-none',
-        xs: 'h-6 rounded-md px-2 text-xs [&_svg]:size-3',
+        xs: 'h-6 rounded-md px-2 text-xs leading-none [&_svg]:size-3',
         sm: 'h-8 rounded-md px-2.5 text-xs leading-none [&_svg]:size-3.5',
         lg: 'h-10 rounded-md px-4 leading-none',
         icon: 'h-9 w-9',

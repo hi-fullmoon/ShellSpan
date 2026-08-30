@@ -13,6 +13,7 @@ import {
   RotateCcwIcon,
   ServerIcon,
   SettingsIcon,
+  SquarePenIcon,
   SquareIcon,
   SquareTerminalIcon,
 } from 'lucide-react';
@@ -53,6 +54,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Bubble, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
+import { ConversationHistoryDialog } from './conversation-history-dialog';
 import { AgentPermissionSelector } from './agent-permission-selector';
 import { AgentRunView } from './agent-run-view';
 import { useI18n } from '@/hooks/useI18n';
@@ -72,7 +74,10 @@ import {
 } from '@/lib/ai-stream-batcher';
 import { cn, generateId } from '@/lib/utils';
 import { parseAssistantContent } from '@/lib/ai-content';
-import { resolveAgentContractStatus } from '@/lib/agent-contract';
+import {
+  DEFAULT_AGENT_PERMISSION_MODE,
+  resolveAgentContractStatus,
+} from '@/lib/agent-contract';
 import {
   agentTargetFromSession,
   agentUiController,
@@ -90,14 +95,17 @@ import {
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiStore } from '@/stores/aiStore';
+import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import {
   clearPersistedAiConversation,
+  deletePersistedAiConversations,
   ensureAiSessionFile,
   persistAiMessage,
+  startNewTerminalAiConversation,
 } from '@/lib/ai-sessions';
 import {
   clearAgentConversationData,
@@ -105,6 +113,7 @@ import {
 } from '@/lib/agent-sessions';
 import type {
   AiChatMessage,
+  AiConversation,
   AiContext,
   AiMessageInput,
   AiStreamEvent,
@@ -238,12 +247,14 @@ function sameAgentTarget(left: AgentTargetSnapshot, right: AgentTargetSnapshot):
 export function selectAgentConversationHistory(
   messages: readonly AgentChatMessage[],
   target: AgentTargetSnapshot,
+  conversationId?: string,
 ): AiMessageInput[] {
   return messages
     .filter((message) => (
       message.status === 'completed'
       && Boolean(message.content.trim())
       && sameAgentTarget(message.target, target)
+      && (!conversationId || message.conversationId === conversationId)
     ))
     .slice(-12)
     .map((message) => ({ role: message.role, content: message.content }));
@@ -499,6 +510,7 @@ export const AiPanel: React.FC = () => {
   const agentMessages = useAgentStore((state) => state.messages);
   const agentRuns = useAgentStore((state) => state.runs);
   const activeAgentRequestId = useAgentStore((state) => state.activeRequestId);
+  const agentPermissionBindings = useAgentPermissionStore((state) => state.bindings);
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
@@ -872,7 +884,11 @@ export const AiPanel: React.FC = () => {
     }
     const target = agentTargetFromSession(session);
     const liveContext = currentTerminalContext();
-    const history = selectAgentConversationHistory(useAgentStore.getState().messages, target);
+    const history = selectAgentConversationHistory(
+      useAgentStore.getState().messages,
+      target,
+      session.conversationId,
+    );
     setAgentStartError(undefined);
     try {
       const conversation = await ensureAiSessionFile(session);
@@ -960,7 +976,8 @@ export const AiPanel: React.FC = () => {
     selectedConversationId && selectedConversationId !== activeConversationId,
   );
   const archivedConversations = conversations.filter((conversation) => (
-    (conversation.archived
+    conversation.id !== activeConversationId
+    && (conversation.archived
       || !sessions.some((session) => session.conversationId === conversation.id))
   ));
   const indexedConversation = visibleConversationId
@@ -982,12 +999,15 @@ export const AiPanel: React.FC = () => {
       || conversationLoadFailed
       || loadingConversationIdsRef.current.has(visibleConversationId)
     ) return;
-    loadingConversationIdsRef.current.add(visibleConversationId);
+    let cancelled = false;
+    const loadingConversationId = visibleConversationId;
+    loadingConversationIdsRef.current.add(loadingConversationId);
     setLoadingConversationIds((current) => current.includes(visibleConversationId)
       ? current
       : [...current, visibleConversationId]);
     void invokeLoadAiSession(indexedConversation.id, indexedConversation.startedAt)
       .then((session) => {
+        if (cancelled) return;
         const loaded = session ?? {
           conversation: indexedConversation,
           messages: [],
@@ -1000,15 +1020,22 @@ export const AiPanel: React.FC = () => {
           : current);
       })
       .catch((reason) => {
+        if (cancelled) return;
         logger.warn('Failed to load AI conversation history', reason);
         setFailedConversationLoadIds((current) => current.includes(visibleConversationId)
           ? current
           : [...current, visibleConversationId]);
       })
       .finally(() => {
-        loadingConversationIdsRef.current.delete(visibleConversationId);
-        setLoadingConversationIds((current) => current.filter((id) => id !== visibleConversationId));
+        if (cancelled) return;
+        loadingConversationIdsRef.current.delete(loadingConversationId);
+        setLoadingConversationIds((current) => current.filter((id) => id !== loadingConversationId));
       });
+    return () => {
+      cancelled = true;
+      loadingConversationIdsRef.current.delete(loadingConversationId);
+      setLoadingConversationIds((current) => current.filter((id) => id !== loadingConversationId));
+    };
   }, [
     indexedConversation,
     loadedConversationIds,
@@ -1031,11 +1058,40 @@ export const AiPanel: React.FC = () => {
       ? message.conversationId === visibleConversationId
       : message.conversationId === undefined && message.sessionId === conversationSessionId)
   ));
+  const visibleAgentMessages = visibleConversationId
+    ? agentMessages.filter((message) => message.conversationId === visibleConversationId)
+    : [];
   const followKey = `${visibleMessages.length}:${visibleMessages[visibleMessages.length - 1]?.content.length ?? 0}`;
   const canAskFromContext = !viewingHistory
     && activeSection === 'terminal'
     && Boolean(contextSnapshot.context);
   const busy = phase === 'streaming' || Boolean(activeAgentRequestId);
+  const handleNewConversation = (): void => {
+    if (busy || !activeSession) return;
+    startNewTerminalAiConversation(activeSession.sessionId);
+    setSelectedConversationId(null);
+    setFailedConversationLoadIds([]);
+    setAgentStartError(undefined);
+    setDraft('');
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
+  const handleDeleteConversations = async (
+    conversationsToDelete: AiConversation[],
+  ): Promise<number> => {
+    const deletedCount = await deletePersistedAiConversations(conversationsToDelete);
+    const deletedIds = new Set(conversationsToDelete.map((conversation) => conversation.id));
+    useAiStore.getState().removeConversations([...deletedIds]);
+    for (const conversationId of deletedIds) {
+      useAgentStore.getState().clearConversation(conversationId);
+      loadingConversationIdsRef.current.delete(conversationId);
+    }
+    setSelectedConversationId((current) => (
+      current && deletedIds.has(current) ? null : current
+    ));
+    setLoadingConversationIds((current) => current.filter((id) => !deletedIds.has(id)));
+    setFailedConversationLoadIds((current) => current.filter((id) => !deletedIds.has(id)));
+    return deletedCount;
+  };
   const agentAvailable = Boolean(agentAvailability.status?.agentAvailable);
   const activeTerminalReady = activeSection === 'terminal'
     && activeSession?.status === 'connected';
@@ -1069,7 +1125,7 @@ export const AiPanel: React.FC = () => {
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
   const currentLane = 'conversation' as const;
   const hasCurrentConversation = mode === 'agent'
-    ? agentMessages.length > 0
+    ? visibleAgentMessages.length > 0
     : visibleMessages.length > 0;
   const failedRequestMessage = errorRequestId
     ? messages.find((message) => (
@@ -1088,12 +1144,17 @@ export const AiPanel: React.FC = () => {
     ? summarizeAiError(currentError)
     : undefined;
   const lastAssistantMessage = [...visibleMessages].reverse().find((message) => message.role === 'assistant');
-  const latestAgentRun = agentMessages.length > 0
-    ? agentRuns[agentMessages[agentMessages.length - 1].requestId]
+  const latestAgentRun = visibleAgentMessages.length > 0
+    ? agentRuns[visibleAgentMessages[visibleAgentMessages.length - 1].requestId]
     : undefined;
   const agentPermissionSessionId = activeAgentRequestId
     ? agentRuns[activeAgentRequestId]?.target.sessionId
     : activeSessionId ?? undefined;
+  const agentPermissionMode = activeAgentRequestId
+    ? agentRuns[activeAgentRequestId]?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE
+    : agentPermissionSessionId
+      ? agentPermissionBindings[agentPermissionSessionId]?.mode ?? DEFAULT_AGENT_PERMISSION_MODE
+      : DEFAULT_AGENT_PERMISSION_MODE;
   const statusAnnouncement = mode === 'agent' && latestAgentRun
     ? t(`agent.phase.${latestAgentRun.phase}` as LocaleKey)
     : phase === 'streaming'
@@ -1342,61 +1403,40 @@ export const AiPanel: React.FC = () => {
             </DropdownMenu>
           </div>
           <div className="flex items-center gap-1">
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={(
-                    <DropdownMenuTrigger
-                      render={(
-                        <Button
-                          variant={viewingHistory ? 'secondary' : 'ghost'}
-                          size="sm"
-                          className="size-8 p-0"
-                          aria-label={t('ai.history')}
-                        />
-                      )}
-                    />
-                  )}
-                >
-                  <HistoryIcon />
-                </TooltipTrigger>
-                <TooltipContent>{t('ai.history')}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="w-72">
-                {activeConversationId && (
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>{t('ai.history.current')}</DropdownMenuLabel>
-                    <DropdownMenuItem onClick={() => setSelectedConversationId(null)}>
-                      <SquareTerminalIcon />
-                      <span className="truncate">{activeSession?.title}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
+            <Tooltip>
+              <TooltipTrigger
+                render={(
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="size-8 p-0"
+                    disabled={busy || !activeSession}
+                    onClick={handleNewConversation}
+                    aria-label={t('ai.newConversation')}
+                  />
                 )}
-                {activeConversationId && <DropdownMenuSeparator />}
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>{t('ai.history.archived')}</DropdownMenuLabel>
-                  {archivedConversations.length === 0 ? (
-                    <DropdownMenuItem disabled>{t('ai.history.empty')}</DropdownMenuItem>
-                  ) : archivedConversations.map((conversation) => (
-                    <DropdownMenuItem
-                      key={conversation.id}
-                      onClick={() => {
-                        setMode('ask');
-                        setSelectedConversationId(conversation.id);
-                      }}
-                    >
-                      <HistoryIcon />
-                      <span className="min-w-0">
-                        <span className="block truncate">{conversation.title}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {new Date(conversation.updatedAt).toLocaleString()}
-                        </span>
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              >
+                <SquarePenIcon />
+              </TooltipTrigger>
+              <TooltipContent>
+                {activeSession ? t('ai.newConversation') : t('ai.newConversationRequiresTerminal')}
+              </TooltipContent>
+            </Tooltip>
+            <ConversationHistoryDialog
+              currentConversation={activeConversationId && activeSession ? {
+                id: activeConversationId,
+                title: activeSession.title,
+                updatedAt: conversations.find((item) => item.id === activeConversationId)?.updatedAt,
+              } : undefined}
+              conversations={archivedConversations}
+              selectedConversationId={selectedConversationId}
+              onSelectCurrent={() => setSelectedConversationId(null)}
+              onSelectConversation={(conversation) => {
+                setMode('ask');
+                setSelectedConversationId(conversation.id);
+              }}
+              onDeleteConversations={handleDeleteConversations}
+            />
             <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
               <Tooltip>
                 <TooltipTrigger
@@ -1570,7 +1610,6 @@ export const AiPanel: React.FC = () => {
               : visibleConversationId}
             onApprove={(reference) => agentUiController.approve(reference)}
             onReject={(reference) => agentUiController.reject(reference)}
-            onStop={(requestId) => agentUiController.stop(requestId)}
             canRetry={(requestId) => agentUiController.canRetry(requestId)}
             onRetry={(requestId) => {
               const run = useAgentStore.getState().runs[requestId];
@@ -1666,8 +1705,8 @@ export const AiPanel: React.FC = () => {
           <Alert variant="destructive" className="mx-3 mb-2 w-auto">
             <CircleAlertIcon />
             <AlertTitle>{t('ai.history.loadFailed')}</AlertTitle>
-            <AlertDescription className="flex flex-col gap-2">
-              <p>{t('ai.history.loadFailedDescription')}</p>
+            <AlertDescription className="flex flex-col gap-1.5">
+              <span>{t('ai.history.loadFailedDescription')}</span>
               <div>
                 <Button variant="secondary" size="xs" onClick={retryConversationLoad}>
                   <RotateCcwIcon data-icon="inline-start" />
@@ -1682,8 +1721,8 @@ export const AiPanel: React.FC = () => {
           <Alert className="mx-3 mb-2 w-auto border-destructive/30 bg-destructive/5">
             <CircleAlertIcon className="text-destructive" />
             <AlertTitle>{t('ai.requestFailed')}</AlertTitle>
-            <AlertDescription className="flex flex-col gap-2 [&_p:not(:last-child)]:mb-0">
-              <p>{t(currentErrorPresentation.key, currentErrorPresentation.variables)}</p>
+            <AlertDescription className="flex flex-col gap-1.5">
+              <span>{t(currentErrorPresentation.key, currentErrorPresentation.variables)}</span>
               <div className="flex flex-wrap gap-1.5">
                 {failedRequestMessage && (
                   <Button
@@ -1738,8 +1777,8 @@ export const AiPanel: React.FC = () => {
               <Alert variant="warning" className="mb-2">
                 <CircleAlertIcon />
                 <AlertTitle>{t('agent.availability.title')}</AlertTitle>
-                <AlertDescription className="flex flex-col gap-2">
-                  <p>{agentModeUnavailableReason}</p>
+                <AlertDescription className="flex flex-col gap-1.5">
+                  <span>{agentModeUnavailableReason}</span>
                   {agentAvailability.state === 'ready'
                     && agentAvailability.status?.featureEnabled
                     && (
@@ -1759,8 +1798,9 @@ export const AiPanel: React.FC = () => {
             )}
             <InputGroup
               data-mode={mode}
+              data-permission-mode={mode === 'agent' ? agentPermissionMode : undefined}
               className={cn(
-                'min-h-28 rounded-3xl bg-card shadow-xs transition-colors has-[[data-slot=input-group-control]:focus-visible]:ring-1',
+                'min-h-28 rounded-3xl bg-card shadow-xs transition-none has-[[data-slot=input-group-control]:focus-visible]:ring-1',
                 mode === 'agent'
                   && 'border-app-warning/60 has-[[data-slot=input-group-control]:focus-visible]:border-app-warning/80 has-[[data-slot=input-group-control]:focus-visible]:ring-app-warning/30',
               )}
@@ -1793,7 +1833,7 @@ export const AiPanel: React.FC = () => {
                   <div className="flex min-w-0 shrink items-center justify-end gap-1">
                     {busy ? (
                       <InputGroupButton
-                        variant="default"
+                        variant={mode === 'agent' ? 'warning' : 'default'}
                         size="icon-sm"
                         className="shrink-0 rounded-full"
                         onClick={mode === 'agent' ? handleAgentCancel : handleCancel}
@@ -1803,7 +1843,7 @@ export const AiPanel: React.FC = () => {
                       </InputGroupButton>
                     ) : (
                       <InputGroupButton
-                        variant="default"
+                        variant={mode === 'agent' ? 'warning' : 'default'}
                         size="icon-sm"
                         className="shrink-0 rounded-full"
                         onClick={submitComposer}

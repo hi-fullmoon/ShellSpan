@@ -81,6 +81,9 @@ export function AgentPermissionSelector({
     ?? PERMISSION_OPTIONS[0];
   const CurrentIcon = current.icon;
   const composer = variant === 'composer';
+  const triggerLabel = mode === 'fullAccess'
+    ? 'agent.permission.fullAccessSelected'
+    : current.label;
 
   const selectMode = (value: string): void => {
     const nextMode = value as AgentPermissionMode;
@@ -115,6 +118,7 @@ export function AgentPermissionSelector({
             className={cn(
               'flex items-center leading-none',
               composer ? 'min-w-0 gap-1' : 'gap-2',
+              mode === 'fullAccess' && 'text-app-warning',
             )}
           >
             <CurrentIcon
@@ -123,7 +127,7 @@ export function AgentPermissionSelector({
               className={cn(mode === 'fullAccess' && 'text-app-warning')}
             />
             <span className={cn('leading-none', composer && 'truncate')}>
-              {t(current.label)}
+              {t(triggerLabel)}
             </span>
             <ChevronDownIcon data-icon="inline-end" />
           </span>
