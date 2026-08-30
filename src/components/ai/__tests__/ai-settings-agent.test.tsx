@@ -168,9 +168,14 @@ describe('M7 Agent settings management', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings.ai.agent.clearSessions' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(mocks.clearAgentConversationData).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button', {
+    const cancelButton = within(dialog).getByRole('button', { name: 'common.cancel' });
+    const confirmButton = within(dialog).getByRole('button', {
       name: 'settings.ai.agent.clearConfirm',
-    }));
+    });
+    for (const button of [cancelButton, confirmButton]) {
+      expect(button).toHaveClass('h-8', 'px-2.5', 'text-xs');
+    }
+    fireEvent.click(confirmButton);
 
     await waitFor(() => expect(mocks.clearAgentConversationData).toHaveBeenCalledTimes(2));
     expect(mocks.shutdown.mock.invocationCallOrder[0])
@@ -234,5 +239,21 @@ describe('M7 Agent settings management', () => {
       'conversation-a',
     ]);
     expect(mocks.toast).toHaveBeenCalledWith('ai.history.deleted:1');
+  });
+
+  it('shows an empty state when there is no conversation history to clear', async () => {
+    useAiStore.setState({
+      conversations: useAiStore.getState().conversations.filter((conversation) => (
+        conversation.id === 'conversation-a'
+      )),
+    });
+
+    render(<AiSettingsSection />);
+    await screen.findByText('settings.ai.agent.stage.stable');
+
+    expect(screen.getByText('ai.history.description:0')).toBeInTheDocument();
+    const emptyState = screen.getByText('ai.history.empty').parentElement;
+    expect(emptyState).toHaveClass('min-h-32');
+    expect(screen.getByRole('button', { name: 'ai.history.deleteAll' })).toBeDisabled();
   });
 });
