@@ -41,7 +41,7 @@
       "status": "blocked",
       "evidence": [
         "Repository inspection found no Petdex Phase 4 asset downloader, checksum ledger, cache policy, or cleanup implementation.",
-        "The roadmap only records future limits for content type, file count, file size, decompressed size, image dimensions, and total cache size."
+        "The Phase 4 assessment only records future limits for content type, file count, file size, decompressed size, image dimensions, and total cache size."
       ],
       "gaps": [
         "Define a trusted checksum source, fail-closed verification, atomic writes, archive and image validation, quotas, corruption recovery, and offline behavior.",
