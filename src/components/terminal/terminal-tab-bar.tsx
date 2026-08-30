@@ -19,6 +19,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
 import { PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
@@ -99,6 +100,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       role="tab"
       tabIndex={0}
       aria-selected={active}
+      aria-busy={session.pendingConnection || undefined}
       data-session-tab={session.sessionId}
       // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
       // swallows the click after any drag, so a trackpad tap that jitters past
@@ -109,6 +111,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       }}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (session.pendingConnection) return;
         onContextMenu(session, e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
@@ -157,13 +160,17 @@ const SessionTab: React.FC<SessionTabProps> = ({
         <div data-drop-indicator="right" className="pointer-events-none absolute right-0 top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary" />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span
-          aria-hidden="true"
-          className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))}
-        />
+        {session.pendingConnection ? (
+          <Spinner className="size-3 shrink-0 text-app-warning" />
+        ) : (
+          <span
+            aria-hidden="true"
+            className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))}
+          />
+        )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
       </div>
-      {session.pinned ? (
+      {!session.pendingConnection && (session.pinned ? (
         <button
           type="button"
           aria-label="unpin"
@@ -192,7 +199,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         >
           <XIcon className="h-3 w-3" strokeWidth={1.5} />
         </button>
-      )}
+      ))}
     </div>
   );
 };
@@ -224,6 +231,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: session.sessionId,
+    disabled: session.pendingConnection,
   });
 
   return (
@@ -348,6 +356,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       if (requestedId && !sessions.some((session) => session.sessionId === requestedId)) return;
       if (!requestedId && !activeGroup) return;
       const closeId = requestedId ?? activeSessionId;
+      if (sessions.some((session) => (
+        session.sessionId === closeId && session.pendingConnection
+      ))) return;
       if (closeId) setClosingSessionId(closeId);
     };
     document.addEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
@@ -431,6 +442,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   };
 
   const handleCloseSession = (sessionId: string): void => {
+    if (sessions.some((session) => (
+      session.sessionId === sessionId && session.pendingConnection
+    ))) return;
     setClosingSessionId(sessionId);
   };
 
@@ -624,7 +638,10 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     ? null
     : displayedInsertIndex;
 
-  const shouldHide = !forceVisible && sessions.length === 1 && terminalHideSingleTabBar;
+  const shouldHide = !forceVisible
+    && sessions.length === 1
+    && terminalHideSingleTabBar
+    && !sessions[0]?.pendingConnection;
 
   return (
     <div

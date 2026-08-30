@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { TerminalTabBar } from '../terminal-tab-bar';
 import { useTerminalStore } from '@/stores/terminalStore';
 
@@ -52,6 +52,23 @@ describe('TerminalTabBar', () => {
     // Tabs activate on pointerdown (browser-tab behavior), not click.
     fireEvent.pointerDown(tabs[1], { button: 0 });
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+  });
+
+  it('renders a connection placeholder as a busy tab without tab actions', () => {
+    useTerminalStore.getState().beginConnectionAttempt({
+      title: 'Pending Server', host: 'h', port: 22, username: 'u',
+    }, 'attempt-1');
+    const onTabContextMenu = vi.fn();
+
+    render(<TerminalTabBar onTabContextMenu={onTabContextMenu} />);
+
+    const tab = screen.getByRole('tab', { name: /Pending Server/ });
+    expect(tab).toHaveAttribute('aria-busy', 'true');
+    expect(within(tab).getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(within(tab).queryByRole('button')).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(tab, { clientX: 10, clientY: 20 });
+    expect(onTabContextMenu).not.toHaveBeenCalled();
   });
 
   it('activates a tab via pointerup fallback when its pointerdown was missed', () => {

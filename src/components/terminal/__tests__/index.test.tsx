@@ -101,6 +101,39 @@ describe('Terminal', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows an active loading tab while a terminal connection is being created', () => {
+    useTerminalStore.getState().beginConnectionAttempt({
+      title: 'Pending Server', host: 'h', port: 22, username: 'u', profileId: 'p1',
+    }, 'attempt-1');
+
+    render(<Terminal />);
+
+    const tab = screen.getByRole('tab', { name: /Pending Server/ });
+    expect(tab).toHaveAttribute('aria-selected', 'true');
+    expect(tab).toHaveAttribute('aria-busy', 'true');
+    expect(within(tab).getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-session-id', 'attempt-1');
+    expect(screen.queryByText('terminal.empty')).not.toBeInTheDocument();
+  });
+
+  it('adds the loading placeholder beside existing terminal tabs', () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 's1', title: 'Session A', host: 'h', port: 22, username: 'u',
+    });
+    useTerminalStore.getState().beginConnectionAttempt({
+      title: 'Session B', host: 'h', port: 22, username: 'u', profileId: 'p1',
+    }, 'attempt-1');
+
+    render(<Terminal />);
+
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.getByRole('tab', { name: /Session A/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Session B/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('opens the new session dialog when the empty-state new-connection button is clicked', () => {
     render(<Terminal />);
 
