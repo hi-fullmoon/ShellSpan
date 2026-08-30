@@ -79,9 +79,12 @@ describe('M3 permission and approval components', () => {
     expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('autoApproveReadOnly');
     expect(await screen.findByText('agent.permission.fullAccessWarning')).toBeVisible();
 
-    fireEvent.click(screen.getByRole('button', {
+    const fullAccessConfirm = screen.getByRole('button', {
       name: 'agent.permission.fullAccessConfirm',
-    }));
+    });
+    expect(fullAccessConfirm).toHaveClass('h-8');
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
+    fireEvent.click(fullAccessConfirm);
     expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('fullAccess');
     expect(await screen.findByText('agent.permission.fullAccessActive')).toBeVisible();
     expect(screen.getByText('agent.permission.fullAccessSelected')).toBeVisible();
@@ -158,7 +161,10 @@ describe('M3 permission and approval components', () => {
     expect(screen.getAllByText('systemctl restart nginx --no-block')).toHaveLength(2);
 
     const approveButtons = screen.getAllByRole('button', { name: 'agent.approval.approve' });
-    fireEvent.click(approveButtons[approveButtons.length - 1]);
+    const dialogApproveButton = approveButtons[approveButtons.length - 1];
+    expect(dialogApproveButton).toHaveClass('h-8');
+    expect(screen.getByRole('button', { name: 'agent.approval.reject' })).toHaveClass('h-8');
+    fireEvent.click(dialogApproveButton);
     expect(onApprove).toHaveBeenCalledWith(approvalSnapshot().approval);
     expect(onReject).not.toHaveBeenCalled();
   });

@@ -1,5 +1,8 @@
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import { classifyAgentCommandRisk } from '@/lib/agent-command-risk';
+import {
+  classifyAgentCommandRisk,
+  requiresApprovalForReadOnlyCommand,
+} from '@/lib/agent-command-risk';
 import { classifyAgentRisk, evaluateAgentPermission } from '@/lib/agent-contract';
 import {
   agentTerminalExecutor,
@@ -115,10 +118,18 @@ export class AgentApprovalController {
     const toolCall = frozenToolCall(call);
     const permissionMode = this.getPermissionMode(toolCall.target.sessionId);
     const riskAssessment = Object.freeze(classifyAgentCommandRisk(toolCall.command));
-    const decision = Object.freeze(evaluateAgentPermission(
+    let decision = evaluateAgentPermission(
       permissionMode,
       classifyAgentRisk(riskAssessment.risk),
-    ));
+    );
+    if (
+      permissionMode === 'autoApproveReadOnly'
+      && riskAssessment.risk === 'readOnly'
+      && requiresApprovalForReadOnlyCommand(toolCall.command)
+    ) {
+      decision = { requiresApproval: true, reason: 'riskRequiresApproval' };
+    }
+    decision = Object.freeze(decision);
     let resolveResult!: (result: AgentToolResult) => void;
     const resultPromise = new Promise<AgentToolResult>((resolve) => {
       resolveResult = resolve;
@@ -254,6 +265,7 @@ export class AgentApprovalController {
     void this.executeTerminal({
       toolCall: record.toolCall,
       authorization,
+      isolateReadOnly: record.decision.reason === 'readOnlyAutoApproved',
     }).then((result) => {
       this.commitResult(record, result);
     }, () => {

@@ -117,6 +117,7 @@ export function AgentApprovalDialog({
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel
+            size="sm"
             onClick={() => {
               if (approval) onReject(approval);
             }}
@@ -124,6 +125,7 @@ export function AgentApprovalDialog({
             {t('agent.approval.reject')}
           </AlertDialogCancel>
           <AlertDialogAction
+            size="sm"
             disabled={!approval}
             onClick={() => {
               if (approval) onApprove(approval);

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { classifyAgentCommandRisk } from '../agent-command-risk';
+import {
+  classifyAgentCommandRisk,
+  requiresApprovalForReadOnlyCommand,
+} from '../agent-command-risk';
 
 describe('Agent command risk classification', () => {
   it.each([
@@ -61,5 +64,27 @@ describe('Agent command risk classification', () => {
     expect(classifyAgentCommandRisk(
       'df -h && systemctl restart nginx && systemctl status nginx',
     ).risk).toBe('stateChange');
+  });
+
+  it.each([
+    'cat .env',
+    'grep TOKEN /srv/app/.env',
+    'ps aux',
+    'ss -lntp',
+    'docker inspect production',
+    'kubectl get secret production -o yaml',
+  ])('requires approval for confidentiality-sensitive reads: %s', (command) => {
+    expect(classifyAgentCommandRisk(command).risk).toBe('readOnly');
+    expect(requiresApprovalForReadOnlyCommand(command)).toBe(true);
+  });
+
+  it.each([
+    'df -h',
+    'free -m',
+    'uname -a',
+    'uptime',
+    'whoami',
+  ])('keeps bounded health checks eligible for isolated auto approval: %s', (command) => {
+    expect(requiresApprovalForReadOnlyCommand(command)).toBe(false);
   });
 });

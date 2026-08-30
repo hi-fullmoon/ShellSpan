@@ -48,6 +48,7 @@ export interface AgentTerminalExecutionAuthorization {
 export interface AuthorizedAgentTerminalExecution {
   readonly toolCall: AgentToolCall;
   readonly authorization: AgentTerminalExecutionAuthorization;
+  readonly isolateReadOnly?: boolean;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
@@ -440,7 +441,11 @@ function quotePowerShell(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function buildPosixWrapper(command: string, boundary: AgentTerminalBoundary): string {
+function buildPosixWrapper(
+  command: string,
+  boundary: AgentTerminalBoundary,
+  isolateReadOnly: boolean,
+): string {
   const nonce = boundary.marker.slice(BOUNDARY_PREFIX.length);
   const split = Math.floor(boundary.marker.length / 2);
   const markerFirst = boundary.marker.slice(0, split);
@@ -469,7 +474,9 @@ function buildPosixWrapper(command: string, boundary: AgentTerminalBoundary): st
     `${systemdPagerValueVar}=\${SYSTEMD_PAGER-}`,
     `printf '\\036%s:BEGIN\\037\\n' "$${markerVar}"`,
     'PAGER=cat; GIT_PAGER=cat; SYSTEMD_PAGER=cat; export PAGER GIT_PAGER SYSTEMD_PAGER',
-    `eval "$${commandVar}"`,
+    isolateReadOnly
+      ? `/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C /bin/sh -c "$${commandVar}"`
+      : `eval "$${commandVar}"`,
     `${exitVar}=$?`,
     restore('PAGER', pagerSetVar, pagerValueVar),
     restore('GIT_PAGER', gitPagerSetVar, gitPagerValueVar),
@@ -479,7 +486,11 @@ function buildPosixWrapper(command: string, boundary: AgentTerminalBoundary): st
   ].join('; ');
 }
 
-function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary): string {
+function buildPowerShellWrapper(
+  command: string,
+  boundary: AgentTerminalBoundary,
+  isolateReadOnly: boolean,
+): string {
   const nonce = boundary.marker.slice(BOUNDARY_PREFIX.length);
   const split = Math.floor(boundary.marker.length / 2);
   const markerFirst = boundary.marker.slice(0, split);
@@ -488,6 +499,7 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
   const markerVar = variable('marker');
   const commandVar = variable('command');
   const scriptVar = variable('script');
+  const isolatedScriptVar = variable('isolated_script');
   const exitVar = variable('exit');
   const okVar = variable('ok');
   const nativeExitVar = variable('native_exit');
@@ -499,6 +511,9 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
   const systemdPagerValueVar = variable('systemd_pager_value');
   const restore = (name: string, hadVar: string, valueVar: string): string =>
     `if (${hadVar}) { $env:${name}=${valueVar} } else { Remove-Item Env:${name} -ErrorAction SilentlyContinue }`;
+  const systemDirectoryExpression =
+    '[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::System)';
+  const isolatedPrelude = `$env:PATH=${systemDirectoryExpression};$env:PSModulePath='';`;
 
   return [
     `${markerVar}=${quotePowerShell(markerFirst)}+${quotePowerShell(markerSecond)}`,
@@ -515,7 +530,9 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
     `${okVar}=$false`,
     `${nativeExitVar}=$null`,
     `${scriptVar}=[ScriptBlock]::Create(${commandVar}+[Environment]::NewLine+${quotePowerShell(`${okVar}=$?;${nativeExitVar}=$global:LASTEXITCODE`)})`,
-    `. ${scriptVar}`,
+    isolateReadOnly
+      ? `${isolatedScriptVar}=${quotePowerShell(isolatedPrelude)}+${commandVar};& ([System.IO.Path]::Combine(${systemDirectoryExpression},'WindowsPowerShell','v1.0','powershell.exe')) -NoLogo -NoProfile -NonInteractive -Command ${isolatedScriptVar};${okVar}=$?;${nativeExitVar}=$global:LASTEXITCODE`
+      : `. ${scriptVar}`,
     `${exitVar}=if (${okVar}) { 0 } elseif ($null -ne ${nativeExitVar}) { [int]${nativeExitVar} } else { 1 }`,
     restore('PAGER', pagerHadVar, pagerValueVar),
     restore('GIT_PAGER', gitPagerHadVar, gitPagerValueVar),
@@ -526,6 +543,7 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
       markerVar,
       commandVar,
       scriptVar,
+      isolatedScriptVar,
       exitVar,
       okVar,
       nativeExitVar,
@@ -543,10 +561,11 @@ export function buildAgentTerminalWrapper(
   command: string,
   boundary: AgentTerminalBoundary,
   shell: AgentTerminalShell,
+  isolateReadOnly = false,
 ): string {
   return shell === 'powershell'
-    ? buildPowerShellWrapper(command, boundary)
-    : buildPosixWrapper(command, boundary);
+    ? buildPowerShellWrapper(command, boundary, isolateReadOnly)
+    : buildPosixWrapper(command, boundary, isolateReadOnly);
 }
 
 interface ShellToken {
@@ -1027,6 +1046,10 @@ export class AgentTerminalExecutor {
   private readonly nonceFactory: () => string;
   private readonly platform: Platform;
   private readonly activeBySession = new Map<string, ActiveExecution>();
+  private readonly quarantinedBySession = new Map<string, Readonly<{
+    requestId: string;
+    callId: string;
+  }>>();
 
   constructor(options: ExecutorOptions = {}) {
     this.nonceFactory = options.nonceFactory ?? createSecureNonce;
@@ -1059,6 +1082,13 @@ export class AgentTerminalExecutor {
     const controller = terminalRegistry.get(call.target.sessionId);
     const targetError = validateFrozenAgentTarget(call.target, session, controller);
     if (targetError || !controller) return toolResult(call, 'failed', targetError ?? 'Frozen terminal session is unavailable');
+    if (this.quarantinedBySession.has(call.target.sessionId)) {
+      return toolResult(
+        call,
+        'failed',
+        'A previous Agent command has not confirmed termination in this terminal session',
+      );
+    }
     if (this.activeBySession.has(call.target.sessionId)) {
       return toolResult(call, 'failed', 'Another Agent command is already running in the frozen terminal session');
     }
@@ -1072,7 +1102,12 @@ export class AgentTerminalExecutor {
     const shell: AgentTerminalShell = call.target.kind === 'local' && this.platform === 'windows'
       ? 'powershell'
       : 'posix';
-    const wrapper = buildAgentTerminalWrapper(call.command, boundary, shell);
+    const wrapper = buildAgentTerminalWrapper(
+      call.command,
+      boundary,
+      shell,
+      input.isolateReadOnly === true,
+    );
     const parser = new AgentTerminalBoundaryParser(boundary);
     const cancellation = new AbortController();
     const active: ActiveExecution = {
@@ -1095,13 +1130,31 @@ export class AgentTerminalExecutor {
         let unsubscribeLifecycle = (): void => {};
         const onExternalAbort = (): void => cancellation.abort();
 
-        const cleanup = (): void => {
+        const quarantineIdentity = Object.freeze({
+          requestId: call.requestId,
+          callId: call.callId,
+        });
+        let quarantined = false;
+
+        const cleanupControl = (): void => {
           if (timeout !== undefined) window.clearTimeout(timeout);
+          input.signal?.removeEventListener('abort', onExternalAbort);
+          cancellation.signal.removeEventListener('abort', onCancelled);
+        };
+
+        const cleanupSubscriptions = (): void => {
           unsubscribeOutput();
           unsubscribeOutputFilter();
           unsubscribeLifecycle();
-          input.signal?.removeEventListener('abort', onExternalAbort);
-          cancellation.signal.removeEventListener('abort', onCancelled);
+        };
+
+        const releaseQuarantine = (): void => {
+          if (!quarantined) return;
+          if (this.quarantinedBySession.get(call.target.sessionId) === quarantineIdentity) {
+            this.quarantinedBySession.delete(call.target.sessionId);
+          }
+          quarantined = false;
+          cleanupSubscriptions();
         };
 
         const settle = (
@@ -1112,7 +1165,7 @@ export class AgentTerminalExecutor {
         ): void => {
           if (settled) return;
           settled = true;
-          cleanup();
+          cleanupControl();
           if (
             interrupt
             && writeDispatched
@@ -1121,7 +1174,11 @@ export class AgentTerminalExecutor {
             // Cancellation completion must not depend on a potentially stuck
             // transport acknowledgement; invoking writeInput queues Ctrl-C on
             // the same PTY and the rejection is intentionally contained.
+            quarantined = true;
+            this.quarantinedBySession.set(call.target.sessionId, quarantineIdentity);
             void controller.writeInput('\u0003').catch(() => undefined);
+          } else {
+            cleanupSubscriptions();
           }
           resolve({
             requestId: call.requestId,
@@ -1145,6 +1202,10 @@ export class AgentTerminalExecutor {
         unsubscribeOutput = controller.subscribeOutput((chunk) => {
           const parsed = parser.push(chunk);
           if (!parsed) return;
+          if (settled) {
+            releaseQuarantine();
+            return;
+          }
           settle(
             parsed.exitCode === 0 ? 'completed' : 'failed',
             parsed.exitCode,
@@ -1155,6 +1216,10 @@ export class AgentTerminalExecutor {
         unsubscribeLifecycle = controller.subscribeLifecycle((event) => {
           if (event.sessionId !== call.target.sessionId) return;
           if (event.type === 'status' && event.payload.status === 'connected') return;
+          if (settled) {
+            releaseQuarantine();
+            return;
+          }
           settle('failed', undefined, 'Frozen terminal session closed before command completion.', false);
         });
         cancellation.signal.addEventListener('abort', onCancelled, { once: true });
@@ -1195,6 +1260,10 @@ export class AgentTerminalExecutor {
 
           writeDispatched = true;
           void controller.writeInput(`${wrapper}\r`).catch(() => {
+            if (settled) {
+              releaseQuarantine();
+              return;
+            }
             settle(
               'failed',
               undefined,

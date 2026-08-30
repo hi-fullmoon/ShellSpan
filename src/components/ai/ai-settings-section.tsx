@@ -54,6 +54,7 @@ import { Switch } from '@/components/ui/switch';
 import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
+import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import {
   invokeAgentRolloutPolicy,
@@ -128,7 +129,11 @@ const protocolDefaults = (kind: AiProviderKind) => {
   return { kind, requiresApiKey: true };
 };
 
-export const AiSettingsSection: React.FC = () => {
+interface AiSettingsSectionProps {
+  embedded?: boolean;
+}
+
+export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
   const providers = useAiSettingsStore((state) => state.providers);
@@ -315,11 +320,13 @@ export const AiSettingsSection: React.FC = () => {
   };
 
   return (
-    <div className="@container flex flex-col gap-5 px-4 py-4">
-      <div className="flex min-w-0 flex-col gap-1">
-        <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
-        <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
-      </div>
+    <div className={cn('@container flex flex-col gap-5', !embedded && 'px-4 py-4')}>
+      {!embedded && (
+        <div className="flex min-w-0 flex-col gap-1">
+          <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
+          <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
+        </div>
+      )}
 
       <div className="grid min-w-0 items-start gap-4 @min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]">
         <div className="contents @min-[44rem]:flex @min-[44rem]:min-w-0 @min-[44rem]:flex-col @min-[44rem]:gap-4">
