@@ -38,6 +38,7 @@ interface AiState {
   hydrateSessions: (sessions: AiSessionFile[]) => void;
   upsertConversation: (conversation: AiConversation) => void;
   archiveConversation: (conversationId: string) => void;
+  removeConversations: (conversationIds: string[]) => void;
   clear: () => void;
 }
 
@@ -247,6 +248,16 @@ export const useAiStore = create<AiState>()((set) => ({
         : conversation
     )),
   })),
+  removeConversations: (conversationIds) => set((state) => {
+    const removed = new Set(conversationIds);
+    return {
+      conversations: state.conversations.filter((conversation) => !removed.has(conversation.id)),
+      messages: state.messages.filter((message) => (
+        !message.conversationId || !removed.has(message.conversationId)
+      )),
+      loadedConversationIds: state.loadedConversationIds.filter((id) => !removed.has(id)),
+    };
+  }),
   clear: () => set({
     messages: [],
     conversations: [],

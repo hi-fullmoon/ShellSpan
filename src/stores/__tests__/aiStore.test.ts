@@ -143,4 +143,35 @@ describe('aiStore', () => {
     expect(useAiStore.getState().messages).toEqual([]);
     expect(useAiStore.getState().loadedConversationIds).toEqual([]);
   });
+
+  it('removes conversation summaries, loaded messages, and load markers together', () => {
+    useAiStore.getState().hydrateSessions([{
+      conversation: {
+        id: 'conversation-to-delete',
+        startedAt: '2026-08-22T09:00:00.000Z',
+        updatedAt: '2026-08-22T09:01:00.000Z',
+        title: 'root@example.com',
+        archived: true,
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+      },
+      messages: [{
+        id: 'message-to-delete',
+        requestId: 'request-to-delete',
+        role: 'user',
+        content: 'Delete me',
+        task: 'chat',
+        status: 'completed',
+        providerId: 'provider-1',
+        conversationId: 'conversation-to-delete',
+      }],
+    }]);
+
+    useAiStore.getState().removeConversations(['conversation-to-delete']);
+
+    expect(useAiStore.getState().conversations).toEqual([]);
+    expect(useAiStore.getState().messages).toEqual([]);
+    expect(useAiStore.getState().loadedConversationIds).toEqual([]);
+  });
 });

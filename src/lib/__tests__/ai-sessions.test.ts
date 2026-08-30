@@ -14,6 +14,7 @@ const tauriMocks = vi.hoisted(() => ({
   cancel: vi.fn().mockResolvedValue(undefined),
   clear: vi.fn().mockResolvedValue(undefined),
   create: vi.fn().mockResolvedValue(undefined),
+  deleteSessions: vi.fn().mockResolvedValue(1),
 }));
 
 vi.mock('@/lib/tauri', () => ({
@@ -22,14 +23,17 @@ vi.mock('@/lib/tauri', () => ({
   invokeCancelAiRequest: tauriMocks.cancel,
   invokeClearAiSessionLane: tauriMocks.clear,
   invokeCreateAiSession: tauriMocks.create,
+  invokeDeleteAiSessions: tauriMocks.deleteSessions,
 }));
 
 import {
   archiveTerminalAiSession,
   clearPersistedAiConversation,
+  deletePersistedAiConversations,
   finalizeAiSessionsBeforeExit,
   flushAiSessionPersistence,
   persistAiMessage,
+  startNewTerminalAiConversation,
 } from '../ai-sessions';
 
 const conversation: AiConversation = {
@@ -194,5 +198,58 @@ describe('AI session persistence queue', () => {
     } finally {
       unregister();
     }
+  });
+
+  it('waits for pending writes before deleting persisted conversations', async () => {
+    let finishAppend: (() => void) | undefined;
+    tauriMocks.append.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishAppend = resolve;
+    }));
+
+    const append = persistAiMessage(assistant);
+    await Promise.resolve();
+    await Promise.resolve();
+    const deletion = deletePersistedAiConversations([conversation]);
+    await Promise.resolve();
+    expect(tauriMocks.deleteSessions).not.toHaveBeenCalled();
+
+    finishAppend?.();
+    await append;
+    await expect(deletion).resolves.toBe(1);
+    expect(tauriMocks.deleteSessions).toHaveBeenCalledWith([{
+      id: conversation.id,
+      startedAt: conversation.startedAt,
+    }]);
+  });
+
+  it('archives the current AI conversation before rotating to a new one', async () => {
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'session-1',
+        title: conversation.title,
+        host: conversation.host,
+        port: conversation.port,
+        username: conversation.username,
+        status: 'connected',
+        conversationId: conversation.id,
+        conversationStartedAt: conversation.startedAt,
+      }],
+      activeSessionId: 'session-1',
+    });
+
+    const nextConversationId = startNewTerminalAiConversation('session-1');
+    await flushAiSessionPersistence();
+
+    expect(nextConversationId).toBeTruthy();
+    expect(nextConversationId).not.toBe(conversation.id);
+    expect(useAiStore.getState().conversations[0]).toMatchObject({
+      id: conversation.id,
+      archived: true,
+    });
+    expect(tauriMocks.archive).toHaveBeenCalledWith(
+      conversation.id,
+      conversation.startedAt,
+      'new_conversation',
+    );
   });
 });

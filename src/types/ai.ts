@@ -76,6 +76,11 @@ export interface AiSessionMeta {
   username: string;
 }
 
+export interface AiSessionLocator {
+  id: string;
+  startedAt: string;
+}
+
 export interface AiSessionFile {
   conversation: AiConversation;
   messages: AiChatMessage[];
