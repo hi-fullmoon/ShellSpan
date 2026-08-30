@@ -211,34 +211,44 @@ describe('SettingsPanel', () => {
     expect(viewport.scrollTop).toBe(0);
   });
 
-  it('uses the built-in horizontal scroll area for the top tabs', async () => {
+  it('uses a stable vertical navigation inside the settings dialog', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
     const tabList = screen.getByRole('tablist', { name: 'settings.sectionNavigation' });
-    const tabScroller = tabList.closest('[data-slot="scroll-area"]');
-
-    expect(tabScroller).toBeInTheDocument();
-    expect(tabScroller).toHaveClass('h-8', 'w-full');
-    expect(tabList).toHaveClass('min-w-max');
-    expect(tabList).not.toHaveClass('group-data-horizontal/tabs:h-9');
-    expect(tabList).not.toHaveClass('overflow-x-auto');
+    expect(screen.getByRole('dialog', { name: 'workbench.settings.title' })).toBeInTheDocument();
+    expect(tabList).toHaveAttribute('aria-orientation', 'vertical');
+    expect(tabList).toHaveClass('w-full', 'flex-col', 'items-stretch');
+    expect(tabList.closest('aside')).toHaveClass('w-52');
   });
 
   it('keeps settings inputs and selects at 32px', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
-    const settingsPage = screen.getByText('workbench.settings.title').closest('[data-slot="workbench-page"]');
-    const settingsContent = settingsPage?.querySelector('[data-slot="workbench-page-content"]');
+    const settingsDialog = screen.getByRole('dialog', { name: 'workbench.settings.title' });
 
-    expect(settingsPage).toHaveClass(
+    expect(settingsDialog).toHaveClass(
       '[&_[data-slot=input]]:h-8',
       '[&_[data-slot=input-group]]:h-8',
       '[&_[data-slot=select-trigger]]:h-8',
     );
-    expect(settingsContent).toHaveClass('mx-0', 'max-w-4xl', 'pl-0', 'sm:pl-0');
-    expect(settingsContent).not.toHaveClass('mx-auto');
+    expect(settingsDialog).toHaveClass(
+      'h-[min(48rem,calc(100vh-2rem))]',
+      'w-[min(64rem,calc(100vw-2rem))]',
+      'max-w-none',
+    );
+  });
+
+  it('reports close requests without changing the active app section', async () => {
+    const onOpenChange = vi.fn();
+    useAppStore.setState({ activeSection: 'terminal' });
+    render(<SettingsPanel open onOpenChange={onOpenChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(useAppStore.getState().activeSection).toBe('terminal');
   });
 
   it('sizes the AI provider layout from the settings pane instead of the window', async () => {

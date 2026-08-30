@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/input-group';
 
 export const WORKBENCH_SEARCH_WIDTH_CLASS =
-  'w-72 max-w-full flex-none';
+  'w-64 max-w-full flex-none';
 
 type WorkbenchSearchClearProps =
   | { onClear?: never; clearLabel?: never }

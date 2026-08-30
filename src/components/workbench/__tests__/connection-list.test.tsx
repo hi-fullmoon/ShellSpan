@@ -61,12 +61,16 @@ describe('ConnectionList', () => {
     expect(
       screen.getByRole('button', { name: 'workbench.connections.new' }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'workbench.connections.import' }),
-    ).toHaveTextContent('workbench.connections.import');
-    expect(
-      screen.getByRole('button', { name: 'workbench.connections.export' }),
-    ).toHaveTextContent('workbench.connections.export');
+    const actionNames = [
+      'workbench.connections.import',
+      'workbench.connections.export',
+      'workbench.connections.new',
+    ];
+    for (const name of actionNames) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveTextContent(name);
+      expect(button.querySelector('[data-icon="inline-start"]')).toBeInTheDocument();
+    }
   });
 
   it('calls onAdd when the empty-state new-connection button is clicked', () => {
@@ -117,7 +121,7 @@ describe('ConnectionList', () => {
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
       'min-w-0',
-      'w-72',
+      'w-64',
       'max-w-full',
       'flex-none',
     );

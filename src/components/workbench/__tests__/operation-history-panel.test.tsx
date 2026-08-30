@@ -115,7 +115,7 @@ describe('OperationHistoryPanel', () => {
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
       'min-w-52',
-      'w-72',
+      'w-64',
       'max-w-full',
       'flex-none',
     );

@@ -736,7 +736,6 @@ export const LogPanel: React.FC = () => {
             clearLabel={t('workbench.logs.clearSearch')}
             placeholder={t('workbench.logs.searchPlaceholder')}
             aria-label={t('workbench.logs.searchPlaceholder')}
-            className="font-mono text-xs"
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">

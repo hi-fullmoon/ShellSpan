@@ -25,15 +25,18 @@ import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import {
   CopyIcon,
+  DownloadIcon,
   EllipsisIcon,
   FolderIcon,
   MonitorIcon,
   PencilIcon,
+  PlusIcon,
   SearchXIcon,
   ServerIcon,
   Trash2Icon,
   StarIcon,
   TerminalIcon,
+  UploadIcon,
   InfoIcon,
   CableIcon,
   HeartPulseIcon,
@@ -159,12 +162,15 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 aria-label={t('workbench.connections.searchPlaceholder')}
               />
               <Button variant="outline" size="sm" onClick={onImport}>
+                <DownloadIcon data-icon="inline-start" />
                 {t('workbench.connections.import')}
               </Button>
               <Button variant="outline" size="sm" onClick={onExport}>
+                <UploadIcon data-icon="inline-start" />
                 {t('workbench.connections.export')}
               </Button>
               <Button variant="default" size="sm" onClick={onAdd}>
+                <PlusIcon data-icon="inline-start" />
                 {t('workbench.connections.new')}
               </Button>
             </>

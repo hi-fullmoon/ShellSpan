@@ -22,7 +22,7 @@ import { findShortcutConflict, getShortcutKeys, isLeaderShortcutAction, shortcut
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -48,12 +48,6 @@ import type {
 } from '@/types';
 import { invokePickLocalFolder } from '@/lib/tauri';
 import type { LocaleKey } from '@/locales';
-import {
-  WorkbenchPage,
-  WorkbenchPageContent,
-  WorkbenchPageHeader,
-  WorkbenchPageToolbar,
-} from './workbench-page';
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
 import { clearTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
 import { clearSftpWorkspace } from '@/lib/sftp-workspace-persistence';
@@ -102,14 +96,19 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
   sftp: 'settings.shortcuts.groupSftp',
 };
 
-const SETTINGS_SECTIONS: { id: SettingsSection; icon: React.ElementType; titleKey: LocaleKey }[] = [
-  { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title' },
-  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title' },
-  { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title' },
-  { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title' },
-  { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title' },
-  { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title' },
-  { id: 'experimental', icon: FlaskConicalIcon, titleKey: 'settings.experimental.title' },
+const SETTINGS_SECTIONS: {
+  id: SettingsSection;
+  icon: React.ElementType;
+  titleKey: LocaleKey;
+  descriptionKey: LocaleKey;
+}[] = [
+  { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title', descriptionKey: 'settings.general.description' },
+  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title', descriptionKey: 'settings.appearance.description' },
+  { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title', descriptionKey: 'settings.terminal.description' },
+  { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title', descriptionKey: 'settings.sftp.description' },
+  { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
+  { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
+  { id: 'experimental', icon: FlaskConicalIcon, titleKey: 'settings.experimental.title', descriptionKey: 'settings.experimental.description' },
 ];
 
 const PETDEX_STATUS_LABEL_KEYS: Record<PetdexConnectionStatus, LocaleKey> = {
@@ -128,12 +127,12 @@ interface SettingRowProps {
 }
 
 const SettingRow: React.FC<SettingRowProps> = ({ description, descriptionId, label, labelId, children }) => (
-  <div className="grid min-h-16 grid-cols-[minmax(0,1fr)_11rem] items-center gap-6 px-4 py-2.5">
+  <div className="grid min-h-16 grid-cols-1 items-start gap-3 px-4 py-3 @min-[38rem]:grid-cols-[minmax(0,1fr)_11rem] @min-[38rem]:items-center @min-[38rem]:gap-6 @min-[38rem]:py-2.5">
     <div className="flex min-w-0 flex-col gap-0.5">
       <Label id={labelId} className="text-sm font-medium text-foreground">{label}</Label>
       <p id={descriptionId} className="text-xs leading-5 text-muted-foreground">{description}</p>
     </div>
-    <div>{children}</div>
+    <div className="w-full">{children}</div>
   </div>
 );
 
@@ -152,7 +151,15 @@ const ShortcutKeys: React.FC<{ shortcut: string }> = ({ shortcut }) => {
   );
 };
 
-export const SettingsPanel: React.FC = () => {
+interface SettingsPanelProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  open = true,
+  onOpenChange = () => undefined,
+}) => {
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
@@ -221,6 +228,7 @@ export const SettingsPanel: React.FC = () => {
   const [testingPetdex, setTestingPetdex] = useState(false);
   const activeSection = useAppStore((state) => state.activeSettingsSection);
   const setActiveSection = useAppStore((state) => state.setActiveSettingsSection);
+  const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const settingsViewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -333,44 +341,76 @@ export const SettingsPanel: React.FC = () => {
     closeRecorder();
   };
 
-  return (
-    <TooltipProvider>
-      <Tabs value={activeSection} onValueChange={handleSectionChange} className="h-full min-h-0 gap-0 overflow-hidden">
-        <WorkbenchPage className="[&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8">
-          <WorkbenchPageHeader
-            icon={Settings2Icon}
-            title={t('workbench.settings.title')}
-            description={t('settings.description')}
-          />
+  const ActiveSectionIcon = activeSectionMeta.icon;
 
-        <WorkbenchPageToolbar className="block p-0">
-          <ScrollArea horizontal vertical={false} size="thin" className="h-8 w-full">
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
+      <DialogContent
+        showCloseButton={false}
+        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 sm:rounded-xl"
+      >
+        <TooltipProvider>
+          <DialogHeader className="flex-row items-center gap-3 border-b border-app-border/50 bg-card/80 px-5 py-4">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Settings2Icon className="size-5" aria-hidden />
+            </div>
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-lg">{t('workbench.settings.title')}</DialogTitle>
+              <DialogDescription className="mt-1 text-xs">{t('settings.description')}</DialogDescription>
+            </div>
+            <DialogClose
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t('common.close')}
+                />
+              }
+            >
+              <XIcon />
+            </DialogClose>
+          </DialogHeader>
+
+          <Tabs
+            value={activeSection}
+            onValueChange={handleSectionChange}
+            orientation="vertical"
+            className="@container min-h-0 flex-1 flex-row gap-0 overflow-hidden"
+          >
+            <aside className="flex w-52 shrink-0 flex-col border-r border-app-border/50 bg-muted/30 p-2.5">
             <TabsList
               aria-label={t('settings.sectionNavigation')}
-              variant="line"
-              className="min-w-max justify-start"
+              aria-orientation="vertical"
+              className="h-auto w-full flex-col items-stretch justify-start gap-1 rounded-none bg-transparent p-0"
             >
               {SETTINGS_SECTIONS.map((section) => {
                 const Icon = section.icon;
                 return (
-                  <TabsTrigger key={section.id} value={section.id} className="flex-none px-2.5 text-[13px]">
+                  <TabsTrigger key={section.id} value={section.id} className="h-9 flex-none justify-start px-3 text-[13px]">
                     <Icon data-icon="inline-start" />
                     {t(section.titleKey)}
                   </TabsTrigger>
                 );
               })}
             </TabsList>
-          </ScrollArea>
-        </WorkbenchPageToolbar>
+            </aside>
 
-        <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-          <WorkbenchPageContent className="mx-0 max-w-4xl pl-0 sm:pl-0">
-            <TabsContent value="appearance" className="w-full">
-              <div>
-                <div className="px-3 pb-2 pt-1">
-                  <p className="text-xs text-muted-foreground">{t('settings.appearance.description')}</p>
+            <section className="flex min-w-0 flex-1 flex-col bg-background">
+              <div className="flex shrink-0 items-center gap-3 border-b border-app-border/40 px-5 py-3.5">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  <ActiveSectionIcon className="size-4" aria-hidden />
                 </div>
-                <Separator className="data-horizontal:border-border/40" />
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-foreground">{t(activeSectionMeta.titleKey)}</h2>
+                  <p className="truncate text-xs text-muted-foreground">{t(activeSectionMeta.descriptionKey)}</p>
+                </div>
+              </div>
+
+              <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
+                <div className="@container mx-auto w-full max-w-3xl p-4 @min-[44rem]:p-5">
+            <TabsContent value="appearance" className="w-full">
+              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
                   <Select value={theme} onValueChange={(value) => setTheme(value as ThemeMode)}>
                     <SelectTrigger size="sm" aria-label={t('settings.appearance.theme')}>
@@ -404,11 +444,7 @@ export const SettingsPanel: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="experimental" className="w-full">
-              <div>
-                <div className="px-3 pb-2 pt-1">
-                  <p className="text-xs text-muted-foreground">{t('settings.experimental.description')}</p>
-                </div>
-                <Separator className="data-horizontal:border-border/40" />
+              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
                 <SettingRow
                   label={t('settings.experimental.petdex.title')}
                   description={t('settings.experimental.petdex.description')}
@@ -489,11 +525,7 @@ export const SettingsPanel: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="general" className="w-full">
-              <div>
-                <div className="px-3 pb-2 pt-1">
-                  <p className="text-xs text-muted-foreground">{t('settings.general.description')}</p>
-                </div>
-                <Separator className="data-horizontal:border-border/40" />
+              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
                 <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
                   <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
                     <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
@@ -542,11 +574,7 @@ export const SettingsPanel: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="terminal" className="w-full">
-              <div>
-                <div className="px-3 pb-2 pt-1">
-                  <p className="text-xs text-muted-foreground">{t('settings.terminal.description')}</p>
-                </div>
-                <Separator className="data-horizontal:border-border/40" />
+              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
                 <SettingGroupLabel>{t('settings.terminal.groupAppearance')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
                   <Select value={terminalFontFamily} onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}>
@@ -796,11 +824,7 @@ export const SettingsPanel: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="sftp" className="w-full">
-              <div>
-                <div className="px-3 pb-2 pt-1">
-                  <p className="text-xs text-muted-foreground">{t('settings.sftp.description')}</p>
-                </div>
-                <Separator className="data-horizontal:border-border/40" />
+              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
                 <SettingRow label={t('settings.sftp.showHiddenFiles')} description={t('settings.sftp.showHiddenFilesDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.sftp.showHiddenFiles')} checked={sftpShowHiddenFiles} onCheckedChange={setSftpShowHiddenFiles} />
@@ -900,13 +924,12 @@ export const SettingsPanel: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="ai" className="w-full">
-              <AiSettingsSection />
+              <AiSettingsSection embedded />
             </TabsContent>
 
             <TabsContent value="shortcuts" className="w-full">
-              <div>
-                <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
-                  <p className="min-w-0 text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
+              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
+                <div className="flex items-center justify-end px-3 py-2">
                   <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
                     <RotateCcwIcon data-icon="inline-start" />
                     {t('settings.shortcuts.resetAll')}
@@ -976,10 +999,12 @@ export const SettingsPanel: React.FC = () => {
                 ))}
               </div>
             </TabsContent>
-          </WorkbenchPageContent>
-        </ScrollArea>
+                </div>
+              </ScrollArea>
+            </section>
+          </Tabs>
 
-        <Dialog
+          <Dialog
           open={editingAction !== null}
           onOpenChange={(open) => {
             if (!open) closeRecorder();
@@ -1011,9 +1036,9 @@ export const SettingsPanel: React.FC = () => {
               </p>
             )}
           </DialogContent>
-        </Dialog>
-        </WorkbenchPage>
-      </Tabs>
-    </TooltipProvider>
+          </Dialog>
+        </TooltipProvider>
+      </DialogContent>
+    </Dialog>
   );
 };
