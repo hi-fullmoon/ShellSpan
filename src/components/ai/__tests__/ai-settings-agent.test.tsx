@@ -1,13 +1,16 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiSettingsSection } from '../ai-settings-section';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiStore } from '@/stores/aiStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 
 const mocks = vi.hoisted(() => ({
   clearAgentConversationData: vi.fn(),
+  deletePersistedAiConversations: vi.fn(),
   flushAgentSessionPersistence: vi.fn(),
   invokeAgentRolloutPolicy: vi.fn(),
   invokeListAiModels: vi.fn(),
@@ -36,6 +39,10 @@ vi.mock('@/lib/agent-sessions', () => ({
   flushAgentSessionPersistence: mocks.flushAgentSessionPersistence,
 }));
 
+vi.mock('@/lib/ai-sessions', () => ({
+  deletePersistedAiConversations: mocks.deletePersistedAiConversations,
+}));
+
 vi.mock('@/hooks/useToast', () => ({
   useToast: () => ({ error: mocks.toast, success: mocks.toast }),
 }));
@@ -52,6 +59,7 @@ const initialAiSettings = useAiSettingsStore.getState();
 const initialAi = useAiStore.getState();
 const initialAgent = useAgentStore.getState();
 const initialApp = useAppStore.getState();
+const initialTerminal = useTerminalStore.getState();
 
 describe('M7 Agent settings management', () => {
   beforeEach(() => {
@@ -71,6 +79,7 @@ describe('M7 Agent settings management', () => {
     mocks.shutdown.mockResolvedValue(undefined);
     mocks.flushAgentSessionPersistence.mockResolvedValue(undefined);
     mocks.clearAgentConversationData.mockResolvedValue(undefined);
+    mocks.deletePersistedAiConversations.mockResolvedValue(1);
     useAiSettingsStore.setState({ ...initialAiSettings, agentEnabled: true }, true);
     useAiStore.setState({
       ...initialAi,
@@ -99,6 +108,22 @@ describe('M7 Agent settings management', () => {
     }, true);
     useAgentStore.setState(initialAgent, true);
     useAppStore.setState({ ...initialApp, operationHistoryCategory: 'all' }, true);
+    useTerminalStore.setState({
+      ...initialTerminal,
+      activeSessionId: 'terminal-a',
+      sessions: [
+        {
+          sessionId: 'terminal-a',
+          title: 'A',
+          host: 'a.example.test',
+          port: 22,
+          username: 'operator',
+          status: 'connected',
+          conversationId: 'conversation-a',
+          conversationStartedAt: '2026-08-29T00:00:00.000Z',
+        },
+      ],
+    }, true);
   });
 
   it('closes Agent safely and opens its filtered local operation history', async () => {
@@ -117,6 +142,23 @@ describe('M7 Agent settings management', () => {
       activeWorkbenchTab: 'history',
       operationHistoryCategory: 'agent',
     });
+  });
+
+  it('places model settings first and uses outlined destructive actions', async () => {
+    render(<AiSettingsSection />);
+    await screen.findByText('settings.ai.agent.stage.stable');
+
+    const providersHeading = screen.getByText('settings.ai.providers');
+    const agentHeading = screen.getByText('settings.ai.agent.title');
+    expect(providersHeading.compareDocumentPosition(agentHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    const deleteProvider = screen.getByRole('button', { name: 'settings.ai.deleteProvider' });
+    const clearSessions = screen.getByRole('button', { name: 'settings.ai.agent.clearSessions' });
+    const deleteHistory = screen.getByRole('button', { name: 'ai.history.deleteAll' });
+    for (const button of [deleteProvider, clearSessions, deleteHistory]) {
+      expect(button).toHaveClass('border-destructive', 'bg-transparent', 'text-destructive');
+      expect(button).not.toHaveClass('bg-destructive');
+    }
   });
 
   it('requires confirmation, cancels active work first, and clears every Agent lane', async () => {
@@ -143,5 +185,54 @@ describe('M7 Agent settings management', () => {
       'conversation-b',
       '2026-08-29T01:00:00.000Z',
     );
+  });
+
+  it('shows and updates thinking effort for a Kimi K3 provider', async () => {
+    const user = userEvent.setup();
+    const kimi = {
+      id: 'kimi',
+      name: 'Kimi Code',
+      preset: 'kimi' as const,
+      kind: 'openAiCompatible' as const,
+      baseUrl: 'https://api.kimi.com/coding',
+      model: 'k3',
+      reasoningEffort: 'high' as const,
+      requiresApiKey: true,
+    };
+    useAiSettingsStore.setState({ providers: [kimi], defaultProviderId: kimi.id });
+
+    render(<AiSettingsSection />);
+    const effortSelector = await screen.findByRole('combobox', {
+      name: 'settings.ai.reasoningEffort',
+    });
+    expect(effortSelector).toHaveTextContent('ai.reasoningEffort.high');
+
+    await user.click(effortSelector);
+    await user.click(await screen.findByRole('option', { name: 'ai.reasoningEffort.max' }));
+    await waitFor(() => expect(useAiSettingsStore.getState().providers[0]).toHaveProperty(
+      'reasoningEffort',
+      'max',
+    ));
+  });
+
+  it('moves bulk conversation-history deletion into settings and preserves current sessions', async () => {
+    render(<AiSettingsSection />);
+    await screen.findByText('settings.ai.agent.stage.stable');
+
+    expect(screen.getByText('ai.history.description:1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'ai.history.deleteAll' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(mocks.deletePersistedAiConversations).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ai.history.deleteAll' }));
+
+    await waitFor(() => expect(mocks.deletePersistedAiConversations).toHaveBeenCalledOnce());
+    expect(mocks.deletePersistedAiConversations).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'conversation-b' }),
+    ]);
+    expect(useAiStore.getState().conversations.map((conversation) => conversation.id)).toEqual([
+      'conversation-a',
+    ]);
+    expect(mocks.toast).toHaveBeenCalledWith('ai.history.deleted:1');
   });
 });

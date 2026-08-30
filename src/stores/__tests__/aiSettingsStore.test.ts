@@ -121,7 +121,22 @@ describe('aiSettingsStore', () => {
     expect(useAiSettingsStore.getState().getProviderConfig(kimiId)).toEqual(expect.objectContaining({
       baseUrl: 'https://api.kimi.com/coding',
       model: 'k3',
+      reasoningEffort: 'high',
     }));
+  });
+
+  it('persists Kimi K3 thinking effort and only sends it to K3 models', () => {
+    const kimiId = useAiSettingsStore.getState().addProvider('kimi');
+    useAiSettingsStore.getState().updateProvider(kimiId, { reasoningEffort: 'max' });
+
+    expect(useAiSettingsStore.getState().getProviderConfig(kimiId))
+      .toEqual(expect.objectContaining({ reasoningEffort: 'max' }));
+
+    useAiSettingsStore.getState().updateProvider(kimiId, { model: 'kimi-for-coding' });
+    expect(useAiSettingsStore.getState().getProviderConfig(kimiId))
+      .not.toHaveProperty('reasoningEffort');
+    expect(useAiSettingsStore.getState().providers.find((provider) => provider.id === kimiId))
+      .toHaveProperty('reasoningEffort', 'max');
   });
 
   it('keeps inline API keys in provider preferences and trims them for requests', () => {

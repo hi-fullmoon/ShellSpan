@@ -32,6 +32,14 @@ pub(crate) enum AiProviderKind {
     OpenAiCompatible,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AiReasoningEffort {
+    Low,
+    High,
+    Max,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AiProviderConfig {
@@ -39,6 +47,8 @@ pub(crate) struct AiProviderConfig {
     pub(crate) kind: AiProviderKind,
     pub(crate) base_url: String,
     pub(crate) model: String,
+    #[serde(default)]
+    pub(crate) reasoning_effort: Option<AiReasoningEffort>,
     pub(crate) requires_api_key: bool,
     #[serde(default)]
     pub(crate) api_key: Option<String>,
@@ -404,13 +414,14 @@ async fn run_request(
             stream_ollama(app, &request.request_id, response, cancellation).await
         }
         AiProviderKind::OpenAi => {
-            let body = json!({
+            let mut body = json!({
                 "model": request.provider.model,
                 "stream": true,
                 "store": false,
                 "instructions": instructions,
                 "input": messages,
             });
+            apply_reasoning_effort(&mut body, &request.provider);
             let Some(response) = await_with_cancellation(
                 &cancellation,
                 client
@@ -437,11 +448,12 @@ async fn run_request(
                     "content": message.content,
                 })
             }));
-            let body = json!({
+            let mut body = json!({
                 "model": request.provider.model,
                 "stream": true,
                 "messages": provider_messages,
             });
+            apply_reasoning_effort(&mut body, &request.provider);
             let request_builder = client
                 .post(endpoint_url(&request.provider, "chat/completions")?)
                 .json(&body);
@@ -928,6 +940,27 @@ fn is_loopback_host(host: Option<&str>) -> bool {
     matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
 }
 
+pub(crate) fn is_kimi_code_provider(provider: &AiProviderConfig) -> bool {
+    Url::parse(provider.base_url.trim())
+        .ok()
+        .is_some_and(|url| {
+            url.host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case("api.kimi.com"))
+                && (url.path() == "/coding" || url.path().starts_with("/coding/"))
+        })
+}
+
+pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConfig) {
+    let Some(effort) = provider.reasoning_effort else {
+        return;
+    };
+    match provider.kind {
+        AiProviderKind::OpenAi => body["reasoning"] = json!({ "effort": effort }),
+        AiProviderKind::OpenAiCompatible => body["reasoning_effort"] = json!(effort),
+        AiProviderKind::Ollama => {}
+    }
+}
+
 pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> {
     validate_provider_config(provider, false)?;
     let mut url = Url::parse(provider.base_url.trim())
@@ -1325,6 +1358,7 @@ mod tests {
             kind: AiProviderKind::Ollama,
             base_url: "http://127.0.0.1:11434".to_string(),
             model: "qwen3".to_string(),
+            reasoning_effort: None,
             requires_api_key: false,
             api_key: None,
         };
@@ -1343,6 +1377,7 @@ mod tests {
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com/v1/chat/completions".to_string(),
             model: "MiniMax-M3".to_string(),
+            reasoning_effort: None,
             requires_api_key: true,
             api_key: None,
         };
@@ -1386,12 +1421,53 @@ mod tests {
     }
 
     #[test]
+    fn applies_reasoning_effort_in_each_supported_protocol_shape() {
+        let compatible = AiProviderConfig {
+            id: "kimi".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.kimi.com/coding".to_string(),
+            model: "k3".to_string(),
+            reasoning_effort: Some(AiReasoningEffort::Max),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let mut compatible_body = json!({ "model": "k3" });
+        apply_reasoning_effort(&mut compatible_body, &compatible);
+        assert_eq!(
+            compatible_body
+                .get("reasoning_effort")
+                .and_then(Value::as_str),
+            Some("max")
+        );
+        assert!(is_kimi_code_provider(&compatible));
+
+        let openai = AiProviderConfig {
+            id: "openai".to_string(),
+            kind: AiProviderKind::OpenAi,
+            base_url: "https://api.openai.com".to_string(),
+            model: "gpt-test".to_string(),
+            reasoning_effort: Some(AiReasoningEffort::High),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let mut responses_body = json!({ "model": "gpt-test" });
+        apply_reasoning_effort(&mut responses_body, &openai);
+        assert_eq!(
+            responses_body
+                .pointer("/reasoning/effort")
+                .and_then(Value::as_str),
+            Some("high")
+        );
+    }
+
+    #[test]
     fn reads_and_trims_api_key_from_provider_configuration() {
         let provider = AiProviderConfig {
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com/v1".to_string(),
             model: "MiniMax-M3".to_string(),
+            reasoning_effort: None,
             requires_api_key: true,
             api_key: Some("  database-key  ".to_string()),
         };
@@ -1409,6 +1485,7 @@ mod tests {
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com/v1".to_string(),
             model: "MiniMax-M3".to_string(),
+            reasoning_effort: None,
             requires_api_key: true,
             api_key: None,
         };
