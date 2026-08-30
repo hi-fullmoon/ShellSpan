@@ -1,5 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ExternalLinkIcon, Globe2Icon, KeyboardIcon, RotateCcwIcon, Settings2Icon, XIcon } from 'lucide-react';
+import {
+  BotIcon,
+  ExternalLinkIcon,
+  FlaskConicalIcon,
+  FolderCogIcon,
+  FolderOpenIcon,
+  Globe2Icon,
+  KeyboardIcon,
+  MessageSquareIcon,
+  PaletteIcon,
+  RotateCcwIcon,
+  Settings2Icon,
+  SquareTerminalIcon,
+  Trash2Icon,
+  XIcon,
+} from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
@@ -87,14 +102,14 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
   sftp: 'settings.shortcuts.groupSftp',
 };
 
-const SETTINGS_SECTIONS: { id: SettingsSection; titleKey: LocaleKey }[] = [
-  { id: 'general', titleKey: 'settings.general.title' },
-  { id: 'appearance', titleKey: 'settings.appearance.title' },
-  { id: 'terminal', titleKey: 'settings.terminal.title' },
-  { id: 'sftp', titleKey: 'settings.sftp.title' },
-  { id: 'ai', titleKey: 'settings.ai.title' },
-  { id: 'shortcuts', titleKey: 'settings.shortcuts.title' },
-  { id: 'experimental', titleKey: 'settings.experimental.title' },
+const SETTINGS_SECTIONS: { id: SettingsSection; icon: React.ElementType; titleKey: LocaleKey }[] = [
+  { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title' },
+  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title' },
+  { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title' },
+  { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title' },
+  { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title' },
+  { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title' },
+  { id: 'experimental', icon: FlaskConicalIcon, titleKey: 'settings.experimental.title' },
 ];
 
 const PETDEX_STATUS_LABEL_KEYS: Record<PetdexConnectionStatus, LocaleKey> = {
@@ -336,8 +351,10 @@ export const SettingsPanel: React.FC = () => {
               className="min-w-max justify-start"
             >
               {SETTINGS_SECTIONS.map((section) => {
+                const Icon = section.icon;
                 return (
                   <TabsTrigger key={section.id} value={section.id} className="flex-none px-2.5 text-[13px]">
+                    <Icon data-icon="inline-start" />
                     {t(section.titleKey)}
                   </TabsTrigger>
                 );
@@ -347,7 +364,7 @@ export const SettingsPanel: React.FC = () => {
         </WorkbenchPageToolbar>
 
         <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-          <WorkbenchPageContent className="max-w-4xl">
+          <WorkbenchPageContent className="mx-0 max-w-4xl pl-0 sm:pl-0">
             <TabsContent value="appearance" className="w-full">
               <div>
                 <div className="px-3 pb-2 pt-1">
@@ -441,6 +458,7 @@ export const SettingsPanel: React.FC = () => {
                       disabled={!petdexEnabled || testingPetdex}
                       onClick={() => void handleTestPetdex()}
                     >
+                      <FlaskConicalIcon data-icon="inline-start" />
                       {testingPetdex
                         ? t('settings.experimental.petdex.testing')
                         : t('settings.experimental.petdex.testAction')}
@@ -461,6 +479,7 @@ export const SettingsPanel: React.FC = () => {
                       aria-describedby="petdex-feedback-description"
                       onClick={() => void openPetdexPhase3Feedback()}
                     >
+                      <MessageSquareIcon data-icon="inline-start" />
                       {t('settings.experimental.petdex.feedbackAction')}
                       <ExternalLinkIcon data-icon="inline-end" />
                     </Button>
@@ -511,6 +530,7 @@ export const SettingsPanel: React.FC = () => {
                 <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
                   <div className="flex items-center justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={handleClearWorkspace}>
+                      <Trash2Icon data-icon="inline-start" />
                       {t('settings.general.clearWorkspace')}
                     </Button>
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
@@ -838,6 +858,7 @@ export const SettingsPanel: React.FC = () => {
                           />
                         }
                       >
+                        <FolderOpenIcon data-icon="inline-start" />
                         <span className="truncate">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</span>
                       </TooltipTrigger>
                       <TooltipContent className="break-all">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</TooltipContent>
@@ -887,6 +908,7 @@ export const SettingsPanel: React.FC = () => {
                 <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
                   <p className="min-w-0 text-xs text-muted-foreground">{t('settings.shortcuts.description')}</p>
                   <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
+                    <RotateCcwIcon data-icon="inline-start" />
                     {t('settings.shortcuts.resetAll')}
                   </Button>
                 </div>
@@ -914,6 +936,7 @@ export const SettingsPanel: React.FC = () => {
                                   setEditingAction(action);
                                 }}
                               >
+                                <KeyboardIcon data-icon="inline-start" />
                                 {isLeaderShortcutAction(action) ? (
                                   <span className="flex items-center gap-1.5">
                                     <ShortcutKeys shortcut={leaderBinding} />

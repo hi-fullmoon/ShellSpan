@@ -36,7 +36,12 @@ import {
   TerminalIcon,
   InfoIcon,
   CableIcon,
+  DownloadIcon,
   HeartPulseIcon,
+  HistoryIcon,
+  ListIcon,
+  PlusIcon,
+  UploadIcon,
   ZapIcon,
 } from 'lucide-react';
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
@@ -159,12 +164,15 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 aria-label={t('workbench.connections.searchPlaceholder')}
               />
               <Button variant="outline" size="sm" onClick={onImport}>
+                <UploadIcon data-icon="inline-start" />
                 {t('workbench.connections.import')}
               </Button>
               <Button variant="outline" size="sm" onClick={onExport}>
+                <DownloadIcon data-icon="inline-start" />
                 {t('workbench.connections.export')}
               </Button>
               <Button variant="default" size="sm" onClick={onAdd}>
+                <PlusIcon data-icon="inline-start" />
                 {t('workbench.connections.new')}
               </Button>
             </>
@@ -173,11 +181,19 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
 
         {profiles.length > 0 && (
           <WorkbenchPageToolbar className="flex-row flex-wrap items-center gap-1.5">
-            {(['all', 'favorites', 'recent'] as const).map((filter) => (
-              <Button key={filter} variant={activityFilter === filter ? 'secondary' : 'ghost'} size="xs" onClick={() => setActivityFilter(filter)}>
-                {t(`workbench.connections.filter.${filter}`)}
-              </Button>
-            ))}
+            {(['all', 'favorites', 'recent'] as const).map((filter) => {
+              const FilterIcon = filter === 'favorites'
+                ? StarIcon
+                : filter === 'recent'
+                  ? HistoryIcon
+                  : ListIcon;
+              return (
+                <Button key={filter} variant={activityFilter === filter ? 'secondary' : 'ghost'} size="xs" onClick={() => setActivityFilter(filter)}>
+                  <FilterIcon data-icon="inline-start" />
+                  {t(`workbench.connections.filter.${filter}`)}
+                </Button>
+              );
+            })}
             {groups.length > 0 && (
               <Select value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
                 <SelectTrigger size="sm" className="ml-auto w-40" aria-label={t('workbench.connections.groupFilter')}>

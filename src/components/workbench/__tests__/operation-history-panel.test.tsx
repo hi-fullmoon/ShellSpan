@@ -182,6 +182,7 @@ describe('OperationHistoryPanel', () => {
     expect(dialog).toHaveClass('max-h-[min(720px,calc(100vh-2rem))]', 'overflow-hidden');
     const confirm = within(dialog).getByRole('button', { name: 'operationHistory.clearConfirm' });
     expect(confirm).toHaveClass('bg-destructive');
+    expect(confirm.querySelector('svg')).toBeNull();
     fireEvent.click(confirm);
 
     await waitFor(() => expect(mocks.clear).toHaveBeenCalledOnce());

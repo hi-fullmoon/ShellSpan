@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangleIcon, FileKeyIcon, ServerIcon } from 'lucide-react';
+import { AlertTriangleIcon, FileKeyIcon, ServerIcon, UploadIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -101,6 +101,7 @@ export const ConnectionImportDialog: React.FC<ConnectionImportDialogProps> = ({
             disabled={importing || selected.size === 0}
             onClick={() => void onImport([...selected])}
           >
+            <UploadIcon data-icon="inline-start" />
             {importing
               ? t('workbench.connections.importing')
               : t('workbench.connections.importSelected', { count: selected.size })}

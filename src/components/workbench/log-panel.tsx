@@ -9,11 +9,14 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDownToLineIcon,
   BugIcon,
+  CheckIcon,
   ChevronRightIcon,
   CircleAlertIcon,
+  CopyIcon,
   FileSearchIcon,
   FileTextIcon,
   Layers3Icon,
+  RefreshCwIcon,
   SearchXIcon,
   XIcon,
 } from 'lucide-react';
@@ -431,6 +434,9 @@ const LogInspector: React.FC<{
               onClick={() => void handleCopy()}
               aria-live="polite"
             >
+              {copied
+                ? <CheckIcon data-icon="inline-start" />
+                : <CopyIcon data-icon="inline-start" />}
               {t(copied
                 ? 'workbench.logs.inspector.copied'
                 : 'workbench.logs.inspector.copy')}
@@ -695,12 +701,15 @@ export const LogPanel: React.FC = () => {
                 <ToggleGroupItem value="backend">{t('workbench.logs.backend')}</ToggleGroupItem>
               </ToggleGroup>
               <Button variant="outline" size="sm" onClick={handleRefresh}>
+                <RefreshCwIcon data-icon="inline-start" />
                 {t('common.refresh')}
               </Button>
               <Button variant="outline" size="sm" onClick={handleExport} disabled={!content}>
+                <ArrowDownToLineIcon data-icon="inline-start" />
                 {t('workbench.logs.export')}
               </Button>
               <Button variant="secondary" size="sm" onClick={handleDiagnosticBundle}>
+                <BugIcon data-icon="inline-start" />
                 {t('workbench.logs.diagnostic')}
               </Button>
             </>

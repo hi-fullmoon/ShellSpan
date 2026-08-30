@@ -7,6 +7,9 @@ import {
   Layers3Icon,
   MemoryStickIcon,
   NetworkIcon,
+  PauseIcon,
+  PlayIcon,
+  RefreshCwIcon,
   ServerIcon,
   TerminalIcon,
 } from 'lucide-react';
@@ -426,6 +429,9 @@ export const MonitorPanel: React.FC = () => {
                 size="sm"
                 onClick={() => setPaused(!paused)}
               >
+                {paused
+                  ? <PlayIcon data-icon="inline-start" />
+                  : <PauseIcon data-icon="inline-start" />}
                 {t(paused ? 'workbench.monitor.resume' : 'workbench.monitor.pause')}
               </Button>
               <Button
@@ -434,7 +440,9 @@ export const MonitorPanel: React.FC = () => {
                 onClick={() => void refresh()}
                 disabled={paused}
               >
-                {loading && <Spinner data-icon="inline-start" />}
+                {loading
+                  ? <Spinner data-icon="inline-start" />
+                  : <RefreshCwIcon data-icon="inline-start" />}
                 {t('common.refresh')}
               </Button>
             </>

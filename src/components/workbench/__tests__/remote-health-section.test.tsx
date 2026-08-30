@@ -78,9 +78,11 @@ describe('RemoteHealthSection authorization', () => {
     expect(dialog).toHaveClass('max-h-[min(720px,calc(100vh-2rem))]', 'overflow-hidden');
     expect(within(dialog).getByText(/root@prod\.example\.com:22/)).toBeInTheDocument();
     expect(within(dialog).getByText('remoteHealth.authorization.scope')).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', {
+    const confirm = within(dialog).getByRole('button', {
       name: 'remoteHealth.authorization.confirm',
-    }));
+    });
+    expect(confirm.querySelector('svg')).toBeNull();
+    fireEvent.click(confirm);
 
     await waitFor(() => expect(collect).toHaveBeenCalledOnce());
     expect(collect).toHaveBeenCalledWith(profile, true);

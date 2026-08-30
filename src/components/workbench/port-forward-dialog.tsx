@@ -4,6 +4,14 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CableIcon,
+  EraserIcon,
+  PencilIcon,
+  PlayIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  SaveIcon,
+  SquareIcon,
+  XIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -289,6 +297,7 @@ export function PortForwardDialog({
                   disabled={Boolean(validationError) || saving}
                   onClick={() => void saveDraft()}
                 >
+                  <SaveIcon data-icon="inline-start" />
                   {t('common.save')}
                 </Button>
               </CardFooter>
@@ -299,6 +308,7 @@ export function PortForwardDialog({
                 {t('portForward.summary', { configured: rules.length, active: activeCount })}
               </div>
               <Button size="sm" onClick={() => setDraft(createDraft())}>
+                <PlusIcon data-icon="inline-start" />
                 {t('portForward.create')}
               </Button>
             </div>
@@ -374,6 +384,7 @@ export function PortForwardDialog({
                       onClick={() => setDraft(createDraft(rule))}
                       disabled={active}
                     >
+                      <PencilIcon data-icon="inline-start" />
                       {t('common.edit')}
                     </Button>
                     <Button
@@ -391,10 +402,12 @@ export function PortForwardDialog({
                       disabled={runtime.status === 'stopping'}
                       onClick={() => void usePortForwardStore.getState().stop(runtime.operationId)}
                     >
+                      <SquareIcon data-icon="inline-start" />
                       {t('portForward.stop')}
                     </Button>
                   ) : runtime?.status === 'failed' ? (
                     <Button size="xs" onClick={() => void usePortForwardStore.getState().retry(runtime.operationId)}>
+                      <RotateCcwIcon data-icon="inline-start" />
                       {t('portForward.retry')}
                     </Button>
                   ) : (
@@ -403,6 +416,7 @@ export function PortForwardDialog({
                       onClick={() => profile
                         && void usePortForwardStore.getState().startRule(profile, rule, 'manual')}
                     >
+                      <PlayIcon data-icon="inline-start" />
                       {t('portForward.start')}
                     </Button>
                   )}
@@ -419,10 +433,14 @@ export function PortForwardDialog({
               size="sm"
               onClick={() => profile && usePortForwardStore.getState().clearFinished(profile.id)}
             >
+              <EraserIcon data-icon="inline-start" />
               {t('portForward.clearHistory')}
             </Button>
           ) : null}
-          <Button variant="outline" size="sm" onClick={onClose}>{t('common.close')}</Button>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            <XIcon data-icon="inline-start" />
+            {t('common.close')}
+          </Button>
         </CompactDialogFooter>
       </CompactDialogContent>
     </Dialog>

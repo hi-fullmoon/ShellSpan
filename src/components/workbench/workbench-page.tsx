@@ -148,7 +148,7 @@ export const WorkbenchPageContent: React.FC<WorkbenchPageContentProps> = ({
   <main
     data-slot="workbench-page-content"
     className={cn(
-      'mx-auto flex min-h-full w-full max-w-screen-2xl flex-col gap-3 p-3 sm:p-4',
+      'mx-auto flex min-h-full w-full flex-col gap-3 p-3 sm:p-4',
       className,
     )}
     {...props}

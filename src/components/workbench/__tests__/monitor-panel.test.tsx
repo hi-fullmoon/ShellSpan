@@ -79,15 +79,15 @@ describe('MonitorPanel health layers', () => {
     expect(screen.getByRole('banner').querySelector('p')).not.toBeNull();
   });
 
-  it('renders header actions as text buttons', () => {
+  it('renders header actions with leading icons', () => {
     render(<MonitorPanel />);
 
     const resume = screen.getByRole('button', { name: 'workbench.monitor.resume' });
     const refresh = screen.getByRole('button', { name: 'common.refresh' });
     expect(resume).toHaveTextContent('workbench.monitor.resume');
     expect(refresh).toHaveTextContent('common.refresh');
-    expect(resume.querySelector('svg')).toBeNull();
-    expect(refresh.querySelector('svg')).toBeNull();
+    expect(resume.querySelector('[data-icon="inline-start"]')).toBeInTheDocument();
+    expect(refresh.querySelector('[data-icon="inline-start"]')).toBeInTheDocument();
   });
 
   it('keeps empty connection states compact', () => {

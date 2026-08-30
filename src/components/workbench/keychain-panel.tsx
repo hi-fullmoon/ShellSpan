@@ -1,5 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { KeyRound, Lock, SearchXIcon, Trash2Icon, PencilIcon, CopyIcon, FileKey, UploadCloud } from 'lucide-react';
+import {
+  CopyIcon,
+  FileKey,
+  KeyRound,
+  Lock,
+  PencilIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  SaveIcon,
+  SearchXIcon,
+  Trash2Icon,
+  UploadCloud,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -194,9 +206,11 @@ export const KeychainPanel: React.FC = () => {
                 aria-label={t('workbench.keychain.searchPlaceholder')}
               />
               <Button variant="outline" size="sm" onClick={hydrate}>
+                <RefreshCwIcon data-icon="inline-start" />
                 {t('common.refresh')}
               </Button>
               <Button size="sm" onClick={openCreate}>
+                <PlusIcon data-icon="inline-start" />
                 {t('common.create')}
               </Button>
             </>
@@ -334,6 +348,7 @@ export const KeychainPanel: React.FC = () => {
           </FieldGroup>
           <DrawerFooter className="px-5 pb-4 pt-1">
             <Button size="sm" onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
+              <SaveIcon data-icon="inline-start" />
               {t('common.save')}
             </Button>
           </DrawerFooter>
