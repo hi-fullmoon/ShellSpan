@@ -240,12 +240,12 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
       <DialogContent className="top-[12vh] flex max-h-[76vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="px-5 pb-3 pt-5 pr-12">
+        <DialogHeader className="px-4 pb-3 pt-4 pr-12">
           <DialogTitle>{t('terminal.newSession.title')}</DialogTitle>
           <DialogDescription>{t('terminal.newSession.description')}</DialogDescription>
         </DialogHeader>
 
-        <div className="px-5 pb-4">
+        <div className="px-4 pb-4">
           <InputGroup className="h-10 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
             <InputGroupInput
               ref={searchInputRef}
@@ -265,7 +265,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
 
         <Separator />
         <ScrollArea className="min-h-32 flex-1">
-          <div id="new-session-command-list" ref={commandListRef} className="flex flex-col gap-2 p-2">
+          <div id="new-session-command-list" ref={commandListRef} className="flex flex-col gap-2 px-4 py-3">
             {localCommand && (
               <Button
                 id={`new-session-command-${localCommand.index}`}

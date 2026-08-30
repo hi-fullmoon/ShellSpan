@@ -518,7 +518,7 @@ export const CommandPalette: React.FC = () => {
       setOpen(nextOpen);
       if (!nextOpen) setQuery('');
     }}>
-      <DialogContent className="top-[18%] max-w-2xl translate-y-0 gap-3 p-3" showCloseButton={false}>
+      <DialogContent className="top-[18%] max-w-2xl translate-y-0 gap-3 p-4" showCloseButton={false}>
         <DialogHeader className="sr-only">
           <DialogTitle>{t('commandPalette.title')}</DialogTitle>
           <DialogDescription>{t('commandPalette.description')}</DialogDescription>

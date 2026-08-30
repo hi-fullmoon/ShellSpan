@@ -507,13 +507,13 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
       }}
     >
       <DrawerContent className="w-100 gap-0 p-0">
-        <DrawerHeader className="border-b border-app-border px-5 py-4">
+        <DrawerHeader className="border-b border-app-border px-4 py-4">
           <DrawerTitle>{initial ? t('connection.form.title.edit') : t('connection.form.title.new')}</DrawerTitle>
           <p className="text-xs text-muted-foreground">{t('connection.form.subtitle')}</p>
         </DrawerHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="flex flex-col gap-5 px-5 py-4">
+          <div className="flex flex-col gap-5 px-4 py-4">
             <FormSection icon={Server} title={t('connection.form.section.general')}>
               <FormRow controlId="connection-name" label={t('common.name')} error={errors.name}>
                 <Input id="connection-name" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? 'connection-name-error' : undefined} value={form.name} onChange={(e) => updateField('name', e.target.value)} placeholder="My Server" autoComplete="off" autoCapitalize="none" />
@@ -664,7 +664,7 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
           </div>
         </ScrollArea>
 
-        <DrawerFooter className="grid grid-cols-3 gap-2 px-5 py-4">
+        <DrawerFooter className="grid grid-cols-3 gap-2 px-4 py-4">
           <Button variant="outline" size="sm" onClick={() => void runPreflight()} disabled={isSubmitting || preflightChecking}>
             <ShieldCheckIcon data-icon="inline-start" />
             {t('connection.preflight.action')}

@@ -44,7 +44,7 @@ export const ConnectionImportDialog: React.FC<ConnectionImportDialogProps> = ({
           title={t('workbench.connections.importPreviewTitle')}
           description={t('workbench.connections.importPreviewDescription')}
         />
-        <CompactDialogBody className="max-h-[60vh] overflow-y-auto p-2">
+        <CompactDialogBody className="max-h-[60vh] overflow-y-auto">
           {candidates.map((candidate) => {
             const checked = selected.has(candidate.id);
             return (

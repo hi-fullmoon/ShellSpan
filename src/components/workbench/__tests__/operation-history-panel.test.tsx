@@ -155,7 +155,7 @@ describe('OperationHistoryPanel', () => {
       expect(timelineScroller?.querySelector('[data-slot="scroll-area-scrollbar"]'))
         .toBeInTheDocument();
     });
-    expect(timelineContent).toHaveClass('flex', 'px-6', 'py-4');
+    expect(timelineContent).toHaveClass('flex', 'px-4', 'py-3');
     expect(timelineContent).not.toHaveClass('overflow-y-auto');
     expect(screen.getAllByText(/precheck-1/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('step-1').length).toBeGreaterThan(0);
