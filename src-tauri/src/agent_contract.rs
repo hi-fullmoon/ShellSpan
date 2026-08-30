@@ -1,4 +1,4 @@
-//! Frozen M0 contracts and fail-closed policy for the terminal Agent.
+//! Versioned contracts and fail-closed policy for the terminal Agent.
 //!
 //! This module intentionally contains no model loop or terminal executor. Those
 //! capabilities belong to later roadmap milestones and must enter through this
@@ -11,13 +11,13 @@ use tauri::State;
 
 use crate::ai::AiProviderKind;
 
-pub const AGENT_CONTRACT_VERSION: u8 = 1;
+pub const AGENT_CONTRACT_VERSION: u8 = 2;
 pub const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = AgentPermissionMode::RequestApproval;
 const EXPERIMENTAL_AGENT_ENV: &str = "TERMBRIDGE_EXPERIMENTAL_AGENT";
 const AGENT_ROLLOUT_ENV: &str = "TERMBRIDGE_AGENT_ROLLOUT";
 
 pub const AGENT_CONTRACT_SCHEMA: &str =
-    include_str!("../../protocol/agent/v1/agent-contract.schema.json");
+    include_str!("../../protocol/agent/v2/agent-contract.schema.json");
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -241,8 +241,8 @@ pub enum AgentSafeFallbackReason {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum AgentFallbackTask {
-    #[serde(rename = "generateCommand")]
-    GenerateCommand,
+    #[serde(rename = "ask")]
+    Ask,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -386,7 +386,7 @@ pub(crate) fn resolve_agent_contract_status(
     let agent_available =
         feature_enabled && provider_capability.support == AgentToolCallingSupport::Supported;
     let fallback = (!agent_available).then(|| AgentSafeFallback {
-        task: AgentFallbackTask::GenerateCommand,
+        task: AgentFallbackTask::Ask,
         automatic_execution: AgentAutomaticExecutionDisabled,
         assistant_text_execution: AgentAssistantTextExecution::Forbidden,
         reason: if !feature_enabled {
@@ -429,7 +429,7 @@ pub(crate) fn agent_rollout_policy() -> AgentRolloutPolicy {
 mod tests {
     use super::*;
 
-    const FIXTURES: &str = include_str!("../../protocol/agent/v1/agent-contract-fixtures.json");
+    const FIXTURES: &str = include_str!("../../protocol/agent/v2/agent-contract-fixtures.json");
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -632,7 +632,7 @@ mod tests {
         assert_eq!(
             disabled.fallback.unwrap(),
             AgentSafeFallback {
-                task: AgentFallbackTask::GenerateCommand,
+                task: AgentFallbackTask::Ask,
                 automatic_execution: AgentAutomaticExecutionDisabled,
                 assistant_text_execution: AgentAssistantTextExecution::Forbidden,
                 reason: AgentSafeFallbackReason::FeatureDisabled,
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn fallback_contract_rejects_automatic_execution() {
         let invalid = serde_json::json!({
-            "task": "generateCommand",
+            "task": "ask",
             "automaticExecution": true,
             "assistantTextExecution": "forbidden",
             "reason": "featureDisabled"
