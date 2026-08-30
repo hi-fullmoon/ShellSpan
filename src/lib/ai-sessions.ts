@@ -8,6 +8,7 @@ import {
   invokeCancelAiRequest,
   invokeClearAiSessionLane,
   invokeCreateAiSession,
+  invokeDeleteAiSessions,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { flushAiStreamDelta } from '@/lib/ai-stream-batcher';
@@ -93,6 +94,40 @@ export async function clearPersistedAiConversation(
   return enqueueAiSessionPersistence(conversationId, () => (
     invokeClearAiSessionLane(conversationId, startedAt, lane)
   ));
+}
+
+export async function deletePersistedAiConversations(
+  conversations: Pick<AiConversation, 'id' | 'startedAt'>[],
+): Promise<number> {
+  await flushAiSessionPersistenceQueue();
+  return invokeDeleteAiSessions(conversations.map(({ id, startedAt }) => ({ id, startedAt })));
+}
+
+export function startNewTerminalAiConversation(sessionId: string): string | undefined {
+  const terminal = useTerminalStore
+    .getState()
+    .sessions.find((session) => session.sessionId === sessionId);
+  if (!terminal) return undefined;
+
+  const previousConversationId = terminal.conversationId;
+  const previousStartedAt = terminal.conversationStartedAt;
+  const ai = useAiStore.getState();
+  const previousConversation = previousConversationId
+    ? ai.conversations.find((conversation) => conversation.id === previousConversationId)
+    : undefined;
+
+  if (previousConversationId && previousStartedAt && previousConversation) {
+    ai.archiveConversation(previousConversationId);
+    void enqueueAiSessionPersistence(previousConversationId, () => (
+      invokeArchiveAiSession(previousConversationId, previousStartedAt, 'new_conversation')
+    )).catch((error) => logger.warn('Failed to archive previous AI conversation', error));
+  }
+
+  useTerminalStore.getState().startNewConversation(sessionId);
+  return useTerminalStore
+    .getState()
+    .sessions.find((session) => session.sessionId === sessionId)
+    ?.conversationId;
 }
 
 export async function flushAiSessionPersistence(): Promise<void> {

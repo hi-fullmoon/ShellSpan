@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -43,6 +43,13 @@ pub(crate) struct AiConversationSummary {
     pub host: String,
     pub port: u16,
     pub username: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiSessionLocator {
+    pub id: String,
+    pub started_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +97,18 @@ fn validate_id(id: &str) -> Result<(), String> {
 
 fn session_path(root: &Path, id: &str, started_at: &str) -> Result<PathBuf, String> {
     validate_id(id)?;
+    let timestamp_bytes = started_at.as_bytes();
+    if timestamp_bytes.len() < 19
+        || timestamp_bytes[10] != b'T'
+        || timestamp_bytes[13] != b':'
+        || timestamp_bytes[16] != b':'
+        || !timestamp_bytes[..19]
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit())
+    {
+        return Err("AI session timestamp must start with YYYY-MM-DDTHH:MM:SS".to_string());
+    }
     let (year, month, day) = date_parts(started_at)?;
     let safe_timestamp: String = started_at
         .chars()
@@ -101,6 +120,28 @@ fn session_path(root: &Path, id: &str, started_at: &str) -> Result<PathBuf, Stri
         .join(month)
         .join(day)
         .join(format!("rollout-{safe_timestamp}-{id}.jsonl")))
+}
+
+fn delete_ai_session_files(root: &Path, sessions: &[AiSessionLocator]) -> Result<usize, String> {
+    let paths = sessions
+        .iter()
+        .map(|session| session_path(root, &session.id, &session.started_at))
+        .collect::<Result<HashSet<_>, _>>()?;
+    let mut ordinals = AI_SESSION_ORDINALS
+        .lock()
+        .map_err(|error| format!("AI session write lock poisoned: {error}"))?;
+    let mut deleted_count = 0;
+    for path in paths {
+        match fs::remove_file(&path) {
+            Ok(()) => {
+                ordinals.remove(&path);
+                deleted_count += 1;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("failed to delete AI session: {error}")),
+        }
+    }
+    Ok(deleted_count)
 }
 
 fn append_record(
@@ -246,7 +287,13 @@ pub(crate) fn archive_ai_session(
     conversation_id: String,
     started_at: String,
     timestamp: String,
+    reason: Option<String>,
 ) -> Result<(), String> {
+    let reason = match reason.as_deref() {
+        None | Some("terminal_closed") => "terminal_closed",
+        Some("new_conversation") => "new_conversation",
+        Some(_) => return Err("invalid AI session archive reason".to_string()),
+    };
     let path = session_path(&sessions_root(&app)?, &conversation_id, &started_at)?;
     if !path.exists() {
         return Ok(());
@@ -255,8 +302,16 @@ pub(crate) fn archive_ai_session(
         &path,
         &timestamp,
         "event_msg",
-        json!({ "type": "conversation_archived", "reason": "terminal_closed" }),
+        json!({ "type": "conversation_archived", "reason": reason }),
     )
+}
+
+#[tauri::command]
+pub(crate) fn delete_ai_sessions(
+    app: AppHandle,
+    sessions: Vec<AiSessionLocator>,
+) -> Result<usize, String> {
+    delete_ai_session_files(&sessions_root(&app)?, &sessions)
 }
 
 fn collect_jsonl_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
@@ -527,8 +582,8 @@ pub(crate) fn load_ai_session(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_record, date_parts, load_session_file, load_session_summary, session_path,
-        AiSessionMeta,
+        append_record, date_parts, delete_ai_session_files, load_session_file,
+        load_session_summary, session_path, AiSessionLocator, AiSessionMeta,
     };
     use crate::redaction::redact_json_value;
     use serde_json::{json, to_value};
@@ -541,6 +596,34 @@ mod tests {
         let path = session_path(root.path(), "conversation-1", "2026-08-22T10:49:08.000Z").unwrap();
         assert!(path.ends_with("2026/08/22/rollout-2026-08-22T10-49-08-conversation-1.jsonl"));
         assert!(date_parts("bad").is_err());
+        assert!(session_path(root.path(), "conversation-1", "2026-08-22/../../bad").is_err());
+    }
+
+    #[test]
+    fn deletes_only_explicitly_selected_session_files() {
+        let root = tempdir().unwrap();
+        let first = AiSessionLocator {
+            id: "conversation-1".to_string(),
+            started_at: "2026-08-22T10:49:08.000Z".to_string(),
+        };
+        let second = AiSessionLocator {
+            id: "conversation-2".to_string(),
+            started_at: "2026-08-23T10:49:08.000Z".to_string(),
+        };
+        let first_path = session_path(root.path(), &first.id, &first.started_at).unwrap();
+        let second_path = session_path(root.path(), &second.id, &second.started_at).unwrap();
+        fs::create_dir_all(first_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(second_path.parent().unwrap()).unwrap();
+        fs::write(&first_path, "first\n").unwrap();
+        fs::write(&second_path, "second\n").unwrap();
+
+        assert_eq!(
+            delete_ai_session_files(root.path(), &[first.clone()]).unwrap(),
+            1
+        );
+        assert!(!first_path.exists());
+        assert!(second_path.exists());
+        assert_eq!(delete_ai_session_files(root.path(), &[first]).unwrap(), 0);
     }
 
     #[test]

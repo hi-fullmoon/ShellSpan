@@ -61,6 +61,7 @@ import type {
   AiConversation,
   AiProviderConfig,
   AiSessionFile,
+  AiSessionLocator,
   AiSessionMeta,
   AiStartRequest,
 } from '@/types/ai';
@@ -856,12 +857,18 @@ export async function invokeClearAiSessionLane(
 export async function invokeArchiveAiSession(
   conversationId: string,
   startedAt: string,
+  reason: 'terminal_closed' | 'new_conversation' = 'terminal_closed',
 ): Promise<void> {
   return invokeLogged('archive_ai_session', {
     conversationId,
     startedAt,
     timestamp: new Date().toISOString(),
+    reason,
   });
+}
+
+export async function invokeDeleteAiSessions(sessions: AiSessionLocator[]): Promise<number> {
+  return invokeLogged<number>('delete_ai_sessions', { sessions });
 }
 
 export async function invokeListAiSessions(): Promise<AiConversation[]> {

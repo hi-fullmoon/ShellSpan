@@ -265,6 +265,7 @@ pub fn run() {
             ai_sessions::append_ai_session_agent_state,
             ai_sessions::clear_ai_session_lane,
             ai_sessions::archive_ai_session,
+            ai_sessions::delete_ai_sessions,
             ai_sessions::list_ai_sessions,
             ai_sessions::load_ai_session,
             petdex::petdex_set_enabled,
