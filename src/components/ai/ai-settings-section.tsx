@@ -51,7 +51,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { Spinner } from '@/components/ui/empty-state';
+import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import type { LocaleKey } from '@/locales';
@@ -714,6 +714,15 @@ export const AiSettingsSection: React.FC = () => {
             {t('ai.history.description', { count: historicalConversations.length })}
           </CardDescription>
         </CardHeader>
+        {historicalConversations.length === 0 && (
+          <CardContent>
+            <EmptyState
+              className="min-h-32"
+              icon={<HistoryIcon />}
+              title={t('ai.history.empty')}
+            />
+          </CardContent>
+        )}
         <CardFooter className="justify-end">
           <Button
             variant="destructiveOutline"
@@ -794,9 +803,10 @@ export const AiSettingsSection: React.FC = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructiveOutline"
+              size="sm"
               onClick={() => void handleClearAgentSessions()}
             >
               {t('settings.ai.agent.clearConfirm')}
