@@ -211,14 +211,14 @@ export type AgentSafeFallbackReason =
   | 'toolCallingUnverified';
 
 export interface AgentSafeFallback {
-  readonly task: 'generateCommand';
+  readonly task: 'ask';
   readonly automaticExecution: false;
   readonly assistantTextExecution: 'forbidden';
   readonly reason: AgentSafeFallbackReason;
 }
 
 export interface AgentContractStatus {
-  readonly contractVersion: 1;
+  readonly contractVersion: 2;
   readonly featureEnabled: boolean;
   readonly agentAvailable: boolean;
   readonly defaultPermissionMode: 'requestApproval';

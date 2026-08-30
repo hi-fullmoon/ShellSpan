@@ -11,7 +11,7 @@ import {
   type AgentTargetSnapshot,
 } from '@/types/agent';
 
-export const AGENT_CONTRACT_VERSION = 1 as const;
+export const AGENT_CONTRACT_VERSION = 2 as const;
 export const DEFAULT_AGENT_PERMISSION_MODE = 'requestApproval' as const;
 
 export function classifyAgentRisk(value: unknown): AgentRiskClassification {
@@ -100,7 +100,7 @@ export function resolveAgentContractStatus(
     defaultPermissionMode: DEFAULT_AGENT_PERMISSION_MODE,
     providerCapability,
     fallback: {
-      task: 'generateCommand',
+      task: 'ask',
       automaticExecution: false,
       assistantTextExecution: 'forbidden',
       reason: !featureEnabled
