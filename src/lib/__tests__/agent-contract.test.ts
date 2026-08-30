@@ -1,7 +1,9 @@
 import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
-import fixtures from '../../../protocol/agent/v1/agent-contract-fixtures.json';
-import schema from '../../../protocol/agent/v1/agent-contract.schema.json';
+import legacyFixtures from '../../../protocol/agent/v1/agent-contract-fixtures.json';
+import legacySchema from '../../../protocol/agent/v1/agent-contract.schema.json';
+import fixtures from '../../../protocol/agent/v2/agent-contract-fixtures.json';
+import schema from '../../../protocol/agent/v2/agent-contract.schema.json';
 import {
   classifyAgentRisk,
   evaluateAgentPermission,
@@ -27,7 +29,7 @@ interface PermissionMatrixCase {
   expected: AgentApprovalDecision;
 }
 
-describe('Agent v1 shared contract', () => {
+describe('Agent v2 shared contract', () => {
   it('validates the checked-in cross-language fixtures against the strict schema', () => {
     const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
     expect(validate(fixtures), JSON.stringify(validate.errors)).toBe(true);
@@ -35,6 +37,11 @@ describe('Agent v1 shared contract', () => {
     const invalid = structuredClone(fixtures) as typeof fixtures & { unexpected?: boolean };
     invalid.unexpected = true;
     expect(validate(invalid)).toBe(false);
+  });
+
+  it('preserves the v1 contract artifacts for historical compatibility', () => {
+    const validate = new Ajv2020({ allErrors: true, strict: true }).compile(legacySchema);
+    expect(validate(legacyFixtures), JSON.stringify(validate.errors)).toBe(true);
   });
 
   it('keeps wire enum values synchronized with the canonical schema', () => {
@@ -117,13 +124,13 @@ describe('Agent target and provider capability contracts', () => {
     });
   });
 
-  it('defaults the disabled experiment and unsupported providers to paste-only generation', () => {
+  it('defaults the disabled experiment and unsupported providers to read-only Ask', () => {
     expect(resolveAgentContractStatus(false, 'openAi')).toMatchObject({
       featureEnabled: false,
       agentAvailable: false,
       defaultPermissionMode: 'requestApproval',
       fallback: {
-        task: 'generateCommand',
+        task: 'ask',
         automaticExecution: false,
         assistantTextExecution: 'forbidden',
         reason: 'featureDisabled',

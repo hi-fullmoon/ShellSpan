@@ -437,7 +437,7 @@ describe('AgentUiController M4 integration', () => {
       type: 'safeFallback',
       requestId: 'request-1',
       fallback: {
-        task: 'generateCommand',
+        task: 'ask',
         automaticExecution: false,
         assistantTextExecution: 'forbidden',
         reason: 'toolCallingUnsupported',

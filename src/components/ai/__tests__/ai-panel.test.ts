@@ -13,21 +13,17 @@ import {
   appendTerminalOutput,
   clearTerminalOutput,
 } from '@/lib/terminal-output-buffer';
-import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import {
   AiPanel,
   LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS,
   canStartAiRequest,
   cancelActiveAiRequests,
   clampAiPanelWidth,
-  extractSingleLineCommand,
   getAiPanelWidthBounds,
-  isMessageBoundToTerminal,
   retrySnapshotForMessage,
   sanitizeTerminalSelection,
   selectAgentConversationHistory,
   selectConversationHistory,
-  shouldCompactAiModeControls,
   shouldSubmitAiDraft,
   summarizeAiError,
 } from '../ai-panel';
@@ -91,16 +87,6 @@ beforeEach(() => {
   Object.values(agentUiMock).forEach((mock) => mock.mockClear());
 });
 
-describe('extractSingleLineCommand', () => {
-  it('extracts a single-line fenced shell command', () => {
-    expect(extractSingleLineCommand('Use this:\n```bash\ndf -h\n```')).toBe('df -h');
-  });
-
-  it('rejects multi-line command blocks so insertion cannot execute earlier lines', () => {
-    expect(extractSingleLineCommand('```bash\ncd /tmp\nrm file\n```')).toBeUndefined();
-  });
-});
-
 describe('explicit AI modes', () => {
   it('keeps the Agent entry visible when the runtime rollout is unavailable', async () => {
     const previousApp = useAppStore.getState();
@@ -110,10 +96,20 @@ describe('explicit AI modes', () => {
     useAiStore.getState().setOpen(true);
     const { unmount } = render(createElement(AiPanel));
     try {
-      const agentMode = await screen.findByRole('button', { name: 'Agent' });
-      expect(agentMode).toBeDisabled();
-      expect(agentMode).toHaveAttribute('aria-describedby', 'agent-mode-availability');
-      expect(screen.getByText(/disabled by the current rollout policy/i)).toHaveClass('sr-only');
+      const modeSelector = await screen.findByRole('button', { name: 'AI mode' });
+      expect(modeSelector).toBeEnabled();
+      expect(modeSelector).toHaveTextContent('Ask');
+      expect(screen.queryByRole('button', { name: 'Terminal permissions' })).not.toBeInTheDocument();
+
+      fireEvent.click(modeSelector);
+      const askOption = await screen.findByRole('menuitemradio', { name: /^Ask/ });
+      expect(screen.getByRole('menu')).toHaveClass('w-64');
+      expect(askOption).toHaveClass('py-1.5');
+      expect(askOption).toHaveAttribute('aria-checked', 'true');
+      const agentOption = screen.getByRole('menuitemradio', { name: /^Agent/ });
+      expect(agentOption).toHaveClass('py-1.5');
+      expect(agentOption).toHaveAttribute('aria-disabled', 'true');
+      expect(agentOption).toHaveTextContent(/disabled by the current rollout policy/i);
     } finally {
       unmount();
       useAiStore.getState().clear();
@@ -123,7 +119,7 @@ describe('explicit AI modes', () => {
     }
   });
 
-  it('routes Chat and Generate command only to AI, and Agent only to the Agent coordinator', async () => {
+  it('routes Ask only to AI and Agent only to the Agent coordinator while preserving the draft', async () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
@@ -143,7 +139,7 @@ describe('explicit AI modes', () => {
       }
       if (command === 'agent_contract_status') {
         return {
-          contractVersion: 1,
+          contractVersion: 2,
           featureEnabled: true,
           agentAvailable: true,
           defaultPermissionMode: 'requestApproval',
@@ -176,45 +172,63 @@ describe('explicit AI modes', () => {
     const { unmount } = render(createElement(AiPanel));
     try {
       const textbox = screen.getByRole('textbox');
+      const inputGroup = textbox.closest('[data-slot="input-group"]');
+      expect(inputGroup).toHaveAttribute('data-mode', 'ask');
+      expect(inputGroup).toHaveClass('bg-card');
       fireEvent.change(textbox, { target: { value: 'Explain nginx' } });
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
         'ai_start_request',
         expect.anything(),
       ));
+      expect(tauriCoreMock.invoke.mock.calls.find(([command]) => (
+        command === 'ai_start_request'
+      ))?.[1]).toMatchObject({ request: { task: 'ask' } });
       expect(agentUiMock.start).not.toHaveBeenCalled();
       act(() => {
         const requestId = useAiStore.getState().activeRequestId;
         if (requestId) useAiStore.getState().cancelRequest(requestId);
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'Generate command' }));
-      fireEvent.change(textbox, { target: { value: 'Show disk usage' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-      await waitFor(() => {
-        const starts = tauriCoreMock.invoke.mock.calls.filter(([command]) => (
-          command === 'ai_start_request'
-        ));
-        expect(starts).toHaveLength(2);
-        expect(starts[1]?.[1]).toMatchObject({ request: { task: 'generateCommand' } });
-      });
-      expect(agentUiMock.start).not.toHaveBeenCalled();
-      act(() => {
-        const requestId = useAiStore.getState().activeRequestId;
-        if (requestId) useAiStore.getState().cancelRequest(requestId);
-      });
-
-      const agentMode = await screen.findByRole('button', { name: 'Agent' });
-      await waitFor(() => expect(agentMode).toBeEnabled());
-      fireEvent.click(agentMode);
       fireEvent.change(textbox, { target: { value: 'Verify nginx' } });
+      const modeSelector = await screen.findByRole('button', { name: 'AI mode' });
+      expect(modeSelector).toHaveTextContent('Ask');
+      expect(modeSelector).toHaveClass('hover:bg-accent');
+      expect(modeSelector).not.toHaveClass('bg-secondary');
+      expect(modeSelector.querySelector('[data-slot="ai-mode-trigger-content"]')).toHaveClass(
+        'items-center',
+        'leading-none',
+      );
+      expect(screen.queryByRole('button', { name: 'Terminal permissions' })).not.toBeInTheDocument();
+      fireEvent.click(modeSelector);
+      const agentOption = await screen.findByRole('menuitemradio', { name: /^Agent/ });
+      await waitFor(() => expect(agentOption).not.toHaveAttribute('aria-disabled', 'true'));
+      fireEvent.click(agentOption);
+      await waitFor(() => expect(modeSelector).toHaveTextContent('Agent'));
+      expect(textbox).toHaveValue('Verify nginx');
+      expect(inputGroup).toHaveAttribute('data-mode', 'agent');
+      expect(inputGroup).toHaveClass(
+        'border-app-warning/60',
+        'has-[[data-slot=input-group-control]:focus-visible]:border-app-warning/80',
+        'has-[[data-slot=input-group-control]:focus-visible]:ring-app-warning/30',
+      );
+      expect(inputGroup).toHaveClass('bg-card');
+      expect(screen.getByRole('button', { name: 'Terminal permissions' })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       await waitFor(() => expect(agentUiMock.start).toHaveBeenCalledWith(expect.objectContaining({
         goal: 'Verify nginx',
         target: expect.objectContaining({ sessionId: 'mode-session' }),
       })));
       expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => command === 'ai_start_request'))
-        .toHaveLength(2);
+        .toHaveLength(1);
+      fireEvent.change(textbox, { target: { value: 'Draft the next question' } });
+      fireEvent.click(modeSelector);
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Ask/ }));
+      expect(textbox).toHaveValue('Draft the next question');
+      expect(modeSelector).toHaveTextContent('Ask');
+      expect(inputGroup).toHaveAttribute('data-mode', 'ask');
+      expect(inputGroup).not.toHaveClass('border-app-warning/60');
+      expect(screen.queryByRole('button', { name: 'Terminal permissions' })).not.toBeInTheDocument();
     } finally {
       unmount();
       delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
@@ -248,7 +262,7 @@ describe('explicit AI modes', () => {
       if (command === 'agent_contract_status') {
         const evidence = args?.evidence as { support?: string; source?: string } | undefined;
         return {
-          contractVersion: 1,
+          contractVersion: 2,
           featureEnabled: true,
           agentAvailable: evidence?.support === 'supported',
           defaultPermissionMode: 'requestApproval',
@@ -284,18 +298,24 @@ describe('explicit AI modes', () => {
 
     const { unmount } = render(createElement(AiPanel));
     try {
-      const agentMode = await screen.findByRole('button', { name: 'Agent' });
-      await waitFor(() => expect(agentMode).toBeEnabled());
+      const providerSelector = screen.getByRole('button', { name: 'Switch AI provider' });
+      expect(providerSelector.closest('header')).not.toBeNull();
+      expect(providerSelector.closest('[data-slot="input-group"]')).toBeNull();
+
+      const modeSelector = await screen.findByRole('button', { name: 'AI mode' });
       expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => (
         command === 'agent_detect_provider_capability'
       ))).toHaveLength(0);
 
-      fireEvent.click(agentMode);
+      fireEvent.click(modeSelector);
+      const agentOption = await screen.findByRole('menuitemradio', { name: /^Agent/ });
+      await waitFor(() => expect(agentOption).not.toHaveAttribute('aria-disabled', 'true'));
+      fireEvent.click(agentOption);
 
       await waitFor(() => expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => (
         command === 'agent_detect_provider_capability'
       ))).toHaveLength(1));
-      await waitFor(() => expect(agentMode).toBeEnabled());
+      await waitFor(() => expect(modeSelector).toHaveTextContent('Agent'));
 
       useAiSettingsStore.getState().updateProvider(
         useAiSettingsStore.getState().defaultProviderId,
@@ -405,25 +425,6 @@ describe('terminal conversation binding', () => {
     await initI18n(previousApp.locale);
   });
 
-  it('keeps commands bound after a terminal reconnect changes sessionId', () => {
-    expect(isMessageBoundToTerminal(
-      { conversationId: 'conversation-1', sessionId: 'old-session' },
-      'conversation-1',
-      'new-session',
-    )).toBe(true);
-    expect(isMessageBoundToTerminal(
-      { conversationId: 'conversation-2', sessionId: 'old-session' },
-      'conversation-1',
-      'new-session',
-    )).toBe(false);
-    expect(isMessageBoundToTerminal({}, 'conversation-1', 'new-session')).toBe(false);
-    expect(isMessageBoundToTerminal(
-      { sessionId: 'new-session' },
-      undefined,
-      'new-session',
-    )).toBe(true);
-  });
-
   it('retries with the original context and the reconnected terminal identity', () => {
     const context = { label: 'root@example.com', content: 'original evidence' };
     expect(retrySnapshotForMessage(
@@ -485,7 +486,7 @@ describe('terminal conversation binding', () => {
         ));
         expect(startCall?.[1]).toMatchObject({
           request: {
-            task: 'explainTerminal',
+            task: 'ask',
             context: originalContext,
           },
         });
@@ -508,17 +509,9 @@ describe('terminal conversation binding', () => {
     }
   });
 
-  it('allows commands outside the read-only allowlist to be inserted into the bound terminal', async () => {
+  it('keeps legacy generated-command records hidden from the Ask conversation', async () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
-    const paste = vi.fn();
-    const getTerminal = vi.spyOn(terminalRegistry, 'get').mockReturnValue({
-      terminal: {
-        getSelection: () => '',
-        onSelectionChange: () => ({ dispose: vi.fn() }),
-        paste,
-      },
-    } as never);
     await initI18n('en-US');
     useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
     useTerminalStore.setState({
@@ -552,27 +545,19 @@ describe('terminal conversation binding', () => {
 
     const { unmount } = render(createElement(AiPanel));
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Generate command' }));
-
-      const insert = await screen.findByRole('button', { name: 'Insert into terminal' });
-      expect(insert).toBeEnabled();
-      fireEvent.click(insert);
-
-      expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(1);
-      expect(screen.queryByText('Manual command review required')).toBeNull();
-      expect(paste).toHaveBeenCalledWith('systemctl restart nginx');
+      expect(screen.queryByText('systemctl restart nginx')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Insert into terminal' })).not.toBeInTheDocument();
     } finally {
       unmount();
       useAiStore.getState().clear();
       useAiStore.getState().setOpen(false);
       useAppStore.setState(previousApp, true);
       useTerminalStore.setState(previousTerminal, true);
-      getTerminal.mockRestore();
       await initI18n(previousApp.locale);
     }
   });
 
-  it('does not offer to insert an unbound command from a non-terminal section', async () => {
+  it('renders Ask code blocks without any terminal insertion action', async () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
     await initI18n('en-US');
@@ -592,19 +577,19 @@ describe('terminal conversation binding', () => {
     });
     useAiStore.getState().clear();
     useAiStore.getState().beginRequest({
-      requestId: 'unbound-command',
-      task: 'generateCommand',
-      userContent: 'Show disk usage',
+      requestId: 'ask-code-block',
+      task: 'ask',
+      userContent: 'How can I check disk usage?',
       providerId: 'provider-1',
     });
-    useAiStore.getState().appendDelta('unbound-command', '```bash\ndf -h\n```');
-    useAiStore.getState().completeRequest('unbound-command');
+    useAiStore.getState().appendDelta('ask-code-block', 'This command reports disk usage:\n```bash\ndf -h\n```');
+    useAiStore.getState().completeRequest('ask-code-block');
     useAiStore.getState().setOpen(true);
 
     const { unmount } = render(createElement(AiPanel));
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Generate command' }));
-      expect(await screen.findByRole('button', { name: 'Insert into terminal' })).toBeDisabled();
+      expect(await screen.findByText('df -h')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Insert into terminal' })).not.toBeInTheDocument();
     } finally {
       unmount();
       useAiStore.getState().clear();
@@ -647,16 +632,18 @@ describe('terminal conversation binding', () => {
 });
 
 describe('selectConversationHistory', () => {
-  it('keeps command generation separate from the conversational lane', () => {
+  it('shares Ask and legacy chat history while keeping generated commands separate', () => {
     const messages = [
       message('chat-1', 'user', 'Explain this'),
       message('chat-1', 'assistant', 'Explanation'),
+      message('ask-1', 'user', 'Explain this', { task: 'ask' }),
+      message('ask-1', 'assistant', 'Read-only answer', { task: 'ask' }),
       message('command-1', 'user', 'Show disk usage', { task: 'generateCommand' }),
       message('command-1', 'assistant', '```bash\ndf -h\n```', { task: 'generateCommand' }),
     ];
 
-    expect(selectConversationHistory(messages, 'chat').map((item) => item.content))
-      .toEqual(['Explain this', 'Explanation']);
+    expect(selectConversationHistory(messages, 'ask').map((item) => item.content))
+      .toEqual(['Explain this', 'Explanation', 'Explain this', 'Read-only answer']);
     expect(selectConversationHistory(messages, 'generateCommand').map((item) => item.content))
       .toEqual(['Show disk usage', '```bash\ndf -h\n```']);
   });
@@ -809,9 +796,6 @@ describe('AI panel width', () => {
     expect(clampAiPanelWidth(200, 1480)).toBe(320);
     expect(clampAiPanelWidth(800, 1480)).toBe(720);
     expect(clampAiPanelWidth(461.6, 1480)).toBe(462);
-    expect(shouldCompactAiModeControls(400, 'en-US')).toBe(true);
-    expect(shouldCompactAiModeControls(440, 'en-US')).toBe(false);
-    expect(shouldCompactAiModeControls(400, 'zh-CN')).toBe(false);
   });
 
   it('preserves the minimum main-content width in a smaller container', () => {
@@ -824,32 +808,22 @@ describe('AI panel width', () => {
     expect(clampAiPanelWidth(0, 375)).toBe(320);
   });
 
-  it('keeps compact mode controls accessible when the panel narrows', async () => {
+  it('keeps the Ask composer controls accessible when the panel narrows', async () => {
     await initI18n('zh-CN');
     useAiStore.getState().setOpen(true);
 
     try {
       const { unmount } = render(createElement(AiPanel));
       const handle = screen.getByRole('separator', { name: '调整 AI 助手宽度' });
-      const chatMode = screen.getByRole('button', { name: '问答' });
-      const commandMode = screen.getByRole('button', { name: '生成命令' });
+      const modeSelector = screen.getByRole('button', { name: 'AI 模式' });
 
-      expect(chatMode).toHaveTextContent('问答');
-      expect(commandMode).toHaveTextContent('生成命令');
-      expect(chatMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
-      expect(commandMode.querySelector('svg')).toHaveAttribute('data-icon', 'inline-start');
-      expect(chatMode.querySelector('svg')).toHaveClass('-translate-y-px');
-      expect(commandMode.querySelector('svg')).toHaveClass('-translate-y-px');
+      expect(modeSelector).toHaveTextContent('Ask');
+      expect(screen.queryByRole('button', { name: '终端权限' })).not.toBeInTheDocument();
 
       fireEvent.keyDown(handle, { key: 'ArrowRight' });
 
-      expect(chatMode).not.toHaveTextContent('问答');
-      expect(commandMode).not.toHaveTextContent('生成命令');
-      expect(chatMode.querySelector('svg')).not.toHaveAttribute('data-icon');
-      expect(commandMode.querySelector('svg')).not.toHaveAttribute('data-icon');
-      expect(chatMode.querySelector('svg')).not.toHaveClass('-translate-y-px');
-      expect(commandMode.querySelector('svg')).not.toHaveClass('-translate-y-px');
-      expect(screen.getByText('我能帮你处理什么？')).toBeInTheDocument();
+      expect(modeSelector).toHaveTextContent('Ask');
+      expect(screen.getByText('想问些什么？')).toBeInTheDocument();
       unmount();
     } finally {
       useAiStore.getState().setOpen(false);
@@ -983,7 +957,7 @@ describe('AI panel compact and context behavior', () => {
           'password=manual-send-secret\nlatest-before-send\n',
         );
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Analyze terminal' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Ask about terminal output' }));
 
       await waitFor(() => {
         const startCall = tauriCoreMock.invoke.mock.calls.find(([command]) => (
@@ -991,6 +965,7 @@ describe('AI panel compact and context behavior', () => {
         ));
         expect(startCall?.[1]).toMatchObject({
           request: {
+            task: 'ask',
             context: {
               content: expect.stringContaining('latest-before-send'),
             },
@@ -1213,7 +1188,7 @@ describe('conversation history', () => {
       fireEvent.click(await screen.findByText('root@archived.example.com'));
 
       expect(await screen.findByText('Preserved question')).toBeInTheDocument();
-      expect(screen.getByText('df -h')).toBeInTheDocument();
+      expect(screen.queryByText('df -h')).not.toBeInTheDocument();
       expect(screen.getByText(/只读方式保留|preserved as read-only/i)).toBeInTheDocument();
       expect(screen.getByRole('textbox')).toBeDisabled();
     } finally {

@@ -86,6 +86,36 @@ describe('M3 permission and approval components', () => {
     expect(await screen.findByText('agent.permission.fullAccessActive')).toBeVisible();
   });
 
+  it('keeps full descriptions and confirmation in the compact composer variant', async () => {
+    const { container } = render(
+      <AgentPermissionSelector sessionId="session-1" variant="composer" />,
+    );
+
+    expect(container.querySelector('[data-slot="agent-permission-selector"]')).toHaveAttribute(
+      'data-variant',
+      'composer',
+    );
+    const trigger = screen.getByRole('button', { name: 'agent.permission' });
+    expect(trigger).toHaveClass('hover:bg-accent');
+    expect(trigger).not.toHaveClass('bg-secondary');
+    expect(container.querySelector('[data-slot="agent-permission-trigger-content"]')).toHaveClass(
+      'items-center',
+      'leading-none',
+    );
+    fireEvent.click(trigger);
+    expect(await screen.findByText('agent.permission.requestApprovalDescription')).toBeVisible();
+    fireEvent.click(screen.getByRole('menuitemradio', {
+      name: /agent\.permission\.fullAccess/,
+    }));
+    expect(await screen.findByText('agent.permission.fullAccessWarning')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'agent.permission.fullAccessConfirm',
+    }));
+    expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('fullAccess');
+    expect(screen.queryByText('agent.permission.fullAccessActive')).not.toBeInTheDocument();
+  });
+
   it('returns to the default and disables elevation after disconnect', async () => {
     useAgentPermissionStore.getState().setMode('session-1', 'fullAccess');
     render(<AgentPermissionSelector sessionId="session-1" />);
