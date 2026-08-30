@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { Event as TauriEvent, EventCallback } from '@tauri-apps/api/event';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { getRecentTerminalOutput } from '@/lib/terminal-output-buffer';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { AgentTargetSnapshot, AgentToolCall } from '@/types/agent';
 import {
@@ -8,6 +9,7 @@ import {
   AGENT_TERMINAL_COMMAND_LIMIT_CHARS,
   AGENT_TERMINAL_MODEL_OUTPUT_LIMIT_BYTES,
   AgentTerminalBoundaryParser,
+  AgentTerminalDisplayFilter,
   AgentTerminalExecutor,
   buildAgentTerminalWrapper,
   createAgentTerminalBoundary,
@@ -207,6 +209,67 @@ describe('Agent M2 terminal boundary parser', () => {
   });
 });
 
+describe('Agent M2 terminal display filter', () => {
+  it.each(['posix', 'powershell'] as const)(
+    'replaces a split %s wrapper echo with the original command and hides boundary records',
+    (shell) => {
+      const boundary = createAgentTerminalBoundary(NONCE);
+      const command = 'kimi --version';
+      const wrapper = buildAgentTerminalWrapper(command, boundary, shell);
+      const filter = new AgentTerminalDisplayFilter(boundary, command, shell);
+      const stream = `${wrapper}\r\n${boundary.beginToken}\r\n0.38.0\r\n${boundary.endPrefix}0\u001f[root@host ~]# `;
+      const cuts = [9, wrapper.length - 3, wrapper.length + 11, stream.length - 17];
+      const pieces = cuts.map((end, index) => stream.slice(index === 0 ? 0 : cuts[index - 1], end));
+      pieces.push(stream.slice(cuts[cuts.length - 1]));
+
+      const visible = `${pieces.map((piece) => filter.push(piece)).join('')}${filter.finish()}`;
+
+      expect(visible).toBe('kimi --version\r\n0.38.0\r\n[root@host ~]# ');
+      expect(visible).not.toContain('__tb_');
+      expect(visible).not.toContain('TERMBRIDGE_M2_');
+      expect(visible).not.toContain('\u001e');
+      expect(visible).not.toContain('\u001f');
+    },
+  );
+
+  it('removes boundary records when shell echo is disabled without hiding command output', () => {
+    const boundary = createAgentTerminalBoundary(NONCE);
+    const filter = new AgentTerminalDisplayFilter(boundary, 'printf ready', 'posix');
+
+    const visible = [
+      filter.push(boundary.beginToken.slice(0, 13)),
+      filter.push(`${boundary.beginToken.slice(13)}\r`),
+      filter.push(`\nready\r\n${boundary.endPrefix}0\u001f$ `),
+      filter.finish(),
+    ].join('');
+
+    expect(visible).toBe('ready\r\n$ ');
+  });
+
+  it('keeps a forged end record visible and removes the later valid record', () => {
+    const boundary = createAgentTerminalBoundary(NONCE);
+    const filter = new AgentTerminalDisplayFilter(boundary, 'printf ready', 'posix');
+    const forged = `${boundary.endPrefix}not-an-exit\u001f`;
+
+    const visible = filter.push(
+      `${boundary.beginToken}\nstart${forged}finish${boundary.endPrefix}7\u001fprompt`,
+    );
+
+    expect(visible).toBe(`start${forged}finishprompt`);
+  });
+
+  it('fails open when a wrapper echo never reaches its begin record', () => {
+    const boundary = createAgentTerminalBoundary(NONCE);
+    const command = 'printf ready';
+    const wrapper = buildAgentTerminalWrapper(command, boundary, 'posix');
+    const filter = new AgentTerminalDisplayFilter(boundary, command, 'posix');
+    const incomplete = wrapper.slice(0, 300);
+
+    expect(filter.push(incomplete)).toBe('');
+    expect(filter.finish()).toBe(incomplete);
+  });
+});
+
 describe('Agent M2 command wrapper and local blocking', () => {
   it.each(['posix', 'powershell'] as const)(
     'builds a one-line %s wrapper without echoing the actual framed marker',
@@ -302,6 +365,43 @@ describe('Agent M2 PTY executor', () => {
     });
     expect(invokeWriteSession).toHaveBeenCalledTimes(1);
     expect(invokeWriteSession).toHaveBeenCalledWith('session-1', expect.stringMatching(/\r$/));
+  });
+
+  it('shows only the command, command output, and prompt in the terminal and context cache', async () => {
+    const { invokeWriteSession } = await import('@/lib/tauri');
+    const call = toolCall('kimi --version');
+    const boundary = createAgentTerminalBoundary(NONCE);
+    vi.mocked(invokeWriteSession).mockImplementationOnce(async (sessionId, data) => {
+      const wrapper = data.replace(/\r$/, '');
+      const stream = `${wrapper}\r\n${boundary.beginToken}\r\n0.38.0\r\n${boundary.endPrefix}0\u001f[root@host ~]# `;
+      const split = wrapper.length + Math.floor(boundary.beginToken.length / 2);
+      terminalEvents.emitData(sessionId, stream.slice(0, split));
+      terminalEvents.emitData(sessionId, stream.slice(split));
+    });
+    const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
+
+    const result = await executor.execute({ toolCall: call, authorization: authorization(call) });
+    const controller = terminalRegistry.get('session-1')!;
+    await vi.waitFor(() => {
+      const terminalText = Array.from(
+        { length: controller.terminal.buffer.active.length },
+        (_, index) => controller.terminal.buffer.active.getLine(index)?.translateToString(true) ?? '',
+      ).join('\n');
+      expect(terminalText).toContain('kimi --version');
+      expect(terminalText).toContain('0.38.0');
+      expect(terminalText).toContain('[root@host ~]#');
+      expect(terminalText).not.toContain('__tb_');
+      expect(terminalText).not.toContain('TERMBRIDGE_M2_');
+    });
+    const cached = getRecentTerminalOutput('session-1', 20);
+
+    expect(result.status).toBe('completed');
+    expect(result.output).toBe('0.38.0');
+    expect(cached).toContain('kimi --version');
+    expect(cached).toContain('0.38.0');
+    expect(cached).toContain('[root@host ~]#');
+    expect(cached).not.toContain('__tb_');
+    expect(cached).not.toContain('TERMBRIDGE_M2_');
   });
 
   it('does not write until the underlying PTY output listener is ready', async () => {

@@ -1,4 +1,8 @@
-import { terminalRegistry, type TerminalController } from '@/components/terminal/registry/terminal-registry';
+import {
+  terminalRegistry,
+  type TerminalController,
+  type TerminalOutputFilter,
+} from '@/components/terminal/registry/terminal-registry';
 import { getPlatform, type Platform } from '@/lib/platform';
 import {
   redactTerminalSecrets,
@@ -19,6 +23,7 @@ const BOUNDARY_ENTROPY_BYTES = 24;
 const RECORD_SEPARATOR = '\u001e';
 const UNIT_SEPARATOR = '\u001f';
 const MAX_EXIT_CODE_TOKEN_CHARS = 20;
+const DISPLAY_FILTER_FAIL_OPEN_LIMIT_CHARS = 64 * 1024;
 const CAPTURE_OMISSION_MARKER = '\n[... terminal output beyond the 2 MiB capture boundary omitted ...]\n';
 
 type AgentTerminalShell = 'posix' | 'powershell';
@@ -257,6 +262,155 @@ export class AgentTerminalBoundaryParser {
   }
 }
 
+type AgentTerminalDisplayFilterState =
+  | 'seekingStart'
+  | 'suppressingWrapper'
+  | 'suppressingBeginNewline'
+  | 'capturing'
+  | 'completed';
+
+function longestSuffixMatchingTokenPrefix(value: string, tokens: readonly string[]): number {
+  const maxLength = Math.min(
+    value.length,
+    Math.max(0, ...tokens.map((token) => token.length - 1)),
+  );
+  for (let length = maxLength; length > 0; length -= 1) {
+    const suffix = value.slice(-length);
+    if (tokens.some((token) => token.startsWith(suffix))) return length;
+  }
+  return 0;
+}
+
+/**
+ * Removes the private M2 wrapper echo and framed boundary records from the
+ * visible terminal stream while leaving the raw PTY stream untouched for the
+ * authoritative boundary parser. Incomplete protocol input fails open from
+ * finish(), so a shell syntax or transport failure cannot hide diagnostics.
+ */
+export class AgentTerminalDisplayFilter implements TerminalOutputFilter {
+  private state: AgentTerminalDisplayFilterState = 'seekingStart';
+  private pending = '';
+  private wrapperSuppressionAvailable = true;
+  private readonly wrapperEchoPrefix: string;
+
+  constructor(
+    private readonly boundary: AgentTerminalBoundary,
+    private readonly command: string,
+    shell: AgentTerminalShell,
+  ) {
+    const nonce = boundary.marker.slice(BOUNDARY_PREFIX.length);
+    this.wrapperEchoPrefix = `${shell === 'powershell' ? '$' : ''}__tb_marker_${nonce}=`;
+  }
+
+  push(chunk: string): string {
+    if (!chunk) return '';
+    if (this.state === 'completed') return chunk;
+    this.pending += chunk;
+    let visible = '';
+
+    while (this.pending) {
+      if (this.state === 'seekingStart') {
+        const wrapperStart = this.wrapperSuppressionAvailable
+          ? this.pending.indexOf(this.wrapperEchoPrefix)
+          : -1;
+        const beginStart = this.pending.indexOf(this.boundary.beginToken);
+        if (wrapperStart >= 0 && (beginStart < 0 || wrapperStart <= beginStart)) {
+          visible += this.pending.slice(0, wrapperStart);
+          this.pending = this.pending.slice(wrapperStart);
+          this.wrapperSuppressionAvailable = false;
+          this.state = 'suppressingWrapper';
+          continue;
+        }
+        if (beginStart >= 0) {
+          visible += this.pending.slice(0, beginStart);
+          this.pending = this.pending.slice(beginStart + this.boundary.beginToken.length);
+          this.state = 'suppressingBeginNewline';
+          continue;
+        }
+
+        const activeTokens = this.wrapperSuppressionAvailable
+          ? [this.wrapperEchoPrefix, this.boundary.beginToken]
+          : [this.boundary.beginToken];
+        const retained = longestSuffixMatchingTokenPrefix(this.pending, activeTokens);
+        visible += this.pending.slice(0, this.pending.length - retained);
+        this.pending = this.pending.slice(this.pending.length - retained);
+        break;
+      }
+
+      if (this.state === 'suppressingWrapper') {
+        const beginStart = this.pending.indexOf(this.boundary.beginToken);
+        if (beginStart < 0) {
+          if (this.pending.length > DISPLAY_FILTER_FAIL_OPEN_LIMIT_CHARS) {
+            visible += this.pending;
+            this.pending = '';
+            this.state = 'seekingStart';
+          }
+          break;
+        }
+        this.pending = this.pending.slice(beginStart + this.boundary.beginToken.length);
+        visible += `${this.command}\r\n`;
+        this.state = 'suppressingBeginNewline';
+        continue;
+      }
+
+      if (this.state === 'suppressingBeginNewline') {
+        if (this.pending.startsWith('\r') && this.pending.length === 1) break;
+        if (this.pending.startsWith('\r\n')) {
+          this.pending = this.pending.slice(2);
+        } else if (this.pending.startsWith('\n') || this.pending.startsWith('\r')) {
+          this.pending = this.pending.slice(1);
+        }
+        this.state = 'capturing';
+        continue;
+      }
+
+      if (this.state === 'capturing') {
+        const endStart = this.pending.indexOf(this.boundary.endPrefix);
+        if (endStart < 0) {
+          const retained = longestSuffixMatchingTokenPrefix(this.pending, [this.boundary.endPrefix]);
+          visible += this.pending.slice(0, this.pending.length - retained);
+          this.pending = this.pending.slice(this.pending.length - retained);
+          break;
+        }
+
+        visible += this.pending.slice(0, endStart);
+        this.pending = this.pending.slice(endStart);
+        const codeStart = this.boundary.endPrefix.length;
+        const terminator = this.pending.indexOf(UNIT_SEPARATOR, codeStart);
+        if (terminator < 0) {
+          if (this.pending.length - codeStart <= MAX_EXIT_CODE_TOKEN_CHARS) break;
+          visible += this.pending.slice(0, 1);
+          this.pending = this.pending.slice(1);
+          continue;
+        }
+        const code = this.pending.slice(codeStart, terminator);
+        const exitCode = Number(code);
+        if (!/^-?\d+$/.test(code) || !Number.isSafeInteger(exitCode)) {
+          visible += this.pending.slice(0, 1);
+          this.pending = this.pending.slice(1);
+          continue;
+        }
+
+        this.pending = this.pending.slice(terminator + UNIT_SEPARATOR.length);
+        this.state = 'completed';
+        continue;
+      }
+
+      visible += this.pending;
+      this.pending = '';
+    }
+
+    return visible;
+  }
+
+  finish(): string {
+    const remainder = this.pending;
+    this.pending = '';
+    this.state = 'completed';
+    return remainder;
+  }
+}
+
 function createSecureNonce(): string {
   const cryptoApi = globalThis.crypto;
   if (!cryptoApi?.getRandomValues) {
@@ -320,7 +474,7 @@ function buildPosixWrapper(command: string, boundary: AgentTerminalBoundary): st
     restore('PAGER', pagerSetVar, pagerValueVar),
     restore('GIT_PAGER', gitPagerSetVar, gitPagerValueVar),
     restore('SYSTEMD_PAGER', systemdPagerSetVar, systemdPagerValueVar),
-    `printf '\\036%s:END:%d\\037\\n' "$${markerVar}" "$${exitVar}"`,
+    `printf '\\036%s:END:%d\\037' "$${markerVar}" "$${exitVar}"`,
     `unset ${markerVar} ${commandVar} ${exitVar} ${pagerSetVar} ${pagerValueVar} ${gitPagerSetVar} ${gitPagerValueVar} ${systemdPagerSetVar} ${systemdPagerValueVar}`,
   ].join('; ');
 }
@@ -366,7 +520,7 @@ function buildPowerShellWrapper(command: string, boundary: AgentTerminalBoundary
     restore('PAGER', pagerHadVar, pagerValueVar),
     restore('GIT_PAGER', gitPagerHadVar, gitPagerValueVar),
     restore('SYSTEMD_PAGER', systemdPagerHadVar, systemdPagerValueVar),
-    `Write-Host (-join ([char]30,${markerVar},':END:',${exitVar},[char]31))`,
+    `Write-Host (-join ([char]30,${markerVar},':END:',${exitVar},[char]31)) -NoNewline`,
     `$global:LASTEXITCODE=${exitVar}`,
     `Remove-Variable ${[
       markerVar,
@@ -937,12 +1091,14 @@ export class AgentTerminalExecutor {
         let writeDispatched = false;
         let timeout: number | undefined;
         let unsubscribeOutput = (): void => {};
+        let unsubscribeOutputFilter = (): void => {};
         let unsubscribeLifecycle = (): void => {};
         const onExternalAbort = (): void => cancellation.abort();
 
         const cleanup = (): void => {
           if (timeout !== undefined) window.clearTimeout(timeout);
           unsubscribeOutput();
+          unsubscribeOutputFilter();
           unsubscribeLifecycle();
           input.signal?.removeEventListener('abort', onExternalAbort);
           cancellation.signal.removeEventListener('abort', onCancelled);
@@ -983,6 +1139,9 @@ export class AgentTerminalExecutor {
         // These subscriptions are deliberately installed before the one PTY
         // write so even a command that returns in the same event turn cannot
         // outrun output capture.
+        unsubscribeOutputFilter = controller.subscribeOutputFilter(
+          new AgentTerminalDisplayFilter(boundary, call.command, shell),
+        );
         unsubscribeOutput = controller.subscribeOutput((chunk) => {
           const parsed = parser.push(chunk);
           if (!parsed) return;
