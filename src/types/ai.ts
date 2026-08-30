@@ -1,6 +1,6 @@
 export type AiProviderKind = 'ollama' | 'openAi' | 'openAiCompatible';
 export type AiProviderPreset = 'ollama' | 'openai' | 'deepseek' | 'minimax' | 'kimi' | 'custom';
-export type AiTaskKind = 'chat' | 'explainTerminal' | 'generateCommand';
+export type AiTaskKind = 'ask' | 'chat' | 'explainTerminal' | 'generateCommand';
 
 export interface AiProviderConfig {
   id: string;
