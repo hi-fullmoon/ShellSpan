@@ -38,7 +38,6 @@ interface ConversationHistoryDialogProps {
 
 interface DeleteTarget {
   conversations: AiConversation[];
-  all: boolean;
 }
 
 function conversationSearchText(conversation: AiConversation): string {
@@ -196,7 +195,6 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
                             disabled={deleting}
                             onClick={() => setDeleteTarget({
                               conversations: [conversation],
-                              all: false,
                             })}
                             aria-label={t('ai.history.deleteLabel', {
                               title: conversation.title,
@@ -213,16 +211,7 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
               )}
             </section>
           </CompactDialogBody>
-          <CompactDialogFooter className="justify-between sm:justify-between">
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={conversations.length === 0 || deleting}
-              onClick={() => setDeleteTarget({ conversations, all: true })}
-            >
-              <Trash2Icon data-icon="inline-start" />
-              {t('ai.history.deleteAll')}
-            </Button>
+          <CompactDialogFooter>
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
               {t('common.close')}
             </Button>
@@ -234,16 +223,10 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setDeleteTarget(undefined);
         }}
-        title={deleteTarget?.all
-          ? t('ai.history.deleteAllConfirmTitle')
-          : t('ai.history.deleteConfirmTitle')}
-        description={deleteTarget?.all
-          ? t('ai.history.deleteAllConfirmDescription', {
-            count: deleteTarget.conversations.length,
-          })
-          : t('ai.history.deleteConfirmDescription', {
-            title: deleteTarget?.conversations[0]?.title ?? '',
-          })}
+        title={t('ai.history.deleteConfirmTitle')}
+        description={t('ai.history.deleteConfirmDescription', {
+          title: deleteTarget?.conversations[0]?.title ?? '',
+        })}
         onConfirm={confirmDelete}
       />
     </>
