@@ -55,8 +55,11 @@ describe('KnownHostsPanel', () => {
 
     const dialog = screen.getByRole('alertdialog');
     const deleteButton = screen.getByRole('button', { name: 'common.delete' });
+    const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
     expect(dialog).toHaveClass('gap-0', 'overflow-hidden', 'p-0');
     expect(deleteButton).toHaveClass('bg-destructive', 'h-8');
+    expect(deleteButton.querySelector('svg')).toBeNull();
+    expect(cancelButton.querySelector('svg')).toBeNull();
     expect(
       screen.getByText('workbench.knownHosts.removeTitle'),
     ).toBeInTheDocument();

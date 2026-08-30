@@ -6,6 +6,7 @@ import {
   MemoryStickIcon,
   ServerCogIcon,
   ShieldCheckIcon,
+  SquareIcon,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -220,7 +221,9 @@ export function RemoteHealthSection(): React.JSX.Element {
               onClick={() => setAuthorizationProfileId(selectedProfile.id)}
               disabled={busy}
             >
-              {busy && <Spinner data-icon="inline-start" />}
+              {busy
+                ? <Spinner data-icon="inline-start" />
+                : <ShieldCheckIcon data-icon="inline-start" />}
               {entry?.phase === 'preparing'
                 ? t('remoteHealth.preparing')
                 : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
@@ -236,6 +239,7 @@ export function RemoteHealthSection(): React.JSX.Element {
                 onClick={() => void cancel(selectedProfile.id)}
                 disabled={entry.phase === 'cancelling'}
               >
+                <SquareIcon data-icon="inline-start" />
                 {entry.phase === 'cancelling'
                   ? t('remoteHealth.cancelling')
                   : t('common.cancel')}

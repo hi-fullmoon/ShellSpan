@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useUpdateStore } from '@/stores/updateStore';
 import { isTauriRuntime } from '@/lib/tauri';
@@ -62,6 +63,7 @@ export const UpdateSection: React.FC = () => {
         {!downloading && !downloaded && (
           <div className="flex justify-end">
             <Button size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
+              <RefreshCwIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
               {checking ? t('settings.general.checkingUpdate') : t('settings.general.checkUpdate')}
             </Button>
           </div>
@@ -91,6 +93,7 @@ export const UpdateSection: React.FC = () => {
             {targetVersion ? t('update.restartDialog.description', { version: targetVersion }) : t('update.downloaded')}
           </p>
           <Button size="sm" onClick={() => void installNow()}>
+            <DownloadIcon data-icon="inline-start" />
             {t('update.restartDialog.installNow')}
           </Button>
         </div>
@@ -105,6 +108,7 @@ export const UpdateSection: React.FC = () => {
             <TooltipContent className="break-all">{error ?? t('update.failed', { error: '' })}</TooltipContent>
           </Tooltip>
           <Button variant="outline" size="sm" onClick={() => void runCheck('manual')}>
+            <RotateCcwIcon data-icon="inline-start" />
             {t('settings.general.retry')}
           </Button>
         </div>

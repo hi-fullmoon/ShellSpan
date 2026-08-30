@@ -4,6 +4,8 @@ import {
   CheckCircle2Icon,
   CircleDashedIcon,
   LoaderCircleIcon,
+  RotateCcwIcon,
+  ShieldAlertIcon,
   XCircleIcon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
@@ -96,8 +98,9 @@ function PreflightStepRow({
           size="sm"
           variant="outline"
           onClick={() => onTrust(step.host!, step.port!, step.fingerprint)}
-        >
-          {t('connection.preflight.trust')}
+      >
+        <ShieldAlertIcon data-icon="inline-start" />
+        {t('connection.preflight.trust')}
         </Button>
       )}
     </li>
@@ -168,9 +171,13 @@ export function ConnectionPreflightDialog({
           ) : (
             <>
               <Button variant="outline" size="sm" onClick={onClose}>
+                <XCircleIcon data-icon="inline-start" />
                 {t('common.close')}
               </Button>
-              <Button size="sm" onClick={onRetry}>{t('connection.preflight.retry')}</Button>
+              <Button size="sm" onClick={onRetry}>
+                <RotateCcwIcon data-icon="inline-start" />
+                {t('connection.preflight.retry')}
+              </Button>
             </>
           )}
         </CompactDialogFooter>

@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Clock3Icon,
+  EyeIcon,
+  FileJsonIcon,
+  FileTextIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
+  Trash2Icon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -247,12 +251,15 @@ export const OperationHistoryPanel: React.FC = () => {
               </SelectContent>
             </Select>
             <Button variant="outline" size="sm" disabled={exporting} onClick={() => void handleExport('markdown')}>
+              <FileTextIcon data-icon="inline-start" />
               Markdown
             </Button>
             <Button variant="outline" size="sm" disabled={exporting} onClick={() => void handleExport('json')}>
+              <FileJsonIcon data-icon="inline-start" />
               JSON
             </Button>
             <Button variant="outline" size="sm" onClick={() => setConfirmClear(true)}>
+              <Trash2Icon data-icon="inline-start" />
               {t('operationHistory.clear')}
             </Button>
           </>
@@ -346,7 +353,7 @@ export const OperationHistoryPanel: React.FC = () => {
               aria-label={t('operationHistory.refresh')}
               onClick={() => void refresh()}
             >
-              <RefreshCwIcon />
+              <RefreshCwIcon data-icon="inline-start" />
             </Button>
           </div>
 
@@ -365,7 +372,12 @@ export const OperationHistoryPanel: React.FC = () => {
                 icon={<RefreshCwIcon />}
                 title={t('operationHistory.loadFailed')}
                 description={t('operationHistory.loadFailedDescription')}
-                action={<Button variant="outline" size="sm" onClick={() => void refresh()}>{t('operationHistory.retry')}</Button>}
+                action={(
+                  <Button variant="outline" size="sm" onClick={() => void refresh()}>
+                    <RefreshCwIcon data-icon="inline-start" />
+                    {t('operationHistory.retry')}
+                  </Button>
+                )}
               />
             ) : tasks.length === 0 ? (
               <EmptyState
@@ -434,6 +446,7 @@ export const OperationHistoryPanel: React.FC = () => {
                           <TableCell className="text-center">{task.events.length}</TableCell>
                           <TableCell className="text-right">
                             <Button variant="ghost" size="sm" onClick={() => setSelected(task)}>
+                              <EyeIcon data-icon="inline-start" />
                               {t('operationHistory.viewDetails')}
                             </Button>
                           </TableCell>

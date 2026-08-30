@@ -230,12 +230,15 @@ describe('SettingsPanel', () => {
     await waitFor(() => {});
 
     const settingsPage = screen.getByText('workbench.settings.title').closest('[data-slot="workbench-page"]');
+    const settingsContent = settingsPage?.querySelector('[data-slot="workbench-page-content"]');
 
     expect(settingsPage).toHaveClass(
       '[&_[data-slot=input]]:h-8',
       '[&_[data-slot=input-group]]:h-8',
       '[&_[data-slot=select-trigger]]:h-8',
     );
+    expect(settingsContent).toHaveClass('mx-0', 'max-w-4xl', 'pl-0', 'sm:pl-0');
+    expect(settingsContent).not.toHaveClass('mx-auto');
   });
 
   it('sizes the AI provider layout from the settings pane instead of the window', async () => {

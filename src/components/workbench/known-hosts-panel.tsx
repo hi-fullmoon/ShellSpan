@@ -13,6 +13,7 @@ import {
   CircleAlertIcon,
   FingerprintIcon,
   PlusIcon,
+  RefreshCwIcon,
   SearchXIcon,
   ShieldCheckIcon,
   Trash2Icon,
@@ -88,9 +89,10 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.knownHosts.searchPlaceholder')}
                 aria-label={t('workbench.knownHosts.searchPlaceholder')}
-              />
-              <Button variant="outline" size="sm" onClick={loadHosts}>
-                {t('common.refresh')}
+            />
+            <Button variant="outline" size="sm" onClick={loadHosts}>
+              <RefreshCwIcon data-icon="inline-start" className={cn(loading && 'animate-spin')} />
+              {t('common.refresh')}
               </Button>
             </>
           )}
