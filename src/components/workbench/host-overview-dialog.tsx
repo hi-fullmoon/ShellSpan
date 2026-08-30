@@ -3,7 +3,6 @@ import {
   CableIcon,
   FolderIcon,
   TerminalIcon,
-  XIcon,
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -139,7 +138,6 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
 
         <CompactDialogFooter>
         <Button variant="outline" size="sm" onClick={onClose}>
-          <XIcon data-icon="inline-start" />
           {t('common.close')}
         </Button>
         </CompactDialogFooter>

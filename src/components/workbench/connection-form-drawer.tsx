@@ -2,13 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EyeIcon,
   EyeOffIcon,
-  FolderOpenIcon,
   KeyRound,
   Network,
-  PlugZapIcon,
-  SaveIcon,
   Server,
-  ShieldCheckIcon,
   TagsIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -697,28 +693,23 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
 
         <DrawerFooter className="grid grid-cols-3 gap-2 px-4 py-4">
           <Button variant="outline" size="sm" onClick={() => void runPreflight()} disabled={isSubmitting || preflightChecking}>
-            <ShieldCheckIcon data-icon="inline-start" />
             {t('connection.preflight.action')}
           </Button>
           {initial ? (
             <>
               <Button variant="outline" size="sm" onClick={handleConnect} disabled={isSubmitting}>
-                <PlugZapIcon data-icon="inline-start" />
                 {t('connection.form.saveAndConnect')}
               </Button>
               <Button size="sm" onClick={handleSaveOnly} disabled={isSubmitting}>
-                <SaveIcon data-icon="inline-start" />
                 {t('common.save')}
               </Button>
             </>
           ) : (
             <>
               <Button variant="outline" size="sm" onClick={handleSaveOnly} disabled={isSubmitting}>
-                <SaveIcon data-icon="inline-start" />
                 {t('common.save')}
               </Button>
               <Button size="sm" onClick={handleConnect} disabled={isSubmitting}>
-                <PlugZapIcon data-icon="inline-start" />
                 {t('connection.form.saveAndConnect')}
               </Button>
             </>
@@ -899,7 +890,6 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
           <div className="flex gap-2">
             <Input id={pathControlId} aria-invalid={Boolean(errors.privateKeyPath)} aria-describedby={errors.privateKeyPath ? `${pathControlId}-error` : undefined} value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="flex-1" autoComplete="off" autoCapitalize="none" />
             <Button variant="outline" size="sm" className="shrink-0" onClick={onBrowse}>
-              <FolderOpenIcon data-icon="inline-start" />
               {t('connection.form.browse')}
             </Button>
           </div>

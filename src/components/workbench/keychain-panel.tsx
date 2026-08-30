@@ -1,17 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  CopyIcon,
-  FileKey,
-  KeyRound,
-  Lock,
-  PencilIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  SaveIcon,
-  SearchXIcon,
-  Trash2Icon,
-  UploadCloud,
-} from 'lucide-react';
+import { CopyIcon, FileKey, KeyRound, Lock, PencilIcon, PlusIcon, RefreshCwIcon, SaveIcon, SearchXIcon, Trash2Icon, UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -31,12 +19,7 @@ import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { FormRow, MANAGEMENT_CARD_MIN_WIDTH, keyTypeBadgeClass } from './shared';
 import type { KeychainKey, KeychainKeyKind } from '@/types';
-import {
-  WorkbenchPage,
-  WorkbenchPageContent,
-  WorkbenchPageHeader,
-  WorkbenchSearchInput,
-} from './workbench-page';
+import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput } from './workbench-page';
 
 interface KeyFormState {
   kind: KeychainKeyKind;
@@ -197,7 +180,7 @@ export const KeychainPanel: React.FC = () => {
             count: filteredKeys.length,
             total: keys.length,
           })}
-          actions={(
+          actions={
             <>
               <WorkbenchSearchInput
                 value={query}
@@ -214,7 +197,7 @@ export const KeychainPanel: React.FC = () => {
                 {t('common.create')}
               </Button>
             </>
-          )}
+          }
         />
 
         <ScrollArea className="min-h-0 flex-1">
@@ -235,11 +218,7 @@ export const KeychainPanel: React.FC = () => {
               />
             )}
             {filteredKeys.length > 0 && (
-              <ResponsiveCardGrid
-                columns={1}
-                minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
-                gap="0.375rem"
-              >
+              <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.375rem">
                 {filteredKeys.map((key) => {
                   const isProfilePassword = key.service === 'com.termbridge.profile-password';
                   return (
@@ -312,7 +291,14 @@ export const KeychainPanel: React.FC = () => {
           </DrawerHeader>
           <FieldGroup className="gap-5 px-4 py-4">
             <FormRow controlId="keychain-label" label={t('common.label')} error={errors.label}>
-              <Input id="keychain-label" aria-invalid={Boolean(errors.label)} aria-describedby={errors.label ? 'keychain-label-error' : undefined} value={form.label} onChange={(e) => updateField('label', e.target.value)} placeholder={t('keychain.form.labelPlaceholder')} />
+              <Input
+                id="keychain-label"
+                aria-invalid={Boolean(errors.label)}
+                aria-describedby={errors.label ? 'keychain-label-error' : undefined}
+                value={form.label}
+                onChange={(e) => updateField('label', e.target.value)}
+                placeholder={t('keychain.form.labelPlaceholder')}
+              />
             </FormRow>
 
             <FormRow controlId="keychain-privateKey" label={t('common.privateKey')} error={errors.privateKey}>
@@ -348,7 +334,6 @@ export const KeychainPanel: React.FC = () => {
           </FieldGroup>
           <DrawerFooter className="px-4 pb-4 pt-1">
             <Button size="sm" onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
-              <SaveIcon data-icon="inline-start" />
               {t('common.save')}
             </Button>
           </DrawerFooter>
