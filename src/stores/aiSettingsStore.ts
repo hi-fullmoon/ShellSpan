@@ -6,6 +6,7 @@ import type {
   AiProviderKind,
   AiProviderPreset,
   AiProviderProfile,
+  AiReasoningEffort,
 } from '@/types/ai';
 import {
   invokeLoadPreferences,
@@ -14,6 +15,11 @@ import {
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
+import {
+  DEFAULT_KIMI_K3_REASONING_EFFORT,
+  effectiveReasoningEffort,
+  isAiReasoningEffort,
+} from '@/lib/ai-reasoning';
 
 const logger = createLogger('aiSettingsStore');
 
@@ -23,6 +29,7 @@ export interface AiProviderPresetDefinition {
   kind: AiProviderKind;
   baseUrl: string;
   model: string;
+  reasoningEffort?: AiReasoningEffort;
   requiresApiKey: boolean;
 }
 
@@ -65,6 +72,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     kind: 'openAiCompatible',
     baseUrl: 'https://api.kimi.com/coding',
     model: 'k3',
+    reasoningEffort: DEFAULT_KIMI_K3_REASONING_EFFORT,
     requiresApiKey: true,
   },
   {
@@ -165,6 +173,11 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
       preset,
       baseUrl: typeof provider.baseUrl === 'string' ? provider.baseUrl : '',
       model: typeof provider.model === 'string' ? provider.model : '',
+      ...(isAiReasoningEffort(provider.reasoningEffort)
+        ? { reasoningEffort: provider.reasoningEffort }
+        : presetDefinition(preset).reasoningEffort
+          ? { reasoningEffort: presetDefinition(preset).reasoningEffort }
+          : {}),
       requiresApiKey: typeof provider.requiresApiKey === 'boolean'
         ? provider.requiresApiKey
         : provider.kind !== 'ollama',
@@ -349,11 +362,13 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       const provider = state.providers.find((item) => item.id === (id ?? state.defaultProviderId))
         ?? state.providers[0];
       if (!provider) throw new Error('No AI provider is configured');
+      const reasoningEffort = effectiveReasoningEffort(provider);
       return {
         id: provider.id,
         kind: provider.kind,
         baseUrl: provider.baseUrl.trim(),
         model: provider.model.trim(),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         requiresApiKey: provider.requiresApiKey,
         ...(provider.apiKey?.trim() ? { apiKey: provider.apiKey.trim() } : {}),
       };

@@ -30,8 +30,9 @@ use crate::{
         AgentToolResultStatus, RunTerminalCommandArguments,
     },
     ai::{
-        api_key_for_provider, build_client, endpoint_url, validate_provider_config, AiMessage,
-        AiProviderConfig, AiProviderKind,
+        api_key_for_provider, apply_reasoning_effort, build_client, endpoint_url,
+        is_kimi_code_provider, validate_provider_config, AiMessage, AiProviderConfig,
+        AiProviderKind,
     },
     redaction::redact_sensitive_text,
 };
@@ -1042,6 +1043,52 @@ struct HttpAgentBackend {
     cached_capability: Option<AgentProviderCapabilityEvidence>,
 }
 
+fn compatible_probe_body(provider: &AiProviderConfig) -> Value {
+    let kimi_code = is_kimi_code_provider(provider);
+    let mut body = json!({
+        "model": provider.model,
+        "stream": false,
+        "messages": [
+            {
+                "role": "system",
+                "content": "This is a side-effect-free capability check. Return exactly one call to the provided tool and no prose."
+            },
+            {
+                "role": "user",
+                "content": "Call termbridge_capability_probe exactly once."
+            }
+        ],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "termbridge_capability_probe",
+                "description": "Reports support for structured function calls without performing an action.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }
+            }
+        }],
+        // K3 always reasons before answering. Its low effort plus a larger
+        // output allowance avoids misclassifying a truncated probe as unknown.
+        "max_tokens": if kimi_code { 1_024 } else { 256 }
+    });
+    if kimi_code {
+        // Kimi's OpenAI-compatible API supports auto/none/null tool choice,
+        // but not OpenAI's named forced-function object used below.
+        body["tool_choice"] = json!("auto");
+        body["reasoning_effort"] = json!("low");
+    } else {
+        body["tool_choice"] = json!({
+            "type": "function",
+            "function": { "name": "termbridge_capability_probe" }
+        });
+        body["parallel_tool_calls"] = json!(false);
+    }
+    body
+}
+
 impl HttpAgentBackend {
     fn new(
         provider: AiProviderConfig,
@@ -1074,35 +1121,7 @@ impl HttpAgentBackend {
         &self,
         cancellation: &CancellationToken,
     ) -> AgentToolCallingSupport {
-        let body = json!({
-            "model": self.provider.model,
-            "stream": false,
-            "messages": [{
-                "role": "user",
-                "content": "Call termbridge_capability_probe exactly once. This probe has no side effects."
-            }],
-            "tools": [{
-                "type": "function",
-                "function": {
-                    "name": "termbridge_capability_probe",
-                    "description": "Reports support for structured function calls without performing an action.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": false
-                    }
-                }
-            }],
-            "tool_choice": {
-                "type": "function",
-                "function": { "name": "termbridge_capability_probe" }
-            },
-            "parallel_tool_calls": false,
-            // Reasoning-capable compatible models can consume a small token
-            // budget before emitting the forced call. A truncated 200 reply
-            // is not evidence that tools are unsupported.
-            "max_tokens": 256
-        });
+        let body = compatible_probe_body(&self.provider);
         let endpoint = match endpoint_url(&self.provider, "chat/completions") {
             Ok(endpoint) => endpoint,
             Err(_) => return AgentToolCallingSupport::Unknown,
@@ -1186,6 +1205,7 @@ impl HttpAgentBackend {
             "instructions": instructions_for_mode(mode),
             "input": input,
         });
+        apply_reasoning_effort(&mut body, &self.provider);
         if mode == AgentTurnMode::Tools {
             body["tools"] = json!([responses_terminal_tool()]);
             body["tool_choice"] = json!("auto");
@@ -1239,10 +1259,13 @@ impl HttpAgentBackend {
             "stream": true,
             "messages": messages,
         });
+        apply_reasoning_effort(&mut body, &self.provider);
         if mode == AgentTurnMode::Tools {
             body["tools"] = json!([chat_terminal_tool()]);
             body["tool_choice"] = json!("auto");
-            body["parallel_tool_calls"] = json!(false);
+            if !is_kimi_code_provider(&self.provider) {
+                body["parallel_tool_calls"] = json!(false);
+            }
         }
         let endpoint =
             endpoint_url(&self.provider, "chat/completions").map_err(ProviderFailure::other)?;
@@ -1411,11 +1434,15 @@ impl AgentModelBackend for HttpAgentBackend {
                     .provider_call_id
                     .as_deref()
                     .ok_or_else(|| "Chat Completions tool call is missing id".to_string())?;
-                self.history.push(json!({
+                let mut message = json!({
                     "role": "tool",
                     "tool_call_id": provider_call_id,
                     "content": content,
-                }));
+                });
+                if is_kimi_code_provider(&self.provider) {
+                    message["name"] = json!(call.name);
+                }
+                self.history.push(message);
             }
             AiProviderKind::Ollama => {
                 self.history.push(json!({
@@ -2748,6 +2775,7 @@ mod tests {
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://provider.example.com/v1".to_string(),
             model: "tool-model-a".to_string(),
+            reasoning_effort: None,
             requires_api_key: true,
             api_key: None,
         };
@@ -2776,6 +2804,7 @@ mod tests {
                 kind: AiProviderKind::OpenAiCompatible,
                 base_url: "http://127.0.0.1:1/v1".to_string(),
                 model: "tool-model".to_string(),
+                reasoning_effort: None,
                 requires_api_key: false,
                 api_key: None,
             },
@@ -2937,6 +2966,7 @@ mod tests {
                 kind: AiProviderKind::OpenAiCompatible,
                 base_url: "https://api.minimaxi.com".to_string(),
                 model: "MiniMax-M2.7".to_string(),
+                reasoning_effort: None,
                 requires_api_key: true,
                 api_key: Some("minimax-test-key".to_string()),
             },
@@ -3019,6 +3049,7 @@ mod tests {
                 kind: AiProviderKind::OpenAi,
                 base_url: "https://api.openai.com".to_string(),
                 model: "gpt-test".to_string(),
+                reasoning_effort: None,
                 requires_api_key: true,
                 api_key: Some("test-key".to_string()),
             },
@@ -3131,6 +3162,31 @@ mod tests {
             ollama_metadata_support(&json!({ "details": {} })),
             AgentToolCallingSupport::Unknown
         );
+    }
+
+    #[test]
+    fn kimi_probe_uses_supported_auto_choice_and_a_low_reasoning_budget() {
+        let provider = AiProviderConfig {
+            id: "kimi".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.kimi.com/coding".to_string(),
+            model: "k3".to_string(),
+            reasoning_effort: None,
+            requires_api_key: true,
+            api_key: None,
+        };
+        let body = compatible_probe_body(&provider);
+
+        assert_eq!(
+            body.get("tool_choice").and_then(Value::as_str),
+            Some("auto")
+        );
+        assert_eq!(
+            body.get("reasoning_effort").and_then(Value::as_str),
+            Some("low")
+        );
+        assert_eq!(body.get("max_tokens").and_then(Value::as_u64), Some(1_024));
+        assert!(body.get("parallel_tool_calls").is_none());
     }
 
     #[test]
@@ -3267,6 +3323,7 @@ mod tests {
             kind,
             base_url,
             model,
+            reasoning_effort: None,
             requires_api_key: api_key.is_some(),
             api_key,
         }

@@ -66,13 +66,20 @@ import {
   flushAgentSessionPersistence,
 } from '@/lib/agent-sessions';
 import { agentUiController } from '@/lib/agent-ui-controller';
+import { deletePersistedAiConversations } from '@/lib/ai-sessions';
+import {
+  effectiveReasoningEffort,
+  isAiReasoningEffort,
+  reasoningEffortOptions,
+} from '@/lib/ai-reasoning';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAiStore } from '@/stores/aiStore';
 import { useAppStore } from '@/stores/appStore';
 import { AI_PROVIDER_PRESETS, useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 import type { AgentRolloutPolicy } from '@/types/agent';
-import type { AiProviderKind, AiProviderPreset } from '@/types/ai';
+import type { AiProviderKind, AiProviderPreset, AiReasoningEffort } from '@/types/ai';
 import {
   DeepSeekBrandIcon,
   KimiBrandIcon,
@@ -105,6 +112,12 @@ const PROTOCOL_LABEL_KEYS: Record<AiProviderKind, LocaleKey> = {
   openAiCompatible: 'settings.ai.protocol.openAiCompatible',
 };
 
+const REASONING_EFFORT_LABEL_KEYS: Record<AiReasoningEffort, LocaleKey> = {
+  low: 'ai.reasoningEffort.low',
+  high: 'ai.reasoningEffort.high',
+  max: 'ai.reasoningEffort.max',
+};
+
 const protocolDefaults = (kind: AiProviderKind) => {
   if (kind === 'ollama') {
     return { kind, requiresApiKey: false };
@@ -129,6 +142,8 @@ export const AiSettingsSection: React.FC = () => {
   const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const setAgentEnabled = useAiSettingsStore((state) => state.setAgentEnabled);
   const activeAgentRequestId = useAgentStore((state) => state.activeRequestId);
+  const conversations = useAiStore((state) => state.conversations);
+  const terminalSessions = useTerminalStore((state) => state.sessions);
   const persistenceStatus = useAiSettingsStore((state) => state.persistenceStatus);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
@@ -140,6 +155,8 @@ export const AiSettingsSection: React.FC = () => {
   const [agentPolicy, setAgentPolicy] = useState<AgentRolloutPolicy>();
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
+  const [historyActionBusy, setHistoryActionBusy] = useState(false);
+  const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -160,6 +177,14 @@ export const AiSettingsSection: React.FC = () => {
     () => providers.find((provider) => provider.id === selectedProviderId) ?? providers[0],
     [providers, selectedProviderId],
   );
+  const historicalConversations = useMemo(() => {
+    const currentConversationIds = new Set(
+      terminalSessions
+        .map((session) => session.conversationId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    return conversations.filter((conversation) => !currentConversationIds.has(conversation.id));
+  }, [conversations, terminalSessions]);
 
   useEffect(() => {
     if (selectedProvider && selectedProvider.id !== selectedProviderId) {
@@ -186,6 +211,8 @@ export const AiSettingsSection: React.FC = () => {
         ? 'settings.ai.keyStored'
         : 'settings.ai.keyMissing';
   const SelectedIcon = PRESET_ICONS[selectedProvider.preset];
+  const availableReasoningEfforts = reasoningEffortOptions(selectedProvider);
+  const selectedReasoningEffort = effectiveReasoningEffort(selectedProvider);
 
   const handleAddProvider = (preset: AiProviderPreset): void => {
     const id = addProvider(preset);
@@ -260,6 +287,26 @@ export const AiSettingsSection: React.FC = () => {
     }
   };
 
+  const handleClearConversationHistory = async (): Promise<void> => {
+    const conversationsToDelete = historicalConversations;
+    if (conversationsToDelete.length === 0) return;
+    setHistoryActionBusy(true);
+    setClearHistoryOpen(false);
+    try {
+      const count = await deletePersistedAiConversations(conversationsToDelete);
+      const conversationIds = conversationsToDelete.map((conversation) => conversation.id);
+      useAiStore.getState().removeConversations(conversationIds);
+      for (const conversationId of conversationIds) {
+        useAgentStore.getState().clearConversation(conversationId);
+      }
+      showSuccess(t('ai.history.deleted', { count }));
+    } catch {
+      showError(t('ai.history.deleteFailed'));
+    } finally {
+      setHistoryActionBusy(false);
+    }
+  };
+
   const openAgentHistory = (): void => {
     const app = useAppStore.getState();
     app.setOperationHistoryCategory('agent');
@@ -273,69 +320,6 @@ export const AiSettingsSection: React.FC = () => {
         <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
         <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{t('settings.ai.description')}</p>
       </div>
-
-      <Card size="sm">
-        <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2">
-            <BotIcon />
-            {t('settings.ai.agent.title')}
-          </CardTitle>
-          <CardDescription>{t('settings.ai.agent.description')}</CardDescription>
-          <CardAction>
-            <Badge variant={agentPolicy?.featureEnabled ? 'secondary' : 'outline'}>
-              {agentPolicy
-                ? t(`settings.ai.agent.stage.${agentPolicy.stage}` as LocaleKey)
-                : t('settings.ai.agent.stage.checking')}
-            </Badge>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <Field
-            className="flex-row items-center gap-3"
-            data-disabled={!agentPolicy?.featureEnabled || agentActionBusy || undefined}
-          >
-            <div className="min-w-0 flex-1">
-              <FieldLabel htmlFor="ai-agent-enabled">{t('settings.ai.agent.enable')}</FieldLabel>
-              <FieldDescription>{t('settings.ai.agent.enableDescription')}</FieldDescription>
-            </div>
-            <Switch
-              id="ai-agent-enabled"
-              checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
-              disabled={!agentPolicy?.featureEnabled || agentActionBusy}
-              onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
-            />
-          </Field>
-          <Alert>
-            <AlertTitle>{t('settings.ai.agent.permissionTitle')}</AlertTitle>
-            <AlertDescription>{t('settings.ai.agent.permissionDescription')}</AlertDescription>
-          </Alert>
-          {agentPolicy?.collectLocalDiagnostics && (
-            <Alert>
-              <AlertTitle>{t('settings.ai.agent.previewDataTitle')}</AlertTitle>
-              <AlertDescription>{t('settings.ai.agent.previewDataDescription')}</AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-        <CardFooter className="flex-wrap justify-between gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openAgentHistory}
-          >
-            <HistoryIcon data-icon="inline-start" />
-            {t('settings.ai.agent.viewHistory')}
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={agentActionBusy}
-            onClick={() => setClearAgentOpen(true)}
-          >
-            {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
-            {t('settings.ai.agent.clearSessions')}
-          </Button>
-        </CardFooter>
-      </Card>
 
       <div className="grid min-w-0 items-start gap-4 @min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]">
         <div className="contents @min-[44rem]:flex @min-[44rem]:min-w-0 @min-[44rem]:flex-col @min-[44rem]:gap-4">
@@ -521,6 +505,38 @@ export const AiSettingsSection: React.FC = () => {
                     </Combobox>
                     <FieldDescription>{t('settings.ai.modelHint')}</FieldDescription>
                   </Field>
+
+                  {selectedReasoningEffort && availableReasoningEfforts.length > 0 && (
+                    <Field>
+                      <FieldLabel>{t('settings.ai.reasoningEffort')}</FieldLabel>
+                      <Select
+                        value={selectedReasoningEffort}
+                        onValueChange={(value) => {
+                          if (isAiReasoningEffort(value)) {
+                            updateProvider(selectedProvider.id, {
+                              reasoningEffort: value,
+                            });
+                          }
+                        }}
+                      >
+                        <SelectTrigger aria-label={t('settings.ai.reasoningEffort')}>
+                          <SelectValue>
+                            {t(REASONING_EFFORT_LABEL_KEYS[selectedReasoningEffort])}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {availableReasoningEfforts.map((effort) => (
+                              <SelectItem key={effort} value={effort}>
+                                {t(REASONING_EFFORT_LABEL_KEYS[effort])}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>{t('settings.ai.reasoningEffortHint')}</FieldDescription>
+                    </Field>
+                  )}
                 </FieldGroup>
               </section>
 
@@ -590,7 +606,7 @@ export const AiSettingsSection: React.FC = () => {
             </CardContent>
             <CardFooter className="justify-between gap-2">
               <Button
-                variant="destructive"
+                variant="destructiveOutline"
                 size="sm"
                 onClick={() => setDeleteOpen(true)}
                 disabled={busy || providers.length <= 1}
@@ -624,6 +640,94 @@ export const AiSettingsSection: React.FC = () => {
           )}
         </div>
       </div>
+
+      <Card size="sm">
+        <CardHeader className="border-b">
+          <CardTitle className="flex items-center gap-2">
+            <BotIcon />
+            {t('settings.ai.agent.title')}
+          </CardTitle>
+          <CardDescription>{t('settings.ai.agent.description')}</CardDescription>
+          <CardAction>
+            <Badge variant={agentPolicy?.featureEnabled ? 'secondary' : 'outline'}>
+              {agentPolicy
+                ? t(`settings.ai.agent.stage.${agentPolicy.stage}` as LocaleKey)
+                : t('settings.ai.agent.stage.checking')}
+            </Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Field
+            className="flex-row items-center gap-3"
+            data-disabled={!agentPolicy?.featureEnabled || agentActionBusy || undefined}
+          >
+            <div className="min-w-0 flex-1">
+              <FieldLabel htmlFor="ai-agent-enabled">{t('settings.ai.agent.enable')}</FieldLabel>
+              <FieldDescription>{t('settings.ai.agent.enableDescription')}</FieldDescription>
+            </div>
+            <Switch
+              id="ai-agent-enabled"
+              checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
+              disabled={!agentPolicy?.featureEnabled || agentActionBusy}
+              onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
+            />
+          </Field>
+          <Alert>
+            <AlertTitle>{t('settings.ai.agent.permissionTitle')}</AlertTitle>
+            <AlertDescription>{t('settings.ai.agent.permissionDescription')}</AlertDescription>
+          </Alert>
+          {agentPolicy?.collectLocalDiagnostics && (
+            <Alert>
+              <AlertTitle>{t('settings.ai.agent.previewDataTitle')}</AlertTitle>
+              <AlertDescription>{t('settings.ai.agent.previewDataDescription')}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+        <CardFooter className="flex-wrap justify-between gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openAgentHistory}
+          >
+            <HistoryIcon data-icon="inline-start" />
+            {t('settings.ai.agent.viewHistory')}
+          </Button>
+          <Button
+            variant="destructiveOutline"
+            size="sm"
+            disabled={agentActionBusy}
+            onClick={() => setClearAgentOpen(true)}
+          >
+            {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
+            {t('settings.ai.agent.clearSessions')}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader className="border-b">
+          <CardTitle className="flex items-center gap-2">
+            <HistoryIcon />
+            {t('ai.history')}
+          </CardTitle>
+          <CardDescription>
+            {t('ai.history.description', { count: historicalConversations.length })}
+          </CardDescription>
+        </CardHeader>
+        <CardFooter className="justify-end">
+          <Button
+            variant="destructiveOutline"
+            size="sm"
+            disabled={historicalConversations.length === 0 || historyActionBusy}
+            onClick={() => setClearHistoryOpen(true)}
+          >
+            {historyActionBusy
+              ? <Spinner data-icon="inline-start" />
+              : <Trash2Icon data-icon="inline-start" />}
+            {t('ai.history.deleteAll')}
+          </Button>
+        </CardFooter>
+      </Card>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>
@@ -664,6 +768,19 @@ export const AiSettingsSection: React.FC = () => {
         title={t('settings.ai.deleteProviderTitle', { name: selectedProvider.name })}
         description={t('settings.ai.deleteProviderDescription')}
         onConfirm={handleDeleteProvider}
+        confirmVariant="destructiveOutline"
+      />
+
+      <ConfirmDeleteDialog
+        open={clearHistoryOpen}
+        onOpenChange={setClearHistoryOpen}
+        title={t('ai.history.deleteAllConfirmTitle')}
+        description={t('ai.history.deleteAllConfirmDescription', {
+          count: historicalConversations.length,
+        })}
+        onConfirm={() => void handleClearConversationHistory()}
+        confirmLabel={t('ai.history.deleteAll')}
+        confirmVariant="destructiveOutline"
       />
 
       <AlertDialog open={clearAgentOpen} onOpenChange={setClearAgentOpen}>
@@ -679,7 +796,7 @@ export const AiSettingsSection: React.FC = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              variant="destructive"
+              variant="destructiveOutline"
               onClick={() => void handleClearAgentSessions()}
             >
               {t('settings.ai.agent.clearConfirm')}

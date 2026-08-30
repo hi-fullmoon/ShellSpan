@@ -85,6 +85,11 @@ import {
 import { agentRolloutAuditor } from '@/lib/agent-rollout-audit';
 import { detectAgentProviderCapabilityCached } from '@/lib/agent-provider-capability';
 import {
+  effectiveReasoningEffort,
+  isAiReasoningEffort,
+  reasoningEffortOptions,
+} from '@/lib/ai-reasoning';
+import {
   getRecentTerminalOutput,
   redactTerminalSecrets,
   renderTerminalText,
@@ -118,6 +123,7 @@ import type {
   AiMessageInput,
   AiStreamEvent,
   AiTaskKind,
+  AiReasoningEffort,
 } from '@/types/ai';
 import type { LocaleKey } from '@/locales';
 import type {
@@ -136,6 +142,11 @@ const AI_PANEL_KEYBOARD_RESIZE_STEP = 24;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'termbridge.aiPanelWidth';
 export const LIVE_TERMINAL_CONTEXT_MAX_LATENCY_MS = 50;
 const logger = createLogger('ai');
+const REASONING_EFFORT_LABEL_KEYS: Record<AiReasoningEffort, LocaleKey> = {
+  low: 'ai.reasoningEffort.low',
+  high: 'ai.reasoningEffort.high',
+  max: 'ai.reasoningEffort.max',
+};
 type ConversationTask = AiTaskKind;
 type AiPanelMode = 'ask' | 'agent';
 type CancelAiRequest = (requestId: string) => Promise<void>;
@@ -514,9 +525,16 @@ export const AiPanel: React.FC = () => {
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
+  const updateProvider = useAiSettingsStore((state) => state.updateProvider);
   const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const defaultProvider = providers.find((provider) => provider.id === defaultProviderId) ?? providers[0];
   const model = defaultProvider?.model ?? '';
+  const availableReasoningEfforts = defaultProvider
+    ? reasoningEffortOptions(defaultProvider)
+    : [];
+  const reasoningEffort = defaultProvider
+    ? effectiveReasoningEffort(defaultProvider)
+    : undefined;
   const activeSection = useAppStore((state) => state.activeSection);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const sessions = useTerminalStore((state) => state.sessions);
@@ -1367,7 +1385,13 @@ export const AiPanel: React.FC = () => {
                   <span className="block truncate font-semibold">{t('ai.title')}</span>
                   <span className="block truncate text-[11px] font-normal text-muted-foreground">
                     {defaultProvider
-                      ? `${defaultProvider.name} · ${model || t('ai.modelMissing')}`
+                      ? [
+                          defaultProvider.name,
+                          model || t('ai.modelMissing'),
+                          reasoningEffort
+                            ? t(REASONING_EFFORT_LABEL_KEYS[reasoningEffort])
+                            : undefined,
+                        ].filter(Boolean).join(' · ')
                       : t('ai.modelMissing')}
                   </span>
                 </span>
@@ -1392,6 +1416,28 @@ export const AiPanel: React.FC = () => {
                     ))}
                   </DropdownMenuRadioGroup>
                 </DropdownMenuGroup>
+                {defaultProvider && reasoningEffort && availableReasoningEfforts.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>{t('ai.reasoningEffort')}</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={reasoningEffort}
+                        onValueChange={(value) => {
+                          if (isAiReasoningEffort(value)) {
+                            updateProvider(defaultProvider.id, { reasoningEffort: value });
+                          }
+                        }}
+                      >
+                        {availableReasoningEfforts.map((effort) => (
+                          <DropdownMenuRadioItem key={effort} value={effort} closeOnClick>
+                            {t(REASONING_EFFORT_LABEL_KEYS[effort])}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuGroup>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={openSettings}>

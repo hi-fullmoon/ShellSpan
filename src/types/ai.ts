@@ -1,5 +1,6 @@
 export type AiProviderKind = 'ollama' | 'openAi' | 'openAiCompatible';
 export type AiProviderPreset = 'ollama' | 'openai' | 'deepseek' | 'minimax' | 'kimi' | 'custom';
+export type AiReasoningEffort = 'low' | 'high' | 'max';
 export type AiTaskKind = 'ask' | 'chat' | 'explainTerminal' | 'generateCommand';
 
 export interface AiProviderConfig {
@@ -7,6 +8,7 @@ export interface AiProviderConfig {
   kind: AiProviderKind;
   baseUrl: string;
   model: string;
+  reasoningEffort?: AiReasoningEffort;
   requiresApiKey: boolean;
   apiKey?: string;
 }

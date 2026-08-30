@@ -93,6 +93,46 @@ beforeEach(() => {
 });
 
 describe('explicit AI modes', () => {
+  it('shows and updates Kimi K3 thinking effort from the model menu', async () => {
+    const previousApp = useAppStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ locale: 'en-US' });
+    useAiSettingsStore.setState({
+      providers: [{
+        id: 'kimi',
+        name: 'Kimi Code',
+        preset: 'kimi',
+        kind: 'openAiCompatible',
+        baseUrl: 'https://api.kimi.com/coding',
+        model: 'k3',
+        reasoningEffort: 'high',
+        requiresApiKey: true,
+      }],
+      defaultProviderId: 'kimi',
+    });
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const providerSelector = await screen.findByRole('button', {
+        name: 'Switch AI provider',
+      });
+      expect(providerSelector).toHaveTextContent('Kimi Code · k3 · High');
+
+      fireEvent.click(providerSelector);
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Max' }));
+      await waitFor(() => expect(useAiSettingsStore.getState().providers[0])
+        .toHaveProperty('reasoningEffort', 'max'));
+    } finally {
+      unmount();
+      useAiStore.getState().setOpen(false);
+      useAiSettingsStore.setState(previousSettings, true);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
   it('keeps the Agent entry visible when the runtime rollout is unavailable', async () => {
     const previousApp = useAppStore.getState();
     await initI18n('en-US');
@@ -1413,7 +1453,7 @@ describe('conversation history', () => {
     }
   });
 
-  it('deletes all history while preserving the current conversation', async () => {
+  it('keeps bulk deletion out of the conversation-history dialog', async () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
     await initI18n('en-US');
@@ -1458,24 +1498,17 @@ describe('conversation history', () => {
       currentConversation,
       ...archivedConversations,
     ]);
-    tauriCoreMock.invoke.mockImplementation((command: string) => (
-      Promise.resolve(command === 'delete_ai_sessions' ? 2 : undefined)
-    ));
     useAiStore.getState().setOpen(true);
 
     const { unmount } = render(createElement(AiPanel));
     try {
       fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
-      fireEvent.click(await screen.findByRole('button', { name: 'Delete all history' }));
-      const confirmation = await screen.findByRole('alertdialog');
-      fireEvent.click(within(confirmation).getByRole('button', { name: 'Delete' }));
-
-      await waitFor(() => expect(useAiStore.getState().conversations).toEqual([
+      expect(await screen.findByText('Archived target 1')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Delete all history' })).not.toBeInTheDocument();
+      expect(useAiStore.getState().conversations).toEqual([
         currentConversation,
-      ]));
-      expect(tauriCoreMock.invoke).toHaveBeenCalledWith('delete_ai_sessions', {
-        sessions: archivedConversations.map(({ id, startedAt }) => ({ id, startedAt })),
-      });
+        ...archivedConversations,
+      ]);
     } finally {
       unmount();
       useAiStore.getState().clear();
