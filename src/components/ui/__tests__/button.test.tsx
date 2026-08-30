@@ -31,6 +31,14 @@ describe('Button', () => {
     expect(button.className).toContain('[&_svg]:size-3.5');
   });
 
+  it('renders destructive outline actions without a filled background', () => {
+    render(<Button variant="destructiveOutline">Delete</Button>);
+
+    const button = screen.getByRole('button', { name: 'Delete' });
+    expect(button).toHaveClass('border-destructive', 'bg-transparent', 'text-destructive', 'hover:bg-transparent');
+    expect(button).not.toHaveClass('bg-destructive');
+  });
+
   it('lets loading indicators inherit the button foreground color', () => {
     const { container } = render(
       <Button disabled>
