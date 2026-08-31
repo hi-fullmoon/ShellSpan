@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2Icon,
   CircleAlertIcon,
@@ -113,34 +113,46 @@ const ENDPOINT_SUFFIXES = [
   '/api/show',
 ] as const;
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+function parseProviderBaseUrl(baseUrl: string): URL | undefined {
+  try {
+    const url = new URL(baseUrl.trim());
+    if (url.username || url.password) return undefined;
+    if (url.protocol === 'https:') return url;
+    const hostname = url.hostname.replace(/^\[|\]$/g, '');
+    if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(hostname)) return url;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildProviderRequestEndpoint(
   baseUrl: string,
   kind: AiProviderKind,
 ): string | undefined {
-  try {
-    const url = new URL(baseUrl.trim());
-    let basePath = url.pathname.replace(/\/$/, '');
-    for (const suffix of ENDPOINT_SUFFIXES) {
-      if (basePath.endsWith(suffix)) {
-        basePath = basePath.slice(0, -suffix.length);
-        break;
-      }
+  const url = parseProviderBaseUrl(baseUrl);
+  if (!url) return undefined;
+  let basePath = url.pathname.replace(/\/$/, '');
+  for (const suffix of ENDPOINT_SUFFIXES) {
+    if (basePath.endsWith(suffix)) {
+      basePath = basePath.slice(0, -suffix.length);
+      break;
     }
-    if (kind !== 'ollama' && !basePath.endsWith('/v1')) {
-      basePath = `${basePath.replace(/\/$/, '')}/v1`;
-    }
-    const requestPath = kind === 'ollama'
-      ? 'api/chat'
-      : kind === 'openAi'
-        ? 'responses'
-        : 'chat/completions';
-    url.pathname = `${basePath.replace(/\/$/, '')}/${requestPath}`;
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return undefined;
   }
+  if (kind !== 'ollama' && !basePath.endsWith('/v1')) {
+    basePath = `${basePath.replace(/\/$/, '')}/v1`;
+  }
+  const requestPath = kind === 'ollama'
+    ? 'api/chat'
+    : kind === 'openAi'
+      ? 'responses'
+      : 'chat/completions';
+  url.pathname = `${basePath.replace(/\/$/, '')}/${requestPath}`;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
 
 function draftConfig(draft: ProviderDraft): AiProviderConfig {
@@ -170,9 +182,19 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>();
+  const modelRequestGeneration = useRef(0);
+
+  const invalidateModelRequest = (): void => {
+    modelRequestGeneration.current += 1;
+    setBusy(false);
+  };
 
   useEffect(() => {
-    if (!open) return;
+    modelRequestGeneration.current += 1;
+    if (!open) {
+      setBusy(false);
+      return;
+    }
     setDraft(provider ? { ...provider } : undefined);
     setModels([]);
     setShowApiKey(false);
@@ -201,11 +223,13 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   );
 
   const updateDraft = (changes: Partial<ProviderDraft>): void => {
+    invalidateModelRequest();
     setDraft((current) => current ? { ...current, ...changes } : current);
     setFeedback(undefined);
   };
 
   const handlePresetChange = (preset: AiProviderPresetDefinition | null): void => {
+    invalidateModelRequest();
     setShowApiKey(false);
     if (!preset) {
       setDraft(undefined);
@@ -220,10 +244,13 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   const handleLoadModels = async (): Promise<void> => {
     if (!draft || !canTest) return;
+    const requestGeneration = modelRequestGeneration.current + 1;
+    modelRequestGeneration.current = requestGeneration;
     setBusy(true);
     setFeedback(undefined);
     try {
       const found = await invokeListAiModels(draftConfig(draft));
+      if (modelRequestGeneration.current !== requestGeneration) return;
       setModels(found);
       if (!draft.model.trim() && found[0]) {
         setDraft((current) => current ? { ...current, model: found[0] } : current);
@@ -233,13 +260,19 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
         message: t('settings.ai.connectionSuccess', { count: found.length }),
       });
     } catch (reason) {
+      if (modelRequestGeneration.current !== requestGeneration) return;
       setFeedback({
         kind: 'error',
         message: reason instanceof Error ? reason.message : String(reason),
       });
     } finally {
-      setBusy(false);
+      if (modelRequestGeneration.current === requestGeneration) setBusy(false);
     }
+  };
+
+  const handleOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen) invalidateModelRequest();
+    onOpenChange(nextOpen);
   };
 
   const handleSave = (): void => {
@@ -256,11 +289,11 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     const providerId = provider?.id ?? addProvider(draft.preset, changes);
     if (provider) updateProvider(provider.id, changes);
     onSaved(providerId);
-    onOpenChange(false);
+    handleOpenChange(false);
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-xl grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0">
         <DialogHeader className="px-4 pt-4 pr-12">
           <DialogTitle>
@@ -520,7 +553,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 </Button>
               </div>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                   {t('common.cancel')}
                 </Button>
                 <Button type="submit" disabled={!canSave || busy}>

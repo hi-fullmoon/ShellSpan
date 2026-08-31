@@ -2361,22 +2361,41 @@ mod tests {
     }
 
     #[test]
-    fn only_allows_loopback_plain_http() {
-        let local = AiProviderConfig {
+    fn validates_provider_url_security_contract() {
+        let mut provider = AiProviderConfig {
             id: "ollama".to_string(),
             kind: AiProviderKind::Ollama,
-            base_url: "http://127.0.0.1:11434".to_string(),
+            base_url: String::new(),
             model: "qwen3".to_string(),
             reasoning_effort: None,
             requires_api_key: false,
             api_key: None,
         };
-        assert!(validate_provider_config(&local, true).is_ok());
-        let remote = AiProviderConfig {
-            base_url: "http://example.com/v1".to_string(),
-            ..local
-        };
-        assert!(validate_provider_config(&remote, true).is_err());
+        for base_url in [
+            "https://example.com/v1",
+            "http://localhost:11434",
+            "http://127.0.0.1:11434",
+            "http://[::1]:11434",
+        ] {
+            provider.base_url = base_url.to_string();
+            assert!(
+                validate_provider_config(&provider, true).is_ok(),
+                "expected provider URL to be accepted: {base_url}"
+            );
+        }
+        for base_url in [
+            "http://example.com/v1",
+            "https://user@example.com/v1",
+            "https://user:password@example.com/v1",
+            "ftp://example.com/v1",
+            "file:///tmp/provider",
+        ] {
+            provider.base_url = base_url.to_string();
+            assert!(
+                validate_provider_config(&provider, true).is_err(),
+                "expected provider URL to be rejected: {base_url}"
+            );
+        }
     }
 
     #[test]
