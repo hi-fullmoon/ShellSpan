@@ -54,6 +54,12 @@ export interface AiChatMessage extends AiMessageInput {
   context?: AiContext;
 }
 
+export interface AiSessionRecovery {
+  validRecords: number;
+  skippedBytes: number;
+  firstError: string;
+}
+
 export interface AiConversation {
   id: string;
   startedAt: string;
@@ -65,6 +71,7 @@ export interface AiConversation {
   host: string;
   port: number;
   username: string;
+  recovery?: AiSessionRecovery;
 }
 
 export interface AiSessionMeta {
@@ -87,4 +94,5 @@ export interface AiSessionFile {
   conversation: AiConversation;
   messages: AiChatMessage[];
   agentStates?: import('./agent').PersistedAgentRunState[];
+  recovery?: AiSessionRecovery;
 }

@@ -16,7 +16,13 @@ const target = {
 describe('AgentRunView', () => {
   beforeEach(async () => {
     await initI18n('en-US');
-    useAgentStore.setState({ messages: [], runs: {}, tools: {}, activeRequestId: undefined });
+    useAgentStore.setState({
+      messages: [],
+      runs: {},
+      tools: {},
+      contextLimitedRequests: {},
+      activeRequestId: undefined,
+    });
   });
 
   it('keeps an empty-text tool message visible without the target-binding banner', () => {
@@ -82,7 +88,7 @@ describe('AgentRunView', () => {
       reason: 'toolCallingUnsupported',
     });
     useAgentStore.getState().appendText('request-fallback', 'Use read-only Ask instead.');
-    useAgentStore.getState().completeRun('request-fallback', true);
+    useAgentStore.getState().finishRun('request-fallback', 'incomplete');
     const onSwitchToAsk = vi.fn();
 
     render(
@@ -98,6 +104,71 @@ describe('AgentRunView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue in Ask' }));
     expect(onSwitchToAsk).toHaveBeenCalledWith('request-fallback');
+  });
+
+  it('shows when only the Agent model context was shortened', () => {
+    useAgentStore.getState().beginRun({
+      requestId: 'request-bounded',
+      goal: 'Inspect the complete local history',
+      providerId: 'openai',
+      target,
+      targetTitle: 'Production A',
+      permissionMode: 'requestApproval',
+    });
+
+    render(
+      <AgentRunView
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onRetry={vi.fn()}
+        canRetry={() => false}
+        onSwitchToAsk={vi.fn()}
+        onOpenSettings={vi.fn()}
+        requestBudgetNotices={{
+          'request-bounded': {
+            omittedTurns: 1,
+            omittedMessages: 2,
+            truncatedMessages: 0,
+            terminalContextTruncated: true,
+          },
+        }}
+      />,
+    );
+
+    const notice = screen.getByText(
+      'Only the context sent to the model was shortened for this request. Your complete local conversation history is unchanged.',
+    );
+    expect(notice.closest('[data-slot="marker"]')).toBeInTheDocument();
+    expect(screen.getByText('Inspect the complete local history')).toBeVisible();
+  });
+
+  it('shows when the backend limits the internal Agent context', () => {
+    useAgentStore.getState().beginRun({
+      requestId: 'request-backend-bounded',
+      goal: 'Inspect the terminal with bounded internal context',
+      providerId: 'openai',
+      target,
+      targetTitle: 'Production A',
+      permissionMode: 'requestApproval',
+    });
+    useAgentStore.getState().markContextLimited('request-backend-bounded');
+
+    render(
+      <AgentRunView
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onRetry={vi.fn()}
+        canRetry={() => false}
+        onSwitchToAsk={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    const notice = screen.getByText(
+      'Only the context sent to the model was shortened for this request. Your complete local conversation history is unchanged.',
+    );
+    expect(notice.closest('[data-slot="marker"]')).toBeInTheDocument();
+    expect(screen.getByText('Inspect the terminal with bounded internal context')).toBeVisible();
   });
 
   it('uses the persistent composer stop control instead of flashing a destructive tool-card action', () => {

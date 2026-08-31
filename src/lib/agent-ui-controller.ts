@@ -360,6 +360,9 @@ export class AgentUiController {
       case 'safeFallback':
         state.markFallback(event.requestId, event.fallback);
         return;
+      case 'contextLimited':
+        state.markContextLimited(event.requestId);
+        return;
       case 'textDelta':
         state.appendText(event.requestId, event.text);
         if (useAgentStore.getState().runs[event.requestId]?.toolCallIds.length) {
@@ -422,8 +425,8 @@ export class AgentUiController {
       case 'stepLimitReached':
         state.markStepLimit(event.requestId);
         return;
-      case 'completed':
-        state.completeRun(event.requestId, event.fallback);
+      case 'finished':
+        state.finishRun(event.requestId, event.outcome);
         agentRolloutAuditor.recordRunOutcome(useAgentStore.getState().runs[event.requestId]);
         this.releaseTerminalRequest(event.requestId);
         return;

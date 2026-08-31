@@ -53,6 +53,25 @@ describe('aiStore', () => {
     });
   });
 
+  it('keeps late events from a cancelled request out of a rapid replacement request', () => {
+    begin('request-old');
+    useAiStore.getState().cancelRequest('request-old');
+    begin('request-new');
+
+    useAiStore.getState().appendDelta('request-old', 'stale text');
+    useAiStore.getState().completeRequest('request-old');
+    useAiStore.getState().failRequest('request-old', 'stale failure');
+
+    expect(useAiStore.getState()).toMatchObject({
+      phase: 'streaming',
+      activeRequestId: 'request-new',
+      error: undefined,
+    });
+    expect(useAiStore.getState().messages.find((message) => (
+      message.id === 'assistant-request-new'
+    ))).toMatchObject({ status: 'streaming', content: '' });
+  });
+
   it('removes an empty assistant response after cancellation or failure', () => {
     begin('cancelled');
     useAiStore.getState().cancelRequest('cancelled');
@@ -142,6 +161,25 @@ describe('aiStore', () => {
     expect(useAiStore.getState().conversations).toEqual([conversation]);
     expect(useAiStore.getState().messages).toEqual([]);
     expect(useAiStore.getState().loadedConversationIds).toEqual([]);
+  });
+
+  it('marks an empty locally upserted conversation as loaded', () => {
+    const conversation = {
+      id: 'local-empty-conversation',
+      startedAt: '2026-08-31T05:00:00.000Z',
+      updatedAt: '2026-08-31T05:00:00.000Z',
+      title: 'root@local.example.com',
+      archived: false,
+      sessionId: 'local-session',
+      host: 'local.example.com',
+      port: 22,
+      username: 'root',
+    };
+
+    useAiStore.getState().upsertConversation(conversation);
+
+    expect(useAiStore.getState().messages).toEqual([]);
+    expect(useAiStore.getState().loadedConversationIds).toEqual([conversation.id]);
   });
 
   it('removes conversation summaries, loaded messages, and load markers together', () => {

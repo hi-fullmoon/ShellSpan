@@ -121,11 +121,6 @@ export function useConnectSession(): {
           const summary = await invokeCreateSession(
             buildSessionCreateRequest(preparedProfile, 120, 30),
           );
-          resolveConnectionAttempt(connectionAttemptId, summary, profile.id);
-          await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
-          void usePortForwardStore
-            .getState()
-            .startAutoForOwner(preparedProfile, `terminal:${summary.sessionId}`);
           if (options?.initialDirectory) {
             const changeDirectoryCommand = buildChangeDirectoryCommand(options.initialDirectory);
             if (changeDirectoryCommand) {
@@ -140,6 +135,14 @@ export function useConnectSession(): {
               }
             }
           }
+          // Do not expose the connected session to Agent execution until the
+          // initial-directory write (which includes Enter) is complete. This
+          // prevents it from interleaving with a paced terminal wrapper.
+          resolveConnectionAttempt(connectionAttemptId, summary, profile.id);
+          await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
+          void usePortForwardStore
+            .getState()
+            .startAutoForOwner(preparedProfile, `terminal:${summary.sessionId}`);
           logger.info(`Connected to ${profile.host}:${profile.port} (session ${summary.sessionId})`);
           useRecentProfilesStore.getState().touchProfile(profile.id);
           return;

@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './styles/base.css';
 import { App } from './App';
 import { AppErrorBoundary } from './components/app-error-boundary';
-import { initGlobalErrorLogging } from './lib/logger';
+import { createLogger, initGlobalErrorLogging } from './lib/logger';
 import { applyTheme } from './lib/theme';
 import { parseTerminalWorkspace } from './lib/terminal-workspace';
 import { parseSftpWorkspace } from './lib/sftp-workspace';
@@ -27,6 +27,20 @@ import { initializeAgentSessionPersistence } from './lib/agent-sessions';
 initGlobalErrorLogging();
 initializeAgentSessionPersistence();
 
+const logger = createLogger('bootstrap');
+
+function auditRecoveredAiSessionIndex(
+  sessions: Awaited<ReturnType<typeof invokeListAiSessions>>,
+): void {
+  for (const session of sessions) {
+    if (!session.recovery) continue;
+    logger.warn(
+      `AI session index includes recovered history conversation_id=${session.id}`,
+      session.recovery,
+    );
+  }
+}
+
 async function bootstrap(): Promise<void> {
   await Promise.all([
     useAppStore.getState().hydrateFromDb(),
@@ -35,9 +49,12 @@ async function bootstrap(): Promise<void> {
     useAiSettingsStore.getState().hydrateFromDb(),
   ]);
   try {
-    useAiStore.getState().hydrateSessionIndex(await invokeListAiSessions());
-  } catch {
+    const sessions = await invokeListAiSessions();
+    auditRecoveredAiSessionIndex(sessions);
+    useAiStore.getState().hydrateSessionIndex(sessions);
+  } catch (error) {
     // Local AI history is best-effort and must not block application startup.
+    logger.warn('Failed to load the local AI session index during startup', error);
   }
   if (useAppStore.getState().restoreWorkspace) {
     await Promise.all([

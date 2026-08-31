@@ -1,5 +1,5 @@
 const GENERIC_READ_ONLY_COMMANDS = new Set([
-  'cat', 'df', 'du', 'free', 'grep', 'head', 'id', 'ls', 'lsof', 'netstat', 'ps', 'stat',
+  'cat', 'df', 'du', 'grep', 'head', 'id', 'ls', 'ps', 'stat',
   'tail', 'uname', 'uptime', 'whoami',
 ]);
 const SAFE_HOSTNAME_ARGUMENTS = new Set([
@@ -35,6 +35,16 @@ function hasNumericLimit(args: string[], longOption: string, shortOption?: strin
   });
 }
 
+function hasPositiveNumericLimit(args: string[], longOption: string, shortOption: string): boolean {
+  return args.some((argument, index) => {
+    if (new RegExp(`^${longOption}=[1-9]\\d*$`).test(argument)) return true;
+    if (argument === longOption || argument === shortOption) {
+      return /^[1-9]\d*$/.test(args[index + 1] ?? '');
+    }
+    return new RegExp(`^${shortOption}[1-9]\\d*$`).test(argument);
+  });
+}
+
 /**
  * Validates commands before the AI panel offers its paste-only shortcut.
  * The allowlist intentionally excludes shell syntax and state-changing forms.
@@ -51,7 +61,27 @@ export function isSafeReadOnlyCommand(command: string): boolean {
   if (program === 'tail') return !hasFollowOrWatchOption(args);
   if (program === 'cat') {
     return args.some((argument) => !argument.startsWith('-'))
-      && !args.some((argument) => /^\/dev\/(?:full|null|random|urandom|zero)$/.test(argument));
+      && !args.some((argument) => /^\/dev\/(?:full|null|random|urandom|zero|tty|stdin|fd\/0)$/.test(
+        argument.replace(/\/(?:\.)\//g, '/'),
+      ));
+  }
+  if (program === 'free') {
+    const repeats = args.some((argument) => (
+      argument === '-s'
+      || argument === '--seconds'
+      || /^-s\d/.test(argument)
+      || argument.startsWith('--seconds=')
+    ));
+    return !repeats || hasPositiveNumericLimit(args, '--count', '-c');
+  }
+  if (program === 'lsof') {
+    return !args.some((argument) => /^[+-]r(?:\d+(?:\.\d+)?)?$/i.test(argument));
+  }
+  if (program === 'netstat') {
+    return !args.some((argument) => (
+      argument === '--continuous'
+      || /^-[^-]*[cw][^-]*$/.test(argument)
+    ));
   }
   if (GENERIC_READ_ONLY_COMMANDS.has(program)) return true;
   if (program === 'date') {
@@ -71,7 +101,15 @@ export function isSafeReadOnlyCommand(command: string): boolean {
       MUTATING_JOURNALCTL_OPTIONS.some((option) => argument.startsWith(option))
     )) && hasNumericLimit(args, '--lines', '-n');
   }
-  if (program === 'ss') return !args.some((argument) => ['-K', '--kill'].includes(argument));
+  if (program === 'ss') {
+    return !args.some((argument) => (
+      argument === '--kill'
+      || argument === '--events'
+      || argument === '--diag'
+      || argument.startsWith('--diag=')
+      || /^-[^-]*[DEK][^-]*$/.test(argument)
+    ));
+  }
   if (program === 'systemctl') return ['status', 'show', 'is-active', 'list-units'].includes(action);
   if (program === 'docker') {
     if (action === 'stats') return hasEnabledFlag(args.slice(1), '--no-stream');

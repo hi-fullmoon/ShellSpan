@@ -197,6 +197,13 @@ pub enum AgentToolResultStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentTaskOutcome {
+    Completed,
+    Incomplete,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentToolResult {
@@ -479,7 +486,14 @@ mod tests {
             fixture.examples.tool_call.target
         );
         assert_eq!(fixture.examples.tool_results.len(), 5);
-        assert_eq!(fixture.examples.stream_events.len(), 11);
+        assert_eq!(fixture.examples.stream_events.len(), 12);
+        assert!(fixture.examples.stream_events.iter().any(|event| {
+            event.get("type").and_then(serde_json::Value::as_str) == Some("finished")
+                && event.get("outcome").and_then(serde_json::Value::as_str) == Some("incomplete")
+        }));
+        assert!(fixture.examples.stream_events.iter().any(|event| {
+            event.get("type").and_then(serde_json::Value::as_str) == Some("contextLimited")
+        }));
         let statuses = fixture
             .examples
             .tool_results
@@ -674,10 +688,17 @@ mod tests {
             AgentRisk::Destructive,
         ])
         .unwrap();
+        let outcomes =
+            serde_json::to_value([AgentTaskOutcome::Completed, AgentTaskOutcome::Incomplete])
+                .unwrap();
         assert_eq!(
             schema.pointer("/$defs/agentPermissionMode/enum"),
             Some(&permission_modes)
         );
         assert_eq!(schema.pointer("/$defs/agentRisk/enum"), Some(&risks));
+        assert_eq!(
+            schema.pointer("/$defs/agentTaskOutcome/enum"),
+            Some(&outcomes)
+        );
     }
 }

@@ -1,4 +1,4 @@
-import { invokeWriteSession } from '@/lib/tauri';
+import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useAppStore } from '@/stores/appStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -45,10 +45,11 @@ export async function insertHostCommandSnippet(
   ) return 'invalid';
   const sessionId = findConnectedTerminalSession(profileId);
   if (!sessionId) return 'no-target';
+  const controller = terminalRegistry.get(sessionId);
+  if (!controller) return 'no-target';
   useTerminalStore.getState().setActiveSession(sessionId);
   useAppStore.getState().setActiveSection('terminal');
-  await invokeWriteSession(sessionId, command);
-  return 'inserted';
+  return await controller.writeUserInput(command) ? 'inserted' : 'no-target';
 }
 
 export function openHostPath(

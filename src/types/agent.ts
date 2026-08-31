@@ -151,6 +151,9 @@ export type AgentRunStatus =
   | 'cancelled'
   | 'failed';
 
+export const AGENT_TASK_OUTCOMES = ['completed', 'incomplete'] as const;
+export type AgentTaskOutcome = (typeof AGENT_TASK_OUTCOMES)[number];
+
 export interface AgentRunRecord {
   readonly requestId: string;
   readonly conversationId: string;
@@ -189,6 +192,52 @@ export interface PersistedAgentRunState {
   readonly messages: readonly AgentChatMessage[];
   readonly tools: readonly AgentToolApprovalSnapshot[];
 }
+
+export type PersistedAgentRunSet = Readonly<Partial<Omit<
+  AgentRunRecord,
+  'requestId' | 'conversationId' | 'toolCallIds'
+>>>;
+
+export type PersistedAgentMessageSet = Readonly<Partial<Omit<
+  AgentChatMessage,
+  'id' | 'requestId' | 'content' | 'toolCallIds'
+>>>;
+
+export interface PersistedAgentMessagePatch {
+  readonly id: string;
+  readonly upsert?: AgentChatMessage;
+  readonly appendContent?: string;
+  /** UTF-8 byte offset where appendContent starts; omitted only by legacy patches. */
+  readonly contentOffsetBytes?: number;
+  readonly set?: PersistedAgentMessageSet;
+  readonly appendToolCallIds?: readonly string[];
+}
+
+export interface PersistedAgentRunPatch {
+  readonly set?: PersistedAgentRunSet;
+  readonly appendToolCallIds?: readonly string[];
+}
+
+/**
+ * Versioned Agent persistence records. A run starts with one checkpoint and
+ * then appends patches whose size follows the new logical data, rather than
+ * repeatedly appending the growing run snapshot.
+ */
+export type PersistedAgentStateEnvelope =
+  | Readonly<{
+      kind: 'checkpoint';
+      version: 1;
+      state: PersistedAgentRunState;
+    }>
+  | Readonly<{
+      kind: 'patch';
+      version: 1;
+      requestId: string;
+      run?: PersistedAgentRunPatch;
+      messages?: readonly PersistedAgentMessagePatch[];
+      removedMessageIds?: readonly string[];
+      tools?: readonly AgentToolApprovalSnapshot[];
+    }>;
 
 export const AGENT_TOOL_CALLING_SUPPORT = ['supported', 'unsupported', 'unknown'] as const;
 export type AgentToolCallingSupport = (typeof AGENT_TOOL_CALLING_SUPPORT)[number];
@@ -234,8 +283,9 @@ export const AGENT_STREAM_EVENT_TYPES = [
   'toolCall',
   'toolResultAccepted',
   'toolResultTimedOut',
+  'contextLimited',
   'stepLimitReached',
-  'completed',
+  'finished',
   'cancelled',
   'error',
 ] as const;
@@ -273,14 +323,16 @@ export type AgentStreamEvent =
       step: number;
       callId: string;
     }>
+  | Readonly<{ type: 'contextLimited'; requestId: string }>
   | Readonly<{
       type: 'stepLimitReached';
       requestId: string;
       maxToolSteps: number;
     }>
   | Readonly<{
-      type: 'completed';
+      type: 'finished';
       requestId: string;
+      outcome: AgentTaskOutcome;
       toolSteps: number;
       fallback: boolean;
     }>

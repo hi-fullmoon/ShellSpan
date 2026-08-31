@@ -13,6 +13,7 @@ import {
 } from '../agent-contract';
 import {
   AGENT_CAPABILITY_SOURCES,
+  AGENT_TASK_OUTCOMES,
   AGENT_PERMISSION_MODES,
   AGENT_RISKS,
   AGENT_STREAM_EVENT_TYPES,
@@ -51,6 +52,7 @@ describe('Agent v2 shared contract', () => {
     expect(definitions.agentToolResult.properties.status.enum).toEqual(AGENT_TOOL_RESULT_STATUSES);
     expect(definitions.providerCapability.properties.support.enum).toEqual(AGENT_TOOL_CALLING_SUPPORT);
     expect(definitions.providerCapability.properties.source.enum).toEqual(AGENT_CAPABILITY_SOURCES);
+    expect(definitions.agentTaskOutcome.enum).toEqual(AGENT_TASK_OUTCOMES);
     expect(definitions.agentStreamEventType.enum).toEqual(AGENT_STREAM_EVENT_TYPES);
     expect(fixtures.examples.streamEvents.map((event) => event.type)).toEqual(
       AGENT_STREAM_EVENT_TYPES,

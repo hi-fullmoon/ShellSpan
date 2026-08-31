@@ -64,6 +64,7 @@ describe('agentStore M4 lifecycle', () => {
       messages: [],
       runs: {},
       tools: {},
+      contextLimitedRequests: {},
       activeRequestId: undefined,
     });
   });
@@ -71,7 +72,7 @@ describe('agentStore M4 lifecycle', () => {
   it('keeps an empty Assistant message valid when it contains a tool card', () => {
     begin();
     useAgentStore.getState().registerTool(toolSnapshot('awaitingApproval'));
-    useAgentStore.getState().completeRun('request-1', false);
+    useAgentStore.getState().finishRun('request-1', 'incomplete');
 
     const assistant = useAgentStore.getState().messages.find((message) => message.role === 'assistant');
     expect(assistant).toMatchObject({
@@ -98,7 +99,7 @@ describe('agentStore M4 lifecycle', () => {
     expect(useAgentStore.getState().runs['request-1'].phase).toBe('readingResult');
     useAgentStore.getState().setPhase('request-1', 'verifying');
     useAgentStore.getState().appendText('request-1', 'Nginx is active.');
-    useAgentStore.getState().completeRun('request-1', false);
+    useAgentStore.getState().finishRun('request-1', 'completed');
 
     expect(useAgentStore.getState().runs['request-1']).toMatchObject({
       phase: 'completed',
@@ -108,32 +109,32 @@ describe('agentStore M4 lifecycle', () => {
     });
   });
 
-  it('derives partial and incomplete outcomes conservatively from real tool results', () => {
+  it('uses the explicit finished outcome instead of inferring success from tool results', () => {
     begin();
     useAgentStore.getState().registerTool(toolSnapshot('completed', 'call-1'));
-    useAgentStore.getState().registerTool(toolSnapshot('failed', 'call-2'));
-    useAgentStore.getState().completeRun('request-1', false);
-    expect(useAgentStore.getState().runs['request-1'].status).toBe('partial');
+    useAgentStore.getState().finishRun('request-1', 'incomplete');
+    expect(useAgentStore.getState().runs['request-1']).toMatchObject({
+      phase: 'incomplete',
+      status: 'incomplete',
+    });
 
     begin('request-2');
-    const second = toolSnapshot('failed', 'call-3');
-    useAgentStore.getState().registerTool({
-      ...second,
-      toolCall: { ...second.toolCall, requestId: 'request-2' },
-      result: { ...second.result!, requestId: 'request-2' },
+    useAgentStore.getState().appendText('request-2', 'No terminal command was needed.');
+    useAgentStore.getState().finishRun('request-2', 'incomplete');
+    expect(useAgentStore.getState().runs['request-2']).toMatchObject({
+      phase: 'incomplete',
+      status: 'incomplete',
     });
-    useAgentStore.getState().completeRun('request-2', false);
-    expect(useAgentStore.getState().runs['request-2'].status).toBe('incomplete');
   });
 
-  it('never reports a nonzero exit or step-limited run as fully completed', () => {
+  it('keeps nonzero and step-limited runs incomplete when the backend reports them incomplete', () => {
     begin();
     const nonzero = toolSnapshot('completed');
     useAgentStore.getState().registerTool({
       ...nonzero,
       result: { ...nonzero.result!, exitCode: 1, output: 'permission denied' },
     });
-    useAgentStore.getState().completeRun('request-1', false);
+    useAgentStore.getState().finishRun('request-1', 'incomplete');
     expect(useAgentStore.getState().runs['request-1'].status).toBe('incomplete');
 
     begin('request-2');
@@ -144,10 +145,10 @@ describe('agentStore M4 lifecycle', () => {
       result: { ...successful.result!, requestId: 'request-2' },
     });
     useAgentStore.getState().markStepLimit('request-2');
-    useAgentStore.getState().completeRun('request-2', false);
+    useAgentStore.getState().finishRun('request-2', 'incomplete');
     expect(useAgentStore.getState().runs['request-2']).toMatchObject({
-      phase: 'partial',
-      status: 'partial',
+      phase: 'incomplete',
+      status: 'incomplete',
       stepLimitReached: true,
     });
   });
@@ -218,16 +219,22 @@ describe('agentStore M4 lifecycle', () => {
 
   it('clears only the selected Agent conversation lane', () => {
     begin('request-1');
+    useAgentStore.getState().markContextLimited('request-1');
     useAgentStore.getState().cancelRun('request-1');
     begin('request-2');
+    useAgentStore.getState().markContextLimited('request-2');
     useAgentStore.getState().cancelRun('request-2');
 
     useAgentStore.getState().clearConversation('conversation-request-1');
 
     expect(useAgentStore.getState().runs['request-1']).toBeUndefined();
     expect(useAgentStore.getState().runs['request-2']).toBeDefined();
+    expect(useAgentStore.getState().contextLimitedRequests).toEqual({ 'request-2': true });
     expect(useAgentStore.getState().messages.every((message) => (
       message.conversationId === 'conversation-request-2'
     ))).toBe(true);
+
+    useAgentStore.getState().clear();
+    expect(useAgentStore.getState().contextLimitedRequests).toEqual({});
   });
 });

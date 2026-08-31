@@ -16,6 +16,25 @@ describe('safe read-only command validation', () => {
     'docker stats',
     'kubectl get pods --watch',
     'cat /dev/zero',
+    'cat /dev/tty',
+    'cat /dev/./zero',
+    './df -h',
+    '/tmp/df -h',
+    'C:/Users/operator/bin/whoami.exe',
+    'free -s 1',
+    'free -s 1 -c 0',
+    'lsof -r 1',
+    'lsof +r2',
+    'netstat -c',
+    'netstat --continuous',
+    'netstat -w 1',
+    'netstat -anw 1',
+    'ss -E',
+    'ss -Etn',
+    'ss -Ktn dst 203.0.113.10',
+    'ss --events',
+    'ss -D /tmp/ss.dump',
+    'ss --diag=/tmp/ss.dump',
   ])('rejects unsafe commands: %s', (command) => {
     expect(isSafeReadOnlyCommand(command)).toBe(false);
   });
@@ -30,6 +49,9 @@ describe('safe read-only command validation', () => {
     'docker logs --tail 200 app',
     'docker stats --no-stream',
     'kubectl logs app --tail=200',
+    'free -s 1 -c 2',
+    'lsof -iTCP',
+    'netstat -an',
   ])('allows bounded read-only commands: %s', (command) => {
     expect(isSafeReadOnlyCommand(command)).toBe(true);
   });

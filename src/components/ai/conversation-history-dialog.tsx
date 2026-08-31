@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   HistoryIcon,
   SearchIcon,
@@ -28,6 +28,7 @@ interface CurrentConversationItem {
 }
 
 interface ConversationHistoryDialogProps {
+  disabled?: boolean;
   currentConversation?: CurrentConversationItem;
   conversations: AiConversation[];
   selectedConversationId: string | null;
@@ -50,6 +51,7 @@ function conversationSearchText(conversation: AiConversation): string {
 }
 
 export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps> = ({
+  disabled = false,
   currentConversation,
   conversations,
   selectedConversationId,
@@ -71,6 +73,12 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
       ))
       : conversations
   ), [conversations, normalizedQuery]);
+
+  useEffect(() => {
+    if (!disabled) return;
+    setOpen(false);
+    setQuery('');
+  }, [disabled]);
 
   const selectCurrent = (): void => {
     onSelectCurrent();
@@ -102,6 +110,7 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
       <Dialog
         open={open}
         onOpenChange={(nextOpen) => {
+          if (disabled && nextOpen) return;
           setOpen(nextOpen);
           if (!nextOpen) setQuery('');
         }}
@@ -115,6 +124,7 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
                     variant={selectedConversationId ? 'secondary' : 'ghost'}
                     size="sm"
                     className="size-8 p-0"
+                    disabled={disabled}
                     aria-label={t('ai.history')}
                   />
                 )}

@@ -152,7 +152,13 @@ const controllers: AgentUiController[] = [];
 
 describe('AgentUiController M4 integration', () => {
   beforeEach(() => {
-    useAgentStore.setState({ messages: [], runs: {}, tools: {}, activeRequestId: undefined });
+    useAgentStore.setState({
+      messages: [],
+      runs: {},
+      tools: {},
+      contextLimitedRequests: {},
+      activeRequestId: undefined,
+    });
     useAgentPermissionStore.setState({ bindings: {} });
     useAiSettingsStore.setState({ agentEnabled: true });
     connectTerminal();
@@ -225,7 +231,13 @@ describe('AgentUiController M4 integration', () => {
       status: 'completed',
     });
     controller.handleStreamEvent({ type: 'textDelta', requestId: 'request-1', turn: 2, text: 'Nginx is active.' });
-    controller.handleStreamEvent({ type: 'completed', requestId: 'request-1', toolSteps: 1, fallback: false });
+    controller.handleStreamEvent({
+      type: 'finished',
+      requestId: 'request-1',
+      outcome: 'completed',
+      toolSteps: 1,
+      fallback: false,
+    });
     expect(useAgentStore.getState().runs['request-1'].status).toBe('completed');
   });
 
@@ -449,13 +461,29 @@ describe('AgentUiController M4 integration', () => {
       },
     });
     h.emit({ type: 'textDelta', requestId: 'request-1', turn: 1, text: '```bash\nsystemctl status nginx\n```' });
-    h.emit({ type: 'completed', requestId: 'request-1', toolSteps: 0, fallback: true });
+    h.emit({
+      type: 'finished',
+      requestId: 'request-1',
+      outcome: 'incomplete',
+      toolSteps: 0,
+      fallback: true,
+    });
 
     expect(h.execute).not.toHaveBeenCalled();
     expect(useAgentStore.getState().runs['request-1']).toMatchObject({
       status: 'incomplete',
       fallback: { automaticExecution: false, assistantTextExecution: 'forbidden' },
     });
+  });
+
+  it('records when the backend limits an Agent request context', async () => {
+    const h = harness();
+    controllers.push(h.controller);
+    await startRun(h);
+
+    h.emit({ type: 'contextLimited', requestId: 'request-1' });
+
+    expect(useAgentStore.getState().contextLimitedRequests).toEqual({ 'request-1': true });
   });
 
   it('retries the whole task with a new request id while preserving the exact frozen target', async () => {
@@ -574,12 +602,18 @@ describe('AgentUiController M4 integration', () => {
     expect(useAgentStore.getState().runs['request-1'].status).toBe('cancelled');
   });
 
-  it('never executes a delayed tool call after a terminal completion event', async () => {
+  it('never executes a delayed tool call after a terminal incomplete event', async () => {
     const h = harness({ mode: 'fullAccess' });
     controllers.push(h.controller);
     await startRun(h);
     h.emit({ type: 'textDelta', requestId: 'request-1', turn: 1, text: 'No command needed.' });
-    h.emit({ type: 'completed', requestId: 'request-1', toolSteps: 0, fallback: false });
+    h.emit({
+      type: 'finished',
+      requestId: 'request-1',
+      outcome: 'incomplete',
+      toolSteps: 0,
+      fallback: false,
+    });
 
     h.emit({
       type: 'toolCall',
@@ -590,7 +624,7 @@ describe('AgentUiController M4 integration', () => {
 
     expect(h.execute).not.toHaveBeenCalled();
     expect(useAgentStore.getState().tools[agentToolKey('request-1', 'call-1')]).toBeUndefined();
-    expect(useAgentStore.getState().runs['request-1'].status).toBe('completed');
+    expect(useAgentStore.getState().runs['request-1'].status).toBe('incomplete');
   });
 
   it('fails closed on overlapping tool calls instead of authorizing a second command', async () => {
