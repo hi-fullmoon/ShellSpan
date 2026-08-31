@@ -65,7 +65,7 @@ fn sessions_root(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .home_dir()
         .map_err(|error| format!("failed to resolve home directory: {error}"))?
-        .join(".termbridge")
+        .join(".shellspan")
         .join("sessions"))
 }
 

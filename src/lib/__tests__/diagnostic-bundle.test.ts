@@ -19,7 +19,7 @@ describe('diagnostic bundle', () => {
         category: 'network',
       }],
       selectedLog: {
-        name: 'termbridge.log',
+        name: 'shellspan.log',
         source: 'frontend',
         content: 'PASSWORD=hunter2\nAuthorization: Bearer token-value',
       },
@@ -30,7 +30,7 @@ describe('diagnostic bundle', () => {
     expect(JSON.parse(bundle)).toMatchObject({
       schemaVersion: 1,
       generatedAt: '2026-08-23T00:00:00.000Z',
-      application: { name: 'TermBridge', version: '2.1.0', platform: 'Windows' },
+      application: { name: 'ShellSpan', version: '2.1.0', platform: 'Windows' },
       featureState: { terminalSessions: 2, sftpTabs: 1 },
       recentFailures: [{ operationId: 'transfer-123', kind: 'upload', category: 'network' }],
     });

@@ -109,20 +109,20 @@ jobs:
           workspaces: src-tauri -> target
       - name: Start isolated SSH service
         run: |
-          docker build --tag termbridge-ssh-e2e:local tests/ssh-e2e
-          docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml up --detach --wait --pull never
+          docker build --tag shellspan-ssh-e2e:local tests/ssh-e2e
+          docker compose --project-name shellspan-e2e --file tests/ssh-e2e/compose.yml up --detach --wait --pull never
       - name: Run SSH/SFTP end-to-end test
         env:
-          TERMBRIDGE_E2E_SSH_FIXTURE: "1"
-          TERMBRIDGE_E2E_SSH_HOST: 127.0.0.1
-          TERMBRIDGE_E2E_SSH_PORT: "22222"
-          TERMBRIDGE_E2E_SSH_USERNAME: termbridge
-          TERMBRIDGE_E2E_SSH_PASSWORD: termbridge-e2e
-          TERMBRIDGE_E2E_SSH_JUMP_HOST: 127.0.0.1
-          TERMBRIDGE_E2E_SSH_JUMP_PORT: "22223"
-          TERMBRIDGE_E2E_SSH_JUMP_TARGET_HOST: ssh
-          TERMBRIDGE_E2E_SSH_JUMP_TARGET_PORT: "22"
+          SHELLSPAN_E2E_SSH_FIXTURE: "1"
+          SHELLSPAN_E2E_SSH_HOST: 127.0.0.1
+          SHELLSPAN_E2E_SSH_PORT: "22222"
+          SHELLSPAN_E2E_SSH_USERNAME: shellspan
+          SHELLSPAN_E2E_SSH_PASSWORD: shellspan-e2e
+          SHELLSPAN_E2E_SSH_JUMP_HOST: 127.0.0.1
+          SHELLSPAN_E2E_SSH_JUMP_PORT: "22223"
+          SHELLSPAN_E2E_SSH_JUMP_TARGET_HOST: ssh
+          SHELLSPAN_E2E_SSH_JUMP_TARGET_PORT: "22"
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked isolated_ssh_sftp_end_to_end -- --ignored --nocapture --test-threads=1
       - name: Stop isolated SSH service
         if: always()
-        run: docker compose --project-name termbridge-e2e --file tests/ssh-e2e/compose.yml down --volumes --remove-orphans
+        run: docker compose --project-name shellspan-e2e --file tests/ssh-e2e/compose.yml down --volumes --remove-orphans

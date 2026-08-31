@@ -21,7 +21,7 @@ describe('terminal-leader', () => {
 
   it('consumes the leader key and dispatches a focus command on the next key', () => {
     const navigate = vi.fn();
-    document.addEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.addEventListener('shellspan:navigate-terminal-pane', navigate);
 
     expect(handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }))).toBe(true);
     expect(navigate).not.toHaveBeenCalled();
@@ -30,12 +30,12 @@ describe('terminal-leader', () => {
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(lastDetail(navigate).direction).toBe('left');
 
-    document.removeEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.removeEventListener('shellspan:navigate-terminal-pane', navigate);
   });
 
   it('resolves all four focus directions', () => {
     const navigate = vi.fn();
-    document.addEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.addEventListener('shellspan:navigate-terminal-pane', navigate);
 
     const cases: Array<[string, string]> = [
       ['h', 'left'],
@@ -50,25 +50,25 @@ describe('terminal-leader', () => {
     }
     expect(navigate).toHaveBeenCalledTimes(4);
 
-    document.removeEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.removeEventListener('shellspan:navigate-terminal-pane', navigate);
   });
 
   it('matches the command key even while Ctrl is still held', () => {
     const navigate = vi.fn();
-    document.addEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.addEventListener('shellspan:navigate-terminal-pane', navigate);
 
     handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }));
     expect(handleTerminalLeaderKeydown(keydown({ key: 'l', ctrlKey: true }))).toBe(true);
     expect(lastDetail(navigate).direction).toBe('right');
 
-    document.removeEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.removeEventListener('shellspan:navigate-terminal-pane', navigate);
   });
 
   it('dispatches split and close commands', () => {
     const split = vi.fn();
     const close = vi.fn();
-    document.addEventListener('termbridge:split-terminal-pane', split);
-    document.addEventListener('termbridge:close-terminal-tab', close);
+    document.addEventListener('shellspan:split-terminal-pane', split);
+    document.addEventListener('shellspan:close-terminal-tab', close);
 
     handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }));
     expect(handleTerminalLeaderKeydown(keydown({ key: 'v' }))).toBe(true);
@@ -82,8 +82,8 @@ describe('terminal-leader', () => {
     expect(handleTerminalLeaderKeydown(keydown({ key: 'x' }))).toBe(true);
     expect(close).toHaveBeenCalledTimes(1);
 
-    document.removeEventListener('termbridge:split-terminal-pane', split);
-    document.removeEventListener('termbridge:close-terminal-tab', close);
+    document.removeEventListener('shellspan:split-terminal-pane', split);
+    document.removeEventListener('shellspan:close-terminal-tab', close);
   });
 
   it('swallows unknown command keys and disarms', () => {
@@ -114,21 +114,21 @@ describe('terminal-leader', () => {
 
   it('keeps the leader armed through key repeats of the leader itself', () => {
     const navigate = vi.fn();
-    document.addEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.addEventListener('shellspan:navigate-terminal-pane', navigate);
 
     handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }));
     expect(handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true, repeat: true }))).toBe(true);
     expect(handleTerminalLeaderKeydown(keydown({ key: 'h' }))).toBe(true);
     expect(lastDetail(navigate).direction).toBe('left');
 
-    document.removeEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.removeEventListener('shellspan:navigate-terminal-pane', navigate);
   });
 
   it('follows customized leader and sub-key bindings', () => {
     useAppStore.getState().setShortcut('terminalLeader', 'mod+;');
     useAppStore.getState().setShortcut('terminalFocusLeft', 'a');
     const navigate = vi.fn();
-    document.addEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.addEventListener('shellspan:navigate-terminal-pane', navigate);
 
     // The old default leader no longer arms.
     expect(handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }))).toBe(false);
@@ -136,7 +136,7 @@ describe('terminal-leader', () => {
     expect(handleTerminalLeaderKeydown(keydown({ key: 'a' }))).toBe(true);
     expect(lastDetail(navigate).direction).toBe('left');
 
-    document.removeEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.removeEventListener('shellspan:navigate-terminal-pane', navigate);
   });
 
   it('ignores non-keydown events', () => {

@@ -32,9 +32,9 @@ fn ensure_native_store() -> Result<(), String> {
         .clone()
 }
 
-pub(crate) const KEY_SERVICE: &str = "com.termbridge.key";
-pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.termbridge.profile-password";
-pub(crate) const PROFILE_SECRET_SERVICE: &str = "com.termbridge.profile-secret";
+pub(crate) const KEY_SERVICE: &str = "com.shellspan.key";
+pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.shellspan.profile-password";
+pub(crate) const PROFILE_SECRET_SERVICE: &str = "com.shellspan.profile-secret";
 
 /// Kinds of per-profile secrets other than the main login password.
 ///
@@ -472,7 +472,7 @@ mod macos_keychain {
     fn with_current_app_access<T>(
         f: impl FnOnce(SecAccessRef) -> Result<T, Error>,
     ) -> Result<T, Error> {
-        let descriptor = CFString::from_static_string("TermBridge");
+        let descriptor = CFString::from_static_string("ShellSpan");
         let trusted_list = TrustedApplicationList::current_app()?;
         let mut access = ptr::null_mut();
         unsafe {

@@ -792,7 +792,7 @@ async fn classifies_failures_without_response_details() {
 #[ignore = "controlled local Petdex Desktop 0.8.0 end-to-end test"]
 async fn controlled_macos_petdex_restart_recovers_without_adapter_restart() {
     assert_eq!(
-        std::env::var("TERMBRIDGE_PETDEX_E2E").as_deref(),
+        std::env::var("SHELLSPAN_PETDEX_E2E").as_deref(),
         Ok("1"),
         "set the explicit controlled-E2E guard"
     );

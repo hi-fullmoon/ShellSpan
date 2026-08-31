@@ -156,7 +156,7 @@ describe('host quick actions', () => {
     } as SftpConnection;
     useSftpStore.setState({ connections: [connection], activeConnectionId: null });
     const listener = vi.fn();
-    document.addEventListener('termbridge:open-sftp-path', listener);
+    document.addEventListener('shellspan:open-sftp-path', listener);
 
     openHostPath(profile, '/var/log/api', 'sftp');
 
@@ -167,12 +167,12 @@ describe('host quick actions', () => {
       side: 'remote',
       path: '/var/log/api',
     });
-    document.removeEventListener('termbridge:open-sftp-path', listener);
+    document.removeEventListener('shellspan:open-sftp-path', listener);
   });
 
   it('creates a host-bound connection when a path has no open pane', () => {
     const listener = vi.fn();
-    document.addEventListener('termbridge:connect-profile', listener);
+    document.addEventListener('shellspan:connect-profile', listener);
 
     openHostPath(profile, '/srv/api', 'sftp');
 
@@ -182,12 +182,12 @@ describe('host quick actions', () => {
       initialDirectory: '/srv/api',
       sftpSide: 'remote',
     });
-    document.removeEventListener('termbridge:connect-profile', listener);
+    document.removeEventListener('shellspan:connect-profile', listener);
   });
 
   it('routes host tools through the exact profile context', () => {
     const listener = vi.fn();
-    document.addEventListener('termbridge:open-host-tool', listener);
+    document.addEventListener('shellspan:open-host-tool', listener);
 
     runHostConnectionAction(profile.id, 'portForward');
 
@@ -199,6 +199,6 @@ describe('host quick actions', () => {
       profileId: profile.id,
       tool: 'portForward',
     });
-    document.removeEventListener('termbridge:open-host-tool', listener);
+    document.removeEventListener('shellspan:open-host-tool', listener);
   });
 });

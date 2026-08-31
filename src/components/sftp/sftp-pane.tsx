@@ -223,8 +223,8 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
         if (detail?.connectionId !== connection.id || detail.side !== side || !detail.path) return;
         navigateTo(detail.path);
       };
-      document.addEventListener('termbridge:open-sftp-path', handleOpenPath);
-      return () => document.removeEventListener('termbridge:open-sftp-path', handleOpenPath);
+      document.addEventListener('shellspan:open-sftp-path', handleOpenPath);
+      return () => document.removeEventListener('shellspan:open-sftp-path', handleOpenPath);
     }, [connection.id, navigateTo, side]);
 
     const goBack = useCallback((): void => {

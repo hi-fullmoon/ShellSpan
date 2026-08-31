@@ -149,7 +149,7 @@ export const KeychainPanel: React.FC = () => {
     if (!deleting) return;
     try {
       const affectedProfileIds = await removeKey(deleting.id);
-      if (deleting.service === 'com.termbridge.profile-password') {
+      if (deleting.service === 'com.shellspan.profile-password') {
         useProfileStore.getState().clearProfilePassword(deleting.id);
       } else {
         useProfileStore.getState().clearKeychainKeyIds(affectedProfileIds, deleting.id, false);
@@ -220,7 +220,7 @@ export const KeychainPanel: React.FC = () => {
             {filteredKeys.length > 0 && (
               <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.375rem">
                 {filteredKeys.map((key) => {
-                  const isProfilePassword = key.service === 'com.termbridge.profile-password';
+                  const isProfilePassword = key.service === 'com.shellspan.profile-password';
                   return (
                     <ManagementCard key={key.id}>
                       <div className="flex items-center gap-2.5">

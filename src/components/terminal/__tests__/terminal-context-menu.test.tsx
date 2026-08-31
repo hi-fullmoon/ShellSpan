@@ -186,7 +186,7 @@ describe('TerminalContextMenu', () => {
 
     const onClose = vi.fn();
     const eventListener = vi.fn();
-    document.addEventListener('termbridge:close-terminal-tab', eventListener);
+    document.addEventListener('shellspan:close-terminal-tab', eventListener);
 
     render(
       <TerminalContextMenu
@@ -206,7 +206,7 @@ describe('TerminalContextMenu', () => {
     });
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    document.removeEventListener('termbridge:close-terminal-tab', eventListener);
+    document.removeEventListener('shellspan:close-terminal-tab', eventListener);
   });
 
   it('close others leaves only the target session', () => {
@@ -272,7 +272,7 @@ describe('TerminalContextMenu', () => {
 
   it('opens the profiled host in SFTP through the shared host-context event', () => {
     const listener = vi.fn();
-    document.addEventListener('termbridge:connect-profile', listener);
+    document.addEventListener('shellspan:connect-profile', listener);
     const onClose = vi.fn();
     render(
       <TerminalContextMenu
@@ -292,7 +292,7 @@ describe('TerminalContextMenu', () => {
       target: 'sftp',
     });
     expect(onClose).toHaveBeenCalledTimes(1);
-    document.removeEventListener('termbridge:connect-profile', listener);
+    document.removeEventListener('shellspan:connect-profile', listener);
   });
 
   it('keeps the source split scope after the parent closes the context menu', () => {

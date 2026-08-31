@@ -21,19 +21,19 @@ $ErrorActionPreference = 'Stop'
 
 $workspace = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $workspace 'tests\ssh-e2e\compose.yml'
-$projectName = 'termbridge-sftp-benchmark'
+$projectName = 'shellspan-sftp-benchmark'
 
 try {
   docker compose --project-name $projectName --file $composeFile up --build --detach --wait
-  $env:TERMBRIDGE_E2E_SSH_HOST = '127.0.0.1'
-  $env:TERMBRIDGE_E2E_SSH_PORT = '22222'
-  $env:TERMBRIDGE_E2E_SSH_USERNAME = 'termbridge'
-  $env:TERMBRIDGE_E2E_SSH_PASSWORD = 'termbridge-e2e'
-  $env:TERMBRIDGE_SFTP_BENCH_ITERATIONS = $Iterations.ToString()
-  $env:TERMBRIDGE_SFTP_BENCH_LARGE_BYTES = $LargeBytes.ToString()
-  $env:TERMBRIDGE_SFTP_BENCH_SMALL_FILE_COUNT = $SmallFileCount.ToString()
-  $env:TERMBRIDGE_SFTP_BENCH_SMALL_FILE_BYTES = $SmallFileBytes.ToString()
-  $env:TERMBRIDGE_SFTP_BENCH_TRANSFER_BUFFER_BYTES = $TransferBufferBytes.ToString()
+  $env:SHELLSPAN_E2E_SSH_HOST = '127.0.0.1'
+  $env:SHELLSPAN_E2E_SSH_PORT = '22222'
+  $env:SHELLSPAN_E2E_SSH_USERNAME = 'shellspan'
+  $env:SHELLSPAN_E2E_SSH_PASSWORD = 'shellspan-e2e'
+  $env:SHELLSPAN_SFTP_BENCH_ITERATIONS = $Iterations.ToString()
+  $env:SHELLSPAN_SFTP_BENCH_LARGE_BYTES = $LargeBytes.ToString()
+  $env:SHELLSPAN_SFTP_BENCH_SMALL_FILE_COUNT = $SmallFileCount.ToString()
+  $env:SHELLSPAN_SFTP_BENCH_SMALL_FILE_BYTES = $SmallFileBytes.ToString()
+  $env:SHELLSPAN_SFTP_BENCH_TRANSFER_BUFFER_BYTES = $TransferBufferBytes.ToString()
 
   $cargoArguments = @('test')
   if (-not $DebugBuild) { $cargoArguments += '--release' }

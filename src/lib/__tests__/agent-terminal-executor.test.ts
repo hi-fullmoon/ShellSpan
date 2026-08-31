@@ -226,7 +226,7 @@ describe('Agent M2 terminal display filter', () => {
 
       expect(visible).toBe('kimi --version\r\n0.38.0\r\n[root@host ~]# ');
       expect(visible).not.toContain('__tb_');
-      expect(visible).not.toContain('TERMBRIDGE_M2_');
+      expect(visible).not.toContain('SHELLSPAN_M2_');
       expect(visible).not.toContain('\u001e');
       expect(visible).not.toContain('\u001f');
     },
@@ -402,7 +402,7 @@ describe('Agent M2 PTY executor', () => {
       expect(terminalText).toContain('0.38.0');
       expect(terminalText).toContain('[root@host ~]#');
       expect(terminalText).not.toContain('__tb_');
-      expect(terminalText).not.toContain('TERMBRIDGE_M2_');
+      expect(terminalText).not.toContain('SHELLSPAN_M2_');
     });
     const cached = getRecentTerminalOutput('session-1', 20);
 
@@ -412,7 +412,7 @@ describe('Agent M2 PTY executor', () => {
     expect(cached).toContain('0.38.0');
     expect(cached).toContain('[root@host ~]#');
     expect(cached).not.toContain('__tb_');
-    expect(cached).not.toContain('TERMBRIDGE_M2_');
+    expect(cached).not.toContain('SHELLSPAN_M2_');
   });
 
   it('does not write until the underlying PTY output listener is ready', async () => {

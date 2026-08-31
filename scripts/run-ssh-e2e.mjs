@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const composeFile = path.join(workspace, 'tests', 'ssh-e2e', 'compose.yml');
-const projectName = 'termbridge-e2e';
+const projectName = 'shellspan-e2e';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -22,7 +22,7 @@ let composeAttempted = false;
 let failure;
 try {
   run('docker', [
-    'build', '--tag', 'termbridge-ssh-e2e:local', path.dirname(composeFile),
+    'build', '--tag', 'shellspan-ssh-e2e:local', path.dirname(composeFile),
   ]);
   // Set this before `up`: Docker can create part of the project and still
   // return a failure (for example, after one container becomes unhealthy).
@@ -39,15 +39,15 @@ try {
   ], {
     env: {
       ...process.env,
-      TERMBRIDGE_E2E_SSH_FIXTURE: '1',
-      TERMBRIDGE_E2E_SSH_HOST: '127.0.0.1',
-      TERMBRIDGE_E2E_SSH_PORT: '22222',
-      TERMBRIDGE_E2E_SSH_USERNAME: 'termbridge',
-      TERMBRIDGE_E2E_SSH_PASSWORD: 'termbridge-e2e',
-      TERMBRIDGE_E2E_SSH_JUMP_HOST: '127.0.0.1',
-      TERMBRIDGE_E2E_SSH_JUMP_PORT: '22223',
-      TERMBRIDGE_E2E_SSH_JUMP_TARGET_HOST: 'ssh',
-      TERMBRIDGE_E2E_SSH_JUMP_TARGET_PORT: '22',
+      SHELLSPAN_E2E_SSH_FIXTURE: '1',
+      SHELLSPAN_E2E_SSH_HOST: '127.0.0.1',
+      SHELLSPAN_E2E_SSH_PORT: '22222',
+      SHELLSPAN_E2E_SSH_USERNAME: 'shellspan',
+      SHELLSPAN_E2E_SSH_PASSWORD: 'shellspan-e2e',
+      SHELLSPAN_E2E_SSH_JUMP_HOST: '127.0.0.1',
+      SHELLSPAN_E2E_SSH_JUMP_PORT: '22223',
+      SHELLSPAN_E2E_SSH_JUMP_TARGET_HOST: 'ssh',
+      SHELLSPAN_E2E_SSH_JUMP_TARGET_PORT: '22',
     },
   });
 } catch (error) {

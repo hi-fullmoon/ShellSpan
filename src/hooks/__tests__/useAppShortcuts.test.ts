@@ -29,7 +29,7 @@ describe('useAppShortcuts', () => {
 
   it('opens the command palette through the configured global shortcut', () => {
     const listener = vi.fn();
-    document.addEventListener('termbridge:open-command-palette', listener);
+    document.addEventListener('shellspan:open-command-palette', listener);
     renderHook(() => useAppShortcuts());
 
     document.dispatchEvent(new KeyboardEvent('keydown', {
@@ -37,7 +37,7 @@ describe('useAppShortcuts', () => {
     }));
 
     expect(listener).toHaveBeenCalledOnce();
-    document.removeEventListener('termbridge:open-command-palette', listener);
+    document.removeEventListener('shellspan:open-command-palette', listener);
   });
 
   it('uses a customized binding immediately', () => {
@@ -50,18 +50,18 @@ describe('useAppShortcuts', () => {
   it('dispatches terminal actions while the terminal is active', () => {
     useAppStore.setState({ activeSection: 'terminal' });
     const listener = vi.fn();
-    document.addEventListener('termbridge:new-terminal-tab', listener);
+    document.addEventListener('shellspan:new-terminal-tab', listener);
     renderHook(() => useAppShortcuts());
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
 
     expect(listener).toHaveBeenCalledOnce();
-    document.removeEventListener('termbridge:new-terminal-tab', listener);
+    document.removeEventListener('shellspan:new-terminal-tab', listener);
   });
 
   it('opens the terminal tab switcher with mod+shift+o only in the terminal section', () => {
     const listener = vi.fn();
-    document.addEventListener('termbridge:switch-terminal-tab', listener);
+    document.addEventListener('shellspan:switch-terminal-tab', listener);
     renderHook(() => useAppShortcuts());
 
     document.dispatchEvent(new KeyboardEvent('keydown', {
@@ -75,14 +75,14 @@ describe('useAppShortcuts', () => {
     }));
     expect(listener).toHaveBeenCalledOnce();
 
-    document.removeEventListener('termbridge:switch-terminal-tab', listener);
+    document.removeEventListener('shellspan:switch-terminal-tab', listener);
   });
 
   it('scopes the same chord by section: mod+k toggles terminal vs sftp menus', () => {
     const terminalListener = vi.fn();
     const sftpListener = vi.fn();
-    document.addEventListener('termbridge:new-terminal-tab', terminalListener);
-    document.addEventListener('termbridge:new-sftp-connection', sftpListener);
+    document.addEventListener('shellspan:new-terminal-tab', terminalListener);
+    document.addEventListener('shellspan:new-sftp-connection', sftpListener);
     renderHook(() => useAppShortcuts());
 
     useAppStore.setState({ activeSection: 'sftp' });
@@ -95,8 +95,8 @@ describe('useAppShortcuts', () => {
     expect(terminalListener).toHaveBeenCalledOnce();
     expect(sftpListener).toHaveBeenCalledOnce();
 
-    document.removeEventListener('termbridge:new-terminal-tab', terminalListener);
-    document.removeEventListener('termbridge:new-sftp-connection', sftpListener);
+    document.removeEventListener('shellspan:new-terminal-tab', terminalListener);
+    document.removeEventListener('shellspan:new-sftp-connection', sftpListener);
   });
 
   it('ignores leader bindings and leader sub-keys at the document level', () => {

@@ -13,8 +13,8 @@ use crate::ai::AiProviderKind;
 
 pub const AGENT_CONTRACT_VERSION: u8 = 2;
 pub const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = AgentPermissionMode::RequestApproval;
-const EXPERIMENTAL_AGENT_ENV: &str = "TERMBRIDGE_EXPERIMENTAL_AGENT";
-const AGENT_ROLLOUT_ENV: &str = "TERMBRIDGE_AGENT_ROLLOUT";
+const EXPERIMENTAL_AGENT_ENV: &str = "SHELLSPAN_EXPERIMENTAL_AGENT";
+const AGENT_ROLLOUT_ENV: &str = "SHELLSPAN_AGENT_ROLLOUT";
 
 pub const AGENT_CONTRACT_SCHEMA: &str =
     include_str!("../../protocol/agent/v2/agent-contract.schema.json");

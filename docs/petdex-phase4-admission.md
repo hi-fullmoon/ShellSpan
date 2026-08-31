@@ -1,4 +1,4 @@
-# TermBridge × Petdex Phase 4 准入评估
+# ShellSpan × Petdex Phase 4 准入评估
 
 <!-- petdex-phase4-decision: blocked -->
 <!-- petdex-phase4-implementation: not-authorized -->
@@ -35,11 +35,11 @@ pnpm petdex:phase3:gate -- --as-of 2026-08-28
 | 准入项 | 当前证据 | 当前缺口 | 状态 |
 | --- | --- | --- | --- |
 | Phase 3 真实用户门禁 | 2026-08-28 严格门禁为 `collecting` / exit 1；真实台账为 opt-in 0、等量证据 0、Day-7 0/0、定性反馈 0、安全复核未完成 | 必须在真实 14–28 天截止后满足 ≥30 名/等量有引用证据、全部试用用户 Day-7 覆盖且保持启用率 ≥30%、有引用的安全复核确认严重事件为 0，并有引用的状态感知价值反馈 | **阻断**（硬前置） |
-| 资产可机读许可、署名、来源、版本、下架状态 | Phase 0 快照记录 manifest 有 `submittedBy`、资产 URL、`spriteVersionNumber`，上游有 takedown 流程 | 没有逐资产 `license` / `rights` / `copyright`；`submittedBy` 不能表达完整署名义务；URL 不是不可变来源证明；`spriteVersionNumber` 不是资产内容版本或摘要；manifest 没有 active/withdrawn 状态。还缺 TermBridge 对已预览、已下载、已打包和已缓存副本的撤回规则 | **阻断** |
+| 资产可机读许可、署名、来源、版本、下架状态 | Phase 0 快照记录 manifest 有 `submittedBy`、资产 URL、`spriteVersionNumber`，上游有 takedown 流程 | 没有逐资产 `license` / `rights` / `copyright`；`submittedBy` 不能表达完整署名义务；URL 不是不可变来源证明；`spriteVersionNumber` 不是资产内容版本或摘要；manifest 没有 active/withdrawn 状态。还缺 ShellSpan 对已预览、已下载、已打包和已缓存副本的撤回规则 | **阻断** |
 | 下载校验和缓存清理 | 本评估只列出未来应限制内容类型、文件数、大小、解压总量、图片尺寸和缓存总量；仓库没有 Phase 4 下载器、摘要台账或缓存策略 | 缺可信摘要来源、失败关闭校验、原子写入、归档/图片验证、损坏恢复、配额、离线语义；缺用户清理、自动逐出、下架清理、卸载清理及相应测试 | **阻断** |
 | 跨平台窗口原型 | 当前仅有固定 loopback 的外部 Petdex Desktop 状态桥接；没有 Phase 4 窗口原型或平台结果矩阵 | Phase 3 通过后才可定义支持平台并验证透明/置顶/穿透点击/拖拽、焦点与无障碍、虚拟桌面、多屏与 DPI、生命周期、签名和权限；还需记录平台失败与回滚 | **阻断** |
 | 资源占用基线 | 现有性能工具针对终端路径；没有目录、内嵌角色或悬浮渲染器基线 | 缺经批准的 OS/硬件矩阵、对照构建、采样时长和资源预算；缺 idle/动画/多屏场景的 CPU、内存、GPU、唤醒、启动影响及超预算失败口径 | **阻断** |
-| Petdex 格式版本兼容与回滚 | Phase 0 已记录 manifest v1/v2、`spriteVersionNumber` 以及已知 8×9 / 8×11 精灵图族；TermBridge 当前不解析这些格式 | 缺受支持版本矩阵、固定 fixtures、未知/损坏版本失败关闭；缺 last-known-good 元数据/资产回滚、应用降级兼容、缓存 schema 迁移、下架处置和完整关闭功能的回滚路径 | **阻断** |
+| Petdex 格式版本兼容与回滚 | Phase 0 已记录 manifest v1/v2、`spriteVersionNumber` 以及已知 8×9 / 8×11 精灵图族；ShellSpan 当前不解析这些格式 | 缺受支持版本矩阵、固定 fixtures、未知/损坏版本失败关闭；缺 last-known-good 元数据/资产回滚、应用降级兼容、缓存 schema 迁移、下架处置和完整关闭功能的回滚路径 | **阻断** |
 
 上述六项中任何一项阻断，都不能把 Phase 4 标为准入。当前是六项全部阻断，而不是“已准入、待实现”。
 
@@ -66,7 +66,7 @@ pnpm petdex:phase4:gate
 只有同时出现以下可复核变化，才重新作 Phase 4 准入决定：
 
 1. 在 2026-09-11 至 2026-09-25 的真实截止日冻结 Phase 3 台账，完成全部证据引用，并让 `pnpm petdex:phase3:gate -- --as-of <真实截止日>` 返回 `pass` / exit 0。
-2. 提供逐资产可机读的许可、署名要求、不可变来源、内容/格式版本和 active/withdrawn 状态，并有能撤回 TermBridge 全部副本的下架流程证据。
+2. 提供逐资产可机读的许可、署名要求、不可变来源、内容/格式版本和 active/withdrawn 状态，并有能撤回 ShellSpan 全部副本的下架流程证据。
 3. 提供不依赖生产资产下载的完整下载/校验/缓存/清理设计与自动化证据；随后仅在重新授权的阶段任务中验证实现。
 4. Phase 3 通过后，在明确支持的平台矩阵上完成可复现窗口原型记录，并同时产出经批准预算下的资源基线。
 5. 提供格式兼容矩阵、固定测试 fixtures、未知版本失败关闭、last-known-good 与完整禁用/降级回滚演练证据。

@@ -1,4 +1,4 @@
-# TermBridge × Petdex Phase 3 小规模价值验证运行手册
+# ShellSpan × Petdex Phase 3 小规模价值验证运行手册
 
 > 状态：`COLLECTING — 观察期已启动，尚无真实参与者或结论`
 >
@@ -17,15 +17,15 @@
 1. 外部桌宠是否帮助用户发现后台传输、AI 完成或连接失败？
 2. 明确选择试用的用户是否在第 7 天仍主动保持启用？
 3. 联动是否造成干扰、资源压力、遮挡、崩溃、业务阻塞或秘密泄露？
-4. 用户更需要外部悬浮桌宠、TermBridge 窗口内角色，还是普通系统通知？
+4. 用户更需要外部悬浮桌宠、ShellSpan 窗口内角色，还是普通系统通知？
 
-TermBridge 不观察设置开关，不生成参与者 ID，不发送使用事件，不读取 Petdex 使用记录。所有证据只能来自用户主动提交的 GitHub 反馈或经过明确同意的访谈。
+ShellSpan 不观察设置开关，不生成参与者 ID，不发送使用事件，不读取 Petdex 使用记录。所有证据只能来自用户主动提交的 GitHub 反馈或经过明确同意的访谈。
 
 ## 2. 招募与知情选择
 
 ### 招募渠道
 
-- 设置页中的“提供自愿反馈”按钮，只打开固定的 [GitHub Issue 表单](https://github.com/hi-fullmoon/TermBridge/issues/new?template=petdex-phase3-feedback.yml)，不附带应用数据。
+- 设置页中的“提供自愿反馈”按钮，只打开固定的 [GitHub Issue 表单](https://github.com/hi-fullmoon/ShellSpan/issues/new?template=petdex-phase3-feedback.yml)，不附带应用数据。
 - 发布说明、项目讨论或维护者邀请可以链接到同一表单。
 - 访谈仅邀请已经主动表示愿意试用的人；不从应用行为反推、筛选或联系用户。
 
@@ -37,7 +37,7 @@ TermBridge 不观察设置开关，不生成参与者 ID，不发送使用事件
 2. 知道 Petdex Desktop 是独立外部应用；
 3. 主动启用并实际试用，或提供可复核的等量需求证据；
 4. 明确同意其脱敏反馈被计入聚合统计；
-5. 通过 GitHub 表单或访谈主动提交，不由 TermBridge 自动记录。
+5. 通过 GitHub 表单或访谈主动提交，不由 ShellSpan 自动记录。
 
 公开 GitHub Issue 会显示提交者的 GitHub 身份；表单必须先告知这一点。希望保持匿名的人可以选择访谈，由保管者只为台账提供 `anonymous:<record-id>` 引用。台账本身不得保存姓名、账号、邮箱或可逆参与者标识。撤回时，在下一次聚合更新中扣除相应计数和证据引用。
 

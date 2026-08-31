@@ -1,7 +1,7 @@
 import type { ThemeMode } from '@/types';
 
 export type ResolvedTheme = Exclude<ThemeMode, 'system'>;
-export const THEME_CACHE_KEY = 'termbridge.theme';
+export const THEME_CACHE_KEY = 'shellspan.theme';
 
 export function cacheTheme(mode: ThemeMode): void {
   try {

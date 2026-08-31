@@ -11,7 +11,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, State};
 
-const COMMAND_SET_VERSION: &str = "termbridge-read-only-v1";
+const COMMAND_SET_VERSION: &str = "shellspan-read-only-v1";
 const PLATFORM_PROBE_COMMAND: &str = "uname -s";
 const MAX_REMOTE_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_REMOTE_ERROR_BYTES: usize = 4 * 1024;
@@ -846,15 +846,15 @@ TB_DISK=1000000 250000 750000 25% /\n";
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_remote_health() {
         let host =
-            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+            std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
             .ok()
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(22222);
-        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-            .unwrap_or_else(|_| "termbridge".to_string());
-        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-            .unwrap_or_else(|_| "termbridge-e2e".to_string());
+        let username =
+            std::env::var("SHELLSPAN_E2E_SSH_USERNAME").unwrap_or_else(|_| "shellspan".to_string());
+        let password = std::env::var("SHELLSPAN_E2E_SSH_PASSWORD")
+            .unwrap_or_else(|_| "shellspan-e2e".to_string());
         let connection = RemoteConnectionRequest {
             host,
             port,

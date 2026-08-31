@@ -12,7 +12,7 @@ export const CONTEXT_LINE_LIMIT = 2_000;
 export const INCREMENTAL_RESET_BYTES = 192 * 1024;
 export const COALESCED_INCREMENTAL_CHUNKS = 8;
 
-const TERMINAL_LINE = '\u001b[32mtermbridge\u001b[0m output line 0123456789 abcdefghijklmnopqrstuvwxyz\r\n';
+const TERMINAL_LINE = '\u001b[32mshellspan\u001b[0m output line 0123456789 abcdefghijklmnopqrstuvwxyz\r\n';
 
 function repeatedPayload(bytes: number): string {
   return TERMINAL_LINE.repeat(Math.ceil(bytes / TERMINAL_LINE.length)).slice(0, bytes);

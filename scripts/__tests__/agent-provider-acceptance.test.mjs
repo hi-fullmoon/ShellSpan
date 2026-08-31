@@ -15,9 +15,9 @@ describe('MiniMax live provider acceptance', () => {
     });
 
     expect(env).toMatchObject({
-      TERMBRIDGE_M6_MINIMAX_LIVE: '1',
-      TERMBRIDGE_M6_MINIMAX_BASE_URL: DEFAULT_MINIMAX_BASE_URL,
-      TERMBRIDGE_M6_MINIMAX_MODEL: DEFAULT_MINIMAX_MODEL,
+      SHELLSPAN_M6_MINIMAX_LIVE: '1',
+      SHELLSPAN_M6_MINIMAX_BASE_URL: DEFAULT_MINIMAX_BASE_URL,
+      SHELLSPAN_M6_MINIMAX_MODEL: DEFAULT_MINIMAX_MODEL,
       MINIMAX_API_KEY: 'minimax-test-secret',
     });
     expect(env).not.toHaveProperty('OPENAI_API_KEY');

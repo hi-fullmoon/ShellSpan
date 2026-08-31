@@ -59,7 +59,7 @@ RemoteHealthSnapshotResult {
     checkedAt: Date.parse('2026-08-23T08:00:00.000Z'),
     source: {
       kind: 'sshReadOnly',
-      commandSetVersion: 'termbridge-read-only-v1',
+      commandSetVersion: 'shellspan-read-only-v1',
       profileId: profile.id,
       host: profile.host,
       port: profile.port,

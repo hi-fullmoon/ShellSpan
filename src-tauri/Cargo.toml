@@ -1,13 +1,13 @@
 [package]
-name = "TermBridge"
+name = "ShellSpan"
 version = "2.1.0"
-description = "TermBridge desktop SSH client"
+description = "ShellSpan desktop SSH client"
 authors = ["Codex"]
 license = "MIT"
 edition = "2021"
 
 [lib]
-name = "term_bridge_lib"
+name = "shell_span_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

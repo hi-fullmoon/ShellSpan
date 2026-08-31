@@ -163,12 +163,12 @@ describe('Terminal', () => {
     expect(screen.queryByTestId('new-session-dialog')).not.toBeInTheDocument();
 
     act(() => {
-      document.dispatchEvent(new Event('termbridge:new-terminal-tab'));
+      document.dispatchEvent(new Event('shellspan:new-terminal-tab'));
     });
     expect(screen.getByTestId('new-session-dialog')).toBeInTheDocument();
 
     act(() => {
-      document.dispatchEvent(new Event('termbridge:new-terminal-tab'));
+      document.dispatchEvent(new Event('shellspan:new-terminal-tab'));
     });
     expect(screen.queryByTestId('new-session-dialog')).not.toBeInTheDocument();
   });
@@ -184,7 +184,7 @@ describe('Terminal', () => {
 
     render(<Terminal />);
     act(() => {
-      document.dispatchEvent(new Event('termbridge:switch-terminal-tab'));
+      document.dispatchEvent(new Event('shellspan:switch-terminal-tab'));
     });
 
     expect(screen.getByTestId('terminal-tab-switcher')).toBeInTheDocument();
@@ -547,7 +547,7 @@ describe('Terminal', () => {
 
     const navigate = (direction: string): void => {
       act(() => {
-        document.dispatchEvent(new CustomEvent('termbridge:navigate-terminal-pane', {
+        document.dispatchEvent(new CustomEvent('shellspan:navigate-terminal-pane', {
           detail: { direction },
         }));
       });
@@ -603,7 +603,7 @@ describe('Terminal', () => {
     expect(screen.getAllByTestId('terminal-pane')).toHaveLength(1);
 
     act(() => {
-      document.dispatchEvent(new CustomEvent('termbridge:split-terminal-pane', {
+      document.dispatchEvent(new CustomEvent('shellspan:split-terminal-pane', {
         detail: { direction: 'right' },
       }));
     });

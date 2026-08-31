@@ -397,8 +397,8 @@ export const CommandPalette: React.FC = () => {
 
   React.useEffect(() => {
     const handleOpen = (): void => setOpen(true);
-    document.addEventListener('termbridge:open-command-palette', handleOpen);
-    return () => document.removeEventListener('termbridge:open-command-palette', handleOpen);
+    document.addEventListener('shellspan:open-command-palette', handleOpen);
+    return () => document.removeEventListener('shellspan:open-command-palette', handleOpen);
   }, []);
 
   React.useEffect(() => {
@@ -428,7 +428,7 @@ export const CommandPalette: React.FC = () => {
         useAppStore.getState().openSettings(section);
       },
       connect: (profileId, target) => {
-        document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {
+        document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
           detail: { profileId, target },
         }));
       },
@@ -436,7 +436,7 @@ export const CommandPalette: React.FC = () => {
         const app = useAppStore.getState();
         app.setActiveSection('workbench');
         app.setActiveWorkbenchTab('connections');
-        document.dispatchEvent(new CustomEvent('termbridge:open-host-tool', {
+        document.dispatchEvent(new CustomEvent('shellspan:open-host-tool', {
           detail: { profileId, tool },
         }));
       },
@@ -468,7 +468,7 @@ export const CommandPalette: React.FC = () => {
       },
       splitTerminal: (direction) => {
         useAppStore.getState().setActiveSection('terminal');
-        document.dispatchEvent(new CustomEvent('termbridge:split-terminal-pane', {
+        document.dispatchEvent(new CustomEvent('shellspan:split-terminal-pane', {
           detail: { direction },
         }));
       },

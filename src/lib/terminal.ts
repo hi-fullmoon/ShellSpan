@@ -1,7 +1,7 @@
 import { t } from '@/locales';
 import type { SessionStatus } from '@/types';
 
-const TERMINAL_PREFIX = '[36m[termbridge][0m';
+const TERMINAL_PREFIX = '[36m[shellspan][0m';
 
 function statusLabel(status: SessionStatus): string {
   switch (status) {

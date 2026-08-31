@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://termbridge.local/protocol/agent/v1/agent-contract.schema.json",
-  "title": "TermBridge Agent v1 contracts and fixtures",
+  "$id": "https://shellspan.local/protocol/agent/v1/agent-contract.schema.json",
+  "title": "ShellSpan Agent v1 contracts and fixtures",
   "type": "object",
   "additionalProperties": false,
   "required": ["contractVersion", "examples", "permissionMatrix"],

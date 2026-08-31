@@ -1,4 +1,4 @@
-# TermBridge 项目规范
+# ShellSpan 项目规范
 
 ## 项目信息
 

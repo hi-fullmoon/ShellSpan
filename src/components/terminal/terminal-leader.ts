@@ -54,20 +54,20 @@ function effectiveShortcuts(): ShortcutBindings {
 function dispatchLeaderCommand(action: ShortcutAction): void {
   const focusDirection = FOCUS_DIRECTIONS[action];
   if (focusDirection) {
-    document.dispatchEvent(new CustomEvent('termbridge:navigate-terminal-pane', {
+    document.dispatchEvent(new CustomEvent('shellspan:navigate-terminal-pane', {
       detail: { direction: focusDirection },
     }));
     return;
   }
   const splitDirection = SPLIT_DIRECTIONS[action];
   if (splitDirection) {
-    document.dispatchEvent(new CustomEvent('termbridge:split-terminal-pane', {
+    document.dispatchEvent(new CustomEvent('shellspan:split-terminal-pane', {
       detail: { direction: splitDirection },
     }));
     return;
   }
   if (action === 'terminalClosePane') {
-    document.dispatchEvent(new Event('termbridge:close-terminal-tab'));
+    document.dispatchEvent(new Event('shellspan:close-terminal-tab'));
   }
 }
 

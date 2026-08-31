@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-state_dir=/var/lib/termbridge-m6
+state_dir=/var/lib/shellspan-m6
 state_file="$state_dir/service.state"
 count_file="$state_dir/restart.count"
 
@@ -25,7 +25,7 @@ case "${1:-}" in
     cat "$count_file"
     ;;
   *)
-    printf 'usage: termbridge-m6-service {reset|status|restart|restart-count}\n' >&2
+    printf 'usage: shellspan-m6-service {reset|status|restart|restart-count}\n' >&2
     exit 64
     ;;
 esac

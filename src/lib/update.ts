@@ -119,7 +119,7 @@ export async function downloadAndInstallUpdate(
   });
 }
 
-const STARTUP_UPDATE_CHECK_KEY = 'termbridge.update.lastStartupCheckAt';
+const STARTUP_UPDATE_CHECK_KEY = 'shellspan.update.lastStartupCheckAt';
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
 
 export function shouldRunStartupUpdateCheck(now: number): boolean {

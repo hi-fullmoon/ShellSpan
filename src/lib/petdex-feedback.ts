@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauriRuntime } from '@/lib/tauri';
 
-export const PETDEX_PHASE3_FEEDBACK_URL = 'https://github.com/hi-fullmoon/TermBridge/issues/new?template=petdex-phase3-feedback.yml';
+export const PETDEX_PHASE3_FEEDBACK_URL = 'https://github.com/hi-fullmoon/ShellSpan/issues/new?template=petdex-phase3-feedback.yml';
 
 export async function openPetdexPhase3Feedback(): Promise<void> {
   if (isTauriRuntime()) {

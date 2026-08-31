@@ -28,7 +28,7 @@ describe('Petdex Phase 3 feedback link', () => {
     await openPetdexPhase3Feedback();
 
     expect(tauriMocks.invoke).toHaveBeenCalledWith('open_url', {
-      url: 'https://github.com/hi-fullmoon/TermBridge/issues/new?template=petdex-phase3-feedback.yml',
+      url: 'https://github.com/hi-fullmoon/ShellSpan/issues/new?template=petdex-phase3-feedback.yml',
     });
     expect(PETDEX_PHASE3_FEEDBACK_URL).not.toContain('token');
   });

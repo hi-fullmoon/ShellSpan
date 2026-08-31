@@ -800,15 +800,15 @@ mod tests {
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_port_forward() {
         let host =
-            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+            std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
             .ok()
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(22222);
-        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-            .unwrap_or_else(|_| "termbridge".to_string());
-        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-            .unwrap_or_else(|_| "termbridge-e2e".to_string());
+        let username =
+            std::env::var("SHELLSPAN_E2E_SSH_USERNAME").unwrap_or_else(|_| "shellspan".to_string());
+        let password = std::env::var("SHELLSPAN_E2E_SSH_PASSWORD")
+            .unwrap_or_else(|_| "shellspan-e2e".to_string());
         let connection = RemoteConnectionRequest {
             host,
             port,
@@ -872,7 +872,7 @@ mod tests {
             banner.extend_from_slice(&chunk[..count]);
         }
         let banner_text = String::from_utf8_lossy(&banner);
-        assert_eq!(banner_text, "termbridge-forward-ok\n");
+        assert_eq!(banner_text, "shellspan-forward-ok\n");
         let count = banner.len();
         drop(client);
 
@@ -896,15 +896,15 @@ mod tests {
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_remote_port_forward() {
         let host =
-            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+            std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
             .ok()
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(22222);
-        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-            .unwrap_or_else(|_| "termbridge".to_string());
-        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-            .unwrap_or_else(|_| "termbridge-e2e".to_string());
+        let username =
+            std::env::var("SHELLSPAN_E2E_SSH_USERNAME").unwrap_or_else(|_| "shellspan".to_string());
+        let password = std::env::var("SHELLSPAN_E2E_SSH_PASSWORD")
+            .unwrap_or_else(|_| "shellspan-e2e".to_string());
         let connection = RemoteConnectionRequest {
             host: host.clone(),
             port,

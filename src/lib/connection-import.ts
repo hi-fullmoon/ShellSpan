@@ -10,7 +10,7 @@ import { sanitizeHostQuickActions } from '@/lib/host-quick-action-model';
 
 export interface ConnectionImportCandidate {
   id: string;
-  source: 'openssh' | 'termbridge';
+  source: 'openssh' | 'shellspan';
   name: string;
   host: string;
   port: number;
@@ -319,8 +319,8 @@ export function parseConnectionExport(content: string): ConnectionImportCandidat
         || (candidate.authMethod !== 'password' && candidate.authMethod !== 'key')
       ) return [];
       return [{
-        id: `termbridge:${index}:${candidate.name}`,
-        source: 'termbridge' as const,
+        id: `shellspan:${index}:${candidate.name}`,
+        source: 'shellspan' as const,
         name: candidate.name,
         host: candidate.host,
         port: parsePort(String(candidate.port ?? 22)),

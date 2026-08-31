@@ -77,8 +77,8 @@ const Sftp: React.FC = () => {
 
   useEffect(() => {
     const handleNewConnectionRequest = (): void => setNewConnectionMenuOpen((prev) => !prev);
-    document.addEventListener('termbridge:new-sftp-connection', handleNewConnectionRequest);
-    return () => document.removeEventListener('termbridge:new-sftp-connection', handleNewConnectionRequest);
+    document.addEventListener('shellspan:new-sftp-connection', handleNewConnectionRequest);
+    return () => document.removeEventListener('shellspan:new-sftp-connection', handleNewConnectionRequest);
   }, []);
 
   useEffect(() => {
@@ -257,7 +257,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     const profileId = side === 'local' ? connection.leftProfileId : connection.profileId;
     const path = side === 'local' ? connection.localPath : connection.remotePath;
     if (!profileId || !path) return;
-    document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {
+    document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
       detail: { profileId, target: 'terminal', initialDirectory: path },
     }));
   }, [connection.leftProfileId, connection.localPath, connection.profileId, connection.remotePath]);

@@ -185,7 +185,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   const handleOpenSftp = (): void => {
     if (target.profileId) {
-      document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {
+      document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
         detail: { profileId: target.profileId, target: 'sftp' },
       }));
     }
@@ -194,7 +194,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   const handleClose = (): void => {
     document.dispatchEvent(
-      new CustomEvent('termbridge:close-terminal-tab', { detail: { sessionId: target.sessionId } }),
+      new CustomEvent('shellspan:close-terminal-tab', { detail: { sessionId: target.sessionId } }),
     );
     onClose();
   };

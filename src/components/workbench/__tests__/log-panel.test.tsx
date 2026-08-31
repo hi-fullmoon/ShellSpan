@@ -41,7 +41,7 @@ const defaultContent =
   'first complete log line\nsecond complete log line\nthird complete log line';
 let mockContent = defaultContent;
 let mockFiles: { name: string; size: number; modifiedAt: number }[] = [];
-let mockActiveFileName: string | undefined = 'termbridge.log';
+let mockActiveFileName: string | undefined = 'shellspan.log';
 let mockActiveSource: 'frontend' | 'backend' = 'frontend';
 const setActiveSource = vi.fn();
 
@@ -95,7 +95,7 @@ describe('LogPanel', () => {
     mockAddToast.mockClear();
     mockContent = defaultContent;
     mockFiles = [];
-    mockActiveFileName = 'termbridge.log';
+    mockActiveFileName = 'shellspan.log';
     mockActiveSource = 'frontend';
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -111,7 +111,7 @@ describe('LogPanel', () => {
     const today = new Date();
     const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     mockContent =
-      `[${todayString}][12:34:56][INFO][termbridge] persisted log entry`;
+      `[${todayString}][12:34:56][INFO][shellspan] persisted log entry`;
 
     render(<LogPanel />);
 
@@ -145,7 +145,7 @@ describe('LogPanel', () => {
 
   it('shows an empty-filter message when no log entries match', () => {
     mockContent =
-      '[2000-01-01][12:34:56][INFO][termbridge] persisted log entry\n';
+      '[2000-01-01][12:34:56][INFO][shellspan] persisted log entry\n';
 
     render(<LogPanel />);
 
@@ -170,8 +170,8 @@ describe('LogPanel', () => {
     const today = new Date();
     const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     mockContent =
-      `[${todayString}][12:34:56][INFO][termbridge] persisted log entry\n` +
-      `[${todayString}][12:34:57][ERROR][termbridge] something failed badly`;
+      `[${todayString}][12:34:56][INFO][shellspan] persisted log entry\n` +
+      `[${todayString}][12:34:57][ERROR][shellspan] something failed badly`;
 
     render(<LogPanel />);
 
@@ -265,14 +265,14 @@ describe('LogPanel', () => {
     const today = new Date();
     const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     mockContent =
-      `[${todayString}][12:34:57][ERROR][termbridge::connect] something failed badly`;
+      `[${todayString}][12:34:57][ERROR][shellspan::connect] something failed badly`;
 
     render(<LogPanel />);
 
     fireEvent.click(screen.getByText('something failed badly'));
 
     expect(screen.getByText('workbench.logs.inspector.title')).toBeInTheDocument();
-    expect(screen.getByText('termbridge::connect')).toBeInTheDocument();
+    expect(screen.getByText('shellspan::connect')).toBeInTheDocument();
     expect(screen.getByText('workbench.logs.inspector.raw')).toBeInTheDocument();
     expect(
       screen.getByText('workbench.logs.inspector.title').closest('aside'),
@@ -287,7 +287,7 @@ describe('LogPanel', () => {
     const today = new Date();
     const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     mockContent =
-      `[${todayString}][12:34:57][ERROR][termbridge] copy this entry`;
+      `[${todayString}][12:34:57][ERROR][shellspan] copy this entry`;
 
     render(<LogPanel />);
     fireEvent.click(screen.getByText('copy this entry'));
@@ -316,7 +316,7 @@ describe('LogPanel', () => {
     const today = new Date();
     const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     mockContent =
-      `[${todayString}][12:34:57][ERROR][termbridge] something failed\n` +
+      `[${todayString}][12:34:57][ERROR][shellspan] something failed\n` +
       'Error: stack trace\n    at render (app.tsx:1:1)';
 
     render(<LogPanel />);

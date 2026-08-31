@@ -139,8 +139,8 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       else if (detail.tool === 'overview') setOverviewProfile(target);
       else if (detail.tool === 'quickActions') setQuickActionProfile(target);
     };
-    document.addEventListener('termbridge:open-host-tool', handleOpenHostTool);
-    return () => document.removeEventListener('termbridge:open-host-tool', handleOpenHostTool);
+    document.addEventListener('shellspan:open-host-tool', handleOpenHostTool);
+    return () => document.removeEventListener('shellspan:open-host-tool', handleOpenHostTool);
   }, [profiles]);
 
   return (

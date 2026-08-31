@@ -194,7 +194,7 @@ describe('SftpPane', () => {
     vi.mocked(invokeListRemoteDirectory).mockClear();
 
     act(() => {
-      document.dispatchEvent(new CustomEvent('termbridge:open-sftp-path', {
+      document.dispatchEvent(new CustomEvent('shellspan:open-sftp-path', {
         detail: {
           connectionId: connection.id,
           side: 'remote',
