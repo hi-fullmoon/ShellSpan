@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 6;
+const CURRENT_SCHEMA_VERSION: i32 = 7;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -205,6 +205,14 @@ INSERT INTO schema_version (version) VALUES (6);
 COMMIT;
 ";
 
+const SCHEMA_V7: &str = "
+BEGIN IMMEDIATE;
+DROP TABLE IF EXISTS operation_history_events;
+DELETE FROM preferences WHERE key = 'operationHistoryRetentionDays';
+INSERT INTO schema_version (version) VALUES (7);
+COMMIT;
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -277,6 +285,11 @@ impl Database {
         if current < 6 {
             conn.execute_batch(SCHEMA_V6)
                 .map_err(|e| format!("migration v6 failed: {e}"))?;
+        }
+
+        if current < 7 {
+            conn.execute_batch(SCHEMA_V7)
+                .map_err(|e| format!("migration v7 failed: {e}"))?;
         }
 
         Ok(())
@@ -936,7 +949,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_creates_tables() {
+    fn migration_creates_current_schema_without_legacy_operation_history() {
         let db = test_db();
         let conn = db.conn.lock().unwrap();
         let version: i32 = conn
@@ -946,7 +959,7 @@ mod tests {
             .unwrap();
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
-        // Verify tables exist by querying them
+        // Verify the current tables exist and the retired table does not.
         conn.execute("SELECT 1 FROM profiles LIMIT 0", []).unwrap();
         conn.execute("SELECT 1 FROM preferences LIMIT 0", [])
             .unwrap();
@@ -960,17 +973,15 @@ mod tests {
             .unwrap();
         conn.execute("SELECT 1 FROM key_credentials LIMIT 0", [])
             .unwrap();
-        conn.execute("SELECT 1 FROM operation_history_events LIMIT 0", [])
+        let operation_history_table_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name='operation_history_events'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
-        let operation_history_columns = conn
-            .prepare("PRAGMA table_info(operation_history_events)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(operation_history_columns.contains(&"permission_mode".to_string()));
-        assert!(operation_history_columns.contains(&"human_approved".to_string()));
+        assert_eq!(operation_history_table_count, 0);
         let has_secret_value_column: bool = conn
             .prepare("PRAGMA table_info(key_credentials)")
             .unwrap()
@@ -1066,7 +1077,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_v6_preserves_v5_history_and_adds_agent_audit_fields() {
+    fn migration_v7_removes_legacy_history_and_preference_and_is_idempotent() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_V1).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
@@ -1075,13 +1086,31 @@ mod tests {
         conn.execute_batch(SCHEMA_V3).unwrap();
         conn.execute_batch(SCHEMA_V4).unwrap();
         conn.execute_batch(SCHEMA_V5).unwrap();
+        conn.execute_batch(SCHEMA_V6).unwrap();
         conn.execute(
             "INSERT INTO operation_history_events (
                 event_id, task_id, operation_id, occurred_at, category, action,
                 event_kind, status, targets_json, evidence_json, created_at
              ) VALUES (
-                'event-v5', 'task-v5', 'operation-v5', 1, 'terminal',
+                'event-v6', 'task-v6', 'operation-v6', 1, 'terminal',
                 'closeSession', 'completed', 'succeeded', '[]', '[]', 1
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO preferences (key, value) VALUES
+             ('operationHistoryRetentionDays', '0'),
+             ('theme', '\"dark\"')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO profiles (
+                id, name, host, port, username, auth_method, created_at, updated_at
+             ) VALUES (
+                'profile-kept', 'Kept profile', 'example.com', 22, 'alice',
+                'password', 1, 1
              )",
             [],
         )
@@ -1091,23 +1120,57 @@ mod tests {
         };
 
         db.migrate().unwrap();
+        db.migrate().unwrap();
 
         let conn = db.conn.lock().unwrap();
-        let preserved: (String, Option<String>, Option<bool>) = conn
+        let operation_history_table_count: i32 = conn
             .query_row(
-                "SELECT action, permission_mode, human_approved
-                 FROM operation_history_events WHERE event_id='event-v5'",
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name='operation_history_events'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(preserved, ("closeSession".to_string(), None, None));
+        assert_eq!(operation_history_table_count, 0);
+        let retention_preference_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM preferences
+                 WHERE key='operationHistoryRetentionDays'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retention_preference_count, 0);
+        let theme: String = conn
+            .query_row(
+                "SELECT value FROM preferences WHERE key='theme'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(theme, "\"dark\"");
+        let profile_name: String = conn
+            .query_row(
+                "SELECT name FROM profiles WHERE id='profile-kept'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(profile_name, "Kept profile");
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
+        let version_row_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_version WHERE version=7",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version_row_count, 1);
     }
 
     #[test]
