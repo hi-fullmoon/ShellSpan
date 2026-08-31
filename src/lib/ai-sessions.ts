@@ -11,6 +11,7 @@ import {
   invokeDeleteAiSessions,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
+import { generateId } from '@/lib/utils';
 import { flushAiStreamDelta } from '@/lib/ai-stream-batcher';
 import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
 import {
@@ -24,6 +25,13 @@ import {
 import { flushAgentSessionPersistence } from '@/lib/agent-sessions';
 
 const logger = createLogger('aiSessions');
+
+export function resolvedAiConversationScope(
+  conversation: Pick<AiConversation, 'scope'>,
+): 'workbench' | 'terminal' {
+  return conversation.scope ?? 'terminal';
+}
+
 export function conversationFromTerminal(session: TerminalSession): AiConversation | undefined {
   if (!session.conversationId || !session.conversationStartedAt) return undefined;
   return {
@@ -32,6 +40,7 @@ export function conversationFromTerminal(session: TerminalSession): AiConversati
     updatedAt: session.conversationStartedAt,
     title: session.title,
     archived: false,
+    scope: 'terminal',
     sessionId: session.sessionId,
     profileId: session.profileId,
     host: session.host,
@@ -53,6 +62,7 @@ export async function ensureAiSessionFile(session: TerminalSession): Promise<AiC
     id: conversation.id,
     timestamp: conversation.startedAt,
     title: conversation.title,
+    scope: 'terminal',
     sessionId: conversation.sessionId,
     profileId: conversation.profileId,
     host: conversation.host,
@@ -62,6 +72,72 @@ export async function ensureAiSessionFile(session: TerminalSession): Promise<AiC
   useAiStore.getState().upsertConversation(conversation);
   await enqueueAiSessionPersistence(conversation.id, () => invokeCreateAiSession(meta));
   return conversation;
+}
+
+export function ensureWorkbenchAiConversation(title: string): AiConversation {
+  const ai = useAiStore.getState();
+  const existing = ai.activeWorkbenchConversationId
+    ? ai.conversations.find((conversation) => (
+        conversation.id === ai.activeWorkbenchConversationId
+        && resolvedAiConversationScope(conversation) === 'workbench'
+        && !conversation.archived
+      ))
+    : undefined;
+  if (existing) return existing;
+
+  const timestamp = new Date().toISOString();
+  const conversation: AiConversation = {
+    id: generateId(),
+    startedAt: timestamp,
+    updatedAt: timestamp,
+    title,
+    archived: false,
+    scope: 'workbench',
+    host: '',
+    port: 0,
+    username: '',
+  };
+  const meta: AiSessionMeta = {
+    id: conversation.id,
+    timestamp,
+    title,
+    scope: 'workbench',
+    host: '',
+    port: 0,
+    username: '',
+  };
+  ai.upsertConversation(conversation);
+  ai.setActiveWorkbenchConversationId(conversation.id);
+  const reboundMessages = ai.bindUnboundWorkbenchMessages(conversation.id);
+  void enqueueAiSessionPersistence(conversation.id, () => invokeCreateAiSession(meta))
+    .catch((error) => logger.warn('Failed to create Workbench AI conversation', error));
+  for (const message of reboundMessages) {
+    void persistAiMessage(message).catch((error) => {
+      logger.warn('Failed to migrate an in-memory Workbench AI message', error);
+    });
+  }
+  return conversation;
+}
+
+export function startNewWorkbenchAiConversation(title: string): string {
+  const ai = useAiStore.getState();
+  const previousConversationId = ai.activeWorkbenchConversationId;
+  const previousConversation = previousConversationId
+    ? ai.conversations.find((conversation) => conversation.id === previousConversationId)
+    : undefined;
+
+  if (previousConversation && !previousConversation.archived) {
+    ai.archiveConversation(previousConversation.id);
+    void enqueueAiSessionPersistence(previousConversation.id, () => (
+      invokeArchiveAiSession(
+        previousConversation.id,
+        previousConversation.startedAt,
+        'new_conversation',
+      )
+    )).catch((error) => logger.warn('Failed to archive previous Workbench AI conversation', error));
+  }
+  ai.setActiveWorkbenchConversationId(null);
+  return ensureWorkbenchAiConversation(title).id;
 }
 
 export async function persistAiMessage(message: AiChatMessage): Promise<void> {

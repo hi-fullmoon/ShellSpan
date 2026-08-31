@@ -16,6 +16,28 @@ function begin(requestId = 'request-1'): void {
 describe('aiStore', () => {
   beforeEach(() => {
     useAiStore.getState().clear();
+    useAiStore.getState().setOpen(false);
+  });
+
+  it('keeps panel visibility isolated by app section', () => {
+    useAiStore.getState().setOpen(true, 'workbench');
+
+    expect(useAiStore.getState().panelOpenBySection).toEqual({
+      workbench: true,
+      terminal: false,
+    });
+
+    useAiStore.getState().toggleOpen('terminal');
+    expect(useAiStore.getState().panelOpenBySection).toEqual({
+      workbench: true,
+      terminal: true,
+    });
+
+    useAiStore.getState().setOpen(false, 'workbench');
+    expect(useAiStore.getState().panelOpenBySection).toEqual({
+      workbench: false,
+      terminal: true,
+    });
   });
 
   it('records request provenance and completes streamed responses', () => {
@@ -161,6 +183,46 @@ describe('aiStore', () => {
     expect(useAiStore.getState().conversations).toEqual([conversation]);
     expect(useAiStore.getState().messages).toEqual([]);
     expect(useAiStore.getState().loadedConversationIds).toEqual([]);
+  });
+
+  it('restores only the latest active Workbench conversation from the index', () => {
+    useAiStore.getState().hydrateSessionIndex([
+      {
+        id: 'terminal-current',
+        startedAt: '2026-08-31T04:00:00.000Z',
+        updatedAt: '2026-08-31T04:00:00.000Z',
+        title: 'root@example.com',
+        archived: false,
+        scope: 'terminal',
+        host: 'example.com',
+        port: 22,
+        username: 'root',
+      },
+      {
+        id: 'workbench-older',
+        startedAt: '2026-08-31T05:00:00.000Z',
+        updatedAt: '2026-08-31T05:00:00.000Z',
+        title: 'Workbench conversation',
+        archived: false,
+        scope: 'workbench',
+        host: '',
+        port: 0,
+        username: '',
+      },
+      {
+        id: 'workbench-latest',
+        startedAt: '2026-08-31T06:00:00.000Z',
+        updatedAt: '2026-08-31T06:00:00.000Z',
+        title: 'Workbench conversation',
+        archived: false,
+        scope: 'workbench',
+        host: '',
+        port: 0,
+        username: '',
+      },
+    ]);
+
+    expect(useAiStore.getState().activeWorkbenchConversationId).toBe('workbench-latest');
   });
 
   it('marks an empty locally upserted conversation as loaded', () => {
