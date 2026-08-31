@@ -141,10 +141,10 @@ describe('M3 permission and approval components', () => {
     expect(screen.getByRole('button', { name: 'agent.permission' })).toBeDisabled();
   });
 
-  it('shows the complete target and command before approving or rejecting', async () => {
+  it('shows the connection target without the internal session id before approval', async () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();
-    render(
+    const { container } = render(
       <AgentApprovalCard
         snapshot={approvalSnapshot()}
         onApprove={onApprove}
@@ -152,12 +152,18 @@ describe('M3 permission and approval components', () => {
       />,
     );
 
-    expect(screen.getByText('operator@server.example.com:22 · session-1')).toBeVisible();
+    expect(screen.getByText('operator@server.example.com:22')).toBeVisible();
+    expect(screen.queryByText(/session-1/)).not.toBeInTheDocument();
+    expect(container.querySelector('[data-slot="agent-approval-card"]')).toHaveStyle({
+      '--card-spacing': 'calc(var(--spacing) * 2)',
+    });
+    expect(container.querySelector('[data-slot="card-content"]')).toHaveClass('gap-2');
     expect(screen.getByText('systemctl restart nginx --no-block')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'agent.approval.approve' }));
     expect(await screen.findByText('agent.approval.dialogDescription')).toBeVisible();
     expect(screen.getByRole('alertdialog')).toHaveClass('p-4');
-    expect(screen.getAllByText('operator@server.example.com:22 · session-1')).toHaveLength(2);
+    expect(screen.getAllByText('operator@server.example.com:22')).toHaveLength(2);
+    expect(screen.queryByText(/session-1/)).not.toBeInTheDocument();
     expect(screen.getAllByText('systemctl restart nginx --no-block')).toHaveLength(2);
 
     const approveButtons = screen.getAllByRole('button', { name: 'agent.approval.approve' });
