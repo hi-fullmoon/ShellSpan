@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, PetdexConnectionStatus, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
 import type { OperationHistoryCategory } from '@/types/operation-history';
 import {
   invokeLoadPreferences,
@@ -73,6 +73,9 @@ interface AppPreferences {
 
 interface AppState extends AppPreferences {
   initialized: boolean;
+  petdexBackendEnabled: boolean;
+  petdexRequestedEnabled: boolean | null;
+  petdexConfiguring: boolean;
   activeSection: AppSection;
   activeWorkbenchTab: WorkbenchTab;
   activeSettingsSection: SettingsSection;
@@ -91,7 +94,7 @@ interface AppState extends AppPreferences {
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
-  setPetdexEnabled: (enabled: boolean) => void;
+  setPetdexEnabled: (enabled: boolean) => Promise<PetdexConnectionStatus>;
   setStartupSection: (section: AppSection) => void;
   setTerminalFontSize: (fontSize: number) => void;
   setTerminalFontFamily: (fontFamily: TerminalFontFamily) => void;
@@ -240,6 +243,14 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let petdexConfigurationRevision = 0;
+let petdexConfigurationQueue: Promise<void> = Promise.resolve();
+
+function enqueuePetdexConfiguration(enabled: boolean): Promise<PetdexConnectionStatus> {
+  const request = petdexConfigurationQueue.then(() => configurePetdex(enabled));
+  petdexConfigurationQueue = request.then(() => undefined, () => undefined);
+  return request;
+}
 
 function debouncedSaveToDb(state: AppPreferences) {
   if (saveTimer) clearTimeout(saveTimer);
@@ -255,9 +266,12 @@ function debouncedSaveToDb(state: AppPreferences) {
 }
 
 export const useAppStore = create<AppState>()(
-  subscribeWithSelector((set, _get) => ({
+  subscribeWithSelector((set, get) => ({
     ...defaults,
     initialized: false,
+    petdexBackendEnabled: false,
+    petdexRequestedEnabled: null,
+    petdexConfiguring: false,
     activeSection: defaults.startupSection,
     activeWorkbenchTab: 'connections' as WorkbenchTab,
     activeSettingsSection: 'general' as SettingsSection,
@@ -270,23 +284,50 @@ export const useAppStore = create<AppState>()(
         const entries = await invokeLoadPreferences();
         if (entries.length > 0) {
           const prefs = entriesToPreferences(entries);
-          set({ ...prefs, initialized: true, activeSection: prefs.startupSection ?? defaults.startupSection });
-          void configurePetdex(prefs.petdexEnabled ?? false).catch(() => {
+          const requestedPetdexEnabled = prefs.petdexEnabled ?? false;
+          let confirmedPetdexEnabled = requestedPetdexEnabled;
+          try {
+            await enqueuePetdexConfiguration(requestedPetdexEnabled);
+          } catch {
+            confirmedPetdexEnabled = false;
             logger.warn('failed to synchronize Petdex integration state');
+          }
+          set({
+            ...prefs,
+            petdexEnabled: confirmedPetdexEnabled,
+            petdexBackendEnabled: confirmedPetdexEnabled,
+            petdexRequestedEnabled: null,
+            petdexConfiguring: false,
+            initialized: true,
+            activeSection: prefs.startupSection ?? defaults.startupSection,
           });
           if (prefs.locale) {
             void changeLocale(prefs.locale);
           }
           logger.info('preferences loaded from database');
         } else {
-          set({ initialized: true });
-          void configurePetdex(false).catch(() => {
+          try {
+            await enqueuePetdexConfiguration(false);
+          } catch {
             logger.warn('failed to initialize Petdex integration state');
+          }
+          set({
+            petdexEnabled: false,
+            petdexBackendEnabled: false,
+            petdexRequestedEnabled: null,
+            petdexConfiguring: false,
+            initialized: true,
           });
         }
       } catch (error) {
         logger.error('failed to hydrate preferences from database', error);
-        set({ initialized: true });
+        set({
+          petdexEnabled: false,
+          petdexBackendEnabled: false,
+          petdexRequestedEnabled: null,
+          petdexConfiguring: false,
+          initialized: true,
+        });
       }
     },
 
@@ -315,11 +356,36 @@ export const useAppStore = create<AppState>()(
       set({ locale });
     },
     setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
-    setPetdexEnabled: (petdexEnabled) => {
-      set({ petdexEnabled });
-      void configurePetdex(petdexEnabled).catch(() => {
-        logger.warn('failed to update Petdex integration state');
+    setPetdexEnabled: async (requestedEnabled) => {
+      const revision = ++petdexConfigurationRevision;
+      set({
+        petdexRequestedEnabled: requestedEnabled,
+        petdexConfiguring: true,
       });
+      try {
+        const status = await enqueuePetdexConfiguration(requestedEnabled);
+        if (revision === petdexConfigurationRevision) {
+          set({
+            petdexEnabled: requestedEnabled,
+            petdexBackendEnabled: requestedEnabled,
+            petdexRequestedEnabled: null,
+            petdexConfiguring: false,
+          });
+        } else {
+          set({ petdexBackendEnabled: requestedEnabled });
+        }
+        return status;
+      } catch (error) {
+        if (revision === petdexConfigurationRevision) {
+          set({
+            petdexEnabled: get().petdexBackendEnabled,
+            petdexRequestedEnabled: null,
+            petdexConfiguring: false,
+          });
+        }
+        logger.warn('failed to update Petdex integration state');
+        throw error;
+      }
     },
     setStartupSection: (startupSection) => set({ startupSection }),
     setTerminalFontSize: (terminalFontSize) => set({ terminalFontSize }),
