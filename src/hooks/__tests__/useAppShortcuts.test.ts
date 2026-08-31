@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppShortcuts } from '../useAppShortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useAiStore } from '@/stores/aiStore';
 
 describe('useAppShortcuts', () => {
   beforeEach(() => {
@@ -11,6 +12,7 @@ describe('useAppShortcuts', () => {
       activeWorkbenchTab: 'connections',
       shortcuts: { ...DEFAULT_SHORTCUTS },
     });
+    useAiStore.getState().setOpen(false);
   });
 
   it('navigates between app sections', () => {
@@ -45,6 +47,20 @@ describe('useAppShortcuts', () => {
     renderHook(() => useAppShortcuts());
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true, bubbles: true }));
     expect(useAppStore.getState().activeSection).toBe('sftp');
+  });
+
+  it('does not open an AI panel in SFTP', () => {
+    useAppStore.setState({ activeSection: 'sftp' });
+    renderHook(() => useAppShortcuts());
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'a', ctrlKey: true, shiftKey: true, bubbles: true,
+    }));
+
+    expect(useAiStore.getState().panelOpenBySection).toEqual({
+      workbench: false,
+      terminal: false,
+    });
   });
 
   it('dispatches terminal actions while the terminal is active', () => {
