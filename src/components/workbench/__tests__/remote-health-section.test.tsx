@@ -39,6 +39,7 @@ describe('RemoteHealthSection authorization', () => {
   it('shows the profile label instead of its internal ID in the target select', () => {
     render(<RemoteHealthSection />);
 
+    expect(screen.getByText('remoteHealth.title').querySelector('svg')).toBeNull();
     const select = screen.getByRole('combobox', { name: 'remoteHealth.profile' });
     expect(select).toHaveTextContent('Production · root@prod.example.com:22');
     expect(select).not.toHaveTextContent(profile.id);
@@ -67,8 +68,8 @@ describe('RemoteHealthSection authorization', () => {
     const collectButton = screen.getByRole('button', { name: 'remoteHealth.collect' });
     expect(collectButton).toHaveClass('h-8');
     expect(collectButton.closest('[data-slot="card-footer"]')).toBeNull();
-    expect(collectButton.closest('[data-slot="card-action"]')).toBeNull();
-    expect(collectButton.closest('[data-slot="remote-health-section-header"]'))
+    expect(collectButton.closest('[data-slot="card-action"]')).toBeInTheDocument();
+    expect(collectButton.closest('[data-slot="remote-health-section-actions"]'))
       .toBeInTheDocument();
     expect(document.querySelector('[data-slot="remote-health-actions"]')).toBeNull();
     fireEvent.click(collectButton);

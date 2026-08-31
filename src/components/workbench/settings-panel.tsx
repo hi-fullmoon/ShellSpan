@@ -19,12 +19,14 @@ import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
 import { findShortcutConflict, getShortcutKeys, isLeaderShortcutAction, shortcutFromBareKeyEvent, shortcutFromKeyboardEvent } from '@/lib/shortcuts';
+import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
-import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
@@ -119,6 +121,7 @@ const PETDEX_STATUS_LABEL_KEYS: Record<PetdexConnectionStatus, LocaleKey> = {
 };
 
 interface SettingRowProps {
+  className?: string;
   description: string;
   descriptionId?: string;
   label: string;
@@ -126,19 +129,90 @@ interface SettingRowProps {
   children: React.ReactNode;
 }
 
-const SettingRow: React.FC<SettingRowProps> = ({ description, descriptionId, label, labelId, children }) => (
-  <div className="grid min-h-16 grid-cols-1 items-start gap-3 px-4 py-3 @min-[38rem]:grid-cols-[minmax(0,1fr)_11rem] @min-[38rem]:items-center @min-[38rem]:gap-6 @min-[38rem]:py-2.5">
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <Label id={labelId} className="text-sm font-medium text-foreground">{label}</Label>
-      <p id={descriptionId} className="text-xs leading-5 text-muted-foreground">{description}</p>
+const SettingRow: React.FC<SettingRowProps> = ({
+  children,
+  className,
+  description,
+  descriptionId,
+  label,
+  labelId,
+}) => (
+  <Field
+    className={cn(
+      'min-h-20 gap-3 px-5 py-4 @min-[34rem]:flex-row @min-[34rem]:items-center @min-[34rem]:justify-between @min-[34rem]:gap-6',
+      className,
+    )}
+  >
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <FieldLabel id={labelId} className="text-sm font-medium text-foreground">
+        {label}
+      </FieldLabel>
+      <FieldDescription id={descriptionId} className="leading-5">
+        {description}
+      </FieldDescription>
     </div>
-    <div className="w-full">{children}</div>
-  </div>
+    <div
+      data-slot="setting-control"
+      className="flex min-h-8 w-full items-center justify-start @min-[34rem]:w-auto @min-[34rem]:shrink-0 @min-[34rem]:justify-end"
+    >
+      {children}
+    </div>
+  </Field>
 );
 
-const SettingGroupLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</div>
-);
+interface SettingGroupLabelProps {
+  children: React.ReactNode;
+}
+
+const SettingGroupLabel: React.FC<SettingGroupLabelProps> = () => null;
+
+const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const groups: Array<{ rows: React.ReactNode[]; title?: React.ReactNode }> = [];
+  let currentGroup: { rows: React.ReactNode[]; title?: React.ReactNode } = { rows: [] };
+
+  React.Children.forEach(children, (child) => {
+    if (child === null || child === undefined || typeof child === 'boolean') return;
+    if (
+      React.isValidElement<SettingGroupLabelProps>(child)
+      && child.type === SettingGroupLabel
+    ) {
+      if (currentGroup.rows.length > 0) groups.push(currentGroup);
+      currentGroup = { rows: [], title: child.props.children };
+      return;
+    }
+    currentGroup.rows.push(child);
+  });
+
+  if (currentGroup.rows.length > 0) groups.push(currentGroup);
+
+  return (
+    <div data-slot="settings-groups" className="flex flex-col gap-6">
+      {groups.map((group, groupIndex) => (
+        <section
+          key={groupIndex}
+          data-slot="settings-group"
+          className="flex min-w-0 flex-col gap-2.5"
+        >
+          {group.title && (
+            <h3 className="px-1 text-sm font-semibold text-foreground">{group.title}</h3>
+          )}
+          <Card variant="outline" className="gap-0 py-0">
+            <CardContent className="px-0">
+              <FieldGroup className="gap-0">
+                {group.rows.map((row, rowIndex) => (
+                  <React.Fragment key={rowIndex}>
+                    {rowIndex > 0 && <Separator />}
+                    {row}
+                  </React.Fragment>
+                ))}
+              </FieldGroup>
+            </CardContent>
+          </Card>
+        </section>
+      ))}
+    </div>
+  );
+};
 
 const ShortcutKeys: React.FC<{ shortcut: string }> = ({ shortcut }) => {
   const platform = usePlatform();
@@ -414,7 +488,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 sm:rounded-xl"
+        className="flex h-[min(52rem,calc(100vh-2rem))] w-[min(72rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
       >
         <TooltipProvider>
           <DialogHeader className="flex-row items-center gap-3 border-b border-app-border/50 bg-card/80 px-5 py-4">
@@ -445,7 +519,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             orientation="vertical"
             className="@container min-h-0 flex-1 flex-row gap-0 overflow-hidden"
           >
-            <aside className="flex w-52 shrink-0 flex-col border-r border-app-border/50 bg-muted/30 p-2.5">
+            <aside className="flex w-52 shrink-0 flex-col border-r border-app-border/50 bg-muted/30 p-3">
             <TabsList
               aria-label={t('settings.sectionNavigation')}
               aria-orientation="vertical"
@@ -475,9 +549,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
 
               <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-                <div className="@container mx-auto w-full max-w-3xl p-4 @min-[44rem]:p-5">
+                <div className="@container mx-auto w-full max-w-4xl p-4 @min-[44rem]:p-6">
             <TabsContent value="appearance" className="w-full">
-              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
+              <SettingsGrid>
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
                   <Select value={theme} onValueChange={(value) => setTheme(value as ThemeMode)}>
                     <SelectTrigger size="sm" aria-label={t('settings.appearance.theme')}>
@@ -492,7 +566,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.appearance.language')} description={t('settings.appearance.languageDescription')}>
                   <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
                     <SelectTrigger size="sm" aria-label={t('settings.appearance.language')}>
@@ -507,11 +580,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-              </div>
+              </SettingsGrid>
             </TabsContent>
 
             <TabsContent value="experimental" className="w-full">
-              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
+              <SettingsGrid>
                 <SettingRow
                   label={t('settings.experimental.petdex.title')}
                   description={t('settings.experimental.petdex.description')}
@@ -528,7 +601,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
                   label={t('settings.experimental.petdex.status')}
                   description={t('settings.experimental.petdex.privacy')}
@@ -569,7 +641,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </Button>
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
                   label={t('settings.experimental.petdex.feedback')}
                   description={t('settings.experimental.petdex.feedbackDescription')}
@@ -589,11 +660,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </Button>
                   </div>
                 </SettingRow>
-              </div>
+              </SettingsGrid>
             </TabsContent>
 
             <TabsContent value="general" className="w-full">
-              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
+              <SettingsGrid>
                 <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
                   <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
                     <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
@@ -610,7 +681,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -620,13 +690,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.confirmBeforeExit')} description={t('settings.general.confirmBeforeExitDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.general.confirmBeforeExit')} checked={confirmBeforeExit} onCheckedChange={setConfirmBeforeExit} />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
                   <div className="flex items-center justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={handleClearWorkspace}>
@@ -636,13 +704,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <UpdateSection />
-              </div>
+              </SettingsGrid>
             </TabsContent>
 
             <TabsContent value="terminal" className="w-full">
-              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
+              <SettingsGrid>
                 <SettingGroupLabel>{t('settings.terminal.groupAppearance')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
                   <Select value={terminalFontFamily} onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}>
@@ -660,7 +727,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.colorScheme')} description={t('settings.terminal.colorSchemeDescription')}>
                   <Select value={terminalColorScheme} onValueChange={(value) => setTerminalColorScheme(value as TerminalColorScheme)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.colorScheme')}>
@@ -677,7 +743,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.fontSize')} description={t('settings.terminal.fontSizeDescription')}>
                   <Select value={String(terminalFontSize)} onValueChange={(value) => setTerminalFontSize(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.fontSize')}>
@@ -694,7 +759,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.lineHeight')} description={t('settings.terminal.lineHeightDescription')}>
                   <Select value={String(terminalLineHeight)} onValueChange={(value) => setTerminalLineHeight(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.lineHeight')}>
@@ -711,7 +775,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.letterSpacing')} description={t('settings.terminal.letterSpacingDescription')}>
                   <Select value={String(terminalLetterSpacing)} onValueChange={(value) => setTerminalLetterSpacing(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.letterSpacing')}>
@@ -728,7 +791,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.cursorStyle')} description={t('settings.terminal.cursorStyleDescription')}>
                   <Select value={terminalCursorStyle} onValueChange={(value) => setTerminalCursorStyle(value as TerminalCursorStyle)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.cursorStyle')}>
@@ -745,14 +807,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingGroupLabel>{t('settings.terminal.groupInteraction')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.cursorBlink')} description={t('settings.terminal.cursorBlinkDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.terminal.cursorBlink')} checked={terminalCursorBlink} onCheckedChange={setTerminalCursorBlink} />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.copyOnSelect')} description={t('settings.terminal.copyOnSelectDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -762,7 +822,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow
                   label={t('settings.terminal.trimTrailingWhitespace')}
                   description={t('settings.terminal.trimTrailingWhitespaceDescription')}
@@ -775,7 +834,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.rightClickBehavior')} description={t('settings.terminal.rightClickBehaviorDescription')}>
                   <Select
                     value={terminalRightClickBehavior}
@@ -795,7 +853,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.urlDetection')} description={t('settings.terminal.urlDetectionDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -805,7 +862,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.bellStyle')} description={t('settings.terminal.bellStyleDescription')}>
                   <Select value={terminalBellStyle} onValueChange={(value) => setTerminalBellStyle(value as TerminalBellStyle)}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.bellStyle')}>
@@ -822,8 +878,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
-                <SettingRow label={t('settings.terminal.scrollback')} description={t('settings.terminal.scrollbackDescription')}>
+                <SettingRow
+                  label={t('settings.terminal.scrollback')}
+                  description={t('settings.terminal.scrollbackDescription')}
+                >
                   <Select value={String(terminalScrollback)} onValueChange={(value) => setTerminalScrollback(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.scrollback')}>
                       <SelectValue>
@@ -843,7 +901,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingGroupLabel>{t('settings.terminal.groupSafety')}</SettingGroupLabel>
                 <SettingRow
                   label={t('settings.terminal.multiLinePasteWarning')}
@@ -857,7 +914,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.largePasteWarning')} description={t('settings.terminal.largePasteWarningDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -867,7 +923,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingGroupLabel>{t('settings.terminal.groupSessions')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.autoReconnect')} description={t('settings.terminal.autoReconnectDescription')}>
                   <div className="flex justify-end">
@@ -878,7 +933,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.terminal.hideSingleTabBar')} description={t('settings.terminal.hideSingleTabBarDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -888,17 +942,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-              </div>
+              </SettingsGrid>
             </TabsContent>
 
             <TabsContent value="sftp" className="w-full">
-              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
+              <SettingsGrid>
                 <SettingRow label={t('settings.sftp.showHiddenFiles')} description={t('settings.sftp.showHiddenFilesDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.sftp.showHiddenFiles')} checked={sftpShowHiddenFiles} onCheckedChange={setSftpShowHiddenFiles} />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.conflictPolicy')} description={t('settings.sftp.conflictPolicyDescription')}>
                   <Select value={sftpConflictPolicy} onValueChange={(value) => setSftpConflictPolicy(value as SftpConflictPolicy)}>
                     <SelectTrigger size="sm" aria-label={t('settings.sftp.conflictPolicy')}>
@@ -915,7 +968,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.retryCount')} description={t('settings.sftp.retryCountDescription')}>
                   <Select value={String(sftpRetryCount)} onValueChange={(value) => setSftpRetryCount(Number(value))}>
                     <SelectTrigger size="sm" aria-label={t('settings.sftp.retryCount')}>
@@ -932,7 +984,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </SelectContent>
                   </Select>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.downloadDirectory')} description={t('settings.sftp.downloadDirectoryDescription')}>
                   <div className="flex gap-1">
                     <Tooltip>
@@ -968,7 +1019,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     )}
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.completionNotification')} description={t('settings.sftp.completionNotificationDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -978,7 +1028,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-                <Separator className="data-horizontal:border-border/40" />
                 <SettingRow label={t('settings.sftp.hideSingleTabBar')} description={t('settings.sftp.hideSingleTabBarDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -988,7 +1037,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     />
                   </div>
                 </SettingRow>
-              </div>
+              </SettingsGrid>
             </TabsContent>
 
             <TabsContent value="ai" className="w-full">
@@ -996,74 +1045,76 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsContent>
 
             <TabsContent value="shortcuts" className="w-full">
-              <div className="overflow-hidden rounded-lg border border-app-border/50 bg-card shadow-[var(--shadow-card)]">
-                <div className="flex items-center justify-end px-3 py-2">
-                  <Button variant="ghost" size="sm" className="shrink-0" onClick={resetShortcuts}>
+              <div className="flex flex-col gap-6">
+                <div className="flex items-center justify-end">
+                  <Button variant="outline" size="sm" className="shrink-0" onClick={resetShortcuts}>
                     <RotateCcwIcon data-icon="inline-start" />
                     {t('settings.shortcuts.resetAll')}
                   </Button>
                 </div>
-                <Separator className="data-horizontal:border-border/40" />
                 {SHORTCUT_GROUPS.map((group) => (
-                  <React.Fragment key={group.id}>
-                    <div className="px-3 pb-1 pt-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <section key={group.id} className="flex min-w-0 flex-col gap-2.5">
+                    <h3 className="px-1 text-sm font-semibold text-foreground">
                       {t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}
-                    </div>
-                    {group.actions.map((action, index) => {
-                      const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
-                      const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
-                      return (
-                        <React.Fragment key={action}>
-                          {index > 0 && <Separator className="data-horizontal:border-border/40" />}
-                          <div className="flex min-h-12 items-center justify-between gap-3 px-3 py-2">
-                            <span className="text-sm font-medium">{shortcutLabels[action]}</span>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="min-w-24"
-                                onClick={() => {
-                                  setConflictAction(null);
-                                  setEditingAction(action);
-                                }}
-                              >
-                                <KeyboardIcon data-icon="inline-start" />
-                                {isLeaderShortcutAction(action) ? (
-                                  <span className="flex items-center gap-1.5">
-                                    <ShortcutKeys shortcut={leaderBinding} />
-                                    <span aria-hidden="true" className="text-muted-foreground">
-                                      →
-                                    </span>
-                                    <ShortcutKeys shortcut={binding} />
-                                  </span>
-                                ) : (
-                                  <ShortcutKeys shortcut={binding} />
-                                )}
-                              </Button>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="size-8"
-                                      disabled={binding === DEFAULT_SHORTCUTS[action]}
-                                      aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
-                                    />
-                                  }
-                                  onClick={() => resetShortcut(action)}
-                                >
-                                  <RotateCcwIcon />
-                                </TooltipTrigger>
-                                <TooltipContent>{t('settings.shortcuts.reset')}</TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </div>
-                        </React.Fragment>
-                      );
-                    })}
-                    <Separator className="data-horizontal:border-border/40" />
-                  </React.Fragment>
+                    </h3>
+                    <Card variant="outline" className="gap-0 py-0">
+                      <CardContent className="px-0">
+                        {group.actions.map((action, index) => {
+                          const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
+                          const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
+                          return (
+                            <React.Fragment key={action}>
+                              {index > 0 && <Separator />}
+                              <div className="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
+                                <span className="text-sm font-medium">{shortcutLabels[action]}</span>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="min-w-24"
+                                    onClick={() => {
+                                      setConflictAction(null);
+                                      setEditingAction(action);
+                                    }}
+                                  >
+                                    <KeyboardIcon data-icon="inline-start" />
+                                    {isLeaderShortcutAction(action) ? (
+                                      <span className="flex items-center gap-1.5">
+                                        <ShortcutKeys shortcut={leaderBinding} />
+                                        <span aria-hidden="true" className="text-muted-foreground">
+                                          →
+                                        </span>
+                                        <ShortcutKeys shortcut={binding} />
+                                      </span>
+                                    ) : (
+                                      <ShortcutKeys shortcut={binding} />
+                                    )}
+                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="size-8"
+                                          disabled={binding === DEFAULT_SHORTCUTS[action]}
+                                          aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
+                                        />
+                                      }
+                                      onClick={() => resetShortcut(action)}
+                                    >
+                                      <RotateCcwIcon />
+                                    </TooltipTrigger>
+                                    <TooltipContent>{t('settings.shortcuts.reset')}</TooltipContent>
+                                  </Tooltip>
+                                </div>
+                              </div>
+                            </React.Fragment>
+                          );
+                        })}
+                      </CardContent>
+                    </Card>
+                  </section>
                 ))}
               </div>
             </TabsContent>
