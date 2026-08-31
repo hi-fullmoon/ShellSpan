@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -30,6 +30,16 @@ vi.mock('@/hooks/useI18n', () => ({
 }));
 
 const initialState = useAiSettingsStore.getState();
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 describe('ProviderSetupDialog', () => {
   beforeEach(() => {
@@ -127,6 +137,119 @@ describe('ProviderSetupDialog', () => {
     expect(await screen.findByText('settings.ai.connectionSuccess:2')).toBeInTheDocument();
   });
 
+  it('ignores a model response after switching presets', async () => {
+    const user = userEvent.setup();
+    const pendingModels = deferred<string[]>();
+    mocks.invokeListAiModels.mockReturnValueOnce(pendingModels.promise);
+    render(
+      <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />,
+    );
+
+    const providerInput = screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' });
+    await user.click(providerInput);
+    await user.type(providerInput, 'Ollama');
+    await user.click(await screen.findByRole('option', { name: /Ollama/ }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
+    await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
+
+    await user.click(providerInput);
+    await user.clear(providerInput);
+    await user.type(providerInput, 'DeepSeek');
+    await user.click(await screen.findByRole('option', { name: /DeepSeek/ }));
+    await act(async () => {
+      pendingModels.resolve(['stale-ollama-model']);
+      await pendingModels.promise;
+    });
+
+    expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://api.deepseek.com');
+    expect(screen.getByLabelText('settings.ai.model')).toHaveValue('deepseek-v4-flash');
+    expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText('settings.ai.model'));
+    expect(screen.queryByRole('option', { name: 'stale-ollama-model' })).not.toBeInTheDocument();
+  });
+
+  it('ignores a model response from before the dialog was closed and reopened', async () => {
+    const user = userEvent.setup();
+    const pendingModels = deferred<string[]>();
+    mocks.invokeListAiModels.mockReturnValueOnce(pendingModels.promise);
+    const provider = { ...useAiSettingsStore.getState().providers[0], model: '' };
+    const onOpenChange = vi.fn();
+    const onSaved = vi.fn();
+    const { rerender } = render(
+      <ProviderSetupDialog
+        open
+        provider={provider}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
+    await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
+    rerender(
+      <ProviderSetupDialog
+        open={false}
+        provider={provider}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />,
+    );
+    rerender(
+      <ProviderSetupDialog
+        open
+        provider={provider}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />,
+    );
+    await act(async () => {
+      pendingModels.resolve(['stale-model']);
+      await pendingModels.promise;
+    });
+
+    expect(screen.getByLabelText('settings.ai.model')).toHaveValue('');
+    expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
+  });
+
+  it('ignores a model response after changing the provider being edited', async () => {
+    const user = userEvent.setup();
+    const pendingModels = deferred<string[]>();
+    mocks.invokeListAiModels.mockReturnValueOnce(pendingModels.promise);
+    const [firstProvider, secondProvider] = useAiSettingsStore.getState().providers;
+    const providerA = { ...firstProvider, model: '' };
+    const providerB = { ...secondProvider, model: '' };
+    const onOpenChange = vi.fn();
+    const onSaved = vi.fn();
+    const { rerender } = render(
+      <ProviderSetupDialog
+        open
+        provider={providerA}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
+    await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
+    rerender(
+      <ProviderSetupDialog
+        open
+        provider={providerB}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />,
+    );
+    await act(async () => {
+      pendingModels.resolve(['provider-a-model']);
+      await pendingModels.promise;
+    });
+
+    expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue(providerB.name);
+    expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue(providerB.baseUrl);
+    expect(screen.getByLabelText('settings.ai.model')).toHaveValue('');
+    expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
+  });
+
   it('cancels without creating a provider', async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();
@@ -192,5 +315,23 @@ describe('buildProviderRequestEndpoint', () => {
       'http://127.0.0.1:11434',
       'ollama',
     )).toBe('http://127.0.0.1:11434/api/chat');
+  });
+
+  it.each([
+    'http://example.com/v1',
+    'https://user@example.com/v1',
+    'https://user:password@example.com/v1',
+    'ftp://example.com/v1',
+    'file:///tmp/provider',
+  ])('rejects backend-invalid provider URL %s', (baseUrl) => {
+    expect(buildProviderRequestEndpoint(baseUrl, 'openAiCompatible')).toBeUndefined();
+  });
+
+  it.each([
+    ['http://localhost:11434', 'http://localhost:11434/api/chat'],
+    ['http://127.0.0.1:11434', 'http://127.0.0.1:11434/api/chat'],
+    ['http://[::1]:11434', 'http://[::1]:11434/api/chat'],
+  ])('keeps backend-approved loopback HTTP URL %s', (baseUrl, endpoint) => {
+    expect(buildProviderRequestEndpoint(baseUrl, 'ollama')).toBe(endpoint);
   });
 });
