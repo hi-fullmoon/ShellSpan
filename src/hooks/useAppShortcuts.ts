@@ -64,7 +64,8 @@ export function useAppShortcuts(): void {
           document.dispatchEvent(new Event('shellspan:open-command-palette'));
           break;
         case 'toggleAiPanel':
-          useAiStore.getState().toggleOpen();
+          if (activeSection === 'sftp') break;
+          useAiStore.getState().toggleOpen(activeSection);
           break;
         case 'newTerminalTab':
           document.dispatchEvent(new Event('shellspan:new-terminal-tab'));
